@@ -1,13 +1,31 @@
 import { chromium } from "playwright";
 import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { EventEmitter } from "events";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+export const ARTIFACTS_DIR = path.join(__dirname, "..", "artifacts");
+
+// Global event emitter for SSE log streaming
+export const runEvents = new EventEmitter();
+runEvents.setMaxListeners(50);
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
 
 function log(run, msg) {
   const entry = `[${new Date().toISOString()}] ${msg}`;
   run.logs.push(entry);
   console.log(entry);
+  // Emit event for SSE streaming
+  runEvents.emit(`log:${run.id}`, entry);
 }
 
-async function executeTest(test, context) {
+async function executeTest(test, context, screenshotDir) {
   const page = await context.newPage();
   const result = {
     testId: test.id,
@@ -16,6 +34,8 @@ async function executeTest(test, context) {
     durationMs: 0,
     error: null,
     screenshot: null,
+    screenshotPath: null,
+    videoPath: null,
   };
 
   const start = Date.now();
@@ -77,20 +97,35 @@ async function executeTest(test, context) {
       }
     }
 
-    // Take screenshot on success too (for records)
-    result.screenshot = await page.screenshot({ type: "png" }).then((buf) =>
-      buf.toString("base64")
-    );
+    // Take screenshot on success and save to disk
+    const screenshotFile = path.join(screenshotDir, `${test.id}.png`);
+    await page.screenshot({ path: screenshotFile, type: "png" });
+    result.screenshot = fs.readFileSync(screenshotFile).toString("base64");
+    result.screenshotPath = screenshotFile;
   } catch (err) {
     result.status = "failed";
     result.error = err.message;
     try {
-      result.screenshot = await page.screenshot({ type: "png" }).then((buf) =>
-        buf.toString("base64")
-      );
-    } catch {}
+      const screenshotFile = path.join(screenshotDir, `${test.id}.png`);
+      await page.screenshot({ path: screenshotFile, type: "png" });
+      result.screenshot = fs.readFileSync(screenshotFile).toString("base64");
+      result.screenshotPath = screenshotFile;
+    } catch {
+      // Screenshot capture failed
+    }
   } finally {
     result.durationMs = Date.now() - start;
+
+    // Capture video path before closing the page
+    try {
+      const video = page.video();
+      if (video) {
+        result.videoPath = await video.path();
+      }
+    } catch {
+      // Video path retrieval failed
+    }
+
     await page.close();
   }
 
@@ -98,32 +133,59 @@ async function executeTest(test, context) {
 }
 
 export async function runTests(project, tests, run, db) {
+  // Create artifacts directories for this run
+  const runDir = path.join(ARTIFACTS_DIR, run.id);
+  const videoDir = path.join(runDir, "videos");
+  const screenshotDir = path.join(runDir, "screenshots");
+  const traceDir = path.join(runDir, "traces");
+  ensureDir(videoDir);
+  ensureDir(screenshotDir);
+  ensureDir(traceDir);
+
+  // Store artifact info in run for later reference
+  run.artifactsDir = runDir;
+  run.artifactsUrl = `/artifacts/${run.id}`;
+
+  const headless = (process.env.HEADLESS || "false").toLowerCase() === "true";
+
   const browser = await chromium.launch({
-    headless: true,
+    headless,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
+    recordVideo: {
+      dir: videoDir,
+      size: { width: 1280, height: 720 },
+    },
   });
 
-  log(run, `🚀 Starting test run: ${tests.length} tests`);
+  // Start tracing for this run
+  await context.tracing.start({
+    screenshots: true,
+    snapshots: true,
+    sources: false,
+  });
+
+  log(run, `Starting test run: ${tests.length} tests`);
+  log(run, `Headed mode: ${!headless} | Video recording: enabled | Tracing: enabled`);
 
   for (const test of tests) {
-    log(run, `  ▶ Running: ${test.name}`);
+    log(run, `  Running: ${test.name}`);
     try {
-      const result = await executeTest(test, context);
+      const result = await executeTest(test, context, screenshotDir);
       run.results.push(result);
 
       if (result.status === "passed") {
         run.passed++;
-        log(run, `    ✅ PASSED (${result.durationMs}ms)`);
+        log(run, `    PASSED (${result.durationMs}ms)`);
       } else if (result.status === "warning") {
         run.passed++; // Count warnings as passed
-        log(run, `    ⚠️  WARNING: ${result.error}`);
+        log(run, `    WARNING: ${result.error}`);
       } else {
         run.failed++;
-        log(run, `    ❌ FAILED: ${result.error}`);
+        log(run, `    FAILED: ${result.error}`);
       }
 
       // Update test's last result
@@ -140,8 +202,36 @@ export async function runTests(project, tests, run, db) {
         error: err.message,
         durationMs: 0,
       });
-      log(run, `    ❌ FAILED (exception): ${err.message}`);
+      log(run, `    FAILED (exception): ${err.message}`);
     }
+  }
+
+  // Stop tracing and save trace file
+  const traceFile = path.join(traceDir, "trace.zip");
+  try {
+    await context.tracing.stop({ path: traceFile });
+    run.tracePath = traceFile;
+    run.traceUrl = `/artifacts/${run.id}/traces/trace.zip`;
+    log(run, `Trace saved: ${run.traceUrl}`);
+  } catch (err) {
+    log(run, `Warning: Failed to save trace: ${err.message}`);
+  }
+
+  await context.close();
+
+  // After context is closed, video files are finalized
+  // Map video files to test results
+  try {
+    const videoFiles = fs.readdirSync(videoDir);
+    log(run, `Videos generated: ${videoFiles.length} files`);
+    run.videos = videoFiles.map((f) => `/artifacts/${run.id}/videos/${f}`);
+
+    // Assign video URLs to results in order
+    for (let i = 0; i < run.results.length && i < videoFiles.length; i++) {
+      run.results[i].videoUrl = `/artifacts/${run.id}/videos/${videoFiles[i]}`;
+    }
+  } catch (err) {
+    log(run, `Warning: Could not read video directory: ${err.message}`);
   }
 
   await browser.close();
@@ -150,6 +240,9 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   log(
     run,
-    `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`
+    `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`
   );
+
+  // Emit run completed event for SSE
+  runEvents.emit(`complete:${run.id}`, run);
 }
