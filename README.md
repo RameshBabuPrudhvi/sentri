@@ -1,6 +1,6 @@
-# 🐻 BearQA — Autonomous QA Platform
+# 🐻 Sentri — Autonomous QA Platform
 
-An AI-powered autonomous QA system that crawls your web application, generates test cases using Claude AI, and continuously executes them — similar to SmartBear's BearQ.
+An AI-powered autonomous QA system that crawls your web application, generates test cases using Claude AI, and continuously executes them
 
 ---
 
