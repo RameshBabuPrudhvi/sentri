@@ -59,7 +59,7 @@ export const api = {
 
   // Crawl
   crawl: (id) => req("POST", `/projects/${id}/crawl`),
-  runTests: (id) => req("POST", `/projects/${id}/run`),
+  runTests: (id, options) => req("POST", `/projects/${id}/run`, options),
 
   // Tests
   getTests: (id) => req("GET", `/projects/${id}/tests`),

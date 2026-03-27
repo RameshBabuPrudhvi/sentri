@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Globe, Play, Search, Trash2, ArrowRight, Clock, CheckCircle, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
+import { Globe, Play, Search, Trash2, ArrowRight, Clock, CheckCircle, XCircle, AlertTriangle, RefreshCw, Eye } from "lucide-react";
 import { api } from "../api.js";
 
 function statusBadge(s) {
@@ -34,6 +34,7 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [tab, setTab] = useState("tests");
+  const [headed, setHeaded] = useState(false);
 
   const refresh = useCallback(async () => {
     const [p, t, r] = await Promise.all([
@@ -78,7 +79,7 @@ export default function ProjectDetail() {
   async function doRun() {
     setActionLoading("run");
     try {
-      const { runId } = await api.runTests(id);
+      const { runId } = await api.runTests(id, { headed });
       setActiveRun(runId);
       setTab("runs");
     } catch (err) { alert(err.message); }
@@ -117,11 +118,32 @@ export default function ProjectDetail() {
               <a href={project.url} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: "0.78rem", color: "var(--text3)" }}>{project.url}</a>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button className="btn btn-ghost" onClick={doCrawl} disabled={!!actionLoading}>
               {actionLoading === "crawl" ? <RefreshCw size={15} className="spin" /> : <Search size={15} />}
               {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate Tests"}
             </button>
+            <label
+              style={{
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                padding: "6px 12px", borderRadius: "var(--radius)",
+                background: headed ? "rgba(0,229,255,0.1)" : "transparent",
+                border: `1px solid ${headed ? "rgba(0,229,255,0.3)" : "var(--border)"}`,
+                fontSize: "0.8rem", fontFamily: "var(--font-display)", fontWeight: 600,
+                color: headed ? "var(--accent)" : "var(--text2)",
+                transition: "all 0.15s ease",
+                userSelect: "none",
+              }}
+            >
+              <Eye size={14} />
+              <span>Watch Live</span>
+              <input
+                type="checkbox"
+                checked={headed}
+                onChange={(e) => setHeaded(e.target.checked)}
+                style={{ accentColor: "var(--accent)", marginLeft: 2 }}
+              />
+            </label>
             <button className="btn btn-primary" onClick={doRun} disabled={!!actionLoading || tests.length === 0}>
               {actionLoading === "run" ? <RefreshCw size={15} className="spin" /> : <Play size={15} />}
               Run Tests

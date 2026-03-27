@@ -105,7 +105,9 @@ app.post("/api/projects/:id/run", async (req, res) => {
   };
   db.runs[runId] = run;
 
-  runTests(project, tests, run, db).catch((err) => {
+  const { headed } = req.body || {};
+
+  runTests(project, tests, run, db, { headed: !!headed }).catch((err) => {
     run.status = "failed";
     run.error = err.message;
     run.finishedAt = new Date().toISOString();
