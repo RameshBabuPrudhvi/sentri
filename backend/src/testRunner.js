@@ -146,7 +146,7 @@ export async function runTests(project, tests, run, db) {
   run.artifactsDir = runDir;
   run.artifactsUrl = `/artifacts/${run.id}`;
 
-  const headless = (process.env.HEADLESS || "false").toLowerCase() === "true";
+  const headless = (process.env.HEADLESS || "true").toLowerCase() === "true";
 
   const browser = await chromium.launch({
     headless,
@@ -226,9 +226,12 @@ export async function runTests(project, tests, run, db) {
     log(run, `Videos generated: ${videoFiles.length} files`);
     run.videos = videoFiles.map((f) => `/artifacts/${run.id}/videos/${f}`);
 
-    // Assign video URLs to results in order
-    for (let i = 0; i < run.results.length && i < videoFiles.length; i++) {
-      run.results[i].videoUrl = `/artifacts/${run.id}/videos/${videoFiles[i]}`;
+    // Assign video URLs to results using the captured videoPath
+    for (const result of run.results) {
+      if (result.videoPath) {
+        const filename = path.basename(result.videoPath);
+        result.videoUrl = `/artifacts/${run.id}/videos/${filename}`;
+      }
     }
   } catch (err) {
     log(run, `Warning: Could not read video directory: ${err.message}`);
