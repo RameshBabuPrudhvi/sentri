@@ -1,8 +1,6 @@
 import { chromium } from "playwright";
-import Anthropic from "@anthropic-ai/sdk";
 import { v4 as uuidv4 } from "uuid";
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+import { generateTests } from "./aiProvider.js";
 
 const MAX_PAGES = 20;
 const MAX_DEPTH = 3;
@@ -63,43 +61,6 @@ async function takeSnapshot(page) {
   });
 }
 
-// ─── AI test generation ───────────────────────────────────────────────────────
-
-async function generateTestsForPage(snapshot, projectUrl) {
-  const prompt = `You are an expert QA engineer. Given this page snapshot from a web application, generate 2-4 specific, actionable Playwright test cases.
-
-Page snapshot:
-- URL: ${snapshot.url}
-- Title: ${snapshot.title}
-- H1: ${snapshot.h1}
-- Forms on page: ${snapshot.forms}
-- Interactive elements: ${JSON.stringify(snapshot.elements, null, 2)}
-
-Generate test cases as a JSON array. Each test case must have:
-- "name": short descriptive test name
-- "description": what this test validates
-- "priority": "high" | "medium" | "low"
-- "type": "navigation" | "form" | "visibility" | "interaction"
-- "steps": array of plain-English steps
-- "playwrightCode": complete runnable Playwright test code using page object, targeting this URL: ${snapshot.url}
-
-Focus on: page loads correctly, key elements visible, forms functional, navigation works.
-Return ONLY valid JSON array, no markdown fences.`;
-
-  const msg = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const raw = msg.content[0].text.trim().replace(/^```json\n?/, "").replace(/\n?```$/, "");
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
 // ─── Main crawler ─────────────────────────────────────────────────────────────
 
 export async function crawlAndGenerateTests(project, run, db) {
@@ -153,7 +114,6 @@ export async function crawlAndGenerateTests(project, run, db) {
       pageSnapshots.push(snapshot);
       run.pagesFound = pageSnapshots.length;
 
-      // Collect links
       if (depth < MAX_DEPTH) {
         const links = await page.$$eval("a[href]", (els) => els.map((e) => e.href));
         for (const href of links) {
@@ -173,11 +133,11 @@ export async function crawlAndGenerateTests(project, run, db) {
   await browser.close();
   log(run, `✅ Crawl complete. Found ${pageSnapshots.length} pages. Generating tests with AI...`);
 
-  // Generate tests per page
+  // Generate tests per page using the provider abstraction
   for (const snapshot of pageSnapshots) {
     log(run, `🤖 Generating tests for: ${snapshot.url}`);
     try {
-      const generatedTests = await generateTestsForPage(snapshot, project.url);
+      const generatedTests = await generateTests(snapshot, project.url);
       for (const t of generatedTests) {
         const testId = uuidv4();
         db.tests[testId] = {

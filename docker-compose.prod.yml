@@ -11,7 +11,10 @@ services:
     image: ${BACKEND_IMAGE:-ghcr.io/your-org/sentri-backend:latest}
     container_name: sentri-backend
     environment:
+      - AI_PROVIDER=${AI_PROVIDER}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PORT=3001
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
