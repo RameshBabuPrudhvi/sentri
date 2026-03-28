@@ -85,7 +85,7 @@ async function callAnthropic(prompt) {
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 
 async function callGoogle(prompt) {
-  const { GoogleGenAI } = await import("@google/genai");
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const client = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
   const res = await client.models.generateContent({
     model: MODELS.google,
