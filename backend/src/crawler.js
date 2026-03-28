@@ -222,18 +222,19 @@ export async function crawlAndGenerateTests(project, run, db) {
     for (const test of result.tests) {
       allTests.push({
         id: `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        project_id: project.id,
-        page_url: result.url,
+        projectId: project.id,
+        sourceUrl: result.url,
+        name: test.plan.goal,
         goal: test.plan.goal,
         priority: test.plan.priority,
         file_path: test.test_file,
         code: test.test_code,
         assertion_count: test.assertion_count,
         enhancements: test.enhancements,
-        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
         status: "generated",
+        lastResult: null,
       });
-    }
   }
 
   onProgress(
