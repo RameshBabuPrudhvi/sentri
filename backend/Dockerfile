@@ -1,6 +1,7 @@
 FROM node:20-slim
 
 # Install Chromium + all Playwright system deps
+# libasound2t64 is the correct name in Debian Bookworm (node:20-slim base)
 RUN apt-get update && apt-get install -y \
   chromium \
   libnss3 \
@@ -12,7 +13,7 @@ RUN apt-get update && apt-get install -y \
   libxfixes3 \
   libxrandr2 \
   libgbm1 \
-  libasound2 \
+  libasound2t64 \
   libpango-1.0-0 \
   libcairo2 \
   && rm -rf /var/lib/apt/lists/*
@@ -24,9 +25,9 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-# Copy package files and install production deps
+# Copy lockfile for reproducible installs
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY src/ ./src/
 

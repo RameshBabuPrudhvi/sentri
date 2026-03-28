@@ -1,22 +1,20 @@
 {
-  "name": "autonomous-qa-backend",
+  "name": "sentri-backend",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node tests/pipeline.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@google/generative-ai": "^0.24.1",
+    "@google/generative-ai": "^0.21.0",
+    "openai": "^4.77.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "openai": "^4.20.1",
     "playwright": "^1.50.1",
     "uuid": "^11.0.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.9"
   }
 }

@@ -1,13 +1,39 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, RefreshCw, Clock, Film, Image, Download } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Clock, Copy, ExternalLink } from "lucide-react";
 import { api } from "../api.js";
 
+function StepDot({ status }) {
+  if (status === "passed")  return <div className="step-dot step-dot-pass"><CheckCircle2 size={10} /></div>;
+  if (status === "failed")  return <div className="step-dot step-dot-fail"><XCircle size={10} /></div>;
+  if (status === "running") return <div className="step-dot step-dot-run"><RefreshCw size={8} className="spin" /></div>;
+  return <div className="step-dot step-dot-wait">○</div>;
+}
+
+function AgentTag({ type = "TA" }) {
+  const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
+  return <div className={`avatar ${s[type]}`}>{type}</div>;
+}
+
 function colorLog(line) {
-  if (line.includes("✅") || line.includes("PASSED") || line.includes("Done") || line.includes("complete")) return "log-ok";
-  if (line.includes("❌") || line.includes("FAILED") || line.includes("failed")) return "log-error";
-  if (line.includes("⚠️") || line.includes("WARNING") || line.includes("warn")) return "log-warn";
+  if (/✅|PASSED|Done|complete|Generating|Generated/i.test(line)) return "log-ok";
+  if (/❌|FAILED|failed|Error/i.test(line)) return "log-error";
+  if (/⚠️|WARNING|warn/i.test(line)) return "log-warn";
+  if (/🤖|🕷️|🧠|🗺️|🚫|✨|📊/u.test(line)) return "log-info";
   return "";
+}
+
+// Parse log lines into structured steps
+function parseLogs(logs = []) {
+  return logs.map((line, i) => {
+    const time = line.match(/\[([^\]]+)\]/)?.[1];
+    const msg = line.replace(/^\[[^\]]+\]\s*/, "");
+    let status = "done";
+    if (/⚠️|FAILED|Error/i.test(line)) status = "failed";
+    else if (/✅|Done|complete/i.test(line)) status = "passed";
+    else if (/🤖|🕷️|Visiting|Generating/i.test(line)) status = "running";
+    return { id: i, time, msg, status, raw: line };
+  });
 }
 
 export default function RunDetail() {
@@ -15,12 +41,9 @@ export default function RunDetail() {
   const navigate = useNavigate();
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [activeStep, setActiveStep] = useState(null);
   const logRef = useRef(null);
-  const intervalRef = useRef(null);
-
-  const [showVideo, setShowVideo] = useState(false);
-  const [selectedVideo, setSelectedVideo] = useState(null);
-  const sseRef = useRef(null);
+  const pollRef = useRef(null);
 
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
@@ -32,299 +55,279 @@ export default function RunDetail() {
     fetchRun().finally(() => setLoading(false));
   }, [fetchRun]);
 
-  // SSE real-time log streaming with polling fallback
   useEffect(() => {
     if (!run) return;
-    if (run.status !== "running") return;
-
-    // Try SSE first
-    let useSSE = true;
-    try {
-      const evtSource = new EventSource(`/api/runs/${runId}/stream`);
-      sseRef.current = evtSource;
-
-      evtSource.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "log") {
-            setRun((prev) => {
-              if (!prev) return prev;
-              if (prev.logs?.includes(msg.data)) return prev;
-              return { ...prev, logs: [...(prev.logs || []), msg.data] };
-            });
-          } else if (msg.type === "complete") {
-            setRun(msg.data);
-            evtSource.close();
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      evtSource.onerror = () => {
-        useSSE = false;
-        evtSource.close();
-        // Fall back to polling
-        intervalRef.current = setInterval(async () => {
-          const r = await fetchRun();
-          if (r?.status !== "running") clearInterval(intervalRef.current);
-        }, 1500);
-      };
-    } catch {
-      useSSE = false;
-      // SSE not available, use polling
-      intervalRef.current = setInterval(async () => {
+    if (run.status === "running") {
+      pollRef.current = setInterval(async () => {
         const r = await fetchRun();
-        if (r?.status !== "running") clearInterval(intervalRef.current);
+        if (r?.status !== "running") clearInterval(pollRef.current);
       }, 1500);
     }
+    return () => clearInterval(pollRef.current);
+  }, [run?.status]);
 
-    return () => {
-      if (sseRef.current) sseRef.current.close();
-      clearInterval(intervalRef.current);
-    };
-  }, [run?.status, fetchRun, runId]);
-
-  // Auto-open video player when run completes and has videos
-  useEffect(() => {
-    if (run?.status === "completed" && run?.videos?.length > 0 && !showVideo) {
-      setShowVideo(true);
-      setSelectedVideo(run.videos[0]);
-    }
-  }, [run?.status, run?.videos]);
-
-  // Auto-scroll logs
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [run?.logs?.length]);
 
   if (loading) return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div className="skeleton" style={{ height: 100, borderRadius: 16, marginBottom: 16 }} />
-      <div className="skeleton" style={{ height: 320, borderRadius: 16 }} />
+    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <div className="skeleton" style={{ height: 100, borderRadius: 12, marginBottom: 16 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="skeleton" style={{ height: 480, borderRadius: 12 }} />
+        <div className="skeleton" style={{ height: 480, borderRadius: 12 }} />
+      </div>
     </div>
   );
-  if (!run) return <div style={{ color: "var(--text2)" }}>Run not found</div>;
+  if (!run) return <div>Run not found</div>;
 
   const isRunning = run.status === "running";
   const isCrawl = run.type === "crawl";
+  const steps = parseLogs(run.logs);
   const passRate = run.total ? Math.round((run.passed / run.total) * 100) : null;
+  const activeResult = activeStep !== null ? run.results?.[activeStep] : null;
 
   return (
-    <div className="fade-in" style={{ maxWidth: 960, margin: "0 auto" }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={() => navigate(-1)}>
-        <ArrowLeft size={14} /> Back
-      </button>
-
-      {/* Run header */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-              {isRunning
-                ? <RefreshCw size={18} color="var(--accent)" className="spin" />
-                : run.status === "completed"
-                ? <CheckCircle size={18} color="var(--green)" />
-                : <XCircle size={18} color="var(--red)" />}
-              <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.3rem" }}>
-                {isCrawl ? "Crawl & Generate Run" : "Test Execution Run"}
-              </h1>
-              {isRunning && <span className="badge badge-blue pulse">● Live</span>}
-              {run.status === "completed" && <span className="badge badge-green">Completed</span>}
-              {run.status === "failed" && <span className="badge badge-red">Failed</span>}
-            </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: "var(--text3)" }}>{run.id}</div>
-          </div>
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-            {isCrawl ? (
-              <Stat icon={<CheckCircle size={14} color="var(--green)" />} label="Pages Found" value={run.pagesFound ?? 0} />
-            ) : (
-              <>
-                <Stat icon={<CheckCircle size={14} color="var(--green)" />} label="Passed" value={run.passed ?? 0} color="var(--green)" />
-                <Stat icon={<XCircle size={14} color="var(--red)" />} label="Failed" value={run.failed ?? 0} color="var(--red)" />
-                <Stat icon={<AlertTriangle size={14} color="var(--text2)" />} label="Total" value={run.total ?? 0} />
-              </>
-            )}
-            <Stat icon={<Clock size={14} color="var(--text3)" />} label="Started" value={new Date(run.startedAt).toLocaleTimeString()} />
-          </div>
-        </div>
-
-        {/* Progress bar for test runs */}
-        {!isCrawl && run.total > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: "0.78rem", color: "var(--text2)" }}>
-              <span>{(run.passed || 0) + (run.failed || 0)} / {run.total} tests executed</span>
-              {passRate !== null && <span style={{ color: passRate >= 80 ? "var(--green)" : passRate >= 50 ? "var(--amber)" : "var(--red)", fontWeight: 700 }}>{passRate}% pass rate</span>}
-            </div>
-            <div className="progress-bar">
-              <div className="progress-bar-fill" style={{ width: `${Math.round(((run.passed || 0) + (run.failed || 0)) / run.total * 100)}%` }} />
-            </div>
-          </div>
-        )}
+    <div className="fade-in" style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {/* Back + breadcrumb */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20, fontSize: "0.82rem", color: "var(--text3)" }}>
+        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, color: "var(--text2)", fontWeight: 500 }}>
+          <ArrowLeft size={14} /> Work
+        </button>
+        <span>›</span>
+        <span>Task Details</span>
       </div>
 
-      {/* Video Player - auto-opens after execution */}
-      {showVideo && run.videos?.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+      {/* Task header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <h1 style={{ fontWeight: 700, fontSize: "1.3rem" }}>
+            Task #{runId.slice(0, 6).toUpperCase()}: {isCrawl ? "Crawl & Generate" : "Test Run"}
+          </h1>
+          {run.status === "completed" && <span className="badge badge-green"><CheckCircle2 size={10} /> Passed</span>}
+          {run.status === "running"   && <span className="badge badge-blue pulse">● Running</span>}
+          {run.status === "failed"    && <span className="badge badge-red"><XCircle size={10} /> Failed</span>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, color: "var(--text3)", fontSize: "0.78rem" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span className="mono">#{runId.slice(0, 8)}</span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><AgentTag type="TA" /> Sentri Agent</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={12} /> {new Date(run.startedAt).toLocaleString()}</span>
+          {run.finishedAt && (
+            <span>
+              {Math.round((new Date(run.finishedAt) - new Date(run.startedAt)) / 1000)}s
+            </span>
+          )}
+          {!isCrawl && run.total > 0 && (
+            <span>{run.passed ?? 0} passed · {run.failed ?? 0} failed · {run.total} total</span>
+          )}
+          {isCrawl && <span>{run.pagesFound ?? 0} pages found · {run.testsGenerated ?? 0} tests generated</span>}
+        </div>
+      </div>
+
+      {/* Progress bar for test runs */}
+      {!isCrawl && run.total > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", color: "var(--text2)", marginBottom: 6 }}>
+            <span>{(run.passed || 0) + (run.failed || 0)} / {run.total} tests executed</span>
+            {passRate !== null && <span style={{ fontWeight: 600, color: passRate >= 80 ? "var(--green)" : passRate >= 50 ? "var(--amber)" : "var(--red)" }}>{passRate}% pass rate</span>}
+          </div>
+          <div className="progress-bar progress-bar-green">
+            <div className="progress-bar-fill" style={{ width: `${Math.round(((run.passed || 0) + (run.failed || 0)) / run.total * 100)}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Main split layout: Activity Log | Browser View */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+
+        {/* LEFT: Activity Log */}
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Film size={16} color="var(--accent)" />
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "0.85rem", color: "var(--text2)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                Test Recording
-              </span>
+              <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--bg2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: 10 }}>≡</span>
+              </div>
+              <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Activity Log</span>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {run.videos.length > 1 && (
-                <select
-                  value={selectedVideo || ""}
-                  onChange={(e) => setSelectedVideo(e.target.value)}
-                  style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "4px 8px", color: "var(--text)", fontSize: "0.78rem", fontFamily: "var(--font-mono)" }}
-                >
-                  {run.videos.map((v, i) => (
-                    <option key={v} value={v}>Video {i + 1}</option>
-                  ))}
-                </select>
-              )}
-              {selectedVideo && (
-                <a href={selectedVideo} download style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--accent)", fontSize: "0.78rem", textDecoration: "none" }}>
-                  <Download size={13} /> Download
-                </a>
-              )}
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowVideo(false)} style={{ fontSize: "0.75rem" }}>
-                Hide
-              </button>
-            </div>
+            <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{steps.length} of {steps.length} items</span>
           </div>
-          {selectedVideo && (
-            <video
-              key={selectedVideo}
-              controls
-              autoPlay
-              style={{ width: "100%", borderRadius: "var(--radius)", background: "#000" }}
-            >
-              <source src={selectedVideo} type="video/webm" />
-              Your browser does not support the video tag.
-            </video>
-          )}
-          {run.traceUrl && (
-            <div style={{ marginTop: 10, fontSize: "0.78rem" }}>
-              <a href={run.traceUrl} download style={{ color: "var(--accent)", textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}>
-                <Download size={13} /> Download Playwright Trace
-              </a>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Show video button when videos available but player hidden */}
-      {!showVideo && run.videos?.length > 0 && (
-        <button
-          className="btn btn-ghost"
-          style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}
-          onClick={() => { setShowVideo(true); setSelectedVideo(run.videos[0]); }}
-        >
-          <Film size={15} /> Show Test Recordings ({run.videos.length})
-        </button>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: run.results?.length ? "1fr 1fr" : "1fr", gap: 16 }}>
-        {/* Logs */}
-        <div className="card">
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "0.85rem", color: "var(--text2)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 12 }}>
-            Agent Logs {isRunning && <span style={{ marginLeft: 8 }} className="pulse">Live</span>}
-          </div>
-          <div className="log-box" ref={logRef}>
-            {run.logs?.length === 0 && <span style={{ color: "var(--text3)" }}>Waiting for logs…</span>}
-            {run.logs?.map((line, i) => (
-              <div key={i} className={colorLog(line)}>{line}</div>
-            ))}
-            {isRunning && <div style={{ color: "var(--accent)", opacity: 0.6 }}>▌</div>}
-          </div>
-        </div>
-
-        {/* Test Results */}
-        {run.results?.length > 0 && (
-          <div className="card">
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "0.85rem", color: "var(--text2)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 12 }}>
-              Test Results
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 460, overflowY: "auto" }}>
-              {run.results.map((r, i) => (
-                <div key={i} style={{
-                  padding: "10px 14px", borderRadius: "var(--radius)",
-                  background: r.status === "passed" ? "rgba(0,212,106,0.06)" : r.status === "warning" ? "rgba(255,165,2,0.06)" : "rgba(255,71,87,0.06)",
-                  border: `1px solid ${r.status === "passed" ? "rgba(0,212,106,0.15)" : r.status === "warning" ? "rgba(255,165,2,0.15)" : "rgba(255,71,87,0.15)"}`,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {r.status === "passed"
-                      ? <CheckCircle size={14} color="var(--green)" />
-                      : r.status === "warning"
-                      ? <AlertTriangle size={14} color="var(--amber)" />
-                      : <XCircle size={14} color="var(--red)" />}
-                    <span style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: "0.83rem", flex: 1 }}>{r.testName}</span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>{r.durationMs}ms</span>
-                  </div>
-                  {r.error && (
-                    <div style={{ marginTop: 6, fontSize: "0.75rem", color: r.status === "warning" ? "var(--amber)" : "var(--red)", fontFamily: "var(--font-mono)", paddingLeft: 22 }}>
-                      {r.error}
+          <div style={{ padding: 16, maxHeight: 520, overflowY: "auto" }} ref={logRef}>
+            {/* Summary message at top */}
+            {run.logs?.length > 0 && (
+              <div style={{ padding: "12px 14px", background: "var(--bg2)", borderRadius: 10, border: "1px solid var(--border)", marginBottom: 16, fontSize: "0.82rem", color: "var(--text2)", lineHeight: 1.6 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <AgentTag type="TA" />
+                  <div>
+                    <span style={{ fontWeight: 500, color: "var(--text)" }}>
+                      {isCrawl ? `Crawl run for this project — ` : `Test execution — `}
+                    </span>
+                    {isCrawl
+                      ? `Crawling up to 20 pages, filtering elements, classifying intents, and generating tests with AI.`
+                      : `Running ${run.total} tests against the application, recording pass/fail results.`}
+                    <div style={{ marginTop: 4, fontSize: "0.73rem", color: "var(--text3)" }}>
+                      {new Date(run.startedAt).toLocaleTimeString()}
                     </div>
-                  )}
-                  {/* Action buttons: video & screenshot */}
-                  <div style={{ display: "flex", gap: 10, marginTop: 8, paddingLeft: 22 }}>
-                    {r.videoUrl && (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ fontSize: "0.72rem", padding: "2px 8px" }}
-                        onClick={() => { setSelectedVideo(r.videoUrl); setShowVideo(true); }}
-                      >
-                        <Film size={11} /> Video
-                      </button>
-                    )}
-                    {r.screenshot && (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ fontSize: "0.72rem", padding: "2px 8px" }}
-                        onClick={() => {
-                          const w = window.open();
-                          if (w) {
-                            w.document.write(`<img src="data:image/png;base64,${r.screenshot}" style="max-width:100%" />`);
-                          }
-                        }}
-                      >
-                        <Image size={11} /> Screenshot
-                      </button>
-                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+              </div>
+            )}
 
-      {/* Generated Tests (crawl run) */}
-      {isCrawl && run.tests?.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "0.85rem", color: "var(--text2)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 12 }}>
-            Tests Generated ({run.tests.length})
-          </div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--green)" }}>
-            ✓ {run.tests.length} test cases created and ready to run
+            {/* Step-by-step log items */}
+            {run.results?.length > 0 ? (
+              // Test results as steps
+              run.results.map((r, i) => (
+                <div key={i} className="step-item" style={{ cursor: "pointer", background: activeStep === i ? "var(--bg2)" : "transparent", borderRadius: 8, margin: "0 -8px", padding: "10px 8px" }}
+                  onClick={() => setActiveStep(activeStep === i ? null : i)}>
+                  <StepDot status={r.status} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>
+                      Step {i + 1} <span className={`badge badge-${r.status === "passed" ? "green" : "red"}`} style={{ marginLeft: 6, fontSize: "0.68rem" }}>{r.status === "passed" ? "Passed" : "Failed"}</span>
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text2)", marginTop: 2 }} className="truncate">{r.testName}</div>
+                    {r.error && activeStep === i && (
+                      <div style={{ marginTop: 6, fontSize: "0.75rem", color: "var(--red)", fontFamily: "var(--font-mono)", background: "var(--red-bg)", padding: "6px 8px", borderRadius: 6 }}>
+                        {r.error}
+                      </div>
+                    )}
+                    <div style={{ fontSize: "0.7rem", color: "var(--text3)", marginTop: 3 }}>
+                      {r.durationMs ? `${r.durationMs}ms` : ""}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              // Raw log lines
+              <div>
+                {steps.map((s, i) => (
+                  <div key={i} className="step-item" style={{ cursor: "pointer", borderRadius: 8, margin: "0 -8px", padding: "8px 8px", background: activeStep === i ? "var(--bg2)" : "transparent" }}
+                    onClick={() => setActiveStep(activeStep === i ? null : i)}>
+                    <StepDot status={s.status} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: "0.82rem", color: "var(--text)", lineHeight: 1.5 }}>{s.msg}</div>
+                      {s.time && <div style={{ fontSize: "0.7rem", color: "var(--text3)", marginTop: 2 }}>{new Date(s.time).toLocaleTimeString()}</div>}
+                    </div>
+                  </div>
+                ))}
+                {isRunning && (
+                  <div className="step-item">
+                    <div className="step-dot step-dot-run"><RefreshCw size={8} className="spin" /></div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>Running…</div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
 
-function Stat({ icon, label, value, color = "var(--text)" }) {
-  return (
-    <div style={{ textAlign: "center" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center", marginBottom: 4 }}>
-        {icon}
-        <span style={{ fontSize: "0.72rem", color: "var(--text3)", fontFamily: "var(--font-display)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+        {/* RIGHT: Browser View / Details */}
+        <div className="card" style={{ overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--bg2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: 10 }}>⊡</span>
+              </div>
+              <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                {activeResult?.screenshot ? "Browser View" : isCrawl ? "Pipeline Report" : "Test Results"}
+              </span>
+            </div>
+            {activeResult?.screenshot && (
+              <button className="btn btn-ghost btn-xs"><ExternalLink size={12} /> Open</button>
+            )}
+          </div>
+
+          <div style={{ padding: 16, maxHeight: 520, overflowY: "auto" }}>
+            {/* Screenshot if available */}
+            {activeResult?.screenshot ? (
+              <div>
+                <div style={{ marginBottom: 12, padding: "8px 12px", background: "var(--bg2)", borderRadius: 8, border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "0.78rem", color: "var(--text2)", marginBottom: 4 }}>
+                    <strong>{activeResult.testName}</strong>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.73rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444" }} />
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b" }} />
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e" }} />
+                    <span style={{ marginLeft: 8 }}>screenshot</span>
+                  </div>
+                </div>
+                <img src={`data:image/png;base64,${activeResult.screenshot}`} alt="Test screenshot" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)" }} />
+              </div>
+            ) : isCrawl && run.pipelineStats ? (
+              /* Pipeline report */
+              <div>
+                <div style={{ marginBottom: 16, fontSize: "0.82rem", color: "var(--text2)", lineHeight: 1.7 }}>
+                  Sentri crawled your application, filtered elements, classified intents, detected user journeys, and generated high-quality tests.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[
+                    { label: "Pages Found",           val: run.pipelineStats.pagesFound,           color: "var(--accent)"  },
+                    { label: "Raw Tests Generated",   val: run.pipelineStats.rawTestsGenerated,    color: "var(--text)"    },
+                    { label: "Duplicates Removed",    val: run.pipelineStats.duplicatesRemoved,    color: "var(--amber)"   },
+                    { label: "Journeys Detected",     val: run.pipelineStats.journeysDetected,     color: "var(--purple)"  },
+                    { label: "Assertions Enhanced",   val: run.pipelineStats.assertionsEnhanced,   color: "var(--green)"   },
+                    { label: "Avg Quality Score",     val: run.pipelineStats.averageQuality != null ? `${run.pipelineStats.averageQuality}/100` : "—", color: (run.pipelineStats.averageQuality || 0) >= 60 ? "var(--green)" : "var(--amber)" },
+                  ].map((s, i) => (
+                    <div key={i} style={{ padding: "14px 16px", background: "var(--bg2)", borderRadius: 10, border: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val ?? "—"}</div>
+                      <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 3 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {run.tests?.length > 0 && (
+                  <div style={{ marginTop: 14, padding: "10px 14px", background: "var(--green-bg)", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: "0.82rem", color: "var(--green)", fontWeight: 500 }}>
+                    ✓ {run.tests.length} tests ready to run
+                  </div>
+                )}
+              </div>
+            ) : run.results?.length > 0 && activeStep !== null && activeResult ? (
+              /* Selected test result detail */
+              <div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 4 }}>{activeResult.testName}</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <span className={`badge badge-${activeResult.status === "passed" ? "green" : "red"}`}>{activeResult.status}</span>
+                    <span className="badge badge-gray">{activeResult.durationMs}ms</span>
+                  </div>
+                </div>
+                {activeResult.error && (
+                  <div style={{ padding: "10px 12px", background: "var(--red-bg)", border: "1px solid #fca5a5", borderRadius: 8, fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--red)", marginBottom: 12, lineHeight: 1.6 }}>
+                    {activeResult.error}
+                  </div>
+                )}
+                <div style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Click a different step in the Activity Log to inspect it.</div>
+              </div>
+            ) : (
+              /* Default: summary */
+              <div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.7, marginBottom: 16 }}>
+                  {isRunning
+                    ? "Tests are executing. Results will appear here as they complete."
+                    : run.results?.length > 0
+                    ? "Click any step in the Activity Log to view its details and screenshot."
+                    : run.status === "completed"
+                    ? "Run completed successfully."
+                    : "Waiting for results…"}
+                </div>
+                {run.results?.length > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    {[
+                      { label: "Passed", val: run.passed, color: "var(--green)", bg: "var(--green-bg)" },
+                      { label: "Failed", val: run.failed, color: "var(--red)",   bg: "var(--red-bg)"   },
+                      { label: "Total",  val: run.total,  color: "var(--text)",  bg: "var(--bg2)"      },
+                    ].map((s, i) => (
+                      <div key={i} style={{ padding: "16px", background: s.bg, borderRadius: 10, textAlign: "center", border: "1px solid var(--border)" }}>
+                        <div style={{ fontSize: "1.8rem", fontWeight: 700, color: s.color }}>{s.val ?? 0}</div>
+                        <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 3 }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.4rem", color }}>{value}</div>
     </div>
   );
 }
