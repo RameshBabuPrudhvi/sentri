@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import { fileURLToPath } from "url";
 import { crawlAndGenerateTests } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
@@ -9,9 +11,22 @@ import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfig
 
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ─── Serve Playwright artifacts ────────────────────────────────────────────
+const ARTIFACTS_DIR = path.join(__dirname, "..", "artifacts");
+app.use("/artifacts", express.static(ARTIFACTS_DIR, {
+  setHeaders(res, fp) {
+    if (fp.endsWith(".webm")) res.setHeader("Content-Type", "video/webm");
+    if (fp.endsWith(".zip"))  res.setHeader("Content-Type", "application/zip");
+    if (fp.endsWith(".png"))  res.setHeader("Content-Type", "image/png");
+    res.setHeader("Accept-Ranges", "bytes");
+  },
+}));
 
 const db = getDb();
 
