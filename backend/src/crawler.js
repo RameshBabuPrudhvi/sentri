@@ -196,6 +196,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   for (const t of enhancedTests) {
     const testId = uuidv4();
     db.tests[testId] = {
+      ...t,
       id: testId,
       projectId: project.id,
       sourceUrl: t.sourceUrl,
@@ -210,7 +211,6 @@ export async function crawlAndGenerateTests(project, run, db) {
       // All crawl-generated tests start as draft — humans must approve before regression
       reviewStatus: "draft",
       reviewedAt: null,
-      ...t,
     };
     run.tests.push(testId);
   }
