@@ -379,7 +379,12 @@ export default function ProjectDetail() {
                                 <div>
                                   <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
-                                  {t.isJourneyTest && <span className="badge badge-purple" style={{ marginTop: 4 }}>Journey</span>}
+                                  <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                                    {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                                    {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
+                                    {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
+                                    {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                                  </div>
                                 </div>
                               </div>
                             </td>
@@ -479,7 +484,12 @@ export default function ProjectDetail() {
                             <AgentTag type="TA" />
                             <div>
                               <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
-                              {t.isJourneyTest && <span className="badge badge-purple" style={{ marginTop: 4 }}>Journey</span>}
+                              <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                                {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                                {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
+                                {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
+                                {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                              </div>
                             </div>
                           </div>
                         </td>

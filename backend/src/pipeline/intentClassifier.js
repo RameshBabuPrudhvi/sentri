@@ -114,7 +114,9 @@ export function classifyPage(snapshot, filteredElements) {
     dominantIntent,
     intentBreakdown: intentCounts,
     classifiedElements: classified,
-    isHighPriority: ["AUTH", "CHECKOUT", "FORM_SUBMISSION", "CRUD"].includes(dominantIntent),
+    // All pages are high priority — NAVIGATION pages like homepages still need
+    // comprehensive test coverage (titles, CTAs, links, layout, 404 checks, etc.)
+    isHighPriority: true,
   };
 }
 

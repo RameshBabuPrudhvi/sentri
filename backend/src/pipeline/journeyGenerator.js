@@ -20,7 +20,7 @@ function buildJourneyPrompt(journey, allSnapshots) {
   Key elements: ${JSON.stringify((snapshot?.elements || []).slice(0, 10), null, 2)}`;
   }).join("\n---");
 
-  return `You are a senior QA engineer generating a user journey Playwright test.
+  return `You are a senior QA engineer generating comprehensive Playwright tests for a real user journey.
 
 JOURNEY: ${journey.name}
 TYPE: ${journey.type}
@@ -29,26 +29,32 @@ DESCRIPTION: ${journey.description}
 PAGES IN THIS JOURNEY:
 ${pageContexts}
 
-Generate ONE comprehensive end-to-end Playwright test that simulates this complete user journey.
+Generate 3-5 end-to-end Playwright tests covering this journey from multiple angles.
 
 Requirements:
-1. The test must flow through multiple pages/steps logically
-2. Use role-based selectors: getByRole(), getByLabel(), getByText()
-3. Include at least 3 meaningful assertions (toHaveURL, toBeVisible, toContainText)
-4. Add page.waitForLoadState() between navigation steps
-5. The test must represent a REAL user goal, not random clicks
-6. Use descriptive variable names
+1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
+2. Each test must flow through multiple pages/steps logically
+3. Use role-based selectors: getByRole(), getByLabel(), getByText()
+4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText)
+5. Add page.waitForLoadState() between navigation steps
+6. Tests must represent REAL user goals and behaviors
+7. Negative tests should verify error messages and validation feedback
 
 Return ONLY valid JSON (no markdown):
 {
-  "name": "descriptive journey test name",
-  "description": "what user goal this validates",
-  "priority": "high",
-  "type": "${journey.type.toLowerCase()}",
-  "journeyType": "${journey.type}",
-  "isJourneyTest": true,
-  "steps": ["User opens login page", "User enters credentials", "User lands on dashboard"],
-  "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // full journey code here\n});"
+  "tests": [
+    {
+      "name": "descriptive journey test name",
+      "description": "what user goal this validates",
+      "priority": "high",
+      "type": "${journey.type.toLowerCase()}",
+      "scenario": "positive|negative|edge_case",
+      "journeyType": "${journey.type}",
+      "isJourneyTest": true,
+      "steps": ["User opens page", "User performs action", "Assert expected outcome"],
+      "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // full journey code here\n});"
+    }
+  ]
 }`;
 }
 
@@ -56,40 +62,117 @@ Return ONLY valid JSON (no markdown):
 
 function buildIntentPrompt(classifiedPage, snapshot) {
   const elements = classifiedPage.classifiedElements
-    .filter(({ confidence }) => confidence > 30)
-    .slice(0, 15)
+    .filter(({ confidence }) => confidence > 20)
+    .slice(0, 20)
     .map(({ element, intent, confidence }) => ({ ...element, intent, confidence }));
 
-  return `You are a senior QA engineer. Generate 2-3 high-quality Playwright tests for this page.
+  const pageType = classifiedPage.dominantIntent;
+
+  const scenarioHints = {
+    AUTH: `Generate 5-8 tests covering:
+- POSITIVE: Successful login with valid credentials redirects to dashboard
+- POSITIVE: Registration form accepts valid new user data  
+- NEGATIVE: Wrong password shows clear error message
+- NEGATIVE: Empty required fields show validation errors
+- NEGATIVE: Invalid email format blocked before submit
+- EDGE: Password visibility toggle works
+- EDGE: Forgot password link is accessible`,
+
+    SEARCH: `Generate 5-8 tests covering:
+- POSITIVE: Search returns relevant results for valid query
+- POSITIVE: Search filters narrow down results correctly
+- POSITIVE: Clicking a result navigates to detail page
+- NEGATIVE: Empty search query handled gracefully
+- NEGATIVE: No results for unknown term shows empty state
+- EDGE: Special characters in search don't break the page
+- EDGE: Very long search query is handled`,
+
+    CHECKOUT: `Generate 5-8 tests covering:
+- POSITIVE: Add item to cart and view cart with correct total
+- POSITIVE: Quantity update recalculates cart total
+- POSITIVE: Proceed to checkout from cart page
+- NEGATIVE: Invalid payment details show error
+- NEGATIVE: Empty required checkout fields blocked
+- EDGE: Remove item from cart updates totals
+- EDGE: Cart persists on page refresh`,
+
+    FORM_SUBMISSION: `Generate 5-8 tests covering:
+- POSITIVE: Form submits with all valid required fields
+- POSITIVE: Success confirmation is shown after submit
+- NEGATIVE: Submit with empty required fields shows validation
+- NEGATIVE: Invalid email format shows error before submit
+- NEGATIVE: Duplicate submission is prevented
+- EDGE: Form scrolls to first error field on failed submit
+- EDGE: Character limits enforced on text inputs`,
+
+    NAVIGATION: `Generate 5-8 tests covering:
+- POSITIVE: Page title and main heading (H1) are visible and correct
+- POSITIVE: Primary navigation links are present and clickable
+- POSITIVE: Clicking the logo/brand returns to homepage
+- POSITIVE: Key call-to-action buttons are visible and enabled
+- POSITIVE: Page loads without console errors (no 404 resources)
+- NEGATIVE: 404 URL shows appropriate not-found page
+- EDGE: Keyboard navigation reaches all interactive elements
+- EDGE: Page is correctly structured with semantic headings`,
+
+    CRUD: `Generate 5-8 tests covering:
+- POSITIVE: Create new item with valid data succeeds
+- POSITIVE: Created item appears in list immediately  
+- POSITIVE: Edit existing item and save persists changes
+- NEGATIVE: Create with duplicate name shows error
+- NEGATIVE: Required fields block save when empty
+- EDGE: Delete shows confirmation dialog
+- EDGE: Cancel edit discards unsaved changes`,
+
+    CONTENT: `Generate 5-8 tests covering:
+- POSITIVE: Main content/article is visible and readable
+- POSITIVE: Images are loaded (no broken images)
+- POSITIVE: Internal links within content navigate correctly
+- POSITIVE: Page metadata (title, description) is present
+- NEGATIVE: Page handles missing optional content gracefully
+- EDGE: Long content is paginated or scrollable
+- EDGE: Content is accessible with proper heading hierarchy`,
+  };
+
+  const hints = scenarioHints[pageType] || scenarioHints.NAVIGATION;
+
+  return `You are a senior QA engineer. Generate comprehensive Playwright tests based on REAL user behavior patterns.
 
 PAGE: ${snapshot.url}
 TITLE: ${snapshot.title}
-DOMINANT INTENT: ${classifiedPage.dominantIntent}
-FORMS: ${snapshot.forms}
+DOMINANT INTENT: ${pageType}
+FORMS ON PAGE: ${snapshot.forms}
+H1 TEXT: ${snapshot.h1 || "none"}
 
-CLASSIFIED ELEMENTS (filtered, high-value only):
+CLASSIFIED INTERACTIVE ELEMENTS:
 ${JSON.stringify(elements, null, 2)}
 
-RULES:
-1. Focus ONLY on the dominant intent: ${classifiedPage.dominantIntent}
-2. Each test must validate a REAL user goal
-3. Use getByRole(), getByLabel(), getByText() selectors — NOT CSS selectors
-4. Every test must have at least 2 strong assertions
-5. BAD assertion: expect(page).toBeTruthy()
-   GOOD assertion: await expect(page).toHaveURL(/dashboard/); await expect(page.getByText('Welcome')).toBeVisible();
-6. Do NOT generate tests for footer, social icons, or navigation boilerplate
-7. Tests should be independent (no shared state)
+REQUIRED SCENARIO COVERAGE:
+${hints}
 
-Return ONLY valid JSON (no markdown):
+STRICT RULES:
+1. Generate 5-8 tests — must include BOTH positive AND negative scenarios
+2. Each test validates a REAL user goal or validates graceful failure handling
+3. Use ONLY accessibility selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
+4. Every test MUST have at least 2 strong assertions
+5. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
+6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
+7. Skip tests for: footer, social icons, cookie banners, generic navigation boilerplate
+8. Tests must be independent — no shared state between tests
+9. For NEGATIVE tests: assert the actual error message or validation indicator is visible
+10. Only test elements/behaviors that ACTUALLY exist for this type of page
+
+Return ONLY valid JSON (no markdown, no code fences):
 {
   "tests": [
     {
-      "name": "clear intent-driven name",
-      "description": "specific user goal being validated",
-      "priority": "high",
+      "name": "descriptive name that includes what scenario (positive/negative) is tested",
+      "description": "specific user goal or failure scenario being validated",
+      "priority": "high|medium",
       "type": "${classifiedPage.dominantIntent.toLowerCase()}",
-      "steps": ["concrete step 1", "concrete step 2", "assertion step"],
-      "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // complete test\n});"
+      "scenario": "positive|negative|edge_case",
+      "steps": ["concrete step 1", "concrete step 2", "assert: expected outcome"],
+      "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // complete test code\n});"
     }
   ]
 }`;
@@ -98,23 +181,25 @@ Return ONLY valid JSON (no markdown):
 // ── Main generators ───────────────────────────────────────────────────────────
 
 /**
- * generateJourneyTest(journey, snapshotsByUrl) → test object or null
+ * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
 export async function generateJourneyTest(journey, snapshotsByUrl) {
   try {
     const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
     const text = await generateText(prompt);
     const result = parseJSON(text);
-    return result;
+
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result.tests)) return result.tests;
+    if (result && result.name) return [result]; // legacy single-test shape
+    return [];
   } catch (err) {
-    return null;
+    return [];
   }
 }
 
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
- *
- * Generates tests focused on the page's dominant intent.
  */
 export async function generateIntentTests(classifiedPage, snapshot) {
   try {
@@ -134,26 +219,26 @@ export async function generateIntentTests(classifiedPage, snapshot) {
  * generateAllTests(classifiedPages, journeys, snapshotsByUrl) → Array of test objects
  *
  * Orchestrates full test generation: journeys first, then per-page intent tests.
+ * ALL pages get comprehensive tests — not just high-priority ones.
  */
 export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress) {
   const allTests = [];
 
-  // 1. Generate journey tests (highest value)
+  // 1. Generate journey tests (highest value — multi-page flows)
   for (const journey of journeys) {
-    onProgress?.(`🗺️  Generating journey: ${journey.name}`);
-    const journeyTest = await generateJourneyTest(journey, snapshotsByUrl);
-    if (journeyTest) {
-      allTests.push({ ...journeyTest, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
+    onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
+    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl);
+    for (const jt of journeyTests) {
+      allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
     }
   }
 
-  // 2. Generate per-page intent tests for high-priority pages
+  // Track which URLs are fully covered by journeys
   const coveredUrls = new Set(journeys.flatMap(j => j.pages.map(p => p.url)));
 
+  // 2. Comprehensive tests for HIGH-PRIORITY pages not covered by journeys
   for (const classifiedPage of classifiedPages) {
     if (!classifiedPage.isHighPriority) continue;
-
-    // Skip if fully covered by a journey test
     if (coveredUrls.has(classifiedPage.url)) continue;
 
     onProgress?.(`🤖 Generating intent tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
@@ -166,18 +251,18 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     }
   }
 
-  // 3. Generate basic tests for low-priority pages (just navigation/visibility)
+  // 3. Comprehensive tests for ALL remaining pages (NAVIGATION, CONTENT, etc.)
+  //    Previously these only got 1 basic test — now they get full 5-8 test coverage
   for (const classifiedPage of classifiedPages) {
     if (classifiedPage.isHighPriority || coveredUrls.has(classifiedPage.url)) continue;
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
 
-    // Only generate one basic visibility test per low-priority page
-    onProgress?.(`📄 Basic test for: ${classifiedPage.url}`);
+    onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
     try {
-      const basicTests = await generateIntentTests(classifiedPage, snapshot);
-      if (basicTests.length > 0) {
-        allTests.push({ ...basicTests[0], sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
+      const tests = await generateIntentTests(classifiedPage, snapshot);
+      for (const t of tests) {
+        allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
       }
     } catch {}
   }
