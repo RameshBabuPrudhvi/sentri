@@ -21,16 +21,158 @@ function log(run, msg) {
   console.log(entry);
 }
 
+/**
+ * extractTestBody(playwrightCode)
+ *
+ * Pulls the async function body out of the generated Playwright test so we can
+ * run it directly against an already-open page/context — without needing to
+ * spawn a whole new Playwright test runner process.
+ *
+ * Handles both common shapes the AI produces:
+ *   test('name', async ({ page }) => { ... })
+ *   test('name', async ({ page, context }) => { ... })
+ */
+function extractTestBody(playwrightCode) {
+  if (!playwrightCode) return null;
+
+  // Match:  async ({ page ... }) => {  ...  }
+  // We want everything inside the outermost braces of the arrow function body.
+  const arrowMatch = playwrightCode.match(/async\s*\(\s*\{[^}]*\}\s*\)\s*=>\s*\{([\s\S]*)/);
+  if (!arrowMatch) return null;
+
+  // arrowMatch[1] starts just after the opening { of the test body.
+  // We walk character-by-character to find the matching closing brace.
+  const bodyAndRest = arrowMatch[1];
+  let depth = 1;
+  let i = 0;
+  for (; i < bodyAndRest.length && depth > 0; i++) {
+    if (bodyAndRest[i] === "{") depth++;
+    else if (bodyAndRest[i] === "}") depth--;
+  }
+  // Everything up to (but not including) the final closing brace is the body.
+  return bodyAndRest.slice(0, i - 1).trim();
+}
+
+/**
+ * stripPlaywrightImports(code)
+ *
+ * Remove lines like:
+ *   import { test, expect } from '@playwright/test';
+ *   const { test, expect } = require('@playwright/test');
+ * so they don't cause parse errors when we eval the body.
+ */
+function stripPlaywrightImports(code) {
+  return code
+    .split("\n")
+    .filter(line => !line.match(/import\s*\{.*\}\s*from\s*['"]@playwright\/test['"]/))
+    .filter(line => !line.match(/require\s*\(\s*['"]@playwright\/test['"]\s*\)/))
+    .join("\n");
+}
+
+/**
+ * buildSelfHealingHelpers()
+ *
+ * Returns JS code that overrides common Playwright locator patterns with
+ * self-healing versions that try fallback selectors when the primary fails.
+ * Injected at the top of every executed test body.
+ */
+function buildSelfHealingHelpers() {
+  return `
+    // Self-healing helper: tries multiple selector strategies in order
+    async function findElement(page, strategies) {
+      for (const strategy of strategies) {
+        try {
+          const loc = strategy(page);
+          await loc.waitFor({ state: 'visible', timeout: 3000 });
+          return loc;
+        } catch {}
+      }
+      // Return last strategy as a best-effort attempt
+      return strategies[strategies.length - 1](page);
+    }
+
+    // Self-healing fill: tries common input selector patterns
+    async function safeFill(page, labelOrPlaceholder, value) {
+      const strategies = [
+        p => p.getByLabel(labelOrPlaceholder),
+        p => p.getByPlaceholder(labelOrPlaceholder),
+        p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
+        p => p.getByRole('combobox', { name: labelOrPlaceholder }),
+        p => p.getByRole('textbox', { name: labelOrPlaceholder }),
+        p => p.locator(\`input[name*="\${labelOrPlaceholder.toLowerCase().replace(/ /g,'')}"]\`),
+        p => p.locator(\`input[placeholder*="\${labelOrPlaceholder}"]\`),
+      ];
+      const el = await findElement(page, strategies);
+      await el.fill(value);
+    }
+
+    // Self-healing click: tries button text, link text, role patterns
+    async function safeClick(page, text) {
+      const strategies = [
+        p => p.getByRole('button', { name: text }),
+        p => p.getByRole('link', { name: text }),
+        p => p.getByText(text, { exact: true }),
+        p => p.getByText(text),
+        p => p.locator(\`[aria-label*="\${text}"]\`),
+      ];
+      const el = await findElement(page, strategies);
+      await el.click();
+    }
+  `;
+}
+
+/**
+ * runGeneratedCode(page, context, playwrightCode, expect)
+ *
+ * Dynamically executes the AI-generated test body against the live page.
+ * Returns { passed: true } or throws with the error message.
+ */
+async function runGeneratedCode(page, context, playwrightCode, expect) {
+  const body = extractTestBody(playwrightCode);
+  if (!body) {
+    throw new Error("Could not parse test body from generated code");
+  }
+
+  const cleaned = stripPlaywrightImports(body);
+  const helpers = buildSelfHealingHelpers();
+
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("page", "context", "expect", `
+    return (async () => {
+      ${helpers}
+      ${cleaned}
+    })();
+  `);
+
+  await fn(page, context, expect);
+  return { passed: true };
+}
+
+/**
+ * buildExpect(page)
+ *
+ * Returns a minimal `expect` compatible with Playwright's assertion API
+ * by delegating to the real Playwright expect imported dynamically.
+ * We lazy-import it here because Playwright's `expect` lives in the test
+ * runner module which we don't load at the top level.
+ */
+async function getExpect() {
+  // Playwright exports expect from its test module — import it at runtime.
+  const { expect } = await import("@playwright/test");
+  return expect;
+}
+
 async function executeTest(test, browser, runId, stepIndex, runStart) {
-  // Each test gets its OWN context with its own video file so we can reliably
-  // locate the recorded video after the context is closed.
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
   const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     recordVideo: { dir: testVideoDir, size: { width: 1280, height: 720 } },
     viewport: { width: 1280, height: 720 },
+    // Accept all permissions so interactions aren't blocked
+    permissions: ["geolocation", "notifications"],
+    ignoreHTTPSErrors: true,
   });
 
   const page = await context.newPage();
@@ -87,49 +229,35 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
   const start = Date.now();
 
   try {
-    await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForTimeout(500);
+    const expect = await getExpect();
 
-    if (test.type === "visibility") {
-      const title = await page.title();
-      if (!title) throw new Error("Page has no title");
-      const bodyText = await page.locator("body").innerText().catch(() => "");
-      const errorPatterns = ["404", "not found", "500", "forbidden"];
-      if (errorPatterns.some((p) => bodyText.toLowerCase().includes(p))) {
-        const h1 = await page.locator("h1").first().innerText().catch(() => "");
-        if (errorPatterns.some((p) => h1.toLowerCase().includes(p)))
-          throw new Error(`Error page detected: ${h1}`);
+    if (test.playwrightCode && extractTestBody(test.playwrightCode)) {
+      // ── PRIMARY PATH: Execute the actual AI-generated Playwright code ──────
+      const body = extractTestBody(test.playwrightCode);
+      const codeAlreadyNavigates = body.includes("page.goto(");
+
+      // Only pre-navigate if the generated code doesn't do it itself
+      if (!codeAlreadyNavigates) {
+        await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.waitForTimeout(800);
       }
-    }
 
-    if (test.type === "navigation") {
-      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+      // Run the full generated test body
+      await runGeneratedCode(page, context, test.playwrightCode, expect);
+
+    } else {
+      // ── FALLBACK: No parseable code — run a basic smoke test ──────────────
+      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(500);
+
+      const title = await page.title();
+      if (!title) throw new Error("Page has no title — possible load failure");
+
       const url = page.url();
       if (!url.startsWith("http")) throw new Error("Invalid URL after navigation");
     }
 
-    if (test.type === "form") {
-      const forms = await page.locator("form").count();
-      const inputs = await page.locator("input:visible").count();
-      if (forms === 0 && inputs === 0) {
-        result.status = "warning";
-        result.error = "No forms found on page (may have changed)";
-      }
-    }
-
-    if (test.type === "interaction") {
-      const buttons = page.locator("button:visible, [role='button']:visible");
-      const count = await buttons.count();
-      if (count > 0) {
-        const isEnabled = await buttons.first().isEnabled().catch(() => false);
-        if (!isEnabled) {
-          result.status = "warning";
-          result.error = "Primary button appears disabled";
-        }
-      }
-    }
-
-    // DOM snapshot
+    // DOM snapshot (always, after test runs)
     result.domSnapshot = await page.evaluate(() => {
       function serialize(node, depth = 0) {
         if (depth > 4 || !node) return null;
@@ -157,7 +285,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
       return serialize(document.body);
     }).catch(() => null);
 
-    // Screenshot
+    // Screenshot of final state
     const shotName = `${runId}-step${stepIndex}.png`;
     const shotPath = path.join(SHOTS_DIR, shotName);
     const buf = await page.screenshot({ type: "png", fullPage: false });
@@ -167,10 +295,16 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
 
   } catch (err) {
     result.status = "failed";
-    result.error = err.message;
+    // Strip ANSI escape codes so the UI shows clean text
+    result.error = err.message.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+    // Screenshot the failure state
     try {
-      const buf = await page.screenshot({ type: "png" });
+      const buf = await page.screenshot({ type: "png", fullPage: false });
       result.screenshot = buf.toString("base64");
+      const shotName = `${runId}-step${stepIndex}-fail.png`;
+      const shotPath = path.join(SHOTS_DIR, shotName);
+      fs.writeFileSync(shotPath, buf);
+      result.screenshotPath = `/artifacts/screenshots/${shotName}`;
     } catch {}
   } finally {
     result.durationMs = Date.now() - start;
@@ -178,11 +312,11 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
     result.network = networkLogs;
     result.consoleLogs = consoleLogs;
 
-    // Close page first, then context — this flushes the video to disk
+    // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
     await context.close().catch(() => {});
 
-    // Now find and move the video file (context.close() guarantees it's written)
+    // Move the video to a stable named path
     try {
       const files = fs.readdirSync(testVideoDir).filter(f => f.endsWith(".webm"));
       if (files.length > 0) {
@@ -192,7 +326,6 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
         fs.renameSync(src, dst);
         result.videoPath = `/artifacts/videos/${videoName}`;
       }
-      // Clean up the temp per-test dir
       fs.rmSync(testVideoDir, { recursive: true, force: true });
     } catch (videoErr) {
       console.warn(`Video move failed for step ${stepIndex}:`, videoErr.message);
@@ -206,7 +339,6 @@ export async function runTests(project, tests, run, db) {
   const runId = run.id;
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
 
-  // We use a shared browser but per-test contexts for reliable video capture
   const browser = await chromium.launch({
     headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
@@ -227,14 +359,14 @@ export async function runTests(project, tests, run, db) {
 
   for (let i = 0; i < tests.length; i++) {
     const test = tests[i];
-    log(run, `  ▶ Running: ${test.name}`);
+    const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
+    log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
+
     try {
       const result = await executeTest(test, browser, runId, i, runStart);
       run.results.push(result);
 
-      if (result.videoPath) {
-        allVideoSegments.push(result.videoPath);
-      }
+      if (result.videoPath) allVideoSegments.push(result.videoPath);
 
       if (result.status === "passed") {
         run.passed++;
@@ -273,14 +405,10 @@ export async function runTests(project, tests, run, db) {
   await traceContext.close().catch(() => {});
   await browser.close();
 
-  // Use the first test's video as the run-level video (most representative)
-  // Also store all segment paths for per-test playback in the UI
   if (allVideoSegments.length > 0) {
-    run.videoPath = allVideoSegments[0];  // run-level video (first test)
-    run.videoSegments = allVideoSegments; // per-test videos
+    run.videoPath = allVideoSegments[0];
+    run.videoSegments = allVideoSegments;
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
-  } else {
-    log(run, `  ⚠️  No video segments captured`);
   }
 
   run.status = "completed";

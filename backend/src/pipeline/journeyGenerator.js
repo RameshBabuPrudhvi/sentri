@@ -39,6 +39,8 @@ Requirements:
 5. Add page.waitForLoadState() between navigation steps
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
+8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL') as the very first line inside the test function. Use the actual URL from the PAGE data above.
+9. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use the real page URL provided.
 
 Return ONLY valid JSON (no markdown):
 {
@@ -161,6 +163,8 @@ STRICT RULES:
 8. Tests must be independent — no shared state between tests
 9. For NEGATIVE tests: assert the actual error message or validation indicator is visible
 10. Only test elements/behaviors that ACTUALLY exist for this type of page
+11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
+12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
 
 Return ONLY valid JSON (no markdown, no code fences):
 {

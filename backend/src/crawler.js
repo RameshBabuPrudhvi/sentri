@@ -21,7 +21,7 @@ import { generateAllTests } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
 
-const MAX_PAGES = 20;
+const MAX_PAGES = 30;  // Increased from 20 to capture more pages per site
 const MAX_DEPTH = 3;
 
 function log(run, msg) {
@@ -32,11 +32,34 @@ function log(run, msg) {
 
 async function takeSnapshot(page) {
   return page.evaluate(() => {
+    // Compute the effective ARIA role of an element (explicit or implicit)
+    function getComputedRole(el) {
+      const explicit = el.getAttribute("role");
+      if (explicit) return explicit;
+      const tag = el.tagName.toLowerCase();
+      const type = (el.getAttribute("type") || "").toLowerCase();
+      if (tag === "button") return "button";
+      if (tag === "a" && el.getAttribute("href")) return "link";
+      if (tag === "input") {
+        if (type === "search") return "searchbox";
+        if (type === "checkbox") return "checkbox";
+        if (type === "radio") return "radio";
+        if (type === "submit" || type === "button") return "button";
+        return "textbox";
+      }
+      if (tag === "select") return "combobox";
+      if (tag === "textarea") return "textbox";
+      return "";
+    }
+
     const elements = [];
     document.querySelectorAll(
-      "a, button, input, select, textarea, [role='button'], [role='link'], form"
+      "a, button, input, select, textarea, [role='button'], [role='link'], [role='combobox'], [role='searchbox'], form"
     ).forEach((el) => {
       const text = (el.innerText || el.value || el.placeholder || el.getAttribute("aria-label") || "").trim().slice(0, 80);
+      const computedRole = getComputedRole(el);
+      const ariaLabel = el.getAttribute("aria-label") || "";
+      const placeholder = el.getAttribute("placeholder") || "";
       elements.push({
         tag: el.tagName.toLowerCase(),
         text,
@@ -44,7 +67,9 @@ async function takeSnapshot(page) {
         href: el.getAttribute("href") || "",
         id: el.id || "",
         name: el.getAttribute("name") || "",
-        role: el.getAttribute("role") || "",
+        role: computedRole,
+        ariaLabel,
+        placeholder,
         visible: el.offsetParent !== null,
       });
     });
@@ -120,7 +145,6 @@ export async function crawlAndGenerateTests(project, run, db) {
         await page.close();
         continue;
       }
-
       crawlQueue.markStructureSeen(structureFP);
 
       snapshots.push(snapshot);
@@ -196,7 +220,6 @@ export async function crawlAndGenerateTests(project, run, db) {
   for (const t of enhancedTests) {
     const testId = uuidv4();
     db.tests[testId] = {
-      ...t,
       id: testId,
       projectId: project.id,
       sourceUrl: t.sourceUrl,
@@ -211,6 +234,7 @@ export async function crawlAndGenerateTests(project, run, db) {
       // All crawl-generated tests start as draft — humans must approve before regression
       reviewStatus: "draft",
       reviewedAt: null,
+      ...t,
     };
     run.tests.push(testId);
   }
