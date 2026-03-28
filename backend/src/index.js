@@ -181,7 +181,7 @@ app.get("/api/dashboard", (req, res) => {
   });
 });
 
-
+      { id: "google",    name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         docsUrl: "https://aistudio.google.com/apikey" },
 // ── Config & Settings ─────────────────────────────────────────────────────────
 
 // GET /api/config — provider info for the LLM badge shown everywhere
