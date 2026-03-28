@@ -212,7 +212,6 @@ export async function crawlAndGenerateTests(project, run, db) {
     `Crawl complete. ${pageSnapshots.length} pages snapshotted. Running AI pipeline...`
   );
 
-onProgress(`DEBUG elements: ${JSON.stringify(pageSnapshots.map(p => ({ url: p.url, count: p.elements.length })))}`);
   // ── Run the 5-stage AI pipeline ───────────────────────────────────────────
   const pipelineResults = await runPipelineForCrawl(pageSnapshots);
 
