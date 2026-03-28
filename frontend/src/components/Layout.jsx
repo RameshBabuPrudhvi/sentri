@@ -9,7 +9,7 @@ const NAV = [
   { to: "/reports",   icon: BarChart2,       label: "Reports" },
   { to: "/work",      icon: Briefcase,       label: "Work" },
   { to: "/context",   icon: Layers,          label: "Context" },
-  { to: "/settings",  icon: AppWindow,       label: "Application" },
+  { to: "/applications",  icon: AppWindow,       label: "Application" },
 ];
 
 export default function Layout() {

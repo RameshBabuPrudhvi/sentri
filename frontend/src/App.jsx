@@ -7,6 +7,10 @@ import ProjectDetail from "./pages/ProjectDetail.jsx";
 import NewProject from "./pages/NewProject.jsx";
 import RunDetail from "./pages/RunDetail.jsx";
 import Settings from "./pages/Settings.jsx";
+import Applications from "./pages/Applications";
+import Reports from "./pages/Reports";
+import Work from "./pages/Work";
+import Context from "./pages/Context";
 
 // Stub pages
 const Stub = ({ title }) => (
@@ -29,9 +33,10 @@ export default function App() {
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/runs/:runId" element={<RunDetail />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/reports"  element={<Stub title="Reports" />} />
-          <Route path="/work"     element={<Stub title="Work" />} />
-          <Route path="/context"  element={<Stub title="Context" />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/work" element={<Work />} />
+          <Route path="/context" element={<Context />} />
+          <Route path="/applications" element={<Applications />} />
         </Route>
       </Routes>
     </BrowserRouter>
