@@ -21,7 +21,18 @@ function log(run, msg) {
   console.log(entry);
 }
 
-async function executeTest(test, context, runId, stepIndex, runStart) {
+async function executeTest(test, browser, runId, stepIndex, runStart) {
+  // Each test gets its OWN context with its own video file so we can reliably
+  // locate the recorded video after the context is closed.
+  const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
+  if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
+
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
+    recordVideo: { dir: testVideoDir, size: { width: 1280, height: 720 } },
+    viewport: { width: 1280, height: 720 },
+  });
+
   const page = await context.newPage();
   const networkLogs = [];
   const consoleLogs = [];
@@ -34,6 +45,7 @@ async function executeTest(test, context, runId, stepIndex, runStart) {
     error: null,
     screenshot: null,
     screenshotPath: null,
+    videoPath: null,
     runTimestamp: 0,
     network: [],
     consoleLogs: [],
@@ -165,7 +177,26 @@ async function executeTest(test, context, runId, stepIndex, runStart) {
     result.runTimestamp = start - runStart;
     result.network = networkLogs;
     result.consoleLogs = consoleLogs;
-    await page.close();
+
+    // Close page first, then context — this flushes the video to disk
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
+
+    // Now find and move the video file (context.close() guarantees it's written)
+    try {
+      const files = fs.readdirSync(testVideoDir).filter(f => f.endsWith(".webm"));
+      if (files.length > 0) {
+        const src = path.join(testVideoDir, files[0]);
+        const videoName = `${runId}-step${stepIndex}.webm`;
+        const dst = path.join(VIDEOS_DIR, videoName);
+        fs.renameSync(src, dst);
+        result.videoPath = `/artifacts/videos/${videoName}`;
+      }
+      // Clean up the temp per-test dir
+      fs.rmSync(testVideoDir, { recursive: true, force: true });
+    } catch (videoErr) {
+      console.warn(`Video move failed for step ${stepIndex}:`, videoErr.message);
+    }
   }
 
   return result;
@@ -174,33 +205,36 @@ async function executeTest(test, context, runId, stepIndex, runStart) {
 export async function runTests(project, tests, run, db) {
   const runId = run.id;
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
-  const videoDir = path.join(VIDEOS_DIR, runId);
-  if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
 
+  // We use a shared browser but per-test contexts for reliable video capture
   const browser = await chromium.launch({
     headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
 
-  const context = await browser.newContext({
+  // Shared tracing context (separate from per-test video contexts)
+  const traceContext = await browser.newContext({
     userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
-    recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } },
     viewport: { width: 1280, height: 720 },
   });
-
-  await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
+  await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
 
   log(run, `🚀 Starting test run: ${tests.length} tests`);
 
   const runStart = Date.now();
+  const allVideoSegments = [];
 
   for (let i = 0; i < tests.length; i++) {
     const test = tests[i];
     log(run, `  ▶ Running: ${test.name}`);
     try {
-      const result = await executeTest(test, context, runId, i, runStart);
+      const result = await executeTest(test, browser, runId, i, runStart);
       run.results.push(result);
+
+      if (result.videoPath) {
+        allVideoSegments.push(result.videoPath);
+      }
 
       if (result.status === "passed") {
         run.passed++;
@@ -228,29 +262,25 @@ export async function runTests(project, tests, run, db) {
     }
   }
 
+  // Save trace
   try {
-    await context.tracing.stop({ path: tracePath });
+    await traceContext.tracing.stop({ path: tracePath });
     run.tracePath = `/artifacts/traces/${runId}.zip`;
     log(run, `  📊 Trace saved`);
   } catch (e) {
     log(run, `  ⚠️  Trace save failed: ${e.message}`);
   }
-
-  await context.close();
+  await traceContext.close().catch(() => {});
   await browser.close();
 
-  try {
-    const files = fs.readdirSync(videoDir);
-    if (files.length > 0) {
-      const src = path.join(videoDir, files[0]);
-      const dst = path.join(VIDEOS_DIR, `${runId}.webm`);
-      fs.renameSync(src, dst);
-      fs.rmdirSync(videoDir, { recursive: true });
-      run.videoPath = `/artifacts/videos/${runId}.webm`;
-      log(run, `  🎬 Video saved: ${run.videoPath}`);
-    }
-  } catch (e) {
-    log(run, `  ⚠️  Video move failed: ${e.message}`);
+  // Use the first test's video as the run-level video (most representative)
+  // Also store all segment paths for per-test playback in the UI
+  if (allVideoSegments.length > 0) {
+    run.videoPath = allVideoSegments[0];  // run-level video (first test)
+    run.videoSegments = allVideoSegments; // per-test videos
+    log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
+  } else {
+    log(run, `  ⚠️  No video segments captured`);
   }
 
   run.status = "completed";

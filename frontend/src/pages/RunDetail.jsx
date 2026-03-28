@@ -25,12 +25,6 @@ function fmtBytes(b) {
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fmtTime(ms) {
-  if (ms === undefined || ms === null) return "0:00";
-  const s = Math.floor(ms / 1000);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
 function StatusDot({ status }) {
   const colors = { passed: "#16a34a", failed: "#dc2626", warning: "#d97706", running: "#2563eb" };
   const bg = colors[status] || "#9ca3af";
@@ -58,13 +52,7 @@ function DomNode({ node, depth = 0 }) {
       >
         {hasChildren ? (open ? "▾ " : "▸ ") : "  "}
         <span style={{ color: "#60a5fa" }}>&lt;{node.tag}</span>
-        {Object.entries(node.attrs || {}).map(([k, v], i) => (
-          <span key={i}>
-            {" "}
-            <span style={{ color: "#f59e0b" }}>{k}</span>=
-            <span style={{ color: "#34d399" }}>"{v}"</span>
-          </span>
-        ))}
+        <span dangerouslySetInnerHTML={{ __html: attrs }} />
         {!hasChildren && <span style={{ color: "#60a5fa" }}> /&gt;</span>}
         {hasChildren && <span style={{ color: "#60a5fa" }}>&gt;</span>}
       </span>
@@ -91,12 +79,9 @@ export default function RunDetail() {
   const [loading, setLoading]     = useState(true);
   const [activeStep, setActiveStep] = useState(0);
   const [activeTab, setActiveTab] = useState("video");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [videoProgress, setVideoProgress] = useState(0);
 
   const videoRef    = useRef(null);
   const pollRef     = useRef(null);
-  const progressRef = useRef(null);
 
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
@@ -119,42 +104,6 @@ export default function RunDetail() {
     return () => clearInterval(pollRef.current);
   }, [run?.status]);
 
-  // Keyboard nav
-  useEffect(() => {
-    const onKey = (e) => {
-      if (!run?.results?.length) return;
-      if (e.key === "ArrowRight") setActiveStep((s) => Math.min(s + 1, run.results.length - 1));
-      if (e.key === "ArrowLeft")  setActiveStep((s) => Math.max(s - 1, 0));
-      if (e.key === "v") setActiveTab("video");
-      if (e.key === "s") setActiveTab("screenshot");
-      if (e.key === "n") setActiveTab("network");
-      if (e.key === "c") setActiveTab("console");
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [run?.results?.length]);
-
-  // Video sync with step
-  useEffect(() => {
-    if (!videoRef.current || !run?.results?.length || !run?.duration) return;
-    const step = run.results[activeStep];
-    if (step?.runTimestamp !== undefined) {
-      const pct = step.runTimestamp / run.duration;
-      videoRef.current.currentTime = pct * videoRef.current.duration;
-    }
-  }, [activeStep]);
-
-  // Video progress tracking
-  useEffect(() => {
-    const vid = videoRef.current;
-    if (!vid) return;
-    const onTimeUpdate = () => {
-      if (vid.duration) setVideoProgress((vid.currentTime / vid.duration) * 100);
-    };
-    vid.addEventListener("timeupdate", onTimeUpdate);
-    return () => vid.removeEventListener("timeupdate", onTimeUpdate);
-  }, [run]);
-
   if (loading) return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px" }}>
       <div className="skeleton" style={{ height: 90, borderRadius: 12, marginBottom: 16 }} />
@@ -171,12 +120,14 @@ export default function RunDetail() {
   const isRunning  = run.status === "running";
   const isCrawl    = run.type === "crawl";
   const results    = run.results || [];
-  const totalDur   = run.duration || 1;
   const passRate   = run.total ? Math.round((run.passed / run.total) * 100) : null;
   const activeResult = results[activeStep] || null;
 
   const BASE_URL   = window.location.origin.replace(":3000", ":3001");
-  const videoUrl   = run.videoPath ? `${BASE_URL}${run.videoPath}` : null;
+  // Per-test video segments (new) or single run video (legacy fallback)
+  const videoSegments = run.videoSegments || (run.videoPath ? [run.videoPath] : []);
+  const activeResultVideoPath = results[activeStep]?.videoPath || videoSegments[activeStep] || videoSegments[0] || null;
+  const videoUrl   = activeResultVideoPath ? `${BASE_URL}${activeResultVideoPath}` : null;
   const traceUrl   = run.tracePath ? `${BASE_URL}${run.tracePath}` : null;
 
   // Cells
@@ -198,11 +149,6 @@ export default function RunDetail() {
     overflow: "hidden",
     display: "flex",
     flexDirection: "column",
-  };
-
-  const timelineNodePct = (step) => {
-    if (!step?.runTimestamp) return 0;
-    return Math.min((step.runTimestamp / totalDur) * 100, 100);
   };
 
   return (
@@ -265,68 +211,7 @@ export default function RunDetail() {
         </div>
       )}
 
-      {/* ── Timeline ── */}
-      {results.length > 0 && (
-        <div className="card" style={{ marginBottom: 16, padding: "16px 20px" }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
-            🕒 Execution Timeline — click to jump
-          </div>
-          <div style={{ position: "relative", height: 50 }}>
-            {/* track */}
-            <div style={{ position: "absolute", left: 0, right: 0, top: 17, height: 3, background: "var(--border)", borderRadius: 2 }} />
-            {/* progress fill */}
-            <div style={{
-              position: "absolute", left: 0, top: 17, height: 3,
-              width: isRunning ? "50%" : "100%",
-              background: "linear-gradient(90deg, var(--green), #4ade80)",
-              borderRadius: 2, transition: "width 0.5s ease",
-              boxShadow: "0 0 6px rgba(22,163,74,0.4)",
-            }} />
-            {results.map((step, i) => {
-              const pct = timelineNodePct(step);
-              const isActive = i === activeStep;
-              const color = step.status === "passed" ? "var(--green)" : step.status === "failed" ? "var(--red)" : "var(--amber)";
-              return (
-                <div
-                  key={i}
-                  onClick={() => setActiveStep(i)}
-                  title={`Step ${i + 1}: ${step.testName}\n${fmtMs(step.durationMs)}`}
-                  style={{
-                    position: "absolute",
-                    left: `${pct}%`,
-                    top: 0,
-                    transform: "translateX(-50%)",
-                    cursor: "pointer",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  <div style={{
-                    width: isActive ? 20 : 14,
-                    height: isActive ? 20 : 14,
-                    borderRadius: "50%",
-                    background: isActive ? color : "var(--surface)",
-                    border: `2.5px solid ${color}`,
-                    boxShadow: isActive ? `0 0 0 4px ${color}33` : "none",
-                    transition: "all 0.2s",
-                    marginTop: isActive ? -3 : 0,
-                  }} />
-                  <div style={{ fontSize: 9, color: "var(--text3)", fontFamily: "var(--font-mono)", marginTop: 4 }}>
-                    S{i + 1}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* step time labels */}
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--text3)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-            <span>0:00</span>
-            <span>{fmtTime(totalDur)}</span>
-          </div>
-        </div>
-      )}
+
 
       {/* ── Main split view ── */}
       {!isCrawl && (
@@ -426,49 +311,43 @@ export default function RunDetail() {
                     <div>
                       <div style={{ background: "#000", borderRadius: 10, overflow: "hidden", marginBottom: 10, border: "1px solid var(--border)" }}>
                         <video
+                          key={videoUrl}
                           ref={videoRef}
                           width="100%"
                           controls
+                          autoPlay={false}
                           style={{ display: "block", maxHeight: 400 }}
-                          onPlay={() => setIsPlaying(true)}
-                          onPause={() => setIsPlaying(false)}
-                          onTimeUpdate={(e) => {
-                            const vid = e.target;
-                            if (vid.duration) setVideoProgress((vid.currentTime / vid.duration) * 100);
-                          }}
                         >
                           <source src={videoUrl} type="video/webm" />
                           Your browser does not support WebM video.
                         </video>
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: "0.72rem", color: "var(--text3)", alignSelf: "center" }}>Jump to step:</span>
-                        {results.map((r, i) => (
-                          <button
-                            key={i}
-                            onClick={() => {
-                              setActiveStep(i);
-                              if (videoRef.current && r.runTimestamp !== undefined && run.duration) {
-                                videoRef.current.currentTime = (r.runTimestamp / run.duration) * videoRef.current.duration;
-                                videoRef.current.play();
-                              }
-                            }}
-                            style={{
-                              padding: "3px 10px",
-                              borderRadius: 100,
-                              fontSize: "0.72rem",
-                              fontFamily: "var(--font-mono)",
-                              cursor: "pointer",
-                              border: `1px solid ${i === activeStep ? "var(--accent)" : "var(--border)"}`,
-                              background: i === activeStep ? "var(--accent-bg)" : "transparent",
-                              color: i === activeStep ? "var(--accent)" : "var(--text3)",
-                              transition: "all 0.12s",
-                            }}
-                          >
-                            S{i + 1} {fmtTime(r.runTimestamp)}
-                          </button>
-                        ))}
-                      </div>
+                      {videoSegments.length > 1 && (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ fontSize: "0.72rem", color: "var(--text3)", alignSelf: "center" }}>Test video:</span>
+                          {results.map((r, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setActiveStep(i);
+                              }}
+                              style={{
+                                padding: "3px 10px",
+                                borderRadius: 100,
+                                fontSize: "0.72rem",
+                                fontFamily: "var(--font-mono)",
+                                cursor: "pointer",
+                                border: `1px solid ${i === activeStep ? "var(--accent)" : "var(--border)"}`,
+                                background: i === activeStep ? "var(--accent-bg)" : "transparent",
+                                color: i === activeStep ? "var(--accent)" : "var(--text3)",
+                                transition: "all 0.12s",
+                              }}
+                            >
+                              S{i + 1} {r.status === "passed" ? "✅" : r.status === "failed" ? "❌" : "⚠️"}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div style={{ background: "var(--bg2)", borderRadius: 10, padding: 40, textAlign: "center", border: "2px dashed var(--border)" }}>
@@ -723,11 +602,6 @@ tracing.start({ screenshots: true, snapshots: true })`}</pre>
         </div>
       )}
 
-      {/* Keyboard hint */}
-      <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 100, padding: "5px 14px", fontSize: "0.72rem", color: "var(--text3)", display: "flex", gap: 10, alignItems: "center", boxShadow: "var(--shadow)", zIndex: 50, pointerEvents: "none" }}>
-        <span><kbd style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--font-mono)" }}>←</kbd> <kbd style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--font-mono)" }}>→</kbd> navigate steps</span>
-        <span><kbd style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--font-mono)" }}>V</kbd> video · <kbd style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--font-mono)" }}>S</kbd> screenshot · <kbd style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--font-mono)" }}>N</kbd> network</span>
-      </div>
     </div>
   );
 }
