@@ -117,9 +117,10 @@ export async function crawlAndGenerateTests(project, run, db) {
       const structureFP = fingerprintStructure(snapshot);
       if (crawlQueue.isStructureDuplicate(structureFP) && depth > 1) {
         log(run, `\u23ED\uFE0F  Skipping duplicate layout: ${url}`);
+        await page.close();
         continue;
       }
-      }
+
       crawlQueue.markStructureSeen(structureFP);
 
       snapshots.push(snapshot);
