@@ -206,6 +206,9 @@ export async function crawlAndGenerateTests(project, run, db) {
       isJourneyTest: t.isJourneyTest || false,
       journeyType: t.journeyType || null,
       assertionEnhanced: t._assertionEnhanced || false,
+      // All crawl-generated tests start as draft — humans must approve before regression
+      reviewStatus: "draft",
+      reviewedAt: null,
       ...t,
     };
     run.tests.push(testId);

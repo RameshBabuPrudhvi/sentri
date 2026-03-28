@@ -79,8 +79,11 @@ app.post("/api/projects/:id/run", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
 
-  const tests = Object.values(db.tests).filter((t) => t.projectId === project.id);
-  if (!tests.length) return res.status(400).json({ error: "no tests found, crawl first" });
+  const allTests = Object.values(db.tests).filter((t) => t.projectId === project.id);
+  // Only run approved tests — draft/rejected tests must not enter regression
+  const tests = allTests.filter((t) => t.reviewStatus === "approved");
+  if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
+  if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
   const runId = uuidv4();
   const run = {
@@ -221,4 +224,52 @@ app.delete("/api/settings/:provider", (req, res) => {
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3001;
+
+// ─── Test Review: Approve / Reject / Restore / Bulk ──────────────────────────
+
+app.patch("/api/projects/:id/tests/:testId/approve", (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
+  test.reviewStatus = "approved";
+  test.reviewedAt = new Date().toISOString();
+  res.json(test);
+});
+
+app.patch("/api/projects/:id/tests/:testId/reject", (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
+  test.reviewStatus = "rejected";
+  test.reviewedAt = new Date().toISOString();
+  res.json(test);
+});
+
+app.patch("/api/projects/:id/tests/:testId/restore", (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
+  test.reviewStatus = "draft";
+  test.reviewedAt = null;
+  res.json(test);
+});
+
+// NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
+app.post("/api/projects/:id/tests/bulk", (req, res) => {
+  const { testIds, action } = req.body;
+  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore"].includes(action))
+    return res.status(400).json({ error: "testIds[] and valid action required" });
+  const statusMap = { approve: "approved", reject: "rejected", restore: "draft" };
+  const updated = [];
+  testIds.forEach((tid) => {
+    const test = db.tests[tid];
+    if (test && test.projectId === req.params.id) {
+      test.reviewStatus = statusMap[action];
+      test.reviewedAt = action === "restore" ? null : new Date().toISOString();
+      updated.push(test);
+    }
+  });
+  res.json({ updated: updated.length, tests: updated });
+});
+
 app.listen(PORT, () => console.log(`🐻 Sentri API running on port ${PORT}`));

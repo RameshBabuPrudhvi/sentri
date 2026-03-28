@@ -30,7 +30,7 @@ function getKey(envName) {
 const PROVIDER_META = {
   anthropic: { name: "Claude Sonnet",         model: "claude-sonnet-4-20250514", color: "#cd7f32" },
   openai:    { name: "GPT-4o-mini",           model: "gpt-4o-mini",              color: "#10a37f" },
-  google:    { name: "Gemini 1.5 Flash",      model: "gemini-1.5-flash",         color: "#4285f4" },
+  google:    { name: "Gemini 2.5 Flash",      model: "gemini-2.5-flash",         color: "#4285f4" },
 };
 
 function detectProvider() {

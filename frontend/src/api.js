@@ -28,6 +28,13 @@ export const api = {
   getTests: (id) => req("GET", `/projects/${id}/tests`),
   deleteTest: (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
 
+  // Test review actions (draft → approved / rejected)
+  approveTest: (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/approve`),
+  rejectTest: (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/reject`),
+  restoreTest: (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/restore`),
+  bulkUpdateTests: (projectId, testIds, action) =>
+    req("POST", `/projects/${projectId}/tests/bulk`, { testIds, action }),
+
   // Runs
   getRuns: (id) => req("GET", `/projects/${id}/runs`),
   getRun: (runId) => req("GET", `/runs/${runId}`),

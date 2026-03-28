@@ -1,22 +1,25 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Globe, Clock } from "lucide-react";
+import {
+  Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle,
+  AlertTriangle, RefreshCw, Globe, Clock, ThumbsUp, ThumbsDown,
+  RotateCcw, Info, Shield, AlertCircle,
+} from "lucide-react";
 import { api } from "../api.js";
-
-function StatusDot({ s }) {
-  if (s === "passed")    return <CheckCircle2 size={14} color="var(--green)" />;
-  if (s === "failed")    return <XCircle size={14} color="var(--red)" />;
-  if (s === "warning")   return <AlertTriangle size={14} color="var(--amber)" />;
-  return <Clock size={14} color="var(--text3)" />;
-}
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
-  if (s === "passed")  return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (s === "failed")  return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  if (s === "running") return <span className="badge badge-blue pulse">● Running</span>;
+  if (s === "passed")    return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
+  if (s === "failed")    return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
+  if (s === "running")   return <span className="badge badge-blue pulse">● Running</span>;
   if (s === "completed") return <span className="badge badge-green">✓ Completed</span>;
   return <span className="badge badge-gray">{s}</span>;
+}
+
+function ReviewBadge({ status }) {
+  if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
+  if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
+  return <span className="badge badge-amber"><AlertCircle size={10} /> Draft</span>;
 }
 
 function AgentTag({ type = "TA" }) {
@@ -24,17 +27,56 @@ function AgentTag({ type = "TA" }) {
   return <div className={`avatar ${s[type] || "avatar-ta"}`}>{type}</div>;
 }
 
+function ConfBar({ score }) {
+  if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
+  const color = score >= 80 ? "var(--green)" : score >= 60 ? "var(--amber)" : "var(--red)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 52, height: 4, borderRadius: 2, background: "var(--bg3)", overflow: "hidden" }}>
+        <div style={{ width: `${score}%`, height: "100%", background: color, borderRadius: 2 }} />
+      </div>
+      <span style={{ fontSize: "0.73rem", color: "var(--text2)", fontWeight: 500 }}>{score}%</span>
+    </div>
+  );
+}
+
+function Toast({ msg, type, visible }) {
+  const colors = { success: "var(--green)", error: "var(--red)", info: "var(--accent)" };
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, right: 28, zIndex: 9999,
+      background: "var(--surface)", border: "1px solid var(--border)",
+      borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8,
+      fontSize: "0.83rem", fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
+      transition: "all 0.25s", opacity: visible ? 1 : 0,
+      transform: visible ? "translateY(0)" : "translateY(12px)", pointerEvents: "none",
+    }}>
+      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[type] || colors.info, flexShrink: 0 }} />
+      {msg}
+    </div>
+  );
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [project, setProject] = useState(null);
-  const [tests, setTests] = useState([]);
-  const [runs, setRuns] = useState([]);
-  const [activeRun, setActiveRun] = useState(null);
-  const [loading, setLoading] = useState(true);
+
+  const [project, setProject]           = useState(null);
+  const [tests, setTests]               = useState([]);
+  const [runs, setRuns]                 = useState([]);
+  const [activeRun, setActiveRun]       = useState(null);
+  const [loading, setLoading]           = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
-  const [tab, setTab] = useState("tests");
-  const [search, setSearch] = useState("");
+  const [tab, setTab]                   = useState("review");
+  const [reviewFilter, setReviewFilter] = useState("draft");
+  const [search, setSearch]             = useState("");
+  const [selected, setSelected]         = useState(new Set());
+  const [toast, setToast]               = useState({ msg: "", type: "info", visible: false });
+
+  const showToast = (msg, type = "info") => {
+    setToast({ msg, type, visible: true });
+    setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 2800);
+  };
 
   const refresh = useCallback(async () => {
     const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
@@ -54,34 +96,93 @@ export default function ProjectDetail() {
 
   async function doCrawl() {
     setActionLoading("crawl");
-    try { const { runId } = await api.crawl(id); setActiveRun(runId); setTab("runs"); }
-    catch (err) { alert(err.message); }
+    try {
+      const { runId } = await api.crawl(id);
+      setActiveRun(runId); setTab("runs");
+      showToast("Crawl started — new tests will appear as Draft", "info");
+    } catch (err) { showToast(err.message, "error"); }
     finally { setActionLoading(null); }
   }
 
   async function doRun() {
     setActionLoading("run");
-    try { const { runId } = await api.runTests(id); setActiveRun(runId); setTab("runs"); }
-    catch (err) { alert(err.message); }
+    try {
+      const { runId } = await api.runTests(id);
+      setActiveRun(runId); setTab("runs");
+      showToast("Regression run started", "info");
+    } catch (err) {
+      // Surface backend error clearly — e.g. "no approved tests"
+      showToast(err.message, "error");
+      setActionLoading(null);
+    }
     finally { setActionLoading(null); }
   }
 
-  const filteredTests = tests.filter(t =>
+  async function reviewOne(testId, action) {
+    try {
+      if (action === "approve") await api.approveTest(id, testId);
+      else if (action === "reject") await api.rejectTest(id, testId);
+      else if (action === "restore") await api.restoreTest(id, testId);
+      await refresh();
+      setSelected(s => { const n = new Set(s); n.delete(testId); return n; });
+      const msgs = { approve: "Test approved → Regression suite", reject: "Test rejected", restore: "Test restored to Draft" };
+      showToast(msgs[action], action === "approve" ? "success" : action === "reject" ? "error" : "info");
+    } catch (err) { showToast(err.message, "error"); }
+  }
+
+  async function bulkAction(action) {
+    const ids = selected.size > 0
+      ? Array.from(selected)
+      : filteredByReview.map(t => t.id);
+    if (!ids.length) return;
+    try {
+      const res = await api.bulkUpdateTests(id, ids, action);
+      await refresh(); setSelected(new Set());
+      const label = action === "approve" ? "approved → Regression" : action === "reject" ? "rejected" : "restored to Draft";
+      showToast(`${res.updated} tests ${label}`, action === "approve" ? "success" : "info");
+    } catch (err) { showToast(err.message, "error"); }
+  }
+
+  function toggleSelect(testId) {
+    setSelected(s => { const n = new Set(s); n.has(testId) ? n.delete(testId) : n.add(testId); return n; });
+  }
+
+  function toggleAll(checked, ids) {
+    setSelected(checked ? new Set(ids) : new Set());
+  }
+
+  const draftTests    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft");
+  const approvedTests = tests.filter(t => t.reviewStatus === "approved");
+  const rejectedTests = tests.filter(t => t.reviewStatus === "rejected");
+
+  const filteredByReview = tests.filter(t => {
+    const statusOk =
+      reviewFilter === "all"      ? true :
+      reviewFilter === "draft"    ? (!t.reviewStatus || t.reviewStatus === "draft") :
+                                    t.reviewStatus === reviewFilter;
+    const searchOk = !search ||
+      t.name?.toLowerCase().includes(search.toLowerCase()) ||
+      t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
+    return statusOk && searchOk;
+  });
+
+  const regressionTests = approvedTests.filter(t =>
     !search || t.name?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const passed = approvedTests.filter(t => t.lastResult === "passed").length;
+  const failed = approvedTests.filter(t => t.lastResult === "failed").length;
+
   if (loading) return (
-    <div style={{ maxWidth: 960, margin: "0 auto" }}>
+    <div style={{ maxWidth: 980, margin: "0 auto" }}>
       {[80, 400].map((h, i) => <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 16 }} />)}
     </div>
   );
   if (!project) return <div>Not found</div>;
 
-  const passed = tests.filter(t => t.lastResult === "passed").length;
-  const failed = tests.filter(t => t.lastResult === "failed").length;
-
   return (
-    <div className="fade-in" style={{ maxWidth: 960, margin: "0 auto" }}>
+    <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
+
       {/* Project header */}
       <div className="card" style={{ padding: 24, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
@@ -99,33 +200,39 @@ export default function ProjectDetail() {
               {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
               {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate Tests"}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={doRun} disabled={!!actionLoading || tests.length === 0}>
+            <button className="btn btn-primary btn-sm" onClick={doRun}
+              disabled={!!actionLoading || approvedTests.length === 0}
+              title={approvedTests.length === 0 ? "Approve tests first to run regression" : undefined}>
               {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-              Run Tests
+              Run Regression ({approvedTests.length})
             </button>
           </div>
         </div>
+
         {tests.length > 0 && (
-          <div style={{ display: "flex", gap: 24, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", gap: 24, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
             {[
-              { label: "Total Tests", val: tests.length, color: "var(--text)" },
-              { label: "Passing",     val: passed,       color: "var(--green)" },
-              { label: "Failing",     val: failed,       color: "var(--red)" },
-              { label: "Not Run",     val: tests.length - passed - failed, color: "var(--text3)" },
+              { label: "Draft",    val: draftTests.length,    color: "var(--amber)" },
+              { label: "Approved", val: approvedTests.length, color: "var(--green)" },
+              { label: "Rejected", val: rejectedTests.length, color: "var(--red)"   },
+              { label: "Passing",  val: passed,               color: "var(--green)" },
+              { label: "Failing",  val: failed,               color: "var(--red)"   },
             ].map((s, i) => (
               <div key={i}>
                 <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val}</div>
                 <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
-            <div style={{ marginLeft: "auto", alignSelf: "center" }}>
-              <div className="progress-bar progress-bar-green" style={{ width: 160 }}>
-                <div className="progress-bar-fill" style={{ width: `${tests.length ? Math.round(passed / tests.length * 100) : 0}%` }} />
+            {approvedTests.length > 0 && (
+              <div style={{ marginLeft: "auto", alignSelf: "center" }}>
+                <div className="progress-bar progress-bar-green" style={{ width: 140 }}>
+                  <div className="progress-bar-fill" style={{ width: `${Math.round(passed / approvedTests.length * 100)}%` }} />
+                </div>
+                <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 4, textAlign: "right" }}>
+                  {Math.round(passed / approvedTests.length * 100)}% passing
+                </div>
               </div>
-              <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 4, textAlign: "right" }}>
-                {tests.length ? Math.round(passed / tests.length * 100) : 0}% passing
-              </div>
-            </div>
+            )}
           </div>
         )}
       </div>
@@ -143,86 +250,268 @@ export default function ProjectDetail() {
         </div>
       )}
 
+      {/* Draft-pending reminder */}
+      {draftTests.length > 0 && tab !== "runs" && (
+        <div style={{ marginBottom: 16, padding: "10px 16px", background: "var(--amber-bg)", border: "1px solid #fcd34d", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
+          <Info size={14} color="var(--amber)" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: "0.82rem", color: "#92400e" }}>
+            <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
+          </span>
+          <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto", flexShrink: 0 }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
+            Review <ArrowRight size={11} />
+          </button>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
-        {[["tests", `Tests (${tests.length})`], ["runs", `Runs (${runs.length})`]].map(([key, label]) => (
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 14 }}>
+        {[
+          ["review",     "Generated Tests (Review Required)"],
+          ["regression", `Regression Suite (${approvedTests.length})`],
+          ["runs",       `Runs (${runs.length})`],
+        ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             background: "none", border: "none", cursor: "pointer",
-            padding: "10px 18px", fontSize: "0.875rem", fontWeight: tab === key ? 600 : 400,
+            padding: "10px 18px", fontSize: "0.875rem",
+            fontWeight: tab === key ? 600 : 400,
             color: tab === key ? "var(--accent)" : "var(--text2)",
             borderBottom: tab === key ? "2px solid var(--accent)" : "2px solid transparent",
-            marginBottom: -1,
-          }}>{label}</button>
+            marginBottom: -1, display: "flex", alignItems: "center", gap: 6,
+          }}>
+            {key === "review" && draftTests.length > 0 && (
+              <span style={{ background: "var(--amber)", color: "#fff", borderRadius: "99px", fontSize: "0.65rem", fontWeight: 700, padding: "1px 6px" }}>{draftTests.length}</span>
+            )}
+            {label}
+          </button>
         ))}
       </div>
 
-      {/* Tests tab */}
-      {tab === "tests" && (
-        <div className="card">
-          {tests.length > 0 && (
-            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
-              <div style={{ position: "relative" }}>
-                <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
-                <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Search tests..." style={{ paddingLeft: 28, height: 32, fontSize: "0.82rem" }} />
-              </div>
-            </div>
-          )}
-          {filteredTests.length === 0 ? (
-            <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
-              {tests.length === 0 ? "No tests yet — click Crawl to generate" : "No results"}
+      {/* ── GENERATED TESTS / REVIEW TAB ─────────────────────────────────── */}
+      {tab === "review" && (
+        <div>
+          {tests.length === 0 ? (
+            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+              <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
+              <div style={{ fontSize: "0.875rem" }}>Click "Crawl & Generate Tests" — all generated tests will appear here as Draft for your review.</div>
             </div>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Test Name</th>
-                  <th>Status</th>
-                  <th>Type</th>
-                  <th>Priority</th>
-                  <th>Last Run</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTests.map(t => (
-                  <tr key={t.id}>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <AgentTag type="TA" />
-                        <div>
-                          <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
-                          {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 60)}</div>}
-                          {t.isJourneyTest && <span className="badge badge-purple" style={{ marginTop: 4 }}>Journey</span>}
-                        </div>
-                      </div>
-                    </td>
-                    <td><StatusBadge s={t.lastResult} /></td>
-                    <td><span className="badge badge-gray">{t.type || "—"}</span></td>
-                    <td>
-                      <span className={`badge ${t.priority === "high" ? "badge-red" : t.priority === "medium" ? "badge-amber" : "badge-gray"}`}>
-                        {t.priority || "—"}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                        {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                      </span>
-                    </td>
-                    <td>
-                      <button className="btn btn-ghost btn-xs" onClick={() => api.deleteTest(id, t.id).then(refresh)}>
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
+            <>
+              {/* Filter + search row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                {[
+                  ["draft",    `Draft (${draftTests.length})`,    "var(--amber)"],
+                  ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
+                  ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"],
+                  ["all",      `All (${tests.length})`,           "var(--text2)"],
+                ].map(([key, label, color]) => (
+                  <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); }} style={{
+                    padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
+                    border: `1px solid ${reviewFilter === key ? color : "var(--border)"}`,
+                    background: "transparent", color: reviewFilter === key ? color : "var(--text2)",
+                    cursor: "pointer", transition: "all 0.12s",
+                  }}>{label}</button>
                 ))}
-              </tbody>
-            </table>
+                <div style={{ flex: 1 }} />
+                <div style={{ position: "relative" }}>
+                  <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+                  <input className="input" value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 200 }} />
+                </div>
+              </div>
+
+              {/* Bulk action bar — shown when filter is draft OR something is selected */}
+              {(reviewFilter === "draft" || selected.size > 0) && filteredByReview.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)", borderRadius: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+                    {selected.size > 0 ? `${selected.size} selected` : `${filteredByReview.length} draft tests`}
+                  </span>
+                  <button className="btn btn-sm" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                    onClick={() => bulkAction("approve")}>
+                    <ThumbsUp size={12} /> {selected.size > 0 ? "Approve selected" : "Approve All"}
+                  </button>
+                  <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+                    onClick={() => bulkAction("reject")}>
+                    <ThumbsDown size={12} /> {selected.size > 0 ? "Reject selected" : "Reject All"}
+                  </button>
+                  {selected.size > 0 && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
+                  )}
+                </div>
+              )}
+
+              <div className="card">
+                {filteredByReview.length === 0 ? (
+                  <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--text2)", fontSize: "0.875rem" }}>
+                    No {reviewFilter !== "all" ? reviewFilter : ""} tests
+                  </div>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 36, paddingRight: 0 }}>
+                          <input type="checkbox"
+                            checked={filteredByReview.length > 0 && filteredByReview.every(t => selected.has(t.id))}
+                            onChange={e => toggleAll(e.target.checked, filteredByReview.map(t => t.id))}
+                            style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                        </th>
+                        <th>Test Name</th>
+                        <th>Review Status</th>
+                        <th>Confidence</th>
+                        <th>Source Page</th>
+                        <th>Generated</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredByReview.map(t => {
+                        const rs = t.reviewStatus || "draft";
+                        const isSelected = selected.has(t.id);
+                        return (
+                          <tr key={t.id} style={{ background: isSelected ? "var(--accent-bg)" : undefined }}>
+                            <td style={{ paddingRight: 0 }}>
+                              <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
+                                style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                            </td>
+                            <td>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <AgentTag type="TA" />
+                                <div>
+                                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                                  {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
+                                  {t.isJourneyTest && <span className="badge badge-purple" style={{ marginTop: 4 }}>Journey</span>}
+                                </div>
+                              </div>
+                            </td>
+                            <td><ReviewBadge status={rs} /></td>
+                            <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
+                            <td>
+                              <span style={{ fontSize: "0.73rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
+                                {t.sourceUrl ? t.sourceUrl.replace(/^https?:\/\/[^/]+/, "") || "/" : "—"}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                                {t.createdAt ? new Date(t.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                {rs === "draft" && (
+                                  <>
+                                    <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                                      onClick={() => reviewOne(t.id, "approve")}>
+                                      <ThumbsUp size={11} /> Approve
+                                    </button>
+                                    <button className="btn btn-xs" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+                                      onClick={() => reviewOne(t.id, "reject")}>
+                                      <ThumbsDown size={11} /> Reject
+                                    </button>
+                                  </>
+                                )}
+                                {(rs === "approved" || rs === "rejected") && (
+                                  <button className="btn btn-ghost btn-xs" onClick={() => reviewOne(t.id, "restore")} title="Move back to Draft">
+                                    <RotateCcw size={11} /> Restore
+                                  </button>
+                                )}
+                                <button className="btn btn-ghost btn-xs" onClick={() => api.deleteTest(id, t.id).then(refresh)}>
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {/* Runs tab */}
+      {/* ── REGRESSION SUITE TAB ─────────────────────────────────────────── */}
+      {tab === "regression" && (
+        <div>
+          <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--green-bg)", border: "1px solid #86efac", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
+            <Shield size={14} color="var(--green)" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
+              Only <strong>approved tests</strong> appear here. Draft and rejected tests cannot enter regression.
+            </span>
+          </div>
+
+          {approvedTests.length === 0 ? (
+            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+              <Shield size={32} style={{ opacity: 0.2, marginBottom: 12 }} />
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>No approved tests yet</div>
+              <div style={{ fontSize: "0.875rem", marginBottom: 16 }}>Review and approve generated tests to populate this suite.</div>
+              <button className="btn btn-primary btn-sm" onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
+                Go to review queue <ArrowRight size={13} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <div style={{ position: "relative" }}>
+                  <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
+                  <input className="input" value={search} onChange={e => setSearch(e.target.value)}
+                    placeholder="Search regression tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 220 }} />
+                </div>
+                <div style={{ flex: 1 }} />
+                <button className="btn btn-primary btn-sm" onClick={doRun} disabled={!!actionLoading}>
+                  {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
+                  Run All ({approvedTests.length})
+                </button>
+              </div>
+              <div className="card">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Test Name</th><th>Last Result</th><th>Type</th><th>Priority</th><th>Confidence</th><th>Last Run</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {regressionTests.map(t => (
+                      <tr key={t.id}>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <AgentTag type="TA" />
+                            <div>
+                              <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                              {t.isJourneyTest && <span className="badge badge-purple" style={{ marginTop: 4 }}>Journey</span>}
+                            </div>
+                          </div>
+                        </td>
+                        <td><StatusBadge s={t.lastResult} /></td>
+                        <td><span className="badge badge-gray">{t.type || "—"}</span></td>
+                        <td>
+                          <span className={`badge ${t.priority === "high" ? "badge-red" : t.priority === "medium" ? "badge-amber" : "badge-gray"}`}>
+                            {t.priority || "—"}
+                          </span>
+                        </td>
+                        <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
+                        <td>
+                          <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                            {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn btn-ghost btn-xs" onClick={() => reviewOne(t.id, "restore")} title="Move back to Draft">
+                            <RotateCcw size={11} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── RUNS TAB ─────────────────────────────────────────────────────── */}
       {tab === "runs" && (
         <div className="card">
           {runs.length === 0 ? (
@@ -249,6 +538,8 @@ export default function ProjectDetail() {
           )}
         </div>
       )}
+
+      <Toast msg={toast.msg} type={toast.type} visible={toast.visible} />
     </div>
   );
 }
