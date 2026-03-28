@@ -37,7 +37,7 @@ export default function Work() {
         console.log("➡️ Fetching runs for:", project);
 
         try {
-          const res = await api.getProjectRuns(project.id);
+          const res = await api.getRuns(project.id);
           console.log(`📊 Runs for ${project.id}:`, res);
 
           let runs = [];
