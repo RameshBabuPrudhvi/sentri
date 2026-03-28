@@ -1,9 +1,10 @@
 import { getPromptForRole } from "./prompts.js";
 
 async function callProvider(systemPrompt, userMessage) {
-  const providerName = (process.env.AI_PROVIDER || "anthropic").toLowerCase();
+   const providerName = (process.env.AI_PROVIDER || "openai").toLowerCase();
+   console.log("🔥 USING PROVIDER:", providerName);
 
-  if (providerName === "anthropic") {
+    if (providerName === "anthropic") {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const msg = await client.messages.create({

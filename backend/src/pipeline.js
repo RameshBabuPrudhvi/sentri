@@ -27,78 +27,171 @@ export async function runPipeline(crawlOutput) {
     `\n🚀 [Pipeline] Starting for ${url} with ${elements.length} raw elements`
   );
 
-  // ── Stage 1: Filter ────────────────────────────────────────────────────────
+  // ── Stage 1: Filter ─────────────────────────────────────────────
   console.log("🧹 [Pipeline] Stage 1: Filter");
+
   const filterInput = {
     page_url: url,
     raw_elements: elements,
-    instruction:
-      "Filter the following crawled elements. Keep only high-signal elements that belong to real user flows. Remove noise.",
-  };
-  const filterOutput = await runAgent("filter", filterInput);
-  console.log(`   Filter raw output: ${JSON.stringify(filterOutput)}`); // ← ADD THIS
+    instruction: `
+Filter the following crawled elements.
 
-  if (!filterOutput.filtered_elements || filterOutput.filtered_elements.length === 0) {
-    // ← FALLBACK: if LLM filtered everything out, use all input elements instead
-    console.log("   ⚠ Filter removed everything — using all elements as fallback.");
+RULES:
+- Keep elements that represent real user interactions
+- Prefer inputs, buttons, links, forms
+- Remove decorative or repeated UI elements
+- Do NOT remove everything — always keep at least a few meaningful elements
+`,
+  };
+
+  let filterOutput = await runAgent("filter", filterInput);
+
+  console.log("   Filter raw output:", JSON.stringify(filterOutput, null, 2));
+
+  // ✅ Fallback if filter removes everything
+  if (
+    !filterOutput.filtered_elements ||
+    filterOutput.filtered_elements.length === 0
+  ) {
+    console.log(
+      "   ⚠ Filter removed everything — using fallback (all elements)"
+    );
+
     filterOutput.filtered_elements = elements.map((el, i) => ({
       id: `el-${i}`,
       type: el.tag,
       role: el.ariaRole || el.type || el.tag,
       selector: el.selector,
       page: url,
-      user_intent: el.text || el.ariaLabel || el.placeholder || "interactive element",
+      user_intent:
+        el.text || el.ariaLabel || el.placeholder || "interactive element",
     }));
   }
 
-  console.log(`   ✓ ${filterOutput.filtered_elements.length} elements kept`);
+  console.log(
+    `   ✓ ${filterOutput.filtered_elements.length} elements kept`
+  );
 
-  // ── Stage 2: Planner ───────────────────────────────────────────────────────
+  // ── Stage 2: Planner ─────────────────────────────────────────────
   console.log("🧩 [Pipeline] Stage 2: Planner");
+
   const plannerInput = {
     page_url: url,
     filtered_elements: filterOutput.filtered_elements,
-    instruction:
-      "Convert these filtered elements into user-intent-driven test plans. Group logically. Avoid redundancy.",
-  };
-  const plannerOutput = await runAgent("planner", plannerInput);
-  console.log(`   ✓ ${plannerOutput.test_plans.length} test plans created`);
+    instruction: `
+Generate Playwright test plans from these elements.
 
-  // ── Stages 3+4: Executor → Assertion Enhancer (per plan) ──────────────────
+STRICT RULES:
+- ALWAYS generate at least 1–3 test plans
+- Even for simple pages, create basic interaction tests
+- Include:
+  - typing into inputs
+  - clicking buttons
+  - navigation
+- Each plan must include:
+  - id
+  - goal
+  - priority (low/medium/high)
+  - steps (array)
+
+DO NOT return empty output.
+`,
+  };
+
+  let plannerOutput = await runAgent("planner", plannerInput);
+
+  console.log(
+    "   Planner raw output:",
+    JSON.stringify(plannerOutput, null, 2)
+  );
+
+  let plans = plannerOutput.test_plans || [];
+
+  // ✅ Planner fallback (CRITICAL FIX)
+  if (plans.length === 0) {
+    console.log(
+      "   ⚠ Planner returned 0 plans — generating fallback plans"
+    );
+
+    plans = filterOutput.filtered_elements.slice(0, 3).map((el, i) => ({
+      id: `fallback-${i}`,
+      goal: `Interact with ${el.user_intent}`,
+      priority: "low",
+      steps: [
+        { action: "navigate", url },
+        { action: "interact", selector: el.selector },
+      ],
+    }));
+  }
+
+  console.log(`   ✓ ${plans.length} test plans created`);
+
+  // ── Stage 3 + 4: Executor → Assertion Enhancer ───────────────────
   const enhancedTests = [];
 
-  for (const plan of plannerOutput.test_plans) {
-    console.log(`\n⚡ [Pipeline] Stage 3: Executor for plan "${plan.goal}"`);
-    const executorInput = {
-      plan,
-      instruction:
-        "Convert this test plan into a complete Playwright TypeScript test. Use stable selectors. Add test.step() sections.",
-    };
-    const executorOutput = await runAgent("executor", executorInput);
-    console.log(`   ✓ Generated: ${executorOutput.test_file}`);
+  for (const plan of plans) {
+    try {
+      console.log(
+        `\n⚡ [Pipeline] Stage 3: Executor for plan "${plan.goal}"`
+      );
 
-    console.log(
-      `🎯 [Pipeline] Stage 4: Assertion Enhancer for "${plan.goal}"`
-    );
-    const enhancerInput = {
-      plan_id: plan.id,
-      goal: plan.goal,
-      original_test: executorOutput.test_code,
-      instruction:
-        "Enhance this Playwright test with rich, meaningful assertions. Every action must have a follow-up assertion.",
-    };
-    const enhancedOutput = await runAgent("assertion_enhancer", enhancerInput);
-    console.log(
-      `   ✓ Assertions: ${enhancedOutput.original_assertion_count} → ${enhancedOutput.enhanced_assertion_count}`
-    );
+      const executorInput = {
+        plan,
+        instruction: `
+Convert this test plan into a complete Playwright TypeScript test.
 
-    enhancedTests.push({
-      plan,
-      test_file: enhancedOutput.test_file,
-      test_code: enhancedOutput.test_code,
-      enhancements: enhancedOutput.enhancements_made,
-      assertion_count: enhancedOutput.enhanced_assertion_count,
-    });
+RULES:
+- Use stable selectors
+- Use test.step()
+- Include navigation
+- Make it runnable
+`,
+      };
+
+      const executorOutput = await runAgent("executor", executorInput);
+
+      console.log(`   ✓ Generated: ${executorOutput?.test_file}`);
+
+      console.log(
+        `🎯 [Pipeline] Stage 4: Assertion Enhancer for "${plan.goal}"`
+      );
+
+      const enhancerInput = {
+        plan_id: plan.id,
+        goal: plan.goal,
+        original_test: executorOutput.test_code,
+        instruction: `
+Enhance this Playwright test with strong assertions.
+
+RULES:
+- Every action must have at least one assertion
+- Add visibility checks, text checks, navigation checks
+- Improve reliability
+`,
+      };
+
+      const enhancedOutput = await runAgent(
+        "assertion_enhancer",
+        enhancerInput
+      );
+
+      console.log(
+        `   ✓ Assertions: ${enhancedOutput.original_assertion_count} → ${enhancedOutput.enhanced_assertion_count}`
+      );
+
+      enhancedTests.push({
+        plan,
+        test_file: enhancedOutput.test_file,
+        test_code: enhancedOutput.test_code,
+        enhancements: enhancedOutput.enhancements_made,
+        assertion_count: enhancedOutput.enhanced_assertion_count,
+      });
+    } catch (err) {
+      console.error(
+        `❌ Error processing plan "${plan.goal}":`,
+        err.stack
+      );
+    }
   }
 
   console.log(
@@ -111,8 +204,7 @@ export async function runPipeline(crawlOutput) {
     stats: {
       raw_elements: elements.length,
       filtered_elements: filterOutput.filtered_elements.length,
-      removed_elements: filterOutput.removed_count,
-      plans_created: plannerOutput.test_plans.length,
+      plans_created: plans.length,
       tests_generated: enhancedTests.length,
     },
     tests: enhancedTests,
