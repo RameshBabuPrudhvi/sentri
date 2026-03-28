@@ -58,7 +58,13 @@ function DomNode({ node, depth = 0 }) {
       >
         {hasChildren ? (open ? "▾ " : "▸ ") : "  "}
         <span style={{ color: "#60a5fa" }}>&lt;{node.tag}</span>
-        <span dangerouslySetInnerHTML={{ __html: attrs }} />
+        {Object.entries(node.attrs || {}).map(([k, v], i) => (
+          <span key={i}>
+            {" "}
+            <span style={{ color: "#f59e0b" }}>{k}</span>=
+            <span style={{ color: "#34d399" }}>"{v}"</span>
+          </span>
+        ))}
         {!hasChildren && <span style={{ color: "#60a5fa" }}> /&gt;</span>}
         {hasChildren && <span style={{ color: "#60a5fa" }}>&gt;</span>}
       </span>
