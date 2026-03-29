@@ -1,42 +1,16 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis,
-  Tooltip, ResponsiveContainer, Cell,
-} from "recharts";
-import {
-  CheckCircle2, XCircle, Clock, TrendingUp,
+  CheckCircle2, XCircle, TrendingUp,
   AlertTriangle, Download, ChevronRight,
   BarChart2, FlaskConical,
 } from "lucide-react";
-import { api } from "../api";
-
-function fmtDate(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function fmtDateTime(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function StatCard({ label, value, sub, color = "var(--accent)", icon }) {
-  return (
-    <div className="card" style={{ padding: "18px 20px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ fontSize: "0.72rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
-        {icon && <span style={{ color, opacity: 0.7 }}>{icon}</span>}
-      </div>
-      <div style={{ fontSize: "1.9rem", fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 5 }}>{sub}</div>}
-    </div>
-  );
-}
+import useProjectData from "../hooks/useProjectData";
+import { fmtShortDate, fmtRelativeDate, passRateColor } from "../utils/formatters";
+import StatCard from "../components/StatCard";
+import StatusBadge from "../components/StatusBadge";
+import PassFailChart from "../components/PassFailChart";
+import PassRateBar from "../components/PassRateBar";
 
 function downloadCSV(runs, projectNames) {
   const header = ["Run ID","Project","Type","Status","Passed","Failed","Total","Started","Duration"];
@@ -57,57 +31,10 @@ function downloadCSV(runs, projectNames) {
   a.click();
 }
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color }}>{p.name}: {p.value}</div>
-      ))}
-    </div>
-  );
-};
-
 export default function Reports() {
-  const [projects, setProjects] = useState([]);
-  const [allRuns, setAllRuns]   = useState([]);
-  const [allTests, setAllTests] = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const { projects, allTests, testRuns, projMap, loading } = useProjectData();
   const [selectedProject, setSelectedProject] = useState("all");
   const navigate = useNavigate();
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const projs = await api.getProjects();
-        setProjects(projs);
-        const [runs, tests] = await Promise.all([
-          Promise.all(projs.map(p =>
-            api.getRuns(p.id)
-              .then(rs => rs.map(r => ({ ...r, projectId: p.id })))
-              .catch(() => [])
-          )).then(r => r.flat()),
-          Promise.all(projs.map(p =>
-            api.getTests(p.id).catch(() => [])
-          )).then(t => t.flat()),
-        ]);
-        setAllRuns(runs.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)));
-        setAllTests(tests);
-      } catch (err) {
-        console.error("Reports load error:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  const projMap = useMemo(() =>
-    Object.fromEntries(projects.map(p => [p.id, p.name])), [projects]);
-
-  const testRuns = useMemo(() =>
-    allRuns.filter(r => r.type === "test_run"), [allRuns]);
 
   const filteredRuns = useMemo(() =>
     selectedProject === "all" ? testRuns : testRuns.filter(r => r.projectId === selectedProject),
@@ -120,7 +47,7 @@ export default function Reports() {
       passed: r.passed || 0,
       failed: r.failed || 0,
       total:  r.total  || 0,
-      date: fmtDate(r.startedAt),
+      date: fmtShortDate(r.startedAt),
     })), [filteredRuns]);
 
   // Per-project breakdown
@@ -271,45 +198,13 @@ export default function Reports() {
           </div>
 
           {/* Trend chart */}
-          {trendData.length > 1 && (
-            <div className="card" style={{ padding: 24, marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>Pass / Fail Trend</div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 2 }}>Last {trendData.length} runs</div>
-                </div>
-                <div style={{ display: "flex", gap: 14, fontSize: "0.75rem" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--green)", display: "inline-block" }} />
-                    Passed
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--red)", display: "inline-block" }} />
-                    Failed
-                  </span>
-                </div>
-              </div>
-              <ResponsiveContainer width="100%" height={160}>
-                <AreaChart data={trendData}>
-                  <defs>
-                    <linearGradient id="rGp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#16a34a" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="rGf" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#dc2626" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#dc2626" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--text3)" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "var(--text3)" }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="passed" name="Passed" stroke="#16a34a" fill="url(#rGp)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="failed" name="Failed" stroke="#dc2626" fill="url(#rGf)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          <PassFailChart
+            data={trendData}
+            height={160}
+            idPrefix="rpt"
+            title="Pass / Fail Trend"
+            subtitle={`Last ${trendData.length} runs`}
+          />
 
           {/* Two column: project breakdown + flaky / top failing */}
           <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
@@ -341,7 +236,7 @@ export default function Reports() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 500, fontSize: "0.85rem", marginBottom: 2 }}>{p.name}</div>
                           <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
-                            {p.tests} tests · {p.runs} runs · last {fmtDateTime(p.lastRun?.startedAt) || "never"}
+                            {p.tests} tests · {p.runs} runs · last {fmtRelativeDate(p.lastRun?.startedAt, "never")}
                           </div>
                         </div>
                         <div style={{ flexShrink: 0, minWidth: 80 }}>
