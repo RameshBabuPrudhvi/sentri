@@ -239,6 +239,10 @@ export function applyHealingTransforms(code) {
       "safeClick(page, '$1')"
     )
     .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.click\(\)/g,
+      "safeClick(page, '$1')"
+    )
+    .replace(
       /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
       "safeFill(page, '$1', $2)"
     )
