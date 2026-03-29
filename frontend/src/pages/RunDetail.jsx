@@ -79,9 +79,11 @@ export default function RunDetail() {
   const [loading, setLoading]     = useState(true);
   const [activeStep, setActiveStep] = useState(0);
   const [activeTab, setActiveTab] = useState("video");
+  const [userPickedStep, setUserPickedStep] = useState(false);
 
   const videoRef    = useRef(null);
   const pollRef     = useRef(null);
+  const stepListRef = useRef(null);
 
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
@@ -103,6 +105,19 @@ export default function RunDetail() {
     }
     return () => clearInterval(pollRef.current);
   }, [run?.status]);
+
+  // Auto-advance active step to latest during run (unless user manually picked a step)
+  useEffect(() => {
+    if (!run || userPickedStep) return;
+    const results = run.results || [];
+    if (results.length > 0) {
+      setActiveStep(results.length - 1);
+      // Scroll step list to bottom
+      if (stepListRef.current) {
+        stepListRef.current.scrollTop = stepListRef.current.scrollHeight;
+      }
+    }
+  }, [run?.results?.length, userPickedStep]);
 
   if (loading) return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px" }}>
@@ -221,9 +236,20 @@ export default function RunDetail() {
           <div style={{ ...panel }}>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
               <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Activity Log</span>
-              <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>{results.length} steps</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {isRunning && userPickedStep && (
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    style={{ fontSize: "0.68rem" }}
+                    onClick={() => { setUserPickedStep(false); }}
+                  >
+                    ↓ Follow latest
+                  </button>
+                )}
+                <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>{results.length} steps</span>
+              </div>
             </div>
-            <div style={{ overflowY: "auto", flex: 1 }}>
+            <div ref={stepListRef} style={{ overflowY: "auto", flex: 1 }}>
               {results.length === 0 && (
                 <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: "0.82rem" }}>
                   {isRunning ? "Running…" : "No results yet"}
@@ -232,7 +258,7 @@ export default function RunDetail() {
               {results.map((r, i) => (
                 <div
                   key={i}
-                  onClick={() => setActiveStep(i)}
+                  onClick={() => { setActiveStep(i); setUserPickedStep(true); }}
                   style={{
                     padding: "12px 16px",
                     borderBottom: "1px solid var(--border)",
@@ -330,6 +356,7 @@ export default function RunDetail() {
                               key={i}
                               onClick={() => {
                                 setActiveStep(i);
+                                setUserPickedStep(true);
                               }}
                               style={{
                                 padding: "3px 10px",
@@ -568,37 +595,179 @@ tracing.start({ screenshots: true, snapshots: true })`}</pre>
         </div>
       )}
 
-      {/* ── Crawl pipeline report (unchanged for crawl runs) ── */}
-      {isCrawl && run.pipelineStats && (
-        <div className="card" style={{ padding: 20 }}>
-          <div style={{ marginBottom: 16, fontSize: "0.82rem", color: "var(--text2)", lineHeight: 1.7 }}>
-            Sentri crawled your application, filtered elements, classified intents, detected user journeys, and generated high-quality tests.
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {[
-              { label: "Pages Found", val: run.pipelineStats.pagesFound, color: "var(--accent)" },
-              { label: "Raw Tests Generated", val: run.pipelineStats.rawTestsGenerated, color: "var(--text)" },
-              { label: "Duplicates Removed", val: run.pipelineStats.duplicatesRemoved, color: "var(--amber)" },
-              { label: "Journeys Detected", val: run.pipelineStats.journeysDetected, color: "var(--purple)" },
-              { label: "Assertions Enhanced", val: run.pipelineStats.assertionsEnhanced, color: "var(--green)" },
-              { label: "Avg Quality Score", val: run.pipelineStats.averageQuality != null ? `${run.pipelineStats.averageQuality}/100` : "—", color: (run.pipelineStats.averageQuality || 0) >= 60 ? "var(--green)" : "var(--amber)" },
-            ].map((s, i) => (
-              <div key={i} style={{ padding: "14px 16px", background: "var(--bg2)", borderRadius: 10, border: "1px solid var(--border)" }}>
-                <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val ?? "—"}</div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 3 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-          {run.logs?.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Activity Log</div>
-              <div style={{ background: "#0d1117", borderRadius: 8, padding: "10px 14px", maxHeight: 300, overflowY: "auto" }}>
-                {run.logs.map((l, i) => (
-                  <div key={i} style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "#94a3b8", lineHeight: 1.8 }}>{l}</div>
-                ))}
+      {/* ── Crawl run view (running + completed) ── */}
+      {isCrawl && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
+
+          {/* LEFT: Live activity log */}
+          <div className="card" style={{ overflow: "hidden" }}>
+            <div style={{
+              padding: "12px 16px", borderBottom: "1px solid var(--border)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                {isRunning ? "Live Activity Log" : "Activity Log"}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {isRunning && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: "var(--blue)" }}>
+                    <RefreshCw size={10} style={{ animation: "spin 1s linear infinite" }} />
+                    Updating…
+                  </span>
+                )}
+                <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+                  {run.logs?.length || 0} entries
+                </span>
               </div>
             </div>
-          )}
+
+            {/* Crawl pipeline steps — shown while running */}
+            {isRunning && (
+              <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
+                <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+                  Pipeline Steps
+                </div>
+                {[
+                  { label: "🔍 Crawl & Snapshot Pages",     done: (run.pagesFound || 0) > 0 },
+                  { label: "🧹 Filter Elements",             done: (run.logs || []).some(l => l.includes("filter") || l.includes("Filter")) },
+                  { label: "🧠 Classify Intents",            done: (run.logs || []).some(l => l.includes("classif") || l.includes("journey") || l.includes("Journey")) },
+                  { label: "⚡ Generate Tests via AI",       done: (run.logs || []).some(l => l.includes("Generat") || l.includes("generat")) },
+                  { label: "🚫 Deduplicate Tests",           done: (run.logs || []).some(l => l.includes("dedup") || l.includes("Dedup") || l.includes("duplicate")) },
+                  { label: "✨ Enhance Assertions",          done: (run.logs || []).some(l => l.includes("enhanc") || l.includes("Enhanc") || l.includes("assert")) },
+                  { label: "🎉 Done",                        done: run.status === "completed" },
+                ].map((step, i, arr) => {
+                  // determine current active step
+                  const prevDone = i === 0 ? true : arr[i - 1].done;
+                  const isActive = prevDone && !step.done && run.status === "running";
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <div style={{
+                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        background: step.done ? "var(--green-bg)" : isActive ? "var(--blue-bg)" : "var(--bg3)",
+                        border: `1.5px solid ${step.done ? "var(--green)" : isActive ? "var(--blue)" : "var(--border)"}`,
+                        fontSize: 10,
+                      }}>
+                        {step.done ? (
+                          <CheckCircle2 size={11} color="var(--green)" />
+                        ) : isActive ? (
+                          <RefreshCw size={10} color="var(--blue)" style={{ animation: "spin 1s linear infinite" }} />
+                        ) : (
+                          <Clock size={10} color="var(--text3)" />
+                        )}
+                      </div>
+                      <span style={{
+                        fontSize: "0.78rem",
+                        color: step.done ? "var(--text)" : isActive ? "var(--blue)" : "var(--text3)",
+                        fontWeight: isActive ? 600 : 400,
+                      }}>
+                        {step.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Log output */}
+            <div
+              style={{ background: "#0d1117", padding: "12px 14px", minHeight: 200, maxHeight: isRunning ? 320 : 500, overflowY: "auto" }}
+              ref={el => { if (el && isRunning) el.scrollTop = el.scrollHeight; }}
+            >
+              {(!run.logs || run.logs.length === 0) ? (
+                <div style={{ padding: 20, textAlign: "center", color: "#475569", fontSize: "0.78rem" }}>
+                  {isRunning ? "Starting crawl…" : "No log entries."}
+                </div>
+              ) : (
+                run.logs.map((l, i) => {
+                  const isError = l.includes("❌") || l.includes("error") || l.includes("Error");
+                  const isSuccess = l.includes("✅") || l.includes("🎉") || l.includes("Done");
+                  const color = isError ? "#f87171" : isSuccess ? "#4ade80" : "#94a3b8";
+                  return (
+                    <div key={i} style={{
+                      fontFamily: "var(--font-mono)", fontSize: "0.72rem",
+                      color, lineHeight: 1.9,
+                      borderBottom: "1px solid rgba(255,255,255,0.03)",
+                      paddingBottom: 1,
+                    }}>
+                      <span style={{ color: "#334155", marginRight: 8, userSelect: "none" }}>
+                        {String(i + 1).padStart(3, "0")}
+                      </span>
+                      {l}
+                    </div>
+                  );
+                })
+              )}
+              {isRunning && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 8, color: "#475569", fontSize: "0.72rem", fontFamily: "var(--font-mono)" }}>
+                  <RefreshCw size={10} style={{ animation: "spin 1s linear infinite" }} />
+                  waiting for next update…
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* RIGHT: Stats panel */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+            {/* Live counters */}
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
+                {isRunning ? "Live Counts" : "Results"}
+              </div>
+              {[
+                { label: "Pages Found",        val: run.pagesFound ?? run.pipelineStats?.pagesFound,              color: "var(--accent)" },
+                { label: "Tests Generated",    val: run.testsGenerated ?? run.pipelineStats?.rawTestsGenerated,   color: "var(--green)" },
+                { label: "Duplicates Removed", val: run.pipelineStats?.duplicatesRemoved,                         color: "var(--amber)" },
+                { label: "Journeys Detected",  val: run.pipelineStats?.journeysDetected,                          color: "var(--purple, #a855f7)" },
+                { label: "Assertions Enhanced",val: run.pipelineStats?.assertionsEnhanced,                        color: "var(--blue)" },
+                { label: "Avg Quality Score",  val: run.pipelineStats?.averageQuality != null ? `${run.pipelineStats.averageQuality}/100` : null, color: (run.pipelineStats?.averageQuality || 0) >= 60 ? "var(--green)" : "var(--amber)" },
+              ].map((s, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "8px 0",
+                  borderBottom: i < 5 ? "1px solid var(--border)" : "none",
+                }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{s.label}</span>
+                  <span style={{
+                    fontSize: "1rem", fontWeight: 700, color: s.val != null ? s.color : "var(--text3)",
+                    fontFamily: "var(--font-mono)",
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}>
+                    {s.val != null ? s.val : (
+                      isRunning
+                        ? <RefreshCw size={11} style={{ animation: "spin 1.2s linear infinite", color: "var(--text3)" }} />
+                        : "—"
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Status card */}
+            <div className="card" style={{ padding: 16 }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Run Info</div>
+              {[
+                { label: "Status", val: <span className={`badge ${isRunning ? "badge-blue pulse" : run.status === "completed" ? "badge-green" : "badge-red"}`}>{isRunning ? "● Running" : run.status}</span> },
+                { label: "Started", val: <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{new Date(run.startedAt).toLocaleTimeString()}</span> },
+                { label: "Duration", val: <span style={{ fontSize: "0.78rem", color: "var(--text2)", fontFamily: "var(--font-mono)" }}>{run.duration ? fmtMs(run.duration) : isRunning ? "in progress…" : "—"}</span> },
+              ].map((row, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: i < 2 ? "1px solid var(--border)" : "none" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{row.label}</span>
+                  {row.val}
+                </div>
+              ))}
+              {run.status === "completed" && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ width: "100%", marginTop: 14, justifyContent: "center" }}
+                  onClick={() => navigate(-1)}
+                >
+                  ← Back to Project
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
