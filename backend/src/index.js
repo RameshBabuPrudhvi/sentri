@@ -32,9 +32,16 @@ const db = getDb();
 
 // ─── Activity Logger ──────────────────────────────────────────────────────────
 // Records user/system actions so the Work page shows a complete timeline.
-// Types: create_project, generate, regenerate, create, edit, approve, reject,
-//        restore, delete, crawl_start, crawl_done, test_run_start,
-//        test_run_done, settings_update
+//
+// Standard naming convention — dot-separated: <resource>.<action>
+//   project.create
+//   crawl.start          crawl.complete        crawl.fail
+//   test_run.start       test_run.complete     test_run.fail
+//   test.create          test.generate         test.regenerate
+//   test.edit            test.delete
+//   test.approve         test.reject           test.restore
+//   test.bulk_approve    test.bulk_reject      test.bulk_restore
+//   settings.update
 function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
   const id = uuidv4();
   db.activities[id] = {
@@ -69,7 +76,7 @@ app.post("/api/projects", (req, res) => {
   db.projects[id] = project;
 
   logActivity({
-    type: "create_project", projectId: id, projectName: name,
+    type: "project.create", projectId: id, projectName: name,
     detail: `Project created — "${name}" (${url})`,
   });
 
@@ -106,7 +113,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   db.runs[runId] = run;
 
   logActivity({
-    type: "crawl_start", projectId: project.id, projectName: project.name,
+    type: "crawl.start", projectId: project.id, projectName: project.name,
     detail: `Crawl started for ${project.url}`, status: "running",
   });
 
@@ -114,7 +121,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   crawlAndGenerateTests(project, run, db)
     .then(() => {
       logActivity({
-        type: "crawl_done", projectId: project.id, projectName: project.name,
+        type: "crawl.complete", projectId: project.id, projectName: project.name,
         detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
       });
     })
@@ -123,7 +130,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
       logActivity({
-        type: "crawl_done", projectId: project.id, projectName: project.name,
+        type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${err.message}`, status: "failed",
       });
     });
@@ -160,14 +167,14 @@ app.post("/api/projects/:id/run", async (req, res) => {
   db.runs[runId] = run;
 
   logActivity({
-    type: "test_run_start", projectId: project.id, projectName: project.name,
+    type: "test_run.start", projectId: project.id, projectName: project.name,
     detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`, status: "running",
   });
 
   runTests(project, tests, run, db)
     .then(() => {
       logActivity({
-        type: "test_run_done", projectId: project.id, projectName: project.name,
+        type: "test_run.complete", projectId: project.id, projectName: project.name,
         detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
       });
     })
@@ -176,7 +183,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
       logActivity({
-        type: "test_run_done", projectId: project.id, projectName: project.name,
+        type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${err.message}`, status: "failed",
       });
     });
@@ -267,7 +274,7 @@ Return ONLY valid JSON with no markdown fences:
   // Log the edit activity
   const project = db.projects[test.projectId];
   logActivity({
-    type: stepsChanged && regenerateCode ? "regenerate" : "edit",
+    type: stepsChanged && regenerateCode ? "test.regenerate" : "test.edit",
     projectId: test.projectId,
     projectName: project?.name || null,
     testId: test.id,
@@ -318,7 +325,7 @@ app.post("/api/projects/:id/tests", (req, res) => {
   db.tests[testId] = test;
 
   logActivity({
-    type: "create", projectId: project.id, projectName: project.name,
+    type: "test.create", projectId: project.id, projectName: project.name,
     testId, testName: test.name,
     detail: `Manual test created — "${test.name}"`,
   });
@@ -331,7 +338,7 @@ app.delete("/api/projects/:id/tests/:testId", (req, res) => {
   const project = db.projects[req.params.id];
   if (test) {
     logActivity({
-      type: "delete", projectId: req.params.id, projectName: project?.name || null,
+      type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
       testId: req.params.testId, testName: test.name,
       detail: `Test deleted — "${test.name}"`,
     });
@@ -461,7 +468,7 @@ Return ONLY valid JSON with no markdown fences:
     db.tests[testId] = newTest;
 
     logActivity({
-      type: "generate", projectId: project.id, projectName: project.name,
+      type: "test.generate", projectId: project.id, projectName: project.name,
       testId, testName: newTest.name,
       detail: `AI generated test — ${steps.length} steps${playwrightCode ? " + Playwright code" : ""}`,
     });
@@ -471,7 +478,7 @@ Return ONLY valid JSON with no markdown fences:
   } catch (err) {
     console.error("[generate test] error:", err.message);
     logActivity({
-      type: "generate", projectId: project.id, projectName: project.name,
+      type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `AI generation failed for "${name.trim()}" — ${err.message}`,
       status: "failed",
     });
@@ -504,7 +511,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
   db.runs[runId] = run;
 
   logActivity({
-    type: "test_run_start", projectId: project.id, projectName: project.name,
+    type: "test_run.start", projectId: project.id, projectName: project.name,
     testId: test.id, testName: test.name,
     detail: `Single test run started — "${test.name}"`, status: "running",
   });
@@ -512,7 +519,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
   runTests(project, [test], run, db)
     .then(() => {
       logActivity({
-        type: "test_run_done", projectId: project.id, projectName: project.name,
+        type: "test_run.complete", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
         detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
       });
@@ -522,7 +529,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
       logActivity({
-        type: "test_run_done", projectId: project.id, projectName: project.name,
+        type: "test_run.fail", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
         detail: `Single test failed: ${err.message}`, status: "failed",
       });
@@ -613,7 +620,7 @@ app.post("/api/settings", (req, res) => {
   setRuntimeKey(provider, apiKey.trim());
 
   logActivity({
-    type: "settings_update",
+    type: "settings.update",
     detail: `API key configured for ${getProviderMeta()?.name || provider}`,
   });
 
@@ -631,7 +638,7 @@ app.delete("/api/settings/:provider", (req, res) => {
   setRuntimeKey(provider, "");
 
   logActivity({
-    type: "settings_update",
+    type: "settings.update",
     detail: `API key removed for provider "${provider}"`,
   });
 
