@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ChevronDown,
-  ChevronRight,
   CheckCircle2,
   XCircle,
   Clock,
@@ -47,12 +45,7 @@ function statusBadgeClass(status) {
 // ─── Test Case Row ────────────────────────────────────────────────────────────
 
 function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
-  const [expanded, setExpanded] = useState(isSelected);
   const steps = result.steps || [];
-
-  useEffect(() => {
-    if (isSelected) setExpanded(true);
-  }, [isSelected]);
 
   return (
     <div>
@@ -68,14 +61,8 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
           borderLeft: `3px solid ${isSelected ? statusColor(result.status) : "transparent"}`,
           transition: "all 0.12s",
         }}
-        onClick={() => { onSelect(caseIndex); setExpanded((e) => !e); }}
+        onClick={() => onSelect(caseIndex)}
       >
-        <div style={{ color: "var(--text3)", flexShrink: 0, width: 14 }}>
-          {steps.length > 0
-            ? expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />
-            : null}
-        </div>
-
         <StatusIcon status={result.status} size={13} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -122,63 +109,7 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
         </div>
       </div>
 
-      {/* Expanded: step preview */}
-      {expanded && steps.length > 0 && (
-        <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
-          {steps.map((step, si) => (
-            <div
-              key={si}
-              onClick={() => onDrillDown(caseIndex)}
-              style={{
-                display: "flex", alignItems: "flex-start", gap: 10,
-                padding: "7px 14px 7px 36px", cursor: "pointer",
-                borderBottom: si < steps.length - 1 ? "1px solid var(--border)" : "none",
-              }}
-            >
-              <div style={{
-                width: 17, height: 17, borderRadius: "50%",
-                border: "1.5px solid var(--border)", background: "var(--surface)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                flexShrink: 0, fontSize: "0.6rem", fontWeight: 700,
-                color: "var(--text3)", fontFamily: "var(--font-mono)", marginTop: 1,
-              }}>
-                {si + 1}
-              </div>
-              <div style={{
-                flex: 1, fontSize: "0.73rem", color: "var(--text2)",
-                lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {step}
-              </div>
-            </div>
-          ))}
-          <div
-            onClick={() => onDrillDown(caseIndex)}
-            style={{
-              padding: "7px 14px 7px 36px", display: "flex",
-              alignItems: "center", gap: 5, fontSize: "0.71rem",
-              color: "var(--accent)", fontWeight: 600, cursor: "pointer",
-            }}
-          >
-            <ArrowRight size={11} />
-            View step results &amp; browser screenshots
-          </div>
-        </div>
-      )}
 
-      {expanded && steps.length === 0 && (
-        <div
-          onClick={() => onDrillDown(caseIndex)}
-          style={{
-            padding: "8px 14px 8px 36px", display: "flex",
-            alignItems: "center", gap: 5, fontSize: "0.72rem",
-            color: "var(--accent)", fontWeight: 600, cursor: "pointer",
-            borderBottom: "1px solid var(--border)", background: "var(--bg2)",
-          }}
-        >
-          <ArrowRight size={11} /> View debug artifacts
-        </div>
-      )}
     </div>
   );
 }
@@ -215,9 +146,6 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
               )}
             </div>
           </div>
-          <button onClick={onDrillDown} className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
-            View Steps <ArrowRight size={12} />
-          </button>
         </div>
       </div>
 
@@ -300,47 +228,6 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
           </div>
         )}
 
-        {/* Steps quick list */}
-        {steps.length > 0 && (
-          <div style={{ background: "var(--bg2)", borderRadius: 8, border: "1px solid var(--border)", overflow: "hidden" }}>
-            <div style={{
-              padding: "8px 12px", borderBottom: "1px solid var(--border)",
-              fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)",
-              textTransform: "uppercase", letterSpacing: "0.05em",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
-              <span>Steps</span>
-              <button onClick={onDrillDown} style={{
-                background: "none", border: "none", cursor: "pointer",
-                fontSize: "0.68rem", color: "var(--accent)", fontWeight: 600,
-                display: "flex", alignItems: "center", gap: 3, fontFamily: "var(--font-sans)",
-              }}>
-                See statuses <ArrowRight size={10} />
-              </button>
-            </div>
-            {steps.slice(0, 5).map((step, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "7px 12px",
-                borderBottom: i < Math.min(steps.length, 5) - 1 ? "1px solid var(--border)" : "none",
-                fontSize: "0.74rem", color: "var(--text2)",
-              }}>
-                <span style={{ color: "var(--text3)", fontSize: "0.65rem", fontFamily: "var(--font-mono)", width: 14, flexShrink: 0 }}>
-                  {i + 1}.
-                </span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step}</span>
-              </div>
-            ))}
-            {steps.length > 5 && (
-              <div onClick={onDrillDown} style={{
-                padding: "7px 12px", fontSize: "0.72rem", color: "var(--text3)",
-                cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-              }}>
-                +{steps.length - 5} more <ArrowRight size={10} />
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
