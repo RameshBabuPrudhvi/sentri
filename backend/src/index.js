@@ -30,6 +30,26 @@ app.use("/artifacts", express.static(ARTIFACTS_DIR, {
 
 const db = getDb();
 
+// ─── Activity Logger ──────────────────────────────────────────────────────────
+// Records user/system actions so the Work page shows a complete timeline.
+// Types: generate, regenerate, create, edit, approve, reject, restore, delete,
+//        crawl_start, crawl_done, test_run_start, test_run_done
+function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
+  const id = uuidv4();
+  db.activities[id] = {
+    id,
+    type,
+    projectId: projectId || null,
+    projectName: projectName || null,
+    testId: testId || null,
+    testName: testName || null,
+    detail: detail || null,
+    status: status || "completed",
+    createdAt: new Date().toISOString(),
+  };
+  return db.activities[id];
+}
+
 // ─── Projects ────────────────────────────────────────────────────────────────
 
 app.post("/api/projects", (req, res) => {
@@ -78,12 +98,28 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   };
   db.runs[runId] = run;
 
-  // Kick off async - stream updates via polling
-  crawlAndGenerateTests(project, run, db).catch((err) => {
-    run.status = "failed";
-    run.error = err.message;
-    run.finishedAt = new Date().toISOString();
+  logActivity({
+    type: "crawl_start", projectId: project.id, projectName: project.name,
+    detail: `Crawl started for ${project.url}`, status: "running",
   });
+
+  // Kick off async - stream updates via polling
+  crawlAndGenerateTests(project, run, db)
+    .then(() => {
+      logActivity({
+        type: "crawl_done", projectId: project.id, projectName: project.name,
+        detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
+      });
+    })
+    .catch((err) => {
+      run.status = "failed";
+      run.error = err.message;
+      run.finishedAt = new Date().toISOString();
+      logActivity({
+        type: "crawl_done", projectId: project.id, projectName: project.name,
+        detail: `Crawl failed: ${err.message}`, status: "failed",
+      });
+    });
 
   res.json({ runId });
 });
@@ -116,11 +152,27 @@ app.post("/api/projects/:id/run", async (req, res) => {
   };
   db.runs[runId] = run;
 
-  runTests(project, tests, run, db).catch((err) => {
-    run.status = "failed";
-    run.error = err.message;
-    run.finishedAt = new Date().toISOString();
+  logActivity({
+    type: "test_run_start", projectId: project.id, projectName: project.name,
+    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`, status: "running",
   });
+
+  runTests(project, tests, run, db)
+    .then(() => {
+      logActivity({
+        type: "test_run_done", projectId: project.id, projectName: project.name,
+        detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
+      });
+    })
+    .catch((err) => {
+      run.status = "failed";
+      run.error = err.message;
+      run.finishedAt = new Date().toISOString();
+      logActivity({
+        type: "test_run_done", projectId: project.id, projectName: project.name,
+        detail: `Test run failed: ${err.message}`, status: "failed",
+      });
+    });
 
   res.json({ runId });
 });
@@ -205,6 +257,19 @@ Return ONLY valid JSON with no markdown fences:
     }
   }
 
+  // Log the edit activity
+  const project = db.projects[test.projectId];
+  logActivity({
+    type: stepsChanged && regenerateCode ? "regenerate" : "edit",
+    projectId: test.projectId,
+    projectName: project?.name || null,
+    testId: test.id,
+    testName: test.name,
+    detail: stepsChanged
+      ? `Steps updated (${test.steps.length} steps)${test.codeRegeneratedAt ? " — Playwright code regenerated" : ""}`
+      : "Test metadata updated",
+  });
+
   // Let the frontend know if the code may be out of sync with steps
   const response = { ...test };
   if (stepsChanged && !test.codeRegeneratedAt) {
@@ -244,10 +309,26 @@ app.post("/api/projects/:id/tests", (req, res) => {
   };
 
   db.tests[testId] = test;
+
+  logActivity({
+    type: "create", projectId: project.id, projectName: project.name,
+    testId, testName: test.name,
+    detail: `Manual test created — "${test.name}"`,
+  });
+
   res.status(201).json(test);
 });
 
 app.delete("/api/projects/:id/tests/:testId", (req, res) => {
+  const test = db.tests[req.params.testId];
+  const project = db.projects[req.params.id];
+  if (test) {
+    logActivity({
+      type: "delete", projectId: req.params.id, projectName: project?.name || null,
+      testId: req.params.testId, testName: test.name,
+      detail: `Test deleted — "${test.name}"`,
+    });
+  }
   delete db.tests[req.params.testId];
   res.json({ ok: true });
 });
@@ -371,10 +452,22 @@ Return ONLY valid JSON with no markdown fences:
     };
 
     db.tests[testId] = newTest;
+
+    logActivity({
+      type: "generate", projectId: project.id, projectName: project.name,
+      testId, testName: newTest.name,
+      detail: `AI generated test — ${steps.length} steps${playwrightCode ? " + Playwright code" : ""}`,
+    });
+
     res.status(201).json(newTest);
 
   } catch (err) {
     console.error("[generate test] error:", err.message);
+    logActivity({
+      type: "generate", projectId: project.id, projectName: project.name,
+      detail: `AI generation failed for "${name.trim()}" — ${err.message}`,
+      status: "failed",
+    });
     res.status(500).json({ error: err.message || "AI generation failed" });
   }
 });
@@ -403,11 +496,30 @@ app.post("/api/tests/:testId/run", async (req, res) => {
   };
   db.runs[runId] = run;
 
-  runTests(project, [test], run, db).catch((err) => {
-    run.status = "failed";
-    run.error = err.message;
-    run.finishedAt = new Date().toISOString();
+  logActivity({
+    type: "test_run_start", projectId: project.id, projectName: project.name,
+    testId: test.id, testName: test.name,
+    detail: `Single test run started — "${test.name}"`, status: "running",
   });
+
+  runTests(project, [test], run, db)
+    .then(() => {
+      logActivity({
+        type: "test_run_done", projectId: project.id, projectName: project.name,
+        testId: test.id, testName: test.name,
+        detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
+      });
+    })
+    .catch((err) => {
+      run.status = "failed";
+      run.error = err.message;
+      run.finishedAt = new Date().toISOString();
+      logActivity({
+        type: "test_run_done", projectId: project.id, projectName: project.name,
+        testId: test.id, testName: test.name,
+        detail: `Single test failed: ${err.message}`, status: "failed",
+      });
+    });
 
   res.json({ runId });
 });
@@ -508,6 +620,24 @@ app.delete("/api/settings/:provider", (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Activities ───────────────────────────────────────────────────────────────
+// GET /api/activities — returns all activities sorted newest-first.
+// Optional query params: ?type=generate&projectId=xxx&limit=100
+app.get("/api/activities", (req, res) => {
+  let activities = Object.values(db.activities)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  if (req.query.type) {
+    activities = activities.filter(a => a.type === req.query.type);
+  }
+  if (req.query.projectId) {
+    activities = activities.filter(a => a.projectId === req.query.projectId);
+  }
+
+  const limit = parseInt(req.query.limit, 10) || 200;
+  res.json(activities.slice(0, limit));
+});
+
 // ── Health ────────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => res.json({ ok: true }));
 
@@ -521,6 +651,12 @@ app.patch("/api/projects/:id/tests/:testId/approve", (req, res) => {
     return res.status(404).json({ error: "not found" });
   test.reviewStatus = "approved";
   test.reviewedAt = new Date().toISOString();
+  const project = db.projects[req.params.id];
+  logActivity({
+    type: "approve", projectId: req.params.id, projectName: project?.name || null,
+    testId: test.id, testName: test.name,
+    detail: `Test approved — "${test.name}"`,
+  });
   res.json(test);
 });
 
@@ -530,6 +666,12 @@ app.patch("/api/projects/:id/tests/:testId/reject", (req, res) => {
     return res.status(404).json({ error: "not found" });
   test.reviewStatus = "rejected";
   test.reviewedAt = new Date().toISOString();
+  const project = db.projects[req.params.id];
+  logActivity({
+    type: "reject", projectId: req.params.id, projectName: project?.name || null,
+    testId: test.id, testName: test.name,
+    detail: `Test rejected — "${test.name}"`,
+  });
   res.json(test);
 });
 
@@ -539,6 +681,12 @@ app.patch("/api/projects/:id/tests/:testId/restore", (req, res) => {
     return res.status(404).json({ error: "not found" });
   test.reviewStatus = "draft";
   test.reviewedAt = null;
+  const project = db.projects[req.params.id];
+  logActivity({
+    type: "restore", projectId: req.params.id, projectName: project?.name || null,
+    testId: test.id, testName: test.name,
+    detail: `Test restored to draft — "${test.name}"`,
+  });
   res.json(test);
 });
 
@@ -557,6 +705,13 @@ app.post("/api/projects/:id/tests/bulk", (req, res) => {
       updated.push(test);
     }
   });
+  if (updated.length) {
+    const project = db.projects[req.params.id];
+    logActivity({
+      type: action, projectId: req.params.id, projectName: project?.name || null,
+      detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
+    });
+  }
   res.json({ updated: updated.length, tests: updated });
 });
 
