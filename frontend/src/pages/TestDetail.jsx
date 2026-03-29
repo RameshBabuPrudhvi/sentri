@@ -4,7 +4,7 @@ import {
   ArrowLeft, Play, Edit2, RefreshCw, Download,
   CheckCircle2, XCircle, Clock, AlertCircle,
   ChevronRight, Calendar, User, GitCommit,
-  RotateCcw, ExternalLink,
+  RotateCcw, ExternalLink, X, Plus, Save,
 } from "lucide-react";
 import { api } from "../api.js";
 
@@ -95,6 +95,15 @@ export default function TestDetail() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
+  // ── Edit mode state ──────────────────────────────────────────────────────
+  const [editing, setEditing]         = useState(false);
+  const [editName, setEditName]       = useState("");
+  const [editDesc, setEditDesc]       = useState("");
+  const [editSteps, setEditSteps]     = useState([]);
+  const [editPriority, setEditPriority] = useState("medium");
+  const [saving, setSaving]           = useState(false);
+  const [editError, setEditError]     = useState(null);
+
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
     setTest(t);
@@ -114,6 +123,56 @@ export default function TestDetail() {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  function startEditing() {
+    setEditName(test.name || "");
+    setEditDesc(test.description || "");
+    setEditSteps([...(test.steps || [])]);
+    setEditPriority(test.priority || "medium");
+    setEditError(null);
+    setEditing(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!editName.trim()) { setEditError("Test name is required."); return; }
+    setSaving(true);
+    setEditError(null);
+    try {
+      const cleanSteps = editSteps.filter(s => s.trim());
+      const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
+
+      const updated = await api.updateTest(testId, {
+        name: editName.trim(),
+        description: editDesc.trim(),
+        steps: cleanSteps,
+        priority: editPriority,
+        // When steps changed, ask the backend to regenerate the Playwright code
+        // so the test script stays in sync with the human-readable steps.
+        regenerateCode: stepsChanged,
+      });
+      setTest(updated);
+      setEditing(false);
+    } catch (err) {
+      setEditError(err.message || "Failed to save changes.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelEditing() {
+    setEditing(false);
+    setEditError(null);
+  }
+
+  function updateEditStep(i, val) {
+    setEditSteps(prev => prev.map((s, idx) => idx === i ? val : s));
+  }
+  function removeEditStep(i) {
+    setEditSteps(prev => prev.filter((_, idx) => idx !== i));
+  }
+  function addEditStep() {
+    setEditSteps(prev => [...prev, ""]);
+  }
 
   function handleExport() {
     if (!test) return;
@@ -197,29 +256,65 @@ export default function TestDetail() {
 
         {/* Action buttons */}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={handleExport}>
-            <Download size={14} /> Export
-          </button>
-          <button className="btn btn-ghost btn-sm">
-            <Edit2 size={14} /> Edit Test
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleRunTest}
-            disabled={running}
-          >
-            {running
-              ? <RefreshCw size={14} className="spin" />
-              : <Play size={14} />}
-            Run Test
-          </button>
+          {editing ? (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={cancelEditing} disabled={saving}>
+                <X size={14} /> Cancel
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
+                {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+                {saving ? "Saving & regenerating code…" : "Save Changes"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost btn-sm" onClick={handleExport}>
+                <Download size={14} /> Export
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={startEditing}>
+                <Edit2 size={14} /> Edit Test
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleRunTest}
+                disabled={running}
+              >
+                {running
+                  ? <RefreshCw size={14} className="spin" />
+                  : <Play size={14} />}
+                Run Test
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {/* ── Page title ───────────────────────────────────────────────────── */}
-      <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 24 }}>
-        {test.name}
-      </h1>
+      {editing ? (
+        <div style={{ marginBottom: 24 }}>
+          <input
+            className="input"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            placeholder="Test name"
+            style={{ fontSize: "1.3rem", fontWeight: 700, height: 48, marginBottom: 8 }}
+            autoFocus
+          />
+          {editError && (
+            <div style={{
+              background: "var(--red-bg)", color: "var(--red)",
+              borderRadius: "var(--radius)", padding: "8px 12px",
+              fontSize: "0.82rem",
+            }}>
+              {editError}
+            </div>
+          )}
+        </div>
+      ) : (
+        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 24 }}>
+          {test.name}
+        </h1>
+      )}
 
       {/* ── Two-column layout ────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
@@ -239,9 +334,20 @@ export default function TestDetail() {
               </div>
               <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0 }}>Description</h2>
             </div>
-            <p style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.7, margin: 0 }}>
-              {test.description || <span style={{ color: "var(--text3)" }}>No description provided.</span>}
-            </p>
+            {editing ? (
+              <textarea
+                className="input"
+                value={editDesc}
+                onChange={e => setEditDesc(e.target.value)}
+                placeholder="Describe what this test verifies…"
+                rows={3}
+                style={{ fontSize: "0.875rem", lineHeight: 1.7, resize: "vertical" }}
+              />
+            ) : (
+              <p style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.7, margin: 0 }}>
+                {test.description || <span style={{ color: "var(--text3)" }}>No description provided.</span>}
+              </p>
+            )}
           </div>
 
           {/* Test Steps card */}
@@ -257,42 +363,90 @@ export default function TestDetail() {
               <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0 }}>Test Steps</h2>
             </div>
 
-            {(!test.steps || test.steps.length === 0) ? (
-              <div style={{ color: "var(--text3)", fontSize: "0.875rem", padding: "20px 0" }}>
-                No steps defined for this test.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                {test.steps.map((step, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: "flex", alignItems: "flex-start", gap: 16,
-                      padding: "12px 0",
-                      borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
-                    }}
-                  >
-                    {/* Step number */}
-                    <div style={{
-                      width: 26, height: 26, borderRadius: 6,
-                      background: "var(--bg2)", border: "1px solid var(--border)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: "0.75rem", fontWeight: 700, color: "var(--text2)",
-                      flexShrink: 0, marginTop: 1,
-                    }}>
-                      {idx + 1}
+            {editing ? (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {editSteps.map((step, idx) => (
+                    <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: "50%",
+                        background: "var(--bg3)", border: "1px solid var(--border)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "0.65rem", fontWeight: 700, color: "var(--text3)",
+                        flexShrink: 0, marginTop: 7,
+                      }}>
+                        {idx + 1}
+                      </div>
+                      <input
+                        className="input"
+                        value={step}
+                        onChange={e => updateEditStep(idx, e.target.value)}
+                        style={{ flex: 1, height: 36, fontSize: "0.82rem" }}
+                      />
+                      <button
+                        onClick={() => removeEditStep(idx)}
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: "var(--text3)", padding: "6px 4px", flexShrink: 0,
+                          marginTop: 2,
+                        }}
+                        title="Remove step"
+                      >
+                        <X size={14} />
+                      </button>
                     </div>
-                    {/* Step text */}
-                    <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
-                      {step}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addEditStep}
+                  style={{
+                    marginTop: 8, background: "none", border: "1px dashed var(--border)",
+                    borderRadius: 6, cursor: "pointer", color: "var(--text3)",
+                    fontSize: "0.78rem", padding: "5px 12px", width: "100%",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                  }}
+                >
+                  <Plus size={12} /> Add step
+                </button>
+              </>
+            ) : (
+              (!test.steps || test.steps.length === 0) ? (
+                <div style={{ color: "var(--text3)", fontSize: "0.875rem", padding: "20px 0" }}>
+                  No steps defined for this test.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  {test.steps.map((step, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "flex", alignItems: "flex-start", gap: 16,
+                        padding: "12px 0",
+                        borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                      }}
+                    >
+                      {/* Step number */}
+                      <div style={{
+                        width: 26, height: 26, borderRadius: 6,
+                        background: "var(--bg2)", border: "1px solid var(--border)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "0.75rem", fontWeight: 700, color: "var(--text2)",
+                        flexShrink: 0, marginTop: 1,
+                      }}>
+                        {idx + 1}
+                      </div>
+                      {/* Step text */}
+                      <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                        {step}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )
             )}
 
             {/* Playwright code block (collapsed) */}
-            {test.playwrightCode && (
+            {test.playwrightCode && !editing && (
               <details style={{ marginTop: 16 }}>
                 <summary style={{
                   cursor: "pointer", fontSize: "0.78rem", color: "var(--accent)",
@@ -301,6 +455,11 @@ export default function TestDetail() {
                 }}>
                   <ChevronRight size={13} style={{ transition: "transform 0.2s" }} />
                   View generated Playwright code
+                  {test.codeRegeneratedAt && (
+                    <span style={{ fontSize: "0.68rem", color: "var(--green)", fontWeight: 500, marginLeft: 6 }}>
+                      ✓ regenerated
+                    </span>
+                  )}
                 </summary>
                 <pre style={{
                   marginTop: 12, padding: 16,
@@ -312,6 +471,20 @@ export default function TestDetail() {
                   {test.playwrightCode}
                 </pre>
               </details>
+            )}
+
+            {/* Editing hint: code will be regenerated on save */}
+            {editing && test.playwrightCode && (
+              <div style={{
+                marginTop: 14, padding: "8px 12px",
+                background: "var(--accent-bg)", borderRadius: 6,
+                border: "1px solid rgba(91,110,245,0.2)",
+                fontSize: "0.78rem", color: "var(--accent)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <RefreshCw size={12} />
+                Playwright code will be automatically regenerated from your updated steps when you save.
+              </div>
             )}
           </div>
 
@@ -472,12 +645,25 @@ export default function TestDetail() {
 
           {/* Priority */}
           <InfoRow label="Priority">
-            <span className={`badge ${
-              test.priority === "high"   ? "badge-red" :
-              test.priority === "medium" ? "badge-amber" : "badge-gray"
-            }`}>
-              {test.priority || "medium"}
-            </span>
+            {editing ? (
+              <select
+                className="input"
+                value={editPriority}
+                onChange={e => setEditPriority(e.target.value)}
+                style={{ height: 32, fontSize: "0.82rem", width: "auto" }}
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            ) : (
+              <span className={`badge ${
+                test.priority === "high"   ? "badge-red" :
+                test.priority === "medium" ? "badge-amber" : "badge-gray"
+              }`}>
+                {test.priority || "medium"}
+              </span>
+            )}
           </InfoRow>
 
           {/* Type */}

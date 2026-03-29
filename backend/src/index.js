@@ -141,20 +141,77 @@ app.get("/api/tests/:testId", (req, res) => {
 
 // PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
 // Called after the review phase so edits made in the UI are not silently discarded.
-app.patch("/api/tests/:testId", (req, res) => {
+// When `regenerateCode: true` is sent AND steps changed, re-generates Playwright code via AI.
+app.patch("/api/tests/:testId", async (req, res) => {
   const test = db.tests[req.params.testId];
   if (!test) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority } = req.body;
+  const { steps, name, description, priority, regenerateCode } = req.body;
 
-  if (Array.isArray(steps))          test.steps       = steps;
-  if (typeof name === "string")      test.name        = name.trim();
+  if (typeof name === "string")        test.name        = name.trim();
   if (typeof description === "string") test.description = description.trim();
-  if (typeof priority === "string")  test.priority    = priority;
+  if (typeof priority === "string")    test.priority    = priority;
+
+  const stepsChanged = Array.isArray(steps) &&
+    JSON.stringify(steps) !== JSON.stringify(test.steps);
+
+  if (Array.isArray(steps)) test.steps = steps;
 
   test.updatedAt = new Date().toISOString();
 
-  res.json(test);
+  // If steps changed and caller requested code regeneration, rebuild Playwright script
+  if (stepsChanged && regenerateCode && hasProvider()) {
+    try {
+      const project = db.projects[test.projectId];
+      const appUrl = project?.url || test.sourceUrl || "";
+      const { generateText, parseJSON } = await import("./aiProvider.js");
+
+      const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
+
+Test Name: ${test.name}
+Application URL: ${appUrl}
+Test Steps:
+${test.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Requirements:
+- MUST start with: await page.goto('${appUrl}')
+- Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
+- Add page.waitForLoadState() after each navigation
+- Include at least 3 meaningful expect() assertions
+- Do NOT include import statements at the top — test/expect are provided externally
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "playwrightCode": "test('${test.name}', async ({ page }) => {\\n  // full test implementation\\n});"
+}`;
+
+      const codeRaw = await generateText(codePrompt);
+      let playwrightCode = null;
+      try {
+        const parsed = parseJSON(codeRaw);
+        playwrightCode = typeof parsed.playwrightCode === "string" ? parsed.playwrightCode : null;
+      } catch {
+        if (codeRaw.includes("test(") && codeRaw.includes("async")) {
+          playwrightCode = codeRaw.trim();
+        }
+      }
+      if (playwrightCode) {
+        test.playwrightCode = playwrightCode;
+        test.codeRegeneratedAt = new Date().toISOString();
+      }
+    } catch (err) {
+      console.error("[PATCH test] code regeneration failed:", err.message);
+      // Non-fatal: steps are saved, code stays stale. Frontend will see codeStale flag.
+    }
+  }
+
+  // Let the frontend know if the code may be out of sync with steps
+  const response = { ...test };
+  if (stepsChanged && !test.codeRegeneratedAt) {
+    response._codeStale = true;
+  }
+
+  res.json(response);
 });
 
 // ── Manual test creation ──────────────────────────────────────────────────────
