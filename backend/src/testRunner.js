@@ -182,6 +182,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
   const result = {
     testId: test.id,
     testName: test.name,
+    steps: test.steps || [],
     status: "passed",
     durationMs: 0,
     error: null,
