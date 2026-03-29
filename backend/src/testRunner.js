@@ -213,10 +213,13 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
       // Persist healing events so future runs benefit from what we learned
       if (codeResult.healingEvents?.length && db) {
         for (const evt of codeResult.healingEvents) {
+          // Use bounded split so labels containing '::' don't corrupt args
+          const [action, ...rest] = evt.key.split("::");
+          const label = rest.join("::");
           if (evt.failed) {
-            recordHealingFailure(db, test.id, ...evt.key.split("::"));
+            recordHealingFailure(db, test.id, action, label);
           } else {
-            recordHealing(db, test.id, ...evt.key.split("::"), evt.strategyIndex);
+            recordHealing(db, test.id, action, label, evt.strategyIndex);
           }
         }
       }
