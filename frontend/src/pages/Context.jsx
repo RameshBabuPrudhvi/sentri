@@ -6,15 +6,7 @@ import {
   Link2, RefreshCw, Shield,
 } from "lucide-react";
 import { api } from "../api";
-
-function fmtDate(iso) {
-  if (!iso) return "Never";
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
+import { fmtRelativeDate } from "../utils/formatters";
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -210,7 +202,7 @@ export default function Context() {
                   <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
                     <RefreshCw size={11} color="var(--text3)" />
                     <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>
-                      Last crawl: <strong style={{ color: "var(--text2)" }}>{fmtDate(crawl?.startedAt)}</strong>
+                      Last crawl: <strong style={{ color: "var(--text2)" }}>{fmtRelativeDate(crawl?.startedAt, "Never")}</strong>
                     </span>
                     {crawl && (
                       <span className={`badge ${crawl.status === "completed" ? "badge-green" : crawl.status === "failed" ? "badge-red" : "badge-amber"}`}>

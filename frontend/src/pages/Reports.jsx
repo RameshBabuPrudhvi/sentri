@@ -372,7 +372,7 @@ export default function Reports() {
                       <td><span style={{ color: "var(--green)", fontWeight: 600 }}>{run.passed ?? "—"}</span></td>
                       <td><span style={{ color: run.failed > 0 ? "var(--red)" : "var(--text3)", fontWeight: run.failed > 0 ? 600 : 400 }}>{run.failed ?? "—"}</span></td>
                       <td><span style={{ color: "var(--text2)" }}>{run.total ?? "—"}</span></td>
-                      <td><span style={{ fontSize: "0.8rem", color: "var(--text2)" }}>{fmtDate(run.startedAt)}</span></td>
+                      <td><span style={{ fontSize: "0.8rem", color: "var(--text2)" }}>{fmtRelativeDate(run.startedAt)}</span></td>
                       <td><ChevronRight size={13} color="var(--text3)" /></td>
                     </tr>
                   );

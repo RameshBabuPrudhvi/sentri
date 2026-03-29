@@ -186,7 +186,7 @@ export default function Applications() {
                     <div>
                       <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Last Run</div>
                       <div style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-                        {fmtDate(s.lastRun?.startedAt) || "Never"}
+                        {fmtRelativeDate(s.lastRun?.startedAt, "Never")}
                       </div>
                     </div>
                     <div>
