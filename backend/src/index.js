@@ -112,6 +112,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
     passed: 0,
     failed: 0,
     total: tests.length,
+    testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   db.runs[runId] = run;
 
@@ -196,6 +197,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
     passed: 0,
     failed: 0,
     total: 1,
+    testQueue: [{ id: test.id, name: test.name, steps: test.steps || [] }],
   };
   db.runs[runId] = run;
 
