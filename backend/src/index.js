@@ -678,7 +678,7 @@ app.patch("/api/projects/:id/tests/:testId/approve", (req, res) => {
   test.reviewedAt = new Date().toISOString();
   const project = db.projects[req.params.id];
   logActivity({
-    type: "approve", projectId: req.params.id, projectName: project?.name || null,
+    type: "test.approve", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
@@ -693,7 +693,7 @@ app.patch("/api/projects/:id/tests/:testId/reject", (req, res) => {
   test.reviewedAt = new Date().toISOString();
   const project = db.projects[req.params.id];
   logActivity({
-    type: "reject", projectId: req.params.id, projectName: project?.name || null,
+    type: "test.reject", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
   });
@@ -708,7 +708,7 @@ app.patch("/api/projects/:id/tests/:testId/restore", (req, res) => {
   test.reviewedAt = null;
   const project = db.projects[req.params.id];
   logActivity({
-    type: "restore", projectId: req.params.id, projectName: project?.name || null,
+    type: "test.restore", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test restored to draft — "${test.name}"`,
   });
@@ -733,7 +733,7 @@ app.post("/api/projects/:id/tests/bulk", (req, res) => {
   if (updated.length) {
     const project = db.projects[req.params.id];
     logActivity({
-      type: action, projectId: req.params.id, projectName: project?.name || null,
+      type: `test.bulk_${action}`, projectId: req.params.id, projectName: project?.name || null,
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
   }
