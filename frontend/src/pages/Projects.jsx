@@ -52,6 +52,13 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     if (!name.trim())    { setError("Test name is required.");    return; }
     if (!projectId)      { setError("Please select a project.");  return; }
 
+    // If a previous draft was already created (user navigated back and is
+    // re-generating), delete the orphan so we don't leak draft tests.
+    if (createdTest) {
+      api.deleteTest(createdTest.projectId, createdTest.id).catch(() => {});
+      setCreatedTest(null);
+    }
+
     setPhase("gen-steps");
     try {
       // Hit the AI generate endpoint — backend phase 1 gives us steps
@@ -260,7 +267,6 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                   onClick={handleGenerateSteps}
                   disabled={!name.trim() || !projectId}
                 >
-                  <Loader2 size={13} style={{ opacity: !name.trim() ? 0 : 0 }} />
                   Generate with AI ✦
                 </button>
               </div>

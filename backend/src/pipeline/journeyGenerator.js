@@ -36,7 +36,7 @@ Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
 3. ${SELF_HEALING_PROMPT_RULES}
-4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
+4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — for visibility checks, use safeExpect as described above; other assertions like toHaveURL(), toContainText(), toHaveValue() may use direct locators.
 5. Add page.waitForLoadState() between navigation steps
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback

@@ -51,7 +51,16 @@ export default function CrawlView({ run, isRunning }) {
   const currentStep = run?.currentStep ?? 0;
 
   const stages = PIPELINE_STAGES.map((s) => {
-    const done = isRunning ? s.step < currentStep : s.step <= currentStep;
+    // When running: steps before currentStep are done, currentStep is active.
+    // When finished successfully: all steps are done.
+    // When failed: steps *before* currentStep are done (currentStep itself failed).
+    const done = isRunning
+      ? s.step < currentStep
+      : run?.status === "completed"
+      ? true
+      : run?.status === "failed"
+      ? s.step < currentStep
+      : s.step <= currentStep;
     const active = isRunning && s.step === currentStep;
     return { ...s, done, active };
   });

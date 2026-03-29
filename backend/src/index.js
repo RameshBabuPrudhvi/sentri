@@ -277,7 +277,7 @@ Requirements:
 
 Return ONLY valid JSON with no markdown fences:
 {
-  "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('${name.trim()}', async ({ page }) => {\n  // full test implementation\n});"
+  "playwrightCode": "test('${name.trim()}', async ({ page }) => {\n  // full test implementation\n});"
 }`;
 
     const codeRaw = await generateText(codePrompt);
@@ -292,8 +292,7 @@ Return ONLY valid JSON with no markdown fences:
     }
 
     // ── Phase 3: Save as DRAFT ───────────────────────────────────────────────
-    const { v4: uuidv4Gen } = await import("uuid");
-    const testId = uuidv4Gen();
+    const testId = uuidv4();
     const newTest = {
       id: testId,
       projectId: project.id,
