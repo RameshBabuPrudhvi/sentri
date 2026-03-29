@@ -4,6 +4,7 @@ import { Search, Plus, X, Filter, CheckCircle2, XCircle, Clock, ChevronRight, Lo
 import { api } from "../api.js";
 
 const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
+const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
 
 function AgentTag({ type = "TA" }) {
   const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
@@ -585,6 +586,7 @@ export default function Projects() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRunModal, setShowRunModal]   = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewFilter, setReviewFilter]     = useState("Approved");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -596,6 +598,10 @@ export default function Projects() {
   }, []);
 
   const filtered = tests.filter(t => {
+    // Review status filter — default to approved only (regression suite)
+    const matchReview = reviewFilter === "All Tests"
+      || (reviewFilter === "Approved" && t.reviewStatus === "approved")
+      || (reviewFilter === "Draft" && t.reviewStatus === "draft");
     const matchSearch = !search
       || t.name?.toLowerCase().includes(search.toLowerCase())
       || t.description?.toLowerCase().includes(search.toLowerCase());
@@ -603,7 +609,7 @@ export default function Projects() {
       || (filter === "Passing" && t.lastResult === "passed")
       || (filter === "Failing" && t.lastResult === "failed")
       || (filter === "Not Run" && !t.lastResult);
-    return matchSearch && matchFilter;
+    return matchReview && matchSearch && matchFilter;
   });
 
   const projMap = Object.fromEntries(projects.map(p => [p.id, p]));
@@ -702,7 +708,7 @@ export default function Projects() {
           display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
         }}>
           <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
-            Regression Tests ({filtered.length})
+            {reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
           </div>
           <div style={{ flex: 1, minWidth: 200, position: "relative" }}>
             <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
@@ -735,9 +741,27 @@ export default function Projects() {
               </button>
             ))}
           </div>
-          <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}>
-            <Filter size={13} /> Functional Area
-          </button>
+          <div style={{
+            display: "flex", gap: 4,
+            background: "var(--bg2)", padding: 3,
+            borderRadius: "var(--radius)", border: "1px solid var(--border)",
+          }}>
+            {REVIEW_FILTERS.map(f => (
+              <button
+                key={f}
+                className="btn btn-xs"
+                onClick={() => setReviewFilter(f)}
+                style={{
+                  background: reviewFilter === f ? "#fff" : "transparent",
+                  color: reviewFilter === f ? "var(--text)" : "var(--text3)",
+                  border: reviewFilter === f ? "1px solid var(--border)" : "1px solid transparent",
+                  boxShadow: reviewFilter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (
@@ -800,7 +824,9 @@ export default function Projects() {
                     )}
                   </td>
                   <td>
-                    {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                    {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
+                    {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
+                    {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
                     {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
                     {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
                   </td>
