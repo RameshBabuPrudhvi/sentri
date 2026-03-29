@@ -57,10 +57,12 @@ export default function CrawlView({ run, isRunning }) {
   });
 
   const completedCount = isRunning
-    ? Math.max(0, currentStep - 1)
-    : run?.status === "completed" || run?.status === "failed"
-    ? PIPELINE_STAGES.length
-    : 0;
+      ? Math.max(0, currentStep - 1)
+      : run?.status === "completed"
+      ? PIPELINE_STAGES.length
+      : run?.status === "failed"
+      ? Math.min(currentStep, PIPELINE_STAGES.length)
+      : 0;
 
   const stats = [
     {
