@@ -7,6 +7,7 @@
  */
 
 import { generateText, parseJSON } from "../aiProvider.js";
+import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 
 // ── Journey prompt builder ────────────────────────────────────────────────────
 
@@ -34,8 +35,8 @@ Generate 3-5 end-to-end Playwright tests covering this journey from multiple ang
 Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
-3. Use role-based selectors: getByRole(), getByLabel(), getByText()
-4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText)
+3. ${SELF_HEALING_PROMPT_RULES}
+4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
 5. Add page.waitForLoadState() between navigation steps
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
@@ -155,7 +156,7 @@ ${hints}
 STRICT RULES:
 1. Generate 5-8 tests — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
-3. Use ONLY accessibility selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
+3. ${SELF_HEALING_PROMPT_RULES}
 4. Every test MUST have at least 2 strong assertions
 5. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
 6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)

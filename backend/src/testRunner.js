@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { getSelfHealingHelperCode, applyHealingTransforms } from "./selfHealing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,58 +71,6 @@ function stripPlaywrightImports(code) {
 }
 
 /**
- * buildSelfHealingHelpers()
- *
- * Returns JS code that overrides common Playwright locator patterns with
- * self-healing versions that try fallback selectors when the primary fails.
- * Injected at the top of every executed test body.
- */
-function buildSelfHealingHelpers() {
-  return `
-    // Self-healing helper: tries multiple selector strategies in order
-    async function findElement(page, strategies) {
-      for (const strategy of strategies) {
-        try {
-          const loc = strategy(page);
-          await loc.waitFor({ state: 'visible', timeout: 3000 });
-          return loc;
-        } catch {}
-      }
-      // Return last strategy as a best-effort attempt
-      return strategies[strategies.length - 1](page);
-    }
-
-    // Self-healing fill: tries common input selector patterns
-    async function safeFill(page, labelOrPlaceholder, value) {
-      const strategies = [
-        p => p.getByLabel(labelOrPlaceholder),
-        p => p.getByPlaceholder(labelOrPlaceholder),
-        p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
-        p => p.getByRole('combobox', { name: labelOrPlaceholder }),
-        p => p.getByRole('textbox', { name: labelOrPlaceholder }),
-        p => p.locator(\`input[name*="\${labelOrPlaceholder.toLowerCase().replace(/ /g,'')}"]\`),
-        p => p.locator(\`input[placeholder*="\${labelOrPlaceholder}"]\`),
-      ];
-      const el = await findElement(page, strategies);
-      await el.fill(value);
-    }
-
-    // Self-healing click: tries button text, link text, role patterns
-    async function safeClick(page, text) {
-      const strategies = [
-        p => p.getByRole('button', { name: text }),
-        p => p.getByRole('link', { name: text }),
-        p => p.getByText(text, { exact: true }),
-        p => p.getByText(text),
-        p => p.locator(\`[aria-label*="\${text}"]\`),
-      ];
-      const el = await findElement(page, strategies);
-      await el.click();
-    }
-  `;
-}
-
-/**
  * runGeneratedCode(page, context, playwrightCode, expect)
  *
  * Dynamically executes the AI-generated test body against the live page.
@@ -133,8 +82,8 @@ async function runGeneratedCode(page, context, playwrightCode, expect) {
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = stripPlaywrightImports(body);
-  const helpers = buildSelfHealingHelpers();
+  const cleaned = applyHealingTransforms(stripPlaywrightImports(body));
+  const helpers = getSelfHealingHelperCode();
 
   // eslint-disable-next-line no-new-func
   const fn = new Function("page", "context", "expect", `
