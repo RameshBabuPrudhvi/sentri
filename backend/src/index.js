@@ -162,10 +162,10 @@ app.post("/api/projects/:id/tests", (req, res) => {
     createdAt: new Date().toISOString(),
     lastResult: null,
     lastRunAt: null,
-    qualityScore: 50,
+    qualityScore: null,
     isJourneyTest: false,
-    reviewStatus: "approved", // manually created tests are pre-approved
-    reviewedAt: new Date().toISOString(),
+    reviewStatus: "draft", // all new tests start as draft — must be reviewed before regression
+    reviewedAt: null,
   };
 
   db.tests[testId] = test;
@@ -175,6 +175,134 @@ app.post("/api/projects/:id/tests", (req, res) => {
 app.delete("/api/projects/:id/tests/:testId", (req, res) => {
   delete db.tests[req.params.testId];
   res.json({ ok: true });
+});
+
+// ── AI-powered test generation ────────────────────────────────────────────────
+// POST /api/projects/:id/tests/generate
+// Body: { name, description }
+// Phase 1: AI generates human-readable steps from title + description
+// Phase 2: AI converts steps into a Playwright script
+// Saves result as DRAFT (reviewStatus: "draft") — never auto-approved
+app.post("/api/projects/:id/tests/generate", async (req, res) => {
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const { name, description } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
+
+  const { generateText, parseJSON, hasProvider } = await import("./aiProvider.js");
+
+  if (!hasProvider()) {
+    return res.status(503).json({
+      error: "No AI provider configured. Add an API key in Settings to use AI test generation.",
+    });
+  }
+
+  try {
+    // ── Phase 1: Generate human-readable test steps ─────────────────────────
+    const stepsPrompt = `You are a senior QA engineer. Given a test case title and description for a web application, generate a detailed list of human-readable test steps.
+
+Test Title: ${name.trim()}
+Description: ${(description || "").trim() || "(no description provided)"}
+Application URL: ${project.url}
+
+Generate 5-10 concrete, specific test steps that a QA engineer would follow to test this scenario.
+Each step should be an action (navigate, click, fill, verify, assert) written as an instruction.
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "steps": [
+    "Navigate to ${project.url}",
+    "Step 2 as a clear instruction",
+    "Assert: describe the expected outcome"
+  ]
+}`;
+
+    const stepsRaw = await generateText(stepsPrompt);
+    let steps = [];
+    try {
+      const parsed = parseJSON(stepsRaw);
+      steps = Array.isArray(parsed.steps)
+        ? parsed.steps.filter((s) => typeof s === "string" && s.trim().length > 3)
+        : [];
+    } catch {
+      // Fallback: parse numbered/bulleted list
+      steps = stepsRaw
+        .split("\n")
+        .map((s) => s.replace(/^[\d.\-*•]+\s*/, "").trim())
+        .filter((s) => s.length > 5)
+        .slice(0, 10);
+    }
+    if (!steps.length) {
+      steps = [
+        `Navigate to ${project.url}`,
+        `Verify the page loads correctly`,
+        `${name.trim()}`,
+        `Assert the expected outcome is visible`,
+      ];
+    }
+
+    // ── Phase 2: Convert steps into a Playwright script ─────────────────────
+    const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
+
+Test Name: ${name.trim()}
+Application URL: ${project.url}
+Test Steps:
+${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Requirements:
+- MUST start with: await page.goto('${project.url}')
+- Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
+- Add page.waitForLoadState() after each navigation
+- Include at least 3 meaningful expect() assertions
+- Do NOT import test/expect at the top — they are provided externally
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('${name.trim()}', async ({ page }) => {\n  // full test implementation\n});"
+}`;
+
+    const codeRaw = await generateText(codePrompt);
+    let playwrightCode = null;
+    try {
+      const parsed = parseJSON(codeRaw);
+      playwrightCode = typeof parsed.playwrightCode === "string" ? parsed.playwrightCode : null;
+    } catch {
+      if (codeRaw.includes("test(") && codeRaw.includes("async")) {
+        playwrightCode = codeRaw.trim();
+      }
+    }
+
+    // ── Phase 3: Save as DRAFT ───────────────────────────────────────────────
+    const { v4: uuidv4Gen } = await import("uuid");
+    const testId = uuidv4Gen();
+    const newTest = {
+      id: testId,
+      projectId: project.id,
+      name: name.trim(),
+      description: (description || "").trim(),
+      steps,
+      playwrightCode,
+      priority: "medium",
+      type: "generated",
+      sourceUrl: project.url,
+      pageTitle: project.name,
+      createdAt: new Date().toISOString(),
+      lastResult: null,
+      lastRunAt: null,
+      qualityScore: null,
+      isJourneyTest: false,
+      reviewStatus: "draft",  // Always draft — user must approve before regression
+      reviewedAt: null,
+    };
+
+    db.tests[testId] = newTest;
+    res.status(201).json(newTest);
+
+  } catch (err) {
+    console.error("[generate test] error:", err.message);
+    res.status(500).json({ error: err.message || "AI generation failed" });
+  }
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
