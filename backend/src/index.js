@@ -208,7 +208,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  const { generateText, parseJSON, hasProvider } = await import("./aiProvider.js");
+  const { generateText, parseJSON } = await import("./aiProvider.js");
 
   if (!hasProvider()) {
     return res.status(503).json({
@@ -354,8 +354,6 @@ app.post("/api/tests/:testId/run", async (req, res) => {
 
   res.json({ runId });
 });
-
-
 
 app.get("/api/projects/:id/runs", (req, res) => {
   const runs = Object.values(db.runs)
