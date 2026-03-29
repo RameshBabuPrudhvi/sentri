@@ -1,36 +1,12 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Play, RefreshCw, CheckCircle2, XCircle, Clock,
+  Play, RefreshCw,
   Globe, FlaskConical, Search, ArrowRight, Zap,
 } from "lucide-react";
-import { api } from "../api";
-
-function fmtDate(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 60000)    return "just now";
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function fmtDuration(startedAt, finishedAt) {
-  if (!startedAt || !finishedAt) return "—";
-  const ms = new Date(finishedAt) - new Date(startedAt);
-  if (ms < 1000)  return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-}
-
-function StatusBadge({ status }) {
-  if (status === "completed") return <span className="badge badge-green"><CheckCircle2 size={10} /> Completed</span>;
-  if (status === "failed")    return <span className="badge badge-red"><XCircle size={10} /> Failed</span>;
-  if (status === "running")   return <span className="badge badge-blue pulse">● Running</span>;
-  if (status === "queued")    return <span className="badge badge-amber"><Clock size={10} /> Queued</span>;
-  return <span className="badge badge-gray">{status || "Unknown"}</span>;
-}
+import useProjectData from "../hooks/useProjectData";
+import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
+import StatusBadge from "../components/StatusBadge";
 
 function TypeBadge({ type }) {
   if (type === "test_run") return (
@@ -67,33 +43,11 @@ function ProgressBar({ passed, failed, total }) {
 const STATUS_FILTERS = ["all", "running", "completed", "failed"];
 
 export default function Work() {
-  const [runs, setRuns]       = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { allRuns: runs, loading } = useProjectData({ fetchTests: false });
   const [filter, setFilter]   = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch]   = useState("");
   const navigate = useNavigate();
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const projs = await api.getProjects();
-        const allRuns = (
-          await Promise.all(projs.map(p =>
-            api.getRuns(p.id)
-              .then(rs => rs.map(r => ({ ...r, projectName: p.name, projectUrl: p.url })))
-              .catch(() => [])
-          ))
-        ).flat().sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
-        setRuns(allRuns);
-      } catch (err) {
-        console.error("Work load error:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
 
   const filtered = useMemo(() => runs.filter(r => {
     if (filter !== "all" && r.status !== filter) return false;
@@ -267,7 +221,7 @@ export default function Work() {
                     </span>
                   </td>
                   <td>
-                    <span style={{ fontSize: "0.8rem", color: "var(--text2)" }}>{fmtDate(run.startedAt)}</span>
+                    <span style={{ fontSize: "0.8rem", color: "var(--text2)" }}>{fmtRelativeDate(run.startedAt)}</span>
                   </td>
                   <td><ArrowRight size={14} color="var(--text3)" /></td>
                 </tr>

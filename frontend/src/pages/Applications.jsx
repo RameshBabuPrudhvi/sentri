@@ -1,20 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Plus, Globe, Play, Search, ExternalLink,
-  CheckCircle2, XCircle, Clock, RefreshCw,
-  FlaskConical, AlertCircle, ChevronRight,
+  Plus, Globe, Search, ExternalLink,
+  RefreshCw, FlaskConical, ChevronRight,
 } from "lucide-react";
-import { api } from "../api";
-
-function fmtDate(iso) {
-  if (!iso) return null;
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 3600000)  return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
+import useProjectData from "../hooks/useProjectData";
+import { fmtRelativeDate } from "../utils/formatters";
+import PassRateBar from "../components/PassRateBar";
 
 function StatusDot({ status }) {
   const colors = {
@@ -31,68 +23,38 @@ function StatusDot({ status }) {
   );
 }
 
-function PassRateBar({ rate }) {
-  if (rate == null) return <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>No runs</span>;
-  const color = rate >= 80 ? "var(--green)" : rate >= 50 ? "var(--amber)" : "var(--red)";
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{ flex: 1, height: 5, borderRadius: 3, background: "var(--bg3)", overflow: "hidden", minWidth: 60 }}>
-        <div style={{ width: `${rate}%`, height: "100%", background: color, borderRadius: 3 }} />
-      </div>
-      <span style={{ fontSize: "0.75rem", fontWeight: 600, color, minWidth: 28 }}>{rate}%</span>
-    </div>
-  );
-}
-
 export default function Applications() {
-  const [projects, setProjects]   = useState([]);
-  const [projectStats, setStats]  = useState({});
-  const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState("");
+  const { projects, allTests, allRuns, loading } = useProjectData();
+  const [search, setSearch] = useState("");
   const navigate = useNavigate();
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const projs = await api.getProjects();
-        setProjects(projs);
-
-        // Load tests + runs per project in parallel for stats
-        const statsMap = {};
-        await Promise.all(projs.map(async p => {
-          const [tests, runs] = await Promise.all([
-            api.getTests(p.id).catch(() => []),
-            api.getRuns(p.id).catch(() => []),
-          ]);
-          const testRuns = runs.filter(r => r.type === "test_run");
-          const lastRun = testRuns[0] || null;
-          const completedRuns = testRuns.filter(r => r.status === "completed");
-          const passRate = completedRuns.length
-            ? Math.round(
-                (completedRuns.reduce((s, r) => s + (r.passed || 0), 0) /
-                 completedRuns.reduce((s, r) => s + (r.total || 1), 0)) * 100
-              )
-            : null;
-          const lastCrawl = runs.filter(r => r.type === "crawl")[0] || null;
-          statsMap[p.id] = {
-            totalTests:   tests.length,
-            approved:     tests.filter(t => t.reviewStatus === "approved").length,
-            draft:        tests.filter(t => t.reviewStatus === "draft").length,
-            passRate,
-            lastRun,
-            lastCrawl,
-            activeRun:    testRuns.find(r => r.status === "running") || null,
-          };
-        }));
-        setStats(statsMap);
-      } catch (err) {
-        console.error("Applications load error:", err);
-      } finally {
-        setLoading(false);
-      }
+  // Derive per-project stats from the shared hook data
+  const projectStats = useMemo(() => {
+    const statsMap = {};
+    for (const p of projects) {
+      const tests = allTests.filter(t => t.projectId === p.id);
+      const runs  = allRuns.filter(r => r.projectId === p.id);
+      const testRuns = runs.filter(r => r.type === "test_run");
+      const lastRun = testRuns[0] || null;
+      const completedRuns = testRuns.filter(r => r.status === "completed");
+      const passRate = completedRuns.length
+        ? Math.round(
+            (completedRuns.reduce((s, r) => s + (r.passed || 0), 0) /
+             completedRuns.reduce((s, r) => s + (r.total || 1), 0)) * 100
+          )
+        : null;
+      statsMap[p.id] = {
+        totalTests:   tests.length,
+        approved:     tests.filter(t => t.reviewStatus === "approved").length,
+        draft:        tests.filter(t => t.reviewStatus === "draft").length,
+        passRate,
+        lastRun,
+        lastCrawl:    runs.filter(r => r.type === "crawl")[0] || null,
+        activeRun:    testRuns.find(r => r.status === "running") || null,
+      };
     }
-    load();
-  }, []);
+    return statsMap;
+  }, [projects, allTests, allRuns]);
 
   const filtered = projects.filter(p =>
     !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) ||
