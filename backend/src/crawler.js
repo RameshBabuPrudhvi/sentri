@@ -30,6 +30,10 @@ function log(run, msg) {
   console.log(entry);
 }
 
+function setStep(run, step) {
+  run.currentStep = step;
+}
+
 async function takeSnapshot(page) {
   return page.evaluate(() => {
     // Compute the effective ARIA role of an element (explicit or implicit)
@@ -101,6 +105,7 @@ export async function crawlAndGenerateTests(project, run, db) {
 
   log(run, `\u{1F577}\uFE0F  Starting smart crawl of ${project.url}`);
   log(run, `\u{1F916} AI provider: ${getProviderName()}`);
+  setStep(run, 1);
 
   if (project.credentials?.usernameSelector) {
     const loginPage = await context.newPage();
@@ -176,6 +181,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   log(run, `\u2705 Smart crawl done. ${snapshots.length} unique pages found.`);
 
   // Layer 1: Element filtering
+  setStep(run, 2);
   log(run, `\u{1F50D} Filtering elements (removing noise)...`);
   const filteredSnapshots = snapshots.map(snap => {
     const filtered = filterElements(snap.elements);
@@ -185,6 +191,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
 
   // Layer 2: Intent classification
+  setStep(run, 3);
   log(run, `\u{1F9E0} Classifying page intents...`);
   const classifiedPages = filteredSnapshots.map(snap => classifyPage(snap, snap.elements));
   const classifiedPagesByUrl = {};
@@ -200,11 +207,13 @@ export async function crawlAndGenerateTests(project, run, db) {
   }
 
   // AI test generation
+  setStep(run, 4);
   log(run, `\u{1F916} Generating intent-driven tests...`);
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg));
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
 
   // Layer 3: Deduplication
+  setStep(run, 5);
   log(run, `\u{1F6AB} Deduplicating...`);
   const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
   const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
@@ -212,6 +221,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
 
   // Layer 4: Assertion enhancement
+  setStep(run, 6);
   log(run, `\u2728 Enhancing assertions...`);
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
@@ -243,6 +253,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   run.status = "completed";
   run.finishedAt = new Date().toISOString();
   run.testsGenerated = run.tests.length;
+  setStep(run, 7);
   run.pipelineStats = {
     pagesFound: snapshots.length,
     rawTestsGenerated: rawTests.length,
