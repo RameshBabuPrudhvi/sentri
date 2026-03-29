@@ -273,11 +273,11 @@ Requirements:
 - Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
 - Add page.waitForLoadState() after each navigation
 - Include at least 3 meaningful expect() assertions
-- Do NOT import test/expect at the top — they are provided externally
+- Do NOT include import statements at the top — test/expect are provided externally
 
 Return ONLY valid JSON with no markdown fences:
 {
-  "playwrightCode": "test('${name.trim()}', async ({ page }) => {\n  // full test implementation\n});"
+  "playwrightCode": "test('${name.trim()}', async ({ page }) => {\\n  // full test implementation\\n});"
 }`;
 
     const codeRaw = await generateText(codePrompt);
