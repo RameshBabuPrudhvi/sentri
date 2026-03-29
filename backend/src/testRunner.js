@@ -99,14 +99,29 @@ async function runGeneratedCode(page, context, playwrightCode, expect, healingHi
   const fn = new Function("page", "context", "expect", `
     return (async () => {
       ${helpers}
-      ${cleaned}
-      // Return healing events accumulated during this run
+      let __testError = null;
+      try {
+        ${cleaned}
+      } catch (e) {
+        __testError = e;
+      }
+      // Always return healing events, even on failure, so the runner can
+      // persist what we learned from earlier steps.
+      if (__testError) {
+        __testError.__healingEvents = __healingEvents;
+        throw __testError;
+      }
       return { __healingEvents };
     })();
   `);
 
-  const result = await fn(page, context, expect);
-  return { passed: true, healingEvents: result?.__healingEvents || [] };
+  try {
+    const result = await fn(page, context, expect);
+    return { passed: true, healingEvents: result?.__healingEvents || [] };
+  } catch (err) {
+    err.__healingEvents = err.__healingEvents || [];
+    throw err;
+  }
 }
 
 /**
@@ -276,6 +291,21 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
     result.status = "failed";
     // Strip ANSI escape codes so the UI shows clean text
     result.error = err.message.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+
+    // Persist healing events from the failed run — runGeneratedCode attaches
+    // them to the error so earlier successful steps aren't lost.
+    if (err.__healingEvents?.length && db) {
+      for (const evt of err.__healingEvents) {
+        const [action, ...rest] = evt.key.split("::");
+        const label = rest.join("::");
+        if (evt.failed) {
+          recordHealingFailure(db, test.id, action, label);
+        } else {
+          recordHealing(db, test.id, action, label, evt.strategyIndex);
+        }
+      }
+    }
+
     // Screenshot the failure state
     try {
       const buf = await page.screenshot({ type: "png", fullPage: false });
