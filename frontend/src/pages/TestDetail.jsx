@@ -115,6 +115,40 @@ export default function TestDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
+  function handleExport() {
+    if (!test) return;
+    const exportData = {
+      id: test.id,
+      name: test.name,
+      description: test.description || "",
+      type: test.type || "",
+      priority: test.priority || "medium",
+      reviewStatus: test.reviewStatus || "draft",
+      sourceUrl: test.sourceUrl || "",
+      steps: test.steps || [],
+      playwrightCode: test.playwrightCode || null,
+      lastResult: test.lastResult || null,
+      lastRunAt: test.lastRunAt || null,
+      createdAt: test.createdAt || null,
+      project: project ? { id: project.id, name: project.name, url: project.url } : null,
+      runHistory: runs.slice(0, 20).map(run => {
+        const result = run.results?.find(r => r.testId === testId);
+        return {
+          runId: run.id,
+          status: result?.status || run.status,
+          durationMs: result?.durationMs || null,
+          startedAt: run.startedAt || null,
+        };
+      }),
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+  }
+
   async function handleRunTest() {
     if (!test?.projectId) return;
     setRunning(true);
@@ -163,7 +197,7 @@ export default function TestDetail() {
 
         {/* Action buttons */}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost btn-sm">
+          <button className="btn btn-ghost btn-sm" onClick={handleExport}>
             <Download size={14} /> Export
           </button>
           <button className="btn btn-ghost btn-sm">
