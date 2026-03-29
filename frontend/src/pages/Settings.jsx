@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
-  Activity, Shield, HardDrive, MemoryStick, Info,
+  Activity, Shield, HardDrive, Info,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
