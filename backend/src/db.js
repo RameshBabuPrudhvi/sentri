@@ -7,6 +7,10 @@ export function getDb() {
       projects: {},
       tests: {},
       runs: {},
+      // Self-healing history: records which selector strategy succeeded for
+      // each element so future runs try the winning strategy first.
+      // Key: "<testId>::<action>::<label>" → { strategy, succeededAt, failCount }
+      healingHistory: {},
     };
   }
   return _db;

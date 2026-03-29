@@ -3,7 +3,13 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { getSelfHealingHelperCode, applyHealingTransforms } from "./selfHealing.js";
+import {
+  getSelfHealingHelperCode,
+  applyHealingTransforms,
+  getHealingHistoryForTest,
+  recordHealing,
+  recordHealingFailure,
+} from "./selfHealing.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,30 +77,36 @@ function stripPlaywrightImports(code) {
 }
 
 /**
- * runGeneratedCode(page, context, playwrightCode, expect)
+ * runGeneratedCode(page, context, playwrightCode, expect, healingHints)
  *
  * Dynamically executes the AI-generated test body against the live page.
- * Returns { passed: true } or throws with the error message.
+ * Returns { passed: true, healingEvents: [...] } or throws with the error.
+ *
+ * healingHints is an optional map of "action::label" → strategyIndex from
+ * previous runs, injected into the runtime helpers so the winning strategy
+ * is tried first (adaptive self-healing).
  */
-async function runGeneratedCode(page, context, playwrightCode, expect) {
+async function runGeneratedCode(page, context, playwrightCode, expect, healingHints) {
   const body = extractTestBody(playwrightCode);
   if (!body) {
     throw new Error("Could not parse test body from generated code");
   }
 
   const cleaned = applyHealingTransforms(stripPlaywrightImports(body));
-  const helpers = getSelfHealingHelperCode();
+  const helpers = getSelfHealingHelperCode(healingHints);
 
   // eslint-disable-next-line no-new-func
   const fn = new Function("page", "context", "expect", `
     return (async () => {
       ${helpers}
       ${cleaned}
+      // Return healing events accumulated during this run
+      return { __healingEvents };
     })();
   `);
 
-  await fn(page, context, expect);
-  return { passed: true };
+  const result = await fn(page, context, expect);
+  return { passed: true, healingEvents: result?.__healingEvents || [] };
 }
 
 /**
@@ -111,7 +123,7 @@ async function getExpect() {
   return expect;
 }
 
-async function executeTest(test, browser, runId, stepIndex, runStart) {
+async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
@@ -192,8 +204,22 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
         await page.waitForTimeout(800);
       }
 
+      // Load healing hints from previous runs for this test
+      const healingHints = getHealingHistoryForTest(db, test.id);
+
       // Run the full generated test body
-      await runGeneratedCode(page, context, test.playwrightCode, expect);
+      const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
+
+      // Persist healing events so future runs benefit from what we learned
+      if (codeResult.healingEvents?.length && db) {
+        for (const evt of codeResult.healingEvents) {
+          if (evt.failed) {
+            recordHealingFailure(db, test.id, ...evt.key.split("::"));
+          } else {
+            recordHealing(db, test.id, ...evt.key.split("::"), evt.strategyIndex);
+          }
+        }
+      }
 
     } else {
       // ── FALLBACK: No parseable code — run a basic smoke test ──────────────
@@ -313,7 +339,7 @@ export async function runTests(project, tests, run, db) {
     log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
 
     try {
-      const result = await executeTest(test, browser, runId, i, runStart);
+      const result = await executeTest(test, browser, runId, i, runStart, db);
       run.results.push(result);
 
       if (result.videoPath) allVideoSegments.push(result.videoPath);
