@@ -666,6 +666,73 @@ app.get("/api/activities", (req, res) => {
 // ── Health ────────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+// ── System Info ───────────────────────────────────────────────────────────────
+// GET /api/system — lightweight stats for the Settings "About" section
+app.get("/api/system", async (req, res) => {
+  let playwrightVersion = null;
+  try {
+    const pwPkg = await import("playwright/package.json", { with: { type: "json" } }).catch(() => null);
+    playwrightVersion = pwPkg?.default?.version || null;
+  } catch { /* ignore */ }
+
+  // If the dynamic import didn't work, try reading package.json directly
+  if (!playwrightVersion) {
+    try {
+      const { createRequire } = await import("module");
+      const require = createRequire(import.meta.url);
+      const pwPkg = require("playwright/package.json");
+      playwrightVersion = pwPkg.version;
+    } catch { /* ignore */ }
+  }
+
+  const projects = Object.values(db.projects);
+  const tests    = Object.values(db.tests);
+  const runs     = Object.values(db.runs);
+  const activities = Object.values(db.activities);
+  const healingEntries = Object.keys(db.healingHistory || {}).length;
+
+  res.json({
+    projects:     projects.length,
+    tests:        tests.length,
+    runs:         runs.length,
+    activities:   activities.length,
+    healingEntries,
+    approvedTests: tests.filter(t => t.reviewStatus === "approved").length,
+    draftTests:    tests.filter(t => t.reviewStatus === "draft").length,
+    uptime:        Math.floor(process.uptime()),
+    nodeVersion:   process.version,
+    playwrightVersion,
+    memoryMB:      Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+  });
+});
+
+// ── Data Management ───────────────────────────────────────────────────────────
+// DELETE /api/data/runs — clear all runs (keeps projects & tests)
+app.delete("/api/data/runs", (req, res) => {
+  const count = Object.keys(db.runs).length;
+  for (const key of Object.keys(db.runs)) delete db.runs[key];
+  logActivity({ type: "settings.update", detail: `Cleared ${count} run(s)` });
+  res.json({ ok: true, cleared: count });
+});
+
+// DELETE /api/data/activities — clear activity log
+app.delete("/api/data/activities", (req, res) => {
+  const count = Object.keys(db.activities).length;
+  for (const key of Object.keys(db.activities)) delete db.activities[key];
+  // Don't log this one — we just cleared the log
+  res.json({ ok: true, cleared: count });
+});
+
+// DELETE /api/data/healing — clear self-healing history
+app.delete("/api/data/healing", (req, res) => {
+  const count = Object.keys(db.healingHistory || {}).length;
+  if (db.healingHistory) {
+    for (const key of Object.keys(db.healingHistory)) delete db.healingHistory[key];
+  }
+  logActivity({ type: "settings.update", detail: `Cleared ${count} healing history entries` });
+  res.json({ ok: true, cleared: count });
+});
+
 const PORT = process.env.PORT || 3001;
 
 // ─── Test Review: Approve / Reject / Restore / Bulk ──────────────────────────

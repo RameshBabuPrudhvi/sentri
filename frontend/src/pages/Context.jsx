@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Globe, Cpu, Key, ChevronRight, CheckCircle2,
-  XCircle, Clock, AlertCircle, Layers,
-  Link2, RefreshCw, Shield,
+  Globe, Cpu, ChevronRight, CheckCircle2,
+  XCircle, Settings as SettingsIcon,
+  RefreshCw, Shield,
 } from "lucide-react";
 import { api } from "../api";
 import { fmtRelativeDate } from "../utils/formatters";
@@ -92,7 +92,7 @@ export default function Context() {
         </p>
       </div>
 
-      {/* AI Provider card */}
+      {/* AI Provider — compact status with link to Settings */}
       <div className="card" style={{ padding: 24, marginBottom: 16 }}>
         <SectionHeader
           icon={<Cpu size={15} color="var(--accent)" />}
@@ -108,23 +108,25 @@ export default function Context() {
                 <span className="badge badge-red"><XCircle size={10} /> Not configured</span>
               )}
             </InfoRow>
-            <InfoRow label="Provider">
-              <span style={{ fontWeight: 500 }}>{config.providerName || "—"}</span>
-            </InfoRow>
-            {config.model && (
-              <InfoRow label="Model">
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--accent)" }}>
-                  {config.model}
-                </span>
-              </InfoRow>
+            {config.hasProvider && (
+              <>
+                <InfoRow label="Provider">
+                  <span style={{ fontWeight: 500 }}>{config.providerName || "—"}</span>
+                </InfoRow>
+                {config.model && (
+                  <InfoRow label="Model">
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--accent)" }}>
+                      {config.model}
+                    </span>
+                  </InfoRow>
+                )}
+              </>
             )}
-            {!config.hasProvider && (
-              <div style={{ marginTop: 14 }}>
-                <button className="btn btn-primary btn-sm" onClick={() => navigate("/settings")}>
-                  <Key size={13} /> Configure API Key
-                </button>
-              </div>
-            )}
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate("/settings")}>
+                <SettingsIcon size={13} /> {config.hasProvider ? "Manage in Settings" : "Configure API Key"}
+              </button>
+            </div>
           </div>
         ) : (
           <div style={{ color: "var(--text3)", fontSize: "0.85rem" }}>Could not load provider config.</div>
@@ -221,43 +223,6 @@ export default function Context() {
           </div>
         )}
       </div>
-
-      {/* Supported providers reference */}
-      {config?.supportedProviders?.length > 0 && (
-        <div className="card" style={{ padding: 24 }}>
-          <SectionHeader
-            icon={<Key size={15} color="var(--amber)" />}
-            title="Supported AI Providers"
-            sub="Configure one of these providers in Settings to enable AI test generation"
-          />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-            {config.supportedProviders.map(prov => {
-              const isActive = config.hasProvider && config.providerName === prov.name;
-              return (
-                <div key={prov.id} style={{
-                  padding: "14px 16px", borderRadius: 10,
-                  background: isActive ? "var(--accent-bg)" : "var(--bg2)",
-                  border: `1px solid ${isActive ? "rgba(91,110,245,0.3)" : "var(--border)"}`,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>{prov.name}</span>
-                    {isActive && <span className="badge badge-accent" style={{ fontSize: "0.65rem" }}>Active</span>}
-                  </div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.7rem", color: "var(--text3)", marginBottom: 8 }}>
-                    {prov.model}
-                  </div>
-                  <a
-                    href={prov.docsUrl} target="_blank" rel="noreferrer"
-                    style={{ fontSize: "0.72rem", color: "var(--accent)", display: "flex", alignItems: "center", gap: 4 }}
-                  >
-                    <Link2 size={10} /> Get API key
-                  </a>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

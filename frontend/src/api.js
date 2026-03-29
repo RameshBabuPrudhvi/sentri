@@ -52,4 +52,10 @@ export const api = {
   getSettings: () => req("GET", "/settings"),
   saveApiKey: (provider, apiKey) => req("POST", "/settings", { provider, apiKey }),
   deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
+
+  // System info & data management
+  getSystemInfo: () => req("GET", "/system"),
+  clearRuns: () => req("DELETE", "/data/runs"),
+  clearActivities: () => req("DELETE", "/data/activities"),
+  clearHealing: () => req("DELETE", "/data/healing"),
 };
