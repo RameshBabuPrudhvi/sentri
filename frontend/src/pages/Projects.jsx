@@ -30,6 +30,7 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
   const [projectId, setProjectId]     = useState(defaultProjectId || projects[0]?.id || "");
   const [error, setError]             = useState(null);
   const [createdTest, setCreatedTest] = useState(null);
+  const [isSaving, setIsSaving]       = useState(false);
 
   // Editable generated steps (review phase)
   const [generatedSteps, setGeneratedSteps] = useState([]);
@@ -70,12 +71,26 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     }
   }
 
-  // ── Phase 2: user edits steps, then confirms → show done ──────────────────
+  // ── Phase 2: user edits steps, then confirms → persist edits → show done ──
   async function handleConfirmSteps() {
     setError(null);
-    // The test was already saved as draft by the backend — just show done.
-    setPhase("done");
-    if (createdTest) onCreated(createdTest);
+    // Persist the user-edited steps back to the backend. The test was already
+    // saved as a draft by the backend during handleGenerateSteps, but any
+    // additions, removals, or rewrites the user made in the review UI would
+    // otherwise be silently discarded — the UI said "Save as Draft" but never
+    // actually saved anything. We PATCH the steps now before transitioning.
+    try {
+      setIsSaving(true);
+      const updated = await api.updateTest(createdTest.id, {
+        steps: generatedSteps.filter(s => s.trim()),
+      });
+      setPhase("done");
+      if (onCreated) onCreated(updated);
+    } catch (err) {
+      setError(err.message || "Failed to save steps. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   // Step editing helpers
@@ -382,9 +397,9 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={handleConfirmSteps}
-                  disabled={generatedSteps.filter(s => s.trim()).length === 0}
+                  disabled={isSaving || generatedSteps.filter(s => s.trim()).length === 0}
                 >
-                  Save to Draft
+                  {isSaving ? "Saving…" : "Save to Draft"}
                 </button>
               </div>
             </>

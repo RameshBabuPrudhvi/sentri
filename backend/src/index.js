@@ -139,6 +139,24 @@ app.get("/api/tests/:testId", (req, res) => {
   res.json(test);
 });
 
+// PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
+// Called after the review phase so edits made in the UI are not silently discarded.
+app.patch("/api/tests/:testId", (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test) return res.status(404).json({ error: "not found" });
+
+  const { steps, name, description, priority } = req.body;
+
+  if (Array.isArray(steps))          test.steps       = steps;
+  if (typeof name === "string")      test.name        = name.trim();
+  if (typeof description === "string") test.description = description.trim();
+  if (typeof priority === "string")  test.priority    = priority;
+
+  test.updatedAt = new Date().toISOString();
+
+  res.json(test);
+});
+
 // ── Manual test creation ──────────────────────────────────────────────────────
 app.post("/api/projects/:id/tests", (req, res) => {
   const project = db.projects[req.params.id];

@@ -28,6 +28,7 @@ export const api = {
   // Tests
   getTests: (id) => req("GET", `/projects/${id}/tests`),
   getTest: (testId) => req("GET", `/tests/${testId}`),
+  updateTest: (testId, data) => req("PATCH", `/tests/${testId}`, data),
   createTest: (projectId, data) => req("POST", `/projects/${projectId}/tests`, data),
   generateTest: (projectId, data) => req("POST", `/projects/${projectId}/tests/generate`, data),
   deleteTest: (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
