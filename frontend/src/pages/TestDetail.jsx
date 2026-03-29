@@ -117,6 +117,21 @@ export default function TestDetail() {
 
   async function handleRunTest() {
     if (!test?.projectId) return;
+    // If this test isn't approved, the backend will reject the run request.
+    // Offer to approve first so UX is clear.
+    if (test.reviewStatus !== "approved") {
+      const ok = window.confirm(
+        "This test is not approved yet and won't be included in the run.\n\nApprove it now, then run the regression suite?"
+      );
+      if (!ok) return;
+      try {
+        await api.approveTest(test.projectId, test.id);
+        await load();
+      } catch (err) {
+        alert("Failed to approve test: " + err.message);
+        return;
+      }
+    }
     setRunning(true);
     try {
       const { runId } = await api.runTests(test.projectId);

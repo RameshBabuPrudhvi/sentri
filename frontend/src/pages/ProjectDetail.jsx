@@ -89,10 +89,16 @@ export default function ProjectDetail() {
     if (!activeRun) return;
     const timer = setInterval(async () => {
       const run = await api.getRun(activeRun).catch(() => null);
-      if (!run || run.status !== "running") { setActiveRun(null); refresh(); clearInterval(timer); }
+      // Always refresh runs list so the active run appears immediately in the Runs tab
+      api.getRuns(id).then(r => { if (r) setRuns(r); }).catch(() => {});
+      if (!run || run.status !== "running") {
+        setActiveRun(null);
+        refresh();
+        clearInterval(timer);
+      }
     }, 2000);
     return () => clearInterval(timer);
-  }, [activeRun, refresh]);
+  }, [activeRun, refresh, id]);
 
   async function doCrawl() {
     setActionLoading("crawl");
@@ -111,11 +117,10 @@ export default function ProjectDetail() {
       setActiveRun(runId); setTab("runs");
       showToast("Regression run started", "info");
     } catch (err) {
-      // Surface backend error clearly — e.g. "no approved tests"
       showToast(err.message, "error");
+    } finally {
       setActionLoading(null);
     }
-    finally { setActionLoading(null); }
   }
 
   async function reviewOne(testId, action) {
