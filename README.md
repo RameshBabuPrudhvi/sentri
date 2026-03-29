@@ -1,6 +1,6 @@
 # 🐻 Sentri — Autonomous QA Platform
 
-> AI-powered test generation and execution for modern web applications. Crawl your app, generate Playwright tests, and monitor quality — all on autopilot.
+> AI-powered test generation and execution for modern web applications. Crawl your app, generate Playwright tests, review them, and run regression — all in one place.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org)
@@ -10,12 +10,13 @@
 
 ## What is Sentri?
 
-Sentri is an autonomous QA platform that removes the manual burden of writing and maintaining end-to-end tests. Point it at any web application, and it will:
+Sentri is an autonomous QA platform that removes the manual burden of writing and maintaining end-to-end tests. Point it at any web application and it will:
 
 1. **Crawl** your app — mapping pages, forms, buttons, and interactive elements up to 3 levels deep
-2. **Generate** meaningful Playwright test cases using your choice of AI provider (Anthropic Claude, Google Gemini, or OpenAI GPT-4)
-3. **Execute** those tests against your live app with one click
-4. **Report** pass/fail results with live log streaming and trend charts
+2. **Generate** meaningful Playwright test cases using your choice of AI provider (Anthropic Claude, Google Gemini, or OpenAI GPT-4o-mini)
+3. **Review** — all generated tests land in a **Draft** queue for human approval before they enter regression
+4. **Execute** approved tests against your live app with one click, with per-step video, screenshots, network, and console capture
+5. **Report** pass/fail results with live log streaming, browser view replays, and run history
 
 ---
 
@@ -24,11 +25,14 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 | Feature | Description |
 |---|---|
 | 🕷️ **Autonomous Crawler** | Explores your app up to 3 levels deep, mapping all pages and interactive elements |
-| 🤖 **Multi-AI Test Generation** | Pluggable provider support — Anthropic Claude, Google Gemini, or OpenAI GPT-4 |
-| ▶️ **One-Click Test Execution** | Run all generated tests against your live app instantly |
-| 🔁 **Self-Healing Hints** | DOM snapshots captured to assist re-generation after app changes |
-| 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, and trend charts |
-| 🔑 **Auth Support** | Login to your app before crawling using CSS selectors |
+| 🤖 **Multi-AI Test Generation** | Anthropic Claude Sonnet, Google Gemini 2.5 Flash, or OpenAI GPT-4o-mini — switch with one env var |
+| ✦ **Create Test from Description** | Describe a scenario in plain English; AI generates steps + a Playwright script in seconds |
+| 📋 **Draft → Review → Regression** | All tests (crawled or manually created) start as Draft. Approve to promote to Regression Suite |
+| ▶️ **One-Click Regression Run** | Execute all approved tests with video recording, screenshots, network logs, and DOM snapshots |
+| 🎥 **Step Results View** | Per-test-case drill-down with browser-chrome screenshot replay and step-by-step status |
+| 🔑 **Auth Support** | Login to your app before crawling using CSS selectors for username/password fields |
+| ⚙️ **Runtime API Key Config** | Set or change your AI provider key in the Settings UI — no server restart needed |
+| 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, and pass rate trends |
 | 🐳 **Docker Ready** | Full Docker Compose setup for instant deployment |
 
 ---
@@ -39,7 +43,7 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 
 - Node.js 20+
 - An API key for at least one supported AI provider (see [AI Providers](#ai-providers))
-- Docker & Docker Compose (for containerized deployment)
+- Docker & Docker Compose (for containerised deployment)
 
 ---
 
@@ -51,14 +55,14 @@ git clone https://github.com/RameshBabuPrudhvi/sentri.git
 cd sentri
 
 # 2. Configure environment
-cp .env.example .env
-# Edit .env — set AI_PROVIDER and the corresponding API key
+cp backend/.env.example backend/.env
+# Edit backend/.env — add at least one AI provider key
 
 # 3. Build and start
 docker compose up --build
 
-# Frontend: http://localhost:80
-# Backend API: http://localhost:3001
+# Frontend → http://localhost:80
+# Backend API → http://localhost:3001
 ```
 
 ---
@@ -71,7 +75,7 @@ docker compose up --build
 cd backend
 npm install
 npx playwright install chromium
-cp .env.example .env        # Set AI_PROVIDER and your API key
+cp .env.example .env        # Add at least one AI provider key
 npm run dev                 # Starts on :3001
 ```
 
@@ -80,7 +84,7 @@ npm run dev                 # Starts on :3001
 ```bash
 cd frontend
 npm install
-npm run dev                 # Starts on :3000, proxies API to :3001
+npm run dev                 # Starts on :3000, proxies /api to :3001
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
@@ -89,46 +93,61 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Usage
 
-### 1. Create a Project
+### 1. Configure an AI Provider
+
+Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google. The active provider is shown in the top-right badge. You can also set it in `backend/.env` before starting.
+
+### 2. Create a Project
 
 - Click **New Project**
 - Enter your app name and URL (e.g. `https://myapp.com`)
-- Optionally configure login credentials (CSS selectors for username/password fields)
+- Optionally configure login credentials (CSS selectors for username/password fields and their values)
 
-### 2. Crawl & Generate Tests
+### 3a. Crawl & Generate Tests (Automated)
 
-- Click **Crawl & Generate Tests** on your project page
-- Sentri will visit your app, follow internal links, snapshot each page, and send those snapshots to your chosen AI provider to generate 2–4 Playwright test cases per page
+- Open your project and click **Crawl & Generate Tests**
+- Sentri visits your app, follows internal links, snapshots each page, and sends those snapshots to AI to generate 2–5 Playwright test cases per page
+- All generated tests appear in the **Generated Tests** tab as **Draft**
 
-### 3. Run Tests
+### 3b. Create a Test from Description (Manual)
 
-- Click **Run Tests** to execute all generated tests
-- Watch live log streaming in the Run Detail view
-- Review pass/fail results per test
+- Click **Create Tests** from the Tests page
+- Select your project (auto-populated), enter a test name and plain-English description
+- AI generates detailed test steps and a Playwright script — review and edit the steps before saving
+- The test is saved as **Draft** in your project's Generated Tests queue
 
-### 4. Monitor
+### 4. Review & Approve Tests
 
-- The **Dashboard** shows aggregate pass rate, test counts, and run history trends
+- Open the **Generated Tests (Review Required)** tab in your project
+- Inspect each Draft test — approve to promote it to Regression Suite, or reject to discard it
+- Use **Approve All** / **Reject All** for bulk actions, or select individual tests
+
+### 5. Run Regression
+
+- Click **Run Regression** to execute all approved tests
+- Watch live progress in the Run Detail view with per-step status
+- Click any test case to drill into its **Step Results** — browser-chrome screenshot, network requests, console logs, and DOM snapshot
+
+### 6. Monitor
+
+- The **Dashboard** shows aggregate pass rate, test counts, and run history
+- The **Work** page lists all runs across all projects
 
 ---
 
 ## AI Providers
 
-Sentri supports multiple AI providers for test generation. Switch between them with a single environment variable — no code changes needed.
+Sentri supports three AI providers for test generation. Auto-detection picks the first key that is set; you can force a specific provider with `AI_PROVIDER`.
 
-| Provider | `AI_PROVIDER` value | Required Key | Model Used |
+| Provider | `AI_PROVIDER` value | Env Variable | Model |
 |---|---|---|---|
-| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | claude-opus-4-6 |
-| Google Gemini | `gemini` | `GEMINI_API_KEY` | gemini-1.5-pro |
-| OpenAI GPT-4 | `openai` | `OPENAI_API_KEY` | gpt-4o |
+| Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
+| OpenAI | `openai` | `OPENAI_API_KEY` | gpt-4o-mini |
+| Google Gemini | `google` | `GOOGLE_API_KEY` | gemini-2.5-flash |
 
-Set your provider in `.env`:
+**Auto-detection priority:** Anthropic → OpenAI → Google (first key present wins).
 
-```env
-AI_PROVIDER=anthropic   # or gemini, or openai
-```
-
-> **Note:** Only the API key for the selected provider needs to be set. The others can be left blank.
+You can also set or change keys at runtime from the **Settings** page without restarting the server.
 
 ---
 
@@ -136,13 +155,13 @@ AI_PROVIDER=anthropic   # or gemini, or openai
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `AI_PROVIDER` | No | `anthropic` | AI provider to use (`anthropic`, `gemini`, `openai`) |
+| `AI_PROVIDER` | No | auto-detect | Force a specific provider: `anthropic`, `openai`, or `google` |
 | `ANTHROPIC_API_KEY` | If using Anthropic | — | Get from [console.anthropic.com](https://console.anthropic.com) |
-| `GEMINI_API_KEY` | If using Gemini | — | Get from [aistudio.google.com](https://aistudio.google.com) |
-| `OPENAI_API_KEY` | If using OpenAI | — | Get from [platform.openai.com](https://platform.openai.com) |
+| `OPENAI_API_KEY` | If using OpenAI | — | Get from [platform.openai.com](https://platform.openai.com/api-keys) |
+| `GOOGLE_API_KEY` | If using Google | — | Get from [aistudio.google.com](https://aistudio.google.com/apikey) |
 | `PORT` | No | `3001` | Backend server port |
 
-See [`.env.example`](.env.example) for a full template.
+See [`backend/.env.example`](backend/.env.example) for the full template.
 
 ---
 
@@ -152,66 +171,153 @@ See [`.env.example`](.env.example) for a full template.
 sentri/
 ├── backend/
 │   ├── src/
-│   │   ├── index.js          # Express API server
-│   │   ├── aiProvider.js     # Multi-AI provider abstraction layer
-│   │   ├── crawler.js        # Playwright crawler + AI test generator
-│   │   ├── testRunner.js     # Playwright test executor
-│   │   └── db.js             # In-memory store (swap for Postgres)
+│   │   ├── index.js              # Express API server & all routes
+│   │   ├── aiProvider.js         # Multi-AI provider abstraction + retry logic
+│   │   ├── crawler.js            # Playwright crawler + AI test generator pipeline
+│   │   ├── testRunner.js         # Playwright test executor with video/screenshot capture
+│   │   ├── db.js                 # In-memory store (swap for Postgres in production)
+│   │   └── pipeline/
+│   │       ├── smartCrawl.js     # Page discovery and snapshotting
+│   │       ├── elementFilter.js  # Noise reduction on crawled elements
+│   │       ├── intentClassifier.js  # Page intent classification (auth, dashboard, etc.)
+│   │       ├── journeyGenerator.js  # Multi-page journey test generation
+│   │       ├── deduplicator.js   # Removes duplicate generated tests
+│   │       ├── assertionEnhancer.js # Strengthens Playwright assertions
+│   │       └── feedbackLoop.js   # Quality scoring
+│   ├── .env.example
 │   ├── Dockerfile
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx
-│   │   ├── api.js            # API client
-│   │   ├── index.css         # Design system
+│   │   ├── App.jsx               # Router setup
+│   │   ├── api.js                # Typed API client (fetch wrapper)
+│   │   ├── index.css             # Design system (CSS variables, components)
 │   │   ├── components/
-│   │   │   └── Layout.jsx    # Sidebar navigation
+│   │   │   ├── Layout.jsx        # Sidebar navigation shell
+│   │   │   ├── CrawlView.jsx     # Live crawl pipeline progress + log viewer
+│   │   │   ├── TestRunView.jsx   # Test suite list → case preview
+│   │   │   ├── StepResultsView.jsx  # Per-test-case step drill-down + browser view
+│   │   │   └── ProviderBadge.jsx # Active AI provider indicator
 │   │   └── pages/
-│   │       ├── Dashboard.jsx
-│   │       ├── Projects.jsx
-│   │       ├── ProjectDetail.jsx
-│   │       ├── NewProject.jsx
-│   │       └── RunDetail.jsx
+│   │       ├── Dashboard.jsx     # Pass rate, metrics, recent runs
+│   │       ├── Projects.jsx      # Test library + Create Test modal
+│   │       ├── ProjectDetail.jsx # Draft/Regression/Runs tabs per project
+│   │       ├── NewProject.jsx    # Project creation form
+│   │       ├── TestDetail.jsx    # Individual test view + run history
+│   │       ├── RunDetail.jsx     # Run detail orchestrator (crawl or test run)
+│   │       ├── Work.jsx          # All runs across all projects
+│   │       ├── Reports.jsx       # Reporting view
+│   │       ├── Applications.jsx  # Application management
+│   │       ├── Context.jsx       # Context configuration
+│   │       └── Settings.jsx      # AI provider key management
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
 ├── docker-compose.yml
 ├── docker-compose.prod.yml
-└── .env.example
+└── README.md
 ```
 
 ---
 
 ## API Reference
 
+### Projects
+
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/projects` | Create a new project |
 | `GET` | `/api/projects` | List all projects |
-| `GET` | `/api/projects/:id` | Get a project |
-| `POST` | `/api/projects/:id/crawl` | Start crawl + test generation |
-| `POST` | `/api/projects/:id/run` | Execute all tests |
-| `GET` | `/api/projects/:id/tests` | List generated tests |
+| `GET` | `/api/projects/:id` | Get a single project |
+
+### Crawl & Run
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/projects/:id/crawl` | Start crawl + AI test generation |
+| `POST` | `/api/projects/:id/run` | Execute all approved tests (regression run) |
+
+### Tests
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/:id/tests` | List all tests for a project |
+| `GET` | `/api/tests/:testId` | Get a single test |
+| `POST` | `/api/projects/:id/tests` | Create a manual test (saved as Draft) |
+| `POST` | `/api/projects/:id/tests/generate` | **AI-generate** steps + Playwright script from title & description (saved as Draft) |
 | `DELETE` | `/api/projects/:id/tests/:testId` | Delete a test |
-| `GET` | `/api/projects/:id/runs` | List runs |
-| `GET` | `/api/runs/:runId` | Get run detail (with live logs) |
-| `GET` | `/api/dashboard` | Summary stats |
+| `POST` | `/api/tests/:testId/run` | Run a single test |
+
+### Test Review
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `PATCH` | `/api/projects/:id/tests/:testId/approve` | Promote Draft → Regression Suite |
+| `PATCH` | `/api/projects/:id/tests/:testId/reject` | Mark as Rejected |
+| `PATCH` | `/api/projects/:id/tests/:testId/restore` | Restore any test back to Draft |
+| `POST` | `/api/projects/:id/tests/bulk` | Bulk approve / reject / restore (`{ testIds[], action }`) |
+
+### Runs
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/projects/:id/runs` | List all runs for a project |
+| `GET` | `/api/runs/:runId` | Get run detail (live-pollable while running) |
+
+### Config & Settings
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/config` | Active AI provider info (name, model, color) |
+| `GET` | `/api/settings` | Masked API key status per provider |
+| `POST` | `/api/settings` | Set an API key at runtime (`{ provider, apiKey }`) |
+| `DELETE` | `/api/settings/:provider` | Remove a provider key |
+| `GET` | `/api/dashboard` | Summary stats (projects, tests, pass rate, recent runs) |
+
+---
+
+## Test Lifecycle
+
+All tests — whether crawled automatically or created manually — follow the same lifecycle:
+
+```
+Created (AI crawl or manual)
+        │
+        ▼
+    [ Draft ]  ← default state for every new test
+        │
+   ┌────┴────┐
+   ▼         ▼
+[Approved] [Rejected]
+   │
+   ▼
+[Regression Suite]  ← only approved tests run here
+   │
+   ▼
+[Run Results]  → passed / failed
+```
+
+- **Draft** — visible in the *Generated Tests* review tab; cannot be executed in regression
+- **Approved** — promoted to the Regression Suite; included in every `Run Regression` execution
+- **Rejected** — excluded from all runs; can be restored to Draft at any time
+- Any test can be restored back to Draft using the Restore button or bulk action
 
 ---
 
 ## Production Upgrades
 
-Sentri is production-ready out of the box, but here are recommended enhancements for scale:
+Sentri is designed to grow. Recommended enhancements for production scale:
 
 | Area | Recommendation |
 |---|---|
-| **Database** | Replace in-memory `db.js` with PostgreSQL + Prisma |
-| **Job Queue** | Add BullMQ + Redis for background crawl/run jobs |
-| **Auth** | Add user authentication (NextAuth, Clerk, or JWT) |
-| **Screenshots** | Store failure screenshots to S3/R2 |
-| **Scheduling** | Add cron-based auto-runs via node-cron |
-| **Notifications** | Send Slack/email alerts on failures |
-| **Multi-tenant** | Add workspace/org scoping |
+| **Database** | Replace in-memory `db.js` with PostgreSQL + Prisma ORM |
+| **Job Queue** | Add BullMQ + Redis for background crawl/run jobs with retries |
+| **Auth** | Add user authentication (NextAuth, Clerk, or JWT middleware) |
+| **File Storage** | Store videos and screenshots to S3/R2 instead of local disk |
+| **Scheduling** | Add cron-based auto-runs via `node-cron` or a job scheduler |
+| **Notifications** | Send Slack/email alerts on test failures |
+| **Multi-tenancy** | Add workspace/organisation scoping to projects and tests |
+| **CI/CD Integration** | Expose a run trigger webhook for GitHub Actions / GitLab CI |
 
 ---
 
@@ -220,10 +326,10 @@ Sentri is production-ready out of the box, but here are recommended enhancements
 Pull requests are welcome! For major changes, please open an issue first to discuss what you'd like to change.
 
 1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m 'Add my feature'`
+4. Push to the branch: `git push origin feature/my-feature`
+5. Open a Pull Request against `main`
 
 ---
 
