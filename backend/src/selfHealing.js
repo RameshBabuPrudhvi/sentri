@@ -258,19 +258,19 @@ export function applyHealingTransforms(code) {
     //
     // Non-role assertions (toHaveURL, toContainText, etc.) are left alone.
     .replace(
-      /expect\(page\.getByRole\(['"`](button|link)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
+      /(?:await\s+)?expect\(page\.getByRole\(['"`](button|link)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
       "await safeExpect(page, expect, '$2', '$1')"
     )
     .replace(
-      /expect\(page\.getByRole\(['"`](?:textbox|searchbox|combobox)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
+      /(?:await\s+)?expect\(page\.getByRole\(['"`](?:textbox|searchbox|combobox)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
       "await safeExpect(page, expect, '$1')"
     )
     .replace(
-      /expect\(page\.getByLabel\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
+      /(?:await\s+)?expect\(page\.getByLabel\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
       "await safeExpect(page, expect, '$1')"
     )
     .replace(
-      /expect\(page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\)\.toBeVisible\(\)/g,
+      /(?:await\s+)?expect\(page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\)\.toBeVisible\(\)/g,
       "await safeExpect(page, expect, '$1')"
     );
 }
