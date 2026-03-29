@@ -23,6 +23,7 @@ export const api = {
   // Crawl & Run
   crawl: (id) => req("POST", `/projects/${id}/crawl`),
   runTests: (id) => req("POST", `/projects/${id}/run`),
+  runSingleTest: (testId) => req("POST", `/tests/${testId}/run`),
 
   // Tests
   getTests: (id) => req("GET", `/projects/${id}/tests`),

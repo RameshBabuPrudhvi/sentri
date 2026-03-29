@@ -176,7 +176,39 @@ app.delete("/api/projects/:id/tests/:testId", (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── Runs ─────────────────────────────────────────────────────────────────────
+// ── Run a single test by ID ───────────────────────────────────────────────────
+app.post("/api/tests/:testId/run", async (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test) return res.status(404).json({ error: "test not found" });
+
+  const project = db.projects[test.projectId];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const runId = uuidv4();
+  const run = {
+    id: runId,
+    projectId: project.id,
+    type: "test_run",
+    status: "running",
+    startedAt: new Date().toISOString(),
+    logs: [],
+    results: [],
+    passed: 0,
+    failed: 0,
+    total: 1,
+  };
+  db.runs[runId] = run;
+
+  runTests(project, [test], run, db).catch((err) => {
+    run.status = "failed";
+    run.error = err.message;
+    run.finishedAt = new Date().toISOString();
+  });
+
+  res.json({ runId });
+});
+
+
 
 app.get("/api/projects/:id/runs", (req, res) => {
   const runs = Object.values(db.runs)
