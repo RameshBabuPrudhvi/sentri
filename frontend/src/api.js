@@ -26,6 +26,8 @@ export const api = {
 
   // Tests
   getTests: (id) => req("GET", `/projects/${id}/tests`),
+  getTest: (testId) => req("GET", `/tests/${testId}`),
+  createTest: (projectId, data) => req("POST", `/projects/${projectId}/tests`, data),
   deleteTest: (projectId, testId) => req("DELETE", `/projects/${projectId}/tests/${testId}`),
 
   // Test review actions (draft → approved / rejected)

@@ -373,7 +373,10 @@ export default function ProjectDetail() {
                               <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
                                 style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
                             </td>
-                            <td>
+                            <td
+                              style={{ cursor: "pointer" }}
+                              onClick={() => navigate(`/tests/${t.id}`)}
+                            >
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <AgentTag type="TA" />
                                 <div>
@@ -478,7 +481,7 @@ export default function ProjectDetail() {
                   </thead>
                   <tbody>
                     {regressionTests.map(t => (
-                      <tr key={t.id}>
+                      <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <AgentTag type="TA" />

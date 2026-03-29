@@ -131,6 +131,46 @@ app.get("/api/projects/:id/tests", (req, res) => {
   res.json(tests);
 });
 
+// ── Single test by ID (for TestDetail page) ───────────────────────────────────
+app.get("/api/tests/:testId", (req, res) => {
+  const test = db.tests[req.params.testId];
+  if (!test) return res.status(404).json({ error: "not found" });
+  res.json(test);
+});
+
+// ── Manual test creation ──────────────────────────────────────────────────────
+app.post("/api/projects/:id/tests", (req, res) => {
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const { name, description, steps, playwrightCode, priority, type } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
+
+  const testId = uuidv4();
+  const test = {
+    id: testId,
+    projectId: project.id,
+    name: name.trim(),
+    description: description?.trim() || "",
+    steps: Array.isArray(steps) ? steps : [],
+    playwrightCode: playwrightCode || null,
+    priority: priority || "medium",
+    type: type || "manual",
+    sourceUrl: project.url,
+    pageTitle: project.name,
+    createdAt: new Date().toISOString(),
+    lastResult: null,
+    lastRunAt: null,
+    qualityScore: 50,
+    isJourneyTest: false,
+    reviewStatus: "approved", // manually created tests are pre-approved
+    reviewedAt: new Date().toISOString(),
+  };
+
+  db.tests[testId] = test;
+  res.status(201).json(test);
+});
+
 app.delete("/api/projects/:id/tests/:testId", (req, res) => {
   delete db.tests[req.params.testId];
   res.json({ ok: true });
