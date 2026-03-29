@@ -32,8 +32,9 @@ const db = getDb();
 
 // ─── Activity Logger ──────────────────────────────────────────────────────────
 // Records user/system actions so the Work page shows a complete timeline.
-// Types: generate, regenerate, create, edit, approve, reject, restore, delete,
-//        crawl_start, crawl_done, test_run_start, test_run_done
+// Types: create_project, generate, regenerate, create, edit, approve, reject,
+//        restore, delete, crawl_start, crawl_done, test_run_start,
+//        test_run_done, settings_update
 function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
   const id = uuidv4();
   db.activities[id] = {
@@ -66,6 +67,12 @@ app.post("/api/projects", (req, res) => {
     status: "idle",
   };
   db.projects[id] = project;
+
+  logActivity({
+    type: "create_project", projectId: id, projectName: name,
+    detail: `Project created — "${name}" (${url})`,
+  });
+
   res.json(project);
 });
 
@@ -605,6 +612,11 @@ app.post("/api/settings", (req, res) => {
 
   setRuntimeKey(provider, apiKey.trim());
 
+  logActivity({
+    type: "settings_update",
+    detail: `API key configured for ${getProviderMeta()?.name || provider}`,
+  });
+
   res.json({
     ok: true,
     provider,
@@ -617,6 +629,12 @@ app.post("/api/settings", (req, res) => {
 app.delete("/api/settings/:provider", (req, res) => {
   const { provider } = req.params;
   setRuntimeKey(provider, "");
+
+  logActivity({
+    type: "settings_update",
+    detail: `API key removed for provider "${provider}"`,
+  });
+
   res.json({ ok: true });
 });
 
