@@ -253,6 +253,11 @@ export async function generateSingleTest(project, run, db, { name, description }
 
   const syntheticElements = [];
   const classified = await classifyPageWithAI(syntheticSnapshot, syntheticElements);
+  // Force high priority so generateAllTests routes through section 2 (which
+  // propagates errors) instead of section 3 (which silently catches them).
+  // The isHighPriority flag is only meant to reduce coverage during multi-page
+  // crawls — when a user explicitly requests generation, every page is high priority.
+  classified.isHighPriority = true;
   log(run, `   Intent: ${classified.dominantIntent} (confidence: ${classified.intentConfidence})`);
   if (classified._aiAssisted) {
     log(run, `   🤖 AI-assisted classification`);
