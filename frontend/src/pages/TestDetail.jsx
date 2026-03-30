@@ -84,6 +84,35 @@ function AvatarChip({ name }) {
   );
 }
 
+// ── Playwright syntax highlighter ─────────────────────────────────────────────
+function highlightCode(code) {
+  // Escape HTML first
+  const esc = code
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  return esc
+    // Single-line comments
+    .replace(/(\/\/[^\n]*)/g, '<span style="color:#546174;font-style:italic">$1</span>')
+    // Strings (single + double + template, non-greedy)
+    .replace(/(`[^`]*`|'[^']*'|"[^"]*")/g, '<span style="color:#c3e88d">$1</span>')
+    // Keywords
+    .replace(/\b(import|export|from|const|let|var|async|await|return|if|else|true|false|null|undefined|new|typeof|instanceof|of|in|for|while|do|switch|case|break|continue|throw|try|catch|finally|class|extends|default)\b/g,
+      '<span style="color:#c792ea">$1</span>')
+    // Playwright / test globals
+    .replace(/\b(test|expect|describe|beforeAll|afterAll|beforeEach|afterEach|page|context|browser|request)\b/g,
+      '<span style="color:#82aaff">$1</span>')
+    // Method calls  .foo(
+    .replace(/\.([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*\()/g,
+      '.<span style="color:#82aaff">$1</span>$2')
+    // Numbers
+    .replace(/\b(\d+)\b/g, '<span style="color:#f78c6c">$1</span>')
+    // Arrow / operators
+    .replace(/(=&gt;|===|!==|==|!=|\|\||&amp;&amp;)/g,
+      '<span style="color:#89ddff">$1</span>');
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function TestDetail() {
   const { testId } = useParams();
@@ -103,6 +132,15 @@ export default function TestDetail() {
   const [editPriority, setEditPriority] = useState("medium");
   const [saving, setSaving]           = useState(false);
   const [editError, setEditError]     = useState(null);
+
+  // ── Code editor modal state ──────────────────────────────────────────────
+  const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+  const [editedCode, setEditedCode]         = useState("");
+  const [codeSaving, setCodeSaving]         = useState(false);
+  const [codeSaveError, setCodeSaveError]   = useState(null);
+  const [codeSaveSuccess, setCodeSaveSuccess] = useState(false);
+  const [cursorPos, setCursorPos]           = useState({ line: 1, col: 1 });
+  const [copySuccess, setCopySuccess]       = useState(false);
 
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
@@ -162,6 +200,55 @@ export default function TestDetail() {
   function cancelEditing() {
     setEditing(false);
     setEditError(null);
+  }
+
+  function openCodeEditor() {
+    setEditedCode(test.playwrightCode || "");
+    setCodeSaveError(null);
+    setCodeSaveSuccess(false);
+    setCursorPos({ line: 1, col: 1 });
+    setCopySuccess(false);
+    setCodeEditorOpen(true);
+  }
+
+  function handleCursorMove(e) {
+    const ta = e.target;
+    const text = ta.value.substring(0, ta.selectionStart);
+    const lines = text.split("\n");
+    setCursorPos({ line: lines.length, col: lines[lines.length - 1].length + 1 });
+  }
+
+  async function handleCopyCode() {
+    try {
+      await navigator.clipboard.writeText(editedCode);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch { /* ignore */ }
+  }
+
+  function handleDownloadCode() {
+    const filename = (test.name || "test").replace(/[^a-z0-9]+/gi, "-").toLowerCase() + ".spec.ts";
+    const blob = new Blob([editedCode], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+  }
+
+  async function handleSaveCode() {
+    setCodeSaving(true);
+    setCodeSaveError(null);
+    setCodeSaveSuccess(false);
+    try {
+      const updated = await api.updateTest(testId, { playwrightCode: editedCode });
+      setTest(updated);
+      setCodeSaveSuccess(true);
+      setTimeout(() => setCodeSaveSuccess(false), 2500);
+    } catch (err) {
+      setCodeSaveError(err.message || "Failed to save code.");
+    } finally {
+      setCodeSaving(false);
+    }
   }
 
   function updateEditStep(i, val) {
@@ -360,7 +447,29 @@ export default function TestDetail() {
               }}>
                 <CheckCircle2 size={14} color="var(--text2)" />
               </div>
-              <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0 }}>Test Steps</h2>
+              <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0, flex: 1 }}>Test Steps</h2>
+              {test.playwrightCode && !editing && (
+                <button
+                  onClick={openCodeEditor}
+                  title="View / edit Playwright source code"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    background: "var(--bg2)", border: "1px solid var(--border)",
+                    borderRadius: 6, cursor: "pointer", padding: "4px 10px",
+                    fontSize: "0.73rem", fontWeight: 600, color: "var(--accent)",
+                    fontFamily: "var(--font-mono)", letterSpacing: "0.02em",
+                    transition: "background 0.15s, border-color 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "var(--accent-bg)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                >
+                  {"</>"}
+                  <span style={{ fontFamily: "var(--font-sans, inherit)", letterSpacing: 0 }}>Source</span>
+                  {test.codeRegeneratedAt && (
+                    <span style={{ fontSize: "0.65rem", color: "var(--green)", marginLeft: 2 }}>✓</span>
+                  )}
+                </button>
+              )}
             </div>
 
             {editing ? (
@@ -443,34 +552,6 @@ export default function TestDetail() {
                   ))}
                 </div>
               )
-            )}
-
-            {/* Playwright code block (collapsed) */}
-            {test.playwrightCode && !editing && (
-              <details style={{ marginTop: 16 }}>
-                <summary style={{
-                  cursor: "pointer", fontSize: "0.78rem", color: "var(--accent)",
-                  fontWeight: 600, userSelect: "none", listStyle: "none",
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <ChevronRight size={13} style={{ transition: "transform 0.2s" }} />
-                  View generated Playwright code
-                  {test.codeRegeneratedAt && (
-                    <span style={{ fontSize: "0.68rem", color: "var(--green)", fontWeight: 500, marginLeft: 6 }}>
-                      ✓ regenerated
-                    </span>
-                  )}
-                </summary>
-                <pre style={{
-                  marginTop: 12, padding: 16,
-                  background: "#0f1117", borderRadius: 8,
-                  fontSize: "0.73rem", color: "#8b9cf4",
-                  overflowX: "auto", lineHeight: 1.8, maxHeight: 360,
-                  whiteSpace: "pre-wrap", wordBreak: "break-all",
-                }}>
-                  {test.playwrightCode}
-                </pre>
-              </details>
             )}
 
             {/* Editing hint: code will be regenerated on save */}
@@ -575,6 +656,309 @@ export default function TestDetail() {
             )}
           </div>
         </div>
+
+        {/* ── Code Editor Modal ───────────────────────────────────────────── */}
+        {codeEditorOpen && (
+          <div
+            onClick={e => { if (e.target === e.currentTarget) setCodeEditorOpen(false); }}
+            style={{
+              position: "fixed", inset: 0, zIndex: 1000,
+              background: "rgba(0,0,0,0.55)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 24,
+            }}
+          >
+            <div style={{
+              width: "100%", maxWidth: 880, maxHeight: "90vh",
+              display: "flex", flexDirection: "column",
+              borderRadius: 12, overflow: "hidden",
+              border: "1px solid #2a2d3e",
+              boxShadow: "0 32px 80px rgba(0,0,0,0.6)",
+            }}>
+
+              {/* ── Header ── */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "13px 18px",
+                background: "var(--bg)",
+                borderBottom: "1px solid var(--border)",
+              }}>
+                {/* Language pill */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "rgba(124,106,245,0.12)", border: "1px solid rgba(124,106,245,0.3)",
+                  borderRadius: 6, padding: "4px 10px",
+                  fontFamily: "var(--font-mono)", fontSize: "0.72rem",
+                  fontWeight: 600, color: "#a89cf7",
+                }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#7c6af5", flexShrink: 0, display: "inline-block" }} />
+                  TypeScript
+                </div>
+
+                {/* Title */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.88rem", color: "var(--text)" }}>
+                    Playwright source code
+                    {test.codeRegeneratedAt && (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        background: "rgba(34,197,94,0.1)", color: "#22c55e",
+                        fontSize: "0.68rem", borderRadius: 4, padding: "2px 7px", marginLeft: 8,
+                      }}>✓ auto-generated</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 2 }}>
+                    {test.name}
+                  </div>
+                </div>
+
+                {/* Icon buttons */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {/* Copy */}
+                  <button
+                    onClick={handleCopyCode}
+                    title="Copy code"
+                    style={{
+                      background: copySuccess ? "rgba(34,197,94,0.12)" : "none",
+                      border: "none", cursor: "pointer",
+                      color: copySuccess ? "#22c55e" : "var(--text3)",
+                      padding: "6px 8px", borderRadius: 6,
+                      display: "flex", alignItems: "center", gap: 5,
+                      fontSize: "0.72rem", fontWeight: 500,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {copySuccess ? <CheckCircle2 size={14} /> : (
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M11 5.5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5.5" stroke="currentColor" strokeWidth="1.2"/>
+                      </svg>
+                    )}
+                    {copySuccess ? "Copied!" : "Copy"}
+                  </button>
+
+                  {/* Download */}
+                  <button
+                    onClick={handleDownloadCode}
+                    title="Download .spec.ts"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: "var(--text3)", padding: "6px 8px", borderRadius: 6,
+                      display: "flex", alignItems: "center", gap: 5,
+                      fontSize: "0.72rem", fontWeight: 500,
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                      <path d="M2 12h12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                    </svg>
+                    Download
+                  </button>
+
+                  <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 4px" }} />
+
+                  {/* Close */}
+                  <button
+                    onClick={() => setCodeEditorOpen(false)}
+                    title="Close"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: "var(--text3)", padding: 6, borderRadius: 6,
+                      display: "flex", alignItems: "center",
+                    }}
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Tab bar ── */}
+              <div style={{
+                display: "flex", alignItems: "center",
+                padding: "0 16px",
+                background: "#0d0f17",
+                borderBottom: "1px solid #1e2130",
+              }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "8px 14px",
+                  fontSize: "0.72rem", fontFamily: "var(--font-mono)",
+                  color: "#cdd5f0",
+                  borderBottom: "2px solid #7c6af5",
+                  userSelect: "none",
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <rect x="2" y="2" width="12" height="12" rx="2" stroke="#7c6af5" strokeWidth="1.2"/>
+                    <path d="M5 8h6M8 5v6" stroke="#7c6af5" strokeWidth="1.2" strokeLinecap="round"/>
+                  </svg>
+                  {(test.name || "test").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.spec.ts
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7c6af5", display: "inline-block" }} />
+                </div>
+              </div>
+
+              {/* ── Toolbar ── */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "7px 14px",
+                background: "#10121a",
+                borderBottom: "1px solid #1e2130",
+              }}>
+                {[
+                  { label: "Wrap lines" },
+                  { label: "Find" },
+                ].map(({ label }) => (
+                  <button key={label} style={{
+                    background: "none", border: "1px solid #2a2d3e", borderRadius: 5,
+                    cursor: "pointer", color: "#8892b0", padding: "3px 10px",
+                    fontSize: "0.7rem", fontFamily: "var(--font-sans)",
+                  }}>{label}</button>
+                ))}
+                <div style={{ width: 1, height: 14, background: "#2a2d3e", margin: "0 2px" }} />
+                <button style={{
+                  background: "none", border: "1px solid #2a2d3e", borderRadius: 5,
+                  cursor: "pointer", color: "#8892b0", padding: "3px 10px",
+                  fontSize: "0.7rem", fontFamily: "var(--font-sans)",
+                }}>Format</button>
+                <div style={{ marginLeft: "auto", fontSize: "0.68rem", fontFamily: "var(--font-mono)", color: "#4a5070" }}>
+                  {editedCode.split("\n").length} lines · UTF-8
+                </div>
+              </div>
+
+              {/* ── Editor: line numbers + highlighted overlay ── */}
+              <div style={{ display: "flex", background: "#13151c", flex: 1, overflow: "auto", minHeight: 360 }}>
+                {/* Line numbers */}
+                <div style={{
+                  padding: "14px 0",
+                  minWidth: 48, flexShrink: 0,
+                  textAlign: "right",
+                  fontFamily: "'Fira Code', 'Cascadia Code', monospace",
+                  fontSize: "0.78rem", lineHeight: "1.75",
+                  color: "#3a3f5c",
+                  borderRight: "1px solid #1e2130",
+                  userSelect: "none",
+                  alignSelf: "flex-start",
+                  minHeight: "100%",
+                }}>
+                  {editedCode.split("\n").map((_, i) => (
+                    <div key={i} style={{
+                      padding: "0 10px",
+                      color: i + 1 === cursorPos.line ? "#7c6af5" : "#3a3f5c",
+                    }}>{i + 1}</div>
+                  ))}
+                </div>
+
+                {/* Highlighted pre + transparent textarea overlay */}
+                <div style={{ flex: 1, position: "relative" }}>
+                  {/* Syntax-highlighted layer */}
+                  <pre
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute", inset: 0,
+                      margin: 0, padding: "14px 18px",
+                      fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+                      fontSize: "0.78rem", lineHeight: "1.75",
+                      color: "#cdd5f0",
+                      whiteSpace: "pre-wrap", wordBreak: "break-all",
+                      overflowWrap: "break-word",
+                      pointerEvents: "none",
+                      background: "transparent",
+                      border: "none", outline: "none",
+                    }}
+                    dangerouslySetInnerHTML={{ __html: highlightCode(editedCode) + "\n" }}
+                  />
+                  {/* Transparent editable textarea on top */}
+                  <textarea
+                    value={editedCode}
+                    onChange={e => setEditedCode(e.target.value)}
+                    onClick={handleCursorMove}
+                    onKeyUp={handleCursorMove}
+                    spellCheck={false}
+                    style={{
+                      position: "absolute", inset: 0,
+                      width: "100%", height: "100%",
+                      background: "transparent", color: "transparent",
+                      fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+                      fontSize: "0.78rem", lineHeight: "1.75",
+                      padding: "14px 18px", border: "none", outline: "none",
+                      resize: "none", boxSizing: "border-box",
+                      caretColor: "#7c6af5",
+                      tabSize: 2,
+                      whiteSpace: "pre-wrap", wordBreak: "break-all",
+                      overflowWrap: "break-word",
+                      overflow: "hidden",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* ── Footer ── */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 16px",
+                background: "var(--bg)",
+                borderTop: "1px solid var(--border)",
+              }}>
+                {/* Status messages */}
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.7rem", color: "var(--text3)" }}>
+                    Ln {cursorPos.line}, Col {cursorPos.col}
+                  </span>
+                  <div style={{ width: 1, height: 12, background: "var(--border)" }} />
+                  {codeSaveError ? (
+                    <span style={{ fontSize: "0.75rem", color: "var(--red)" }}>{codeSaveError}</span>
+                  ) : codeSaveSuccess ? (
+                    <span style={{ fontSize: "0.75rem", color: "#22c55e", display: "flex", alignItems: "center", gap: 5 }}>
+                      <CheckCircle2 size={13} /> Saved successfully
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+                      Changes override auto-generated code
+                    </span>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <button
+                  onClick={() => { setEditedCode(test.playwrightCode || ""); }}
+                  style={{
+                    background: "none", border: "1px solid var(--border)",
+                    borderRadius: 6, cursor: "pointer", color: "var(--text2)",
+                    padding: "6px 13px", fontSize: "0.78rem",
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}
+                >
+                  <RotateCcw size={12} /> Discard
+                </button>
+                <button
+                  onClick={() => setCodeEditorOpen(false)}
+                  style={{
+                    background: "none", border: "1px solid var(--border)",
+                    borderRadius: 6, cursor: "pointer", color: "var(--text2)",
+                    padding: "6px 13px", fontSize: "0.78rem",
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}
+                >
+                  <X size={12} /> Close
+                </button>
+                <button
+                  onClick={handleSaveCode}
+                  disabled={codeSaving}
+                  style={{
+                    background: "#5b4bdd", border: "none",
+                    borderRadius: 6, cursor: "pointer", color: "#fff",
+                    padding: "6px 16px", fontSize: "0.78rem", fontWeight: 600,
+                    display: "flex", alignItems: "center", gap: 6,
+                    opacity: codeSaving ? 0.7 : 1,
+                  }}
+                >
+                  {codeSaving ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
+                  {codeSaving ? "Saving…" : "Save code"}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
         {/* RIGHT SIDEBAR */}
         <div className="card" style={{ padding: 22 }}>
