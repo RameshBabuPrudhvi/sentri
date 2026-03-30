@@ -264,12 +264,10 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
-    try {
-      const tests = await generateIntentTests(classifiedPage, snapshot);
-      for (const t of tests) {
-        allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
-      }
-    } catch {}
+    const tests = await generateIntentTests(classifiedPage, snapshot);
+    for (const t of tests) {
+      allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
+    }
   }
 
   return allTests;

@@ -268,11 +268,19 @@ export function getSelfHealingHelperCode(healingHints) {
 // The pseudo-selector pattern requires a tag-like word followed by : and another
 // word-char (e.g. `div:hover`, `input:focus`) — a trailing colon like "Email:"
 // won't match because the colon is followed by a space or end-of-string.
-const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|\s[>~+]\s|\w:(?::|(?=[a-zA-Z-]\w))|\w\[/;
+// The combinator pattern requires selector-like context on BOTH sides:
+// a word-char or closing-bracket before the combinator, and a word-char,
+// dot, hash, or bracket after it. This avoids matching human-readable
+// text like "Add + Continue" or "Terms + Conditions" where both sides
+// are just words separated by spaces.
+const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|(?:[\w\])])\s[>~+]\s(?:[\w#.\[:])|(?:\w):(?::|(?=[a-zA-Z-]\w))|\w\[/;
 
 function looksLikeCssSelector(arg) {
   return CSS_SELECTOR_RE.test(arg.trim());
 }
+
+// Escape single quotes in captured text so injecting into '...' strings is safe.
+function esc(s) { return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 
 export function applyHealingTransforms(code) {
   return code
@@ -281,36 +289,36 @@ export function applyHealingTransforms(code) {
     // e.g. page.click('Sign in') → safeClick, but page.click('#btn') stays as-is.
     .replace(
       /\bpage\.click\(['"`]([^'"`]+)['"`]\)/g,
-      (match, arg) => looksLikeCssSelector(arg) ? match : `safeClick(page, '${arg}')`
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeClick(page, '${esc(arg)}')`
     )
     .replace(
       /\bpage\.fill\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
-      (match, arg, val) => looksLikeCssSelector(arg) ? match : `safeFill(page, '${arg}', ${val})`
+      (match, arg, val) => looksLikeCssSelector(arg) ? match : `safeFill(page, '${esc(arg)}', ${val})`
     )
     .replace(
       /page\.getByText\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
-      "safeClick(page, '$1')"
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
     )
     .replace(
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.click\(\)/g,
-      "safeClick(page, '$1')"
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
     )
     // page.locator(...).click() — leave CSS-based locators alone
     .replace(
       /page\.locator\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
-      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${sel}')`
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
     )
     .replace(
       /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
-      "safeFill(page, '$1', $2)"
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
     )
     .replace(
       /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
-      "safeFill(page, '$1', $2)"
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
     )
     .replace(
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.fill\(([^)]+)\)/g,
-      "safeFill(page, '$1', $2)"
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
     )
     // ── Assertion transforms ────────────────────────────────────────────────
     // Rewrite ALL role-based visibility assertions into safeExpect.
@@ -333,29 +341,29 @@ export function applyHealingTransforms(code) {
     // Scoped roles — keep role hint
     .replace(
       /(?:await\s+)?expect\(page\.getByRole\(['"`](button|link|menuitem|tab|heading|img|navigation|listitem|cell|row|dialog|alert|checkbox|radio|switch|slider|progressbar|option)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$2', '$1')"
+      (match, role, name) => `await safeExpect(page, expect, '${esc(name)}', '${esc(role)}')`
     )
     // Input-like roles — drop role (safeExpect waterfall covers all input types)
     .replace(
       /(?:await\s+)?expect\(page\.getByRole\(['"`](?:textbox|searchbox|combobox|spinbutton)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$1')"
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
     )
     // Catch-all for any remaining getByRole(...).toBeVisible() with unknown roles
     .replace(
       /(?:await\s+)?expect\(page\.getByRole\(['"`]([^'"`]+)['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$2', '$1')"
+      (match, role, name) => `await safeExpect(page, expect, '${esc(name)}', '${esc(role)}')`
     )
     .replace(
       /(?:await\s+)?expect\(page\.getByLabel\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$1')"
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
     )
     .replace(
       /(?:await\s+)?expect\(page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$1')"
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
     )
     .replace(
       /(?:await\s+)?expect\(page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
-      "await safeExpect(page, expect, '$1')"
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
     );
 }
 
