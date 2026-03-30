@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Plus, X, Filter, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Play, Flag } from "lucide-react";
 import { api } from "../api.js";
-import GenerateView from "../components/GenerateView.jsx";
 
 const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
 const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
@@ -23,7 +22,7 @@ function StatusBadge({ result }) {
 // Flow: form → generating steps → review steps → generating code → done (draft)
 
 function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
-  // "form" | "gen-steps" | "review" | "gen-code" | "done"
+  // "form" | "gen-steps"
   const [phase, setPhase] = useState("form");
 
   const [name, setName]               = useState("");
@@ -31,11 +30,6 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
   // Auto-populate: prefer defaultProjectId, then first project
   const [projectId, setProjectId]     = useState(defaultProjectId || projects[0]?.id || "");
   const [error, setError]             = useState(null);
-  const [createdTest, setCreatedTest] = useState(null);
-  const [isSaving, setIsSaving]       = useState(false);
-
-  // Editable generated steps (review phase)
-  const [generatedSteps, setGeneratedSteps] = useState([]);
 
   const navigate  = useNavigate();
   const nameRef   = useRef(null);
@@ -47,79 +41,35 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // ── Phase 1: submit form → ask AI for steps ────────────────────────────────
+  // ── Phase 1: submit form → trigger AI generation → redirect to project page
   async function handleGenerateSteps(e) {
     e?.preventDefault();
     setError(null);
     if (!name.trim())    { setError("Test name is required.");    return; }
     if (!projectId)      { setError("Please select a project.");  return; }
 
-    // If a previous draft was already created (user navigated back and is
-    // re-generating), delete the orphan so we don't leak draft tests.
-    if (createdTest) {
-      api.deleteTest(createdTest.projectId, createdTest.id).catch(() => {});
-      setCreatedTest(null);
-    }
-
     setPhase("gen-steps");
     try {
-      // Hit the AI generate endpoint — backend phase 1 gives us steps
-      // We do this in two calls so the user can review steps before code is written.
-      // Use the lightweight /generate endpoint which returns steps + code together.
+      // Fire-and-forget: the backend creates a run (type: "generate") and
+      // processes the pipeline synchronously. We redirect immediately to the
+      // project page so the user sees the run appear in the Runs tab.
       const result = await api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
       });
 
-      // The backend returns 201 with a full test object on success, or 200
-      if (!result?.id) {
-        setError(result?.message || "AI generation completed but no tests passed validation. Try rephrasing your description.");
-        setPhase("form");
-        return;
-      }
+      // Notify parent so the test list refreshes
+      if (result?.id && onCreated) onCreated(result);
 
-      // result has .steps and .playwrightCode from backend
-      setGeneratedSteps(result.steps || []);
-      setCreatedTest(result); // hold the full test for the done screen
-      setPhase("review");
-     } catch (err) {
-          setError(err.message || "AI generation failed. Check your API key in Settings.");
-          setPhase("form");
-     }
-  }
-
-  // ── Phase 2: user edits steps, then confirms → persist edits → show done ──
-  async function handleConfirmSteps() {
-    setError(null);
-    // Persist the user-edited steps back to the backend. The test was already
-    // saved as a draft by the backend during handleGenerateSteps, but any
-    // additions, removals, or rewrites the user made in the review UI would
-    // otherwise be silently discarded — the UI said "Save as Draft" but never
-    // actually saved anything. We PATCH the steps now before transitioning.
-    try {
-      setIsSaving(true);
-      const updated = await api.updateTest(createdTest.id, {
-        steps: generatedSteps.filter(s => s.trim()),
-        regenerateCode: true,
-      });
-      setPhase("done");
-      if (onCreated) onCreated(updated);
+      // Close modal and redirect to the project detail page.
+      // The run will be visible in the Runs tab, and the generated tests
+      // will appear under "Generated Tests (Review Required)" as Draft.
+      onClose();
+      navigate(`/projects/${projectId}`);
     } catch (err) {
-      setError(err.message || "Failed to save steps. Please try again.");
-    } finally {
-      setIsSaving(false);
+      setError(err.message || "AI generation failed. Check your API key in Settings.");
+      setPhase("form");
     }
-  }
-
-  // Step editing helpers
-  function updateStep(i, val) {
-    setGeneratedSteps(prev => prev.map((s, idx) => idx === i ? val : s));
-  }
-  function removeStep(i) {
-    setGeneratedSteps(prev => prev.filter((_, idx) => idx !== i));
-  }
-  function addStep() {
-    setGeneratedSteps(prev => [...prev, ""]);
   }
 
   const selectedProject = projects.find(p => p.id === projectId);
@@ -145,12 +95,11 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
         border: "1px solid var(--border)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: phase === "review" ? "min(600px, 96vw)" : "min(500px, 96vw)",
+        width: "min(500px, 96vw)",
         maxHeight: "90vh",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        transition: "width 0.2s ease",
       }}>
         {/* Header */}
         <div style={{
@@ -159,38 +108,10 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
           borderBottom: "1px solid var(--border)",
           flexShrink: 0,
         }}>
-          {phase === "review" && (
-            <button
-              onClick={() => setPhase("form")}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", padding: 2, display: "flex" }}
-            >
-              <ChevronRight size={17} style={{ transform: "rotate(180deg)" }} />
-            </button>
-          )}
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
             {phase === "form"      && "Generate a Test Case"}
-            {phase === "gen-steps" && "Analysing your description…"}
-            {phase === "review"    && "Review Generated Steps"}
-            {phase === "gen-code"  && "Writing Playwright script…"}
-            {phase === "done"      && "Test Saved to Draft"}
+            {phase === "gen-steps" && "Generating Tests…"}
           </h2>
-          {/* Progress dots */}
-          {phase !== "done" && (
-            <div style={{ display: "flex", gap: 5, marginRight: 8 }}>
-              {["form", "gen-steps", "review", "done"].map((p, i) => {
-                const phaseOrder = { form: 0, "gen-steps": 1, review: 2, "gen-code": 2, done: 3 };
-                const current = phaseOrder[phase] ?? 0;
-                return (
-                  <div key={p} style={{
-                    width: i <= current ? 18 : 6,
-                    height: 6, borderRadius: 3,
-                    background: i <= current ? "var(--accent)" : "var(--bg3)",
-                    transition: "all 0.25s",
-                  }} />
-                );
-              })}
-            </div>
-          )}
           <button
             onClick={onClose}
             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}
