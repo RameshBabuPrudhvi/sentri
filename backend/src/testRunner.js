@@ -222,7 +222,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
 
       // Only pre-navigate if the generated code doesn't do it itself
       if (!codeAlreadyNavigates) {
-        await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
         await page.waitForTimeout(800);
       }
 
@@ -248,7 +248,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
 
     } else {
       // ── FALLBACK: No parseable code — run a basic smoke test ──────────────
-      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
       await page.waitForTimeout(500);
 
       const title = await page.title();
@@ -356,7 +356,7 @@ export async function runTests(project, tests, run, db) {
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
 
   const browser = await chromium.launch({
-    headless: true,
+    headless: BROWSER_HEADLESS,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });

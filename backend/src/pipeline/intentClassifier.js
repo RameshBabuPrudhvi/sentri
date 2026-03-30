@@ -112,7 +112,7 @@ export function classifyElement(element) {
 // classify the page. This handles non-English UIs, custom components, and
 // pages where keyword matching is ambiguous.
 
-const AI_THRESHOLD = 40;
+const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
 async function aiClassifyPage(snapshot) {
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
