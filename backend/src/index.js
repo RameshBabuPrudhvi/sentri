@@ -222,11 +222,12 @@ app.patch("/api/tests/:testId", async (req, res) => {
   const test = db.tests[req.params.testId];
   if (!test) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode } = req.body;
+  const { steps, name, description, priority, regenerateCode, playwrightCode } = req.body;
 
   if (typeof name === "string")        test.name        = name.trim();
   if (typeof description === "string") test.description = description.trim();
   if (typeof priority === "string")    test.priority    = priority;
+  if (typeof playwrightCode === "string") test.playwrightCode = playwrightCode;
 
   const stepsChanged = Array.isArray(steps) &&
     JSON.stringify(steps) !== JSON.stringify(test.steps);
