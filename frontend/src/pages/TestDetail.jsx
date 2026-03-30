@@ -195,9 +195,9 @@ export default function TestDetail() {
         description: editDesc.trim(),
         steps: cleanSteps,
         priority: editPriority,
-        // When steps changed, ask the backend to regenerate the Playwright code
-        // so the test script stays in sync with the human-readable steps.
-        regenerateCode: stepsChanged,
+        // Always regenerate Playwright code on save so the script stays
+        // in sync with any changes to steps, name, or description.
+        regenerateCode: true,
       });
       setTest(updated);
       setEditing(false);
@@ -618,68 +618,6 @@ export default function TestDetail() {
               </div>
             )}
           </div>
-
-          {/* Inline code preview card (read-only, collapsed by default) */}
-          {test.playwrightCode && !editing && (
-            <div className="card" style={{ overflow: "hidden" }}>
-              <button
-                onClick={openCodeEditor}
-                style={{
-                  width: "100%", background: "none", border: "none", cursor: "pointer",
-                  padding: "14px 24px",
-                  display: "flex", alignItems: "center", gap: 10, textAlign: "left",
-                }}
-              >
-                <div style={{
-                  width: 30, height: 30, borderRadius: 8,
-                  background: "rgba(124,106,245,0.1)", border: "1px solid rgba(124,106,245,0.2)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <Code2 size={14} color="#7c6af5" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "var(--text)" }}>Playwright Code</div>
-                  <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>
-                    {editedCode ? `${(test.playwrightCode || "").split("\n").length} lines` : "No code generated"}
-                    {test.codeRegeneratedAt && (
-                      <span style={{ color: "var(--green)", marginLeft: 8 }}>✓ auto-generated</span>
-                    )}
-                  </div>
-                </div>
-                <span style={{ fontSize: "0.78rem", color: "var(--accent)", fontWeight: 600 }}>
-                  Open Editor →
-                </span>
-              </button>
-              {/* Compact preview — first 8 lines */}
-              <div style={{
-                borderTop: "1px solid var(--border)",
-                background: "#13151c", padding: "12px 18px",
-                maxHeight: 180, overflow: "hidden",
-                position: "relative",
-              }}>
-                <pre
-                  style={{
-                    margin: 0,
-                    fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                    fontSize: "0.72rem", lineHeight: "1.7",
-                    color: "#cdd5f0",
-                    whiteSpace: "pre", overflow: "hidden",
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: highlightCode(
-                      (test.playwrightCode || "").split("\n").slice(0, 8).join("\n")
-                    ),
-                  }}
-                />
-                {/* Fade overlay */}
-                <div style={{
-                  position: "absolute", bottom: 0, left: 0, right: 0, height: 48,
-                  background: "linear-gradient(transparent, #13151c)",
-                  pointerEvents: "none",
-                }} />
-              </div>
-            </div>
-          )}
 
           {/* Recent Test Runs card */}
           <div className="card" style={{ padding: 24 }}>

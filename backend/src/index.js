@@ -239,8 +239,10 @@ app.patch("/api/tests/:testId", async (req, res) => {
   // Track whether code was actually regenerated in THIS request (not a prior one)
   let codeRegeneratedNow = false;
 
-  // If steps changed and caller requested code regeneration, rebuild Playwright script
-  if (stepsChanged && regenerateCode && hasProvider()) {
+  // If caller requested code regeneration, rebuild Playwright script from current steps.
+  // Regenerates whenever regenerateCode is true — not just when steps changed — so the
+  // script stays in sync with name, description, and step edits alike.
+  if (regenerateCode && hasProvider() && Array.isArray(test.steps) && test.steps.length > 0) {
     try {
       const project = db.projects[test.projectId];
       const appUrl = project?.url || test.sourceUrl || "";
@@ -301,7 +303,7 @@ Return ONLY valid JSON with no markdown fences:
 
   // Let the frontend know if the code may be out of sync with steps
   const response = { ...test };
-  if (stepsChanged && !codeRegeneratedNow) {
+  if (regenerateCode && !codeRegeneratedNow) {
     response._codeStale = true;
   }
 
