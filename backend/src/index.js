@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
-import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
+import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys, resetCircuitBreaker } from "./aiProvider.js";
 
 dotenv.config();
 
@@ -568,6 +568,9 @@ app.post("/api/settings", (req, res) => {
   }
 
   setRuntimeKey(provider, apiKey.trim());
+  // Clear the circuit breaker so the new key gets a fresh chance — a previous
+  // quota-exceeded error from the old key shouldn't block the new one.
+  resetCircuitBreaker();
 
   logActivity({
     type: "settings.update",

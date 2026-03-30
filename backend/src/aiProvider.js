@@ -82,16 +82,94 @@ const RETRY_ERRORS      = ["rate_limit_error", "overloaded_error", "Too Many Req
 const MAX_RETRIES       = 3;
 const BASE_DELAY_MS     = 2000;
 
+// ── Circuit breaker ──────────────────────────────────────────────────────────
+// Tracks consecutive failures across generateText() calls within a pipeline run.
+// When a non-retryable error (quota exceeded, auth failure) is detected, the
+// breaker trips and all subsequent calls fail immediately — preventing a crawl
+// with 50+ AI calls from spinning for minutes making doomed requests.
+const circuitBreaker = {
+  consecutiveFailures: 0,
+  lastError: null,
+  trippedAt: null,
+  // After 5 consecutive failures of any kind, stop trying
+  MAX_CONSECUTIVE_FAILURES: 5,
+  // Non-retryable errors trip the breaker immediately
+  isTripped() {
+    return this.trippedAt !== null;
+  },
+  recordSuccess() {
+    this.consecutiveFailures = 0;
+    this.lastError = null;
+    this.trippedAt = null;
+  },
+  recordFailure(err, isNonRetryable) {
+    this.consecutiveFailures++;
+    this.lastError = err;
+    if (isNonRetryable || this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+      this.trippedAt = Date.now();
+    }
+  },
+  // Auto-reset after 60s so a new user action can try again
+  check() {
+    if (!this.trippedAt) return;
+    if (Date.now() - this.trippedAt > 60_000) {
+      this.consecutiveFailures = 0;
+      this.lastError = null;
+      this.trippedAt = null;
+      return;
+    }
+    const err = new Error(
+      `AI provider circuit breaker open — ${this.lastError?.message || "too many consecutive failures"}. ` +
+      `Wait a moment and try again, or check your API key/quota in Settings.`
+    );
+    err.code = "CIRCUIT_BREAKER_OPEN";
+    throw err;
+  },
+};
+
+// Expose a manual reset so callers (e.g. settings key update) can clear it
+export function resetCircuitBreaker() {
+  circuitBreaker.consecutiveFailures = 0;
+  circuitBreaker.lastError = null;
+  circuitBreaker.trippedAt = null;
+}
+
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Quota / billing / auth errors that will NEVER succeed on retry.
+ * These trip the circuit breaker immediately.
+ */
+function isQuotaOrAuthError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  const status = err?.status || err?.statusCode || 0;
+  // 401/403 = bad key or permissions
+  if (status === 401 || status === 403) return true;
+  // Quota / billing keywords across providers
+  return /quota.*(exceeded|exhausted)/i.test(msg)
+    || /insufficient.*(funds|quota|credits|balance)/i.test(msg)
+    || (/billing/i.test(msg) && /hard.limit|not.active|past.due/i.test(msg))
+    || /exceeded.*(?:current|monthly|daily)\s*quota/i.test(msg)
+    || msg.includes("resource has been exhausted")
+    || msg.includes("exceeded your current quota")
+    || msg.includes("api key not valid")
+    || msg.includes("invalid api key")
+    || msg.includes("invalid x-goog-api-key")
+    || msg.includes("permission_denied");
+}
+
+/**
+ * Transient rate-limit errors that are worth retrying with backoff.
+ */
 function isRateLimitError(err) {
+  // Quota/auth errors are NOT retryable
+  if (isQuotaOrAuthError(err)) return false;
   const msg = err?.message || "";
   const status = err?.status || err?.statusCode || 0;
   return RATE_LIMIT_CODES.includes(status)
     || RETRY_ERRORS.some(e => msg.includes(e))
-    || msg.includes("quota")
     || msg.includes("429");
 }
 
@@ -110,6 +188,12 @@ async function withRetry(fn, label = "") {
     try {
       return await fn();
     } catch (err) {
+      // Quota/auth errors: fail immediately, trip the circuit breaker
+      if (isQuotaOrAuthError(err)) {
+        console.error(`[Sentri] Non-retryable AI error${label ? " for " + label : ""}: ${err.message}`);
+        circuitBreaker.recordFailure(err, true);
+        throw err;
+      }
       if (attempt === MAX_RETRIES) throw err;
       if (!isRateLimitError(err)) throw err;
 
@@ -181,6 +265,10 @@ async function callProvider(provider, prompt, maxTokens) {
  * @param {{ maxTokens?: number }} options
  */
 export async function generateText(prompt, options) {
+  // Check circuit breaker BEFORE making any API call — if a previous call
+  // in this pipeline run tripped it (quota exceeded, bad key), fail fast.
+  circuitBreaker.check();
+
   const provider = detectProvider();
   if (!provider) {
     throw new Error(
@@ -190,7 +278,14 @@ export async function generateText(prompt, options) {
       "  GOOGLE_API_KEY=AIza...         → https://aistudio.google.com/apikey"
     );
   }
-  return callProvider(provider, prompt, options?.maxTokens);
+  try {
+    const result = await callProvider(provider, prompt, options?.maxTokens);
+    circuitBreaker.recordSuccess();
+    return result;
+  } catch (err) {
+    circuitBreaker.recordFailure(err, isQuotaOrAuthError(err));
+    throw err;
+  }
 }
 
 export function parseJSON(text) {
