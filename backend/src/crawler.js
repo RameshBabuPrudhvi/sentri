@@ -35,6 +35,10 @@ function setStep(run, step) {
 }
 
 async function takeSnapshot(page) {
+  // Wait for SPA content to settle — domcontentloaded fires too early for SPAs.
+  // Try networkidle first (best for SPAs), fall back to a generous timeout.
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+
   return page.evaluate(() => {
     // Compute the effective ARIA role of an element (explicit or implicit)
     function getComputedRole(el) {
@@ -56,14 +60,59 @@ async function takeSnapshot(page) {
       return "";
     }
 
+    // ── Capture form structures with field relationships ──────────────────
+    // This gives the AI context about which fields belong to which form,
+    // enabling it to generate tests that fill forms correctly rather than
+    // guessing field order from a flat element list.
+    const formStructures = [];
+    document.querySelectorAll("form").forEach((form, idx) => {
+      const fields = [];
+      form.querySelectorAll("input, select, textarea").forEach(field => {
+        if (field.type === "hidden") return;
+        const label = field.labels?.[0]?.innerText?.trim()
+          || field.getAttribute("aria-label")
+          || field.getAttribute("placeholder")
+          || field.getAttribute("name")
+          || "";
+        fields.push({
+          tag: field.tagName.toLowerCase(),
+          type: field.getAttribute("type") || "",
+          label: label.slice(0, 60),
+          name: field.getAttribute("name") || "",
+          required: field.required || field.getAttribute("aria-required") === "true",
+          testId: field.getAttribute("data-testid") || field.getAttribute("data-cy") || "",
+        });
+      });
+      const submitBtn = form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+      formStructures.push({
+        id: form.id || `form-${idx}`,
+        action: form.action || "",
+        method: form.method || "get",
+        fields,
+        submitText: (submitBtn?.innerText || submitBtn?.value || "").trim().slice(0, 40),
+      });
+    });
+
+    // ── Capture semantic page sections ────────────────────────────────────
+    const sections = [];
+    document.querySelectorAll("header, nav, main, aside, footer, [role='banner'], [role='navigation'], [role='main'], [role='complementary'], [role='contentinfo']").forEach(el => {
+      const tag = el.tagName.toLowerCase();
+      const role = el.getAttribute("role") || tag;
+      const headings = Array.from(el.querySelectorAll("h1, h2, h3")).map(h => h.innerText.trim()).slice(0, 3);
+      sections.push({ role, headings });
+    });
+
+    // ── Capture interactive elements with richer metadata ─────────────────
     const elements = [];
     document.querySelectorAll(
-      "a, button, input, select, textarea, [role='button'], [role='link'], [role='combobox'], [role='searchbox'], form"
+      "a, button, input, select, textarea, [role='button'], [role='link'], [role='combobox'], [role='searchbox'], [role='tab'], [role='menuitem'], form"
     ).forEach((el) => {
       const text = (el.innerText || el.value || el.placeholder || el.getAttribute("aria-label") || "").trim().slice(0, 80);
       const computedRole = getComputedRole(el);
       const ariaLabel = el.getAttribute("aria-label") || "";
       const placeholder = el.getAttribute("placeholder") || "";
+      // Find the closest label for inputs
+      const labelText = el.labels?.[0]?.innerText?.trim() || "";
       elements.push({
         tag: el.tagName.toLowerCase(),
         text,
@@ -74,16 +123,36 @@ async function takeSnapshot(page) {
         role: computedRole,
         ariaLabel,
         placeholder,
+        label: labelText.slice(0, 60),
+        testId: el.getAttribute("data-testid") || el.getAttribute("data-cy") || "",
         visible: el.offsetParent !== null,
+        disabled: el.disabled || el.getAttribute("aria-disabled") === "true",
+        required: el.required || el.getAttribute("aria-required") === "true",
+        // Which form does this element belong to? Helps AI group interactions.
+        formId: el.closest("form")?.id || "",
       });
     });
+
+    // ── Capture heading hierarchy for context ─────────────────────────────
+    const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
+      .map(h => ({ level: parseInt(h.tagName[1]), text: h.innerText.trim().slice(0, 60) }))
+      .slice(0, 10);
+
     return {
       title: document.title,
       url: location.href,
-      elements: elements.filter(e => e.visible).slice(0, 80),
+      elements: elements.filter(e => e.visible).slice(0, 100),
       h1: Array.from(document.querySelectorAll("h1")).map(h => h.innerText).join(" | "),
+      headings,
       forms: document.querySelectorAll("form").length,
+      formStructures,
+      sections,
       hasLoginForm: !!document.querySelector("input[type='password']"),
+      // Additional page signals for the AI
+      hasModals: document.querySelectorAll("[role='dialog'], .modal, [aria-modal='true']").length > 0,
+      hasTabs: document.querySelectorAll("[role='tablist'], [role='tab']").length > 0,
+      hasTable: document.querySelectorAll("table, [role='grid']").length > 0,
+      metaDescription: document.querySelector('meta[name="description"]')?.content?.slice(0, 120) || "",
     };
   });
 }
@@ -140,7 +209,8 @@ export async function crawlAndGenerateTests(project, run, db) {
     try {
       log(run, `\u{1F4C4} Visiting (depth ${depth}): ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-      await page.waitForTimeout(800);
+      // takeSnapshot() now calls waitForLoadState('networkidle') internally,
+      // so we no longer need the arbitrary 800ms static wait here.
 
       const snapshot = await takeSnapshot(page);
 
