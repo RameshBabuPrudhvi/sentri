@@ -70,6 +70,17 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
         name: name.trim(),
         description: description.trim(),
       });
+
+      // The backend returns 201 with a full test object on success, or 200
+      // with { runId, message } when no tests passed validation. Guard
+      // against the latter so we don't enter the review phase with a
+      // non-test object (missing .id, .steps, .projectId).
+      if (!result?.id) {
+        setError(result?.message || "AI generation completed but no valid tests were produced. Try a more specific description.");
+        setPhase("form");
+        return;
+      }
+
       // result has .steps and .playwrightCode from backend
       setGeneratedSteps(result.steps || []);
       setCreatedTest(result); // hold the full test for the done screen
