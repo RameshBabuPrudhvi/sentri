@@ -123,9 +123,11 @@ async function withRetry(fn, label = "") {
 
 // ── Core API call ─────────────────────────────────────────────────────────────
 
-// 8192 tokens is enough for 5-8 complete Playwright tests with full code.
-// The previous 2000 limit caused JSON truncation mid-test, silent data loss.
-const DEFAULT_MAX_TOKENS = 8192;
+// 16384 tokens allows 10-15 complete Playwright tests with full code,
+// supporting the new two-phase PLAN+GENERATE pipeline in journeyGenerator.js
+// where the planning prompt alone can consume ~2k tokens.
+// The previous 8192 limit caused truncation on large journey test batches.
+const DEFAULT_MAX_TOKENS = 16384;
 
 async function callProvider(provider, prompt, maxTokens) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;

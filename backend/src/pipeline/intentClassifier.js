@@ -7,7 +7,13 @@
  *   HIGH   — AUTH, CHECKOUT, SEARCH, FORM_SUBMISSION, CRUD (interactive, high test value)
  *   MEDIUM — NAVIGATION (homepages, dashboards — structural tests only)
  *   LOW    — CONTENT (static pages — minimal test coverage)
+ *
+ * Classification modes:
+ *   1. Heuristic (default) — fast, keyword/pattern-based scoring
+ *   2. AI-assisted — when confidence is low (<40), asks the AI to classify
  */
+
+import { generateText, parseJSON, hasProvider } from "../aiProvider.js";
 
 // ── Intent patterns ───────────────────────────────────────────────────────────
 
@@ -101,6 +107,54 @@ export function classifyElement(element) {
   return { element, intent: bestIntent, confidence };
 }
 
+// ── AI-assisted classification ────────────────────────────────────────────────
+// When the heuristic confidence is below AI_THRESHOLD, we ask the LLM to
+// classify the page. This handles non-English UIs, custom components, and
+// pages where keyword matching is ambiguous.
+
+const AI_THRESHOLD = 40;
+
+async function aiClassifyPage(snapshot) {
+  const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
+    tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
+  }));
+
+  const prompt = `You are a QA page classifier. Given a web page's metadata and interactive elements, classify the page's dominant user intent.
+
+PAGE:
+  URL: ${snapshot.url}
+  Title: ${snapshot.title}
+  H1: ${snapshot.h1 || "none"}
+  Forms: ${snapshot.forms}
+  Has login form: ${snapshot.hasLoginForm}
+
+ELEMENTS (sample):
+${JSON.stringify(elements, null, 2)}
+
+Classify into EXACTLY ONE of these categories:
+  AUTH — login, registration, password reset
+  CHECKOUT — cart, payment, purchase flow
+  SEARCH — search bar, filters, results listing
+  FORM_SUBMISSION — contact forms, subscribe, apply
+  CRUD — create/edit/delete data
+  NAVIGATION — homepage, dashboard, navigation hub
+  CONTENT — articles, documentation, static content
+
+Return ONLY valid JSON (no markdown):
+{
+  "intent": "AUTH",
+  "confidence": 85,
+  "reason": "one-sentence explanation"
+}`;
+
+  const text = await generateText(prompt, { maxTokens: 256 });
+  const result = parseJSON(text);
+  const intent = (result.intent || "").toUpperCase();
+  const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];
+  if (!validIntents.includes(intent)) return null;
+  return { intent, confidence: result.confidence || 70 };
+}
+
 /**
  * classifyPage(snapshot, filteredElements) → page intent summary
  *
@@ -145,6 +199,40 @@ export function classifyPage(snapshot, filteredElements) {
     // Low confidence → the AI should generate fewer, more conservative tests.
     intentConfidence: Math.min(100, intentCounts[dominantIntent] || 0),
   };
+}
+
+/**
+ * classifyPageWithAI(snapshot, filteredElements) → page intent summary
+ *
+ * Same as classifyPage but falls back to the AI when heuristic confidence
+ * is below AI_THRESHOLD. Call this from the crawler pipeline instead of
+ * classifyPage when an AI provider is available.
+ */
+export async function classifyPageWithAI(snapshot, filteredElements) {
+  const heuristic = classifyPage(snapshot, filteredElements);
+
+  // If heuristic confidence is high enough, trust it
+  if (heuristic.intentConfidence >= AI_THRESHOLD) return heuristic;
+
+  // Try AI-assisted classification
+  try {
+    if (!hasProvider()) return heuristic;
+    const aiResult = await aiClassifyPage(snapshot);
+    if (!aiResult) return heuristic;
+
+    // Override the dominant intent with the AI's classification
+    const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
+    return {
+      ...heuristic,
+      dominantIntent: aiResult.intent,
+      intentConfidence: aiResult.confidence,
+      isHighPriority,
+      _aiAssisted: true,
+    };
+  } catch {
+    // AI failed — fall back to heuristic
+    return heuristic;
+  }
 }
 
 /**

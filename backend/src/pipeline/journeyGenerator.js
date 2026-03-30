@@ -183,23 +183,140 @@ Return ONLY valid JSON (no markdown, no code fences):
 }`;
 }
 
-// ── Main generators ───────────────────────────────────────────────────────────
+// ── Two-phase generators ──────────────────────────────────────────────────────
+// Phase 1 (PLAN):  Ask the AI for a lightweight test plan — names, scenarios,
+//                   and step outlines — without any Playwright code.
+// Phase 2 (GENERATE): For each planned test, ask the AI to write the full
+//                      Playwright implementation.
+//
+// Splitting the prompt this way avoids token-limit truncation on large pages
+// and gives the AI a focused context window for code generation.
+
+function buildPlanPrompt(journey, allSnapshots) {
+  const pageContexts = journey.pages.map(page => {
+    const snapshot = allSnapshots[page.url];
+    return `  Page: ${page.url} | Title: ${page.title} | Intent: ${page.dominantIntent}`;
+  }).join("\n");
+
+  return `You are a senior QA engineer. Plan 3-5 end-to-end Playwright tests for this user journey.
+Do NOT write any Playwright code yet — only output the test plan.
+
+JOURNEY: ${journey.name}
+TYPE: ${journey.type}
+DESCRIPTION: ${journey.description}
+
+PAGES:
+${pageContexts}
+
+Return ONLY valid JSON (no markdown):
+{
+  "plan": [
+    {
+      "name": "descriptive test name",
+      "description": "what user goal this validates",
+      "scenario": "positive|negative|edge_case",
+      "steps": ["Step 1", "Step 2", "Assert: expected outcome"]
+    }
+  ]
+}`;
+}
+
+function buildCodePrompt(planned, journey, allSnapshots) {
+  const pageContexts = journey.pages.map(page => {
+    const snapshot = allSnapshots[page.url];
+    return `
+  Page: ${page.url}
+  Title: ${page.title}
+  Intent: ${page.dominantIntent}
+  Key elements: ${JSON.stringify((snapshot?.elements || []).slice(0, 10), null, 2)}`;
+  }).join("\n---");
+
+  return `You are a senior QA engineer writing a Playwright test.
+
+JOURNEY: ${journey.name}
+TEST TO IMPLEMENT:
+  Name: ${planned.name}
+  Description: ${planned.description}
+  Scenario: ${planned.scenario}
+  Steps:
+${planned.steps.map((s, i) => `    ${i + 1}. ${s}`).join("\n")}
+
+PAGES IN THIS JOURNEY:
+${pageContexts}
+
+Requirements:
+1. ${SELF_HEALING_PROMPT_RULES}
+2. Include at least 3 meaningful assertions per test — for visibility checks, always use safeExpect; other assertions like toHaveURL(), toContainText(), toHaveValue() may use direct locators.
+3. Add page.waitForLoadState() between navigation steps
+4. CRITICAL: playwrightCode MUST start with await page.goto('FULL_URL') using the real URL above
+5. CRITICAL: Do NOT use placeholder URLs like 'https://example.com'
+
+Return ONLY valid JSON (no markdown):
+{
+  "name": "${planned.name}",
+  "description": "${planned.description}",
+  "priority": "high",
+  "type": "${journey.type.toLowerCase()}",
+  "scenario": "${planned.scenario}",
+  "journeyType": "${journey.type}",
+  "isJourneyTest": true,
+  "steps": ${JSON.stringify(planned.steps)},
+  "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full test code\\n});"
+}`;
+}
 
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
+ *
+ * Two-phase: PLAN then GENERATE per test.
  */
 export async function generateJourneyTest(journey, snapshotsByUrl) {
   try {
-    const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
-    const text = await generateText(prompt);
-    const result = parseJSON(text);
+    // ── Phase 1: PLAN ─────────────────────────────────────────────────────
+    const planPrompt = buildPlanPrompt(journey, snapshotsByUrl);
+    const planText = await generateText(planPrompt, { maxTokens: 4096 });
+    const planResult = parseJSON(planText);
+    const plan = Array.isArray(planResult.plan) ? planResult.plan
+      : Array.isArray(planResult) ? planResult : [];
+    if (!plan.length) return [];
 
-    if (Array.isArray(result)) return result;
-    if (Array.isArray(result.tests)) return result.tests;
-    if (result && result.name) return [result]; // legacy single-test shape
-    return [];
+    // ── Phase 2: GENERATE code for each planned test ──────────────────────
+    const tests = [];
+    for (const planned of plan) {
+      try {
+        const codePrompt = buildCodePrompt(planned, journey, snapshotsByUrl);
+        const codeText = await generateText(codePrompt);
+        const result = parseJSON(codeText);
+        tests.push(result);
+      } catch {
+        // If code generation fails for one test, keep the plan as a codeless test
+        tests.push({
+          name: planned.name,
+          description: planned.description,
+          scenario: planned.scenario,
+          steps: planned.steps,
+          isJourneyTest: true,
+          journeyType: journey.type,
+          type: journey.type.toLowerCase(),
+          priority: "high",
+          playwrightCode: null,
+        });
+      }
+    }
+    return tests;
   } catch (err) {
-    return [];
+    // Fall back to the single-prompt approach if planning fails
+    try {
+      const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
+      const text = await generateText(prompt);
+      const result = parseJSON(text);
+      if (Array.isArray(result)) return result;
+      if (Array.isArray(result.tests)) return result.tests;
+      if (result && result.name) return [result];
+      return [];
+    } catch {
+      return [];
+    }
   }
 }
 

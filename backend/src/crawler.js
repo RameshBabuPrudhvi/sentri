@@ -1,14 +1,15 @@
 /**
  * crawler.js — Sentri autonomous QA pipeline
  *
- * 7-layer pipeline:
+ * 8-layer pipeline:
  *   1. Smart crawl           (pipeline/smartCrawl.js)
  *   2. Element filtering     (pipeline/elementFilter.js)
  *   3. Intent classification (pipeline/intentClassifier.js)
  *   4. Journey generation    (pipeline/journeyGenerator.js)
  *   5. Deduplication         (pipeline/deduplicator.js)
  *   6. Assertion enhancement (pipeline/assertionEnhancer.js)
- *   7. Feedback loop         (pipeline/feedbackLoop.js — runs post-execution)
+ *   7. Validate generated tests (syntax + structure checks)
+ *   8. Feedback loop         (pipeline/feedbackLoop.js — runs post-execution)
  */
 
 import { chromium } from "playwright";
@@ -16,7 +17,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getProviderName } from "./aiProvider.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
-import { classifyPage, buildUserJourneys } from "./pipeline/intentClassifier.js";
+import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
 import { generateAllTests } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
@@ -32,6 +33,51 @@ function log(run, msg) {
 
 function setStep(run, step) {
   run.currentStep = step;
+}
+
+// ── Test validation ───────────────────────────────────────────────────────────
+// Rejects malformed or placeholder tests before they enter the DB.
+// Returns an array of issue strings — empty means the test is valid.
+
+function validateTest(test, projectUrl) {
+  const issues = [];
+
+  // Must have a meaningful name
+  if (!test.name || test.name.trim().length < 5) {
+    issues.push("name is missing or too short");
+  }
+
+  // Must have at least one step
+  if (!Array.isArray(test.steps) || test.steps.length === 0) {
+    issues.push("no test steps defined");
+  }
+
+  // Playwright code: if present, must be parseable (contain `async` and braces)
+  if (test.playwrightCode) {
+    if (!test.playwrightCode.includes("async")) {
+      issues.push("playwrightCode missing async function");
+    }
+    if (!test.playwrightCode.includes("{")) {
+      issues.push("playwrightCode missing function body");
+    }
+    // Reject placeholder URLs that the AI sometimes hallucinates
+    if (test.playwrightCode.includes("https://example.com") ||
+        test.playwrightCode.includes("http://example.com")) {
+      issues.push("playwrightCode uses placeholder example.com URL");
+    }
+    // Must reference the actual project URL (or at least page.goto)
+    if (!test.playwrightCode.includes("page.goto")) {
+      issues.push("playwrightCode missing page.goto navigation");
+    }
+  }
+
+  // Reject tests with duplicate/generic names the AI sometimes produces
+  const genericNames = ["test 1", "test 2", "test 3", "untitled", "sample test", "example test"];
+  if (test.name && genericNames.includes(test.name.toLowerCase().trim())) {
+    issues.push("generic placeholder test name");
+  }
+
+  return issues;
 }
 
 async function takeSnapshot(page) {
@@ -296,8 +342,24 @@ export async function crawlAndGenerateTests(project, run, db) {
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
-  // Store in db
+  // Layer 5: Validate generated tests — reject malformed / placeholder tests
+  setStep(run, 7);
+  log(run, `\u2705 Validating generated tests...`);
+  const validatedTests = [];
+  let rejected = 0;
   for (const t of enhancedTests) {
+    const issues = validateTest(t, project.url);
+    if (issues.length === 0) {
+      validatedTests.push(t);
+    } else {
+      rejected++;
+      log(run, `   \u274C Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
+    }
+  }
+  log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
+
+  // Store in db
+  for (const t of validatedTests) {
     const testId = uuidv4();
     db.tests[testId] = {
       // Spread AI-generated fields first so our critical fields below always win.
@@ -325,18 +387,19 @@ export async function crawlAndGenerateTests(project, run, db) {
   run.status = "completed";
   run.finishedAt = new Date().toISOString();
   run.testsGenerated = run.tests.length;
-  setStep(run, 7);
+  setStep(run, 8);
   run.pipelineStats = {
     pagesFound: snapshots.length,
     rawTestsGenerated: rawTests.length,
     duplicatesRemoved: removed,
     assertionsEnhanced: enhancedCount,
+    validationRejected: rejected,
     journeysDetected: journeys.length,
     averageQuality: dedupStats.averageQuality,
   };
 
   log(run, `\n\u{1F4CA} Pipeline Summary:`);
-  log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Final: ${enhancedTests.length}`);
-  log(run, `   Journey tests: ${enhancedTests.filter(t => t.isJourneyTest).length} | Avg quality: ${dedupStats.averageQuality}/100`);
+  log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
+  log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
   log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
 }

@@ -10,6 +10,7 @@ import {
   recordHealing,
   recordHealingFailure,
 } from "./selfHealing.js";
+import { applyFeedbackLoop } from "./pipeline/feedbackLoop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -424,4 +425,24 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+
+  // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
+  // Only runs when there are failures and an AI provider is available.
+  if (run.failed > 0) {
+    try {
+      const { hasProvider } = await import("./aiProvider.js");
+      if (hasProvider()) {
+        log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
+        const feedback = await applyFeedbackLoop(run, db);
+        if (feedback.improved > 0) {
+          log(run, `   ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
+          run.feedbackLoop = feedback;
+        } else {
+          log(run, `   ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
+        }
+      }
+    } catch (err) {
+      log(run, `   ⚠️  Feedback loop error: ${err.message}`);
+    }
+  }
 }
