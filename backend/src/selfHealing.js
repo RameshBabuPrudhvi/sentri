@@ -195,9 +195,18 @@ export function getSelfHealingHelperCode(healingHints) {
       });
     }
 
+    // Helper: restrict a locator to only fillable elements so we never
+    // try to .fill() a link, div, or other non-editable element.
+    // Playwright's getByLabel/getByPlaceholder can match <a aria-label="...">,
+    // which causes "Element is not an <input>, <textarea> or <select>" errors.
+    const FILLABLE_SELECTOR = 'input, textarea, select, [contenteditable], [role="textbox"], [role="searchbox"], [role="combobox"], [role="spinbutton"]';
+    function onlyFillable(locator) {
+      return locator.locator(FILLABLE_SELECTOR);
+    }
+
     async function safeFill(page, labelOrPlaceholder, value) {
       const strategies = [
-        p => p.getByLabel(labelOrPlaceholder),
+        p => onlyFillable(p.getByLabel(labelOrPlaceholder)),
         p => p.getByPlaceholder(labelOrPlaceholder),
         p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
         p => p.getByRole('combobox',  { name: labelOrPlaceholder }),
