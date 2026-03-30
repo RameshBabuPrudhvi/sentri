@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org)
-[![Playwright](https://img.shields.io/badge/Playwright-1.50+-blue.svg)](https://playwright.dev)
+[![Playwright](https://img.shields.io/badge/Playwright-1.58+-blue.svg)](https://playwright.dev)
 
 ---
 
@@ -27,12 +27,16 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 | 🕷️ **Autonomous Crawler** | Explores your app up to 3 levels deep, mapping all pages and interactive elements |
 | 🤖 **Multi-AI Test Generation** | Anthropic Claude Sonnet, Google Gemini 2.5 Flash, or OpenAI GPT-4o-mini — switch with one env var |
 | ✦ **Create Test from Description** | Describe a scenario in plain English; AI generates steps + a Playwright script in seconds |
+| 🧬 **Self-Healing Tests** | Multi-strategy element finding with adaptive healing history — tests auto-recover when selectors change |
+| 🔄 **Two-Phase AI Pipeline** | PLAN → GENERATE split avoids token truncation; AI-assisted intent classification for ambiguous pages |
 | 📋 **Draft → Review → Regression** | All tests (crawled or manually created) start as Draft. Approve to promote to Regression Suite |
+| ✏️ **Inline Test Editing** | Edit test steps, name, description, and priority in the UI — Playwright code auto-regenerates on save |
 | ▶️ **One-Click Regression Run** | Execute all approved tests with video recording, screenshots, network logs, and DOM snapshots |
 | 🎥 **Step Results View** | Per-test-case drill-down with browser-chrome screenshot replay and step-by-step status |
 | 🔑 **Auth Support** | Login to your app before crawling using CSS selectors for username/password fields |
 | ⚙️ **Runtime API Key Config** | Set or change your AI provider key in the Settings UI — no server restart needed |
-| 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, and pass rate trends |
+| 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, pass rate trends, and per-project analytics |
+| 📝 **Activity Log** | Complete timeline of all user and system actions — crawls, runs, edits, approvals |
 | 🐳 **Docker Ready** | Full Docker Compose setup for instant deployment |
 
 ---
@@ -106,32 +110,57 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google. The
 ### 3a. Crawl & Generate Tests (Automated)
 
 - Open your project and click **Crawl & Generate Tests**
-- Sentri visits your app, follows internal links, snapshots each page, and sends those snapshots to AI to generate 2–5 Playwright test cases per page
+- Sentri visits your app, follows internal links, snapshots each page (including form structures, semantic sections, and heading hierarchy), and sends those snapshots through an 8-step pipeline:
+  1. **Crawl** — discover pages up to 3 levels deep
+  2. **Filter** — remove noise from interactive elements
+  3. **Classify** — identify page intent (AUTH, CHECKOUT, SEARCH, etc.) with AI-assisted fallback for ambiguous pages
+  4. **Generate** — two-phase PLAN → GENERATE pipeline produces focused Playwright tests per page
+  5. **Deduplicate** — remove duplicate tests across the batch and existing project tests
+  6. **Enhance** — strengthen assertions for better coverage
+  7. **Validate** — reject malformed or placeholder tests before they enter the DB
+  8. **Done** — store validated tests as Draft
 - All generated tests appear in the **Generated Tests** tab as **Draft**
 
 ### 3b. Create a Test from Description (Manual)
 
 - Click **Create Tests** from the Tests page
 - Select your project (auto-populated), enter a test name and plain-English description
-- AI generates detailed test steps and a Playwright script — review and edit the steps before saving
+- AI generates detailed test steps and a Playwright script — review and edit the steps in a multi-phase wizard:
+  - **Form** → describe what you want to test
+  - **Generating** → AI analyses your description and writes steps + Playwright code
+  - **Review** → edit, add, remove, or reorder steps before saving
+  - **Done** → test saved as Draft
 - The test is saved as **Draft** in your project's Generated Tests queue
 
 ### 4. Review & Approve Tests
 
 - Open the **Generated Tests (Review Required)** tab in your project
+- Use the **Approved / Draft / All Tests** toggle to filter by review status
 - Inspect each Draft test — approve to promote it to Regression Suite, or reject to discard it
 - Use **Approve All** / **Reject All** for bulk actions, or select individual tests
 
-### 5. Run Regression
+### 5. Edit Tests
+
+- Open any test and click **Edit Test** to modify the name, description, steps, and priority
+- Add, remove, or reorder steps inline
+- On save, Playwright code is **automatically regenerated** from your updated steps via AI
+- Export test data + run history as JSON from the test detail page
+
+### 6. Run Regression
 
 - Click **Run Regression** to execute all approved tests
+- Tests run with **self-healing**: if a selector breaks, the runtime tries multiple fallback strategies (role, label, text, aria-label, title) and remembers which strategy won for future runs
 - Watch live progress in the Run Detail view with per-step status
 - Click any test case to drill into its **Step Results** — browser-chrome screenshot, network requests, console logs, and DOM snapshot
+- After failures, an automatic **feedback loop** classifies each failure and auto-regenerates high-priority failing tests
 
-### 6. Monitor
+### 7. Monitor
 
 - The **Dashboard** shows aggregate pass rate, test counts, and run history
-- The **Work** page lists all runs across all projects
+- The **Work** page lists all runs across all projects with search, status filters, and type filters
+- The **Reports** page provides pass/fail trend charts, per-project breakdown, flaky test detection, and top failures with CSV export
+- The **Applications** page shows per-project health at a glance with pass rate bars and test counts
+- The **Context** page displays AI provider status and per-application environment details
 
 ---
 
@@ -171,45 +200,55 @@ See [`backend/.env.example`](backend/.env.example) for the full template.
 sentri/
 ├── backend/
 │   ├── src/
-│   │   ├── index.js              # Express API server & all routes
-│   │   ├── aiProvider.js         # Multi-AI provider abstraction + retry logic
-│   │   ├── crawler.js            # Playwright crawler + AI test generator pipeline
-│   │   ├── testRunner.js         # Playwright test executor with video/screenshot capture
-│   │   ├── db.js                 # In-memory store (swap for Postgres in production)
+│   │   ├── index.js              # Express API server & all routes + activity logging
+│   │   ├── aiProvider.js         # Multi-AI provider abstraction + retry + circuit breaker
+│   │   ├── crawler.js            # 8-layer pipeline: crawl → filter → classify → generate → dedup → enhance → validate → store
+│   │   ├── selfHealing.js        # Self-healing runtime: multi-strategy element finding, healing history, transform engine
+│   │   ├── testRunner.js         # Playwright test executor with self-healing integration + feedback loop
+│   │   ├── db.js                 # In-memory store with activities + healing history (swap for Postgres in production)
 │   │   └── pipeline/
 │   │       ├── smartCrawl.js     # Page discovery and snapshotting
 │   │       ├── elementFilter.js  # Noise reduction on crawled elements
-│   │       ├── intentClassifier.js  # Page intent classification (auth, dashboard, etc.)
-│   │       ├── journeyGenerator.js  # Multi-page journey test generation
+│   │       ├── intentClassifier.js  # Page intent classification with AI-assisted fallback
+│   │       ├── journeyGenerator.js  # Two-phase PLAN → GENERATE test generation
 │   │       ├── deduplicator.js   # Removes duplicate generated tests
 │   │       ├── assertionEnhancer.js # Strengthens Playwright assertions
-│   │       └── feedbackLoop.js   # Quality scoring
+│   │       └── feedbackLoop.js   # Auto-regeneration of failing tests
 │   ├── .env.example
 │   ├── Dockerfile
 │   └── package.json
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx               # Router setup
-│   │   ├── api.js                # Typed API client (fetch wrapper)
+│   │   ├── api.js                # API client (fetch wrapper)
 │   │   ├── index.css             # Design system (CSS variables, components)
+│   │   ├── hooks/
+│   │   │   └── useProjectData.js # Shared hook: fetches projects + tests + runs in parallel
+│   │   ├── utils/
+│   │   │   └── formatters.js     # Shared date/time/duration formatters
 │   │   ├── components/
 │   │   │   ├── Layout.jsx        # Sidebar navigation shell
-│   │   │   ├── CrawlView.jsx     # Live crawl pipeline progress + log viewer
+│   │   │   ├── CrawlView.jsx     # Live crawl pipeline progress (authoritative step tracking)
+│   │   │   ├── GenerateView.jsx  # Compact pipeline progress for CreateTestModal
 │   │   │   ├── TestRunView.jsx   # Test suite list → case preview
 │   │   │   ├── StepResultsView.jsx  # Per-test-case step drill-down + browser view
-│   │   │   └── ProviderBadge.jsx # Active AI provider indicator
+│   │   │   ├── ProviderBadge.jsx # Active AI provider indicator
+│   │   │   ├── StatCard.jsx      # Reusable stat card component
+│   │   │   ├── StatusBadge.jsx   # Consistent status badge (completed/failed/running)
+│   │   │   ├── PassFailChart.jsx # Recharts area chart for pass/fail trends
+│   │   │   └── PassRateBar.jsx   # Horizontal pass-rate bar with percentage
 │   │   └── pages/
 │   │       ├── Dashboard.jsx     # Pass rate, metrics, recent runs
-│   │       ├── Projects.jsx      # Test library + Create Test modal
+│   │       ├── Projects.jsx      # Test library + multi-phase Create Test wizard
 │   │       ├── ProjectDetail.jsx # Draft/Regression/Runs tabs per project
 │   │       ├── NewProject.jsx    # Project creation form
-│   │       ├── TestDetail.jsx    # Individual test view + run history
+│   │       ├── TestDetail.jsx    # Individual test view + inline editing + export
 │   │       ├── RunDetail.jsx     # Run detail orchestrator (crawl or test run)
-│   │       ├── Work.jsx          # All runs across all projects
-│   │       ├── Reports.jsx       # Reporting view
-│   │       ├── Applications.jsx  # Application management
-│   │       ├── Context.jsx       # Context configuration
-│   │       └── Settings.jsx      # AI provider key management
+│   │       ├── Work.jsx          # All runs with search, status & type filters
+│   │       ├── Reports.jsx       # Analytics: trends, flaky tests, top failures, CSV export
+│   │       ├── Applications.jsx  # Per-project health overview with pass rate bars
+│   │       ├── Context.jsx       # AI provider status + per-app environment details
+│   │       └── Settings.jsx      # AI keys, test execution config, data management, system info
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
@@ -245,6 +284,7 @@ sentri/
 | `GET` | `/api/tests/:testId` | Get a single test |
 | `POST` | `/api/projects/:id/tests` | Create a manual test (saved as Draft) |
 | `POST` | `/api/projects/:id/tests/generate` | **AI-generate** steps + Playwright script from title & description (saved as Draft) |
+| `PATCH` | `/api/tests/:testId` | Update test steps, name, description, priority; optionally regenerate Playwright code |
 | `DELETE` | `/api/projects/:id/tests/:testId` | Delete a test |
 | `POST` | `/api/tests/:testId/run` | Run a single test |
 
@@ -274,6 +314,16 @@ sentri/
 | `DELETE` | `/api/settings/:provider` | Remove a provider key |
 | `GET` | `/api/dashboard` | Summary stats (projects, tests, pass rate, recent runs) |
 
+### Activities & System
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/activities` | Activity log (filterable by `?type=`, `?projectId=`, `?limit=`) |
+| `GET` | `/api/system` | System info: uptime, Node/Playwright versions, heap memory, DB counts |
+| `DELETE` | `/api/data/runs` | Clear all run history (keeps projects & tests) |
+| `DELETE` | `/api/data/activities` | Clear activity log |
+| `DELETE` | `/api/data/healing` | Clear self-healing history |
+
 ---
 
 ## Test Lifecycle
@@ -301,6 +351,29 @@ Created (AI crawl or manual)
 - **Approved** — promoted to the Regression Suite; included in every `Run Regression` execution
 - **Rejected** — excluded from all runs; can be restored to Draft at any time
 - Any test can be restored back to Draft using the Restore button or bulk action
+
+---
+
+## Self-Healing Test Runtime
+
+Every test runs with an adaptive self-healing layer that makes tests resilient to UI changes:
+
+1. **Multi-strategy element finding** — each `safeClick`, `safeFill`, and `safeExpect` call tries multiple selector strategies in a waterfall (role → label → text → aria-label → title)
+2. **Healing history** — when a fallback strategy succeeds, the runtime records which strategy index won for that element. Future runs try the winning strategy first, reducing flakiness over time
+3. **Transform engine** — AI-generated Playwright code is automatically rewritten at runtime to use self-healing helpers via regex-based transforms (e.g. `page.click('Sign in')` → `safeClick(page, 'Sign in')`)
+4. **Feedback loop** — after test failures, the system classifies each failure (selector issue, navigation fail, etc.) and auto-regenerates high-priority failing tests via AI
+
+### Runtime Defaults
+
+| Setting | Value | Description |
+|---|---|---|
+| Element Timeout | 5000 ms | Max wait per element strategy in the waterfall |
+| Retry Count | 3 | Retries per interaction (`safeClick` / `safeFill`) |
+| Retry Delay | 400 ms | Pause between retries |
+| Browser Mode | Headless | Chromium runs without a visible window |
+| Viewport | 1280 × 720 | Default browser viewport size |
+
+These values are compiled into the self-healing runtime. To customise, edit `backend/src/selfHealing.js`.
 
 ---
 
