@@ -72,13 +72,6 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
       });
 
       // The backend returns 201 with a full test object on success, or 200
-      const result = await api.generateTest(projectId, {
-        name: name.trim(),
-        description: description.trim(),
-      });
-
-      // If the backend returned a pipeline-complete-but-no-tests response,
-      // treat it as a user-facing error rather than entering an empty review phase.
       if (!result?.id) {
         setError(result?.message || "AI generation completed but no tests passed validation. Try rephrasing your description.");
         setPhase("form");
@@ -89,7 +82,10 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
       setGeneratedSteps(result.steps || []);
       setCreatedTest(result); // hold the full test for the done screen
       setPhase("review");
-    }
+     } catch (err) {
+          setError(err.message || "AI generation failed. Check your API key in Settings.");
+          setPhase("form");
+     }
   }
 
   // ── Phase 2: user edits steps, then confirms → persist edits → show done ──
