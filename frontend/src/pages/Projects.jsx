@@ -22,17 +22,15 @@ function StatusBadge({ result }) {
 // Flow: form → generating steps → review steps → generating code → done (draft)
 
 function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
-  // "form" | "gen-steps"
   const [phase, setPhase] = useState("form");
 
   const [name, setName]               = useState("");
   const [description, setDescription] = useState("");
-  // Auto-populate: prefer defaultProjectId, then first project
   const [projectId, setProjectId]     = useState(defaultProjectId || projects[0]?.id || "");
   const [error, setError]             = useState(null);
 
-  const navigate  = useNavigate();
-  const nameRef   = useRef(null);
+  const navigate = useNavigate();
+  const nameRef  = useRef(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
   useEffect(() => {
@@ -41,33 +39,32 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // ── Phase 1: submit form → trigger AI generation → redirect to project page
+  // ── Submit: fire-and-forget generate, close modal, navigate to project page
+  // Mirrors exactly how doCrawl works in ProjectDetail — the run appears in
+  // the Runs tab and the user can click it to watch the live pipeline.
   async function handleGenerateSteps(e) {
     e?.preventDefault();
     setError(null);
-    if (!name.trim())    { setError("Test name is required.");    return; }
-    if (!projectId)      { setError("Please select a project.");  return; }
+    if (!name.trim()) { setError("Test name is required.");   return; }
+    if (!projectId)   { setError("Please select a project."); return; }
 
-    setPhase("gen-steps");
+    setPhase("submitting");
+
     try {
-      // Fire-and-forget: the backend creates a run (type: "generate") and
-      // processes the pipeline synchronously. We redirect immediately to the
-      // project page so the user sees the run appear in the Runs tab.
-      const result = await api.generateTest(projectId, {
+      // Fire generate without awaiting — backend runs async pipeline
+      api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
-      });
+      }).then(result => {
+        // Notify parent to refresh test list once done (runs in background)
+        if (result?.id && onCreated) onCreated(result);
+      }).catch(() => {});
 
-      // Notify parent so the test list refreshes
-      if (result?.id && onCreated) onCreated(result);
-
-      // Close modal and redirect to the project detail page.
-      // The run will be visible in the Runs tab, and the generated tests
-      // will appear under "Generated Tests (Review Required)" as Draft.
+      // Close modal and go to project page immediately — same as crawl flow
       onClose();
       navigate(`/projects/${projectId}`);
     } catch (err) {
-      setError(err.message || "AI generation failed. Check your API key in Settings.");
+      setError(err.message || "Failed to start generation.");
       setPhase("form");
     }
   }
@@ -109,8 +106,7 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
           flexShrink: 0,
         }}>
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
-            {phase === "form"      && "Generate a Test Case"}
-            {phase === "gen-steps" && "Generating Tests…"}
+            Generate a Test Case
           </h2>
           <button
             onClick={onClose}
@@ -124,7 +120,7 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
         <div style={{ padding: "20px 22px 24px", overflowY: "auto", flex: 1 }}>
 
           {/* ── FORM ────────────────────────────────────────────────────── */}
-          {phase === "form" && (
+          {(phase === "form" || phase === "submitting") && (
             <>
               <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 20, lineHeight: 1.6 }}>
                 Describe what you want to test. AI will generate detailed steps and a Playwright script, saved as a <strong>Draft</strong> for your review.
@@ -197,184 +193,12 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={handleGenerateSteps}
-                  disabled={!name.trim() || !projectId}
+                  disabled={!name.trim() || !projectId || phase === "submitting"}
                 >
                   Generate with AI ✦
                 </button>
               </div>
             </>
-          )}
-
-          {/* ── GENERATING STEPS ─────────────────────────────────────────── */}
-          {phase === "gen-steps" && (
-            <div style={{ textAlign: "center", padding: "48px 0" }}>
-              <Loader2 size={36} className="spin" color="var(--accent)" style={{ marginBottom: 16 }} />
-              <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 8 }}>
-                Generating test steps…
-              </div>
-              <div style={{ fontSize: "0.82rem", color: "var(--text2)", lineHeight: 1.6, maxWidth: 320, margin: "0 auto" }}>
-                AI is analysing <em>{name}</em> and writing detailed QA steps and a Playwright script.
-              </div>
-              <div style={{ marginTop: 20, display: "flex", justifyContent: "center", gap: 6 }}>
-                {["Parsing description", "Generating steps", "Writing Playwright code"].map((label, i) => (
-                  <span key={i} style={{
-                    fontSize: "0.7rem", padding: "2px 10px", borderRadius: 99,
-                    background: "var(--accent-bg)", color: "var(--accent)",
-                    fontWeight: 600,
-                  }}>
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── REVIEW STEPS ─────────────────────────────────────────────── */}
-          {phase === "review" && (
-            <>
-              <div style={{
-                padding: "10px 14px", background: "var(--accent-bg)",
-                borderRadius: 8, border: "1px solid rgba(91,110,245,0.2)",
-                fontSize: "0.8rem", color: "var(--accent)", marginBottom: 18,
-                display: "flex", alignItems: "center", gap: 8, lineHeight: 1.5,
-              }}>
-                <span style={{ fontSize: "1rem" }}>✦</span>
-                AI generated {generatedSteps.length} steps and a Playwright script. Review and edit the steps below, then confirm to save as <strong>Draft</strong>.
-              </div>
-
-              {/* Project + test name summary */}
-              <div style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: 2 }}>{name}</div>
-                  {selectedProject && (
-                    <div style={{ fontSize: "0.72rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
-                      {selectedProject.name} · {selectedProject.url}
-                    </div>
-                  )}
-                </div>
-                <span className="badge badge-amber" style={{ flexShrink: 0 }}>Draft</span>
-              </div>
-
-              {/* Editable steps list */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 8, color: "var(--text2)" }}>
-                  Test Steps <span style={{ fontWeight: 400, color: "var(--text3)" }}>— edit as needed</span>
-                </label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {generatedSteps.map((step, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                      <div style={{
-                        width: 22, height: 22, borderRadius: "50%",
-                        background: "var(--bg3)", border: "1px solid var(--border)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "0.65rem", fontWeight: 700, color: "var(--text3)",
-                        flexShrink: 0, marginTop: 7,
-                      }}>
-                        {i + 1}
-                      </div>
-                      <input
-                        className="input"
-                        value={step}
-                        onChange={e => updateStep(i, e.target.value)}
-                        style={{ flex: 1, height: 36, fontSize: "0.8rem" }}
-                      />
-                      <button
-                        onClick={() => removeStep(i)}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: "var(--text3)", padding: "6px 4px", flexShrink: 0,
-                          marginTop: 2,
-                        }}
-                        title="Remove step"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={addStep}
-                  style={{
-                    marginTop: 8, background: "none", border: "1px dashed var(--border)",
-                    borderRadius: 6, cursor: "pointer", color: "var(--text3)",
-                    fontSize: "0.78rem", padding: "5px 12px", width: "100%",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  }}
-                >
-                  <Plus size={12} /> Add step
-                </button>
-              </div>
-
-              {/* Playwright code note */}
-              {createdTest?.playwrightCode && (
-                <div style={{
-                  padding: "8px 12px", background: "var(--green-bg)",
-                  border: "1px solid #86efac", borderRadius: 6,
-                  fontSize: "0.78rem", color: "#14532d", marginBottom: 16,
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <CheckCircle2 size={13} color="var(--green)" />
-                  Playwright test script generated and ready to run.
-                </div>
-              )}
-
-              {error && (
-                <div style={{
-                  background: "var(--red-bg)", color: "var(--red)",
-                  borderRadius: "var(--radius)", padding: "8px 12px",
-                  fontSize: "0.82rem", marginBottom: 14,
-                }}>
-                  {error}
-                </div>
-              )}
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => setPhase("form")}>
-                  ← Back
-                </button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleConfirmSteps}
-                  disabled={isSaving || generatedSteps.filter(s => s.trim()).length === 0}
-                >
-                  {isSaving ? "Saving…" : "Save to Draft"}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ── DONE ─────────────────────────────────────────────────────── */}
-          {phase === "done" && createdTest && (
-            <div style={{ textAlign: "center", padding: "32px 0" }}>
-              <div style={{
-                width: 52, height: 52, borderRadius: "50%",
-                background: "var(--amber-bg)", color: "var(--amber)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 16px",
-                border: "2px solid #fcd34d",
-              }}>
-                <Flag size={24} />
-              </div>
-              <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 6 }}>
-                Saved to Draft!
-              </div>
-              <div style={{ fontSize: "0.82rem", color: "var(--text2)", marginBottom: 6, lineHeight: 1.6 }}>
-                <strong>{createdTest.name}</strong> has been saved to the{" "}
-                <strong>Generated Tests (Draft)</strong> queue.
-              </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--text3)", marginBottom: 24, lineHeight: 1.6 }}>
-                Review and approve it in your project to add it to the Regression Suite.
-              </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => { onClose(); navigate(`/tests/${createdTest.id}`); }}
-                >
-                  View Test
-                </button>
-              </div>
-            </div>
           )}
         </div>
       </div>

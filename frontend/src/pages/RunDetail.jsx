@@ -11,6 +11,7 @@ import {
 import { api } from "../api.js";
 
 import CrawlView from "../components/CrawlView";
+import GenerateView from "../components/GenerateView";
 import TestRunView from "../components/TestRunView";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,7 +97,8 @@ export default function RunDetail() {
 
   // ── Derived values ───────────────────────────────────────────────────────
   const isRunning = run.status === "running";
-  const isCrawl = run.type === "crawl";
+  const isCrawl    = run.type === "crawl";
+  const isGenerate = run.type === "generate";
 
   // For test runs: results = test cases
   const results = run.results || [];
@@ -156,7 +158,7 @@ export default function RunDetail() {
         >
           <h1 style={{ fontWeight: 700, fontSize: "1.3rem" }}>
             Task #{runId.slice(0, 6).toUpperCase()}:{" "}
-            {isCrawl ? "Crawl & Generate" : "Test Run"}
+            {isCrawl ? "Crawl & Generate" : isGenerate ? "AI Generate" : "Test Run"}
           </h1>
 
           {run.status === "completed" && (
@@ -262,6 +264,8 @@ export default function RunDetail() {
       {/* ── Main content ───────────────────────────────────────────────── */}
       {isCrawl ? (
         <CrawlView run={run} isRunning={isRunning} />
+      ) : isGenerate ? (
+        <GenerateView run={run} isRunning={isRunning} />
       ) : (
         <TestRunView run={run} />
       )}
