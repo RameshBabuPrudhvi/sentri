@@ -16,7 +16,7 @@
  *   activities — automatically logged by the API for every action above
  */
 
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const BASE_URL = process.env.BASE_URL || "http://localhost:3001";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
