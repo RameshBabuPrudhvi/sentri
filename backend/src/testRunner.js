@@ -3,8 +3,22 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import {
+  getSelfHealingHelperCode,
+  applyHealingTransforms,
+  getHealingHistoryForTest,
+  recordHealing,
+  recordHealingFailure,
+} from "./selfHealing.js";
+import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── Env-driven config (defaults match previous hardcoded values) ──────────────
+const BROWSER_HEADLESS    = process.env.BROWSER_HEADLESS !== "false";
+const VIEWPORT_WIDTH      = parseInt(process.env.VIEWPORT_WIDTH, 10) || 1280;
+const VIEWPORT_HEIGHT     = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
+const NAVIGATION_TIMEOUT  = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
 
 const ARTIFACTS_DIR = path.join(__dirname, "..", "artifacts");
 const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");
@@ -70,82 +84,51 @@ function stripPlaywrightImports(code) {
 }
 
 /**
- * buildSelfHealingHelpers()
- *
- * Returns JS code that overrides common Playwright locator patterns with
- * self-healing versions that try fallback selectors when the primary fails.
- * Injected at the top of every executed test body.
- */
-function buildSelfHealingHelpers() {
-  return `
-    // Self-healing helper: tries multiple selector strategies in order
-    async function findElement(page, strategies) {
-      for (const strategy of strategies) {
-        try {
-          const loc = strategy(page);
-          await loc.waitFor({ state: 'visible', timeout: 3000 });
-          return loc;
-        } catch {}
-      }
-      // Return last strategy as a best-effort attempt
-      return strategies[strategies.length - 1](page);
-    }
-
-    // Self-healing fill: tries common input selector patterns
-    async function safeFill(page, labelOrPlaceholder, value) {
-      const strategies = [
-        p => p.getByLabel(labelOrPlaceholder),
-        p => p.getByPlaceholder(labelOrPlaceholder),
-        p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
-        p => p.getByRole('combobox', { name: labelOrPlaceholder }),
-        p => p.getByRole('textbox', { name: labelOrPlaceholder }),
-        p => p.locator(\`input[name*="\${labelOrPlaceholder.toLowerCase().replace(/ /g,'')}"]\`),
-        p => p.locator(\`input[placeholder*="\${labelOrPlaceholder}"]\`),
-      ];
-      const el = await findElement(page, strategies);
-      await el.fill(value);
-    }
-
-    // Self-healing click: tries button text, link text, role patterns
-    async function safeClick(page, text) {
-      const strategies = [
-        p => p.getByRole('button', { name: text }),
-        p => p.getByRole('link', { name: text }),
-        p => p.getByText(text, { exact: true }),
-        p => p.getByText(text),
-        p => p.locator(\`[aria-label*="\${text}"]\`),
-      ];
-      const el = await findElement(page, strategies);
-      await el.click();
-    }
-  `;
-}
-
-/**
- * runGeneratedCode(page, context, playwrightCode, expect)
+ * runGeneratedCode(page, context, playwrightCode, expect, healingHints)
  *
  * Dynamically executes the AI-generated test body against the live page.
- * Returns { passed: true } or throws with the error message.
+ * Returns { passed: true, healingEvents: [...] } or throws with the error.
+ *
+ * healingHints is an optional map of "action::label" → strategyIndex from
+ * previous runs, injected into the runtime helpers so the winning strategy
+ * is tried first (adaptive self-healing).
  */
-async function runGeneratedCode(page, context, playwrightCode, expect) {
+async function runGeneratedCode(page, context, playwrightCode, expect, healingHints) {
   const body = extractTestBody(playwrightCode);
   if (!body) {
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = stripPlaywrightImports(body);
-  const helpers = buildSelfHealingHelpers();
+  const cleaned = applyHealingTransforms(stripPlaywrightImports(body));
+  const helpers = getSelfHealingHelperCode(healingHints);
 
   // eslint-disable-next-line no-new-func
   const fn = new Function("page", "context", "expect", `
     return (async () => {
       ${helpers}
-      ${cleaned}
+      let __testError = null;
+      try {
+        ${cleaned}
+      } catch (e) {
+        __testError = e;
+      }
+      // Always return healing events, even on failure, so the runner can
+      // persist what we learned from earlier steps.
+      if (__testError) {
+        __testError.__healingEvents = __healingEvents;
+        throw __testError;
+      }
+      return { __healingEvents };
     })();
   `);
 
-  await fn(page, context, expect);
-  return { passed: true };
+  try {
+    const result = await fn(page, context, expect);
+    return { passed: true, healingEvents: result?.__healingEvents || [] };
+  } catch (err) {
+    err.__healingEvents = err.__healingEvents || [];
+    throw err;
+  }
 }
 
 /**
@@ -162,14 +145,14 @@ async function getExpect() {
   return expect;
 }
 
-async function executeTest(test, browser, runId, stepIndex, runStart) {
+async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    recordVideo: { dir: testVideoDir, size: { width: 1280, height: 720 } },
-    viewport: { width: 1280, height: 720 },
+    recordVideo: { dir: testVideoDir, size: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT } },
+    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     // Accept all permissions so interactions aren't blocked
     permissions: ["geolocation", "notifications"],
     ignoreHTTPSErrors: true,
@@ -239,16 +222,33 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
 
       // Only pre-navigate if the generated code doesn't do it itself
       if (!codeAlreadyNavigates) {
-        await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
         await page.waitForTimeout(800);
       }
 
+      // Load healing hints from previous runs for this test
+      const healingHints = getHealingHistoryForTest(db, test.id);
+
       // Run the full generated test body
-      await runGeneratedCode(page, context, test.playwrightCode, expect);
+      const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
+
+      // Persist healing events so future runs benefit from what we learned
+      if (codeResult.healingEvents?.length && db) {
+        for (const evt of codeResult.healingEvents) {
+          // Use bounded split so labels containing '::' don't corrupt args
+          const [action, ...rest] = evt.key.split("::");
+          const label = rest.join("::");
+          if (evt.failed) {
+            recordHealingFailure(db, test.id, action, label);
+          } else {
+            recordHealing(db, test.id, action, label, evt.strategyIndex);
+          }
+        }
+      }
 
     } else {
       // ── FALLBACK: No parseable code — run a basic smoke test ──────────────
-      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
       await page.waitForTimeout(500);
 
       const title = await page.title();
@@ -296,8 +296,30 @@ async function executeTest(test, browser, runId, stepIndex, runStart) {
 
   } catch (err) {
     result.status = "failed";
+    // Extract a readable message — handle AggregateError (thrown by Playwright
+    // when multiple internal strategies fail) so the UI doesn't show a raw
+    // "[object Object]" or bare "AggregateError".
+    let rawMsg = err.message || "";
+    if ((!rawMsg || rawMsg === "AggregateError") && err.errors?.length) {
+      rawMsg = err.errors.map(e => e?.message || String(e)).join("; ");
+    }
     // Strip ANSI escape codes so the UI shows clean text
-    result.error = err.message.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+    result.error = rawMsg.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+
+    // Persist healing events from the failed run — runGeneratedCode attaches
+    // them to the error so earlier successful steps aren't lost.
+    if (err.__healingEvents?.length && db) {
+      for (const evt of err.__healingEvents) {
+        const [action, ...rest] = evt.key.split("::");
+        const label = rest.join("::");
+        if (evt.failed) {
+          recordHealingFailure(db, test.id, action, label);
+        } else {
+          recordHealing(db, test.id, action, label, evt.strategyIndex);
+        }
+      }
+    }
+
     // Screenshot the failure state
     try {
       const buf = await page.screenshot({ type: "png", fullPage: false });
@@ -341,7 +363,7 @@ export async function runTests(project, tests, run, db) {
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
 
   const browser = await chromium.launch({
-    headless: true,
+    headless: BROWSER_HEADLESS,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
@@ -364,7 +386,7 @@ export async function runTests(project, tests, run, db) {
     log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
 
     try {
-      const result = await executeTest(test, browser, runId, i, runStart);
+      const result = await executeTest(test, browser, runId, i, runStart, db);
       run.results.push(result);
 
       if (result.videoPath) allVideoSegments.push(result.videoPath);
@@ -416,4 +438,54 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+
+  // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
+  // Only runs when there are failures and an AI provider is available.
+  // The loop classifies each failure (SELECTOR_ISSUE, NAVIGATION_FAIL, etc.),
+  // regenerates high-priority failures via AI, and updates the DB so the next
+  // run benefits from the improved test code.
+  if (run.failed > 0) {
+    try {
+      const { hasProvider } = await import("./aiProvider.js");
+      if (hasProvider()) {
+        log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
+
+        // Build testMap from the actual tests array (not run.tests which is
+        // only populated during crawl runs). Test runs have testQueue/results
+        // but not run.tests, so we build the map from the tests argument.
+        const testMap = {};
+        for (const t of tests) { if (db.tests[t.id]) testMap[t.id] = db.tests[t.id]; }
+
+        // Populate run.tests so applyFeedbackLoop can find them
+        if (!run.tests || run.tests.length === 0) {
+          run.tests = tests.map(t => t.id);
+        }
+
+        const snapshotsByUrl = {};
+        for (const snap of (run.snapshots || [])) { snapshotsByUrl[snap.url] = snap; }
+        const { improvements } = analyzeRunResults(run.results, testMap, snapshotsByUrl);
+
+        // Log failure categories so the user can see what went wrong
+        const categories = {};
+        for (const imp of improvements) {
+          categories[imp.failureCategory] = (categories[imp.failureCategory] || 0) + 1;
+        }
+        if (Object.keys(categories).length > 0) {
+          const breakdown = Object.entries(categories).map(([k, v]) => `${k}: ${v}`).join(", ");
+          log(run, `   📊 Failure breakdown: ${breakdown}`);
+        }
+
+        const feedback = await applyFeedbackLoop(run, db);
+        if (feedback.improved > 0) {
+          log(run, `   ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
+          log(run, `   💡 Regenerated tests will use improved selectors on next run`);
+          run.feedbackLoop = feedback;
+        } else {
+          log(run, `   ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
+        }
+      }
+    } catch (err) {
+      log(run, `   ⚠️  Feedback loop error: ${err.message}`);
+    }
+  }
 }

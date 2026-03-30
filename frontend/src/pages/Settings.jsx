@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle, RefreshCw, Trash2, Zap } from "lucide-react";
+import {
+  ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
+  RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
+  Activity, Shield, HardDrive, Info,
+} from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
 
@@ -35,9 +39,9 @@ const PROVIDERS = [
   },
   {
     id: "google",
-    name: "Gemini 1.5 Flash",
+    name: "Gemini 2.5 Flash",
     company: "Google",
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
     placeholder: "AIza...",
     docsUrl: "https://aistudio.google.com/apikey",
     color: "#6ba4f8",
@@ -212,16 +216,101 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
   );
 }
 
+function SectionTitle({ icon, title, sub }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, marginTop: 40 }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 10,
+        background: "var(--bg3)", border: "1px solid var(--border)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.05rem" }}>{title}</div>
+        {sub && <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function DataAction({ icon, label, sub, count, btnLabel, btnColor, onAction }) {
+  const [confirming, setConfirming] = useState(false);
+  const [clearing, setClearing]     = useState(false);
+  const [result, setResult]         = useState(null);
+
+  async function handleClick() {
+    if (!confirming) { setConfirming(true); return; }
+    setClearing(true);
+    try {
+      const res = await onAction();
+      setResult(`Cleared ${res.cleared} item${res.cleared !== 1 ? "s" : ""}`);
+      setTimeout(() => setResult(null), 3000);
+    } catch (err) {
+      setResult(`Error: ${err.message}`);
+    } finally {
+      setClearing(false);
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 14,
+      padding: "14px 18px", background: "var(--surface)",
+      border: "1px solid var(--border)", borderRadius: "var(--radius-lg)",
+    }}>
+      <div style={{ color: "var(--text3)" }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>
+          {label}
+          {count != null && <span style={{ fontWeight: 400, color: "var(--text3)", marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
+        </div>
+        <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>{sub}</div>
+      </div>
+      {result ? (
+        <span style={{ fontSize: "0.78rem", color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
+          <Check size={12} /> {result}
+        </span>
+      ) : (
+        <button
+          className={`btn btn-sm ${confirming ? "btn-danger" : "btn-ghost"}`}
+          onClick={handleClick}
+          disabled={clearing || count === 0}
+          style={{ flexShrink: 0 }}
+        >
+          {clearing ? <RefreshCw size={12} className="spin" /> : <Trash2 size={12} />}
+          {confirming ? "Confirm?" : btnLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function fmtUptime(seconds) {
+  if (seconds < 60)    return `${seconds}s`;
+  if (seconds < 3600)  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 export default function Settings() {
   const navigate = useNavigate();
   const [settings, setSettings] = useState(null);
   const [config, setConfig] = useState(null);
+  const [sysInfo, setSysInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
   async function reload() {
-    const [s, c] = await Promise.all([api.getSettings(), api.getConfig()]);
+    const [s, c, sys] = await Promise.all([
+      api.getSettings(),
+      api.getConfig(),
+      api.getSystemInfo().catch(() => null),
+    ]);
     setSettings(s);
     setConfig(c);
+    setSysInfo(sys);
   }
 
   useEffect(() => {
@@ -316,6 +405,122 @@ export default function Settings() {
 OPENAI_API_KEY=sk-proj-...
 GOOGLE_API_KEY=AIza...`}</pre>
       </div>
+
+      {/* ── Test Execution ─────────────────────────────────────────────── */}
+      <SectionTitle
+        icon={<Cpu size={16} color="var(--accent)" />}
+        title="Test Execution"
+        sub="Self-healing runtime defaults — applied to every test run"
+      />
+      <div style={{
+        background: "var(--surface)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)", overflow: "hidden",
+      }}>
+        {[
+          { label: "Element Timeout", value: "5 000 ms", desc: "Max wait for each element strategy in the self-healing waterfall" },
+          { label: "Retry Count", value: "3", desc: "Number of retries per interaction (safeClick / safeFill)" },
+          { label: "Retry Delay", value: "400 ms", desc: "Pause between retries before re-attempting the action" },
+          { label: "Browser Mode", value: "Headless", desc: "Chromium runs without a visible window for faster execution" },
+          { label: "Viewport", value: "1280 × 720", desc: "Default browser viewport size used during test runs" },
+          { label: "Self-Healing", value: "Enabled", desc: "Multi-strategy element finding with adaptive healing history" },
+        ].map((item, i, arr) => (
+          <div key={item.label} style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "13px 20px",
+            borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none",
+          }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{item.label}</div>
+              <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{item.desc}</div>
+            </div>
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600,
+              color: item.value === "Enabled" ? "var(--green)" : "var(--text)",
+              background: "var(--bg3)", padding: "3px 10px", borderRadius: 6,
+            }}>
+              {item.value}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 8, paddingLeft: 2 }}>
+        <Info size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
+        These values are compiled into the self-healing runtime. To customise, edit <span style={{ fontFamily: "var(--font-mono)", background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>backend/src/selfHealing.js</span>
+      </div>
+
+      {/* ── Data Management ─────────────────────────────────────────────── */}
+      <SectionTitle
+        icon={<Database size={16} color="var(--amber)" />}
+        title="Data Management"
+        sub="Clear in-memory data — all data is ephemeral and resets on server restart"
+      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <DataAction
+          icon={<Activity size={16} />}
+          label="Run History"
+          sub="All crawl and test run records, including logs and results"
+          count={sysInfo?.runs}
+          btnLabel="Clear Runs"
+          onAction={async () => { const r = await api.clearRuns(); await reload(); return r; }}
+        />
+        <DataAction
+          icon={<Clock size={16} />}
+          label="Activity Log"
+          sub="Timeline of all user and system actions"
+          count={sysInfo?.activities}
+          btnLabel="Clear Log"
+          onAction={async () => { const r = await api.clearActivities(); await reload(); return r; }}
+        />
+        <DataAction
+          icon={<Shield size={16} />}
+          label="Self-Healing History"
+          sub="Learned selector strategies — clearing forces the waterfall to start fresh"
+          count={sysInfo?.healingEntries}
+          btnLabel="Clear History"
+          onAction={async () => { const r = await api.clearHealing(); await reload(); return r; }}
+        />
+      </div>
+
+      {/* ── System Info ──────────────────────────────────────────────────── */}
+      <SectionTitle
+        icon={<Server size={16} color="var(--green)" />}
+        title="System"
+        sub="Server runtime and resource information"
+      />
+      {sysInfo ? (
+        <div style={{
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)", overflow: "hidden",
+        }}>
+          {[
+            { label: "Uptime",             value: fmtUptime(sysInfo.uptime),                    icon: <Clock size={13} /> },
+            { label: "Node.js",            value: sysInfo.nodeVersion,                           icon: <Server size={13} /> },
+            { label: "Playwright",         value: sysInfo.playwrightVersion || "—",              icon: <Cpu size={13} /> },
+            { label: "Heap Memory",        value: `${sysInfo.memoryMB} MB`,                     icon: <HardDrive size={13} /> },
+            { label: "Projects",           value: sysInfo.projects,                              icon: <Database size={13} /> },
+            { label: "Tests",              value: `${sysInfo.tests} (${sysInfo.approvedTests} approved, ${sysInfo.draftTests} draft)`, icon: <Activity size={13} /> },
+            { label: "Runs",               value: sysInfo.runs,                                  icon: <RefreshCw size={13} /> },
+            { label: "Healing Entries",    value: sysInfo.healingEntries,                        icon: <Shield size={13} /> },
+          ].map((item, i, arr) => (
+            <div key={item.label} style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "11px 20px",
+              borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none",
+            }}>
+              <span style={{ color: "var(--text3)" }}>{item.icon}</span>
+              <span style={{ fontSize: "0.82rem", color: "var(--text2)", minWidth: 130 }}>{item.label}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>{item.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: "20px 0", color: "var(--text3)", fontSize: "0.85rem" }}>
+          Could not load system info.
+        </div>
+      )}
+
+      {/* Bottom spacer */}
+      <div style={{ height: 40 }} />
     </div>
   );
 }

@@ -360,6 +360,7 @@ export default function ProjectDetail() {
                             onChange={e => toggleAll(e.target.checked, filteredByReview.map(t => t.id))}
                             style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
                         </th>
+                        <th>Test ID</th>
                         <th>Test Name</th>
                         <th>Review Status</th>
                         <th>Confidence</th>
@@ -377,6 +378,11 @@ export default function ProjectDetail() {
                             <td style={{ paddingRight: 0 }}>
                               <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
                                 style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                            </td>
+                            <td>
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                                {t.id.slice(0, 8)}…
+                              </span>
                             </td>
                             <td
                               style={{ cursor: "pointer" }}
@@ -481,12 +487,17 @@ export default function ProjectDetail() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Test Name</th><th>Last Result</th><th>Type</th><th>Priority</th><th>Confidence</th><th>Last Run</th><th></th>
+                      <th>Test ID</th><th>Test Name</th><th>Last Result</th><th>Type</th><th>Priority</th><th>Confidence</th><th>Last Run</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {regressionTests.map(t => (
                       <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
+                        <td>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                            {t.id.slice(0, 8)}…
+                          </span>
+                        </td>
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <AgentTag type="TA" />
@@ -537,20 +548,63 @@ export default function ProjectDetail() {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>Run ID</th><th>Type</th><th>Status</th><th>Passed</th><th>Failed</th><th>Started</th><th></th></tr>
+                <tr><th>Run ID</th><th>Type</th><th>Status</th><th>Tests / Pages</th><th>Started</th><th></th></tr>
               </thead>
               <tbody>
-                {runs.map(r => (
-                  <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${r.id}`)}>
-                    <td><span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text3)" }}>{r.id.slice(0, 8)}…</span></td>
-                    <td><span className="badge badge-gray">{r.type}</span></td>
-                    <td><StatusBadge s={r.status} /></td>
-                    <td><span style={{ color: "var(--green)", fontWeight: 600 }}>{r.passed ?? (r.type === "crawl" ? r.pagesFound : "—")}</span></td>
-                    <td><span style={{ color: "var(--red)", fontWeight: 600 }}>{r.failed ?? "—"}</span></td>
-                    <td><span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{new Date(r.startedAt).toLocaleString()}</span></td>
-                    <td><ArrowRight size={14} color="var(--text3)" /></td>
-                  </tr>
-                ))}
+                {[...runs]
+                  .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+                  .map(r => {
+                    const isCrawl    = r.type === "crawl";
+                    const isGenerate = r.type === "generate";
+                    const isRun      = r.type === "run";
+                    return (
+                      <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${r.id}`)}>
+                        <td>
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text3)" }}>
+                            {r.id.slice(0, 8)}…
+                          </span>
+                        </td>
+                        <td>
+                          {isCrawl    && <span className="badge badge-accent">🔍 crawl</span>}
+                          {isGenerate && <span className="badge badge-blue">⚡ generate</span>}
+                          {isRun      && <span className="badge badge-green">▶ run</span>}
+                          {!isCrawl && !isGenerate && !isRun && <span className="badge badge-gray">{r.type}</span>}
+                        </td>
+                        <td>
+                          {r.status === "completed" && <span className="badge badge-green">✓ Completed</span>}
+                          {r.status === "running"   && <span className="badge badge-blue" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>● Running</span>}
+                          {r.status === "failed"    && <span className="badge badge-red">✗ Failed</span>}
+                          {!["completed","running","failed"].includes(r.status) && <span className="badge badge-gray">{r.status}</span>}
+                        </td>
+                        <td>
+                          {isCrawl && (
+                            <span style={{ color: "var(--accent)", fontWeight: 600 }}>
+                              {r.pagesFound ?? "—"} <span style={{ fontWeight: 400, color: "var(--text3)", fontSize: "0.73rem" }}>pages</span>
+                            </span>
+                          )}
+                          {isGenerate && (
+                            <span style={{ color: "var(--accent)", fontWeight: 600 }}>
+                              {r.testsGenerated ?? r.pipelineStats?.rawTestsGenerated ?? "—"} <span style={{ fontWeight: 400, color: "var(--text3)", fontSize: "0.73rem" }}>tests</span>
+                            </span>
+                          )}
+                          {isRun && (
+                            <span>
+                              <span style={{ color: "var(--green)", fontWeight: 600 }}>{r.passed ?? "—"}</span>
+                              <span style={{ color: "var(--text3)", margin: "0 4px" }}>/</span>
+                              <span style={{ color: "var(--red)", fontWeight: 600 }}>{r.failed ?? "—"}</span>
+                              <span style={{ color: "var(--text3)", fontSize: "0.73rem", marginLeft: 4 }}>pass/fail</span>
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                            {new Date(r.startedAt).toLocaleString()}
+                          </span>
+                        </td>
+                        <td><ArrowRight size={14} color="var(--text3)" /></td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           )}

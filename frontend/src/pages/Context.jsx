@@ -1,10 +1,228 @@
-export default function Context() {
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Globe, Cpu, ChevronRight, CheckCircle2,
+  XCircle, Settings as SettingsIcon,
+  RefreshCw, Shield,
+} from "lucide-react";
+import { api } from "../api";
+import { fmtRelativeDate } from "../utils/formatters";
+
+function SectionHeader({ icon, title, sub }) {
   return (
-    <div style={{ textAlign: "center", padding: 60 }}>
-      <h2>Context</h2>
-      <p style={{ color: "gray" }}>
-        Context data (DOM, elements, metadata) will appear here
-      </p>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 8, background: "var(--bg2)",
+        border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>{title}</div>
+        {sub && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, children }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+      <span style={{ fontSize: "0.8rem", color: "var(--text3)", fontWeight: 500, minWidth: 140 }}>{label}</span>
+      <span style={{ fontSize: "0.82rem", color: "var(--text)", textAlign: "right", flex: 1 }}>{children}</span>
+    </div>
+  );
+}
+
+export default function Context() {
+  const [projects, setProjects]   = useState([]);
+  const [config, setConfig]       = useState(null);
+  const [crawlData, setCrawlData] = useState({});
+  const [loading, setLoading]     = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [projs, cfg] = await Promise.all([
+          api.getProjects(),
+          api.getConfig().catch(() => null),
+        ]);
+        setProjects(projs);
+        setConfig(cfg);
+
+        // Load last crawl info per project
+        const crawls = {};
+        await Promise.all(projs.map(async p => {
+          const runs = await api.getRuns(p.id).catch(() => []);
+          const lastCrawl = runs
+            .filter(r => r.type === "crawl")
+            .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0] || null;
+          const tests = await api.getTests(p.id).catch(() => []);
+          crawls[p.id] = { lastCrawl, tests };
+        }));
+        setCrawlData(crawls);
+      } catch (err) {
+        console.error("Context load error:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  if (loading) return (
+    <div style={{ maxWidth: 880, margin: "0 auto" }}>
+      {[60, 200, 200, 180].map((h, i) => (
+        <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 14 }} />
+      ))}
+    </div>
+  );
+
+  const hasProjects = projects.length > 0;
+
+  return (
+    <div className="fade-in" style={{ maxWidth: 880, margin: "0 auto" }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 4 }}>Context</h1>
+        <p style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+          Environment configuration, AI provider status, and crawl context for your applications
+        </p>
+      </div>
+
+      {/* AI Provider — compact status with link to Settings */}
+      <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+        <SectionHeader
+          icon={<Cpu size={15} color="var(--accent)" />}
+          title="AI Provider"
+          sub="Active model used for test generation and Playwright code synthesis"
+        />
+        {config ? (
+          <div>
+            <InfoRow label="Status">
+              {config.hasProvider ? (
+                <span className="badge badge-green"><CheckCircle2 size={10} /> Connected</span>
+              ) : (
+                <span className="badge badge-red"><XCircle size={10} /> Not configured</span>
+              )}
+            </InfoRow>
+            {config.hasProvider && (
+              <>
+                <InfoRow label="Provider">
+                  <span style={{ fontWeight: 500 }}>{config.providerName || "—"}</span>
+                </InfoRow>
+                {config.model && (
+                  <InfoRow label="Model">
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--accent)" }}>
+                      {config.model}
+                    </span>
+                  </InfoRow>
+                )}
+              </>
+            )}
+            <div style={{ marginTop: 14 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate("/settings")}>
+                <SettingsIcon size={13} /> {config.hasProvider ? "Manage in Settings" : "Configure API Key"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: "var(--text3)", fontSize: "0.85rem" }}>Could not load provider config.</div>
+        )}
+      </div>
+
+      {/* Applications context */}
+      <div className="card" style={{ padding: 24, marginBottom: 16 }}>
+        <SectionHeader
+          icon={<Globe size={15} color="var(--purple)" />}
+          title="Application Environments"
+          sub={`${projects.length} application${projects.length !== 1 ? "s" : ""} registered`}
+        />
+
+        {!hasProjects ? (
+          <div style={{ padding: "20px 0", textAlign: "center", color: "var(--text3)", fontSize: "0.85rem" }}>
+            No applications registered yet.{" "}
+            <button className="btn btn-ghost btn-xs" onClick={() => navigate("/projects/new")}>Add one</button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {projects.map(p => {
+              const cd = crawlData[p.id] || {};
+              const crawl = cd.lastCrawl;
+              const tests = cd.tests || [];
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    padding: "16px 18px", background: "var(--bg2)",
+                    borderRadius: 10, border: "1px solid var(--border)",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => navigate(`/projects/${p.id}`)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: 7, background: "var(--purple-bg)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <Globe size={13} color="var(--purple)" />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{p.name}</div>
+                        <a
+                          href={p.url} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{ fontSize: "0.72rem", fontFamily: "var(--font-mono)", color: "var(--accent)" }}
+                        >
+                          {p.url}
+                        </a>
+                      </div>
+                    </div>
+                    <ChevronRight size={14} color="var(--text3)" />
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                    {[
+                      { label: "Total Tests",  value: tests.length },
+                      { label: "Approved",     value: tests.filter(t => t.reviewStatus === "approved").length },
+                      { label: "Draft",        value: tests.filter(t => t.reviewStatus === "draft").length },
+                      { label: "Pages Found",  value: crawl?.pagesFound ?? "—" },
+                    ].map((item, i) => (
+                      <div key={i}>
+                        <div style={{ fontSize: "0.68rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>
+                          {item.label}
+                        </div>
+                        <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text)" }}>{item.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Crawl row */}
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                    <RefreshCw size={11} color="var(--text3)" />
+                    <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>
+                      Last crawl: <strong style={{ color: "var(--text2)" }}>{fmtRelativeDate(crawl?.startedAt, "Never")}</strong>
+                    </span>
+                    {crawl && (
+                      <span className={`badge ${crawl.status === "completed" ? "badge-green" : crawl.status === "failed" ? "badge-red" : "badge-amber"}`}>
+                        {crawl.status}
+                      </span>
+                    )}
+                    {p.credentials && (
+                      <span className="badge badge-gray" style={{ marginLeft: "auto" }}>
+                        <Shield size={9} /> Auth configured
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

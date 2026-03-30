@@ -2,15 +2,29 @@
  * intentClassifier.js — Layer 2: Classify page elements into user intent categories
  *
  * Categories: AUTH | NAVIGATION | FORM_SUBMISSION | SEARCH | CRUD | CHECKOUT | CONTENT
+ *
+ * Priority tiers:
+ *   HIGH   — AUTH, CHECKOUT, SEARCH, FORM_SUBMISSION, CRUD (interactive, high test value)
+ *   MEDIUM — NAVIGATION (homepages, dashboards — structural tests only)
+ *   LOW    — CONTENT (static pages — minimal test coverage)
+ *
+ * Classification modes:
+ *   1. Heuristic (default) — fast, keyword/pattern-based scoring
+ *   2. AI-assisted — when confidence is low (<40), asks the AI to classify
  */
 
+import { generateText, parseJSON, hasProvider } from "../aiProvider.js";
+
 // ── Intent patterns ───────────────────────────────────────────────────────────
+
+const HIGH_PRIORITY_INTENTS = new Set(["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD"]);
 
 const INTENT_PATTERNS = {
   AUTH: {
     keywords: ["login", "log in", "sign in", "signin", "register", "sign up", "signup",
                "create account", "forgot password", "reset password", "logout", "log out",
-               "sign out", "password", "username", "email", "authenticate"],
+               "sign out", "password", "username", "authenticate"],
+    // "email" removed — too generic, causes false positives on contact/content pages
     inputTypes: ["password"],
     weight: 100,
   },
@@ -20,7 +34,8 @@ const INTENT_PATTERNS = {
     weight: 95,
   },
   SEARCH: {
-    keywords: ["search", "find", "filter", "query", "look up", "browse"],
+    keywords: ["search", "find", "filter", "query", "look up"],
+    // "browse" removed — too generic
     inputTypes: ["search"],
     weight: 85,
   },
@@ -36,8 +51,9 @@ const INTENT_PATTERNS = {
   },
   NAVIGATION: {
     keywords: ["home", "about", "docs", "documentation", "blog", "pricing", "features",
-               "contact", "faq", "help", "support", "dashboard", "profile", "settings",
+               "faq", "help", "support", "dashboard", "profile", "settings",
                "account", "back", "next", "previous", "menu"],
+    // "contact" removed — conflicts with FORM_SUBMISSION
     weight: 50,
   },
   CONTENT: {
@@ -48,12 +64,16 @@ const INTENT_PATTERNS = {
 
 /**
  * classifyElement(element) → { element, intent, confidence }
+ *
+ * Uses weighted scoring where element TYPE matters more than text content.
+ * A password input strongly signals AUTH; a link containing "password" does not.
  */
 export function classifyElement(element) {
   const text = (element.text || "").toLowerCase();
   const type = (element.type || "").toLowerCase();
   const name = (element.name || "").toLowerCase();
   const id = (element.id || "").toLowerCase();
+  const tag = (element.tag || "").toLowerCase();
 
   let bestIntent = "NAVIGATION";
   let bestScore = 0;
@@ -61,15 +81,20 @@ export function classifyElement(element) {
   for (const [intent, config] of Object.entries(INTENT_PATTERNS)) {
     let score = 0;
 
-    // Check text keywords
+    // Check text keywords — weight by element type
     for (const kw of config.keywords || []) {
-      if (text.includes(kw)) score += config.weight;
+      if (text.includes(kw)) {
+        // Buttons and inputs matching keywords are stronger signals than links
+        const typeMultiplier = (tag === "button" || tag === "input") ? 1.2
+          : (tag === "a") ? 0.6 : 1.0;
+        score += config.weight * typeMultiplier;
+      }
       if (name.includes(kw) || id.includes(kw)) score += config.weight * 0.5;
     }
 
-    // Check input types
+    // Check input types — strongest signal (e.g. input[type=password] → AUTH)
     for (const t of config.inputTypes || []) {
-      if (type === t) score += config.weight * 1.5;
+      if (type === t) score += config.weight * 2.0;
     }
 
     if (score > bestScore) {
@@ -82,10 +107,59 @@ export function classifyElement(element) {
   return { element, intent: bestIntent, confidence };
 }
 
+// ── AI-assisted classification ────────────────────────────────────────────────
+// When the heuristic confidence is below AI_THRESHOLD, we ask the LLM to
+// classify the page. This handles non-English UIs, custom components, and
+// pages where keyword matching is ambiguous.
+
+const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
+
+async function aiClassifyPage(snapshot) {
+  const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
+    tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
+  }));
+
+  const prompt = `You are a QA page classifier. Given a web page's metadata and interactive elements, classify the page's dominant user intent.
+
+PAGE:
+  URL: ${snapshot.url}
+  Title: ${snapshot.title}
+  H1: ${snapshot.h1 || "none"}
+  Forms: ${snapshot.forms}
+  Has login form: ${snapshot.hasLoginForm}
+
+ELEMENTS (sample):
+${JSON.stringify(elements, null, 2)}
+
+Classify into EXACTLY ONE of these categories:
+  AUTH — login, registration, password reset
+  CHECKOUT — cart, payment, purchase flow
+  SEARCH — search bar, filters, results listing
+  FORM_SUBMISSION — contact forms, subscribe, apply
+  CRUD — create/edit/delete data
+  NAVIGATION — homepage, dashboard, navigation hub
+  CONTENT — articles, documentation, static content
+
+Return ONLY valid JSON (no markdown):
+{
+  "intent": "AUTH",
+  "confidence": 85,
+  "reason": "one-sentence explanation"
+}`;
+
+  const text = await generateText(prompt, { maxTokens: 256 });
+  const result = parseJSON(text);
+  const intent = (result.intent || "").toUpperCase();
+  const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];
+  if (!validIntents.includes(intent)) return null;
+  return { intent, confidence: result.confidence || 70 };
+}
+
 /**
  * classifyPage(snapshot, filteredElements) → page intent summary
  *
- * Returns the dominant intent for the page and classified elements
+ * Returns the dominant intent for the page, classified elements, and priority tier.
+ * Priority is based on the dominant intent — interactive pages get more test coverage.
  */
 export function classifyPage(snapshot, filteredElements) {
   const classified = filteredElements.map(classifyElement);
@@ -96,17 +170,23 @@ export function classifyPage(snapshot, filteredElements) {
     intentCounts[intent] = (intentCounts[intent] || 0) + confidence + (element._score || 0);
   }
 
-  // Page-level signals
-  if (snapshot.forms > 0) {
+  // Page-level signals — use form structures when available for stronger signals
+  if (snapshot.hasLoginForm) {
+    intentCounts.AUTH = (intentCounts.AUTH || 0) + 300;
+  } else if (snapshot.forms > 0) {
     intentCounts.FORM_SUBMISSION = (intentCounts.FORM_SUBMISSION || 0) + 50;
   }
 
-  const title = (snapshot.title + " " + snapshot.h1).toLowerCase();
+  const title = (snapshot.title + " " + (snapshot.h1 || "")).toLowerCase();
   if (title.includes("login") || title.includes("sign in")) intentCounts.AUTH = (intentCounts.AUTH || 0) + 200;
   if (title.includes("checkout") || title.includes("cart")) intentCounts.CHECKOUT = (intentCounts.CHECKOUT || 0) + 200;
   if (title.includes("search")) intentCounts.SEARCH = (intentCounts.SEARCH || 0) + 100;
 
   const dominantIntent = Object.entries(intentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "NAVIGATION";
+
+  // Priority based on intent — only interactive pages are high priority.
+  // NAVIGATION and CONTENT pages get lighter coverage (2-3 structural tests).
+  const isHighPriority = HIGH_PRIORITY_INTENTS.has(dominantIntent);
 
   return {
     url: snapshot.url,
@@ -114,26 +194,64 @@ export function classifyPage(snapshot, filteredElements) {
     dominantIntent,
     intentBreakdown: intentCounts,
     classifiedElements: classified,
-    // All pages are high priority — NAVIGATION pages like homepages still need
-    // comprehensive test coverage (titles, CTAs, links, layout, 404 checks, etc.)
-    isHighPriority: true,
+    isHighPriority,
+    // Confidence score: how strongly does this page match its dominant intent?
+    // Low confidence → the AI should generate fewer, more conservative tests.
+    intentConfidence: Math.min(100, intentCounts[dominantIntent] || 0),
   };
+}
+
+/**
+ * classifyPageWithAI(snapshot, filteredElements) → page intent summary
+ *
+ * Same as classifyPage but falls back to the AI when heuristic confidence
+ * is below AI_THRESHOLD. Call this from the crawler pipeline instead of
+ * classifyPage when an AI provider is available.
+ */
+export async function classifyPageWithAI(snapshot, filteredElements) {
+  // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
+  // The heuristic classifier has been improved with better keyword scoring and
+  // element-type weighting, so AI assistance is not needed for typical pages.
+  // To re-enable: remove this early return and uncomment the AI block below.
+  return classifyPage(snapshot, filteredElements);
+
+  /*
+  const heuristic = classifyPage(snapshot, filteredElements);
+  if (heuristic.intentConfidence >= AI_THRESHOLD) return heuristic;
+  try {
+    if (!hasProvider()) return heuristic;
+    const aiResult = await aiClassifyPage(snapshot);
+    if (!aiResult) return heuristic;
+    const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
+    return {
+      ...heuristic,
+      dominantIntent: aiResult.intent,
+      intentConfidence: aiResult.confidence,
+      isHighPriority,
+      _aiAssisted: true,
+    };
+  } catch {
+    return heuristic;
+  }
+  */
 }
 
 /**
  * buildUserJourneys(classifiedPages) → Array of journey objects
  *
- * Chains related pages into logical user journeys
+ * Chains related pages into GENUINE multi-page user journeys.
+ * Single-page intents are NOT wrapped as journeys — they are handled
+ * separately by generateIntentTests in journeyGenerator.js.
  */
 export function buildUserJourneys(classifiedPages) {
   const journeys = [];
 
-  // Find auth flow
+  // Find auth flow — login page → post-login destination
   const authPages = classifiedPages.filter(p => p.dominantIntent === "AUTH");
   const dashboardPages = classifiedPages.filter(p =>
     p.url.includes("dashboard") || p.url.includes("home") || p.title.toLowerCase().includes("dashboard")
   );
-  if (authPages.length > 0) {
+  if (authPages.length > 0 && dashboardPages.length > 0) {
     journeys.push({
       name: "Authentication Flow",
       type: "AUTH",
@@ -142,9 +260,9 @@ export function buildUserJourneys(classifiedPages) {
     });
   }
 
-  // Find checkout flow
+  // Find checkout flow — only if we have multiple checkout-related pages
   const cartPages = classifiedPages.filter(p => p.dominantIntent === "CHECKOUT");
-  if (cartPages.length > 0) {
+  if (cartPages.length >= 2) {
     journeys.push({
       name: "Checkout Flow",
       type: "CHECKOUT",
@@ -153,9 +271,9 @@ export function buildUserJourneys(classifiedPages) {
     });
   }
 
-  // Find search flow
+  // Find search → results flow
   const searchPages = classifiedPages.filter(p => p.dominantIntent === "SEARCH");
-  if (searchPages.length > 0) {
+  if (searchPages.length >= 2) {
     journeys.push({
       name: "Search Flow",
       type: "SEARCH",
@@ -164,18 +282,22 @@ export function buildUserJourneys(classifiedPages) {
     });
   }
 
-  // Each high-priority page gets its own journey if not already covered
-  const coveredUrls = new Set(journeys.flatMap(j => j.pages.map(p => p.url)));
-  for (const page of classifiedPages) {
-    if (page.isHighPriority && !coveredUrls.has(page.url)) {
-      journeys.push({
-        name: `${page.dominantIntent} — ${page.title}`,
-        type: page.dominantIntent,
-        pages: [page],
-        description: `Isolated ${page.dominantIntent.toLowerCase()} flow on ${page.url}`,
-      });
-    }
+  // Find CRUD flow — list → create/edit → detail
+  const crudPages = classifiedPages.filter(p => p.dominantIntent === "CRUD");
+  if (crudPages.length >= 2) {
+    journeys.push({
+      name: "CRUD Flow",
+      type: "CRUD",
+      pages: crudPages.slice(0, 4),
+      description: "Create, read, update, delete workflow",
+    });
   }
+
+  // DO NOT create single-page "journeys" — those are handled by generateIntentTests.
+  // The old code wrapped every uncovered page as a fake journey, causing:
+  // 1. Massive AI API cost (separate call per page)
+  // 2. Duplicate tests (journey + intent tests for the same page)
+  // 3. Low-quality journey tests (no multi-page context to work with)
 
   return journeys;
 }

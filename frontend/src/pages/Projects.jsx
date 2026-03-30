@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Plus, X, Filter, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Play, Flag } from "lucide-react";
 import { api } from "../api.js";
 
 const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
+const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
 
 function AgentTag({ type = "TA" }) {
   const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
@@ -18,56 +19,59 @@ function StatusBadge({ result }) {
 }
 
 // ── Create Test Modal ─────────────────────────────────────────────────────────
+// Flow: form → generating steps → review steps → generating code → done (draft)
 
-function CreateTestModal({ projects, onClose, onCreated }) {
-  const [step, setStep] = useState("form"); // "form" | "generating" | "done"
-  const [name, setName] = useState("");
+function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
+  const [phase, setPhase] = useState("form");
+
+  const [name, setName]               = useState("");
   const [description, setDescription] = useState("");
-  const [projectId, setProjectId] = useState(projects[0]?.id || "");
-  const [error, setError] = useState(null);
-  const [createdTest, setCreatedTest] = useState(null);
+  const [projectId, setProjectId]     = useState(defaultProjectId || projects[0]?.id || "");
+  const [error, setError]             = useState(null);
+
   const navigate = useNavigate();
-  const nameRef = useRef(null);
+  const nameRef  = useRef(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
-
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  // ── Submit: fire-and-forget generate, close modal, navigate to project page
+  // Mirrors exactly how doCrawl works in ProjectDetail — the run appears in
+  // the Runs tab and the user can click it to watch the live pipeline.
+  async function handleGenerateSteps(e) {
+    e?.preventDefault();
     setError(null);
-    if (!name.trim()) { setError("Test name is required."); return; }
+    if (!name.trim()) { setError("Test name is required.");   return; }
     if (!projectId)   { setError("Please select a project."); return; }
 
-    setStep("generating");
-    try {
-      const steps = description.trim()
-        ? [
-            "Login to the application using the provided credentials",
-            ...description.trim().split(/\.\s+|\n/).filter(Boolean).map(s => s.trim()).filter(s => s.length > 4),
-          ]
-        : ["Login to the application using the provided credentials"];
+    setPhase("submitting");
 
-      const test = await api.createTest(projectId, {
+    try {
+      // Fire generate without awaiting — backend runs async pipeline
+      api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
-        steps,
-        type: "manual",
-        priority: "medium",
-      });
-      setCreatedTest(test);
-      setStep("done");
-      onCreated(test);
+      }).then(result => {
+        // Notify parent to refresh test list once done (runs in background)
+        if (result?.id && onCreated) onCreated(result);
+      }).catch(() => {});
+
+      // Close modal and go to project page immediately — same as crawl flow
+      onClose();
+      navigate(`/projects/${projectId}`);
     } catch (err) {
-      setError(err.message || "Failed to create test.");
-      setStep("form");
+      setError(err.message || "Failed to start generation.");
+      setPhase("form");
     }
   }
 
+  const selectedProject = projects.find(p => p.id === projectId);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       {/* Backdrop */}
@@ -88,21 +92,19 @@ function CreateTestModal({ projects, onClose, onCreated }) {
         border: "1px solid var(--border)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(480px, 95vw)",
+        width: "min(500px, 96vw)",
+        maxHeight: "90vh",
         overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
       }}>
         {/* Header */}
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "18px 22px 16px",
           borderBottom: "1px solid var(--border)",
+          flexShrink: 0,
         }}>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", padding: 2, display: "flex" }}
-          >
-            <ChevronRight size={17} style={{ transform: "rotate(180deg)" }} />
-          </button>
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
             Generate a Test Case
           </h2>
@@ -115,84 +117,57 @@ function CreateTestModal({ projects, onClose, onCreated }) {
         </div>
 
         {/* Body */}
-        <div style={{ padding: "20px 22px 24px" }}>
+        <div style={{ padding: "20px 22px 24px", overflowY: "auto", flex: 1 }}>
 
-          {step === "generating" && (
-            <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <Loader2 size={34} className="spin" color="var(--accent)" style={{ marginBottom: 14 }} />
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Generating test steps…</div>
-              <div style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-                AI is analysing your description and building the test case.
-              </div>
-            </div>
-          )}
-
-          {step === "done" && createdTest && (
-            <div style={{ textAlign: "center", padding: "32px 0" }}>
-              <div style={{
-                width: 52, height: 52, borderRadius: "50%",
-                background: "var(--green-bg)", color: "var(--green)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 14px",
-              }}>
-                <CheckCircle2 size={28} />
-              </div>
-              <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 6 }}>Test Created!</div>
-              <div style={{ fontSize: "0.82rem", color: "var(--text2)", marginBottom: 22 }}>
-                <strong>{createdTest.name}</strong> has been added to your test suite.
-              </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => {
-                    onClose();
-                    navigate(`/tests/${createdTest.id}`);
-                  }}
-                >
-                  View Test
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === "form" && (
+          {/* ── FORM ────────────────────────────────────────────────────── */}
+          {(phase === "form" || phase === "submitting") && (
             <>
               <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 20, lineHeight: 1.6 }}>
-                Provide a name and description for your test case, and AI will generate comprehensive test steps.
+                Describe what you want to test. AI will generate detailed steps and a Playwright script, saved as a <strong>Draft</strong> for your review.
               </p>
 
-              {projects.length > 1 && (
-                <div style={{ marginBottom: 16 }}>
-                  <label>Project</label>
-                  <select
-                    className="input"
-                    value={projectId}
-                    onChange={e => setProjectId(e.target.value)}
-                    style={{ height: 38 }}
-                  >
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              {/* Project — always shown, always auto-populated */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  Project
+                </label>
+                <select
+                  className="input"
+                  value={projectId}
+                  onChange={e => setProjectId(e.target.value)}
+                  style={{ height: 38 }}
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {selectedProject && (
+                  <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
+                    {selectedProject.url}
+                  </div>
+                )}
+              </div>
 
               <div style={{ marginBottom: 16 }}>
-                <label>Test Name</label>
+                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  Test Name
+                </label>
                 <input
                   ref={nameRef}
                   className="input"
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  placeholder="e.g. Dashboard test"
+                  placeholder="e.g. Dashboard loads all employee charts"
                   style={{ height: 38 }}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) handleSubmit(e); }}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) handleGenerateSteps(e); }}
                 />
               </div>
 
-              <div style={{ marginBottom: error ? 12 : 24 }}>
-                <label>Description</label>
+              <div style={{ marginBottom: error ? 12 : 20 }}>
+                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  Description
+                  <span style={{ fontWeight: 400, color: "var(--text3)", marginLeft: 6 }}>(optional but recommended)</span>
+                </label>
                 <textarea
                   className="input"
                   value={description}
@@ -207,7 +182,7 @@ function CreateTestModal({ projects, onClose, onCreated }) {
                 <div style={{
                   background: "var(--red-bg)", color: "var(--red)",
                   borderRadius: "var(--radius)", padding: "8px 12px",
-                  fontSize: "0.82rem", marginBottom: 16,
+                  fontSize: "0.82rem", marginBottom: 16, lineHeight: 1.5,
                 }}>
                   {error}
                 </div>
@@ -217,10 +192,10 @@ function CreateTestModal({ projects, onClose, onCreated }) {
                 <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
                 <button
                   className="btn btn-primary btn-sm"
-                  onClick={handleSubmit}
-                  disabled={!name.trim()}
+                  onClick={handleGenerateSteps}
+                  disabled={!name.trim() || !projectId || phase === "submitting"}
                 >
-                  Create Test
+                  Generate with AI ✦
                 </button>
               </div>
             </>
@@ -366,6 +341,7 @@ export default function Projects() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRunModal, setShowRunModal]   = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewFilter, setReviewFilter]     = useState("Approved");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -377,6 +353,10 @@ export default function Projects() {
   }, []);
 
   const filtered = tests.filter(t => {
+    // Review status filter — default to approved only (regression suite)
+    const matchReview = reviewFilter === "All Tests"
+      || (reviewFilter === "Approved" && t.reviewStatus === "approved")
+      || (reviewFilter === "Draft" && t.reviewStatus === "draft");
     const matchSearch = !search
       || t.name?.toLowerCase().includes(search.toLowerCase())
       || t.description?.toLowerCase().includes(search.toLowerCase());
@@ -384,7 +364,7 @@ export default function Projects() {
       || (filter === "Passing" && t.lastResult === "passed")
       || (filter === "Failing" && t.lastResult === "failed")
       || (filter === "Not Run" && !t.lastResult);
-    return matchSearch && matchFilter;
+    return matchReview && matchSearch && matchFilter;
   });
 
   const projMap = Object.fromEntries(projects.map(p => [p.id, p]));
@@ -483,7 +463,7 @@ export default function Projects() {
           display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
         }}>
           <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
-            Regression Tests ({filtered.length})
+            {reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
           </div>
           <div style={{ flex: 1, minWidth: 200, position: "relative" }}>
             <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
@@ -516,9 +496,27 @@ export default function Projects() {
               </button>
             ))}
           </div>
-          <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}>
-            <Filter size={13} /> Functional Area
-          </button>
+          <div style={{
+            display: "flex", gap: 4,
+            background: "var(--bg2)", padding: 3,
+            borderRadius: "var(--radius)", border: "1px solid var(--border)",
+          }}>
+            {REVIEW_FILTERS.map(f => (
+              <button
+                key={f}
+                className="btn btn-xs"
+                onClick={() => setReviewFilter(f)}
+                style={{
+                  background: reviewFilter === f ? "#fff" : "transparent",
+                  color: reviewFilter === f ? "var(--text)" : "var(--text3)",
+                  border: reviewFilter === f ? "1px solid var(--border)" : "1px solid transparent",
+                  boxShadow: reviewFilter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (
@@ -537,6 +535,7 @@ export default function Projects() {
           <table className="table">
             <thead>
               <tr>
+                <th>Test ID</th>
                 <th>Test Name</th>
                 <th>Status</th>
                 <th>Last Run</th>
@@ -551,6 +550,11 @@ export default function Projects() {
                   style={{ cursor: "pointer" }}
                   onClick={() => navigate(`/tests/${t.id}`)}
                 >
+                  <td>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                      {t.id.slice(0, 8)}…
+                    </span>
+                  </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <AgentTag type="TA" />
@@ -581,7 +585,9 @@ export default function Projects() {
                     )}
                   </td>
                   <td>
-                    {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                    {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
+                    {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
+                    {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
                     {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
                     {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
                   </td>
@@ -598,6 +604,7 @@ export default function Projects() {
           projects={projects}
           onClose={() => setShowCreateModal(false)}
           onCreated={handleTestCreated}
+          defaultProjectId={projects[0]?.id || ""}
         />
       )}
       {showRunModal && (

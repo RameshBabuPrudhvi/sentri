@@ -7,8 +7,39 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api": "http://localhost:3001",
-      "/artifacts": "http://localhost:3001",
+      "/api": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+        timeout: 60000,
+        proxyTimeout: 60000,
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            console.warn("[proxy /api error]", err.message);
+            if (!res.headersSent) {
+              res.writeHead(503, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Server busy, please retry shortly" }));
+            }
+          });
+          proxy.on("proxyReq", (_proxyReq, req) => {
+            console.debug(`[proxy] ${req.method} ${req.url}`);
+          });
+        },
+      },
+      "/artifacts": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+        timeout: 60000,
+        proxyTimeout: 60000,
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            console.warn("[proxy /artifacts error]", err.message);
+            if (!res.headersSent) {
+              res.writeHead(503, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Server busy, please retry shortly" }));
+            }
+          });
+        },
+      },
     },
   },
 });

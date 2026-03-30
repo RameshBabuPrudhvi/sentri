@@ -184,9 +184,16 @@ export async function regenerateFailingTest(improvement) {
     const text = await generateText(prompt);
     const improved = parseJSON(text);
 
+    // Only pick safe fields from the AI response — never let the LLM
+    // override critical DB fields like id, projectId, or reviewStatus.
     return {
       ...test,
-      ...improved,
+      name: improved.name || test.name,
+      description: improved.description || test.description,
+      priority: improved.priority || test.priority,
+      type: improved.type || test.type,
+      steps: Array.isArray(improved.steps) ? improved.steps : test.steps,
+      playwrightCode: improved.playwrightCode || test.playwrightCode,
       _regenerated: true,
       _regenerationReason: failureCategory,
       _originalCode: test.playwrightCode,

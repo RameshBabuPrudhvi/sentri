@@ -1,74 +1,36 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Clock, RefreshCw } from "lucide-react";
 
+// Each stage maps to a 1-based step index set authoritatively by the
+// backend via run.currentStep. No fragile log-string scraping needed.
 const PIPELINE_STAGES = [
-  {
-    label: "Crawl & Snapshot Pages",
-    icon: "🔍",
-    check: (run) =>
-      (run.pagesFound || 0) > 0 ||
-      (run.logs || []).some(
-        (l) => l.includes("smart crawl done") || l.includes("Visiting")
-      ),
-  },
-  {
-    label: "Filter Elements",
-    icon: "🧹",
-    check: (run) =>
-      (run.logs || []).some((l) => l.includes("ilter") || l.includes("noise")),
-  },
-  {
-    label: "Classify Intents & Journeys",
-    icon: "🧠",
-    check: (run) =>
-      (run.logs || []).some(
-        (l) =>
-          l.includes("lassif") ||
-          l.includes("Journey") ||
-          l.includes("journey") ||
-          l.includes("intent")
-      ),
-  },
-  {
-    label: "Generate Tests via AI",
-    icon: "⚡",
-    check: (run) =>
-      (run.logs || []).some(
-        (l) => l.includes("enerating") || l.includes("Raw tests")
-      ),
-  },
-  {
-    label: "Deduplicate Tests",
-    icon: "🚫",
-    check: (run) =>
-      (run.logs || []).some(
-        (l) =>
-          l.includes("edup") ||
-          l.includes("duplicate") ||
-          l.includes("unique tests")
-      ),
-  },
-  {
-    label: "Enhance Assertions",
-    icon: "✨",
-    check: (run) =>
-      (run.logs || []).some(
-        (l) =>
-          l.includes("nhanc") ||
-          l.includes("assertion") ||
-          l.includes("strengthened")
-      ),
-  },
-  {
-    label: "Done",
-    icon: "🎉",
-    check: (run) => run.status === "completed" || run.status === "failed",
-  },
+  { label: "Crawl & Snapshot Pages",      icon: "🔍", step: 1 },
+  { label: "Filter Elements",             icon: "🧹", step: 2 },
+  { label: "Classify Intents & Journeys", icon: "🧠", step: 3 },
+  { label: "Generate Tests via AI",       icon: "⚡", step: 4 },
+  { label: "Deduplicate Tests",           icon: "🚫", step: 5 },
+  { label: "Enhance Assertions",          icon: "✨", step: 6 },
+  { label: "Validate Tests",             icon: "✅", step: 7 },
+  { label: "Done",                        icon: "🎉", step: 8 },
 ];
 
 export default function CrawlView({ run, isRunning }) {
   const [logsOpen, setLogsOpen] = React.useState(!!isRunning);
   const logRef = useRef(null);
+
+  // Accumulate all log lines seen across polls so fast-running steps that
+  // complete between two 1500ms polls are never silently dropped.
+  // We key by line content so duplicate entries from re-renders are idempotent.
+  const logBufferRef = useRef([]);
+  const [logBuffer, setLogBuffer] = React.useState([]);
+
+  React.useEffect(() => {
+    const incoming = run?.logs || [];
+    if (incoming.length > logBufferRef.current.length) {
+      logBufferRef.current = incoming;
+      setLogBuffer([...incoming]);
+    }
+  }, [run?.logs?.length]);
 
   // Open logs while running, collapse when done
   React.useEffect(() => {
@@ -80,19 +42,37 @@ export default function CrawlView({ run, isRunning }) {
     if (isRunning && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [run?.logs?.length, isRunning]);
+  }, [logBuffer.length, isRunning]);
 
-  const logs = run?.logs || [];
+  const logs = logBuffer;
   const ps = run?.pipelineStats || {};
 
-  const stages = PIPELINE_STAGES.map((s, i, arr) => {
-    const done = s.check(run);
-    const prevDone = i === 0 ? true : arr[i - 1].check(run);
-    const active = !!isRunning && prevDone && !done;
+  // Use the authoritative currentStep set by the backend at each stage
+  // transition. Fall back to 0 (nothing started) if not yet set.
+  const currentStep = run?.currentStep ?? 0;
+
+  const stages = PIPELINE_STAGES.map((s) => {
+    // When running: steps before currentStep are done, currentStep is active.
+    // When finished successfully: all steps are done.
+    // When failed: steps *before* currentStep are done (currentStep itself failed).
+    const done = isRunning
+      ? s.step < currentStep
+      : run?.status === "completed"
+      ? true
+      : run?.status === "failed"
+      ? s.step < currentStep
+      : s.step <= currentStep;
+    const active = isRunning && s.step === currentStep;
     return { ...s, done, active };
   });
 
-  const completedCount = stages.filter((s) => s.done).length;
+  const completedCount = isRunning
+      ? Math.max(0, currentStep - 1)
+      : run?.status === "completed"
+      ? PIPELINE_STAGES.length
+      : run?.status === "failed"
+      ? Math.max(0, currentStep - 1)
+      : 0;
 
   const stats = [
     {
@@ -119,6 +99,11 @@ export default function CrawlView({ run, isRunning }) {
       label: "Assertions Enhanced",
       val: ps.assertionsEnhanced,
       color: "var(--blue)",
+    },
+    {
+      label: "Validation Rejected",
+      val: ps.validationRejected,
+      color: "var(--red)",
     },
     {
       label: "Avg Quality Score",
