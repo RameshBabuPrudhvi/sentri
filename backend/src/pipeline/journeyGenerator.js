@@ -185,6 +185,77 @@ Return ONLY valid JSON (no markdown, no code fences):
 }`;
 }
 
+// ── User-requested single test prompt ─────────────────────────────────────────
+// Used by generateSingleTest (POST /api/projects/:id/tests/generate) when a
+// user provides a specific name + description. Unlike buildIntentPrompt which
+// generates 5-8 generic tests from crawled page data, this prompt generates
+// exactly ONE focused test that matches the user's stated intent.
+
+function buildUserRequestedPrompt(name, description, appUrl) {
+  return `You are a senior QA engineer. A user has asked you to create ONE specific Playwright test.
+
+TEST NAME: ${name}
+USER DESCRIPTION: ${description || "(no description provided)"}
+APPLICATION URL: ${appUrl}
+
+Your job is to generate a SINGLE test that precisely matches the user's request above.
+Do NOT generate generic tests. Do NOT generate tests unrelated to the title and description.
+The test MUST directly verify what the user described — nothing more, nothing less.
+
+STRICT RULES:
+1. Generate EXACTLY 1 test — focused entirely on what the user described
+2. The test name should match or closely reflect the user's provided name
+3. Steps must be specific to the described scenario, not generic page checks
+4. ${SELF_HEALING_PROMPT_RULES}
+5. Every test MUST have at least 2 strong assertions
+6. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
+7. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
+8. CRITICAL: playwrightCode MUST start with: await page.goto('${appUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 });
+9. CRITICAL: playwrightCode must be fully self-contained and executable on its own
+10. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use '${appUrl}'
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "tests": [
+    {
+      "name": "${name}",
+      "description": "${(description || "").replace(/"/g, '\\"').slice(0, 200)}",
+      "priority": "high",
+      "type": "user-requested",
+      "scenario": "positive",
+      "steps": ["concrete step 1", "concrete step 2", "assert: expected outcome"],
+      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('${name.replace(/'/g, "\\'")}', async ({ page }) => {\\n  // complete test code\\n});"
+    }
+  ]
+}`;
+}
+
+/**
+ * generateUserRequestedTest(name, description, appUrl) → Array of test objects
+ *
+ * Generates exactly ONE test focused on the user's provided name + description.
+ * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
+ * generic generateIntentTests which produces 5-8 crawl-oriented tests.
+ */
+export async function generateUserRequestedTest(name, description, appUrl) {
+  const prompt = buildUserRequestedPrompt(name, description, appUrl);
+  const text = await generateText(prompt);
+  const parsed = parseJSON(text);
+
+  let tests = [];
+  if (Array.isArray(parsed)) tests = parsed;
+  else if (Array.isArray(parsed.tests)) tests = parsed.tests;
+  else if (parsed && parsed.name) tests = [parsed];
+
+  // Ensure the test name matches the user's input (AI sometimes renames)
+  for (const t of tests) {
+    t.sourceUrl = appUrl;
+    if (!t.name || t.name === "descriptive name") t.name = name;
+  }
+
+  return tests;
+}
+
 // ── Main generators ───────────────────────────────────────────────────────────
 
 /**

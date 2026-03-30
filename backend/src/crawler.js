@@ -18,7 +18,7 @@ import { getProviderName } from "./aiProvider.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
-import { generateAllTests } from "./pipeline/journeyGenerator.js";
+import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
 
@@ -206,14 +206,16 @@ async function takeSnapshot(page) {
 }
 
 /**
- * generateSingleTest — Reuses pipeline stages 3-7 for a single test
- * created from a user-provided name + description (no crawl needed).
+ * generateSingleTest — Generates ONE focused test from a user-provided
+ * name + description (no crawl needed).
+ *
+ * Uses a dedicated AI prompt (generateUserRequestedTest) that produces
+ * exactly 1 test matching the user's intent, instead of the crawl
+ * pipeline's generic 5-8 tests per page.
  *
  * Pipeline:
- *   Step 1: Crawl        — SKIPPED (user provides title + description)
- *   Step 2: Filter       — SKIPPED
- *   Step 3: Classify     — Classify the intent from name/description
- *   Step 4: Generate     — AI generates steps + Playwright code
+ *   Step 1-3: SKIPPED (Crawl, Filter, Classify — user provides intent directly)
+ *   Step 4: Generate     — AI generates 1 focused test from name + description
  *   Step 5: Deduplicate  — Check against existing project tests
  *   Step 6: Enhance      — Strengthen assertions
  *   Step 7: Validate     — Reject malformed / placeholder tests
@@ -223,72 +225,23 @@ export async function generateSingleTest(project, run, db, { name, description }
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
 
-  // Skip steps 1 & 2 — mark them as done immediately
+  // Skip steps 1-3 — user provides the intent directly via name + description
   setStep(run, 1);
   log(run, `⏭️  Step 1 (Crawl) — skipped (user-provided title & description)`);
   setStep(run, 2);
   log(run, `⏭️  Step 2 (Filter) — skipped`);
-
-  // ── Step 3: Classify intent from name + description ─────────────────────
   setStep(run, 3);
-  log(run, `🧠 Classifying intent from title & description...`);
+  log(run, `⏭️  Step 3 (Classify) — skipped (user already described the intent)`);
 
-  // Build a synthetic snapshot from the user's input so the pipeline
-  // modules can work with the same data shape they expect from a crawl.
-  const syntheticSnapshot = {
-    url: project.url,
-    title: name,
-    h1: name,
-    elements: [],
-    forms: 0,
-    formStructures: [],
-    sections: [],
-    headings: [{ level: 1, text: name }],
-    hasLoginForm: false,
-    hasModals: false,
-    hasTabs: false,
-    hasTable: false,
-    metaDescription: description || "",
-  };
-
-  const syntheticElements = [];
-  const classified = await classifyPageWithAI(syntheticSnapshot, syntheticElements);
-  // Force high priority so generateAllTests routes through section 2 (which
-  // propagates errors) instead of section 3 (which silently catches them).
-  // The isHighPriority flag is only meant to reduce coverage during multi-page
-  // crawls — when a user explicitly requests generation, every page is high priority.
-  classified.isHighPriority = true;
-  log(run, `   Intent: ${classified.dominantIntent} (confidence: ${classified.intentConfidence})`);
-  if (classified._aiAssisted) {
-    log(run, `   🤖 AI-assisted classification`);
-  }
-
-  // Build a single-page journey from the classified intent
-  const journeys = buildUserJourneys([classified]);
-  if (journeys.length > 0) {
-    log(run, `🗺️  Detected ${journeys.length} journey(s): ${journeys.map(j => j.name).join(", ")}`);
-  }
-
-  const snapshotsByUrl = { [project.url]: syntheticSnapshot };
-
-  // ── Step 4: Generate tests via AI ───────────────────────────────────────
+  // ── Step 4: Generate ONE focused test via AI ────────────────────────────
+  // Use a dedicated prompt that generates exactly 1 test matching the user's
+  // name + description, instead of the crawl pipeline's generic 5-8 tests.
   setStep(run, 4);
-  log(run, `🤖 Generating tests from intent + description...`);
+  log(run, `🤖 Generating test from user description...`);
+  log(run, `   Name: "${name}"`);
+  if (description) log(run, `   Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
-  // Use the intent-based generator with the classified page and description
-  // context injected into the snapshot for richer AI prompts.
-  const enrichedSnapshot = {
-    ...syntheticSnapshot,
-    metaDescription: description || "",
-    // Inject the user description as an H2 so the AI prompt picks it up
-    headings: [
-      { level: 1, text: name },
-      ...(description ? [{ level: 2, text: description.slice(0, 120) }] : []),
-    ],
-  };
-  snapshotsByUrl[project.url] = enrichedSnapshot;
-
-  const rawTests = await generateAllTests([classified], journeys, snapshotsByUrl, (msg) => log(run, msg));
+  const rawTests = await generateUserRequestedTest(name, description, project.url);
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
@@ -302,7 +255,9 @@ export async function generateSingleTest(project, run, db, { name, description }
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
   setStep(run, 6);
   log(run, `✨ Enhancing assertions...`);
-  const classifiedPagesByUrl = { [project.url]: classified };
+  // No real snapshots or classified pages — enhanceTests falls back gracefully
+  const snapshotsByUrl = {};
+  const classifiedPagesByUrl = {};
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
@@ -358,7 +313,7 @@ export async function generateSingleTest(project, run, db, { name, description }
     duplicatesRemoved: removed,
     assertionsEnhanced: enhancedCount,
     validationRejected: rejected,
-    journeysDetected: journeys.length,
+    journeysDetected: 0,
     averageQuality: dedupStats.averageQuality,
   };
 
