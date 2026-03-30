@@ -123,13 +123,19 @@ async function withRetry(fn, label = "") {
 
 // ── Core API call ─────────────────────────────────────────────────────────────
 
-async function callProvider(provider, prompt) {
+// 8192 tokens is enough for 5-8 complete Playwright tests with full code.
+// The previous 2000 limit caused JSON truncation mid-test, silent data loss.
+const DEFAULT_MAX_TOKENS = 8192;
+
+async function callProvider(provider, prompt, maxTokens) {
+  const tokens = maxTokens || DEFAULT_MAX_TOKENS;
+
   if (provider === "anthropic") {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
     return withRetry(async () => {
       const msg = await client.messages.create({
         model: PROVIDER_META.anthropic.model,
-        max_tokens: 2000,
+        max_tokens: tokens,
         messages: [{ role: "user", content: prompt }],
       });
       return msg.content[0].text;
@@ -141,7 +147,7 @@ async function callProvider(provider, prompt) {
     return withRetry(async () => {
       const res = await client.chat.completions.create({
         model: PROVIDER_META.openai.model,
-        max_tokens: 2000,
+        max_tokens: tokens,
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
       });
@@ -166,7 +172,13 @@ async function callProvider(provider, prompt) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function generateText(prompt) {
+/**
+ * generateText(prompt, options?)
+ *
+ * @param {string} prompt
+ * @param {{ maxTokens?: number }} options
+ */
+export async function generateText(prompt, options) {
   const provider = detectProvider();
   if (!provider) {
     throw new Error(
@@ -176,7 +188,7 @@ export async function generateText(prompt) {
       "  GOOGLE_API_KEY=AIza...         → https://aistudio.google.com/apikey"
     );
   }
-  return callProvider(provider, prompt);
+  return callProvider(provider, prompt, options?.maxTokens);
 }
 
 export function parseJSON(text) {
