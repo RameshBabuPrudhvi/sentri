@@ -209,18 +209,19 @@ export function classifyPage(snapshot, filteredElements) {
  * classifyPage when an AI provider is available.
  */
 export async function classifyPageWithAI(snapshot, filteredElements) {
+  // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
+  // The heuristic classifier has been improved with better keyword scoring and
+  // element-type weighting, so AI assistance is not needed for typical pages.
+  // To re-enable: remove this early return and uncomment the AI block below.
+  return classifyPage(snapshot, filteredElements);
+
+  /*
   const heuristic = classifyPage(snapshot, filteredElements);
-
-  // If heuristic confidence is high enough, trust it
   if (heuristic.intentConfidence >= AI_THRESHOLD) return heuristic;
-
-  // Try AI-assisted classification
   try {
     if (!hasProvider()) return heuristic;
     const aiResult = await aiClassifyPage(snapshot);
     if (!aiResult) return heuristic;
-
-    // Override the dominant intent with the AI's classification
     const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
     return {
       ...heuristic,
@@ -230,9 +231,9 @@ export async function classifyPageWithAI(snapshot, filteredElements) {
       _aiAssisted: true,
     };
   } catch {
-    // AI failed — fall back to heuristic
     return heuristic;
   }
+  */
 }
 
 /**

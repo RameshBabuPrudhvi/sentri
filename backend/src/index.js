@@ -30,6 +30,16 @@ app.use("/artifacts", express.static(ARTIFACTS_DIR, {
 
 const db = getDb();
 
+// ─── Seed helper (dev / testing only) ────────────────────────────────────
+// Allows seed.js to inject pre-built run objects directly into the in-memory DB
+// without going through the real crawl/run flow. Disabled in production.
+if (process.env.NODE_ENV !== "production") {
+  app.patch("/api/_seed/runs/:id", (req, res) => {
+    db.runs[req.params.id] = { ...req.body, id: req.params.id };
+    res.json({ ok: true, id: req.params.id });
+  });
+}
+
 // ─── Activity Logger ──────────────────────────────────────────────────────────
 // Records user/system actions so the Work page shows a complete timeline.
 //

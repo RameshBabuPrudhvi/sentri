@@ -36,7 +36,7 @@ Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
 3. ${SELF_HEALING_PROMPT_RULES}
-4. Include at least 3 meaningful assertions per test — for visibility checks, always use safeExpect as described above; other assertions like toHaveURL(), toContainText(), toHaveValue() may use direct locators.
+4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
 5. Add page.waitForLoadState() between navigation steps
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
@@ -183,262 +183,40 @@ Return ONLY valid JSON (no markdown, no code fences):
 }`;
 }
 
-// ── Two-phase generators ──────────────────────────────────────────────────────
-// Phase 1 (PLAN):  Ask the AI for a lightweight test plan — names, scenarios,
-//                   and step outlines — without any Playwright code.
-// Phase 2 (GENERATE): For each planned test, ask the AI to write the full
-//                      Playwright implementation.
-//
-// Splitting the prompt this way avoids token-limit truncation on large pages
-// and gives the AI a focused context window for code generation.
-
-function buildPlanPrompt(journey, allSnapshots) {
-  const pageContexts = journey.pages.map(page => {
-    const snapshot = allSnapshots[page.url];
-    return `  Page: ${page.url} | Title: ${page.title} | Intent: ${page.dominantIntent}`;
-  }).join("\n");
-
-  return `You are a senior QA engineer. Plan 3-5 end-to-end Playwright tests for this user journey.
-Do NOT write any Playwright code yet — only output the test plan.
-
-JOURNEY: ${journey.name}
-TYPE: ${journey.type}
-DESCRIPTION: ${journey.description}
-
-PAGES:
-${pageContexts}
-
-Return ONLY valid JSON (no markdown):
-{
-  "plan": [
-    {
-      "name": "descriptive test name",
-      "description": "what user goal this validates",
-      "scenario": "positive|negative|edge_case",
-      "steps": ["Step 1", "Step 2", "Assert: expected outcome"]
-    }
-  ]
-}`;
-}
-
-function buildCodePrompt(planned, journey, allSnapshots) {
-  const pageContexts = journey.pages.map(page => {
-    const snapshot = allSnapshots[page.url];
-    return `
-  Page: ${page.url}
-  Title: ${page.title}
-  Intent: ${page.dominantIntent}
-  Key elements: ${JSON.stringify((snapshot?.elements || []).slice(0, 10), null, 2)}`;
-  }).join("\n---");
-
-  return `You are a senior QA engineer writing a Playwright test.
-
-JOURNEY: ${journey.name}
-TEST TO IMPLEMENT:
-  Name: ${planned.name}
-  Description: ${planned.description}
-  Scenario: ${planned.scenario}
-  Steps:
-${planned.steps.map((s, i) => `    ${i + 1}. ${s}`).join("\n")}
-
-PAGES IN THIS JOURNEY:
-${pageContexts}
-
-Requirements:
-1. ${SELF_HEALING_PROMPT_RULES}
-2. Include at least 3 meaningful assertions per test — for visibility checks, always use safeExpect; other assertions like toHaveURL(), toContainText(), toHaveValue() may use direct locators.
-3. Add page.waitForLoadState() between navigation steps
-4. CRITICAL: playwrightCode MUST start with await page.goto('FULL_URL') using the real URL above
-5. CRITICAL: Do NOT use placeholder URLs like 'https://example.com'
-
-Return ONLY valid JSON (no markdown):
-{
-  "name": "${planned.name}",
-  "description": "${planned.description}",
-  "priority": "high",
-  "type": "${journey.type.toLowerCase()}",
-  "scenario": "${planned.scenario}",
-  "journeyType": "${journey.type}",
-  "isJourneyTest": true,
-  "steps": ${JSON.stringify(planned.steps)},
-  "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full test code\\n});"
-}`;
-}
+// ── Main generators ───────────────────────────────────────────────────────────
 
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
- *
- * Two-phase: PLAN then GENERATE per test.
  */
 export async function generateJourneyTest(journey, snapshotsByUrl) {
   try {
-    // ── Phase 1: PLAN ─────────────────────────────────────────────────────
-    const planPrompt = buildPlanPrompt(journey, snapshotsByUrl);
-    const planText = await generateText(planPrompt, { maxTokens: 4096 });
-    const planResult = parseJSON(planText);
-    const plan = Array.isArray(planResult.plan) ? planResult.plan
-      : Array.isArray(planResult) ? planResult : [];
-    if (!plan.length) return [];
+    const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
+    const text = await generateText(prompt);
+    const result = parseJSON(text);
 
-    // ── Phase 2: GENERATE code for each planned test ──────────────────────
-    const tests = [];
-    for (const planned of plan) {
-      try {
-        const codePrompt = buildCodePrompt(planned, journey, snapshotsByUrl);
-        const codeText = await generateText(codePrompt);
-        const result = parseJSON(codeText);
-        tests.push(result);
-      } catch {
-        // If code generation fails for one test, keep the plan as a codeless test
-        tests.push({
-          name: planned.name,
-          description: planned.description,
-          scenario: planned.scenario,
-          steps: planned.steps,
-          isJourneyTest: true,
-          journeyType: journey.type,
-          type: journey.type.toLowerCase(),
-          priority: "high",
-          playwrightCode: null,
-        });
-      }
-    }
-    return tests;
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result.tests)) return result.tests;
+    if (result && result.name) return [result]; // legacy single-test shape
+    return [];
   } catch (err) {
-    // Fall back to the single-prompt approach if planning fails
-    try {
-      const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
-      const text = await generateText(prompt);
-      const result = parseJSON(text);
-      if (Array.isArray(result)) return result;
-      if (Array.isArray(result.tests)) return result.tests;
-      if (result && result.name) return [result];
-      return [];
-    } catch {
-      return [];
-    }
+    return [];
   }
-}
-
-// ── Two-phase intent test generator ───────────────────────────────────────────
-// Same PLAN → GENERATE split as journey tests, but for single-page intents.
-// This avoids token-limit truncation on pages with many elements.
-
-function buildIntentPlanPrompt(classifiedPage, snapshot) {
-  const pageType = classifiedPage.dominantIntent;
-  return `You are a senior QA engineer. Plan 5-8 Playwright tests for this page.
-Do NOT write any Playwright code yet — only output the test plan.
-
-PAGE: ${snapshot.url}
-TITLE: ${snapshot.title}
-DOMINANT INTENT: ${pageType}
-FORMS: ${snapshot.forms}
-H1: ${snapshot.h1 || "none"}
-
-Return ONLY valid JSON (no markdown):
-{
-  "plan": [
-    {
-      "name": "descriptive test name",
-      "description": "what user goal this validates",
-      "scenario": "positive|negative|edge_case",
-      "steps": ["Step 1", "Step 2", "Assert: expected outcome"]
-    }
-  ]
-}`;
-}
-
-function buildIntentCodePrompt(planned, classifiedPage, snapshot) {
-  const elements = classifiedPage.classifiedElements
-    .filter(({ confidence }) => confidence > 20)
-    .slice(0, 20)
-    .map(({ element, intent, confidence }) => ({ ...element, intent, confidence }));
-
-  return `You are a senior QA engineer writing a Playwright test.
-
-PAGE: ${snapshot.url}
-TITLE: ${snapshot.title}
-DOMINANT INTENT: ${classifiedPage.dominantIntent}
-
-TEST TO IMPLEMENT:
-  Name: ${planned.name}
-  Description: ${planned.description}
-  Scenario: ${planned.scenario}
-  Steps:
-${planned.steps.map((s, i) => `    ${i + 1}. ${s}`).join("\n")}
-
-CLASSIFIED INTERACTIVE ELEMENTS:
-${JSON.stringify(elements, null, 2)}
-
-Requirements:
-1. ${SELF_HEALING_PROMPT_RULES}
-2. Include at least 2 strong assertions (toHaveURL, toBeVisible via safeExpect, toContainText, toHaveValue)
-3. Add page.waitForLoadState() after navigation
-4. CRITICAL: playwrightCode MUST start with await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 })
-5. CRITICAL: Do NOT use placeholder URLs like 'https://example.com'
-
-Return ONLY valid JSON (no markdown):
-{
-  "name": "${planned.name}",
-  "description": "${planned.description}",
-  "priority": "high",
-  "type": "${classifiedPage.dominantIntent.toLowerCase()}",
-  "scenario": "${planned.scenario}",
-  "steps": ${JSON.stringify(planned.steps)},
-  "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full test code\\n});"
-}`;
 }
 
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
- *
- * Two-phase: PLAN then GENERATE per test (same as journey tests).
- * Falls back to single-prompt approach if planning fails.
  */
 export async function generateIntentTests(classifiedPage, snapshot) {
   try {
-    // ── Phase 1: PLAN ─────────────────────────────────────────────────────
-    const planPrompt = buildIntentPlanPrompt(classifiedPage, snapshot);
-    const planText = await generateText(planPrompt, { maxTokens: 4096 });
-    const planResult = parseJSON(planText);
-    const plan = Array.isArray(planResult.plan) ? planResult.plan
-      : Array.isArray(planResult) ? planResult : [];
-    if (!plan.length) return [];
+    const prompt = buildIntentPrompt(classifiedPage, snapshot);
+    const text = await generateText(prompt);
+    const parsed = parseJSON(text);
 
-    // ── Phase 2: GENERATE code for each planned test ──────────────────────
-    const tests = [];
-    for (const planned of plan) {
-      try {
-        const codePrompt = buildIntentCodePrompt(planned, classifiedPage, snapshot);
-        const codeText = await generateText(codePrompt);
-        const result = parseJSON(codeText);
-        tests.push(result);
-      } catch {
-        // Code generation failed — keep the plan as a codeless test
-        tests.push({
-          name: planned.name,
-          description: planned.description,
-          scenario: planned.scenario,
-          steps: planned.steps,
-          type: classifiedPage.dominantIntent.toLowerCase(),
-          priority: "medium",
-          playwrightCode: null,
-        });
-      }
-    }
-    return tests;
-  } catch {
-    // Fall back to single-prompt approach if planning fails
-    try {
-      const prompt = buildIntentPrompt(classifiedPage, snapshot);
-      const text = await generateText(prompt);
-      const parsed = parseJSON(text);
-      if (Array.isArray(parsed)) return parsed;
-      if (Array.isArray(parsed.tests)) return parsed.tests;
-      return [];
-    } catch {
-      return [];
-    }
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed.tests)) return parsed.tests;
+    return [];
+  } catch (err) {
+    return [];
   }
 }
 
