@@ -255,10 +255,12 @@ export function getSelfHealingHelperCode(healingHints) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Detect CSS/XPath selectors that should NOT be rewritten to text-based helpers.
-// Matches arguments starting with #, ., [, //, or containing CSS combinators (>, ~, +)
-// or pseudo-selectors (word boundary before colon, e.g. `:hover`, `div:nth-child`).
-// A trailing colon like "Email:" or "Password:" is NOT a CSS selector.
-const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|[>~+]|\w:(?!$)\w/;
+// Matches arguments starting with #, ., [, //, or containing CSS combinators
+// (whitespace-delimited >, ~, +) or pseudo-selectors (`:hover`, `:nth-child`).
+// Human-readable text like "Email:", "Price: $10", or "Add + Continue" is NOT
+// matched — we only flag combinators surrounded by selector-like context and
+// pseudo-selectors that follow a word boundary (e.g. `div:hover`, `a:nth-child`).
+const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|\s[>~+]\s|\w::?\w/;
 
 function looksLikeCssSelector(arg) {
   return CSS_SELECTOR_RE.test(arg.trim());

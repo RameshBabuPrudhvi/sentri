@@ -10,7 +10,8 @@ const PIPELINE_STAGES = [
   { label: "Generate Tests via AI",       icon: "⚡", step: 4 },
   { label: "Deduplicate Tests",           icon: "🚫", step: 5 },
   { label: "Enhance Assertions",          icon: "✨", step: 6 },
-  { label: "Done",                        icon: "🎉", step: 7 },
+  { label: "Validate Tests",             icon: "✅", step: 7 },
+  { label: "Done",                        icon: "🎉", step: 8 },
 ];
 
 export default function CrawlView({ run, isRunning }) {
@@ -98,6 +99,11 @@ export default function CrawlView({ run, isRunning }) {
       label: "Assertions Enhanced",
       val: ps.assertionsEnhanced,
       color: "var(--blue)",
+    },
+    {
+      label: "Validation Rejected",
+      val: ps.validationRejected,
+      color: "var(--red)",
     },
     {
       label: "Avg Quality Score",

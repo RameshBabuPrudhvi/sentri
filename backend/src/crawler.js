@@ -306,10 +306,17 @@ export async function crawlAndGenerateTests(project, run, db) {
   });
   for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
 
-  // Layer 2: Intent classification
+  // Layer 2: Intent classification (AI-assisted when heuristic confidence is low)
   setStep(run, 3);
   log(run, `\u{1F9E0} Classifying page intents...`);
-  const classifiedPages = filteredSnapshots.map(snap => classifyPage(snap, snap.elements));
+  const classifiedPages = [];
+  for (const snap of filteredSnapshots) {
+    const classified = await classifyPageWithAI(snap, snap.elements);
+    if (classified._aiAssisted) {
+      log(run, `   \u{1F916} AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
+    }
+    classifiedPages.push(classified);
+  }
   const classifiedPagesByUrl = {};
   for (const cp of classifiedPages) {
     classifiedPagesByUrl[cp.url] = cp;

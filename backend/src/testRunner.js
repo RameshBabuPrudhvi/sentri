@@ -10,7 +10,7 @@ import {
   recordHealing,
   recordHealingFailure,
 } from "./selfHealing.js";
-import { applyFeedbackLoop } from "./pipeline/feedbackLoop.js";
+import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -428,14 +428,36 @@ export async function runTests(project, tests, run, db) {
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Only runs when there are failures and an AI provider is available.
+  // The loop classifies each failure (SELECTOR_ISSUE, NAVIGATION_FAIL, etc.),
+  // regenerates high-priority failures via AI, and updates the DB so the next
+  // run benefits from the improved test code.
   if (run.failed > 0) {
     try {
       const { hasProvider } = await import("./aiProvider.js");
       if (hasProvider()) {
         log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
+
+        // Classify failures for observability
+        const testMap = {};
+        for (const t of tests) { if (db.tests[t.id]) testMap[t.id] = db.tests[t.id]; }
+        const snapshotsByUrl = {};
+        for (const snap of (run.snapshots || [])) { snapshotsByUrl[snap.url] = snap; }
+        const { improvements } = analyzeRunResults(run.results, testMap, snapshotsByUrl);
+
+        // Log failure categories so the user can see what went wrong
+        const categories = {};
+        for (const imp of improvements) {
+          categories[imp.failureCategory] = (categories[imp.failureCategory] || 0) + 1;
+        }
+        if (Object.keys(categories).length > 0) {
+          const breakdown = Object.entries(categories).map(([k, v]) => `${k}: ${v}`).join(", ");
+          log(run, `   📊 Failure breakdown: ${breakdown}`);
+        }
+
         const feedback = await applyFeedbackLoop(run, db);
         if (feedback.improved > 0) {
           log(run, `   ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
+          log(run, `   💡 Regenerated tests will use improved selectors on next run`);
           run.feedbackLoop = feedback;
         } else {
           log(run, `   ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
