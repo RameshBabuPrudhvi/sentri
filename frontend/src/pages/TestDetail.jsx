@@ -582,6 +582,13 @@ export default function TestDetail() {
             Test Information
           </h3>
 
+          {/* Test ID */}
+          <InfoRow label="Test ID">
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text2)", userSelect: "all" }}>
+              {test.id}
+            </span>
+          </InfoRow>
+
           {/* Test type / review status */}
           <InfoRow label="Test type">
             <ReviewBadge status={test.reviewStatus} />

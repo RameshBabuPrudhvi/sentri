@@ -535,6 +535,7 @@ export default function Projects() {
           <table className="table">
             <thead>
               <tr>
+                <th>Test ID</th>
                 <th>Test Name</th>
                 <th>Status</th>
                 <th>Last Run</th>
@@ -549,6 +550,11 @@ export default function Projects() {
                   style={{ cursor: "pointer" }}
                   onClick={() => navigate(`/tests/${t.id}`)}
                 >
+                  <td>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                      {t.id.slice(0, 8)}…
+                    </span>
+                  </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <AgentTag type="TA" />
