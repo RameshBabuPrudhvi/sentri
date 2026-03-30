@@ -187,7 +187,6 @@ export function getSelfHealingHelperCode(healingHints) {
         p => p.locator(\`input[aria-label*="\${labelOrPlaceholder}"]\`),
         p => p.locator(\`textarea[aria-label*="\${labelOrPlaceholder}"]\`),
         p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
-        p => p.locator('input:visible, textarea:visible').first(),
       ];
 
       const el = await findElement(page, strategies, { healingKey: 'fill::' + labelOrPlaceholder });
@@ -256,8 +255,10 @@ export function getSelfHealingHelperCode(healingHints) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Detect CSS/XPath selectors that should NOT be rewritten to text-based helpers.
-// Matches arguments starting with #, ., [, //, or containing : (pseudo-selectors).
-const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|[:>~+]/;
+// Matches arguments starting with #, ., [, //, or containing CSS combinators (>, ~, +)
+// or pseudo-selectors (word boundary before colon, e.g. `:hover`, `div:nth-child`).
+// A trailing colon like "Email:" or "Password:" is NOT a CSS selector.
+const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|[>~+]|\w:(?!$)\w/;
 
 function looksLikeCssSelector(arg) {
   return CSS_SELECTOR_RE.test(arg.trim());

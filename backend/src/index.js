@@ -225,6 +225,9 @@ app.patch("/api/tests/:testId", async (req, res) => {
 
   test.updatedAt = new Date().toISOString();
 
+  // Track whether code was actually regenerated in THIS request (not a prior one)
+  let codeRegeneratedNow = false;
+
   // If steps changed and caller requested code regeneration, rebuild Playwright script
   if (stepsChanged && regenerateCode && hasProvider()) {
     try {
@@ -264,6 +267,7 @@ Return ONLY valid JSON with no markdown fences:
       if (playwrightCode) {
         test.playwrightCode = playwrightCode;
         test.codeRegeneratedAt = new Date().toISOString();
+        codeRegeneratedNow = true;
       }
     } catch (err) {
       console.error("[PATCH test] code regeneration failed:", err.message);
@@ -280,13 +284,13 @@ Return ONLY valid JSON with no markdown fences:
     testId: test.id,
     testName: test.name,
     detail: stepsChanged
-      ? `Steps updated (${test.steps.length} steps)${test.codeRegeneratedAt ? " — Playwright code regenerated" : ""}`
+      ? `Steps updated (${test.steps.length} steps)${codeRegeneratedNow ? " — Playwright code regenerated" : ""}`
       : "Test metadata updated",
   });
 
   // Let the frontend know if the code may be out of sync with steps
   const response = { ...test };
-  if (stepsChanged && !test.codeRegeneratedAt) {
+  if (stepsChanged && !codeRegeneratedNow) {
     response._codeStale = true;
   }
 

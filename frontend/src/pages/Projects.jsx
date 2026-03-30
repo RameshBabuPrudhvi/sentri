@@ -91,6 +91,7 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
       setIsSaving(true);
       const updated = await api.updateTest(createdTest.id, {
         steps: generatedSteps.filter(s => s.trim()),
+        regenerateCode: true,
       });
       setPhase("done");
       if (onCreated) onCreated(updated);
