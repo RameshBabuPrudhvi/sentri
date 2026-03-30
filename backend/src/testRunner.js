@@ -296,8 +296,15 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
 
   } catch (err) {
     result.status = "failed";
+    // Extract a readable message — handle AggregateError (thrown by Playwright
+    // when multiple internal strategies fail) so the UI doesn't show a raw
+    // "[object Object]" or bare "AggregateError".
+    let rawMsg = err.message || "";
+    if ((!rawMsg || rawMsg === "AggregateError") && err.errors?.length) {
+      rawMsg = err.errors.map(e => e?.message || String(e)).join("; ");
+    }
     // Strip ANSI escape codes so the UI shows clean text
-    result.error = err.message.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+    result.error = rawMsg.replace(/\x1B\[[0-9;]*[mGKHF]/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
 
     // Persist healing events from the failed run — runGeneratedCode attaches
     // them to the error so earlier successful steps aren't lost.

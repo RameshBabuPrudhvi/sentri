@@ -149,8 +149,22 @@ export function getSelfHealingHelperCode(healingHints) {
         __healingEvents.push({ key: hintKey, strategyIndex: -1, healed: false, failed: true });
       }
 
+      // Extract a human-readable message from the last error.
+      // Playwright can throw AggregateError (with .errors[]) or regular Error.
+      // String-concatenating an Error object directly produces unhelpful output
+      // like "[object Object]" or just "AggregateError".
+      let errMsg = 'unknown error';
+      if (lastError) {
+        if (lastError.errors && lastError.errors.length) {
+          // AggregateError — join the sub-error messages
+          errMsg = lastError.errors.map(e => e?.message || String(e)).join('; ');
+        } else {
+          errMsg = lastError.message || String(lastError);
+        }
+      }
+
       throw new Error(
-        'Element not found using any strategy. Last error: ' + lastError
+        'Element not found using any strategy. Last error: ' + errMsg
       );
     }
 
