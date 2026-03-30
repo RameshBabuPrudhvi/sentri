@@ -14,6 +14,12 @@ import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ── Env-driven config (defaults match previous hardcoded values) ──────────────
+const BROWSER_HEADLESS    = process.env.BROWSER_HEADLESS !== "false";
+const VIEWPORT_WIDTH      = parseInt(process.env.VIEWPORT_WIDTH, 10) || 1280;
+const VIEWPORT_HEIGHT     = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
+const NAVIGATION_TIMEOUT  = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
+
 const ARTIFACTS_DIR = path.join(__dirname, "..", "artifacts");
 const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");
 const TRACES_DIR    = path.join(ARTIFACTS_DIR, "traces");
@@ -145,8 +151,8 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
 
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    recordVideo: { dir: testVideoDir, size: { width: 1280, height: 720 } },
-    viewport: { width: 1280, height: 720 },
+    recordVideo: { dir: testVideoDir, size: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT } },
+    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     // Accept all permissions so interactions aren't blocked
     permissions: ["geolocation", "notifications"],
     ignoreHTTPSErrors: true,

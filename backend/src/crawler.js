@@ -22,8 +22,8 @@ import { generateAllTests } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
 
-const MAX_PAGES = 30;  // Increased from 20 to capture more pages per site
-const MAX_DEPTH = 3;
+const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
+const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 
 function log(run, msg) {
   const entry = `[${new Date().toISOString()}] ${msg}`;
@@ -80,10 +80,12 @@ function validateTest(test, projectUrl) {
   return issues;
 }
 
+const CRAWL_NETWORKIDLE_TIMEOUT = parseInt(process.env.CRAWL_NETWORKIDLE_TIMEOUT, 10) || 5000;
+
 async function takeSnapshot(page) {
   // Wait for SPA content to settle — domcontentloaded fires too early for SPAs.
   // Try networkidle first (best for SPAs), fall back to a generous timeout.
-  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: CRAWL_NETWORKIDLE_TIMEOUT }).catch(() => {});
 
   return page.evaluate(() => {
     // Compute the effective ARIA role of an element (explicit or implicit)
@@ -364,7 +366,7 @@ export async function generateSingleTest(project, run, db, { name, description }
 
 export async function crawlAndGenerateTests(project, run, db) {
   const browser = await chromium.launch({
-    headless: true,
+    headless: process.env.BROWSER_HEADLESS !== "false",
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });

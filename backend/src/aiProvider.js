@@ -79,8 +79,8 @@ function maskKey(key) {
 
 const RATE_LIMIT_CODES  = [429, 529];
 const RETRY_ERRORS      = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
-const MAX_RETRIES       = 3;
-const BASE_DELAY_MS     = 2000;
+const MAX_RETRIES       = parseInt(process.env.LLM_MAX_RETRIES, 10) || 3;
+const BASE_DELAY_MS     = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -127,7 +127,7 @@ async function withRetry(fn, label = "") {
 // supporting the new two-phase PLAN+GENERATE pipeline in journeyGenerator.js
 // where the planning prompt alone can consume ~2k tokens.
 // The previous 8192 limit caused truncation on large journey test batches.
-const DEFAULT_MAX_TOKENS = 16384;
+const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
 async function callProvider(provider, prompt, maxTokens) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;

@@ -68,13 +68,18 @@ export function getHealingHistoryForTest(db, testId) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Self-healing helpers (runtime injection)
 // ─────────────────────────────────────────────────────────────────────────────
+// Read self-healing runtime defaults from env (baked into generated code at call time)
+const HEALING_ELEMENT_TIMEOUT = parseInt(process.env.HEALING_ELEMENT_TIMEOUT, 10) || 5000;
+const HEALING_RETRY_COUNT     = parseInt(process.env.HEALING_RETRY_COUNT, 10) || 3;
+const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) || 400;
+
 export function getSelfHealingHelperCode(healingHints) {
   // healingHints is an optional map of "<action>::<label>" → strategyIndex
   const hintsJSON = JSON.stringify(healingHints || {});
   return `
-    const DEFAULT_TIMEOUT = 5000;
-    const RETRY_COUNT = 3;
-    const RETRY_DELAY = 400;
+    const DEFAULT_TIMEOUT = ${HEALING_ELEMENT_TIMEOUT};
+    const RETRY_COUNT = ${HEALING_RETRY_COUNT};
+    const RETRY_DELAY = ${HEALING_RETRY_DELAY};
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
