@@ -359,8 +359,8 @@ app.delete("/api/projects/:id/tests/:testId", (req, res) => {
 // Enhance → Validate), skipping stages 1-2 (Crawl & Filter) since the user
 // provides a title + description instead of a URL to crawl.
 //
-// Returns a runId immediately — the frontend polls GET /api/runs/:runId for
-// progress (same as the crawl flow). Tests are saved as DRAFT on completion.
+// Runs synchronously and returns the first created test object directly so the
+// frontend CreateTestModal can display steps and transition to the review phase.
 app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
@@ -394,29 +394,36 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
   });
 
-  // Kick off async — frontend polls GET /api/runs/:runId for progress
-  generateSingleTest(project, run, db, {
-    name: name.trim(),
-    description: (description || "").trim(),
-  })
-    .then((createdTestIds) => {
-      logActivity({
-        type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
-      });
-    })
-    .catch((err) => {
-      run.status = "failed";
-      run.error = err.message;
-      run.finishedAt = new Date().toISOString();
-      logActivity({
-        type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
-        status: "failed",
-      });
+  try {
+    const createdTestIds = await generateSingleTest(project, run, db, {
+      name: name.trim(),
+      description: (description || "").trim(),
     });
 
-  res.json({ runId });
+    logActivity({
+      type: "test.generate", projectId: project.id, projectName: project.name,
+      detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
+    });
+
+    // Return the first created test object so the frontend can display steps
+    // and transition to the review phase immediately.
+    const firstTest = createdTestIds.length > 0 ? db.tests[createdTestIds[0]] : null;
+    if (firstTest) {
+      res.status(201).json(firstTest);
+    } else {
+      res.status(200).json({ runId, message: "Pipeline completed but no tests passed validation." });
+    }
+  } catch (err) {
+    run.status = "failed";
+    run.error = err.message;
+    run.finishedAt = new Date().toISOString();
+    logActivity({
+      type: "test.generate", projectId: project.id, projectName: project.name,
+      detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
+      status: "failed",
+    });
+    res.status(500).json({ error: err.message || "AI generation failed" });
+  }
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────

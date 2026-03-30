@@ -437,9 +437,17 @@ export async function runTests(project, tests, run, db) {
       if (hasProvider()) {
         log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
 
-        // Classify failures for observability
+        // Build testMap from the actual tests array (not run.tests which is
+        // only populated during crawl runs). Test runs have testQueue/results
+        // but not run.tests, so we build the map from the tests argument.
         const testMap = {};
         for (const t of tests) { if (db.tests[t.id]) testMap[t.id] = db.tests[t.id]; }
+
+        // Populate run.tests so applyFeedbackLoop can find them
+        if (!run.tests || run.tests.length === 0) {
+          run.tests = tests.map(t => t.id);
+        }
+
         const snapshotsByUrl = {};
         for (const snap of (run.snapshots || [])) { snapshotsByUrl[snap.url] = snap; }
         const { improvements } = analyzeRunResults(run.results, testMap, snapshotsByUrl);

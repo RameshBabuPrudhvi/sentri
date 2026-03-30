@@ -162,7 +162,7 @@ async function callProvider(provider, prompt, maxTokens) {
     return withRetry(async () => {
       const model = genAI.getGenerativeModel({
         model: PROVIDER_META.google.model,
-        generationConfig: { responseMimeType: "application/json" },
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: tokens },
       });
       const result = await model.generateContent(prompt);
       return result.response.text();

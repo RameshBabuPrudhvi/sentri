@@ -260,7 +260,10 @@ export function getSelfHealingHelperCode(healingHints) {
 // Human-readable text like "Email:", "Price: $10", or "Add + Continue" is NOT
 // matched — we only flag combinators surrounded by selector-like context and
 // pseudo-selectors that follow a word boundary (e.g. `div:hover`, `a:nth-child`).
-const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|\s[>~+]\s|\w::?\w/;
+// The pseudo-selector pattern requires a tag-like word followed by : and another
+// word-char (e.g. `div:hover`, `input:focus`) — a trailing colon like "Email:"
+// won't match because the colon is followed by a space or end-of-string.
+const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|\s[>~+]\s|\w:(?::|(?=[a-zA-Z-]\w))|\w\[/;
 
 function looksLikeCssSelector(arg) {
   return CSS_SELECTOR_RE.test(arg.trim());
