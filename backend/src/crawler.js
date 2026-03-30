@@ -203,6 +203,165 @@ async function takeSnapshot(page) {
   });
 }
 
+/**
+ * generateSingleTest — Reuses pipeline stages 3-7 for a single test
+ * created from a user-provided name + description (no crawl needed).
+ *
+ * Pipeline:
+ *   Step 1: Crawl        — SKIPPED (user provides title + description)
+ *   Step 2: Filter       — SKIPPED
+ *   Step 3: Classify     — Classify the intent from name/description
+ *   Step 4: Generate     — AI generates steps + Playwright code
+ *   Step 5: Deduplicate  — Check against existing project tests
+ *   Step 6: Enhance      — Strengthen assertions
+ *   Step 7: Validate     — Reject malformed / placeholder tests
+ *   Step 8: Done
+ */
+export async function generateSingleTest(project, run, db, { name, description }) {
+  log(run, `✦ Starting single-test generation pipeline for "${name}"`);
+  log(run, `🤖 AI provider: ${getProviderName()}`);
+
+  // Skip steps 1 & 2 — mark them as done immediately
+  setStep(run, 1);
+  log(run, `⏭️  Step 1 (Crawl) — skipped (user-provided title & description)`);
+  setStep(run, 2);
+  log(run, `⏭️  Step 2 (Filter) — skipped`);
+
+  // ── Step 3: Classify intent from name + description ─────────────────────
+  setStep(run, 3);
+  log(run, `🧠 Classifying intent from title & description...`);
+
+  // Build a synthetic snapshot from the user's input so the pipeline
+  // modules can work with the same data shape they expect from a crawl.
+  const syntheticSnapshot = {
+    url: project.url,
+    title: name,
+    h1: name,
+    elements: [],
+    forms: 0,
+    formStructures: [],
+    sections: [],
+    headings: [{ level: 1, text: name }],
+    hasLoginForm: false,
+    hasModals: false,
+    hasTabs: false,
+    hasTable: false,
+    metaDescription: description || "",
+  };
+
+  const syntheticElements = [];
+  const classified = await classifyPageWithAI(syntheticSnapshot, syntheticElements);
+  log(run, `   Intent: ${classified.dominantIntent} (confidence: ${classified.intentConfidence})`);
+  if (classified._aiAssisted) {
+    log(run, `   🤖 AI-assisted classification`);
+  }
+
+  // Build a single-page journey from the classified intent
+  const journeys = buildUserJourneys([classified]);
+  if (journeys.length > 0) {
+    log(run, `🗺️  Detected ${journeys.length} journey(s): ${journeys.map(j => j.name).join(", ")}`);
+  }
+
+  const snapshotsByUrl = { [project.url]: syntheticSnapshot };
+
+  // ── Step 4: Generate tests via AI ───────────────────────────────────────
+  setStep(run, 4);
+  log(run, `🤖 Generating tests from intent + description...`);
+
+  // Use the intent-based generator with the classified page and description
+  // context injected into the snapshot for richer AI prompts.
+  const enrichedSnapshot = {
+    ...syntheticSnapshot,
+    metaDescription: description || "",
+    // Inject the user description as an H2 so the AI prompt picks it up
+    headings: [
+      { level: 1, text: name },
+      ...(description ? [{ level: 2, text: description.slice(0, 120) }] : []),
+    ],
+  };
+  snapshotsByUrl[project.url] = enrichedSnapshot;
+
+  const rawTests = await generateAllTests([classified], journeys, snapshotsByUrl, (msg) => log(run, msg));
+  log(run, `📝 Raw tests generated: ${rawTests.length}`);
+
+  // ── Step 5: Deduplicate ─────────────────────────────────────────────────
+  setStep(run, 5);
+  log(run, `🚫 Deduplicating...`);
+  const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
+  const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
+  const finalTests = deduplicateAcrossRuns(unique, existingTests);
+  log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
+
+  // ── Step 6: Enhance assertions ──────────────────────────────────────────
+  setStep(run, 6);
+  log(run, `✨ Enhancing assertions...`);
+  const classifiedPagesByUrl = { [project.url]: classified };
+  const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
+  log(run, `   ${enhancedCount} tests had assertions strengthened`);
+
+  // ── Step 7: Validate ────────────────────────────────────────────────────
+  setStep(run, 7);
+  log(run, `✅ Validating generated tests...`);
+  const validatedTests = [];
+  let rejected = 0;
+  for (const t of enhancedTests) {
+    const issues = validateTest(t, project.url);
+    if (issues.length === 0) {
+      validatedTests.push(t);
+    } else {
+      rejected++;
+      log(run, `   ❌ Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
+    }
+  }
+  log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
+
+  // ── Step 8: Store & Done ────────────────────────────────────────────────
+  const createdTestIds = [];
+  for (const t of validatedTests) {
+    const testId = uuidv4();
+    db.tests[testId] = {
+      ...t,
+      id: testId,
+      projectId: project.id,
+      name: t.name || name,
+      description: t.description || description || "",
+      sourceUrl: t.sourceUrl || project.url,
+      pageTitle: t.pageTitle || project.name,
+      createdAt: new Date().toISOString(),
+      lastResult: null,
+      lastRunAt: null,
+      qualityScore: t._quality || 0,
+      isJourneyTest: t.isJourneyTest || false,
+      journeyType: t.journeyType || null,
+      assertionEnhanced: t._assertionEnhanced || false,
+      reviewStatus: "draft",
+      reviewedAt: null,
+    };
+    run.tests.push(testId);
+    createdTestIds.push(testId);
+  }
+
+  run.status = "completed";
+  run.finishedAt = new Date().toISOString();
+  run.testsGenerated = run.tests.length;
+  setStep(run, 8);
+  run.pipelineStats = {
+    pagesFound: 0,
+    rawTestsGenerated: rawTests.length,
+    duplicatesRemoved: removed,
+    assertionsEnhanced: enhancedCount,
+    validationRejected: rejected,
+    journeysDetected: journeys.length,
+    averageQuality: dedupStats.averageQuality,
+  };
+
+  log(run, `\n📊 Pipeline Summary:`);
+  log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
+  log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
+
+  return createdTestIds;
+}
+
 export async function crawlAndGenerateTests(project, run, db) {
   const browser = await chromium.launch({
     headless: true,

@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import { fileURLToPath } from "url";
-import { crawlAndGenerateTests } from "./crawler.js";
+import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
 import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
@@ -351,12 +351,16 @@ app.delete("/api/projects/:id/tests/:testId", (req, res) => {
   res.json({ ok: true });
 });
 
-// ── AI-powered test generation ────────────────────────────────────────────────
+// ── AI-powered test generation (pipeline-based) ──────────────────────────────
 // POST /api/projects/:id/tests/generate
 // Body: { name, description }
-// Phase 1: AI generates human-readable steps from title + description
-// Phase 2: AI converts steps into a Playwright script
-// Saves result as DRAFT (reviewStatus: "draft") — never auto-approved
+//
+// Reuses the crawl pipeline stages 3-7 (Classify → Generate → Deduplicate →
+// Enhance → Validate), skipping stages 1-2 (Crawl & Filter) since the user
+// provides a title + description instead of a URL to crawl.
+//
+// Returns a runId immediately — the frontend polls GET /api/runs/:runId for
+// progress (same as the crawl flow). Tests are saved as DRAFT on completion.
 app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
@@ -364,130 +368,55 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  const { generateText, parseJSON } = await import("./aiProvider.js");
-
   if (!hasProvider()) {
     return res.status(503).json({
       error: "No AI provider configured. Add an API key in Settings to use AI test generation.",
     });
   }
 
-  try {
-    // ── Phase 1: Generate human-readable test steps ─────────────────────────
-    const stepsPrompt = `You are a senior QA engineer. Given a test case title and description for a web application, generate a detailed list of human-readable test steps.
+  const runId = uuidv4();
+  const run = {
+    id: runId,
+    projectId: project.id,
+    type: "generate",
+    status: "running",
+    startedAt: new Date().toISOString(),
+    logs: [],
+    tests: [],
+    pagesFound: 0,
+    // Store the generation input so the frontend can display it
+    generateInput: { name: name.trim(), description: (description || "").trim() },
+  };
+  db.runs[runId] = run;
 
-Test Title: ${name.trim()}
-Description: ${(description || "").trim() || "(no description provided)"}
-Application URL: ${project.url}
+  logActivity({
+    type: "test.generate", projectId: project.id, projectName: project.name,
+    detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
+  });
 
-Generate 5-10 concrete, specific test steps that a QA engineer would follow to test this scenario.
-Each step should be an action (navigate, click, fill, verify, assert) written as an instruction.
-
-Return ONLY valid JSON with no markdown fences:
-{
-  "steps": [
-    "Navigate to ${project.url}",
-    "Step 2 as a clear instruction",
-    "Assert: describe the expected outcome"
-  ]
-}`;
-
-    const stepsRaw = await generateText(stepsPrompt);
-    let steps = [];
-    try {
-      const parsed = parseJSON(stepsRaw);
-      steps = Array.isArray(parsed.steps)
-        ? parsed.steps.filter((s) => typeof s === "string" && s.trim().length > 3)
-        : [];
-    } catch {
-      // Fallback: parse numbered/bulleted list
-      steps = stepsRaw
-        .split("\n")
-        .map((s) => s.replace(/^[\d.\-*•]+\s*/, "").trim())
-        .filter((s) => s.length > 5)
-        .slice(0, 10);
-    }
-    if (!steps.length) {
-      steps = [
-        `Navigate to ${project.url}`,
-        `Verify the page loads correctly`,
-        `${name.trim()}`,
-        `Assert the expected outcome is visible`,
-      ];
-    }
-
-    // ── Phase 2: Convert steps into a Playwright script ─────────────────────
-    const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
-
-Test Name: ${name.trim()}
-Application URL: ${project.url}
-Test Steps:
-${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
-
-Requirements:
-- MUST start with: await page.goto('${project.url}')
-- Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder()
-- Add page.waitForLoadState() after each navigation
-- Include at least 3 meaningful expect() assertions
-- Do NOT include import statements at the top — test/expect are provided externally
-
-Return ONLY valid JSON with no markdown fences:
-{
-  "playwrightCode": "test('${name.trim()}', async ({ page }) => {\\n  // full test implementation\\n});"
-}`;
-
-    const codeRaw = await generateText(codePrompt);
-    let playwrightCode = null;
-    try {
-      const parsed = parseJSON(codeRaw);
-      playwrightCode = typeof parsed.playwrightCode === "string" ? parsed.playwrightCode : null;
-    } catch {
-      if (codeRaw.includes("test(") && codeRaw.includes("async")) {
-        playwrightCode = codeRaw.trim();
-      }
-    }
-
-    // ── Phase 3: Save as DRAFT ───────────────────────────────────────────────
-    const testId = uuidv4();
-    const newTest = {
-      id: testId,
-      projectId: project.id,
-      name: name.trim(),
-      description: (description || "").trim(),
-      steps,
-      playwrightCode,
-      priority: "medium",
-      type: "generated",
-      sourceUrl: project.url,
-      pageTitle: project.name,
-      createdAt: new Date().toISOString(),
-      lastResult: null,
-      lastRunAt: null,
-      qualityScore: null,
-      isJourneyTest: false,
-      reviewStatus: "draft",  // Always draft — user must approve before regression
-      reviewedAt: null,
-    };
-
-    db.tests[testId] = newTest;
-
-    logActivity({
-      type: "test.generate", projectId: project.id, projectName: project.name,
-      testId, testName: newTest.name,
-      detail: `AI generated test — ${steps.length} steps${playwrightCode ? " + Playwright code" : ""}`,
+  // Kick off async — frontend polls GET /api/runs/:runId for progress
+  generateSingleTest(project, run, db, {
+    name: name.trim(),
+    description: (description || "").trim(),
+  })
+    .then((createdTestIds) => {
+      logActivity({
+        type: "test.generate", projectId: project.id, projectName: project.name,
+        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
+      });
+    })
+    .catch((err) => {
+      run.status = "failed";
+      run.error = err.message;
+      run.finishedAt = new Date().toISOString();
+      logActivity({
+        type: "test.generate", projectId: project.id, projectName: project.name,
+        detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
+        status: "failed",
+      });
     });
 
-    res.status(201).json(newTest);
-
-  } catch (err) {
-    console.error("[generate test] error:", err.message);
-    logActivity({
-      type: "test.generate", projectId: project.id, projectName: project.name,
-      detail: `AI generation failed for "${name.trim()}" — ${err.message}`,
-      status: "failed",
-    });
-    res.status(500).json({ error: err.message || "AI generation failed" });
-  }
+  res.json({ runId });
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────

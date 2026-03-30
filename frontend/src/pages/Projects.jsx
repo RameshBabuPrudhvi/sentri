@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, Plus, X, Filter, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Play, Flag } from "lucide-react";
 import { api } from "../api.js";
+import GenerateView from "../components/GenerateView.jsx";
 
 const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
 const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
