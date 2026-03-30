@@ -191,6 +191,13 @@ Return ONLY valid JSON (no markdown, no code fences):
 //
 // Splitting the prompt this way avoids token-limit truncation on large pages
 // and gives the AI a focused context window for code generation.
+//
+// Cost note: Two-phase uses 1 + N calls per page (N = planned tests, typically
+// 3-8). For a 10-page site this can mean 70-90 AI calls. We only use two-phase
+// when the snapshot is large enough that single-prompt truncation is likely.
+// Threshold: if the serialised snapshot elements exceed ~6000 chars, we split.
+
+const TWO_PHASE_THRESHOLD = 6000; // chars of serialised element JSON
 
 function buildPlanPrompt(journey, allSnapshots) {
   const pageContexts = journey.pages.map(page => {
@@ -396,8 +403,30 @@ Return ONLY valid JSON (no markdown):
  * Falls back to single-prompt approach if planning fails.
  */
 export async function generateIntentTests(classifiedPage, snapshot) {
+  // Estimate snapshot size to decide whether two-phase is worth the extra calls.
+  // Small pages fit comfortably in a single prompt — no need for 1+N API calls.
+  const elementsJSON = JSON.stringify(
+    (classifiedPage.classifiedElements || []).slice(0, 20), null, 2
+  );
+  const useTwoPhase = elementsJSON.length > TWO_PHASE_THRESHOLD;
+
+  if (!useTwoPhase) {
+    // ── Single-prompt path (cheap: 1 API call) ────────────────────────────
+    try {
+      const prompt = buildIntentPrompt(classifiedPage, snapshot);
+      const text = await generateText(prompt);
+      const parsed = parseJSON(text);
+      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed.tests)) return parsed.tests;
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  // ── Two-phase path (expensive: 1 + N API calls) ─────────────────────────
   try {
-    // ── Phase 1: PLAN ─────────────────────────────────────────────────────
+    // Phase 1: PLAN
     const planPrompt = buildIntentPlanPrompt(classifiedPage, snapshot);
     const planText = await generateText(planPrompt, { maxTokens: 4096 });
     const planResult = parseJSON(planText);
@@ -405,7 +434,7 @@ export async function generateIntentTests(classifiedPage, snapshot) {
       : Array.isArray(planResult) ? planResult : [];
     if (!plan.length) return [];
 
-    // ── Phase 2: GENERATE code for each planned test ──────────────────────
+    // Phase 2: GENERATE code for each planned test
     const tests = [];
     for (const planned of plan) {
       try {
@@ -428,7 +457,7 @@ export async function generateIntentTests(classifiedPage, snapshot) {
     }
     return tests;
   } catch {
-    // Fall back to single-prompt approach if planning fails
+    // Fall back to single-prompt approach if two-phase planning fails
     try {
       const prompt = buildIntentPrompt(classifiedPage, snapshot);
       const text = await generateText(prompt);
