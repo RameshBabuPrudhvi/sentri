@@ -146,6 +146,8 @@ TITLE: ${snapshot.title}
 DOMINANT INTENT: ${pageType}
 FORMS ON PAGE: ${snapshot.forms}
 H1 TEXT: ${snapshot.h1 || "none"}
+DESCRIPTION: ${snapshot.metaDescription || "none"}
+HEADINGS: ${JSON.stringify(snapshot.headings || [], null, 2)}
 
 CLASSIFIED INTERACTIVE ELEMENTS:
 ${JSON.stringify(elements, null, 2)}
