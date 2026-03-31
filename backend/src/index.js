@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
-import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
+import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys, getOllamaConfig } from "./aiProvider.js";
 
 dotenv.config();
 
@@ -547,6 +547,7 @@ app.get("/api/config", (req, res) => {
       { id: "anthropic", name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", docsUrl: "https://console.anthropic.com/settings/keys" },
       { id: "openai",    name: "GPT-4o-mini",      model: "gpt-4o-mini",              docsUrl: "https://platform.openai.com/api-keys" },
       { id: "google",    name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         docsUrl: "https://aistudio.google.com/apikey" },
+      { id: "ollama",    name: "Ollama (Local)",   model: getOllamaConfig().model,     docsUrl: "https://ollama.com" },
     ],
   });
 });
@@ -559,16 +560,17 @@ app.get("/api/settings", (req, res) => {
 // POST /api/settings — save API key at runtime (no server restart needed)
 app.post("/api/settings", (req, res) => {
   const { provider, apiKey } = req.body;
-  const validProviders = ["anthropic", "openai", "google"];
+  const validProviders = ["anthropic", "openai", "google", "ollama"];
 
   if (!provider || !validProviders.includes(provider)) {
     return res.status(400).json({ error: `provider must be one of: ${validProviders.join(", ")}` });
   }
-  if (!apiKey || apiKey.trim().length < 10) {
+  // Ollama doesn't need a traditional API key — it sends a JSON config or "enabled"
+  if (provider !== "ollama" && (!apiKey || apiKey.trim().length < 10)) {
     return res.status(400).json({ error: "apiKey is required and must be at least 10 characters" });
   }
 
-  setRuntimeKey(provider, apiKey.trim());
+  setRuntimeKey(provider, apiKey?.trim() || "");
 
   logActivity({
     type: "settings.update",
@@ -579,7 +581,7 @@ app.post("/api/settings", (req, res) => {
     ok: true,
     provider,
     providerName: getProviderMeta()?.name || provider,
-    message: `${provider} API key saved. Provider is now active.`,
+    message: `${provider} ${provider === "ollama" ? "configured" : "API key saved"}. Provider is now active.`,
   });
 });
 

@@ -54,6 +54,20 @@ const PROVIDERS = [
   },
 ];
 
+const OLLAMA_PROVIDER = {
+  id: "ollama",
+  name: "Ollama",
+  company: "Local",
+  model: "llama3.1",
+  docsUrl: "https://ollama.com",
+  color: "#6b7280",
+  borderColor: "rgba(107,114,128,0.3)",
+  bg: "rgba(107,114,128,0.06)",
+  description: "Run models locally with Ollama. No API key needed — completely free and private.",
+  badge: "Local / Free",
+  badgeColor: "var(--text2)",
+};
+
 function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete }) {
   const [input, setInput] = useState("");
   const [show, setShow] = useState(false);
@@ -231,6 +245,171 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
       >
         Get {provider.company} API key <ExternalLink size={11} />
       </a>
+    </div>
+  );
+}
+
+function OllamaCard({ activeProvider, ollamaConfig: currentConfig, onSave, onDelete }) {
+  const provider = OLLAMA_PROVIDER;
+  const isActive = activeProvider === "ollama";
+  const hasConfig = !!currentConfig;
+
+  const [baseUrl, setBaseUrl] = useState(currentConfig?.baseUrl || "http://localhost:11434");
+  const [model, setModel]     = useState(currentConfig?.model || "llama3.1");
+  const [saving, setSaving]   = useState(false);
+  const [status, setStatus]   = useState(null);
+  const [error, setError]     = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  async function handleSave() {
+    if (!baseUrl.trim() || !model.trim()) { setError("Base URL and model are required."); return; }
+    setSaving(true);
+    setStatus(null);
+    setError("");
+    try {
+      await onSave("ollama", JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
+      setStatus("saved");
+      setTimeout(() => setStatus(null), 4000);
+    } catch (err) {
+      setStatus("error");
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleDeleteClick() {
+    if (!confirmingDelete) { setConfirmingDelete(true); return; }
+    setConfirmingDelete(false);
+    onDelete("ollama");
+  }
+
+  return (
+    <div style={{
+      background: isActive ? provider.bg : "var(--surface)",
+      border: `1px solid ${isActive ? provider.borderColor : "var(--border)"}`,
+      borderRadius: "var(--radius-lg)", padding: 24,
+      transition: "all 0.2s",
+      position: "relative",
+    }}>
+      {isActive && (
+        <div style={{
+          position: "absolute", top: 16, right: 16,
+          display: "flex", alignItems: "center", gap: 5,
+          background: provider.bg, border: `1px solid ${provider.borderColor}`,
+          borderRadius: 99, padding: "3px 10px",
+        }}>
+          <Zap size={11} color={provider.color} />
+          <span style={{ fontSize: "0.7rem", fontFamily: "var(--font-display)", fontWeight: 700, color: provider.color }}>Active</span>
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 16 }}>
+        <div style={{
+          width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+          background: isActive ? provider.bg : "var(--bg3)",
+          border: `1px solid ${isActive ? provider.borderColor : "var(--border)"}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 20,
+        }}>
+          🦙
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1rem" }}>{provider.name}</span>
+            <span style={{ fontSize: "0.65rem", fontFamily: "var(--font-display)", fontWeight: 700, color: provider.badgeColor, background: `${provider.badgeColor}18`, padding: "2px 7px", borderRadius: 99 }}>{provider.badge}</span>
+          </div>
+          <div style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{provider.company} · {model || provider.model}</div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: "0.82rem", color: "var(--text2)", marginBottom: 16, lineHeight: 1.6 }}>
+        {provider.description}
+      </div>
+
+      {/* Current config status */}
+      {hasConfig && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "8px 12px", background: "var(--bg3)", borderRadius: "var(--radius)",
+          marginBottom: 12, border: "1px solid var(--border)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Check size={13} color="var(--green)" />
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text2)" }}>
+              {currentConfig.baseUrl} · {currentConfig.model}
+            </span>
+          </div>
+          <button
+            className={`btn btn-sm ${confirmingDelete ? "btn-danger" : "btn-ghost"}`}
+            onClick={handleDeleteClick}
+            style={{ padding: "3px 8px", flexShrink: 0 }}
+          >
+            <Trash2 size={11} />
+            {confirmingDelete ? "Confirm remove?" : "Remove"}
+          </button>
+        </div>
+      )}
+
+      {/* Config inputs */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div>
+          <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>Base URL</label>
+          <input
+            className="input"
+            value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)}
+            placeholder="http://localhost:11434"
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--text2)", marginBottom: 4 }}>Model</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="input"
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSave()}
+              placeholder="llama3.1"
+              style={{ flex: 1 }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleSave}
+              disabled={saving || !baseUrl.trim() || !model.trim()}
+              style={{ flexShrink: 0 }}
+            >
+              {saving ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Feedback */}
+      {status === "saved" && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
+          <Check size={12} /> Ollama configured — provider is now active
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--red)" }}>
+          {error}
+        </div>
+      )}
+
+      {/* Hint */}
+      <div style={{
+        marginTop: 14, padding: "10px 12px", borderRadius: "var(--radius)",
+        background: "rgba(107,114,128,0.06)", border: "1px solid rgba(107,114,128,0.15)",
+        fontSize: "0.76rem", color: "var(--text2)", lineHeight: 1.6,
+      }}>
+        <strong>Setup:</strong> Install Ollama from{" "}
+        <a href="https://ollama.com" target="_blank" rel="noreferrer" style={{ color: provider.color }}>ollama.com</a>
+        , then run <code style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>ollama pull {model || "llama3.1"}</code> to download a model.
+        Ollama must be running on the machine where the Sentri backend runs.
+      </div>
     </div>
   );
 }

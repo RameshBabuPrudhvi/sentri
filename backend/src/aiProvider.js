@@ -15,10 +15,32 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // ── Runtime key store (set via /api/settings, survives until process restart) ─
 const runtimeKeys = {};
 
+// Ollama runtime config (base URL + model) — set via /api/settings
+const ollamaConfig = {
+  baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+  model:   process.env.OLLAMA_MODEL    || "llama3.1",
+};
+
 export function setRuntimeKey(provider, key) {
   if (provider === "anthropic") runtimeKeys.ANTHROPIC_API_KEY = key;
   if (provider === "openai")    runtimeKeys.OPENAI_API_KEY = key;
   if (provider === "google")    runtimeKeys.GOOGLE_API_KEY = key;
+  if (provider === "ollama") {
+    // For Ollama, the "key" is a JSON payload: { baseUrl, model }
+    // or a simple truthy string "enabled" to activate with defaults.
+    runtimeKeys.OLLAMA_ENABLED = key ? "1" : "";
+    if (typeof key === "string" && key.startsWith("{")) {
+      try {
+        const cfg = JSON.parse(key);
+        if (cfg.baseUrl) ollamaConfig.baseUrl = cfg.baseUrl;
+        if (cfg.model)   ollamaConfig.model   = cfg.model;
+      } catch { /* use defaults */ }
+    }
+  }
+}
+
+export function getOllamaConfig() {
+  return { ...ollamaConfig };
 }
 
 function getKey(envName) {
@@ -31,12 +53,21 @@ const PROVIDER_META = {
   anthropic: { name: "Claude Sonnet",         model: "claude-sonnet-4-20250514", color: "#cd7f32" },
   openai:    { name: "GPT-4o-mini",           model: "gpt-4o-mini",              color: "#10a37f" },
   google:    { name: "Gemini 2.5 Flash",      model: "gemini-2.5-flash",         color: "#4285f4" },
+  ollama:    { name: "Ollama (Local)",        model: ollamaConfig.model,          color: "#ffffff" },
 };
+
+function isOllamaEnabled() {
+  return !!(getKey("OLLAMA_ENABLED") || process.env.OLLAMA_ENABLED);
+}
 
 function detectProvider() {
   const forced = process.env.AI_PROVIDER?.toLowerCase();
   if (forced && PROVIDER_META[forced]) {
-    const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+    const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY", ollama: "OLLAMA_ENABLED" };
+    if (forced === "ollama") {
+      if (!isOllamaEnabled()) throw new Error(`AI_PROVIDER="ollama" but Ollama is not enabled`);
+      return "ollama";
+    }
     if (!getKey(keyMap[forced])) {
       throw new Error(`AI_PROVIDER="${forced}" but ${keyMap[forced]} is not set`);
     }
@@ -45,6 +76,7 @@ function detectProvider() {
   if (getKey("ANTHROPIC_API_KEY")) return "anthropic";
   if (getKey("OPENAI_API_KEY"))    return "openai";
   if (getKey("GOOGLE_API_KEY"))    return "google";
+  if (isOllamaEnabled())           return "ollama";
   return null;
 }
 
@@ -56,7 +88,14 @@ export function getProviderName() {
 }
 export function getProviderMeta() {
   const p = getProvider();
-  return p ? { provider: p, ...PROVIDER_META[p] } : null;
+  if (!p) return null;
+  const meta = { provider: p, ...PROVIDER_META[p] };
+  // Ollama model is dynamic — always read from current config
+  if (p === "ollama") {
+    meta.model = ollamaConfig.model;
+    meta.name  = `Ollama (${ollamaConfig.model})`;
+  }
+  return meta;
 }
 
 // Returns masked keys for the settings UI (never expose full keys)
@@ -65,6 +104,8 @@ export function getConfiguredKeys() {
     anthropic: maskKey(getKey("ANTHROPIC_API_KEY")),
     openai:    maskKey(getKey("OPENAI_API_KEY")),
     google:    maskKey(getKey("GOOGLE_API_KEY")),
+    ollama:    isOllamaEnabled() ? `${ollamaConfig.baseUrl} · ${ollamaConfig.model}` : "",
+    ollamaConfig: isOllamaEnabled() ? { ...ollamaConfig } : null,
     activeProvider: getProvider(),
   };
 }
@@ -169,6 +210,21 @@ async function callProvider(provider, prompt, maxTokens) {
     }, "Google Gemini");
   }
 
+  if (provider === "ollama") {
+    // Ollama exposes an OpenAI-compatible API — reuse the openai SDK
+    const client = new OpenAI({
+      baseURL: `${ollamaConfig.baseUrl}/v1`,
+      apiKey:  "ollama", // Ollama doesn't require a real key
+    });
+    return withRetry(async () => {
+      const res = await client.chat.completions.create({
+        model: ollamaConfig.model,
+        messages: [{ role: "user", content: prompt }],
+      });
+      return res.choices[0].message.content;
+    }, "Ollama");
+  }
+
   throw new Error(`Unknown provider: ${provider}`);
 }
 
@@ -187,7 +243,8 @@ export async function generateText(prompt, options) {
       "No AI API key configured. Set one in Settings or add to backend/.env:\n" +
       "  ANTHROPIC_API_KEY=sk-ant-...   → https://console.anthropic.com\n" +
       "  OPENAI_API_KEY=sk-...          → https://platform.openai.com/api-keys\n" +
-      "  GOOGLE_API_KEY=AIza...         → https://aistudio.google.com/apikey"
+      "  GOOGLE_API_KEY=AIza...         → https://aistudio.google.com/apikey\n" +
+      "  OLLAMA_ENABLED=1               → Local models via Ollama (no API key needed)"
     );
   }
   return callProvider(provider, prompt, options?.maxTokens);

@@ -28,6 +28,7 @@ const COLORS = {
   anthropic: { bg: "#fef3e2", border: "#fcd8a8", color: "#b45309", dot: "#d97706" },
   openai:    { bg: "#dcfce7", border: "#bbf7d0", color: "#15803d", dot: "#16a34a" },
   google:    { bg: "#dbeafe", border: "#bfdbfe", color: "#1d4ed8", dot: "#2563eb" },
+  ollama:    { bg: "#f3f4f6", border: "#d1d5db", color: "#374151", dot: "#6b7280" },
 };
 
 export default function ProviderBadge({ style }) {
