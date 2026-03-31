@@ -111,7 +111,8 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
           );
         }
       } else {
-        promises.push(Promise.resolve([]));
+        // Preserve cached data when not fetching — don't overwrite state with []
+        promises.push(Promise.resolve(cache.tests.data || []));
       }
 
       const [runs, tests] = await Promise.all(promises);

@@ -95,7 +95,6 @@ function TopBar() {
 
   function clearSearch() {
     setQ("");
-    navigate("/tests");
   }
 
   return (
