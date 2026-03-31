@@ -700,35 +700,42 @@ export default function Tests() {
           <div style={{ flex: 1, minWidth: 200, position: "relative" }}>
             <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
             <input
+              ref={searchRef}
               className="input"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search tests..."
-              style={{ paddingLeft: 28, height: 32, fontSize: "0.82rem" }}
+              placeholder="Search tests… (press /)"
+              style={{ paddingLeft: 28, paddingRight: search ? 30 : 12, height: 32, fontSize: "0.82rem" }}
             />
+            {search && (
+              <button onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, display: "flex" }}>
+                <X size={13} />
+              </button>
+            )}
           </div>
           <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {STATUS_FILTERS.map(f => (
               <button key={f.key} className="btn btn-xs" onClick={() => setFilter(f.key)} style={{
-                background: filter === f.key ? "#fff" : "transparent",
+                background: filter === f.key ? "var(--surface)" : "transparent",
                 color: filter === f.key ? "var(--text)" : "var(--text3)",
                 border: filter === f.key ? "1px solid var(--border)" : "1px solid transparent",
                 boxShadow: filter === f.key ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
                 display: "flex", alignItems: "center", gap: 4,
               }}>
-                {f.icon}{f.label}
+                {f.icon}{f.label} ({statusCounts[f.key]})
               </button>
             ))}
           </div>
           <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {REVIEW_FILTERS.map(f => (
-              <button key={f} className="btn btn-xs" onClick={() => setReviewFilter(f)} style={{
-                background: reviewFilter === f ? "#fff" : "transparent",
-                color: reviewFilter === f ? "var(--text)" : "var(--text3)",
-                border: reviewFilter === f ? "1px solid var(--border)" : "1px solid transparent",
-                boxShadow: reviewFilter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              <button key={f.key} className="btn btn-xs" onClick={() => setReviewFilter(f.key)} style={{
+                background: reviewFilter === f.key ? "var(--surface)" : "transparent",
+                color: reviewFilter === f.key ? "var(--text)" : "var(--text3)",
+                border: reviewFilter === f.key ? "1px solid var(--border)" : "1px solid transparent",
+                boxShadow: reviewFilter === f.key ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                display: "flex", alignItems: "center", gap: 4,
               }}>
-                {f}
+                {f.icon}{f.label} ({reviewCounts[f.key]})
               </button>
             ))}
           </div>
@@ -752,70 +759,144 @@ export default function Tests() {
             navigate={navigate}
           />
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Test ID</th>
-                <th>Test Name</th>
-                <th>Status</th>
-                <th>Last Run</th>
-                <th>Project</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(t => (
-                <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
-                  <td>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                      {t.id.slice(0, 8)}…
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <AgentTag type="TA" />
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
-                        {t.description && (
-                          <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1, maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {t.description}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td><StatusBadge result={t.lastResult} /></td>
-                  <td>
-                    <span style={{ fontSize: "0.8rem", color: "var(--text2)" }}>
-                      {t.lastRunAt
-                        ? new Date(t.lastRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-                        : "—"}
-                    </span>
-                  </td>
-                  <td>
-                    {projMap[t.projectId] && (
-                      <span
-                        className="badge badge-gray"
-                        style={{ cursor: "pointer" }}
-                        onClick={e => { e.stopPropagation(); navigate(`/projects/${t.projectId}`); }}
-                      >
-                        {projMap[t.projectId].name}
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
-                    {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
-                    {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
-                    {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
-                    {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
-                  </td>
+          <>
+            {/* Bulk action bar */}
+            {selected.size > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "var(--accent-bg)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+                  {selected.size} selected
+                </span>
+                <button className="btn btn-sm" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                  onClick={() => requestBulkAction("approve")} disabled={!!actionLoading}>
+                  <ThumbsUp size={12} /> Approve
+                </button>
+                <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+                  onClick={() => requestBulkAction("reject")} disabled={!!actionLoading}>
+                  <ThumbsDown size={12} /> Reject
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
+              </div>
+            )}
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 36, paddingRight: 0 }}>
+                    <input type="checkbox"
+                      checked={paged.length > 0 && paged.every(t => selected.has(t.id))}
+                      onChange={e => toggleAll(e.target.checked, paged.map(t => t.id))}
+                      style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                  </th>
+                  <th>Test ID</th>
+                  <th>Test Name</th>
+                  <SortHeader col="status">Status</SortHeader>
+                  <SortHeader col="lastRun">Last Run</SortHeader>
+                  <SortHeader col="project">Project</SortHeader>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {paged.map(t => {
+                  const isSelected = selected.has(t.id);
+                  const isHovered = hoveredRow === t.id;
+                  return (
+                    <tr
+                      key={t.id}
+                      style={{ cursor: "pointer", background: isSelected ? "var(--accent-bg)" : undefined }}
+                      onClick={() => navigate(`/tests/${t.id}`)}
+                      onMouseEnter={() => setHoveredRow(t.id)}
+                      onMouseLeave={() => setHoveredRow(null)}
+                    >
+                      <td style={{ paddingRight: 0 }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
+                          style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                      </td>
+                      <td>
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                          {t.id.slice(0, 8)}…
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <AgentTag type="TA" />
+                          <div>
+                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                            {t.description && (
+                              <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1, maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {t.description}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td><StatusBadge result={t.lastResult} /></td>
+                      <td>
+                        <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
+                          {relativeTime(t.lastRunAt)}
+                        </span>
+                      </td>
+                      <td>
+                        {projMap[t.projectId] && (
+                          <span
+                            className="badge badge-gray"
+                            style={{ cursor: "pointer" }}
+                            onClick={e => { e.stopPropagation(); navigate(`/projects/${t.projectId}`); }}
+                          >
+                            {projMap[t.projectId].name}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
+                          {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
+                          {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
+                          {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
+                          {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
+                          {/* Row hover actions */}
+                          {isHovered && (
+                            <div style={{ display: "flex", gap: 4, marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
+                              <button className="btn btn-ghost btn-xs" title="Run test" onClick={e => runSingleTest(e, t.id)} disabled={actionLoading === t.id}>
+                                {actionLoading === t.id ? <Loader2 size={11} className="spin" /> : <Play size={11} />}
+                              </button>
+                              <button className="btn btn-ghost btn-xs" title="Delete test" onClick={e => deleteSingleTest(e, t)} disabled={actionLoading === t.id}>
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
+                  {filtered.length} tests · page {page} of {totalPages}
+                </span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-ghost btn-xs" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                  <button className="btn btn-ghost btn-xs" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next →</button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {/* Keyboard shortcut hints */}
+      {selected.size > 0 && (
+        <div style={{ marginTop: 8, textAlign: "center", fontSize: "0.72rem", color: "var(--text3)" }}>
+          <kbd style={{ padding: "1px 5px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, fontFamily: "var(--font-mono)", fontSize: "0.7rem" }}>a</kbd> approve
+          {" · "}
+          <kbd style={{ padding: "1px 5px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, fontFamily: "var(--font-mono)", fontSize: "0.7rem" }}>r</kbd> reject
+          {" · "}
+          <kbd style={{ padding: "1px 5px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 4, fontFamily: "var(--font-mono)", fontSize: "0.7rem" }}>Esc</kbd> clear
+        </div>
+      )}
 
       {/* Modals */}
       {showCreateModal && (
@@ -831,6 +912,28 @@ export default function Tests() {
       )}
       {showReviewModal && (
         <ReviewModal projects={projects} onClose={() => setShowReviewModal(false)} />
+      )}
+
+      {/* Bulk action confirmation modal */}
+      {bulkConfirm && (
+        <>
+          <div onClick={() => setBulkConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999 }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "28px 32px", width: "min(420px,95vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
+            <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> (all visible draft tests). This cannot be undone easily.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
+              <button
+                className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
+                onClick={() => executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
+              >
+                {bulkConfirm.action === "approve" ? "Approve all" : "Reject all"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
