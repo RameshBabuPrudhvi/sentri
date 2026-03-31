@@ -1,15 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Plus, Search } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
 
 const NAV = [
-  { to: "/dashboard",    icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/projects",     icon: FolderOpen,      label: "Projects" },
-  { to: "/tests",        icon: FlaskConical,    label: "Tests" },
-  { to: "/reports",      icon: BarChart2,       label: "Reports" },
-  { to: "/work",         icon: Briefcase,       label: "Work" },
-  { to: "/context",      icon: Layers,          label: "Context" },
+  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/projects",  icon: FolderOpen,      label: "Projects"  },
+  { to: "/tests",     icon: FlaskConical,    label: "Tests"     },
+  { to: "/reports",   icon: BarChart2,       label: "Reports"   },
+  { to: "/work",      icon: Briefcase,       label: "Work"      },
+  { to: "/context",   icon: Layers,          label: "Context"   },
 ];
 
 export default function Layout() {
@@ -36,23 +36,16 @@ function Sidebar() {
       {/* Logo */}
       <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, overflow: "hidden", background: "#111" }}>
-            <img src="https://smartbear.com/favicon.ico" style={{ width: "100%", display: "none" }} onError={e => e.target.style.display = "none"} />
-            <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#5b6ef5,#7c3aed)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14 }}>S</div>
-          </div>
+          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#5b6ef5,#7c3aed)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14 }}>S</div>
           <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text)" }}>Sentri</span>
         </div>
       </div>
 
-      {/* Workspace */}
+      {/* Workspace — no interactive styling until feature exists (Fix #16) */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", borderRadius: "var(--radius)", cursor: "pointer" }}
-          className="hover-bg">
-          <div>
-            <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)" }}>My Workspace</div>
-            <div style={{ fontSize: "0.7rem", color: "var(--text3)" }}>Personal</div>
-          </div>
-          <Plus size={14} color="var(--text3)" />
+        <div style={{ padding: "6px 8px", borderRadius: "var(--radius)" }}>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)" }}>My Workspace</div>
+          <div style={{ fontSize: "0.7rem", color: "var(--text3)" }}>Personal</div>
         </div>
       </div>
 
@@ -90,6 +83,21 @@ function Sidebar() {
 }
 
 function TopBar() {
+  const navigate = useNavigate();
+  const [q, setQ] = React.useState("");
+
+  function handleSearch(e) {
+    if (e.key === "Enter" && q.trim()) {
+      navigate(`/tests?q=${encodeURIComponent(q.trim())}`);
+      setQ("");
+    }
+  }
+
+  function clearSearch() {
+    setQ("");
+    navigate("/tests");
+  }
+
   return (
     <header style={{
       height: 52, background: "var(--surface)", borderBottom: "1px solid var(--border)",
@@ -100,14 +108,20 @@ function TopBar() {
         <Search size={14} color="var(--text3)" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
         <input
           className="input"
-          placeholder="Give your team a task..."
-          style={{ paddingLeft: 32, height: 34, fontSize: "0.83rem", background: "var(--bg2)", border: "1px solid var(--border)" }}
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          onKeyDown={handleSearch}
+          placeholder="Search tests… (press Enter)"
+          style={{ paddingLeft: 32, paddingRight: q ? 32 : 12, height: 34, fontSize: "0.83rem", background: "var(--bg2)", border: "1px solid var(--border)" }}
         />
+        {q && (
+          <button onClick={clearSearch} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, display: "flex" }}>
+            <X size={13} />
+          </button>
+        )}
       </div>
       <div style={{ flex: 1 }} />
-      {/* Provider */}
       <ProviderBadge />
-      {/* Avatar */}
       <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.78rem", flexShrink: 0 }}>R</div>
     </header>
   );

@@ -130,6 +130,7 @@ export default function Reports() {
             Test analytics, pass rate trends, and quality insights
           </p>
         </div>
+        {/* FIX: project filter and CSV export have independent visibility conditions */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {projects.length > 1 && (
             <select
@@ -142,12 +143,17 @@ export default function Reports() {
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           )}
+          {/* Disable export when no runs in current filter; show count */}
           {hasData && (
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => downloadCSV(filteredRuns, projMap)}
+              disabled={filteredRuns.length === 0}
+              title={filteredRuns.length === 0 ? "No runs to export for the current filter" : `Export ${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""} as CSV`}
+              onClick={() => {
+                downloadCSV(filteredRuns, projMap);
+              }}
             >
-              <Download size={13} /> Export CSV
+              <Download size={13} /> Export CSV {filteredRuns.length > 0 && `(${filteredRuns.length})`}
             </button>
           )}
         </div>

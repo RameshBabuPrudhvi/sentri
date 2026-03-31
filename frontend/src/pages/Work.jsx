@@ -2,9 +2,10 @@ import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Play, RefreshCw,
-  Globe, FlaskConical, Search, ArrowRight, Zap,
+  Globe, FlaskConical, Search, ArrowRight, Zap, X,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
+import { api } from "../api.js";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/StatusBadge";
 
@@ -40,13 +41,73 @@ function ProgressBar({ passed, failed, total }) {
   );
 }
 
+
+// inline RunModal so Work page can start runs directly
+function RunModal({ projects, onClose }) {
+  const [projectId, setProjectId] = React.useState(projects[0]?.id || "");
+  const [running, setRunning] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  async function handleRun() {
+    if (!projectId) { setError("Please select a project."); return; }
+    setError(null); setRunning(true);
+    try {
+      const { runId } = await api.runTests(projectId);
+      onClose();
+      navigate(`/runs/${runId}`);
+    } catch (err) {
+      setError(err.message || "Failed to start run.");
+      setRunning(false);
+    }
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999, backdropFilter: "blur(2px)" }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)", width: "min(420px,95vw)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 22px 16px", borderBottom: "1px solid var(--border)" }}>
+          <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>Run Regression Tests</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: "20px 22px 24px" }}>
+          <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 16, lineHeight: 1.6 }}>
+            Select a project to run all approved tests in its regression suite.
+          </p>
+          <div style={{ marginBottom: 16 }}>
+            <label>Project</label>
+            <select className="input" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ height: 38 }}>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          {error && <div style={{ background: "var(--red-bg)", color: "var(--red)", borderRadius: "var(--radius)", padding: "8px 12px", fontSize: "0.82rem", marginBottom: 16 }}>{error}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={handleRun} disabled={running || !projectId}>
+              {running ? <RefreshCw size={13} className="spin" /> : <Play size={13} />}
+              {running ? "Starting…" : "Run Tests"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 const STATUS_FILTERS = ["all", "running", "completed", "failed"];
 
 export default function Work() {
-  const { allRuns: runs, loading } = useProjectData({ fetchTests: false });
+  const { allRuns: runs, projects: allProjects, loading } = useProjectData({ fetchTests: false });
   const [filter, setFilter]   = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch]   = useState("");
+  const [showRunModal, setShowRunModal] = useState(false);
   const navigate = useNavigate();
 
   const filtered = useMemo(() => runs.filter(r => {
@@ -82,7 +143,7 @@ export default function Work() {
             All crawl and test run activity across your projects
           </p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects")}>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowRunModal(true)}>
           <Play size={13} /> Run Tests
         </button>
       </div>
@@ -230,6 +291,9 @@ export default function Work() {
           </table>
         )}
       </div>
+      {showRunModal && (
+        <RunModal projects={allProjects} onClose={() => setShowRunModal(false)} />
+      )}
     </div>
   );
 }
