@@ -619,8 +619,20 @@ app.get("/api/activities", (req, res) => {
 app.post("/api/test-connection", async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: "url is required" });
+  let parsed;
   try {
-    const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(10000) });
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "Invalid URL format" });
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return res.status(400).json({ error: "URL must use http or https protocol" });
+  }
+  if (["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "169.254.169.254"].includes(parsed.hostname)) {
+    return res.status(400).json({ error: "URL must not point to localhost or internal addresses" });
+  }
+  try {
+    const response = await fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(10000) });
     res.json({ ok: true, status: response.status });
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message });
