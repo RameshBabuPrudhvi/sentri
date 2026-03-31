@@ -60,6 +60,8 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null); // "saved" | "error" | null
   const [error, setError] = useState("");
+  // In-app confirm replaces window.confirm()
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const isActive = activeProvider === provider.id;
   const hasKey = !!maskedKey;
@@ -70,10 +72,15 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
     setStatus(null);
     setError("");
     try {
-      await onSave(provider.id, input.trim());
-      setStatus("saved");
+      const validationResult = await onSave(provider.id, input.trim());
+      // Show whether the key was verified by the provider
+      if (validationResult === null) {
+        setStatus("saved");  // saved but couldn't verify
+      } else {
+        setStatus("verified");
+      }
       setInput("");
-      setTimeout(() => setStatus(null), 3000);
+      setTimeout(() => setStatus(null), 4000);
     } catch (err) {
       setStatus("error");
       setError(err.message);
@@ -82,9 +89,11 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
     }
   }
 
-  async function handleDelete() {
-    if (!confirm(`Remove ${provider.name} API key?`)) return;
-    await onDelete(provider.id);
+  // Two-step in-app confirmation — no browser dialog
+  function handleDeleteClick() {
+    if (!confirmingDelete) { setConfirmingDelete(true); return; }
+    setConfirmingDelete(false);
+    onDelete(provider.id);
   }
 
   return (
@@ -155,9 +164,14 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
             <Check size={13} color="var(--green)" />
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text2)" }}>{maskedKey}</span>
           </div>
-          <button className="btn btn-danger btn-sm" onClick={handleDelete} style={{ padding: "3px 8px" }}>
-            <Trash2 size={11} />
-          </button>
+          <button
+              className={`btn btn-sm ${confirmingDelete ? "btn-danger" : "btn-ghost"}`}
+              onClick={handleDeleteClick}
+              style={{ padding: "3px 8px", flexShrink: 0 }}
+            >
+              <Trash2 size={11} />
+              {confirmingDelete ? "Confirm remove?" : "Remove"}
+            </button>
         </div>
       )}
 
@@ -195,6 +209,11 @@ function ProviderCard({ provider, activeProvider, maskedKey, onSave, onDelete })
       {status === "saved" && (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
           <Check size={12} /> Key saved — provider is now active
+        </div>
+      )}
+      {status === "verified" && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
+          <Check size={12} /> Key verified and active ✓
         </div>
       )}
       {status === "error" && (
@@ -302,12 +321,16 @@ export default function Settings() {
   const [sysInfo, setSysInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [loadError, setLoadError] = React.useState(null);
+
   async function reload() {
+    // Fix #3: individual guards so a single failing call never hangs the page
     const [s, c, sys] = await Promise.all([
-      api.getSettings(),
-      api.getConfig(),
+      api.getSettings().catch(() => null),
+      api.getConfig().catch(() => null),
       api.getSystemInfo().catch(() => null),
     ]);
+    if (!s && !c) setLoadError("Could not reach the server. Check that the backend is running.");
     setSettings(s);
     setConfig(c);
     setSysInfo(sys);
@@ -321,6 +344,8 @@ export default function Settings() {
     await api.saveApiKey(provider, apiKey);
     invalidateConfigCache();
     await reload();
+    // Fix #22: validate the key actually works
+    return api.validateApiKey(provider).catch(() => null);
   }
 
   async function handleDelete(provider) {
@@ -339,6 +364,15 @@ export default function Settings() {
         <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.9rem" }}>Settings</h1>
         <p style={{ color: "var(--text2)", marginTop: 6 }}>Configure your AI provider. Keys are stored in memory — restart the server to clear them.</p>
       </div>
+
+      {/* Fix #3: load error banner */}
+      {loadError && (
+        <div style={{ marginBottom: 20, padding: "12px 16px", borderRadius: "var(--radius)", background: "var(--red-bg)", border: "1px solid #fca5a5", color: "var(--red)", fontSize: "0.875rem", display: "flex", alignItems: "center", gap: 10 }}>
+          <AlertTriangle size={15} />
+          {loadError}
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => { setLoadError(null); reload(); }}>Retry</button>
+        </div>
+      )}
 
       {/* Active provider banner */}
       {!loading && config && (
@@ -410,7 +444,7 @@ GOOGLE_API_KEY=AIza...`}</pre>
       <SectionTitle
         icon={<Cpu size={16} color="var(--accent)" />}
         title="Test Execution"
-        sub="Self-healing runtime defaults — applied to every test run"
+        sub="Read-only runtime defaults — edit backend/src/selfHealing.js or set env vars to change"
       />
       <div style={{
         background: "var(--surface)", border: "1px solid var(--border)",

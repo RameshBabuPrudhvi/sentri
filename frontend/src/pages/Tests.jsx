@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Plus, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag,
@@ -144,8 +144,9 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
 
 // ── Run All Modal ──────────────────────────────────────────────────────────────
 
-function RunAllModal({ projects, onClose }) {
-  const [projectId, setProjectId] = useState(projects[0]?.id || "");
+function RunAllModal({ projects, onClose, defaultProjectId }) {
+  // FIX #8: default to most recently active project passed from caller
+  const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -374,20 +375,31 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
 export default function Tests() {
   const [projects, setProjects] = useState([]);
   const [tests, setTests] = useState([]);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("All");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search      = searchParams.get("q")      || "";
+  const filter      = searchParams.get("status") || "All";
+  const reviewFilter= searchParams.get("review") || "All Tests";
+
+  const setSearch      = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("q", v) : n.delete("q"); return n; }, { replace: true }), [setSearchParams]);
+  const setFilter      = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("status", v) : n.delete("status"); return n; }, { replace: true }), [setSearchParams]);
+  const setReviewFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All Tests" ? n.set("review", v) : n.delete("review"); return n; }, { replace: true }), [setSearchParams]);
+
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const [reviewFilter, setReviewFilter] = useState("All Tests");
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.getProjects().then(async (projs) => {
+    // Use batch getAllTests endpoint — falls back to per-project if not available
+    Promise.all([api.getProjects(), api.getAllTests().catch(() => null)]).then(async ([projs, allFromBatch]) => {
       setProjects(projs);
-      const all = await Promise.all(projs.map(p => api.getTests(p.id).catch(() => [])));
-      setTests(all.flat());
+      if (allFromBatch) {
+        setTests(allFromBatch);
+      } else {
+        const all = await Promise.all(projs.map(p => api.getTests(p.id).catch(() => [])));
+        setTests(all.flat());
+      }
     }).finally(() => setLoading(false));
   }, []);
 
@@ -450,7 +462,11 @@ export default function Tests() {
             Manage, run, and review test cases across all projects
           </p>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)} disabled={projects.length === 0}>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true)}
+          title={projects.length === 0 ? "Create a project first" : undefined}
+        >
           <Plus size={14} /> New Test
         </button>
       </div>
@@ -621,7 +637,7 @@ export default function Tests() {
         />
       )}
       {showRunModal && (
-        <RunAllModal projects={projects} onClose={() => setShowRunModal(false)} />
+        <RunAllModal projects={projects} onClose={() => setShowRunModal(false)} defaultProjectId={filtered[0]?.projectId || projects[0]?.id || ""} />
       )}
       {showReviewModal && (
         <ReviewModal projects={projects} onClose={() => setShowReviewModal(false)} />
