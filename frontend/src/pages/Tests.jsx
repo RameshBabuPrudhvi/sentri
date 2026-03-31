@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Plus, X, Filter, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Play, Flag } from "lucide-react";
+import {
+  Search, Plus, X, CheckCircle2, XCircle, Clock,
+  ChevronRight, Loader2, Play, Flag,
+} from "lucide-react";
 import { api } from "../api.js";
 
 const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
@@ -18,19 +21,17 @@ function StatusBadge({ result }) {
   return <span className="badge badge-amber">{result}</span>;
 }
 
-// ── Create Test Modal ─────────────────────────────────────────────────────────
-// Flow: form → generating steps → review steps → generating code → done (draft)
+// ── Create Test Modal ──────────────────────────────────────────────────────────
 
 function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
   const [phase, setPhase] = useState("form");
-
-  const [name, setName]               = useState("");
+  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [projectId, setProjectId]     = useState(defaultProjectId || projects[0]?.id || "");
-  const [error, setError]             = useState(null);
+  const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
+  const [error, setError] = useState(null);
 
   const navigate = useNavigate();
-  const nameRef  = useRef(null);
+  const nameRef = useRef(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
   useEffect(() => {
@@ -39,28 +40,19 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // ── Submit: fire-and-forget generate, close modal, navigate to project page
-  // Mirrors exactly how doCrawl works in ProjectDetail — the run appears in
-  // the Runs tab and the user can click it to watch the live pipeline.
   async function handleGenerateSteps(e) {
     e?.preventDefault();
     setError(null);
-    if (!name.trim()) { setError("Test name is required.");   return; }
-    if (!projectId)   { setError("Please select a project."); return; }
-
+    if (!name.trim()) { setError("Test name is required."); return; }
+    if (!projectId) { setError("Please select a project."); return; }
     setPhase("submitting");
-
     try {
-      // Fire generate without awaiting — backend runs async pipeline
       api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
       }).then(result => {
-        // Notify parent to refresh test list once done (runs in background)
         if (result?.id && onCreated) onCreated(result);
       }).catch(() => {});
-
-      // Close modal and go to project page immediately — same as crawl flow
       onClose();
       navigate(`/projects/${projectId}`);
     } catch (err) {
@@ -71,75 +63,31 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
 
   const selectedProject = projects.find(p => p.id === projectId);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          zIndex: 999, backdropFilter: "blur(2px)",
-        }}
-      />
-
-      {/* Modal */}
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999, backdropFilter: "blur(2px)" }} />
       <div style={{
-        position: "fixed", top: "50%", left: "50%",
-        transform: "translate(-50%, -50%)",
-        zIndex: 1000,
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(500px, 96vw)",
-        maxHeight: "90vh",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
+        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+        zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+        width: "min(500px, 96vw)", maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column",
       }}>
-        {/* Header */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "18px 22px 16px",
-          borderBottom: "1px solid var(--border)",
-          flexShrink: 0,
-        }}>
-          <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
-            Generate a Test Case
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 22px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>Generate a Test Case</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}>
             <X size={18} />
           </button>
         </div>
-
-        {/* Body */}
         <div style={{ padding: "20px 22px 24px", overflowY: "auto", flex: 1 }}>
-
-          {/* ── FORM ────────────────────────────────────────────────────── */}
           {(phase === "form" || phase === "submitting") && (
             <>
               <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 20, lineHeight: 1.6 }}>
                 Describe what you want to test. AI will generate detailed steps and a Playwright script, saved as a <strong>Draft</strong> for your review.
               </p>
-
-              {/* Project — always shown, always auto-populated */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
-                  Project
-                </label>
-                <select
-                  className="input"
-                  value={projectId}
-                  onChange={e => setProjectId(e.target.value)}
-                  style={{ height: 38 }}
-                >
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>Project</label>
+                <select className="input" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ height: 38 }}>
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 {selectedProject && (
                   <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
@@ -147,11 +95,8 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                   </div>
                 )}
               </div>
-
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
-                  Test Name
-                </label>
+                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>Test Name</label>
                 <input
                   ref={nameRef}
                   className="input"
@@ -162,7 +107,6 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) handleGenerateSteps(e); }}
                 />
               </div>
-
               <div style={{ marginBottom: error ? 12 : 20 }}>
                 <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
                   Description
@@ -177,17 +121,11 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
                   style={{ resize: "vertical", lineHeight: 1.6, paddingTop: 10 }}
                 />
               </div>
-
               {error && (
-                <div style={{
-                  background: "var(--red-bg)", color: "var(--red)",
-                  borderRadius: "var(--radius)", padding: "8px 12px",
-                  fontSize: "0.82rem", marginBottom: 16, lineHeight: 1.5,
-                }}>
+                <div style={{ background: "var(--red-bg)", color: "var(--red)", borderRadius: "var(--radius)", padding: "8px 12px", fontSize: "0.82rem", marginBottom: 16, lineHeight: 1.5 }}>
                   {error}
                 </div>
               )}
-
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
                 <button
@@ -206,7 +144,7 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
   );
 }
 
-// ── Run All Modal ─────────────────────────────────────────────────────────────
+// ── Run All Modal ──────────────────────────────────────────────────────────────
 
 function RunAllModal({ projects, onClose }) {
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
@@ -277,7 +215,7 @@ function RunAllModal({ projects, onClose }) {
   );
 }
 
-// ── Review Modal ─────────────────────────────────────────────────────────────
+// ── Review Modal ───────────────────────────────────────────────────────────────
 
 function ReviewModal({ projects, onClose }) {
   const navigate = useNavigate();
@@ -330,18 +268,18 @@ function ReviewModal({ projects, onClose }) {
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Tests Page ─────────────────────────────────────────────────────────────────
 
-export default function Projects() {
-  const [projects, setProjects]           = useState([]);
-  const [tests, setTests]                 = useState([]);
-  const [search, setSearch]               = useState("");
-  const [filter, setFilter]               = useState("All");
-  const [loading, setLoading]             = useState(true);
+export default function Tests() {
+  const [projects, setProjects] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showRunModal, setShowRunModal]   = useState(false);
+  const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const [reviewFilter, setReviewFilter]     = useState("Approved");
+  const [reviewFilter, setReviewFilter] = useState("Approved");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -353,17 +291,18 @@ export default function Projects() {
   }, []);
 
   const filtered = tests.filter(t => {
-    // Review status filter — default to approved only (regression suite)
-    const matchReview = reviewFilter === "All Tests"
-      || (reviewFilter === "Approved" && t.reviewStatus === "approved")
-      || (reviewFilter === "Draft" && t.reviewStatus === "draft");
+    const matchReview =
+      reviewFilter === "All Tests" ? true :
+      reviewFilter === "Approved" ? t.reviewStatus === "approved" :
+      reviewFilter === "Draft" ? t.reviewStatus === "draft" : true;
     const matchSearch = !search
       || t.name?.toLowerCase().includes(search.toLowerCase())
       || t.description?.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === "All"
-      || (filter === "Passing" && t.lastResult === "passed")
-      || (filter === "Failing" && t.lastResult === "failed")
-      || (filter === "Not Run" && !t.lastResult);
+    const matchFilter =
+      filter === "All" ? true :
+      filter === "Passing" ? t.lastResult === "passed" :
+      filter === "Failing" ? t.lastResult === "failed" :
+      filter === "Not Run" ? !t.lastResult : true;
     return matchReview && matchSearch && matchFilter;
   });
 
@@ -380,13 +319,7 @@ export default function Projects() {
       desc: "Create a new test case for your application",
       color: "var(--accent-bg)",
       iconColor: "var(--accent)",
-      action: () => {
-        if (projects.length === 0) {
-          navigate("/projects/new");
-        } else {
-          setShowCreateModal(true);
-        }
-      },
+      action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),
     },
     {
       icon: "▶",
@@ -394,13 +327,7 @@ export default function Projects() {
       desc: "Execute regression tests from your test suite",
       color: "var(--green-bg)",
       iconColor: "var(--green)",
-      action: () => {
-        if (projects.length === 0) {
-          navigate("/projects/new");
-        } else {
-          setShowRunModal(true);
-        }
-      },
+      action: () => projects.length === 0 ? navigate("/projects/new") : setShowRunModal(true),
     },
     {
       icon: "⚑",
@@ -408,13 +335,7 @@ export default function Projects() {
       desc: "Refine and manage your draft and failing tests",
       color: "var(--amber-bg)",
       iconColor: "var(--amber)",
-      action: () => {
-        if (projects.length === 0) {
-          navigate("/projects/new");
-        } else {
-          setShowReviewModal(true);
-        }
-      },
+      action: () => projects.length === 0 ? navigate("/projects/new") : setShowReviewModal(true),
     },
   ];
 
@@ -422,9 +343,14 @@ export default function Projects() {
     <div className="fade-in">
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-        <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Tests</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-          <Plus size={14} /> New Project
+        <div>
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 2 }}>Tests</h1>
+          <p style={{ fontSize: "0.82rem", color: "var(--text2)", margin: 0 }}>
+            Manage, run, and review test cases across all projects
+          </p>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModal(true)} disabled={projects.length === 0}>
+          <Plus size={14} /> New Test
         </button>
       </div>
 
@@ -475,44 +401,26 @@ export default function Projects() {
               style={{ paddingLeft: 28, height: 32, fontSize: "0.82rem" }}
             />
           </div>
-          <div style={{
-            display: "flex", gap: 4,
-            background: "var(--bg2)", padding: 3,
-            borderRadius: "var(--radius)", border: "1px solid var(--border)",
-          }}>
+          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {STATUS_FILTERS.map(f => (
-              <button
-                key={f}
-                className="btn btn-xs"
-                onClick={() => setFilter(f)}
-                style={{
-                  background: filter === f ? "#fff" : "transparent",
-                  color: filter === f ? "var(--text)" : "var(--text3)",
-                  border: filter === f ? "1px solid var(--border)" : "1px solid transparent",
-                  boxShadow: filter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-                }}
-              >
+              <button key={f} className="btn btn-xs" onClick={() => setFilter(f)} style={{
+                background: filter === f ? "#fff" : "transparent",
+                color: filter === f ? "var(--text)" : "var(--text3)",
+                border: filter === f ? "1px solid var(--border)" : "1px solid transparent",
+                boxShadow: filter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              }}>
                 {f}
               </button>
             ))}
           </div>
-          <div style={{
-            display: "flex", gap: 4,
-            background: "var(--bg2)", padding: 3,
-            borderRadius: "var(--radius)", border: "1px solid var(--border)",
-          }}>
+          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {REVIEW_FILTERS.map(f => (
-              <button
-                key={f}
-                className="btn btn-xs"
-                onClick={() => setReviewFilter(f)}
-                style={{
-                  background: reviewFilter === f ? "#fff" : "transparent",
-                  color: reviewFilter === f ? "var(--text)" : "var(--text3)",
-                  border: reviewFilter === f ? "1px solid var(--border)" : "1px solid transparent",
-                  boxShadow: reviewFilter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-                }}
-              >
+              <button key={f} className="btn btn-xs" onClick={() => setReviewFilter(f)} style={{
+                background: reviewFilter === f ? "#fff" : "transparent",
+                color: reviewFilter === f ? "var(--text)" : "var(--text3)",
+                border: reviewFilter === f ? "1px solid var(--border)" : "1px solid transparent",
+                boxShadow: reviewFilter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              }}>
                 {f}
               </button>
             ))}
@@ -545,11 +453,7 @@ export default function Projects() {
             </thead>
             <tbody>
               {filtered.map(t => (
-                <tr
-                  key={t.id}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/tests/${t.id}`)}
-                >
+                <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
                   <td>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
                       {t.id.slice(0, 8)}…
@@ -561,10 +465,7 @@ export default function Projects() {
                       <div>
                         <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
                         {t.description && (
-                          <div style={{
-                            fontSize: "0.75rem", color: "var(--text3)", marginTop: 1,
-                            maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
+                          <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1, maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {t.description}
                           </div>
                         )}
@@ -581,7 +482,13 @@ export default function Projects() {
                   </td>
                   <td>
                     {projMap[t.projectId] && (
-                      <span className="badge badge-gray">{projMap[t.projectId].name}</span>
+                      <span
+                        className="badge badge-gray"
+                        style={{ cursor: "pointer" }}
+                        onClick={e => { e.stopPropagation(); navigate(`/projects/${t.projectId}`); }}
+                      >
+                        {projMap[t.projectId].name}
+                      </span>
                     )}
                   </td>
                   <td>
@@ -608,16 +515,10 @@ export default function Projects() {
         />
       )}
       {showRunModal && (
-        <RunAllModal
-          projects={projects}
-          onClose={() => setShowRunModal(false)}
-        />
+        <RunAllModal projects={projects} onClose={() => setShowRunModal(false)} />
       )}
       {showReviewModal && (
-        <ReviewModal
-          projects={projects}
-          onClose={() => setShowReviewModal(false)}
-        />
+        <ReviewModal projects={projects} onClose={() => setShowReviewModal(false)} />
       )}
     </div>
   );

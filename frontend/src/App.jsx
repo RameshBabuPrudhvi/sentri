@@ -2,13 +2,13 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
-import Projects from "./pages/Projects.jsx";
+import Tests from "./pages/Tests.jsx";
 import ProjectDetail from "./pages/ProjectDetail.jsx";
 import NewProject from "./pages/NewProject.jsx";
 import RunDetail from "./pages/RunDetail.jsx";
 import TestDetail from "./pages/TestDetail.jsx";
 import Settings from "./pages/Settings.jsx";
-import Applications from "./pages/Applications";
+import Projects from "./pages/Applications";
 import Reports from "./pages/Reports";
 import Work from "./pages/Work";
 import Context from "./pages/Context";
@@ -30,6 +30,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
+          <Route path="/tests" element={<Tests />} />
           <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/runs/:runId" element={<RunDetail />} />
@@ -38,7 +39,6 @@ export default function App() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/work" element={<Work />} />
           <Route path="/context" element={<Context />} />
-          <Route path="/applications" element={<Applications />} />
         </Route>
       </Routes>
     </BrowserRouter>

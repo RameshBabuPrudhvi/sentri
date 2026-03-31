@@ -23,7 +23,7 @@ function StatusDot({ status }) {
   );
 }
 
-export default function Applications() {
+export default function Projects() {
   const { projects, allTests, allRuns, loading } = useProjectData();
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
@@ -75,13 +75,13 @@ export default function Applications() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 3 }}>Applications</h1>
+          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 3 }}>Projects</h1>
           <p style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-            Manage your applications under test and their health at a glance
+            Web applications configured for autonomous testing
           </p>
         </div>
         <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-          <Plus size={14} /> New Application
+          <Plus size={14} /> New Project
         </button>
       </div>
 
@@ -93,7 +93,7 @@ export default function Applications() {
             className="input"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search applications..."
+            placeholder="Search projects..."
             style={{ paddingLeft: 28, height: 34, fontSize: "0.82rem" }}
           />
         </div>
@@ -104,16 +104,16 @@ export default function Applications() {
         <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
           <Globe size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
           <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 6 }}>
-            {projects.length === 0 ? "No applications yet" : "No results"}
+            {projects.length === 0 ? "No projects yet" : "No results"}
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
             {projects.length === 0
-              ? "Add your first application to start crawling and generating tests."
+              ? "Add your first web app to start generating and running tests."
               : "Try a different search."}
           </div>
           {projects.length === 0 && (
             <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
-              <Plus size={13} /> Add Application
+              <Plus size={13} /> Add Project
             </button>
           )}
         </div>

@@ -1,15 +1,15 @@
 import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, BarChart2, Briefcase, Layers, AppWindow, Settings, Plus, Search } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Plus, Search } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
 
 const NAV = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/projects",  icon: FlaskConical,    label: "Tests" },
-  { to: "/reports",   icon: BarChart2,       label: "Reports" },
-  { to: "/work",      icon: Briefcase,       label: "Work" },
-  { to: "/context",   icon: Layers,          label: "Context" },
-  { to: "/applications",  icon: AppWindow,       label: "Application" },
+  { to: "/dashboard",    icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/projects",     icon: FolderOpen,      label: "Projects" },
+  { to: "/tests",        icon: FlaskConical,    label: "Tests" },
+  { to: "/reports",      icon: BarChart2,       label: "Reports" },
+  { to: "/work",         icon: Briefcase,       label: "Work" },
+  { to: "/context",      icon: Layers,          label: "Context" },
 ];
 
 export default function Layout() {
