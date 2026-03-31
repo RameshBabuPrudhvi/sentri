@@ -208,6 +208,11 @@ app.get("/api/projects/:id/tests", (req, res) => {
   res.json(tests);
 });
 
+// ── All tests (batch endpoint for frontend) ──────────────────────────────────
+app.get("/api/tests", (req, res) => {
+  res.json(Object.values(db.tests));
+});
+
 // ── Single test by ID (for TestDetail page) ───────────────────────────────────
 app.get("/api/tests/:testId", (req, res) => {
   const test = db.tests[req.params.testId];
