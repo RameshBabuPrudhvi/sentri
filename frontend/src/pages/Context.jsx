@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Globe, Cpu, ChevronRight, CheckCircle2,
@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { fmtRelativeDate } from "../utils/formatters";
+import useProjectData from "../hooks/useProjectData";
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -35,41 +36,28 @@ function InfoRow({ label, children }) {
 }
 
 export default function Context() {
-  const [projects, setProjects]   = useState([]);
-  const [config, setConfig]       = useState(null);
-  const [crawlData, setCrawlData] = useState({});
-  const [loading, setLoading]     = useState(true);
+  // FIX #10: useProjectData batches all project/run/test fetches in one pass (no N+1)
+  const { projects, allTests, allRuns, loading } = useProjectData();
+  const [config, setConfig] = React.useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [projs, cfg] = await Promise.all([
-          api.getProjects(),
-          api.getConfig().catch(() => null),
-        ]);
-        setProjects(projs);
-        setConfig(cfg);
-
-        // Load last crawl info per project
-        const crawls = {};
-        await Promise.all(projs.map(async p => {
-          const runs = await api.getRuns(p.id).catch(() => []);
-          const lastCrawl = runs
-            .filter(r => r.type === "crawl")
-            .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0] || null;
-          const tests = await api.getTests(p.id).catch(() => []);
-          crawls[p.id] = { lastCrawl, tests };
-        }));
-        setCrawlData(crawls);
-      } catch (err) {
-        console.error("Context load error:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+  React.useEffect(() => {
+    api.getConfig().then(setConfig).catch(() => null);
   }, []);
+
+  // Build crawl summary per project from already-fetched allRuns and allTests
+  const crawlData = useMemo(() => {
+    const map = {};
+    projects.forEach(p => {
+      const projectRuns = allRuns.filter(r => r.projectId === p.id);
+      const lastCrawl = projectRuns
+        .filter(r => r.type === "crawl")
+        .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0] || null;
+      const tests = allTests.filter(t => t.projectId === p.id);
+      map[p.id] = { lastCrawl, tests };
+    });
+    return map;
+  }, [projects, allRuns, allTests]);
 
   if (loading) return (
     <div style={{ maxWidth: 880, margin: "0 auto" }}>
@@ -142,9 +130,16 @@ export default function Context() {
         />
 
         {!hasProjects ? (
-          <div style={{ padding: "20px 0", textAlign: "center", color: "var(--text3)", fontSize: "0.85rem" }}>
-            No applications registered yet.{" "}
-            <button className="btn btn-ghost btn-xs" onClick={() => navigate("/projects/new")}>Add one</button>
+          // Fix #17: proper empty state card with clear CTA
+          <div style={{ padding: "48px 32px", textAlign: "center", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", background: "var(--surface)" }}>
+            <Globe size={32} color="var(--text3)" style={{ marginBottom: 14 }} />
+            <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 6 }}>No applications registered</div>
+            <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20, maxWidth: 340, margin: "0 auto 20px" }}>
+              Add a project to see crawl context, test counts, and AI configuration for each application.
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
+              Add First Project
+            </button>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
