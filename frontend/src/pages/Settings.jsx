@@ -600,6 +600,12 @@ export default function Settings() {
               onDelete={handleDelete}
             />
           ))}
+          <OllamaCard
+            activeProvider={settings?.activeProvider}
+            ollamaConfig={settings?.ollamaConfig}
+            onSave={handleSave}
+            onDelete={handleDelete}
+          />
         </div>
       )}
 
@@ -616,7 +622,11 @@ export default function Settings() {
           overflowX: "auto", lineHeight: 2,
         }}>{`ANTHROPIC_API_KEY=sk-ant-api03-...
 OPENAI_API_KEY=sk-proj-...
-GOOGLE_API_KEY=AIza...`}</pre>
+GOOGLE_API_KEY=AIza...
+# Ollama (local models — no API key needed)
+OLLAMA_ENABLED=1
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1`}</pre>
       </div>
 
       {/* ── Test Execution ─────────────────────────────────────────────── */}
