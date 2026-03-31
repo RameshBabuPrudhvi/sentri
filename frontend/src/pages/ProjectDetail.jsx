@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle,
-  AlertTriangle, RefreshCw, Globe, Clock, ThumbsUp, ThumbsDown,
+  AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
   RotateCcw, Info, Shield, AlertCircle,
 } from "lucide-react";
 import { api } from "../api.js";
@@ -40,8 +40,9 @@ function ConfBar({ score }) {
   );
 }
 
-function Toast({ msg, type, visible }) {
+function Toast({ msg, type, visible, onViewRun, runId }) {
   const colors = { success: "var(--green)", error: "var(--red)", info: "var(--accent)" };
+  const navigate = useNavigate();
   return (
     <div style={{
       position: "fixed", bottom: 24, right: 28, zIndex: 9999,
@@ -49,10 +50,20 @@ function Toast({ msg, type, visible }) {
       borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8,
       fontSize: "0.83rem", fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
       transition: "all 0.25s", opacity: visible ? 1 : 0,
-      transform: visible ? "translateY(0)" : "translateY(12px)", pointerEvents: "none",
+      transform: visible ? "translateY(0)" : "translateY(12px)", pointerEvents: visible ? "auto" : "none",
     }}>
       <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[type] || colors.info, flexShrink: 0 }} />
       {msg}
+      {/* Opt-in navigation to run — don't auto-switch tabs */}
+      {onViewRun && runId && (
+        <button
+          className="btn btn-ghost btn-xs"
+          style={{ marginLeft: 8, pointerEvents: "auto" }}
+          onClick={() => navigate(`/runs/${runId}`)}
+        >
+          View run <ArrowRight size={11} />
+        </button>
+      )}
     </div>
   );
 }
@@ -61,21 +72,24 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [project, setProject]           = useState(null);
-  const [tests, setTests]               = useState([]);
-  const [runs, setRuns]                 = useState([]);
-  const [activeRun, setActiveRun]       = useState(null);
-  const [loading, setLoading]           = useState(true);
+  const [project, setProject]             = useState(null);
+  const [tests, setTests]                 = useState([]);
+  const [runs, setRuns]                   = useState([]);
+  const [activeRun, setActiveRun]         = useState(null);
+  const [activeRunId, setActiveRunId]     = useState(null); // for toast link
+  const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
-  const [tab, setTab]                   = useState("review");
-  const [reviewFilter, setReviewFilter] = useState("draft");
-  const [search, setSearch]             = useState("");
-  const [selected, setSelected]         = useState(new Set());
-  const [toast, setToast]               = useState({ msg: "", type: "info", visible: false });
+  const [tab, setTab]                     = useState("review");
+  const [reviewFilter, setReviewFilter]   = useState("draft");
+  const [search, setSearch]               = useState("");
+  const [selected, setSelected]           = useState(new Set());
+  const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
+  const PAGE_SIZE = 50;
+  const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
 
-  const showToast = (msg, type = "info") => {
-    setToast({ msg, type, visible: true });
-    setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 2800);
+  const showToast = (msg, type = "info", runId = null) => {
+    setToast({ msg, type, visible: true, showLink: !!runId, runId });
+    setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
   };
 
   const refresh = useCallback(async () => {
@@ -89,7 +103,6 @@ export default function ProjectDetail() {
     if (!activeRun) return;
     const timer = setInterval(async () => {
       const run = await api.getRun(activeRun).catch(() => null);
-      // Always refresh runs list so the active run appears immediately in the Runs tab
       api.getRuns(id).then(r => { if (r) setRuns(r); }).catch(() => {});
       if (!run || run.status !== "running") {
         setActiveRun(null);
@@ -100,12 +113,14 @@ export default function ProjectDetail() {
     return () => clearInterval(timer);
   }, [activeRun, refresh, id]);
 
+  // FIX #5: No longer auto-switching tab. Run starts in background; toast has opt-in "View run" link.
   async function doCrawl() {
     setActionLoading("crawl");
     try {
       const { runId } = await api.crawl(id);
-      setActiveRun(runId); setTab("runs");
-      showToast("Crawl started — new tests will appear as Draft", "info");
+      setActiveRun(runId);
+      setActiveRunId(runId);
+      showToast("Crawl started — new tests will appear as Draft", "info", runId);
     } catch (err) { showToast(err.message, "error"); }
     finally { setActionLoading(null); }
   }
@@ -114,8 +129,9 @@ export default function ProjectDetail() {
     setActionLoading("run");
     try {
       const { runId } = await api.runTests(id);
-      setActiveRun(runId); setTab("runs");
-      showToast("Regression run started", "info");
+      setActiveRun(runId);
+      setActiveRunId(runId);
+      showToast("Regression run started", "info", runId);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -135,11 +151,24 @@ export default function ProjectDetail() {
     } catch (err) { showToast(err.message, "error"); }
   }
 
-  async function bulkAction(action) {
+  const [bulkConfirm, setBulkConfirm] = React.useState(null); // {action, ids}
+
+  function requestBulkAction(action) {
     const ids = selected.size > 0
       ? Array.from(selected)
       : filteredByReview.map(t => t.id);
     if (!ids.length) return;
+    // Require confirmation when operating on all visible tests
+    if (selected.size === 0 && ids.length > 1) {
+      setBulkConfirm({ action, ids });
+      return;
+    }
+    executeBulkAction(action, ids);
+  }
+
+  async function executeBulkAction(action, ids) {
+    setBulkConfirm(null);
+    if (!ids?.length) return;
     try {
       const res = await api.bulkUpdateTests(id, ids, action);
       await refresh(); setSelected(new Set());
@@ -147,6 +176,9 @@ export default function ProjectDetail() {
       showToast(`${res.updated} tests ${label}`, action === "approve" ? "success" : "info");
     } catch (err) { showToast(err.message, "error"); }
   }
+
+  // Keep old name as alias so existing call sites work unchanged
+  function bulkAction(action) { requestBulkAction(action); }
 
   function toggleSelect(testId) {
     setSelected(s => { const n = new Set(s); n.has(testId) ? n.delete(testId) : n.add(testId); return n; });
@@ -162,9 +194,9 @@ export default function ProjectDetail() {
 
   const filteredByReview = tests.filter(t => {
     const statusOk =
-      reviewFilter === "all"      ? true :
-      reviewFilter === "draft"    ? (!t.reviewStatus || t.reviewStatus === "draft") :
-                                    t.reviewStatus === reviewFilter;
+      reviewFilter === "all"   ? true :
+      reviewFilter === "draft" ? (!t.reviewStatus || t.reviewStatus === "draft") :
+                                  t.reviewStatus === reviewFilter;
     const searchOk = !search ||
       t.name?.toLowerCase().includes(search.toLowerCase()) ||
       t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
@@ -175,6 +207,10 @@ export default function ProjectDetail() {
     !search || t.name?.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Paginate review tab (50 per page)
+  const reviewTotalPages = Math.max(1, Math.ceil(filteredByReview.length / PAGE_SIZE));
+  const pagedReview = filteredByReview.slice((reviewPage - 1) * PAGE_SIZE, reviewPage * PAGE_SIZE);
+
   const passed = approvedTests.filter(t => t.lastResult === "passed").length;
   const failed = approvedTests.filter(t => t.lastResult === "failed").length;
 
@@ -183,7 +219,17 @@ export default function ProjectDetail() {
       {[80, 400].map((h, i) => <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 16 }} />)}
     </div>
   );
-  if (!project) return <div>Not found</div>;
+  if (!project) return (
+    <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)", maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>🔍</div>
+      <div style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--text)", marginBottom: 8 }}>Project not found</div>
+      <div style={{ fontSize: "0.875rem", marginBottom: 24 }}>This project may have been deleted or the link is invalid.</div>
+      <button className="btn btn-primary" onClick={() => navigate("/projects")}>Back to Projects</button>
+    </div>
+  );
+
+  // Build dynamic bulk button labels based on selection scope
+  const bulkScope = selected.size > 0 ? `${selected.size} selected` : `all ${filteredByReview.length} draft${filteredByReview.length !== 1 ? "s" : ""}`;
 
   return (
     <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -242,7 +288,7 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      {/* Active run banner */}
+      {/* Active run banner — now the primary CTA to view run, tab stays put */}
       {activeRun && (
         <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--blue-bg)", border: "1px solid #bfdbfe", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -291,7 +337,7 @@ export default function ProjectDetail() {
         ))}
       </div>
 
-      {/* ── GENERATED TESTS / REVIEW TAB ─────────────────────────────────── */}
+      {/* ── GENERATED TESTS / REVIEW TAB ── */}
       {tab === "review" && (
         <div>
           {tests.length === 0 ? (
@@ -305,10 +351,10 @@ export default function ProjectDetail() {
               {/* Filter + search row */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                 {[
-                  ["draft",    `Draft (${draftTests.length})`,    "var(--amber)"],
+                  ["draft",    `Draft (${draftTests.length})`,       "var(--amber)"],
                   ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
-                  ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"],
-                  ["all",      `All (${tests.length})`,           "var(--text2)"],
+                  ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
+                  ["all",      `All (${tests.length})`,              "var(--text2)"],
                 ].map(([key, label, color]) => (
                   <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); }} style={{
                     padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
@@ -325,22 +371,22 @@ export default function ProjectDetail() {
                 </div>
               </div>
 
-              {/* Bulk action bar — shown when filter is draft OR something is selected */}
+              {/* Bulk action bar — dynamic labels show exact scope */}
               {(reviewFilter === "draft" || selected.size > 0) && filteredByReview.length > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)", borderRadius: 8, marginBottom: 12, flexWrap: "wrap" }}>
                   <span style={{ fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
-                    {selected.size > 0 ? `${selected.size} selected` : `${filteredByReview.length} draft tests`}
+                    {selected.size > 0 ? `${selected.size} selected` : `${filteredByReview.length} draft tests visible`}
                   </span>
                   <button className="btn btn-sm" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
                     onClick={() => bulkAction("approve")}>
-                    <ThumbsUp size={12} /> {selected.size > 0 ? "Approve selected" : "Approve All"}
+                    <ThumbsUp size={12} /> Approve {bulkScope}
                   </button>
                   <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
                     onClick={() => bulkAction("reject")}>
-                    <ThumbsDown size={12} /> {selected.size > 0 ? "Reject selected" : "Reject All"}
+                    <ThumbsDown size={12} /> Reject {bulkScope}
                   </button>
                   {selected.size > 0 && (
-                    <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
                   )}
                 </div>
               )}
@@ -370,7 +416,7 @@ export default function ProjectDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredByReview.map(t => {
+                      {pagedReview.map(t => {
                         const rs = t.reviewStatus || "draft";
                         const isSelected = selected.has(t.id);
                         return (
@@ -384,10 +430,7 @@ export default function ProjectDetail() {
                                 {t.id.slice(0, 8)}…
                               </span>
                             </td>
-                            <td
-                              style={{ cursor: "pointer" }}
-                              onClick={() => navigate(`/tests/${t.id}`)}
-                            >
+                            <td style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <AgentTag type="TA" />
                                 <div>
@@ -450,7 +493,7 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* ── REGRESSION SUITE TAB ─────────────────────────────────────────── */}
+      {/* ── REGRESSION SUITE TAB ── */}
       {tab === "regression" && (
         <div>
           <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--green-bg)", border: "1px solid #86efac", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
@@ -526,7 +569,7 @@ export default function ProjectDetail() {
                           </span>
                         </td>
                         <td>
-                          <button className="btn btn-ghost btn-xs" onClick={() => reviewOne(t.id, "restore")} title="Move back to Draft">
+                          <button className="btn btn-ghost btn-xs" onClick={e => { e.stopPropagation(); reviewOne(t.id, "restore"); }} title="Move back to Draft">
                             <RotateCcw size={11} />
                           </button>
                         </td>
@@ -535,12 +578,25 @@ export default function ProjectDetail() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination */}
+              {reviewTotalPages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
+                    {filteredByReview.length} tests · page {reviewPage} of {reviewTotalPages}
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === 1} onClick={() => setReviewPage(p => p - 1)}>← Prev</button>
+                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === reviewTotalPages} onClick={() => setReviewPage(p => p + 1)}>Next →</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
       )}
 
-      {/* ── RUNS TAB ─────────────────────────────────────────────────────── */}
+      {/* ── RUNS TAB ── */}
       {tab === "runs" && (
         <div className="card">
           {runs.length === 0 ? (
@@ -556,7 +612,7 @@ export default function ProjectDetail() {
                   .map(r => {
                     const isCrawl    = r.type === "crawl";
                     const isGenerate = r.type === "generate";
-                    const isRun      = r.type === "run";
+                    const isRun      = r.type === "run" || r.type === "test_run";
                     return (
                       <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${r.id}`)}>
                         <td>
@@ -611,7 +667,53 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      <Toast msg={toast.msg} type={toast.type} visible={toast.visible} />
+      <Toast msg={toast.msg} type={toast.type} visible={toast.visible} onViewRun={toast.showLink} runId={toast.runId} />
+
+      {/* Bulk action confirmation modal */}
+      {bulkConfirm && (
+        <>
+          <div onClick={() => setBulkConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999 }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "28px 32px", width: "min(420px,95vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
+            <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
+            <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> (all visible tests). This cannot be undone easily.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
+              <button
+                className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
+                onClick={() => executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
+              >
+                {bulkConfirm.action === "approve" ? "Approve all" : "Reject all"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Fix #20: Keyboard shortcut hint */}
+      <KeyboardShortcuts
+        selected={selected}
+        filteredByReview={filteredByReview}
+        onApprove={() => bulkAction("approve")}
+        onReject={() => bulkAction("reject")}
+        onClearSelection={() => setSelected(new Set())}
+      />
     </div>
   );
+}
+
+// Keyboard shortcuts for review actions
+function KeyboardShortcuts({ selected, filteredByReview, onApprove, onReject, onClearSelection }) {
+  React.useEffect(() => {
+    function handler(e) {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "a" && !e.metaKey && !e.ctrlKey) onApprove();
+      if (e.key === "r" && !e.metaKey && !e.ctrlKey) onReject();
+      if (e.key === "Escape") onClearSelection();
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onApprove, onReject, onClearSelection]);
+  return null;
 }
