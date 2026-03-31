@@ -630,12 +630,59 @@ app.post("/api/test-connection", async (req, res) => {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     return res.status(400).json({ error: "URL must use http or https protocol" });
   }
-  if (["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "169.254.169.254"].includes(parsed.hostname)) {
-    return res.status(400).json({ error: "URL must not point to localhost or internal addresses" });
+  // SSRF protection: block loopback, link-local, and private IP ranges
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  const blocked =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    /^127\.\d+\.\d+\.\d+$/.test(hostname) ||                // 127.0.0.0/8
+    /^10\.\d+\.\d+\.\d+$/.test(hostname) ||                  // 10.0.0.0/8
+    /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname) ||  // 172.16.0.0/12
+    /^192\.168\.\d+\.\d+$/.test(hostname) ||                  // 192.168.0.0/16
+    hostname === "0.0.0.0" ||
+    hostname === "::1" || hostname === "::ffff:127.0.0.1" ||
+    hostname === "169.254.169.254" ||                          // AWS metadata
+    /^fe80:/i.test(hostname) ||                                // link-local IPv6
+    /^fd[0-9a-f]{2}:/i.test(hostname) ||                      // unique-local IPv6
+    /^fc[0-9a-f]{2}:/i.test(hostname);                        // unique-local IPv6
+  if (blocked) {
+    return res.status(400).json({ error: "URL must not point to localhost, private, or internal addresses" });
   }
   try {
     const response = await fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(10000) });
     res.json({ ok: true, status: response.status });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// ── API key validation ────────────────────────────────────────────────────────
+// POST /api/settings/:provider/validate — lightweight check that the configured
+// key actually works. Returns 200 on success, 502 if the provider rejects it.
+app.post("/api/settings/:provider/validate", async (req, res) => {
+  const { provider } = req.params;
+  const validProviders = ["anthropic", "openai", "google", "ollama"];
+  if (!validProviders.includes(provider)) {
+    return res.status(400).json({ error: `Unknown provider: ${provider}` });
+  }
+  if (!hasProvider()) {
+    return res.status(400).json({ error: "No provider configured" });
+  }
+  try {
+    if (provider === "ollama") {
+      // For Ollama, just check that the base URL is reachable
+      const cfg = getOllamaConfig();
+      const tagRes = await fetch(`${cfg.baseUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      if (!tagRes.ok) throw new Error(`Ollama returned ${tagRes.status}`);
+      const data = await tagRes.json();
+      const models = (data.models || []).map(m => m.name || m.model);
+      const modelFound = models.some(m => m === cfg.model || m.startsWith(cfg.model + ":"));
+      return res.json({ ok: true, modelsAvailable: models.length, modelFound });
+    }
+    // For cloud providers, make a minimal API call to verify the key
+    const { generateText } = await import("./aiProvider.js");
+    await generateText("Respond with exactly: {\"ok\":true}", { maxTokens: 32 });
+    res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message });
   }

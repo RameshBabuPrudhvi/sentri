@@ -219,6 +219,10 @@ async function callProvider(provider, prompt, maxTokens) {
     return withRetry(async () => {
       const res = await client.chat.completions.create({
         model: ollamaConfig.model,
+        max_tokens: tokens,
+        // Not all Ollama models support json_object, but those that do
+        // (llama3.1, mistral, etc.) will return cleaner output with it.
+        response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
       });
       return res.choices[0].message.content;

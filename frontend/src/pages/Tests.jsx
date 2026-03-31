@@ -60,7 +60,7 @@ function StatusBadge({ result }) {
 
 // ── Create Test Modal ──────────────────────────────────────────────────────────
 
-function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
+function CreateTestModal({ projects, onClose, defaultProjectId }) {
   const [phase, setPhase] = useState("form");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -610,10 +610,6 @@ export default function Tests() {
     return () => window.removeEventListener("keydown", handler);
   }, [selected, filtered]);
 
-  function handleTestCreated(newTest) {
-    setTests(prev => [newTest, ...prev]);
-  }
-
   const quickActions = [
     {
       icon: <Sparkles size={16} />,
@@ -903,7 +899,6 @@ export default function Tests() {
         <CreateTestModal
           projects={projects}
           onClose={() => setShowCreateModal(false)}
-          onCreated={handleTestCreated}
           defaultProjectId={projects[0]?.id || ""}
         />
       )}

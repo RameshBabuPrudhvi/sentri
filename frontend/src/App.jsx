@@ -40,7 +40,7 @@ class ErrorBoundary extends React.Component {
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
             <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
-            <button className="btn btn-ghost" onClick={() => { window.history.pushState(null, "", "/dashboard"); this.setState({ error: null }); }}>Go to Dashboard</button>
+            <button className="btn btn-ghost" onClick={() => { window.location.href = "/dashboard"; }}>Go to Dashboard</button>
           </div>
         </div>
       );

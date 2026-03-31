@@ -148,7 +148,7 @@ export default function Dashboard() {
                   </defs>
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--text3)" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: "var(--text3)" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ background: "#fff", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12, color: "var(--text)" }} />
                   <Area type="monotone" dataKey="passed" stroke="#16a34a" fill="url(#gp)" strokeWidth={2} />
                   <Area type="monotone" dataKey="failed" stroke="#dc2626" fill="url(#gf)" strokeWidth={2} />
                 </AreaChart>

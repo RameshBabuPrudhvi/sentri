@@ -356,7 +356,7 @@ export default function ProjectDetail() {
                   ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
                   ["all",      `All (${tests.length})`,              "var(--text2)"],
                 ].map(([key, label, color]) => (
-                  <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); }} style={{
+                  <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }} style={{
                     padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
                     border: `1px solid ${reviewFilter === key ? color : "var(--border)"}`,
                     background: "transparent", color: reviewFilter === key ? color : "var(--text2)",
@@ -366,7 +366,7 @@ export default function ProjectDetail() {
                 <div style={{ flex: 1 }} />
                 <div style={{ position: "relative" }}>
                   <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
-                  <input className="input" value={search} onChange={e => setSearch(e.target.value)}
+                  <input className="input" value={search} onChange={e => { setSearch(e.target.value); setReviewPage(1); }}
                     placeholder="Search tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 200 }} />
                 </div>
               </div>
@@ -693,6 +693,7 @@ export default function ProjectDetail() {
 
       {/* Fix #20: Keyboard shortcut hint */}
       <KeyboardShortcuts
+        tab={tab}
         selected={selected}
         filteredByReview={filteredByReview}
         onApprove={() => bulkAction("approve")}
@@ -703,17 +704,20 @@ export default function ProjectDetail() {
   );
 }
 
-// Keyboard shortcuts for review actions
-function KeyboardShortcuts({ selected, filteredByReview, onApprove, onReject, onClearSelection }) {
+// Keyboard shortcuts for review actions — only active on the review tab
+function KeyboardShortcuts({ tab, selected, filteredByReview, onApprove, onReject, onClearSelection }) {
   React.useEffect(() => {
     function handler(e) {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
-      if (e.key === "a" && !e.metaKey && !e.ctrlKey) onApprove();
-      if (e.key === "r" && !e.metaKey && !e.ctrlKey) onReject();
+      // Only fire approve/reject when on the review tab to prevent accidental actions
+      if (tab === "review") {
+        if (e.key === "a" && !e.metaKey && !e.ctrlKey) onApprove();
+        if (e.key === "r" && !e.metaKey && !e.ctrlKey) onReject();
+      }
       if (e.key === "Escape") onClearSelection();
     }
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onApprove, onReject, onClearSelection]);
+  }, [tab, onApprove, onReject, onClearSelection]);
   return null;
 }
