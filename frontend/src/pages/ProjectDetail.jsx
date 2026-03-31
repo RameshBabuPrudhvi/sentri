@@ -488,6 +488,19 @@ export default function ProjectDetail() {
                   </table>
                 )}
               </div>
+
+              {/* Pagination */}
+              {reviewTotalPages > 1 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
+                    {filteredByReview.length} tests · page {reviewPage} of {reviewTotalPages}
+                  </span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === 1} onClick={() => setReviewPage(p => p - 1)}>← Prev</button>
+                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === reviewTotalPages} onClick={() => setReviewPage(p => p + 1)}>Next →</button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -578,19 +591,6 @@ export default function ProjectDetail() {
                   </tbody>
                 </table>
               </div>
-
-              {/* Pagination */}
-              {reviewTotalPages > 1 && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
-                    {filteredByReview.length} tests · page {reviewPage} of {reviewTotalPages}
-                  </span>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === 1} onClick={() => setReviewPage(p => p - 1)}>← Prev</button>
-                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === reviewTotalPages} onClick={() => setReviewPage(p => p + 1)}>Next →</button>
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>

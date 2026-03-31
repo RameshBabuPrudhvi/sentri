@@ -167,7 +167,7 @@ export default function Reports() {
           <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
             Run tests to start generating reports and analytics.
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects")}>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate("/tests")}>
             Go to Tests
           </button>
         </div>

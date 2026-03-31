@@ -609,6 +609,19 @@ app.get("/api/activities", (req, res) => {
   res.json(activities.slice(0, limit));
 });
 
+// ── URL reachability test ──────────────────────────────────────────────────────
+// POST /api/test-connection — verify that a URL is reachable before creating a project
+app.post("/api/test-connection", async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: "url is required" });
+  try {
+    const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(10000) });
+    res.json({ ok: true, status: response.status });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Health ────────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => res.json({ ok: true }));
 
