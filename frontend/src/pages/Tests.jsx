@@ -6,7 +6,12 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 
-const STATUS_FILTERS = ["All", "Passing", "Failing", "Not Run"];
+const STATUS_FILTERS = [
+  { key: "All",     label: "All",     icon: null },
+  { key: "Passing", label: "Passing", icon: <CheckCircle2 size={11} style={{ color: "var(--green)" }} /> },
+  { key: "Failing", label: "Failing", icon: <XCircle size={11} style={{ color: "var(--red)" }} /> },
+  { key: "Not Run", label: "Not Run", icon: <Clock size={11} style={{ color: "var(--text3)" }} /> },
+];
 const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
 
 function AgentTag({ type = "TA" }) {
@@ -520,13 +525,14 @@ export default function Tests() {
           </div>
           <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {STATUS_FILTERS.map(f => (
-              <button key={f} className="btn btn-xs" onClick={() => setFilter(f)} style={{
-                background: filter === f ? "#fff" : "transparent",
-                color: filter === f ? "var(--text)" : "var(--text3)",
-                border: filter === f ? "1px solid var(--border)" : "1px solid transparent",
-                boxShadow: filter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              <button key={f.key} className="btn btn-xs" onClick={() => setFilter(f.key)} style={{
+                background: filter === f.key ? "#fff" : "transparent",
+                color: filter === f.key ? "var(--text)" : "var(--text3)",
+                border: filter === f.key ? "1px solid var(--border)" : "1px solid transparent",
+                boxShadow: filter === f.key ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                display: "flex", alignItems: "center", gap: 4,
               }}>
-                {f}
+                {f.icon}{f.label}
               </button>
             ))}
           </div>
