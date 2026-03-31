@@ -407,26 +407,20 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
   });
 
-  try {
-    const createdTestIds = await generateSingleTest(project, run, db, {
-      name: name.trim(),
-      description: (description || "").trim(),
-    });
+  // Respond immediately with runId so the frontend can navigate to the live
+  // run view while the pipeline executes asynchronously in the background.
+  res.status(202).json({ runId });
 
+  // Run pipeline async after response is flushed
+  generateSingleTest(project, run, db, {
+    name: name.trim(),
+    description: (description || "").trim(),
+  }).then(createdTestIds => {
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
     });
-
-    // Return the first created test object so the frontend can display steps
-    // and transition to the review phase immediately.
-    const firstTest = createdTestIds.length > 0 ? db.tests[createdTestIds[0]] : null;
-    if (firstTest) {
-      res.status(201).json(firstTest);
-    } else {
-      res.status(200).json({ runId, message: "Pipeline completed but no tests passed validation." });
-    }
-  } catch (err) {
+  }).catch(err => {
     run.status = "failed";
     run.error = err.message;
     run.finishedAt = new Date().toISOString();
@@ -435,8 +429,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
       detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
       status: "failed",
     });
-    res.status(500).json({ error: err.message || "AI generation failed" });
-  }
+  });
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────

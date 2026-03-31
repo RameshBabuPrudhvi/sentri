@@ -47,14 +47,12 @@ function CreateTestModal({ projects, onClose, onCreated, defaultProjectId }) {
     if (!projectId) { setError("Please select a project."); return; }
     setPhase("submitting");
     try {
-      api.generateTest(projectId, {
+      const { runId } = await api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
-      }).then(result => {
-        if (result?.id && onCreated) onCreated(result);
-      }).catch(() => {});
+      });
       onClose();
-      navigate(`/projects/${projectId}`);
+      navigate(`/runs/${runId}`);
     } catch (err) {
       setError(err.message || "Failed to start generation.");
       setPhase("form");
@@ -268,6 +266,109 @@ function ReviewModal({ projects, onClose }) {
   );
 }
 
+// ── Empty State ────────────────────────────────────────────────────────────────
+
+function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onClearSearch, onClearFilters, navigate }) {
+  // No projects at all — first-time user
+  if (projects.length === 0) {
+    return (
+      <div style={{ padding: "52px 40px", textAlign: "center" }}>
+        <div style={{ fontSize: "2rem", marginBottom: 14 }}>🚀</div>
+        <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
+          Welcome to Tests
+        </div>
+        <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 8, lineHeight: 1.7, maxWidth: 380, margin: "0 auto 20px" }}>
+          Start by creating a project. Sentri will crawl your app and AI-generate test cases for you to review and run.
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
+            Create first project
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Has projects, no tests at all — crawl hasn't been run yet
+  if (tests.length === 0) {
+    return (
+      <div style={{ padding: "52px 40px", textAlign: "center" }}>
+        <div style={{ fontSize: "2rem", marginBottom: 14 }}>🧪</div>
+        <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
+          No tests generated yet
+        </div>
+        <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto 20px" }}>
+          Go to a project and run a <strong>Crawl</strong> to let Sentri discover your app's pages and auto-generate test cases — or create one manually.
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate("/projects")}>
+            Go to Projects
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={onCreateTest}>
+            Generate with AI ✦
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Has tests, but the active filter hides them all
+  const draftCount  = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length;
+  const approvedCount = tests.filter(t => t.reviewStatus === "approved").length;
+
+  // Contextual hint based on which filter is active
+  let hint = null;
+  if (reviewFilter === "Approved" && draftCount > 0) {
+    hint = (
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 10,
+        background: "var(--amber-bg)", border: "1px solid rgba(217,119,6,0.2)",
+        borderRadius: "var(--radius)", padding: "10px 16px",
+        fontSize: "0.82rem", color: "var(--amber)", marginBottom: 20, textAlign: "left",
+      }}>
+        <span style={{ fontSize: "1rem" }}>💡</span>
+        <span>
+          You have <strong>{draftCount} draft {draftCount === 1 ? "test" : "tests"}</strong> waiting for review.
+          Switch to <strong>Draft</strong> to approve them and add them to your regression suite.
+        </span>
+      </div>
+    );
+  } else if (reviewFilter === "Draft" && approvedCount > 0) {
+    hint = (
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 10,
+        background: "var(--blue-bg)", border: "1px solid rgba(37,99,235,0.15)",
+        borderRadius: "var(--radius)", padding: "10px 16px",
+        fontSize: "0.82rem", color: "var(--blue)", marginBottom: 20, textAlign: "left",
+      }}>
+        <span style={{ fontSize: "1rem" }}>ℹ️</span>
+        <span>No draft tests — all <strong>{approvedCount}</strong> tests have already been reviewed.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "52px 40px", textAlign: "center" }}>
+      <div style={{ fontSize: "2rem", marginBottom: 14 }}>🔍</div>
+      <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 8, color: "var(--text)" }}>
+        No tests match your filters
+      </div>
+      {hint && <div style={{ marginBottom: 4 }}>{hint}</div>}
+      <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20 }}>
+        {search ? `No results for "${search}".` : "Try adjusting your filters."}
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+        <button className="btn btn-ghost btn-sm" onClick={onClearFilters}>
+          Clear filters
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={onCreateTest}>
+          Generate with AI ✦
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Tests Page ─────────────────────────────────────────────────────────────────
 
 export default function Tests() {
@@ -279,7 +380,7 @@ export default function Tests() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
-  const [reviewFilter, setReviewFilter] = useState("Approved");
+  const [reviewFilter, setReviewFilter] = useState("All Tests");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -434,11 +535,16 @@ export default function Tests() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
-            {tests.length === 0
-              ? "No tests yet — crawl a project to generate tests"
-              : "No tests match your search"}
-          </div>
+          <EmptyState
+            projects={projects}
+            tests={tests}
+            search={search}
+            reviewFilter={reviewFilter}
+            onCreateTest={() => setShowCreateModal(true)}
+            onClearSearch={() => setSearch("")}
+            onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); }}
+            navigate={navigate}
+          />
         ) : (
           <table className="table">
             <thead>
