@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Plus, X, CheckCircle2, XCircle, Clock,
-  ChevronRight, Loader2, Play, Flag,
+  ChevronRight, Loader2, Play, Flag, Sparkles,
+  AlertCircle, ListFilter, ArrowUpDown, Trash2,
+  ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { api } from "../api.js";
 
@@ -12,7 +14,37 @@ const STATUS_FILTERS = [
   { key: "Failing", label: "Failing", icon: <XCircle size={11} style={{ color: "var(--red)" }} /> },
   { key: "Not Run", label: "Not Run", icon: <Clock size={11} style={{ color: "var(--text3)" }} /> },
 ];
-const REVIEW_FILTERS = ["Approved", "Draft", "All Tests"];
+const REVIEW_FILTERS = [
+  { key: "All Tests", label: "All Tests", icon: <ListFilter size={11} style={{ color: "var(--text3)" }} /> },
+  { key: "Approved",  label: "Approved",  icon: <CheckCircle2 size={11} style={{ color: "var(--green)" }} /> },
+  { key: "Draft",     label: "Draft",     icon: <AlertCircle size={11} style={{ color: "var(--amber)" }} /> },
+];
+
+const PAGE_SIZE = 50;
+
+// ── Relative time utility ──────────────────────────────────────────────────────
+
+const RELATIVE_UNITS = [
+  { max: 60,          divisor: 1,       unit: "second"  },
+  { max: 3600,        divisor: 60,      unit: "minute"  },
+  { max: 86400,       divisor: 3600,    unit: "hour"    },
+  { max: 2592000,     divisor: 86400,   unit: "day"     },
+  { max: 31536000,    divisor: 2592000, unit: "month"   },
+  { max: Infinity,    divisor: 31536000,unit: "year"    },
+];
+
+function relativeTime(dateStr) {
+  if (!dateStr) return "—";
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 10) return "just now";
+  for (const { max, divisor, unit } of RELATIVE_UNITS) {
+    if (diff < max) {
+      const val = Math.floor(diff / divisor);
+      return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(-val, unit);
+    }
+  }
+  return "—";
+}
 
 function AgentTag({ type = "TA" }) {
   const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
@@ -393,7 +425,15 @@ export default function Tests() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [page, setPage] = useState(1);
+  const [sortCol, setSortCol] = useState(null);   // "status" | "lastRun" | "project"
+  const [sortDir, setSortDir] = useState("asc");   // "asc" | "desc"
+  const [selected, setSelected] = useState(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState(null); // {action, ids}
+  const [hoveredRow, setHoveredRow] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
   const navigate = useNavigate();
+  const searchRef = useRef(null);
 
   useEffect(() => {
     // Use batch getAllTests endpoint — falls back to per-project if not available
@@ -408,23 +448,167 @@ export default function Tests() {
     }).finally(() => setLoading(false));
   }, []);
 
-  const filtered = tests.filter(t => {
-    const matchReview =
-      reviewFilter === "All Tests" ? true :
-      reviewFilter === "Approved" ? t.reviewStatus === "approved" :
-      reviewFilter === "Draft" ? t.reviewStatus === "draft" : true;
-    const matchSearch = !search
-      || t.name?.toLowerCase().includes(search.toLowerCase())
-      || t.description?.toLowerCase().includes(search.toLowerCase());
-    const matchFilter =
-      filter === "All" ? true :
-      filter === "Passing" ? t.lastResult === "passed" :
-      filter === "Failing" ? t.lastResult === "failed" :
-      filter === "Not Run" ? !t.lastResult : true;
-    return matchReview && matchSearch && matchFilter;
-  });
+  // ── Filter counts ────────────────────────────────────────────────────────────
+  const statusCounts = useMemo(() => ({
+    All:      tests.length,
+    Passing:  tests.filter(t => t.lastResult === "passed").length,
+    Failing:  tests.filter(t => t.lastResult === "failed").length,
+    "Not Run": tests.filter(t => !t.lastResult).length,
+  }), [tests]);
 
-  const projMap = Object.fromEntries(projects.map(p => [p.id, p]));
+  const reviewCounts = useMemo(() => ({
+    "All Tests": tests.length,
+    Approved:    tests.filter(t => t.reviewStatus === "approved").length,
+    Draft:       tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length,
+  }), [tests]);
+
+  const filtered = useMemo(() => {
+    const list = tests.filter(t => {
+      const matchReview =
+        reviewFilter === "All Tests" ? true :
+        reviewFilter === "Approved" ? t.reviewStatus === "approved" :
+        reviewFilter === "Draft" ? (!t.reviewStatus || t.reviewStatus === "draft") : true;
+      const matchSearch = !search
+        || t.name?.toLowerCase().includes(search.toLowerCase())
+        || t.description?.toLowerCase().includes(search.toLowerCase());
+      const matchFilter =
+        filter === "All" ? true :
+        filter === "Passing" ? t.lastResult === "passed" :
+        filter === "Failing" ? t.lastResult === "failed" :
+        filter === "Not Run" ? !t.lastResult : true;
+      return matchReview && matchSearch && matchFilter;
+    });
+    // Sorting
+    if (sortCol) {
+      list.sort((a, b) => {
+        let av, bv;
+        if (sortCol === "status") { av = a.lastResult || ""; bv = b.lastResult || ""; }
+        else if (sortCol === "lastRun") { av = a.lastRunAt || ""; bv = b.lastRunAt || ""; }
+        else if (sortCol === "project") { av = projMap[a.projectId]?.name || ""; bv = projMap[b.projectId]?.name || ""; }
+        else { av = ""; bv = ""; }
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    }
+    return list;
+  }, [tests, reviewFilter, search, filter, sortCol, sortDir]);
+
+  const projMap = useMemo(
+    () => Object.fromEntries(projects.map(p => [p.id, p])),
+    [projects]
+  );
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [search, filter, reviewFilter]);
+
+  // ── Sorting ────────────────────────────────────────────────────────────────
+  function toggleSort(col) {
+    if (sortCol === col) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  }
+
+  function SortHeader({ col, children }) {
+    const active = sortCol === col;
+    return (
+      <th style={{ cursor: "pointer", userSelect: "none" }} onClick={() => toggleSort(col)}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {children}
+          <ArrowUpDown size={10} style={{ opacity: active ? 1 : 0.3, color: active ? "var(--accent)" : "var(--text3)" }} />
+        </span>
+      </th>
+    );
+  }
+
+  // ── Bulk select & actions ──────────────────────────────────────────────────
+  function toggleSelect(testId) {
+    setSelected(s => { const n = new Set(s); n.has(testId) ? n.delete(testId) : n.add(testId); return n; });
+  }
+
+  function toggleAll(checked, ids) {
+    setSelected(checked ? new Set(ids) : new Set());
+  }
+
+  async function executeBulkAction(action, ids) {
+    setBulkConfirm(null);
+    if (!ids?.length) return;
+    setActionLoading(action);
+    try {
+      await Promise.all(ids.map(testId => {
+        const t = tests.find(x => x.id === testId);
+        if (!t) return Promise.resolve();
+        if (action === "approve") return api.approveTest(t.projectId, testId);
+        if (action === "reject") return api.rejectTest(t.projectId, testId);
+        return Promise.resolve();
+      }));
+      // Refresh tests
+      const allFromBatch = await api.getAllTests().catch(() => null);
+      if (allFromBatch) { setTests(allFromBatch); }
+      else {
+        const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
+        setTests(all.flat());
+      }
+      setSelected(new Set());
+    } catch (err) {
+      console.error("Bulk action failed:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function requestBulkAction(action) {
+    const ids = selected.size > 0
+      ? Array.from(selected)
+      : filtered.filter(t => !t.reviewStatus || t.reviewStatus === "draft").map(t => t.id);
+    if (!ids.length) return;
+    if (selected.size === 0 && ids.length > 1) {
+      setBulkConfirm({ action, ids });
+      return;
+    }
+    executeBulkAction(action, ids);
+  }
+
+  // ── Row actions ────────────────────────────────────────────────────────────
+  async function runSingleTest(e, testId) {
+    e.stopPropagation();
+    setActionLoading(testId);
+    try {
+      const { runId } = await api.runSingleTest(testId);
+      navigate(`/runs/${runId}`);
+    } catch (err) { console.error("Run failed:", err); }
+    finally { setActionLoading(null); }
+  }
+
+  async function deleteSingleTest(e, t) {
+    e.stopPropagation();
+    setActionLoading(t.id);
+    try {
+      await api.deleteTest(t.projectId, t.id);
+      setTests(prev => prev.filter(x => x.id !== t.id));
+      setSelected(s => { const n = new Set(s); n.delete(t.id); return n; });
+    } catch (err) { console.error("Delete failed:", err); }
+    finally { setActionLoading(null); }
+  }
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  useEffect(() => {
+    function handler(e) {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === "a" && !e.metaKey && !e.ctrlKey && selected.size > 0) requestBulkAction("approve");
+      if (e.key === "r" && !e.metaKey && !e.ctrlKey && selected.size > 0) requestBulkAction("reject");
+      if (e.key === "Escape") setSelected(new Set());
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selected, filtered]);
 
   function handleTestCreated(newTest) {
     setTests(prev => [newTest, ...prev]);
@@ -432,7 +616,7 @@ export default function Tests() {
 
   const quickActions = [
     {
-      icon: "✦",
+      icon: <Sparkles size={16} />,
       title: "Create Tests",
       desc: "Create a new test case for your application",
       color: "var(--accent-bg)",
@@ -440,7 +624,7 @@ export default function Tests() {
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),
     },
     {
-      icon: "▶",
+      icon: <Play size={16} />,
       title: "Run Tests",
       desc: "Execute regression tests from your test suite",
       color: "var(--green-bg)",
@@ -448,7 +632,7 @@ export default function Tests() {
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowRunModal(true),
     },
     {
-      icon: "⚑",
+      icon: <Flag size={16} />,
       title: "Review and Fix Tests",
       desc: "Refine and manage your draft and failing tests",
       color: "var(--amber-bg)",
