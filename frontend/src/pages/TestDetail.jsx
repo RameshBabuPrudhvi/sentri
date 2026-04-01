@@ -125,6 +125,48 @@ function highlightCode(code) {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+
+// ── Split Playwright code into per-step chunks ────────────────────────────────
+function splitCodeBySteps(code, stepCount) {
+  if (!code || stepCount === 0) return [];
+
+  // 1. Extract the test body from the async arrow function
+  const arrowMatch = code.match(/async\s*\(\s*\{[^}]*\}\s*\)\s*=>\s*\{([\s\S]*)/);
+  let body = code;
+  if (arrowMatch) {
+    const bodyAndRest = arrowMatch[1];
+    let depth = 1, i = 0;
+    for (; i < bodyAndRest.length && depth > 0; i++) {
+      if (bodyAndRest[i] === "{") depth++;
+      else if (bodyAndRest[i] === "}") depth--;
+    }
+    body = bodyAndRest.slice(0, i - 1).trim();
+  }
+
+  // 2. Split into non-empty lines
+  const lines = body.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
+  if (lines.length === 0) return Array(stepCount).fill("");
+
+  // 3. Distribute lines evenly; remainder goes into LAST bucket so no
+  //    trailing step is ever left empty when lines < stepCount * baseSize
+  const baseSize = Math.floor(lines.length / stepCount);
+  const remainder = lines.length % stepCount;
+
+  const chunks = [];
+  let cursor = 0;
+  for (let s = 0; s < stepCount; s++) {
+    const take = baseSize + (s === stepCount - 1 ? remainder : 0);
+    const slice = lines.slice(cursor, cursor + Math.max(take, 1));
+    chunks.push(slice.join("\n"));
+    cursor += Math.max(take, 1);
+    if (cursor >= lines.length) {
+      while (chunks.length < stepCount) chunks.push("");
+      break;
+    }
+  }
+  return chunks;
+}
+
 export default function TestDetail() {
   const { testId } = useParams();
   const navigate = useNavigate();
@@ -143,6 +185,9 @@ export default function TestDetail() {
   const [editPriority, setEditPriority] = useState("medium");
   const [saving, setSaving]           = useState(false);
   const [editError, setEditError]     = useState(null);
+
+  // ── Steps / Source tab toggle ────────────────────────────────────────────
+  const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
 
   // ── Code editor modal state ──────────────────────────────────────────────
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
@@ -475,6 +520,7 @@ export default function TestDetail() {
 
           {/* Test Steps card */}
           <div className="card" style={{ padding: 24 }}>
+            {/* ── Card header with Steps / Source tab toggle ── */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
               <div style={{
                 width: 30, height: 30, borderRadius: 8,
@@ -484,44 +530,50 @@ export default function TestDetail() {
                 <CheckCircle2 size={14} color="var(--text2)" />
               </div>
               <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0, flex: 1 }}>Test Steps</h2>
+
+              {/* Steps / Source pill toggle — only shown in view mode with code present */}
               {test.playwrightCode && !editing && (
-                <button
-                  onClick={openCodeEditor}
-                  title="View / edit Playwright source code"
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: "linear-gradient(135deg, rgba(91,110,245,0.08), rgba(124,106,245,0.12))",
-                    border: "1px solid rgba(91,110,245,0.25)",
-                    borderRadius: 8, cursor: "pointer", padding: "6px 14px",
-                    fontSize: "0.76rem", fontWeight: 600, color: "var(--accent)",
-                    transition: "all 0.2s ease",
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.background = "linear-gradient(135deg, rgba(91,110,245,0.14), rgba(124,106,245,0.2))";
-                    e.currentTarget.style.borderColor = "var(--accent)";
-                    e.currentTarget.style.transform = "translateY(-1px)";
-                    e.currentTarget.style.boxShadow = "0 2px 8px rgba(91,110,245,0.15)";
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.background = "linear-gradient(135deg, rgba(91,110,245,0.08), rgba(124,106,245,0.12))";
-                    e.currentTarget.style.borderColor = "rgba(91,110,245,0.25)";
-                    e.currentTarget.style.transform = "none";
-                    e.currentTarget.style.boxShadow = "none";
-                  }}
-                >
-                  <Code2 size={14} />
-                  View Source
-                  {test.codeRegeneratedAt && (
-                    <span style={{
-                      fontSize: "0.62rem", fontWeight: 700, color: "var(--green)",
-                      background: "rgba(34,197,94,0.1)", borderRadius: 4,
-                      padding: "1px 5px", marginLeft: 2,
-                    }}>✓ generated</span>
-                  )}
-                </button>
+                <div style={{
+                  display: "flex", alignItems: "center",
+                  background: "var(--bg2)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: 3, gap: 2,
+                }}>
+                  {/* Steps pill */}
+                  <button
+                    onClick={() => setStepsView("steps")}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 5,
+                      padding: "5px 12px", borderRadius: 6, border: "none",
+                      cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
+                      transition: "all 0.15s",
+                      background: stepsView === "steps" ? "var(--surface)" : "transparent",
+                      color:      stepsView === "steps" ? "var(--text)"    : "var(--text3)",
+                      boxShadow:  stepsView === "steps" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                    }}
+                  >
+                    <CheckCircle2 size={12} />
+                    Steps
+                  </button>
+                  {/* Source pill */}
+                  <button
+                    onClick={() => setStepsView("source")}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 5,
+                      padding: "5px 12px", borderRadius: 6, border: "none",
+                      cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
+                      transition: "all 0.15s",
+                      background: stepsView === "source" ? "var(--surface)" : "transparent",
+                      color:      stepsView === "source" ? "var(--accent)"  : "var(--text3)",
+                      boxShadow:  stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                    }}
+                  >
+                    {"</>"} Source
+                  </button>
+                </div>
               )}
             </div>
 
+            {/* ── Edit mode ── */}
             {editing ? (
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -568,7 +620,66 @@ export default function TestDetail() {
                   <Plus size={12} /> Add step
                 </button>
               </>
+            ) : stepsView === "source" && test.playwrightCode ? (
+              /* ── SOURCE view: numbered steps each with their code block ── */
+              (() => {
+                const stepChunks = splitCodeBySteps(test.playwrightCode, (test.steps || []).length);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {(test.steps || []).map((step, idx) => (
+                      <div key={idx} style={{
+                        borderBottom: idx < (test.steps.length - 1) ? "1px solid var(--border)" : "none",
+                        paddingBottom: 16, marginBottom: idx < (test.steps.length - 1) ? 16 : 0,
+                      }}>
+                        {/* Step label row */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                          <div style={{
+                            width: 22, height: 22, borderRadius: "50%",
+                            background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.3)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: "0.65rem", fontWeight: 700, color: "var(--accent)",
+                            flexShrink: 0,
+                          }}>
+                            {idx + 1}
+                          </div>
+                          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)" }}>
+                            {step}
+                          </span>
+                        </div>
+                        {/* Code block */}
+                        {stepChunks[idx] ? (
+                          <div style={{
+                            background: "#13151c",
+                            borderRadius: 8,
+                            border: "1px solid #1e2130",
+                            overflow: "hidden",
+                          }}>
+                            <pre style={{
+                              margin: 0,
+                              padding: "14px 16px",
+                              fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+                              fontSize: "0.76rem",
+                              lineHeight: "1.75",
+                              color: "#cdd5f0",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                              overflowX: "auto",
+                            }}
+                              dangerouslySetInnerHTML={{ __html: highlightCode(stepChunks[idx]) }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: "0.76rem", color: "var(--text3)", fontStyle: "italic", paddingLeft: 32 }}>
+                            No code for this step.
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
             ) : (
+              /* ── STEPS view (default) ── */
               (!test.steps || test.steps.length === 0) ? (
                 <div style={{ color: "var(--text3)", fontSize: "0.875rem", padding: "20px 0" }}>
                   No steps defined for this test.
@@ -584,7 +695,6 @@ export default function TestDetail() {
                         borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
                       }}
                     >
-                      {/* Step number */}
                       <div style={{
                         width: 26, height: 26, borderRadius: 6,
                         background: "var(--bg2)", border: "1px solid var(--border)",
@@ -594,7 +704,6 @@ export default function TestDetail() {
                       }}>
                         {idx + 1}
                       </div>
-                      {/* Step text */}
                       <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
                         {step}
                       </span>

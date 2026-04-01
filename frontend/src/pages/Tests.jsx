@@ -9,16 +9,16 @@ import {
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 
+// Exclude "All" sentinel entries — reset is handled by clicking an active filter
+// or the explicit clear-all button in the bar.
 const STATUS_FILTERS = [
-  { key: "All",     label: "All",     icon: null },
-  { key: "Passing", label: "Passing", icon: <CheckCircle2 size={11} style={{ color: "var(--green)" }} /> },
-  { key: "Failing", label: "Failing", icon: <XCircle size={11} style={{ color: "var(--red)" }} /> },
-  { key: "Not Run", label: "Not Run", icon: <Clock size={11} style={{ color: "var(--text3)" }} /> },
+  { key: "Passing", tooltip: "Passing",  activeColor: "#16a34a", activeBg: "rgba(34,197,94,0.12)",   icon: <CheckCircle2 size={14} /> },
+  { key: "Failing", tooltip: "Failing",  activeColor: "#dc2626", activeBg: "rgba(239,68,68,0.12)",   icon: <XCircle      size={14} /> },
+  { key: "Not Run", tooltip: "Not run",  activeColor: "#64748b", activeBg: "rgba(100,116,139,0.12)", icon: <Clock        size={14} /> },
 ];
 const REVIEW_FILTERS = [
-  { key: "All Tests", label: "All Tests", icon: <ListFilter size={11} style={{ color: "var(--text3)" }} /> },
-  { key: "Approved",  label: "Approved",  icon: <CheckCircle2 size={11} style={{ color: "var(--green)" }} /> },
-  { key: "Draft",     label: "Draft",     icon: <AlertCircle size={11} style={{ color: "var(--amber)" }} /> },
+  { key: "Approved", tooltip: "Approved", activeColor: "#16a34a", activeBg: "rgba(34,197,94,0.12)",  icon: <ThumbsUp    size={14} /> },
+  { key: "Draft",    tooltip: "Draft",    activeColor: "#d97706", activeBg: "rgba(217,119,6,0.12)",  icon: <AlertCircle size={14} /> },
 ];
 
 const PAGE_SIZE = 50;
@@ -723,14 +723,15 @@ export default function Tests() {
           <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
             {reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
           </div>
-          <div style={{ flex: 1, minWidth: 200, position: "relative" }}>
+          {/* Search — constrained width so it doesn't dominate the bar */}
+          <div style={{ width: 220, flexShrink: 0, position: "relative" }}>
             <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
             <input
               ref={searchRef}
               className="input"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search tests… (press /)"
+              placeholder="Search tests… (/)"
               style={{ paddingLeft: 28, paddingRight: search ? 30 : 12, height: 32, fontSize: "0.82rem" }}
             />
             {search && (
@@ -739,31 +740,114 @@ export default function Tests() {
               </button>
             )}
           </div>
-          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-            {STATUS_FILTERS.map(f => (
-              <button key={f.key} className="btn btn-xs" onClick={() => setFilter(f.key)} style={{
-                background: filter === f.key ? "var(--surface)" : "transparent",
-                color: filter === f.key ? "var(--text)" : "var(--text3)",
-                border: filter === f.key ? "1px solid var(--border)" : "1px solid transparent",
-                boxShadow: filter === f.key ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-                display: "flex", alignItems: "center", gap: 4,
-              }}>
-                {f.icon}{f.label} ({statusCounts[f.key]})
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-            {REVIEW_FILTERS.map(f => (
-              <button key={f.key} className="btn btn-xs" onClick={() => setReviewFilter(f.key)} style={{
-                background: reviewFilter === f.key ? "var(--surface)" : "transparent",
-                color: reviewFilter === f.key ? "var(--text)" : "var(--text3)",
-                border: reviewFilter === f.key ? "1px solid var(--border)" : "1px solid transparent",
-                boxShadow: reviewFilter === f.key ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-                display: "flex", alignItems: "center", gap: 4,
-              }}>
-                {f.icon}{f.label} ({reviewCounts[f.key]})
-              </button>
-            ))}
+
+          {/* Spacer pushes filter group to the right */}
+          <div style={{ flex: 1 }} />
+
+          {/* ── Icon-only filter pill bar ─────────────────────────────── */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 1,
+            background: "var(--bg2)", padding: "3px 4px",
+            borderRadius: "var(--radius)", border: "1px solid var(--border)",
+          }}>
+            <span style={{ fontSize: "0.68rem", color: "var(--text3)", fontWeight: 600, padding: "0 6px 0 2px", userSelect: "none", letterSpacing: "0.02em" }}>
+              Filters
+            </span>
+
+            {/* Status filter icons */}
+            {STATUS_FILTERS.map(f => {
+              const active = filter === f.key;
+              const count  = statusCounts[f.key] ?? 0;
+              return (
+                <button
+                  key={f.key}
+                  title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
+                  onClick={() => setFilter(active ? "All" : f.key)}
+                  style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 30, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                    background: active ? f.activeBg      : "transparent",
+                    color:      active ? f.activeColor   : "var(--text3)",
+                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
+                  }}
+                >
+                  {f.icon}
+                  {/* Count dot on active */}
+                  {active && (
+                    <span style={{
+                      position: "absolute", top: 2, right: 2,
+                      minWidth: 14, height: 14, borderRadius: 7,
+                      background: f.activeColor, color: "#fff",
+                      fontSize: "0.55rem", fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      lineHeight: 1, padding: "0 2px",
+                    }}>
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Divider */}
+            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+
+            {/* Review filter icons */}
+            {REVIEW_FILTERS.map(f => {
+              const active = reviewFilter === f.key;
+              const count  = reviewCounts[f.key] ?? 0;
+              return (
+                <button
+                  key={f.key}
+                  title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
+                  onClick={() => setReviewFilter(active ? "All Tests" : f.key)}
+                  style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 30, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                    background: active ? f.activeBg      : "transparent",
+                    color:      active ? f.activeColor   : "var(--text3)",
+                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
+                  }}
+                >
+                  {f.icon}
+                  {active && (
+                    <span style={{
+                      position: "absolute", top: 2, right: 2,
+                      minWidth: 14, height: 14, borderRadius: 7,
+                      background: f.activeColor, color: "#fff",
+                      fontSize: "0.55rem", fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      lineHeight: 1, padding: "0 2px",
+                    }}>
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Clear-all button — only visible when any filter is active */}
+            {(filter !== "All" || reviewFilter !== "All Tests") && (
+              <>
+                <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+                <button
+                  title="Clear all filters"
+                  onClick={() => { setFilter("All"); setReviewFilter("All Tests"); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 28, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "var(--red)",
+                    transition: "background 0.12s",
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </>
+            )}
           </div>
         </div>
 

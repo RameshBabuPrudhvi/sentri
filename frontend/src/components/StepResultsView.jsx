@@ -54,18 +54,43 @@ function inferStepStatuses(steps = [], result = {}) {
   }
 
   if (status === "failed") {
-    // Try to match the error to a specific step
+    // Try to match the error to a specific step.
+    //
+    // Strategy: score every step by how many of its meaningful words appear in
+    // the error message, then pick the highest-scoring step. Ties are broken by
+    // preferring the *later* step (failures are more likely to surface in later
+    // steps than early ones). A minimum score of 2 is required so that a single
+    // incidental word match (e.g. "navigate" appearing in a URL fragment) does
+    // not falsely blame Step 1.
+    //
+    // URL-encoded noise is stripped from the error first so that words like
+    // "navigation" embedded in a percent-encoded query string don't pollute the
+    // match.
+    const cleanError = error
+      .replace(/%[0-9a-f]{2}/gi, " ")   // strip URL-encoded chars
+      .replace(/https?:\/\/\S+/g, " ")  // strip full URLs
+      .replace(/[^a-z0-9 ]/g, " ");     // keep only alphanum + spaces
+
     let failedIdx = -1;
+    let bestScore = 0;
+
     for (let i = 0; i < steps.length; i++) {
+      // Only consider words longer than 4 characters to skip stop-words
       const stepWords = steps[i]
         .toLowerCase()
         .replace(/[^a-z0-9 ]/g, "")
         .split(" ")
-        .filter((w) => w.length > 3);
-      const matchCount = stepWords.filter((w) => error.includes(w)).length;
-      if (matchCount >= 1) {
+        .filter((w) => w.length > 4);
+
+      if (stepWords.length === 0) continue;
+
+      const matchCount = stepWords.filter((w) => cleanError.includes(w)).length;
+      // Require at least 2 matching words, or a majority of the step's words
+      const threshold = Math.max(2, Math.ceil(stepWords.length * 0.4));
+      if (matchCount >= threshold && matchCount >= bestScore) {
+        bestScore = matchCount;
         failedIdx = i;
-        break;
+        // Don't break — keep scanning so a later, better-matching step wins
       }
     }
 
