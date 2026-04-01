@@ -362,71 +362,94 @@ export async function runTests(project, tests, run, db) {
   const runId = run.id;
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
 
-  const browser = await chromium.launch({
-    headless: BROWSER_HEADLESS,
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: BROWSER_HEADLESS,
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
+  } catch (launchErr) {
+    run.status = "failed";
+    run.error = `Browser launch failed: ${launchErr.message}`;
+    run.finishedAt = new Date().toISOString();
+    log(run, `❌ Browser launch failed: ${launchErr.message}`);
+    throw launchErr;
+  }
 
   // Shared tracing context (separate from per-test video contexts)
-  const traceContext = await browser.newContext({
-    userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
-    viewport: { width: 1280, height: 720 },
-  });
-  await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
+  let traceContext;
+  try {
+    traceContext = await browser.newContext({
+      userAgent: "Mozilla/5.0 (compatible; AutonomousQA/1.0)",
+      viewport: { width: 1280, height: 720 },
+    });
+    await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
+  } catch (ctxErr) {
+    await browser.close().catch(() => {});
+    run.status = "failed";
+    run.error = `Trace context setup failed: ${ctxErr.message}`;
+    run.finishedAt = new Date().toISOString();
+    log(run, `❌ Trace context setup failed: ${ctxErr.message}`);
+    throw ctxErr;
+  }
 
   log(run, `🚀 Starting test run: ${tests.length} tests`);
 
   const runStart = Date.now();
   const allVideoSegments = [];
 
-  for (let i = 0; i < tests.length; i++) {
-    const test = tests[i];
-    const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
-    log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
-
-    try {
-      const result = await executeTest(test, browser, runId, i, runStart, db);
-      run.results.push(result);
-
-      if (result.videoPath) allVideoSegments.push(result.videoPath);
-
-      if (result.status === "passed") {
-        run.passed++;
-        log(run, `    ✅ PASSED (${result.durationMs}ms)`);
-      } else if (result.status === "warning") {
-        run.passed++;
-        log(run, `    ⚠️  WARNING: ${result.error}`);
-      } else {
-        run.failed++;
-        log(run, `    ❌ FAILED: ${result.error}`);
-      }
-
-      if (db.tests[test.id]) {
-        db.tests[test.id].lastResult = result.status;
-        db.tests[test.id].lastRunAt = new Date().toISOString();
-      }
-    } catch (err) {
-      run.failed++;
-      run.results.push({
-        testId: test.id, testName: test.name,
-        status: "failed", error: err.message,
-        durationMs: 0, network: [], consoleLogs: [],
-      });
-      log(run, `    ❌ FAILED (exception): ${err.message}`);
-    }
-  }
-
-  // Save trace
   try {
-    await traceContext.tracing.stop({ path: tracePath });
-    run.tracePath = `/artifacts/traces/${runId}.zip`;
-    log(run, `  📊 Trace saved`);
-  } catch (e) {
-    log(run, `  ⚠️  Trace save failed: ${e.message}`);
+    for (let i = 0; i < tests.length; i++) {
+      const test = tests[i];
+      const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
+      log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
+
+      try {
+        const result = await executeTest(test, browser, runId, i, runStart, db);
+        run.results.push(result);
+
+        if (result.videoPath) allVideoSegments.push(result.videoPath);
+
+        if (result.status === "passed") {
+          run.passed++;
+          log(run, `    ✅ PASSED (${result.durationMs}ms)`);
+        } else if (result.status === "warning") {
+          run.passed++;
+          log(run, `    ⚠️  WARNING: ${result.error}`);
+        } else {
+          run.failed++;
+          log(run, `    ❌ FAILED: ${result.error}`);
+        }
+
+        if (db.tests[test.id]) {
+          db.tests[test.id].lastResult = result.status;
+          db.tests[test.id].lastRunAt = new Date().toISOString();
+        }
+      } catch (err) {
+        run.failed++;
+        run.results.push({
+          testId: test.id, testName: test.name,
+          status: "failed", error: err.message,
+          durationMs: 0, network: [], consoleLogs: [],
+        });
+        log(run, `    ❌ FAILED (exception): ${err.message}`);
+      }
+    }
+  } finally {
+    // Always clean up browser resources — even if the loop threw unexpectedly
+    try {
+      await traceContext.tracing.stop({ path: tracePath });
+      run.tracePath = `/artifacts/traces/${runId}.zip`;
+      log(run, `  📊 Trace saved`);
+    } catch (e) {
+      log(run, `  ⚠️  Trace save failed: ${e.message}`);
+    }
+    await traceContext.close().catch(() => {});
+    await browser.close().catch((err) => {
+      console.warn("[testRunner] browser.close() failed:", err.message);
+    });
   }
-  await traceContext.close().catch(() => {});
-  await browser.close();
 
   if (allVideoSegments.length > 0) {
     run.videoPath = allVideoSegments[0];

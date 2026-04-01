@@ -1,9 +1,47 @@
-// Simple in-memory store. Swap for Postgres/SQLite in production.
+// Simple in-memory store with periodic JSON persistence.
+// Data is written to disk every 30s and on process exit so a crash
+// during test execution doesn't wipe everything.
+// Swap for Postgres/SQLite in production.
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = path.join(__dirname, "..", "data", "sentri-db.json");
+const PERSIST_INTERVAL_MS = 30_000;
+
 let _db = null;
+
+function loadFromDisk() {
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const raw = fs.readFileSync(DB_PATH, "utf-8");
+      const data = JSON.parse(raw);
+      console.log(`[db] Restored from ${DB_PATH} — ${Object.keys(data.projects || {}).length} projects, ${Object.keys(data.tests || {}).length} tests`);
+      return data;
+    }
+  } catch (err) {
+    console.warn(`[db] Failed to load ${DB_PATH}, starting fresh:`, err.message);
+  }
+  return null;
+}
+
+function saveToDisk(db) {
+  try {
+    const dir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DB_PATH, JSON.stringify(db), "utf-8");
+  } catch (err) {
+    console.warn("[db] Persist failed:", err.message);
+  }
+}
 
 export function getDb() {
   if (!_db) {
-    _db = {
+    const restored = loadFromDisk();
+
+    _db = restored || {
       projects: {},
       tests: {},
       runs: {},
@@ -25,6 +63,21 @@ export function getDb() {
       // Key: "<testId>::<action>::<label>" → { strategy, succeededAt, failCount }
       healingHistory: {},
     };
+
+    // Ensure all expected keys exist (restored data may be from an older schema)
+    if (!_db.activities)      _db.activities = {};
+    if (!_db.healingHistory)  _db.healingHistory = {};
+    if (!_db.projects)        _db.projects = {};
+    if (!_db.tests)           _db.tests = {};
+    if (!_db.runs)            _db.runs = {};
+
+    // Periodic persistence — every 30s
+    setInterval(() => saveToDisk(_db), PERSIST_INTERVAL_MS).unref();
+
+    // Flush on clean shutdown
+    process.on("beforeExit", () => saveToDisk(_db));
+    process.on("SIGINT",     () => { saveToDisk(_db); process.exit(0); });
+    process.on("SIGTERM",    () => { saveToDisk(_db); process.exit(0); });
   }
   return _db;
 }

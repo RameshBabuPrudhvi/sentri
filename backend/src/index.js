@@ -11,6 +11,17 @@ import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOll
 
 dotenv.config();
 
+// ─── Process-level crash guards ───────────────────────────────────────────────
+// Prevent the server from dying on unhandled errors (which wipes the in-memory DB).
+// Playwright can throw unhandled rejections from browser internals, page event
+// handlers, or video flush operations — especially when assertions fail mid-test.
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception (server kept alive):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled rejection (server kept alive):", reason);
+});
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
