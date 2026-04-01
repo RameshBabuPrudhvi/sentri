@@ -151,10 +151,9 @@ export default function NewProject() {
                   <input className="input" value={form.url} onChange={set("url")} placeholder="https://example.com"
                     onBlur={() => {
                       const v = form.url.trim();
-                      if (v && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(v)) {
+                      if (v && !/^https?:\/\//i.test(v)) {
                         setForm(f => ({ ...f, url: "https://" + v }));
                       }
-                    }}
                     }}
                     style={{ borderColor: fieldErrors.url ? "var(--red)" : undefined }} />
                   <FieldError name="url" />

@@ -601,7 +601,8 @@ app.post("/api/settings", (req, res) => {
       }
     }
     // Ollama — no API key needed, just update base URL / model if provided
-    setRuntimeOllama({ baseUrl: baseUrl || "", model: model || "" });
+    // Clear the disabled flag so Ollama becomes active again after deactivation
+    setRuntimeOllama({ baseUrl: baseUrl || "", model: model || "", disabled: false });
     logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
     return res.json({
       ok: true,
@@ -635,7 +636,7 @@ app.delete("/api/settings/:provider", (req, res) => {
   const { provider } = req.params;
 
   if (provider === "local") {
-    setRuntimeOllama({ baseUrl: "", model: "" });
+    setRuntimeOllama({ baseUrl: "", model: "", disabled: true });
   } else {
     setRuntimeKey(provider, "");
   }
@@ -728,6 +729,7 @@ app.post("/api/test-connection", async (req, res) => {
     isPrivateIPv4(hostname) ||
     (mappedIPv4 && isPrivateIPv4(mappedIPv4)) ||            // IPv4-mapped IPv6 bypass
     hostname === "0.0.0.0" ||
+    hostname === "::" ||                                     // IPv6 unspecified (equivalent to 0.0.0.0)
     hostname === "::1" ||
     (/^::ffff:/i.test(hostname) && mappedIPv4 === null) ||   // unknown ::ffff: form — block
     hostname === "169.254.169.254" ||                        // AWS metadata

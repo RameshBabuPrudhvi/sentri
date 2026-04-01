@@ -25,6 +25,9 @@ const runtimeKeys = {};
 // Ollama runtime config (settable via /api/settings for the local provider)
 let runtimeOllamaBaseUrl = "";
 let runtimeOllamaModel   = "";
+// Explicit deactivation flag — when true, Ollama is disabled even if env vars are set.
+// Set to true by DELETE /api/settings/local; cleared by POST /api/settings with local provider.
+let runtimeOllamaDisabled = false;
 
 export function setRuntimeKey(provider, key) {
   if (provider === "anthropic") runtimeKeys.ANTHROPIC_API_KEY = key;
@@ -32,9 +35,10 @@ export function setRuntimeKey(provider, key) {
   if (provider === "google")    runtimeKeys.GOOGLE_API_KEY    = key;
 }
 
-export function setRuntimeOllama({ baseUrl, model } = {}) {
-  if (baseUrl !== undefined) runtimeOllamaBaseUrl = baseUrl;
-  if (model   !== undefined) runtimeOllamaModel   = model;
+export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
+  if (baseUrl  !== undefined) runtimeOllamaBaseUrl  = baseUrl;
+  if (model    !== undefined) runtimeOllamaModel    = model;
+  if (disabled !== undefined) runtimeOllamaDisabled = disabled;
 }
 
 function getKey(envName) {
@@ -85,7 +89,8 @@ function detectProvider() {
   if (getKey("GOOGLE_API_KEY"))    return "google";
 
   // Auto-detect Ollama as last resort if runtime or env model/url has been set
-  if (runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL) {
+  // Skip if explicitly deactivated via DELETE /api/settings/local
+  if (!runtimeOllamaDisabled && (runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL)) {
     return "local";
   }
 
