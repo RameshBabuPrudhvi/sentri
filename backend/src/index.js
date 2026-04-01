@@ -632,19 +632,49 @@ app.post("/api/test-connection", async (req, res) => {
   }
   // SSRF protection: block loopback, link-local, and private IP ranges
   const hostname = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+
+  // Resolve IPv4-mapped IPv6 addresses (e.g. ::ffff:a00:1 or ::ffff:127.0.0.1)
+  // Node's URL parser converts ::ffff:10.0.0.1 → ::ffff:a00:1 (hex), which would
+  // bypass naive regex checks against dotted-decimal private ranges.
+  function extractMappedIPv4(host) {
+    // Dotted form: ::ffff:10.0.0.1
+    const dottedMatch = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    if (dottedMatch) return dottedMatch[1];
+    // Hex form: ::ffff:AABB:CCDD → A.B.C.D
+    const hexMatch = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+    if (hexMatch) {
+      const hi = parseInt(hexMatch[1], 16);
+      const lo = parseInt(hexMatch[2], 16);
+      return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
+    return null;
+  }
+
+  // Check an IPv4 address (dotted-decimal) against private/reserved ranges
+  function isPrivateIPv4(ip) {
+    return (
+      /^127\.\d+\.\d+\.\d+$/.test(ip) ||                // 127.0.0.0/8
+      /^10\.\d+\.\d+\.\d+$/.test(ip) ||                  // 10.0.0.0/8
+      /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(ip) ||  // 172.16.0.0/12
+      /^192\.168\.\d+\.\d+$/.test(ip) ||                  // 192.168.0.0/16
+      ip === "0.0.0.0" ||
+      ip === "169.254.169.254"                             // AWS metadata
+    );
+  }
+
+  const mappedIPv4 = extractMappedIPv4(hostname);
   const blocked =
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
-    /^127\.\d+\.\d+\.\d+$/.test(hostname) ||                // 127.0.0.0/8
-    /^10\.\d+\.\d+\.\d+$/.test(hostname) ||                  // 10.0.0.0/8
-    /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname) ||  // 172.16.0.0/12
-    /^192\.168\.\d+\.\d+$/.test(hostname) ||                  // 192.168.0.0/16
+    isPrivateIPv4(hostname) ||
+    (mappedIPv4 && isPrivateIPv4(mappedIPv4)) ||            // IPv4-mapped IPv6 bypass
     hostname === "0.0.0.0" ||
-    hostname === "::1" || hostname === "::ffff:127.0.0.1" ||
-    hostname === "169.254.169.254" ||                          // AWS metadata
-    /^fe80:/i.test(hostname) ||                                // link-local IPv6
-    /^fd[0-9a-f]{2}:/i.test(hostname) ||                      // unique-local IPv6
-    /^fc[0-9a-f]{2}:/i.test(hostname);                        // unique-local IPv6
+    hostname === "::1" ||
+    /^::ffff:/i.test(hostname) && mappedIPv4 === null ||    // unknown ::ffff: form — block
+    hostname === "169.254.169.254" ||                        // AWS metadata
+    /^fe80:/i.test(hostname) ||                              // link-local IPv6
+    /^fd[0-9a-f]{2}:/i.test(hostname) ||                    // unique-local IPv6
+    /^fc[0-9a-f]{2}:/i.test(hostname);                      // unique-local IPv6
   if (blocked) {
     return res.status(400).json({ error: "URL must not point to localhost, private, or internal addresses" });
   }
