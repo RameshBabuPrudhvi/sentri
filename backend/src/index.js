@@ -731,6 +731,8 @@ app.post("/api/test-connection", async (req, res) => {
     hostname === "::1" ||
     (/^::ffff:/i.test(hostname) && mappedIPv4 === null) ||   // unknown ::ffff: form — block
     hostname === "169.254.169.254" ||                        // AWS metadata
+    hostname === "metadata.google.internal" ||               // GCE metadata
+    hostname.endsWith(".internal") ||                        // GCE internal DNS
     /^fe80:/i.test(hostname) ||                              // link-local IPv6
     /^fd[0-9a-f]{2}:/i.test(hostname) ||                    // unique-local IPv6
     /^fc[0-9a-f]{2}:/i.test(hostname);                      // unique-local IPv6
