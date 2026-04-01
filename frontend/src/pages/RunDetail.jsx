@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +9,7 @@ import {
   Download,
 } from "lucide-react";
 import { api } from "../api.js";
+import { useRunSSE } from "../hooks/useRunSSE.js";
 
 import CrawlView from "../components/CrawlView";
 import GenerateView from "../components/GenerateView";
@@ -36,29 +37,40 @@ export default function RunDetail() {
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const pollRef = useRef(null);
-
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
     if (r) setRun(r);
     return r;
   }, [runId]);
 
+  // Initial fetch
   useEffect(() => {
     fetchRun().finally(() => setLoading(false));
   }, [fetchRun]);
 
-  // Poll while running
-  useEffect(() => {
-    if (!run) return;
-    if (run.status === "running") {
-      pollRef.current = setInterval(async () => {
-        const r = await fetchRun();
-        if (r?.status !== "running") clearInterval(pollRef.current);
-      }, 1500);
+  // SSE — receives live updates while the run is active
+  useRunSSE(runId, useCallback((event) => {
+    if (event.type === "snapshot") {
+      setRun(event.run);
+    } else if (event.type === "result") {
+      setRun((prev) => {
+        if (!prev) return prev;
+        const results = [...(prev.results || [])];
+        const idx = results.findIndex((r) => r.testId === event.result.testId);
+        if (idx >= 0) results[idx] = { ...results[idx], ...event.result };
+        else results.push(event.result);
+        return { ...prev, results };
+      });
+    } else if (event.type === "log") {
+      setRun((prev) => {
+        if (!prev) return prev;
+        return { ...prev, logs: [...(prev.logs || []), event.message] };
+      });
+    } else if (event.type === "done") {
+      // Final state — re-fetch once to get the full completed run object
+      fetchRun();
     }
-    return () => clearInterval(pollRef.current);
-  }, [run?.status]);
+  }, [fetchRun]));
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -107,8 +119,7 @@ export default function RunDetail() {
   const total = results.length;
   const passRate = total > 0 ? Math.round((passed / total) * 100) : null;
 
-  const BASE_URL = window.location.origin.replace(":3000", ":3001");
-  const traceUrl = run.tracePath ? `${BASE_URL}${run.tracePath}` : null;
+  const traceUrl = run.tracePath ?? null;
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (

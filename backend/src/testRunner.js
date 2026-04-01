@@ -12,6 +12,15 @@ import {
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
 
+// Lazy-loaded so testRunner can be imported before index.js sets up SSE
+let _emitRunEvent = null;
+async function emitRunEvent(...args) {
+  if (!_emitRunEvent) {
+    try { ({ emitRunEvent: _emitRunEvent } = await import("./index.js")); } catch { return; }
+  }
+  _emitRunEvent?.(...args);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Env-driven config (defaults match previous hardcoded values) ──────────────
@@ -33,6 +42,8 @@ function log(run, msg) {
   const entry = `[${new Date().toISOString()}] ${msg}`;
   run.logs.push(entry);
   console.log(entry);
+  // Broadcast log event to SSE listeners
+  emitRunEvent(run.id, "log", { message: entry });
 }
 
 /**
@@ -422,6 +433,16 @@ export async function runTests(project, tests, run, db) {
           log(run, `    ❌ FAILED: ${result.error}`);
         }
 
+        // Emit result event (without the heavy base64 screenshot)
+        const { screenshot: _ss, ...resultLean } = result;
+        emitRunEvent(run.id, "result", { result: resultLean });
+        if (result.screenshotPath) {
+          emitRunEvent(run.id, "screenshot", {
+            testId: test.id,
+            screenshotPath: result.screenshotPath,
+          });
+        }
+
         if (db.tests[test.id]) {
           db.tests[test.id].lastResult = result.status;
           db.tests[test.id].lastRunAt = new Date().toISOString();
@@ -461,6 +482,7 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+  emitRunEvent(run.id, "done", { status: "completed", passed: run.passed, failed: run.failed, total: run.total });
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Only runs when there are failures and an AI provider is available.

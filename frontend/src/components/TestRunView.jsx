@@ -191,7 +191,7 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
           {result.videoPath ? (
             <video
               key={result.videoPath}
-              src={`http://localhost:3001${result.videoPath}`}
+              src={result.videoPath}
               controls
               autoPlay
               muted
@@ -235,18 +235,10 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
 
 // ─── Live step preview while a test is running ───────────────────────────────
 
-function RunningStepsPreview({ queuedTest }) {
+function RunningStepsPreview({ queuedTest, activeStepIndex }) {
   const steps = queuedTest?.steps || [];
-  // Animate which step appears "active" — cycle through steps over time
-  const [activeStep, setActiveStep] = useState(0);
-
-  useEffect(() => {
-    if (steps.length === 0) return;
-    const interval = setInterval(() => {
-      setActiveStep((s) => Math.min(s + 1, steps.length - 1));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [steps.length]);
+  // activeStepIndex is now driven by SSE "step" events from the server
+  const activeStep = typeof activeStepIndex === "number" ? activeStepIndex : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -382,7 +374,12 @@ export default function TestRunView({ run }) {
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, minHeight: 560 }}>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "minmax(260px, 320px) 1fr",
+      gap: 16,
+      minHeight: 560,
+    }}>
 
       {/* LEFT: Test case list */}
       <div style={panelStyle}>
@@ -484,7 +481,7 @@ export default function TestRunView({ run }) {
             onDrillDown={() => setDrilledCase(selectedCase)}
           />
         ) : isRunning ? (
-          <RunningStepsPreview queuedTest={testQueue[selectedCase]} />
+          <RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: "0.82rem" }}>
             Select a test case to preview

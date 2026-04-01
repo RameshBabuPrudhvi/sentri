@@ -513,6 +513,60 @@ app.get("/api/runs/:runId", (req, res) => {
   res.json(run);
 });
 
+// ─── SSE: Real-time run events ────────────────────────────────────────────────
+// Registry: runId → Set of SSE response objects
+const runListeners = new Map();
+
+/**
+ * emitRunEvent(runId, type, payload)
+ * Broadcasts a Server-Sent Event to every client listening on this run.
+ * Called from testRunner.js and crawler.js to push live updates.
+ */
+export function emitRunEvent(runId, type, payload = {}) {
+  const listeners = runListeners.get(runId);
+  if (!listeners || listeners.size === 0) return;
+  const data = JSON.stringify({ type, ...payload });
+  for (const res of listeners) {
+    try { res.write(`data: ${data}\n\n`); } catch { /* client gone */ }
+  }
+}
+
+// GET /api/runs/:id/events  — SSE stream for a single run
+app.get("/api/runs/:runId/events", (req, res) => {
+  const { runId } = req.params;
+  const run = db.runs[runId];
+  if (!run) return res.status(404).json({ error: "not found" });
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
+  res.flushHeaders();
+
+  // Send current snapshot immediately so the client has something to render
+  res.write(`data: ${JSON.stringify({ type: "snapshot", run })}\n\n`);
+
+  // If already done, send done event and close
+  if (run.status !== "running") {
+    res.write(`data: ${JSON.stringify({ type: "done", status: run.status })}\n\n`);
+    return res.end();
+  }
+
+  if (!runListeners.has(runId)) runListeners.set(runId, new Set());
+  runListeners.get(runId).add(res);
+
+  // Heartbeat — keeps the connection alive through proxies / load balancers
+  const heartbeat = setInterval(() => {
+    try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+  }, 20000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    runListeners.get(runId)?.delete(res);
+    if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
+  });
+});
+
 // ─── Dashboard summary ────────────────────────────────────────────────────────
 
 app.get("/api/dashboard", (req, res) => {
