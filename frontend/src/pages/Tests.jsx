@@ -554,13 +554,18 @@ export default function Tests() {
     if (!ids?.length) return;
     setActionLoading(action);
     try {
-      await Promise.all(ids.map(testId => {
+      // Use allSettled so one failure doesn't abort the rest of the batch
+      const results = await Promise.allSettled(ids.map(testId => {
         const t = tests.find(x => x.id === testId);
         if (!t) return Promise.resolve();
         if (action === "approve") return api.approveTest(t.projectId, testId);
         if (action === "reject") return api.rejectTest(t.projectId, testId);
         return Promise.resolve();
       }));
+      const failedCount = results.filter(r => r.status === "rejected").length;
+      if (failedCount > 0) {
+        console.warn(`Bulk ${action}: ${failedCount}/${ids.length} failed`);
+      }
       // Refresh tests — but don't wipe state if the refresh itself fails
       try {
         const allFromBatch = await api.getAllTests().catch(() => null);
