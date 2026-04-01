@@ -25,10 +25,21 @@ import { enhanceTests } from "./pipeline/assertionEnhancer.js";
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 
+// Lazy-loaded so crawler can be imported before index.js sets up SSE
+let _emitRunEvent = null;
+async function emitRunEvent(...args) {
+  if (!_emitRunEvent) {
+    try { ({ emitRunEvent: _emitRunEvent } = await import("./index.js")); } catch { return; }
+  }
+  _emitRunEvent?.(...args);
+}
+
 function log(run, msg) {
   const entry = `[${new Date().toISOString()}] ${msg}`;
   run.logs.push(entry);
   console.log(entry);
+  // Broadcast log event to SSE listeners
+  emitRunEvent(run.id, "log", { message: entry });
 }
 
 function setStep(run, step) {

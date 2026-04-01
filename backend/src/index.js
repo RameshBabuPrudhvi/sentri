@@ -141,6 +141,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   // Kick off async - stream updates via polling
   crawlAndGenerateTests(project, run, db)
     .then(() => {
+      emitRunEvent(runId, "done", { status: "completed" });
       logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
         detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
@@ -434,6 +435,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     name: name.trim(),
     description: (description || "").trim(),
   }).then(createdTestIds => {
+    emitRunEvent(runId, "done", { status: "completed" });
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
