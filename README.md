@@ -38,9 +38,14 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 | ⚙️ **Runtime API Key Config** | Set or change your AI provider key in the Settings UI — no server restart needed |
 | 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, pass rate trends, and per-project analytics |
 | 📝 **Activity Log** | Complete timeline of all user and system actions — crawls, runs, edits, approvals |
+| ⚡ **Async Test Generation** | `POST /projects/:id/tests/generate` returns `202 { runId }` immediately; the AI pipeline runs in the background |
+| 🔗 **API Resilience** | `AbortController`-based timeouts (30s default, 5min for long ops), connection testing, and API key validation endpoints |
+| 📦 **Data Caching** | `useProjectData` hook with module-level 30s TTL cache + batch `/api/tests` endpoint to eliminate N+1 fetches |
 | 🌙 **Dark Mode** | Automatic dark mode via `prefers-color-scheme` — all UI components adapt seamlessly |
 | ⌨️ **Keyboard Shortcuts** | `a` approve, `r` reject, `/` search, `Esc` clear — speed up test review workflows |
 | 🔍 **Global Test Search** | Search across all tests from the sidebar; results open the `/tests` page with URL-synced filters |
+| 📄 **Pagination & Sorting** | Tests page and project review tab paginate at 50/page with sortable columns and URL-synced filters |
+| ☑️ **Bulk Actions** | Select multiple tests for bulk approve/reject with confirmation modal for "select all" operations |
 | 🛡️ **Error Boundary & 404** | Graceful crash recovery and a proper 404 page for unknown routes |
 | 🐳 **Docker Ready** | Full Docker Compose setup for instant deployment |
 
@@ -110,7 +115,9 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google — 
 
 - Click **New Project**
 - Enter your app name and URL (e.g. `https://myapp.com`)
-- Optionally configure login credentials (CSS selectors for username/password fields and their values)
+- Use the **Test** button next to the URL field to verify the URL is reachable before saving
+- URLs without a protocol are auto-prefixed with `https://` on blur
+- Optionally configure login credentials (CSS selectors for username/password fields and their values) — all auth fields are required when auth is enabled, and toggling auth off preserves your entered values
 
 ### 3a. Crawl & Generate Tests (Automated)
 
@@ -161,12 +168,12 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google — 
 
 ### 7. Monitor
 
-- The **Dashboard** shows aggregate pass rate, test counts, run history, and a first-time onboarding banner for new users
-- The **Tests** page (`/tests`) provides a unified view of all tests across projects with sorting, pagination, bulk actions, and URL-synced filters
-- The **Work** page lists all runs across all projects with search, status filters, and type filters
-- The **Reports** page provides pass/fail trend charts, per-project breakdown, flaky test detection, and top failures with CSV export
-- The **Projects** page shows per-project health at a glance with pass rate bars and test counts
-- The **Context** page displays AI provider status and per-application environment details
+- The **Dashboard** (`/dashboard`) shows aggregate pass rate, test counts, run history chart (shown with 1+ runs), and a first-time onboarding banner for new users
+- The **Tests** page (`/tests`) provides a unified view of all tests across all projects with sortable columns, pagination (50/page), bulk select/approve/reject, keyboard shortcuts (`a`/`r`/`Esc`), and URL-synced filters (`?q=`, `?status=`, `?review=`)
+- The **Projects** page (`/projects`) shows per-project health at a glance with pass rate bars and test counts
+- The **Work** page (`/work`) lists all runs across all projects with search, status filters, type filters, and an inline **New Run** modal
+- The **Reports** page (`/reports`) provides pass/fail trend charts, per-project breakdown, flaky test detection, and top failures with CSV export (disabled when no runs match the current filter)
+- The **Context** page (`/context`) displays AI provider status and per-application environment details
 
 ---
 
@@ -241,8 +248,8 @@ sentri/
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx               # Router setup + ErrorBoundary + 404 page
-│   │   ├── api.js                # API client (fetch wrapper with AbortController timeouts)
-│   │   ├── index.css             # Design system (CSS variables, components, dark mode)
+│   │   ├── api.js                # API client (fetch wrapper with AbortController timeouts, 30s/5min)
+│   │   ├── index.css             # Design system (CSS variables, components, light + dark mode)
 │   │   ├── hooks/
 │   │   │   └── useProjectData.js # Shared hook: fetches projects + tests + runs with 30s TTL cache
 │   │   ├── utils/
@@ -259,17 +266,17 @@ sentri/
 │   │   │   ├── PassFailChart.jsx # Recharts area chart for pass/fail trends
 │   │   │   └── PassRateBar.jsx   # Horizontal pass-rate bar with percentage
 │   │   └── pages/
-│   │       ├── Dashboard.jsx     # Pass rate, metrics, recent runs
-│   │       ├── Projects.jsx      # Test library + multi-phase Create Test wizard
-│   │       ├── ProjectDetail.jsx # Draft/Regression/Runs tabs per project
-│   │       ├── NewProject.jsx    # Project creation form
+│   │       ├── Dashboard.jsx     # Pass rate, metrics, recent activity, onboarding banner
+│   │       ├── Tests.jsx         # Unified test library: sort, paginate, bulk actions, URL-synced filters
+│   │       ├── ProjectDetail.jsx # Draft/Regression/Runs tabs per project with pagination & keyboard shortcuts
+│   │       ├── NewProject.jsx    # Project creation form with validation & connection test
 │   │       ├── TestDetail.jsx    # Individual test view + inline editing + export
 │   │       ├── RunDetail.jsx     # Run detail orchestrator (crawl or test run)
-│   │       ├── Work.jsx          # All runs with search, status & type filters
+│   │       ├── Work.jsx          # All runs with search, status & type filters + inline Run modal
 │   │       ├── Reports.jsx       # Analytics: trends, flaky tests, top failures, CSV export
-│   │       ├── Applications.jsx  # Per-project health overview with pass rate bars
+│   │       ├── Applications.jsx  # Projects page: per-project health overview with pass rate bars
 │   │       ├── Context.jsx       # AI provider status + per-app environment details
-│   │       └── Settings.jsx      # AI keys, test execution config, data management, system info
+│   │       └── Settings.jsx      # AI keys (incl. Ollama), test execution config, data management
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
