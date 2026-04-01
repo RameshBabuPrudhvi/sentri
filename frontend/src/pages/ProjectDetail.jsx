@@ -402,8 +402,8 @@ export default function ProjectDetail() {
                       <tr>
                         <th style={{ width: 36, paddingRight: 0 }}>
                           <input type="checkbox"
-                            checked={filteredByReview.length > 0 && filteredByReview.every(t => selected.has(t.id))}
-                            onChange={e => toggleAll(e.target.checked, filteredByReview.map(t => t.id))}
+                            checked={pagedReview.length > 0 && pagedReview.every(t => selected.has(t.id))}
+                            onChange={e => toggleAll(e.target.checked, pagedReview.map(t => t.id))}
                             style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
                         </th>
                         <th>Test ID</th>
@@ -709,8 +709,9 @@ function KeyboardShortcuts({ tab, selected, filteredByReview, onApprove, onRejec
   React.useEffect(() => {
     function handler(e) {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
-      // Only fire approve/reject when on the review tab to prevent accidental actions
-      if (tab === "review") {
+      // Only fire approve/reject when on the review tab AND something is selected
+      // to prevent accidental bulk actions — matches Tests.jsx behavior
+      if (tab === "review" && selected.size > 0) {
         if (e.key === "a" && !e.metaKey && !e.ctrlKey) onApprove();
         if (e.key === "r" && !e.metaKey && !e.ctrlKey) onReject();
       }
@@ -718,6 +719,6 @@ function KeyboardShortcuts({ tab, selected, filteredByReview, onApprove, onRejec
     }
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [tab, onApprove, onReject, onClearSelection]);
+  }, [tab, selected, onApprove, onReject, onClearSelection]);
   return null;
 }

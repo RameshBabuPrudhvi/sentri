@@ -29,12 +29,16 @@ export function setRuntimeKey(provider, key) {
     // For Ollama, the "key" is a JSON payload: { baseUrl, model }
     // or a simple truthy string "enabled" to activate with defaults.
     runtimeKeys.OLLAMA_ENABLED = key ? "1" : "";
-    if (typeof key === "string" && key.startsWith("{")) {
+    if (key && typeof key === "string" && key.startsWith("{")) {
       try {
         const cfg = JSON.parse(key);
         if (cfg.baseUrl) ollamaConfig.baseUrl = cfg.baseUrl;
         if (cfg.model)   ollamaConfig.model   = cfg.model;
       } catch { /* use defaults */ }
+    } else if (!key) {
+      // Reset to defaults when disabling so stale config doesn't persist
+      ollamaConfig.baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+      ollamaConfig.model   = process.env.OLLAMA_MODEL    || "llama3.1";
     }
   }
 }
@@ -84,7 +88,10 @@ export function getProvider()     { try { return detectProvider(); } catch { ret
 export function hasProvider()     { return getProvider() !== null; }
 export function getProviderName() {
   const p = getProvider();
-  return p ? PROVIDER_META[p].name : "No provider configured";
+  if (!p) return "No provider configured";
+  // Ollama model is dynamic — always read from current config
+  if (p === "ollama") return `Ollama (${ollamaConfig.model})`;
+  return PROVIDER_META[p].name;
 }
 export function getProviderMeta() {
   const p = getProvider();
