@@ -309,6 +309,7 @@ sentri/
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/projects/:id/tests` | List all tests for a project |
+| `GET` | `/api/tests` | List all tests (batch endpoint for frontend) |
 | `GET` | `/api/tests/:testId` | Get a single test |
 | `POST` | `/api/projects/:id/tests` | Create a manual test (saved as Draft) |
 | `POST` | `/api/projects/:id/tests/generate` | **AI-generate** steps + Playwright script from title & description (saved as Draft) |
@@ -340,6 +341,8 @@ sentri/
 | `GET` | `/api/settings` | Masked API key status per provider |
 | `POST` | `/api/settings` | Set an API key at runtime (`{ provider, apiKey }`) |
 | `DELETE` | `/api/settings/:provider` | Remove a provider key |
+| `GET` | `/api/ollama/status` | Check Ollama connectivity + list available models |
+| `POST` | `/api/test-connection` | Verify that a URL is reachable before creating a project |
 | `GET` | `/api/dashboard` | Summary stats (projects, tests, pass rate, recent runs) |
 
 ### Activities & System
@@ -348,6 +351,7 @@ sentri/
 |---|---|---|
 | `GET` | `/api/activities` | Activity log (filterable by `?type=`, `?projectId=`, `?limit=`) |
 | `GET` | `/api/system` | System info: uptime, Node/Playwright versions, heap memory, DB counts |
+| `GET` | `/health` | Health check |
 | `DELETE` | `/api/data/runs` | Clear all run history (keeps projects & tests) |
 | `DELETE` | `/api/data/activities` | Clear activity log |
 | `DELETE` | `/api/data/healing` | Clear self-healing history |
