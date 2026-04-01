@@ -569,6 +569,21 @@ app.post("/api/settings", (req, res) => {
   }
 
   if (provider === "local") {
+    // Validate Ollama base URL if provided — block obviously dangerous targets
+    if (baseUrl && baseUrl.trim()) {
+      let parsedUrl;
+      try { parsedUrl = new URL(baseUrl.trim()); } catch {
+        return res.status(400).json({ error: "Invalid Ollama base URL format" });
+      }
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ error: "Ollama base URL must use http or https protocol" });
+      }
+      const host = parsedUrl.hostname.replace(/^\[|\]$/g, "");
+      // Block cloud metadata endpoints — legitimate Ollama won't run on these
+      if (host === "169.254.169.254" || host === "metadata.google.internal") {
+        return res.status(400).json({ error: "Ollama base URL must not point to cloud metadata endpoints" });
+      }
+    }
     // Ollama — no API key needed, just update base URL / model if provided
     setRuntimeOllama({ baseUrl: baseUrl || "", model: model || "" });
     logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
@@ -639,7 +654,9 @@ app.get("/api/activities", (req, res) => {
 // Used by the Settings UI to give real-time feedback on the local provider.
 app.get("/api/ollama/status", async (req, res) => {
   const status = await checkOllamaConnection();
-  res.status(status.ok ? 200 : 503).json(status);
+  // Always return 200 so the frontend can read the structured { ok, error, availableModels }
+  // body. Returning 503 causes api.js to throw before the component can parse the JSON.
+  res.json(status);
 });
 
 // ── URL reachability test ──────────────────────────────────────────────────────

@@ -123,6 +123,11 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
           <RefreshCw size={11} className={checking ? "spin" : undefined} /> Check
         </button>
       </div>
+      {!status?.ok && status != null && !checking && (
+        <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontStyle: "italic" }}>
+          Status reflects the last saved config. Click "Activate Ollama" first if you changed the URL or model above.
+        </div>
+      )}
 
       {/* Available models dropdown */}
       {status?.availableModels?.length > 0 && (
@@ -132,7 +137,13 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
           </label>
           <select
             className="input"
-            value={model}
+            value={
+              // If current model value doesn't exactly match any option (e.g. "llama3.2"
+              // vs "llama3.2:latest"), find the closest match so the dropdown is in sync.
+              status.availableModels.includes(model)
+                ? model
+                : status.availableModels.find(m => m.split(":")[0] === model.split(":")[0]) || model
+            }
             onChange={e => onModelChange(e.target.value)}
             style={{ height: 38, fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}
           >
@@ -218,6 +229,14 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
   const [status, setStatus]         = useState(null);
   const [error, setError]           = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Auto-reset confirmation state after 4s if user doesn't follow through
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const timer = setTimeout(() => setConfirmingDelete(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmingDelete]);
+
   // Ollama-specific local state
   const [ollamaUrl, setOllamaUrl]   = useState(ollamaBaseUrl || "http://localhost:11434");
   const [ollamaMdl, setOllamaMdl]   = useState(ollamaModel   || "llama3.2");
@@ -227,12 +246,13 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
   const isLocal  = provider.isLocal;
 
   async function handleSave() {
+    if (saving) return;
+    if (!isLocal && !input.trim()) return;
     setSaving(true); setStatus(null); setError("");
     try {
       if (isLocal) {
         await onSave(provider.id, null, { baseUrl: ollamaUrl, model: ollamaMdl });
       } else {
-        if (!input.trim()) return;
         await onSave(provider.id, input.trim());
       }
       setStatus("saved");
@@ -281,7 +301,7 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 20,
         }}>
-          {provider.id === "anthropic" ? "🔶" : provider.id === "openai" ? "🟢" : "🔷"}
+          {provider.id === "anthropic" ? "🔶" : provider.id === "openai" ? "🟢" : provider.id === "local" ? "🦙" : "🔷"}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>

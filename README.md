@@ -186,7 +186,7 @@ Sentri supports four AI providers for test generation. Auto-detection picks the 
 | Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
 | OpenAI | `openai` | `OPENAI_API_KEY` | gpt-4o-mini |
 | Google Gemini | `google` | `GOOGLE_API_KEY` | gemini-2.5-flash |
-| Ollama (Local) | `ollama` | `OLLAMA_ENABLED=1` | Configurable (default: `llama3.1`) |
+| Ollama (Local) | `local` | `AI_PROVIDER=local` | Configurable (default: `llama3.2`) |
 
 **Auto-detection priority:** Anthropic → OpenAI → Google → Ollama (first key/config present wins).
 
@@ -197,11 +197,11 @@ You can also set or change keys at runtime from the **Settings** page without re
 [Ollama](https://ollama.com) lets you run AI models locally — completely free and private.
 
 1. Install Ollama from [ollama.com](https://ollama.com)
-2. Pull a model: `ollama pull llama3.1`
-3. Enable in Sentri via **Settings** UI or set `OLLAMA_ENABLED=1` in `backend/.env`
-4. Optionally configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` (defaults: `http://localhost:11434` and `llama3.1`)
+2. Pull a model: `ollama pull llama3.2`
+3. Enable in Sentri via **Settings** UI or set `AI_PROVIDER=local` in `backend/.env`
+4. Optionally configure `OLLAMA_BASE_URL` and `OLLAMA_MODEL` (defaults: `http://localhost:11434` and `llama3.2`)
 
-Ollama must be running on the same machine as the Sentri backend.
+Ollama must be running on the same machine as the Sentri backend (or set `OLLAMA_BASE_URL` to a remote host).
 
 ---
 
@@ -209,13 +209,13 @@ Ollama must be running on the same machine as the Sentri backend.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `AI_PROVIDER` | No | auto-detect | Force a specific provider: `anthropic`, `openai`, `google`, or `ollama` |
+| `AI_PROVIDER` | No | auto-detect | Force a specific provider: `anthropic`, `openai`, `google`, or `local` |
 | `ANTHROPIC_API_KEY` | If using Anthropic | — | Get from [console.anthropic.com](https://console.anthropic.com) |
 | `OPENAI_API_KEY` | If using OpenAI | — | Get from [platform.openai.com](https://platform.openai.com/api-keys) |
 | `GOOGLE_API_KEY` | If using Google | — | Get from [aistudio.google.com](https://aistudio.google.com/apikey) |
-| `OLLAMA_ENABLED` | If using Ollama | — | Set to `1` to enable local Ollama models |
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | No | `llama3.1` | Ollama model to use for generation |
+| `OLLAMA_MODEL` | No | `llama3.2` | Ollama model to use for generation |
+| `OLLAMA_TIMEOUT_MS` | No | `120000` | Timeout (ms) for Ollama API calls — increase for slow machines or large models |
 | `PORT` | No | `3001` | Backend server port |
 
 See [`backend/.env.example`](backend/.env.example) for the full template.

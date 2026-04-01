@@ -28,7 +28,7 @@ const COLORS = {
   anthropic: { bg: "#fef3e2", border: "#fcd8a8", color: "#b45309", dot: "#d97706" },
   openai:    { bg: "#dcfce7", border: "#bbf7d0", color: "#15803d", dot: "#16a34a" },
   google:    { bg: "#dbeafe", border: "#bfdbfe", color: "#1d4ed8", dot: "#2563eb" },
-  local:     { bg: "#f3f4f6", border: "#d1d5db", color: "#374151", dot: "#6b7280" },
+  local:     { bg: "#f5f3ff", border: "#ddd6fe", color: "#6d28d9", dot: "#7c3aed" },
 };
 
 export default function ProviderBadge({ style }) {
@@ -47,7 +47,7 @@ export default function ProviderBadge({ style }) {
     return (
       <button onClick={() => navigate("/settings")} className="btn btn-ghost btn-sm" style={{ gap: 5, color: "var(--red)", borderColor: "#fca5a5", background: "var(--red-bg)", ...style }}>
         <AlertTriangle size={12} />
-        <span style={{ fontSize: "0.75rem", fontWeight: 600 }}>Set API Key</span>
+        <span style={{ fontSize: "0.75rem", fontWeight: 600 }}>Configure AI</span>
       </button>
     );
   }
