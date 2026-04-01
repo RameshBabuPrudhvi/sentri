@@ -569,7 +569,9 @@ app.post("/api/settings", (req, res) => {
   }
 
   if (provider === "local") {
-    // Validate Ollama base URL if provided — block obviously dangerous targets
+    // Validate Ollama base URL if provided.
+    // Unlike /api/test-connection, we allow localhost and LAN IPs (where Ollama
+    // legitimately runs), but block cloud metadata and link-local addresses.
     if (baseUrl && baseUrl.trim()) {
       let parsedUrl;
       try { parsedUrl = new URL(baseUrl.trim()); } catch {
@@ -579,9 +581,12 @@ app.post("/api/settings", (req, res) => {
         return res.status(400).json({ error: "Ollama base URL must use http or https protocol" });
       }
       const host = parsedUrl.hostname.replace(/^\[|\]$/g, "");
-      // Block cloud metadata endpoints — legitimate Ollama won't run on these
-      if (host === "169.254.169.254" || host === "metadata.google.internal") {
-        return res.status(400).json({ error: "Ollama base URL must not point to cloud metadata endpoints" });
+      const ollamaBlocked =
+        host === "169.254.169.254" ||
+        host === "metadata.google.internal" ||
+        /^fe80:/i.test(host);                                // link-local IPv6
+      if (ollamaBlocked) {
+        return res.status(400).json({ error: "Ollama base URL must not point to cloud metadata or link-local addresses" });
       }
     }
     // Ollama — no API key needed, just update base URL / model if provided
@@ -713,7 +718,7 @@ app.post("/api/test-connection", async (req, res) => {
     (mappedIPv4 && isPrivateIPv4(mappedIPv4)) ||            // IPv4-mapped IPv6 bypass
     hostname === "0.0.0.0" ||
     hostname === "::1" ||
-    /^::ffff:/i.test(hostname) && mappedIPv4 === null ||    // unknown ::ffff: form — block
+    (/^::ffff:/i.test(hostname) && mappedIPv4 === null) ||   // unknown ::ffff: form — block
     hostname === "169.254.169.254" ||                        // AWS metadata
     /^fe80:/i.test(hostname) ||                              // link-local IPv6
     /^fd[0-9a-f]{2}:/i.test(hostname) ||                    // unique-local IPv6

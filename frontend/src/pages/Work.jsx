@@ -186,7 +186,7 @@ export default function Work() {
           <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {STATUS_FILTERS.map(f => (
               <button key={f} className="btn btn-xs" onClick={() => setFilter(f)} style={{
-                background: filter === f ? "#fff" : "transparent",
+                background: filter === f ? "var(--surface)" : "transparent",
                 color: filter === f ? "var(--text)" : "var(--text3)",
                 border: filter === f ? "1px solid var(--border)" : "1px solid transparent",
                 textTransform: "capitalize",
@@ -199,7 +199,7 @@ export default function Work() {
           <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
             {[["all","All Types"],["test_run","Test Runs"],["crawl","Crawls"]].map(([t, label]) => (
               <button key={t} className="btn btn-xs" onClick={() => setTypeFilter(t)} style={{
-                background: typeFilter === t ? "#fff" : "transparent",
+                background: typeFilter === t ? "var(--surface)" : "transparent",
                 color: typeFilter === t ? "var(--text)" : "var(--text3)",
                 border: typeFilter === t ? "1px solid var(--border)" : "1px solid transparent",
                 boxShadow: typeFilter === t ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
