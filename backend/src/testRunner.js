@@ -482,7 +482,6 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
-  emitRunEvent(run.id, "done", { status: "completed", passed: run.passed, failed: run.failed, total: run.total });
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Only runs when there are failures and an AI provider is available.
@@ -533,4 +532,8 @@ export async function runTests(project, tests, run, db) {
       log(run, `   ⚠️  Feedback loop error: ${err.message}`);
     }
   }
+
+  // Emit "done" after the feedback loop so SSE clients receive all logs and
+  // the final fetchRun() returns the complete run (including feedbackLoop).
+  emitRunEvent(run.id, "done", { status: "completed", passed: run.passed, failed: run.failed, total: run.total });
 }

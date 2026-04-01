@@ -150,6 +150,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
+      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${err.message}`, status: "failed",
@@ -203,6 +204,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
+      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${err.message}`, status: "failed",
@@ -440,6 +442,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     run.status = "failed";
     run.error = err.message;
     run.finishedAt = new Date().toISOString();
+    emitRunEvent(runId, "done", { status: "failed" });
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
@@ -490,6 +493,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
+      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
