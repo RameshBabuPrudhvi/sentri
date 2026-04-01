@@ -93,8 +93,14 @@ export default function ProjectDetail() {
   };
 
   const refresh = useCallback(async () => {
-    const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
-    setProject(p); setTests(t); setRuns(r);
+    try {
+      const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
+      setProject(p); setTests(t); setRuns(r);
+    } catch (err) {
+      console.error("ProjectDetail refresh error:", err);
+      // Don't wipe existing state on transient errors — only set project to null
+      // on initial load (when project was never fetched successfully).
+    }
   }, [id]);
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);

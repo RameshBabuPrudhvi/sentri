@@ -436,16 +436,29 @@ export default function Tests() {
   const searchRef = useRef(null);
 
   useEffect(() => {
-    // Use batch getAllTests endpoint — falls back to per-project if not available
-    Promise.all([api.getProjects(), api.getAllTests().catch(() => null)]).then(async ([projs, allFromBatch]) => {
-      setProjects(projs);
-      if (allFromBatch) {
-        setTests(allFromBatch);
-      } else {
-        const all = await Promise.all(projs.map(p => api.getTests(p.id).catch(() => [])));
-        setTests(all.flat());
+    // Use batch getAllTests endpoint — falls back to per-project if not available.
+    // Wrap in try/catch so a transient API error doesn't wipe existing state.
+    async function load() {
+      try {
+        const [projs, allFromBatch] = await Promise.all([
+          api.getProjects(),
+          api.getAllTests().catch(() => null),
+        ]);
+        setProjects(projs);
+        if (allFromBatch) {
+          setTests(allFromBatch);
+        } else {
+          const all = await Promise.all(projs.map(p => api.getTests(p.id).catch(() => [])));
+          setTests(all.flat());
+        }
+      } catch (err) {
+        console.error("Tests page load error:", err);
+        // Don't setProjects([]) / setTests([]) — keep whatever state we had
+      } finally {
+        setLoading(false);
       }
-    }).finally(() => setLoading(false));
+    }
+    load();
   }, []);
 
   // ── Filter counts ────────────────────────────────────────────────────────────
@@ -548,12 +561,16 @@ export default function Tests() {
         if (action === "reject") return api.rejectTest(t.projectId, testId);
         return Promise.resolve();
       }));
-      // Refresh tests
-      const allFromBatch = await api.getAllTests().catch(() => null);
-      if (allFromBatch) { setTests(allFromBatch); }
-      else {
-        const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
-        setTests(all.flat());
+      // Refresh tests — but don't wipe state if the refresh itself fails
+      try {
+        const allFromBatch = await api.getAllTests().catch(() => null);
+        if (allFromBatch) { setTests(allFromBatch); }
+        else {
+          const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
+          if (all.flat().length > 0) setTests(all.flat());
+        }
+      } catch (refreshErr) {
+        console.error("Refresh after bulk action failed:", refreshErr);
       }
       setSelected(new Set());
     } catch (err) {

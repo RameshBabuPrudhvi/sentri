@@ -78,6 +78,9 @@ export const api = {
   // Ollama / local provider
   getOllamaStatus: () => req("GET", "/ollama/status"),
 
+  // URL reachability test (NewProject)
+  testConnection: (url) => req("POST", "/test-connection", { url }),
+
   // System info & data management
   getSystemInfo:   () => req("GET",    "/system"),
   clearRuns:       () => req("DELETE", "/data/runs"),

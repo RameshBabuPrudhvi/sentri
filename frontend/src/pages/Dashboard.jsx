@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -43,8 +44,12 @@ export default function Dashboard() {
       .then(([d]) => {
         setData(d);
         setRuns((d.recentRuns || []).slice(0, 6));
+        setLoadError(false);
       })
-      .catch(console.error)
+      .catch((err) => {
+        console.error("Dashboard load error:", err);
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -56,7 +61,7 @@ export default function Dashboard() {
     </div>
   );
 
-  const isEmpty = !data?.totalProjects && !data?.totalTests && !data?.totalRuns;
+  const isEmpty = !loadError && !data?.totalProjects && !data?.totalTests && !data?.totalRuns;
 
   return (
     <div className="fade-in" style={{ maxWidth: 860, margin: "0 auto" }}>
@@ -70,6 +75,20 @@ export default function Dashboard() {
           Here's your real-time overview of the testing environment, including system health, key metrics, and what your agents are up to right now.
         </p>
       </div>
+
+      {/* Error banner when API fails — don't show misleading onboarding */}
+      {loadError && (
+        <div className="card" style={{ padding: "32px 40px", textAlign: "center", marginBottom: 16, border: "1px solid #fca5a5" }}>
+          <div style={{ fontSize: "1.5rem", marginBottom: 10 }}>⚠️</div>
+          <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 6, color: "var(--text)" }}>Could not load dashboard data</div>
+          <div style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 16 }}>
+            The API may be temporarily unavailable. Your data is safe.
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => window.location.reload()}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Fix #8: first-time onboarding banner instead of zeros */}
       {isEmpty ? (
