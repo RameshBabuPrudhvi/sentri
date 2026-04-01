@@ -53,7 +53,7 @@ const PROVIDER_META = {
   anthropic: { name: "Claude Sonnet",         model: "claude-sonnet-4-20250514", color: "#cd7f32" },
   openai:    { name: "GPT-4o-mini",           model: "gpt-4o-mini",              color: "#10a37f" },
   google:    { name: "Gemini 2.5 Flash",      model: "gemini-2.5-flash",         color: "#4285f4" },
-  ollama:    { name: "Ollama (Local)",        model: ollamaConfig.model,          color: "#ffffff" },
+  ollama:    { name: "Ollama (Local)",        model: ollamaConfig.model,          color: "#6b7280" },
 };
 
 function isOllamaEnabled() {
@@ -252,6 +252,17 @@ export async function generateText(prompt, options) {
     );
   }
   return callProvider(provider, prompt, options?.maxTokens);
+}
+
+/**
+ * validateProvider(provider)
+ *
+ * Makes a minimal API call to the specified provider to verify the key works.
+ * Unlike generateText(), this does NOT auto-detect — it targets the exact provider.
+ */
+export async function validateProvider(provider) {
+  if (!PROVIDER_META[provider]) throw new Error(`Unknown provider: ${provider}`);
+  return callProvider(provider, 'Respond with exactly: {"ok":true}', 32);
 }
 
 export function parseJSON(text) {

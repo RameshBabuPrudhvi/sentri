@@ -267,9 +267,16 @@ function OllamaCard({ activeProvider, ollamaConfig: currentConfig, onSave, onDel
     setStatus(null);
     setError("");
     try {
-      await onSave("ollama", JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
-      setStatus("saved");
-      setTimeout(() => setStatus(null), 4000);
+      const validationResult = await onSave("ollama", JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
+      if (validationResult === null) {
+        setStatus("saved");  // saved but couldn't verify
+      } else if (validationResult?.modelFound === false) {
+        setStatus("saved");
+        setError(`Connected to Ollama, but model "${model.trim()}" was not found. Run: ollama pull ${model.trim()}`);
+      } else {
+        setStatus("verified");
+      }
+      setTimeout(() => setStatus(null), 6000);
     } catch (err) {
       setStatus("error");
       setError(err.message);
@@ -393,8 +400,20 @@ function OllamaCard({ activeProvider, ollamaConfig: currentConfig, onSave, onDel
           <Check size={12} /> Ollama configured — provider is now active
         </div>
       )}
+      {status === "verified" && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
+          <Check size={12} /> Ollama verified and active — model found ✓
+        </div>
+      )}
       {status === "error" && (
         <div style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--red)" }}>
+          {error}
+        </div>
+      )}
+      {/* Model-not-found warning shown alongside "saved" status */}
+      {status === "saved" && error && (
+        <div style={{ marginTop: 4, fontSize: "0.76rem", color: "var(--amber)", display: "flex", alignItems: "flex-start", gap: 6 }}>
+          <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 2 }} />
           {error}
         </div>
       )}

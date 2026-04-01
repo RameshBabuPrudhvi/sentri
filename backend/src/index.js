@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
-import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys, getOllamaConfig } from "./aiProvider.js";
+import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys, getOllamaConfig, validateProvider } from "./aiProvider.js";
 
 dotenv.config();
 
@@ -679,9 +679,8 @@ app.post("/api/settings/:provider/validate", async (req, res) => {
       const modelFound = models.some(m => m === cfg.model || m.startsWith(cfg.model + ":"));
       return res.json({ ok: true, modelsAvailable: models.length, modelFound });
     }
-    // For cloud providers, make a minimal API call to verify the key
-    const { generateText } = await import("./aiProvider.js");
-    await generateText("Respond with exactly: {\"ok\":true}", { maxTokens: 32 });
+    // For cloud providers, make a minimal API call to verify the specific key
+    await validateProvider(provider);
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message });

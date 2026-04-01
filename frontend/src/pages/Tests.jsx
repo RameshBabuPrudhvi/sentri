@@ -462,6 +462,11 @@ export default function Tests() {
     Draft:       tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length,
   }), [tests]);
 
+  const projMap = useMemo(
+    () => Object.fromEntries(projects.map(p => [p.id, p])),
+    [projects]
+  );
+
   const filtered = useMemo(() => {
     const list = tests.filter(t => {
       const matchReview =
@@ -491,12 +496,7 @@ export default function Tests() {
       });
     }
     return list;
-  }, [tests, reviewFilter, search, filter, sortCol, sortDir]);
-
-  const projMap = useMemo(
-    () => Object.fromEntries(projects.map(p => [p.id, p])),
-    [projects]
-  );
+  }, [tests, reviewFilter, search, filter, sortCol, sortDir, projMap]);
 
   // ── Pagination ─────────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
