@@ -42,7 +42,11 @@ export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
 }
 
 function getKey(envName) {
-  return runtimeKeys[envName] || process.env[envName] || "";
+  // Use `in` + explicit check so that setting a runtime key to "" (deactivation)
+  // takes precedence over the env var. Previously `||` made "" falsy, falling
+  // through to process.env and making runtime deactivation impossible.
+  if (envName in runtimeKeys) return runtimeKeys[envName];
+  return process.env[envName] || "";
 }
 
 function getOllamaBaseUrl() {
@@ -201,6 +205,10 @@ async function withRetry(fn, label = "") {
   }
 }
 
+// ── Core constants ────────────────────────────────────────────────────────────
+
+const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
+
 // ── Ollama caller ─────────────────────────────────────────────────────────────
 
 async function callOllama(prompt, maxTokens) {
@@ -253,8 +261,6 @@ async function callOllama(prompt, maxTokens) {
 }
 
 // ── Core API call ─────────────────────────────────────────────────────────────
-
-const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
 async function callProvider(provider, prompt, maxTokens) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;

@@ -68,6 +68,8 @@ export default function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/work" element={<Work />} />
             <Route path="/context" element={<Context />} />
+            {/* Redirect old route so bookmarks/links still work */}
+            <Route path="/applications" element={<Navigate to="/projects" replace />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

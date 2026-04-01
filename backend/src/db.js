@@ -31,7 +31,11 @@ function saveToDisk(db) {
   try {
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DB_PATH, JSON.stringify(db), "utf-8");
+    // Write to a temp file first, then atomically rename — prevents
+    // truncated/corrupt JSON if the process crashes mid-write.
+    const tmpPath = DB_PATH + ".tmp";
+    fs.writeFileSync(tmpPath, JSON.stringify(db), "utf-8");
+    fs.renameSync(tmpPath, DB_PATH);
   } catch (err) {
     console.warn("[db] Persist failed:", err.message);
   }

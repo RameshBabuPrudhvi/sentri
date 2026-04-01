@@ -7,6 +7,7 @@ import {
   ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { api } from "../api.js";
+import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 
 const STATUS_FILTERS = [
   { key: "All",     label: "All",     icon: null },
@@ -570,6 +571,8 @@ export default function Tests() {
         setBulkError(`${failedCount} of ${ids.length} tests failed to ${action}. The rest were updated successfully.`);
         setTimeout(() => setBulkError(null), 6000);
       }
+      // Bust shared cache so other pages (Dashboard, Reports, etc.) see fresh data
+      invalidateProjectDataCache();
       // Refresh tests — but don't wipe state if the refresh itself fails
       try {
         const allFromBatch = await api.getAllTests().catch(() => null);
@@ -617,6 +620,7 @@ export default function Tests() {
     setActionLoading(t.id);
     try {
       await api.deleteTest(t.projectId, t.id);
+      invalidateProjectDataCache();
       setTests(prev => prev.filter(x => x.id !== t.id));
       setSelected(s => { const n = new Set(s); n.delete(t.id); return n; });
     } catch (err) { console.error("Delete failed:", err); }

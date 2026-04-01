@@ -602,7 +602,9 @@ app.post("/api/settings", (req, res) => {
     }
     // Ollama — no API key needed, just update base URL / model if provided
     // Clear the disabled flag so Ollama becomes active again after deactivation
-    setRuntimeOllama({ baseUrl: baseUrl || "", model: model || "", disabled: false });
+    // Trim values so whitespace-only strings don't bypass validation and cause
+    // malformed fetch URLs (e.g. "   /api/generate").
+    setRuntimeOllama({ baseUrl: (baseUrl || "").trim(), model: (model || "").trim(), disabled: false });
     logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
     return res.json({
       ok: true,
