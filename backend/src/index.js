@@ -377,8 +377,8 @@ app.delete("/api/projects/:id/tests/:testId", (req, res) => {
 // Enhance → Validate), skipping stages 1-2 (Crawl & Filter) since the user
 // provides a title + description instead of a URL to crawl.
 //
-// Runs synchronously and returns the first created test object directly so the
-// frontend CreateTestModal can display steps and transition to the review phase.
+// Returns 202 { runId } immediately. The AI pipeline runs asynchronously in the
+// background — the frontend navigates to the live run view to track progress.
 app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
