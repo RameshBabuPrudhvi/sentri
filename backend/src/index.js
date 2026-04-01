@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
-import { getProviderName, hasProvider, setRuntimeKey, getProviderMeta, getConfiguredKeys, getOllamaConfig, validateProvider } from "./aiProvider.js";
+import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
 
 dotenv.config();
 
@@ -547,7 +547,7 @@ app.get("/api/config", (req, res) => {
       { id: "anthropic", name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", docsUrl: "https://console.anthropic.com/settings/keys" },
       { id: "openai",    name: "GPT-4o-mini",      model: "gpt-4o-mini",              docsUrl: "https://platform.openai.com/api-keys" },
       { id: "google",    name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         docsUrl: "https://aistudio.google.com/apikey" },
-      { id: "ollama",    name: "Ollama (Local)",   model: getOllamaConfig().model,     docsUrl: "https://ollama.com" },
+      { id: "local",     name: "Ollama (local)",   model: "llama3.2",                 docsUrl: "https://ollama.ai" },
     ],
   });
 });
@@ -558,19 +558,33 @@ app.get("/api/settings", (req, res) => {
 });
 
 // POST /api/settings — save API key at runtime (no server restart needed)
+// For the "local" (Ollama) provider, apiKey is not required;
+// instead accepts { baseUrl?, model? } for Ollama configuration.
 app.post("/api/settings", (req, res) => {
-  const { provider, apiKey } = req.body;
-  const validProviders = ["anthropic", "openai", "google", "ollama"];
+  const { provider, apiKey, baseUrl, model } = req.body;
+  const validProviders = ["anthropic", "openai", "google", "local"];
 
   if (!provider || !validProviders.includes(provider)) {
     return res.status(400).json({ error: `provider must be one of: ${validProviders.join(", ")}` });
   }
-  // Ollama doesn't need a traditional API key — it sends a JSON config or "enabled"
-  if (provider !== "ollama" && (!apiKey || apiKey.trim().length < 10)) {
+
+  if (provider === "local") {
+    // Ollama — no API key needed, just update base URL / model if provided
+    setRuntimeOllama({ baseUrl: baseUrl || "", model: model || "" });
+    logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
+    return res.json({
+      ok: true,
+      provider: "local",
+      providerName: getProviderMeta()?.name || "Ollama (local)",
+      message: "Local Ollama provider activated. Ensure Ollama is running.",
+    });
+  }
+
+  if (!apiKey || apiKey.trim().length < 10) {
     return res.status(400).json({ error: "apiKey is required and must be at least 10 characters" });
   }
 
-  setRuntimeKey(provider, apiKey?.trim() || "");
+  setRuntimeKey(provider, apiKey.trim());
 
   logActivity({
     type: "settings.update",
@@ -581,18 +595,23 @@ app.post("/api/settings", (req, res) => {
     ok: true,
     provider,
     providerName: getProviderMeta()?.name || provider,
-    message: `${provider} ${provider === "ollama" ? "configured" : "API key saved"}. Provider is now active.`,
+    message: `${provider} API key saved. Provider is now active.`,
   });
 });
 
-// DELETE /api/settings/:provider — remove a key
+// DELETE /api/settings/:provider — remove a key or deactivate local provider
 app.delete("/api/settings/:provider", (req, res) => {
   const { provider } = req.params;
-  setRuntimeKey(provider, "");
+
+  if (provider === "local") {
+    setRuntimeOllama({ baseUrl: "", model: "" });
+  } else {
+    setRuntimeKey(provider, "");
+  }
 
   logActivity({
     type: "settings.update",
-    detail: `API key removed for provider "${provider}"`,
+    detail: `Provider "${provider}" deactivated`,
   });
 
   res.json({ ok: true });
@@ -614,6 +633,13 @@ app.get("/api/activities", (req, res) => {
 
   const limit = parseInt(req.query.limit, 10) || 200;
   res.json(activities.slice(0, limit));
+});
+
+// GET /api/ollama/status — check Ollama connectivity + list available models
+// Used by the Settings UI to give real-time feedback on the local provider.
+app.get("/api/ollama/status", async (req, res) => {
+  const status = await checkOllamaConnection();
+  res.status(status.ok ? 200 : 503).json(status);
 });
 
 // ── URL reachability test ──────────────────────────────────────────────────────
@@ -681,37 +707,6 @@ app.post("/api/test-connection", async (req, res) => {
   try {
     const response = await fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(10000) });
     res.json({ ok: true, status: response.status });
-  } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
-  }
-});
-
-// ── API key validation ────────────────────────────────────────────────────────
-// POST /api/settings/:provider/validate — lightweight check that the configured
-// key actually works. Returns 200 on success, 502 if the provider rejects it.
-app.post("/api/settings/:provider/validate", async (req, res) => {
-  const { provider } = req.params;
-  const validProviders = ["anthropic", "openai", "google", "ollama"];
-  if (!validProviders.includes(provider)) {
-    return res.status(400).json({ error: `Unknown provider: ${provider}` });
-  }
-  if (!hasProvider()) {
-    return res.status(400).json({ error: "No provider configured" });
-  }
-  try {
-    if (provider === "ollama") {
-      // For Ollama, just check that the base URL is reachable
-      const cfg = getOllamaConfig();
-      const tagRes = await fetch(`${cfg.baseUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
-      if (!tagRes.ok) throw new Error(`Ollama returned ${tagRes.status}`);
-      const data = await tagRes.json();
-      const models = (data.models || []).map(m => m.name || m.model);
-      const modelFound = models.some(m => m === cfg.model || m.startsWith(cfg.model + ":"));
-      return res.json({ ok: true, modelsAvailable: models.length, modelFound });
-    }
-    // For cloud providers, make a minimal API call to verify the specific key
-    await validateProvider(provider);
-    res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message });
   }

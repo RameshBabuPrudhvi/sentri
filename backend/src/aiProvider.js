@@ -1,11 +1,18 @@
 /**
  * aiProvider.js — Multi-AI provider abstraction for Sentri
  *
- * Supports runtime key injection via /api/settings (no restart needed).
- * Auto-detects provider from available keys.
- * Handles rate limits with exponential backoff + retry.
+ * Supports:
+ *   - Anthropic Claude  (ANTHROPIC_API_KEY)
+ *   - OpenAI GPT        (OPENAI_API_KEY)
+ *   - Google Gemini     (GOOGLE_API_KEY)
+ *   - Ollama / local    (AI_PROVIDER=local, no key needed)
  *
- * Priority order: AI_PROVIDER env var → auto-detect (Anthropic → OpenAI → Google)
+ * Priority order:
+ *   AI_PROVIDER env var (explicit) → auto-detect (Anthropic → OpenAI → Google → Ollama)
+ *
+ * Ollama env vars:
+ *   OLLAMA_BASE_URL  — default: http://localhost:11434
+ *   OLLAMA_MODEL     — default: llama3.2  (any model pulled with `ollama pull <name>`)
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -15,72 +22,73 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // ── Runtime key store (set via /api/settings, survives until process restart) ─
 const runtimeKeys = {};
 
-// Ollama runtime config (base URL + model) — set via /api/settings
-const ollamaConfig = {
-  baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
-  model:   process.env.OLLAMA_MODEL    || "llama3.1",
-};
+// Ollama runtime config (settable via /api/settings for the local provider)
+let runtimeOllamaBaseUrl = "";
+let runtimeOllamaModel   = "";
 
 export function setRuntimeKey(provider, key) {
   if (provider === "anthropic") runtimeKeys.ANTHROPIC_API_KEY = key;
-  if (provider === "openai")    runtimeKeys.OPENAI_API_KEY = key;
-  if (provider === "google")    runtimeKeys.GOOGLE_API_KEY = key;
-  if (provider === "ollama") {
-    // For Ollama, the "key" is a JSON payload: { baseUrl, model }
-    // or a simple truthy string "enabled" to activate with defaults.
-    runtimeKeys.OLLAMA_ENABLED = key ? "1" : "";
-    if (key && typeof key === "string" && key.startsWith("{")) {
-      try {
-        const cfg = JSON.parse(key);
-        if (cfg.baseUrl) ollamaConfig.baseUrl = cfg.baseUrl;
-        if (cfg.model)   ollamaConfig.model   = cfg.model;
-      } catch { /* use defaults */ }
-    } else if (!key) {
-      // Reset to defaults when disabling so stale config doesn't persist
-      ollamaConfig.baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-      ollamaConfig.model   = process.env.OLLAMA_MODEL    || "llama3.1";
-    }
-  }
+  if (provider === "openai")    runtimeKeys.OPENAI_API_KEY    = key;
+  if (provider === "google")    runtimeKeys.GOOGLE_API_KEY    = key;
 }
 
-export function getOllamaConfig() {
-  return { ...ollamaConfig };
+export function setRuntimeOllama({ baseUrl, model } = {}) {
+  if (baseUrl !== undefined) runtimeOllamaBaseUrl = baseUrl;
+  if (model   !== undefined) runtimeOllamaModel   = model;
 }
 
 function getKey(envName) {
   return runtimeKeys[envName] || process.env[envName] || "";
 }
 
-// ── Provider info ─────────────────────────────────────────────────────────────
-
-const PROVIDER_META = {
-  anthropic: { name: "Claude Sonnet",         model: "claude-sonnet-4-20250514", color: "#cd7f32" },
-  openai:    { name: "GPT-4o-mini",           model: "gpt-4o-mini",              color: "#10a37f" },
-  google:    { name: "Gemini 2.5 Flash",      model: "gemini-2.5-flash",         color: "#4285f4" },
-  ollama:    { name: "Ollama (Local)",        model: ollamaConfig.model,          color: "#6b7280" },
-};
-
-function isOllamaEnabled() {
-  return !!(getKey("OLLAMA_ENABLED") || process.env.OLLAMA_ENABLED);
+function getOllamaBaseUrl() {
+  return runtimeOllamaBaseUrl
+    || process.env.OLLAMA_BASE_URL
+    || "http://localhost:11434";
 }
+
+function getOllamaModel() {
+  return runtimeOllamaModel
+    || process.env.OLLAMA_MODEL
+    || "llama3.2";
+}
+
+// ── Provider metadata ─────────────────────────────────────────────────────────
+
+function buildProviderMeta() {
+  return {
+    anthropic: { name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", color: "#cd7f32" },
+    openai:    { name: "GPT-4o-mini",      model: "gpt-4o-mini",              color: "#10a37f" },
+    google:    { name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         color: "#4285f4" },
+    local:     { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" },
+  };
+}
+
+// ── Provider detection ────────────────────────────────────────────────────────
 
 function detectProvider() {
   const forced = process.env.AI_PROVIDER?.toLowerCase();
-  if (forced && PROVIDER_META[forced]) {
-    const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY", ollama: "OLLAMA_ENABLED" };
-    if (forced === "ollama") {
-      if (!isOllamaEnabled()) throw new Error(`AI_PROVIDER="ollama" but Ollama is not enabled`);
-      return "ollama";
+
+  if (forced) {
+    if (forced === "local") {
+      // Ollama needs no API key — just check the server is reachable at runtime
+      return "local";
     }
-    if (!getKey(keyMap[forced])) {
-      throw new Error(`AI_PROVIDER="${forced}" but ${keyMap[forced]} is not set`);
-    }
+    const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+    if (!keyMap[forced]) throw new Error(`Unknown AI_PROVIDER="${forced}". Valid: anthropic, openai, google, local`);
+    if (!getKey(keyMap[forced])) throw new Error(`AI_PROVIDER="${forced}" but ${keyMap[forced]} is not set`);
     return forced;
   }
+
   if (getKey("ANTHROPIC_API_KEY")) return "anthropic";
   if (getKey("OPENAI_API_KEY"))    return "openai";
   if (getKey("GOOGLE_API_KEY"))    return "google";
-  if (isOllamaEnabled())           return "ollama";
+
+  // Auto-detect Ollama as last resort if runtime or env model/url has been set
+  if (runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL) {
+    return "local";
+  }
+
   return null;
 }
 
@@ -88,32 +96,24 @@ export function getProvider()     { try { return detectProvider(); } catch { ret
 export function hasProvider()     { return getProvider() !== null; }
 export function getProviderName() {
   const p = getProvider();
-  if (!p) return "No provider configured";
-  // Ollama model is dynamic — always read from current config
-  if (p === "ollama") return `Ollama (${ollamaConfig.model})`;
-  return PROVIDER_META[p].name;
+  return p ? buildProviderMeta()[p].name : "No provider configured";
 }
 export function getProviderMeta() {
   const p = getProvider();
-  if (!p) return null;
-  const meta = { provider: p, ...PROVIDER_META[p] };
-  // Ollama model is dynamic — always read from current config
-  if (p === "ollama") {
-    meta.model = ollamaConfig.model;
-    meta.name  = `Ollama (${ollamaConfig.model})`;
-  }
-  return meta;
+  return p ? { provider: p, ...buildProviderMeta()[p] } : null;
 }
 
-// Returns masked keys for the settings UI (never expose full keys)
+// Returns masked keys + Ollama config for the settings UI
 export function getConfiguredKeys() {
+  const p = getProvider();
   return {
     anthropic: maskKey(getKey("ANTHROPIC_API_KEY")),
     openai:    maskKey(getKey("OPENAI_API_KEY")),
     google:    maskKey(getKey("GOOGLE_API_KEY")),
-    ollama:    isOllamaEnabled() ? `${ollamaConfig.baseUrl} · ${ollamaConfig.model}` : "",
-    ollamaConfig: isOllamaEnabled() ? { ...ollamaConfig } : null,
-    activeProvider: getProvider(),
+    activeProvider: p,
+    // Ollama-specific fields (never sensitive, no masking needed)
+    ollamaBaseUrl: getOllamaBaseUrl(),
+    ollamaModel:   getOllamaModel(),
   };
 }
 
@@ -123,12 +123,41 @@ function maskKey(key) {
   return key.slice(0, 6) + "••••••••" + key.slice(-4);
 }
 
+// ── Ollama connectivity check ─────────────────────────────────────────────────
+
+export async function checkOllamaConnection() {
+  const base = getOllamaBaseUrl();
+  const model = getOllamaModel();
+  try {
+    const tagsRes = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(4000) });
+    if (!tagsRes.ok) return { ok: false, error: `Ollama /api/tags returned HTTP ${tagsRes.status}` };
+    const { models = [] } = await tagsRes.json();
+    const names = models.map(m => m.name.split(":")[0]);
+    // model name may include a tag (llama3.2:latest) — strip for comparison
+    const modelBase = model.split(":")[0];
+    const found = names.some(n => n === modelBase || n === model);
+    if (!found) {
+      return {
+        ok: false,
+        error: `Model "${model}" not found. Run: ollama pull ${model}\nAvailable: ${names.join(", ") || "(none)"}`,
+        availableModels: models.map(m => m.name),
+      };
+    }
+    return { ok: true, model, baseUrl: base, availableModels: models.map(m => m.name) };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Cannot reach Ollama at ${base}. Is it running? (ollama serve)\nDetail: ${err.message}`,
+    };
+  }
+}
+
 // ── Retry with exponential backoff ────────────────────────────────────────────
 
-const RATE_LIMIT_CODES  = [429, 529];
-const RETRY_ERRORS      = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
-const MAX_RETRIES       = parseInt(process.env.LLM_MAX_RETRIES, 10) || 3;
-const BASE_DELAY_MS     = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
+const RATE_LIMIT_CODES = [429, 529];
+const RETRY_ERRORS     = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
+const MAX_RETRIES      = parseInt(process.env.LLM_MAX_RETRIES, 10)  || 3;
+const BASE_DELAY_MS    = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -144,7 +173,6 @@ function isRateLimitError(err) {
 }
 
 function extractRetryAfter(err) {
-  // Gemini includes "retry in Xs" in the message
   const match = (err?.message || "").match(/retry in (\d+(?:\.\d+)?)(s|ms)/i);
   if (match) {
     const val = parseFloat(match[1]);
@@ -160,7 +188,6 @@ async function withRetry(fn, label = "") {
     } catch (err) {
       if (attempt === MAX_RETRIES) throw err;
       if (!isRateLimitError(err)) throw err;
-
       const retryAfter = extractRetryAfter(err);
       const delay = retryAfter || BASE_DELAY_MS * Math.pow(2, attempt);
       console.warn(`[Sentri] Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
@@ -169,12 +196,59 @@ async function withRetry(fn, label = "") {
   }
 }
 
+// ── Ollama caller ─────────────────────────────────────────────────────────────
+
+async function callOllama(prompt, maxTokens) {
+  const base  = getOllamaBaseUrl();
+  const model = getOllamaModel();
+
+  const body = {
+    model,
+    prompt,
+    stream: false,
+    options: {
+      // Ollama uses num_predict for max tokens
+      num_predict: maxTokens || DEFAULT_MAX_TOKENS,
+      temperature: 0.2,   // Low temp — we want deterministic JSON output
+    },
+    // Ask Ollama to return JSON when the model supports it
+    format: "json",
+  };
+
+  const controller = new AbortController();
+  // Ollama can be slow for large prompts — give it generous time
+  const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120_000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${base}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Ollama HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+
+    const data = await res.json();
+    // Ollama returns { response: "..." } for non-streaming generate
+    if (!data.response) throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data).slice(0, 200)}`);
+    return data.response;
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error(`Ollama request timed out after ${timeoutMs / 1000}s. Try a smaller/faster model or increase OLLAMA_TIMEOUT_MS.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // ── Core API call ─────────────────────────────────────────────────────────────
 
-// 16384 tokens allows 10-15 complete Playwright tests with full code,
-// supporting the new two-phase PLAN+GENERATE pipeline in journeyGenerator.js
-// where the planning prompt alone can consume ~2k tokens.
-// The previous 8192 limit caused truncation on large journey test batches.
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
 async function callProvider(provider, prompt, maxTokens) {
@@ -184,7 +258,7 @@ async function callProvider(provider, prompt, maxTokens) {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
     return withRetry(async () => {
       const msg = await client.messages.create({
-        model: PROVIDER_META.anthropic.model,
+        model: buildProviderMeta().anthropic.model,
         max_tokens: tokens,
         messages: [{ role: "user", content: prompt }],
       });
@@ -196,7 +270,7 @@ async function callProvider(provider, prompt, maxTokens) {
     const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
     return withRetry(async () => {
       const res = await client.chat.completions.create({
-        model: PROVIDER_META.openai.model,
+        model: buildProviderMeta().openai.model,
         max_tokens: tokens,
         response_format: { type: "json_object" },
         messages: [{ role: "user", content: prompt }],
@@ -209,7 +283,7 @@ async function callProvider(provider, prompt, maxTokens) {
     const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
     return withRetry(async () => {
       const model = genAI.getGenerativeModel({
-        model: PROVIDER_META.google.model,
+        model: buildProviderMeta().google.model,
         generationConfig: { responseMimeType: "application/json", maxOutputTokens: tokens },
       });
       const result = await model.generateContent(prompt);
@@ -217,23 +291,19 @@ async function callProvider(provider, prompt, maxTokens) {
     }, "Google Gemini");
   }
 
-  if (provider === "ollama") {
-    // Ollama exposes an OpenAI-compatible API — reuse the openai SDK
-    const client = new OpenAI({
-      baseURL: `${ollamaConfig.baseUrl}/v1`,
-      apiKey:  "ollama", // Ollama doesn't require a real key
-    });
-    return withRetry(async () => {
-      const res = await client.chat.completions.create({
-        model: ollamaConfig.model,
-        max_tokens: tokens,
-        // Not all Ollama models support json_object, but those that do
-        // (llama3.1, mistral, etc.) will return cleaner output with it.
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: prompt }],
-      });
-      return res.choices[0].message.content;
-    }, "Ollama");
+  if (provider === "local") {
+    // Retry on connection errors only (Ollama rarely rate-limits)
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await callOllama(prompt, tokens);
+      } catch (err) {
+        const isConnErr = err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed");
+        if (attempt === MAX_RETRIES || !isConnErr) throw err;
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(`[Sentri/Ollama] Connection error. Retrying in ${delay / 1000}s...`);
+        await sleep(delay);
+      }
+    }
   }
 
   throw new Error(`Unknown provider: ${provider}`);
@@ -243,7 +313,6 @@ async function callProvider(provider, prompt, maxTokens) {
 
 /**
  * generateText(prompt, options?)
- *
  * @param {string} prompt
  * @param {{ maxTokens?: number }} options
  */
@@ -251,25 +320,13 @@ export async function generateText(prompt, options) {
   const provider = detectProvider();
   if (!provider) {
     throw new Error(
-      "No AI API key configured. Set one in Settings or add to backend/.env:\n" +
-      "  ANTHROPIC_API_KEY=sk-ant-...   → https://console.anthropic.com\n" +
-      "  OPENAI_API_KEY=sk-...          → https://platform.openai.com/api-keys\n" +
-      "  GOOGLE_API_KEY=AIza...         → https://aistudio.google.com/apikey\n" +
-      "  OLLAMA_ENABLED=1               → Local models via Ollama (no API key needed)"
+      "No AI provider configured. Options:\n" +
+      "  Cloud: set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY in backend/.env\n" +
+      "  Local: set AI_PROVIDER=local (requires Ollama running at http://localhost:11434)\n" +
+      "         Optionally: OLLAMA_MODEL=llama3.2  OLLAMA_BASE_URL=http://localhost:11434"
     );
   }
   return callProvider(provider, prompt, options?.maxTokens);
-}
-
-/**
- * validateProvider(provider)
- *
- * Makes a minimal API call to the specified provider to verify the key works.
- * Unlike generateText(), this does NOT auto-detect — it targets the exact provider.
- */
-export async function validateProvider(provider) {
-  if (!PROVIDER_META[provider]) throw new Error(`Unknown provider: ${provider}`);
-  return callProvider(provider, 'Respond with exactly: {"ok":true}', 32);
 }
 
 export function parseJSON(text) {

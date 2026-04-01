@@ -65,16 +65,18 @@ export const api = {
   getDashboard: () => req("GET", "/dashboard"),
 
   // Config & Settings
-  getConfig:    ()                 => req("GET",    "/config"),
-  getSettings:  ()                 => req("GET",    "/settings"),
-  saveApiKey:   (provider, apiKey) => req("POST",   "/settings", { provider, apiKey }),
-  deleteApiKey: (provider)         => req("DELETE", `/settings/${provider}`),
+   getConfig:    ()                 => req("GET",    "/config"),
+   getSettings:  ()                 => req("GET",    "/settings"),
 
-  // API key validation (Fix #22)
-  validateApiKey: (provider) => req("POST", `/settings/${provider}/validate`),
+  // For cloud providers pass apiKey; for "local" (Ollama) pass { baseUrl?, model? } instead
+  saveApiKey: (provider, apiKey, ollamaOpts) =>
+    provider === "local"
+      ? req("POST", "/settings", { provider, ...ollamaOpts })
+      : req("POST", "/settings", { provider, apiKey }),
+  deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
 
-  // URL reachability test (Fix #19)
-  testConnection: (url) => req("POST", "/test-connection", { url }),
+  // Ollama / local provider
+  getOllamaStatus: () => req("GET", "/ollama/status"),
 
   // System info & data management
   getSystemInfo:   () => req("GET",    "/system"),
