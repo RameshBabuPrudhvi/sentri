@@ -237,15 +237,16 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
     return () => clearTimeout(timer);
   }, [confirmingDelete]);
 
-  // Ollama-specific local state — sync with props when parent reloads settings
+  // Ollama-specific local state — sync with props when parent reloads settings.
+  // Always sync (not just when truthy) so deactivation resets to defaults.
   const [ollamaUrl, setOllamaUrl]   = useState(ollamaBaseUrl || "http://localhost:11434");
   const [ollamaMdl, setOllamaMdl]   = useState(ollamaModel   || "llama3.2");
 
   useEffect(() => {
-    if (ollamaBaseUrl) setOllamaUrl(ollamaBaseUrl);
+    setOllamaUrl(ollamaBaseUrl || "http://localhost:11434");
   }, [ollamaBaseUrl]);
   useEffect(() => {
-    if (ollamaModel) setOllamaMdl(ollamaModel);
+    setOllamaMdl(ollamaModel || "llama3.2");
   }, [ollamaModel]);
 
   const isActive = activeProvider === provider.id;

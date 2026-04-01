@@ -430,6 +430,7 @@ export default function Tests() {
   const [sortDir, setSortDir] = useState("asc");   // "asc" | "desc"
   const [selected, setSelected] = useState(new Set());
   const [bulkConfirm, setBulkConfirm] = useState(null); // {action, ids}
+  const [bulkError, setBulkError] = useState(null);    // partial failure feedback
   const [hoveredRow, setHoveredRow] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const navigate = useNavigate();
@@ -551,6 +552,7 @@ export default function Tests() {
 
   async function executeBulkAction(action, ids) {
     setBulkConfirm(null);
+    setBulkError(null);
     if (!ids?.length) return;
     setActionLoading(action);
     try {
@@ -565,6 +567,8 @@ export default function Tests() {
       const failedCount = results.filter(r => r.status === "rejected").length;
       if (failedCount > 0) {
         console.warn(`Bulk ${action}: ${failedCount}/${ids.length} failed`);
+        setBulkError(`${failedCount} of ${ids.length} tests failed to ${action}. The rest were updated successfully.`);
+        setTimeout(() => setBulkError(null), 6000);
       }
       // Refresh tests — but don't wipe state if the refresh itself fails
       try {
@@ -793,6 +797,16 @@ export default function Tests() {
                   <ThumbsDown size={12} /> Reject
                 </button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
+              </div>
+            )}
+            {/* Partial failure feedback from bulk actions */}
+            {bulkError && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: "var(--amber-bg)", borderBottom: "1px solid var(--border)", fontSize: "0.82rem", color: "var(--amber)" }}>
+                <AlertCircle size={13} />
+                {bulkError}
+                <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => setBulkError(null)}>
+                  <X size={11} />
+                </button>
               </div>
             )}
             <table className="table">
