@@ -56,6 +56,8 @@ export const api = {
   restoreTest:     (projectId, testId) => req("PATCH", `/projects/${projectId}/tests/${testId}/restore`),
   bulkUpdateTests: (projectId, testIds, action) =>
     req("POST", `/projects/${projectId}/tests/bulk`, { testIds, action }),
+  bulkDeleteTests: (projectId, testIds) =>
+    req("POST", `/projects/${projectId}/tests/bulk`, { testIds, action: "delete" }),
 
   // Runs
   getRuns: (id)    => req("GET", `/projects/${id}/runs`),

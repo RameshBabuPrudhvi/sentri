@@ -183,6 +183,24 @@ export default function ProjectDetail() {
     } catch (err) { showToast(err.message, "error"); }
   }
 
+  async function executeBulkDelete(ids) {
+    setBulkConfirm(null);
+    if (!ids?.length) return;
+    try {
+      const res = await api.bulkDeleteTests(id, ids);
+      await refresh(); setSelected(new Set());
+      showToast(`${res.deleted} test${res.deleted !== 1 ? "s" : ""} deleted`, "info");
+    } catch (err) { showToast(err.message, "error"); }
+  }
+
+  function requestBulkDelete() {
+    const ids = selected.size > 0
+      ? Array.from(selected)
+      : filteredByReview.map(t => t.id);
+    if (!ids.length) return;
+    setBulkConfirm({ action: "delete", ids });
+  }
+
   // Keep old name as alias so existing call sites work unchanged
   function bulkAction(action) { requestBulkAction(action); }
 
@@ -390,6 +408,10 @@ export default function ProjectDetail() {
                   <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
                     onClick={() => bulkAction("reject")}>
                     <ThumbsDown size={12} /> Reject {bulkScope}
+                  </button>
+                  <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+                    onClick={requestBulkDelete}>
+                    <Trash2 size={12} /> Delete {bulkScope}
                   </button>
                   {selected.size > 0 && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
@@ -685,15 +707,17 @@ export default function ProjectDetail() {
           <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "28px 32px", width: "min(420px,95vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
             <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
             <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
-              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> (all visible tests). This cannot be undone easily.
+              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
               <button
                 className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
-                onClick={() => executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
+                onClick={() => bulkConfirm.action === "delete"
+                  ? executeBulkDelete(bulkConfirm.ids)
+                  : executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
               >
-                {bulkConfirm.action === "approve" ? "Approve all" : "Reject all"}
+                {bulkConfirm.action === "approve" ? "Approve all" : bulkConfirm.action === "delete" ? "Delete all" : "Reject all"}
               </button>
             </div>
           </div>

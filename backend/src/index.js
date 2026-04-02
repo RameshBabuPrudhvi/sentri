@@ -936,8 +936,28 @@ app.patch("/api/projects/:id/tests/:testId/restore", (req, res) => {
 // NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
 app.post("/api/projects/:id/tests/bulk", (req, res) => {
   const { testIds, action } = req.body;
-  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore"].includes(action))
+  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore", "delete"].includes(action))
     return res.status(400).json({ error: "testIds[] and valid action required" });
+
+  if (action === "delete") {
+    const deleted = [];
+    testIds.forEach((tid) => {
+      const test = db.tests[tid];
+      if (test && test.projectId === req.params.id) {
+        deleted.push({ id: test.id, name: test.name });
+        delete db.tests[tid];
+      }
+    });
+    if (deleted.length) {
+      const project = db.projects[req.params.id];
+      logActivity({
+        type: "test.bulk_delete", projectId: req.params.id, projectName: project?.name || null,
+        detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
+      });
+    }
+    return res.json({ deleted: deleted.length, tests: deleted });
+  }
+
   const statusMap = { approve: "approved", reject: "rejected", restore: "draft" };
   const updated = [];
   testIds.forEach((tid) => {

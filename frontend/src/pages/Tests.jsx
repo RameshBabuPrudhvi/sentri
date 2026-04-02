@@ -592,6 +592,50 @@ export default function Tests() {
     }
   }
 
+  async function executeBulkDelete(ids) {
+    setBulkConfirm(null);
+    setBulkError(null);
+    if (!ids?.length) return;
+    setActionLoading("delete");
+    try {
+      // Group by projectId so we can call the bulk endpoint per project
+      const byProject = {};
+      ids.forEach(testId => {
+        const t = tests.find(x => x.id === testId);
+        if (t) {
+          if (!byProject[t.projectId]) byProject[t.projectId] = [];
+          byProject[t.projectId].push(testId);
+        }
+      });
+      const results = await Promise.allSettled(
+        Object.entries(byProject).map(([projectId, testIds]) =>
+          api.bulkDeleteTests(projectId, testIds)
+        )
+      );
+      const failedCount = results.filter(r => r.status === "rejected").length;
+      if (failedCount > 0) {
+        setBulkError(`Some tests failed to delete. The rest were removed successfully.`);
+        setTimeout(() => setBulkError(null), 6000);
+      }
+      invalidateProjectDataCache();
+      try {
+        const allFromBatch = await api.getAllTests().catch(() => null);
+        if (allFromBatch) { setTests(allFromBatch); }
+        else {
+          const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
+          if (all.flat().length > 0) setTests(all.flat());
+        }
+      } catch (refreshErr) {
+        console.error("Refresh after bulk delete failed:", refreshErr);
+      }
+      setSelected(new Set());
+    } catch (err) {
+      console.error("Bulk delete failed:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   function requestBulkAction(action) {
     const ids = selected.size > 0
       ? Array.from(selected)
