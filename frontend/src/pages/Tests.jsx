@@ -49,7 +49,7 @@ function relativeTime(dateStr) {
 
 function AgentTag({ type = "TA" }) {
   const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
-  return <div className={`avatar ${s[type]}`}>{type}</div>;
+  return <div className={`avatar ${s[type] || "avatar-ta"}`}>{type}</div>;
 }
 
 function StatusBadge({ result }) {
