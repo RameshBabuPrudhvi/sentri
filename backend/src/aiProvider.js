@@ -403,6 +403,7 @@ export async function streamText(prompt, onToken, options = {}) {
       model: buildProviderMeta().openai.model,
       max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
+      response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     });
     let full = "";

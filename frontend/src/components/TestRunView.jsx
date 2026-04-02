@@ -499,13 +499,15 @@ export default function TestRunView({ run, frames = [] }) {
 
       {/* Execution timeline — only shown once there are completed results */}
       {results.length > 0 && (
-        <ExecutionTimeline
-          results={results}
-          onSelect={(r) => {
-            const idx = results.findIndex(res => res.testId === r.testId);
-            if (idx >= 0) setSelectedCase(idx);
-          }}
-        />
+        <div style={{ gridColumn: "1 / -1" }}>
+                  <ExecutionTimeline
+                    results={results}
+                    onSelect={(r) => {
+                      const idx = results.findIndex(res => res.testId === r.testId);
+                      if (idx >= 0) setSelectedCase(idx);
+                    }}
+                  />
+                </div>
       )}
     </div>
   );
