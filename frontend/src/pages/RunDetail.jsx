@@ -59,7 +59,9 @@ export default function RunDetail() {
     setLlmTokens("");
   }, [runId]);
 
-  // SSE — receives live updates while the run is active
+  // SSE — receives live updates while the run is active.
+  // Pass run?.status as initialStatus so the hook can skip SSE entirely
+  // for already-completed/failed runs (avoids spurious "Run complete" notifications).
   const { sseDown } = useRunSSE(runId, useCallback((event) => {
     if (event.type === "snapshot") {
       setRun(event.run);
@@ -91,7 +93,7 @@ export default function RunDetail() {
       // Then re-fetch to get the full completed run object (stats, results, etc.)
       fetchRun();
     }
-  }, [fetchRun]));
+  }, [fetchRun]), run?.status);
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {

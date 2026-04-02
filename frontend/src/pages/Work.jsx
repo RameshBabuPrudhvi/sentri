@@ -3,11 +3,28 @@ import { useNavigate } from "react-router-dom";
 import {
   Play, RefreshCw,
   Globe, FlaskConical, Search, ArrowRight, Zap, X,
+  CheckCircle2, XCircle,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { api } from "../api.js";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/StatusBadge";
+
+// ── Filter definitions (mirrors Tests.jsx icon-pill pattern) ──────────────────
+
+const STATUS_FILTERS = [
+  { key: "running",   tooltip: "Running",   activeColor: "#2563eb", activeBg: "rgba(37,99,235,0.12)",  icon: <RefreshCw    size={14} /> },
+  { key: "completed", tooltip: "Completed", activeColor: "#16a34a", activeBg: "rgba(34,197,94,0.12)",  icon: <CheckCircle2 size={14} /> },
+  { key: "failed",    tooltip: "Failed",    activeColor: "#dc2626", activeBg: "rgba(239,68,68,0.12)",  icon: <XCircle      size={14} /> },
+];
+
+const TYPE_FILTERS = [
+  { key: "test_run",  tooltip: "Test Runs", activeColor: "var(--accent)", activeBg: "var(--accent-bg)",      icon: <FlaskConical size={14} /> },
+  { key: "crawl",     tooltip: "Crawls",    activeColor: "#7c3aed",       activeBg: "rgba(124,58,237,0.1)",   icon: <Globe        size={14} /> },
+  { key: "generate",  tooltip: "Generate",  activeColor: "#d97706",       activeBg: "rgba(217,119,6,0.1)",    icon: <Zap          size={14} /> },
+];
+
+// ── TypeBadge ─────────────────────────────────────────────────────────────────
 
 function TypeBadge({ type }) {
   if (type === "test_run") return (
@@ -16,12 +33,19 @@ function TypeBadge({ type }) {
     </div>
   );
   if (type === "crawl") return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "var(--purple)", fontWeight: 500 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "#7c3aed", fontWeight: 500 }}>
       <Globe size={12} /> Crawl
+    </div>
+  );
+  if (type === "generate") return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "#d97706", fontWeight: 500 }}>
+      <Zap size={12} /> Generate
     </div>
   );
   return <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>{type || "—"}</span>;
 }
+
+// ── ProgressBar ───────────────────────────────────────────────────────────────
 
 function ProgressBar({ passed, failed, total }) {
   if (!total) return <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>—</span>;
@@ -41,8 +65,8 @@ function ProgressBar({ passed, failed, total }) {
   );
 }
 
+// ── Run Modal ─────────────────────────────────────────────────────────────────
 
-// inline RunModal so Work page can start runs directly
 function RunModal({ projects, onClose }) {
   const [projectId, setProjectId] = React.useState(projects[0]?.id || "");
   const [running, setRunning] = React.useState(false);
@@ -100,29 +124,44 @@ function RunModal({ projects, onClose }) {
   );
 }
 
-const STATUS_FILTERS = ["all", "running", "completed", "failed"];
+// ── Work Page ─────────────────────────────────────────────────────────────────
 
 export default function Work() {
   const { allRuns: runs, projects: allProjects, loading } = useProjectData({ fetchTests: false });
-  const [filter, setFilter]   = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [search, setSearch]   = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter]     = useState("all");
+  const [search, setSearch]             = useState("");
   const [showRunModal, setShowRunModal] = useState(false);
   const navigate = useNavigate();
 
-  const filtered = useMemo(() => runs.filter(r => {
-    if (filter !== "all" && r.status !== filter) return false;
-    if (typeFilter !== "all" && r.type !== typeFilter) return false;
-    if (search.trim() && !(r.projectName || "").toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  }), [runs, filter, typeFilter, search]);
-
-  const stats = useMemo(() => ({
-    total:     runs.length,
+  // ── Counts for filter dots ────────────────────────────────────────────────
+  const statusCounts = useMemo(() => ({
     running:   runs.filter(r => r.status === "running").length,
     completed: runs.filter(r => r.status === "completed").length,
     failed:    runs.filter(r => r.status === "failed").length,
   }), [runs]);
+
+  const typeCounts = useMemo(() => ({
+    test_run: runs.filter(r => r.type === "test_run").length,
+    crawl:    runs.filter(r => r.type === "crawl").length,
+    generate: runs.filter(r => r.type === "generate").length,
+  }), [runs]);
+
+  const filtered = useMemo(() => runs.filter(r => {
+    if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (typeFilter   !== "all" && r.type   !== typeFilter)   return false;
+    if (search.trim() && !(r.projectName || "").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }), [runs, statusFilter, typeFilter, search]);
+
+  const stats = useMemo(() => ({
+    total:     runs.length,
+    running:   statusCounts.running,
+    completed: statusCounts.completed,
+    failed:    statusCounts.failed,
+  }), [runs, statusCounts]);
+
+  const anyFilterActive = statusFilter !== "all" || typeFilter !== "all";
 
   if (loading) return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
@@ -168,53 +207,146 @@ export default function Work() {
         ))}
       </div>
 
-      {/* Toolbar */}
-      <div className="card" style={{ padding: "12px 14px", marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ position: "relative", flex: "1 1 200px", minWidth: 180 }}>
+      {/* Table card */}
+      <div className="card">
+
+        {/* ── Toolbar ── */}
+        <div style={{
+          padding: "14px 16px", borderBottom: "1px solid var(--border)",
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        }}>
+          {/* Title + count */}
+          <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
+            All Runs ({filtered.length})
+          </div>
+
+          {/* Search */}
+          <div style={{ width: 220, flexShrink: 0, position: "relative" }}>
             <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
             <input
               className="input"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search by project..."
-              style={{ paddingLeft: 28, height: 32, fontSize: "0.82rem" }}
+              placeholder="Search by project…"
+              style={{ paddingLeft: 28, paddingRight: search ? 30 : 12, height: 32, fontSize: "0.82rem" }}
             />
+            {search && (
+              <button onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, display: "flex" }}>
+                <X size={13} />
+              </button>
+            )}
           </div>
 
-          {/* Status filter */}
-          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-            {STATUS_FILTERS.map(f => (
-              <button key={f} className="btn btn-xs" onClick={() => setFilter(f)} style={{
-                background: filter === f ? "var(--surface)" : "transparent",
-                color: filter === f ? "var(--text)" : "var(--text3)",
-                border: filter === f ? "1px solid var(--border)" : "1px solid transparent",
-                textTransform: "capitalize",
-                boxShadow: filter === f ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-              }}>{f}</button>
-            ))}
-          </div>
+          {/* Spacer */}
+          <div style={{ flex: 1 }} />
 
-          {/* Type filter */}
-          <div style={{ display: "flex", gap: 4, background: "var(--bg2)", padding: 3, borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-            {[["all","All Types"],["test_run","Test Runs"],["crawl","Crawls"]].map(([t, label]) => (
-              <button key={t} className="btn btn-xs" onClick={() => setTypeFilter(t)} style={{
-                background: typeFilter === t ? "var(--surface)" : "transparent",
-                color: typeFilter === t ? "var(--text)" : "var(--text3)",
-                border: typeFilter === t ? "1px solid var(--border)" : "1px solid transparent",
-                boxShadow: typeFilter === t ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-              }}>{label}</button>
-            ))}
-          </div>
+          {/* ── Icon-only filter pill bar ── */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 1,
+            background: "var(--bg2)", padding: "3px 4px",
+            borderRadius: "var(--radius)", border: "1px solid var(--border)",
+          }}>
+            <span style={{ fontSize: "0.68rem", color: "var(--text3)", fontWeight: 600, padding: "0 6px 0 2px", userSelect: "none", letterSpacing: "0.02em" }}>
+              Filters
+            </span>
 
-          <span style={{ fontSize: "0.75rem", color: "var(--text3)", marginLeft: "auto" }}>
-            {filtered.length} {filtered.length === 1 ? "run" : "runs"}
-          </span>
+            {/* Status filter icons */}
+            {STATUS_FILTERS.map(f => {
+              const active = statusFilter === f.key;
+              const count  = statusCounts[f.key] ?? 0;
+              return (
+                <button
+                  key={f.key}
+                  title={`${f.tooltip} · ${count} run${count !== 1 ? "s" : ""} · click again to clear`}
+                  onClick={() => setStatusFilter(active ? "all" : f.key)}
+                  style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 30, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                    background: active ? f.activeBg    : "transparent",
+                    color:      active ? f.activeColor : "var(--text3)",
+                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
+                  }}
+                >
+                  {f.icon}
+                  {active && (
+                    <span style={{
+                      position: "absolute", top: 2, right: 2,
+                      minWidth: 14, height: 14, borderRadius: 7,
+                      background: f.activeColor, color: "#fff",
+                      fontSize: "0.55rem", fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      lineHeight: 1, padding: "0 2px",
+                    }}>
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Divider */}
+            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+
+            {/* Type filter icons */}
+            {TYPE_FILTERS.map(f => {
+              const active = typeFilter === f.key;
+              const count  = typeCounts[f.key] ?? 0;
+              return (
+                <button
+                  key={f.key}
+                  title={`${f.tooltip} · ${count} run${count !== 1 ? "s" : ""} · click again to clear`}
+                  onClick={() => setTypeFilter(active ? "all" : f.key)}
+                  style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 30, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                    background: active ? f.activeBg    : "transparent",
+                    color:      active ? f.activeColor : "var(--text3)",
+                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
+                  }}
+                >
+                  {f.icon}
+                  {active && (
+                    <span style={{
+                      position: "absolute", top: 2, right: 2,
+                      minWidth: 14, height: 14, borderRadius: 7,
+                      background: f.activeColor, color: "#fff",
+                      fontSize: "0.55rem", fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      lineHeight: 1, padding: "0 2px",
+                    }}>
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* Clear-all — only visible when any filter is active */}
+            {anyFilterActive && (
+              <>
+                <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+                <button
+                  title="Clear all filters"
+                  onClick={() => { setStatusFilter("all"); setTypeFilter("all"); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 28, height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", background: "rgba(239,68,68,0.08)", color: "var(--red)",
+                    transition: "background 0.12s",
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Table */}
-      <div className="card">
+        {/* ── Table ── */}
         {filtered.length === 0 ? (
           <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
             {runs.length === 0 ? (
@@ -291,6 +423,7 @@ export default function Work() {
           </table>
         )}
       </div>
+
       {showRunModal && (
         <RunModal projects={allProjects} onClose={() => setShowRunModal(false)} />
       )}

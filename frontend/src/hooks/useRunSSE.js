@@ -55,10 +55,14 @@ const MAX_SSE_RETRIES  = 5;
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 /**
- * useRunSSE(runId, onEvent)
+ * useRunSSE(runId, onEvent, initialStatus)
  *
  * Opens an SSE stream at GET /api/runs/:runId/events.
  * Fires onEvent({ type, ...payload }) for every event.
+ *
+ * Pass `initialStatus` (e.g. "completed" / "failed") to skip SSE entirely
+ * for runs that are already finished — prevents spurious "Run complete"
+ * browser notifications when reopening a historical run.
  *
  * Resilience:
  *   - Reconnects with exponential backoff (1.5s → 3s → 6s … capped at 30s)
@@ -69,7 +73,7 @@ const MAX_SSE_RETRIES  = 5;
  *   - Updates the page favicon to ⏳/✅/❌ to reflect run state
  *   - Fires a browser Notification on the "done" event (if permission granted)
  */
-export function useRunSSE(runId, onEvent) {
+export function useRunSSE(runId, onEvent, initialStatus) {
   const onEventRef    = useRef(onEvent);
   const doneRef       = useRef(false);
   const esRef         = useRef(null);
@@ -151,6 +155,17 @@ export function useRunSSE(runId, onEvent) {
 
   useEffect(() => {
     if (!runId) return;
+
+    // If the run is already finished, skip SSE/polling entirely.
+    // This prevents a spurious "Run complete" browser notification every time
+    // the user navigates back to a historical run detail page.
+    const alreadyDone = initialStatus && initialStatus !== "running";
+    if (alreadyDone) {
+      doneRef.current = true;
+      setFaviconStatus(initialStatus);
+      return () => { resetFavicon(); };
+    }
+
     doneRef.current    = false;
     retryCount.current = 0;
     setSseDown(false);
@@ -164,7 +179,7 @@ export function useRunSSE(runId, onEvent) {
       esRef.current?.close();
       resetFavicon();
     };
-  }, [connect, runId]);
+  }, [connect, runId, initialStatus]);
 
   return { sseDown };
 }
