@@ -154,6 +154,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
         type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });
@@ -207,6 +208,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });
@@ -454,6 +456,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
       detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
       status: "failed",
     });
+    emitRunEvent(runId, "done", { status: "failed" });
   });
 });
 

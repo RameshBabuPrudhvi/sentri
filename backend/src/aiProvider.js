@@ -103,6 +103,7 @@ function detectProvider() {
 
 export function getProvider()     { try { return detectProvider(); } catch { return null; } }
 export function hasProvider()     { return getProvider() !== null; }
+export function isLocalProvider() { return getProvider() === "local"; }
 export function getProviderName() {
   const p = getProvider();
   return p ? buildProviderMeta()[p].name : "No provider configured";
@@ -215,13 +216,19 @@ async function callOllama(prompt, maxTokens) {
   const base  = getOllamaBaseUrl();
   const model = getOllamaModel();
 
+  // Local models (especially 7B) have much smaller effective context windows.
+  // Cap num_predict so the prompt + output don't exceed the model's limits.
+  // Ollama returns HTTP 500 when the combined size overflows.
+  const OLLAMA_MAX_PREDICT = parseInt(process.env.OLLAMA_MAX_PREDICT, 10) || 4096;
+  const effectiveTokens = Math.min(maxTokens || DEFAULT_MAX_TOKENS, OLLAMA_MAX_PREDICT);
+
   const body = {
     model,
     prompt,
     stream: false,
     options: {
       // Ollama uses num_predict for max tokens
-      num_predict: maxTokens || DEFAULT_MAX_TOKENS,
+      num_predict: effectiveTokens,
       temperature: 0.2,   // Low temp — we want deterministic JSON output
     },
     // Ask Ollama to return JSON when the model supports it
@@ -323,15 +330,18 @@ async function callProvider(provider, prompt, maxTokens) {
   }
 
   if (provider === "local") {
-    // Retry on connection errors only (Ollama rarely rate-limits)
+    // Retry on connection errors AND Ollama HTTP 500s (model overload / context overflow)
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await callOllama(prompt, tokens);
       } catch (err) {
-        const isConnErr = err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed");
-        if (attempt === MAX_RETRIES || !isConnErr) throw err;
+        const isRetryable =
+          err.message.includes("ECONNREFUSED") ||
+          err.message.includes("fetch failed") ||
+          err.message.includes("Ollama HTTP 500");
+        if (attempt === MAX_RETRIES || !isRetryable) throw err;
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        console.warn(`[Sentri/Ollama] Connection error. Retrying in ${delay / 1000}s...`);
+        console.warn(`[Sentri/Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
         await sleep(delay);
       }
     }
