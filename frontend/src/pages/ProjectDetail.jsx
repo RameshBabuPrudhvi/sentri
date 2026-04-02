@@ -482,7 +482,10 @@ export default function ProjectDetail() {
                                     <RotateCcw size={11} /> Restore
                                   </button>
                                 )}
-                                <button className="btn btn-ghost btn-xs" onClick={() => api.deleteTest(id, t.id).then(refresh)}>
+                                <button className="btn btn-ghost btn-xs" onClick={() => {
+                                  if (!window.confirm(`Delete test "${t.name}"? This cannot be undone.`)) return;
+                                  api.deleteTest(id, t.id).then(refresh).catch(err => showToast(err.message, "error"));
+                                }}>
                                   <Trash2 size={11} />
                                 </button>
                               </div>
