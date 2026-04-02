@@ -9,6 +9,8 @@ import {
   Lock,
 } from "lucide-react";
 import StepResultsView from "./StepResultsView";
+import LiveBrowserView from "./LiveBrowserView";
+import ExecutionTimeline from "./ExecutionTimeline";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -328,7 +330,7 @@ function RunningStepsPreview({ queuedTest, activeStepIndex }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function TestRunView({ run }) {
+export default function TestRunView({ run, frames = [] }) {
   const results = run?.results || run?.steps || [];
   const testQueue = run?.testQueue || [];
 
@@ -481,13 +483,30 @@ export default function TestRunView({ run }) {
             onDrillDown={() => setDrilledCase(selectedCase)}
           />
         ) : isRunning ? (
-          <RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />
+          frames.length > 0
+            ? <LiveBrowserView
+                frames={frames}
+                label={testQueue[selectedCase]?.name}
+                fallback={<RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />}
+              />
+            : <RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: "0.82rem" }}>
             Select a test case to preview
           </div>
         )}
       </div>
+
+      {/* Execution timeline — only shown once there are completed results */}
+      {results.length > 0 && (
+        <ExecutionTimeline
+          results={results}
+          onSelect={(r) => {
+            const idx = results.findIndex(res => res.testId === r.testId);
+            if (idx >= 0) setSelectedCase(idx);
+          }}
+        />
+      )}
     </div>
   );
 }

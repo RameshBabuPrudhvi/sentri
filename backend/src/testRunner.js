@@ -117,6 +117,12 @@ async function runGeneratedCode(page, context, playwrightCode, expect, healingHi
   const fn = new Function("page", "context", "expect", `
     return (async () => {
       ${helpers}
+      // Stubs for Playwright fixtures that some LLMs hallucinate in the function
+      // signature but are not valid in our eval context (e.g. 'run', 'browser',
+      // 'request'). Defining them as undefined prevents ReferenceError crashes.
+      const run = undefined;
+      const browser = context?.browser?.() ?? undefined;
+      const request = undefined;
       let __testError = null;
       try {
         ${cleaned}
@@ -170,6 +176,49 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   });
 
   const page = await context.newPage();
+
+  // ── CDP screencast — only stream if at least one SSE client is watching ──
+  let cdpSession = null;
+  let rafScheduled = false;
+  let pendingFrame = null;
+
+  // Only start if there are active SSE listeners (avoids encoding overhead
+  // when nobody is watching the live stream)
+  const { runListeners } = await import("./index.js").catch(() => ({}));
+  if (runListeners?.get(runId)?.size > 0) {
+    try {
+      cdpSession = await page.context().newCDPSession(page);
+      await cdpSession.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 50,
+        maxWidth: 1280,
+        maxHeight: 720,
+        everyNthFrame: 2, // ~15 FPS source → ~7 FPS net
+      });
+
+      cdpSession.on("Page.screencastFrame", async ({ data, sessionId }) => {
+        // Buffer the latest frame; requestAnimationFrame-style throttle via
+        // a flag so bursting frames don't flood the SSE channel
+        pendingFrame = data;
+        if (!rafScheduled) {
+          rafScheduled = true;
+          setImmediate(() => {
+            rafScheduled = false;
+            if (pendingFrame) {
+              emitRunEvent(runId, "frame", { data: pendingFrame });
+              pendingFrame = null;
+            }
+          });
+        }
+        // Acknowledge every frame so the browser doesn't stall
+        await cdpSession.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
+      });
+    } catch (cdpErr) {
+      console.warn("[testRunner] CDP screencast unavailable:", cdpErr.message);
+      cdpSession = null;
+    }
+  }
+
   const networkLogs = [];
   const consoleLogs = [];
 
@@ -187,6 +236,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
     network: [],
     consoleLogs: [],
     domSnapshot: null,
+    boundingBoxes: [], // populated after test execution from last interacted element
   };
 
   page.on("request", (req) => {
@@ -222,6 +272,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   });
 
   const start = Date.now();
+  result.startedAt = start; // absolute timestamp for ExecutionTimeline Gantt
 
   try {
     const expect = await getExpect();
@@ -305,6 +356,37 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
     result.screenshot = buf.toString("base64");
     result.screenshotPath = `/artifacts/screenshots/${shotName}`;
 
+    // Capture bounding boxes of the last interacted / focused elements.
+    // We collect up to 5 interactive elements that are currently visible and
+    // in focus or recently clicked, so the OverlayCanvas can draw highlights.
+    try {
+      result.boundingBoxes = await page.evaluate(() => {
+        const boxes = [];
+        // Prefer the currently-focused element
+        const focused = document.activeElement;
+        if (focused && focused !== document.body && focused !== document.documentElement) {
+          const r = focused.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            boxes.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+          }
+        }
+        // Also collect any elements with aria-selected / data-testid that are visible
+        if (boxes.length === 0) {
+          const candidates = document.querySelectorAll(
+            "button:focus, input:focus, [aria-selected='true'], [data-focused='true']"
+          );
+          for (const el of candidates) {
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+              boxes.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+              if (boxes.length >= 3) break;
+            }
+          }
+        }
+        return boxes;
+      }).catch(() => []);
+    } catch { result.boundingBoxes = []; }
+
   } catch (err) {
     result.status = "failed";
     // Extract a readable message — handle AggregateError (thrown by Playwright
@@ -345,6 +427,13 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
     result.runTimestamp = start - runStart;
     result.network = networkLogs;
     result.consoleLogs = consoleLogs;
+
+    // Stop CDP screencast before closing the page
+    if (cdpSession) {
+      await cdpSession.send("Page.stopScreencast").catch(() => {});
+      await cdpSession.detach().catch(() => {});
+      cdpSession = null;
+    }
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
@@ -482,6 +571,8 @@ export async function runTests(project, tests, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+  // NOTE: "done" SSE event is emitted AFTER the feedback loop (see bottom of function)
+  //         so the frontend only receives it once the entire pipeline is truly finished.
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Only runs when there are failures and an AI provider is available.
@@ -533,7 +624,7 @@ export async function runTests(project, tests, run, db) {
     }
   }
 
-  // Emit "done" after the feedback loop so SSE clients receive all logs and
-  // the final fetchRun() returns the complete run (including feedbackLoop).
+  // Emit "done" only now — after the feedback loop — so the frontend's
+  // fetchRun() always sees the final, stable completed state.
   emitRunEvent(run.id, "done", { status: "completed", passed: run.passed, failed: run.failed, total: run.total });
 }

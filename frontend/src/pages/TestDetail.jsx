@@ -4,9 +4,10 @@ import {
   ArrowLeft, Play, Edit2, RefreshCw, Download,
   CheckCircle2, XCircle, Clock, AlertCircle,
   ChevronRight, Calendar, User, GitCommit,
-  RotateCcw, ExternalLink, X, Plus, Save, Code2,
+  RotateCcw, ExternalLink, X, Plus, Save, Code2, GitMerge,
 } from "lucide-react";
 import { api } from "../api.js";
+import DiffView from "../components/DiffView.jsx";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -188,6 +189,7 @@ export default function TestDetail() {
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
+  const [showDiff,  setShowDiff]  = useState(false);   // show code diff when playwrightCodePrev exists
 
   // ── Code editor modal state ──────────────────────────────────────────────
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
@@ -571,6 +573,25 @@ export default function TestDetail() {
                   </button>
                 </div>
               )}
+
+              {/* Show changes — only when a regenerated previous version exists */}
+              {test.playwrightCodePrev && !editing && (
+                <button
+                  onClick={() => setShowDiff(v => !v)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "5px 10px", borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: showDiff ? "var(--accent-bg)" : "var(--bg2)",
+                    color: showDiff ? "var(--accent)" : "var(--text3)",
+                    fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <GitMerge size={11} />
+                  {showDiff ? "Hide diff" : "Show changes"}
+                </button>
+              )}
             </div>
 
             {/* ── Edit mode ── */}
@@ -626,6 +647,15 @@ export default function TestDetail() {
                 const stepChunks = splitCodeBySteps(test.playwrightCode, (test.steps || []).length);
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {/* Diff panel — shown above source when "Show changes" is active */}
+                    {showDiff && test.playwrightCodePrev && (
+                      <div style={{ marginBottom: 16 }}>
+                        <DiffView
+                          before={test.playwrightCodePrev}
+                          after={test.playwrightCode}
+                        />
+                      </div>
+                    )}
                     {(test.steps || []).map((step, idx) => (
                       <div key={idx} style={{
                         borderBottom: idx < (test.steps.length - 1) ? "1px solid var(--border)" : "none",

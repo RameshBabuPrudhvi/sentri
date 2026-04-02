@@ -6,7 +6,7 @@
  *   Browse → Add to Cart → Checkout
  */
 
-import { generateText, parseJSON } from "../aiProvider.js";
+import { generateText, streamText, parseJSON } from "../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 
 // ── Journey prompt builder ────────────────────────────────────────────────────
@@ -237,9 +237,11 @@ Return ONLY valid JSON (no markdown, no code fences):
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl) {
+export async function generateUserRequestedTest(name, description, appUrl, onToken) {
   const prompt = buildUserRequestedPrompt(name, description, appUrl);
-  const text = await generateText(prompt);
+  const text = onToken
+    ? await streamText(prompt, onToken)
+    : await generateText(prompt);
   const parsed = parseJSON(text);
 
   let tests = [];

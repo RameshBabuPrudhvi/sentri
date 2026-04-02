@@ -141,7 +141,6 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   // Kick off async - stream updates via polling
   crawlAndGenerateTests(project, run, db)
     .then(() => {
-      emitRunEvent(runId, "done", { status: "completed" });
       logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
         detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
@@ -151,7 +150,6 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
-      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${err.message}`, status: "failed",
@@ -205,7 +203,6 @@ app.post("/api/projects/:id/run", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
-      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${err.message}`, status: "failed",
@@ -246,7 +243,12 @@ app.patch("/api/tests/:testId", async (req, res) => {
   if (typeof name === "string")        test.name        = name.trim();
   if (typeof description === "string") test.description = description.trim();
   if (typeof priority === "string")    test.priority    = priority;
-  if (typeof playwrightCode === "string") test.playwrightCode = playwrightCode;
+  if (typeof playwrightCode === "string") {
+    if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
+      test.playwrightCodePrev = test.playwrightCode;
+    }
+    test.playwrightCode = playwrightCode;
+  }
 
   const stepsChanged = Array.isArray(steps) &&
     JSON.stringify(steps) !== JSON.stringify(test.steps);
@@ -297,6 +299,10 @@ Return ONLY valid JSON with no markdown fences:
         }
       }
       if (playwrightCode) {
+        // Preserve the previous version so the frontend can show a diff
+        if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
+          test.playwrightCodePrev = test.playwrightCode;
+        }
         test.playwrightCode = playwrightCode;
         test.codeRegeneratedAt = new Date().toISOString();
         codeRegeneratedNow = true;
@@ -435,7 +441,6 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     name: name.trim(),
     description: (description || "").trim(),
   }).then(createdTestIds => {
-    emitRunEvent(runId, "done", { status: "completed" });
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
@@ -444,7 +449,6 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     run.status = "failed";
     run.error = err.message;
     run.finishedAt = new Date().toISOString();
-    emitRunEvent(runId, "done", { status: "failed" });
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
@@ -495,7 +499,6 @@ app.post("/api/tests/:testId/run", async (req, res) => {
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
-      emitRunEvent(runId, "done", { status: "failed" });
       logActivity({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
@@ -521,7 +524,7 @@ app.get("/api/runs/:runId", (req, res) => {
 
 // ─── SSE: Real-time run events ────────────────────────────────────────────────
 // Registry: runId → Set of SSE response objects
-const runListeners = new Map();
+export const runListeners = new Map();
 
 /**
  * emitRunEvent(runId, type, payload)

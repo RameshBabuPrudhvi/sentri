@@ -14,7 +14,7 @@
 
 import { chromium } from "playwright";
 import { v4 as uuidv4 } from "uuid";
-import { getProviderName } from "./aiProvider.js";
+import { getProviderName, streamText } from "./aiProvider.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
@@ -22,10 +22,7 @@ import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyG
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
 
-const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
-const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
-
-// Lazy-loaded so crawler can be imported before index.js sets up SSE
+// Lazy SSE emitter — avoids circular-import issues
 let _emitRunEvent = null;
 async function emitRunEvent(...args) {
   if (!_emitRunEvent) {
@@ -34,16 +31,21 @@ async function emitRunEvent(...args) {
   _emitRunEvent?.(...args);
 }
 
+const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
+const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
+
 function log(run, msg) {
   const entry = `[${new Date().toISOString()}] ${msg}`;
   run.logs.push(entry);
   console.log(entry);
-  // Broadcast log event to SSE listeners
+  // Broadcast log event to SSE listeners (mirrors testRunner.js behaviour)
   emitRunEvent(run.id, "log", { message: entry });
 }
 
 function setStep(run, step) {
   run.currentStep = step;
+  // Broadcast a snapshot so the frontend pipeline progress bar updates live
+  emitRunEvent(run.id, "snapshot", { run });
 }
 
 // ── Test validation ───────────────────────────────────────────────────────────
@@ -233,6 +235,7 @@ async function takeSnapshot(page) {
  *   Step 8: Done
  */
 export async function generateSingleTest(project, run, db, { name, description }) {
+  const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
 
@@ -252,7 +255,9 @@ export async function generateSingleTest(project, run, db, { name, description }
   log(run, `   Name: "${name}"`);
   if (description) log(run, `   Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
-  const rawTests = await generateUserRequestedTest(name, description, project.url);
+  const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
+    emitRunEvent(run.id, "llm_token", { token });
+  });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
@@ -316,6 +321,7 @@ export async function generateSingleTest(project, run, db, { name, description }
 
   run.status = "completed";
   run.finishedAt = new Date().toISOString();
+  run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
   setStep(run, 8);
   run.pipelineStats = {
@@ -332,6 +338,9 @@ export async function generateSingleTest(project, run, db, { name, description }
   log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
   log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
 
+  // Signal completion to SSE clients so the frontend stops showing "Running"
+  emitRunEvent(run.id, "done", { status: "completed" });
+
   return createdTestIds;
 }
 
@@ -342,6 +351,8 @@ export async function crawlAndGenerateTests(project, run, db) {
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
   const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
+
+  const runStart = Date.now();
 
   const crawlQueue = new SmartCrawlQueue(project.url);
   crawlQueue.enqueue(project.url, 0);
@@ -403,6 +414,8 @@ export async function crawlAndGenerateTests(project, run, db) {
       snapshots.push(snapshot);
       snapshotsByUrl[url] = snapshot;
       run.pagesFound = snapshots.length;
+      // Keep run.pages in sync so the frontend site graph updates live
+      run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
 
       if (depth < MAX_DEPTH) {
         const links = await page.$$eval("a[href]", els => els.map(e => e.href));
@@ -523,8 +536,10 @@ export async function crawlAndGenerateTests(project, run, db) {
   }
 
   run.snapshots = filteredSnapshots;
+  run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   run.status = "completed";
   run.finishedAt = new Date().toISOString();
+  run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
   setStep(run, 8);
   run.pipelineStats = {
@@ -541,4 +556,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
   log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
   log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
+
+  // Signal completion to SSE clients so the frontend stops showing "Running"
+  emitRunEvent(run.id, "done", { status: "completed" });
 }

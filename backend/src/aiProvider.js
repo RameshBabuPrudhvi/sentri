@@ -246,7 +246,27 @@ async function callOllama(prompt, maxTokens) {
       throw new Error(`Ollama HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const data = await res.json();
+    // Ollama with stream:false should return a single JSON object, but some
+    // versions return NDJSON (one JSON object per line). We read as text and
+    // parse the last non-empty line that contains a "response" field to be safe.
+    const raw = await res.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // NDJSON fallback — split on newlines, find the last parseable line with
+      // a "response" field (the final done:true object from Ollama streaming)
+      const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+      data = null;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const candidate = JSON.parse(lines[i]);
+          if (candidate.response !== undefined) { data = candidate; break; }
+        } catch { /* keep searching */ }
+      }
+      if (!data) throw new Error(`Ollama returned unparseable response: ${raw.slice(0, 300)}`);
+    }
+
     // Ollama returns { response: "..." } for non-streaming generate
     if (!data.response) throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data).slice(0, 200)}`);
     return data.response;
@@ -346,4 +366,55 @@ export function parseJSON(text) {
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "");
   return JSON.parse(clean);
+}
+
+/**
+ * streamText(prompt, onToken, options?)
+ *
+ * Token-streaming variant of generateText().
+ * Calls onToken(string) for each token as it arrives.
+ * Returns the full accumulated text when the stream completes.
+ *
+ * Falls back to a single blocking call (Google / Ollama) that delivers
+ * the entire response as one synthetic "token".
+ */
+export async function streamText(prompt, onToken, options = {}) {
+  const provider = detectProvider();
+  if (!provider) throw new Error("No AI provider configured.");
+
+  if (provider === "anthropic") {
+    const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+    const stream = client.messages.stream({
+      model: buildProviderMeta().anthropic.model,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      messages: [{ role: "user", content: prompt }],
+    });
+    for await (const chunk of stream) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+        onToken(chunk.delta.text);
+      }
+    }
+    return (await stream.finalMessage()).content[0].text;
+  }
+
+  if (provider === "openai") {
+    const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+    const stream = await client.chat.completions.create({
+      model: buildProviderMeta().openai.model,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      stream: true,
+      messages: [{ role: "user", content: prompt }],
+    });
+    let full = "";
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content ?? "";
+      if (token) { full += token; onToken(token); }
+    }
+    return full;
+  }
+
+  // Google / Ollama — no streaming SDK; deliver whole response as one token
+  const text = await generateText(prompt, options);
+  onToken(text);
+  return text;
 }
