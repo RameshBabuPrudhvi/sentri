@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { CheckCircle2, Clock, RefreshCw, SkipForward } from "lucide-react";
+import LLMStreamPanel from "./LLMStreamPanel.jsx";
 
 // Pipeline stages for AI Generate flow.
 // Steps 1 & 2 (Crawl & Filter) are skipped — user provides test name + description directly.
@@ -14,7 +15,7 @@ const PIPELINE_STAGES = [
   { label: "Done",                icon: "🎉", step: 8 },
 ];
 
-export default function GenerateView({ run, isRunning }) {
+export default function GenerateView({ run, isRunning, llmTokens = "" }) {
   const [logsOpen, setLogsOpen] = React.useState(!!isRunning);
   const logRef = useRef(null);
 
@@ -281,6 +282,10 @@ export default function GenerateView({ run, isRunning }) {
             </div>
           )}
         </div>
+
+        {/* ── LLM streaming panel — sits below the pipeline/log card ── */}
+        <LLMStreamPanel tokens={llmTokens} isRunning={isRunning} />
+
       </div>
 
       {/* ── RIGHT: Stats + Run Info ── */}

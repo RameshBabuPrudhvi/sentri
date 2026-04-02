@@ -40,8 +40,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    Promise.all([api.getDashboard(), api.getProjects()])
-      .then(([d]) => {
+    api.getDashboard()
+      .then((d) => {
         setData(d);
         setRuns((d.recentRuns || []).slice(0, 6));
         setLoadError(false);

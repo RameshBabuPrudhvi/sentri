@@ -9,6 +9,8 @@ import {
   Lock,
 } from "lucide-react";
 import StepResultsView from "./StepResultsView";
+import LiveBrowserView from "./LiveBrowserView";
+import ExecutionTimeline from "./ExecutionTimeline";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -191,7 +193,7 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
           {result.videoPath ? (
             <video
               key={result.videoPath}
-              src={`http://localhost:3001${result.videoPath}`}
+              src={result.videoPath}
               controls
               autoPlay
               muted
@@ -237,7 +239,10 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
 
 function RunningStepsPreview({ queuedTest }) {
   const steps = queuedTest?.steps || [];
-  // Animate which step appears "active" — cycle through steps over time
+
+  // Animate which step appears "active" — cycle through steps over time.
+  // The backend does not emit per-step SSE events, so we use a client-side
+  // timer to give visual progress feedback while a test is running.
   const [activeStep, setActiveStep] = useState(0);
 
   useEffect(() => {
@@ -336,7 +341,7 @@ function RunningStepsPreview({ queuedTest }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function TestRunView({ run }) {
+export default function TestRunView({ run, frames = [] }) {
   const results = run?.results || run?.steps || [];
   const testQueue = run?.testQueue || [];
 
@@ -382,7 +387,12 @@ export default function TestRunView({ run }) {
   };
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, minHeight: 560 }}>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "minmax(260px, 320px) 1fr",
+      gap: 16,
+      minHeight: 560,
+    }}>
 
       {/* LEFT: Test case list */}
       <div style={panelStyle}>
@@ -484,13 +494,32 @@ export default function TestRunView({ run }) {
             onDrillDown={() => setDrilledCase(selectedCase)}
           />
         ) : isRunning ? (
-          <RunningStepsPreview queuedTest={testQueue[selectedCase]} />
+          frames.length > 0
+            ? <LiveBrowserView
+                frames={frames}
+                label={testQueue[selectedCase]?.name}
+                fallback={<RunningStepsPreview queuedTest={testQueue[selectedCase]} />}
+              />
+            : <RunningStepsPreview queuedTest={testQueue[selectedCase]} />
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: "0.82rem" }}>
             Select a test case to preview
           </div>
         )}
       </div>
+
+      {/* Execution timeline — only shown once there are completed results */}
+      {results.length > 0 && (
+        <div style={{ gridColumn: "1 / -1" }}>
+                  <ExecutionTimeline
+                    results={results}
+                    onSelect={(r) => {
+                      const idx = results.findIndex(res => res.testId === r.testId);
+                      if (idx >= 0) setSelectedCase(idx);
+                    }}
+                  />
+                </div>
+      )}
     </div>
   );
 }

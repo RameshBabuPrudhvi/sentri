@@ -13,6 +13,8 @@ import {
   Lock,
   MoreHorizontal,
 } from "lucide-react";
+import OverlayCanvas from "./OverlayCanvas.jsx";
+import HealingTimeline from "./HealingTimeline.jsx";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -713,6 +715,13 @@ export default function StepResultsView({ result, run, onBack }) {
                           : result.error}
                       </div>
                     )}
+
+                    {/* Self-healing trace — shown when the active step has healing events */}
+                    {isActive && result?.healingEvents?.length > 0 && (
+                      <div style={{ marginLeft: 30, marginTop: 8 }}>
+                        <HealingTimeline events={result.healingEvents} />
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -820,7 +829,7 @@ export default function StepResultsView({ result, run, onBack }) {
                 {result?.videoPath ? (
                   <video
                     key={result.videoPath}
-                    src={`http://localhost:3001${result.videoPath}`}
+                    src={result.videoPath}
                     controls
                     autoPlay
                     style={{ width: "100%", display: "block", background: "#000", minHeight: 200 }}
@@ -846,14 +855,10 @@ export default function StepResultsView({ result, run, onBack }) {
                 }
               >
                 {result?.screenshot ? (
-                  <img
-                    src={`data:image/png;base64,${result.screenshot}`}
-                    alt={`Step ${activeStepIdx + 1} screenshot`}
-                    style={{
-                      width: "100%",
-                      display: "block",
-                      minHeight: 200,
-                    }}
+                  <OverlayCanvas
+                    base64={result.screenshot}
+                    boxes={result.boundingBoxes || []}
+                    status={result.status}
                   />
                 ) : (
                   <div

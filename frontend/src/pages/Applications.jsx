@@ -161,7 +161,15 @@ export default function Projects() {
                   </div>
                   <div style={{ fontSize: "0.75rem", color: "var(--text3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     {p.url}
-                    <ExternalLink size={10} style={{ marginLeft: 4, verticalAlign: "middle" }} />
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      style={{ color: "inherit", marginLeft: 4, verticalAlign: "middle", display: "inline-flex" }}
+                    >
+                      <ExternalLink size={10} />
+                    </a>
                   </div>
 
                   {/* Stats row */}

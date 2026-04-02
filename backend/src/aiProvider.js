@@ -103,6 +103,7 @@ function detectProvider() {
 
 export function getProvider()     { try { return detectProvider(); } catch { return null; } }
 export function hasProvider()     { return getProvider() !== null; }
+export function isLocalProvider() { return getProvider() === "local"; }
 export function getProviderName() {
   const p = getProvider();
   return p ? buildProviderMeta()[p].name : "No provider configured";
@@ -215,13 +216,19 @@ async function callOllama(prompt, maxTokens) {
   const base  = getOllamaBaseUrl();
   const model = getOllamaModel();
 
+  // Local models (especially 7B) have much smaller effective context windows.
+  // Cap num_predict so the prompt + output don't exceed the model's limits.
+  // Ollama returns HTTP 500 when the combined size overflows.
+  const OLLAMA_MAX_PREDICT = parseInt(process.env.OLLAMA_MAX_PREDICT, 10) || 4096;
+  const effectiveTokens = Math.min(maxTokens || DEFAULT_MAX_TOKENS, OLLAMA_MAX_PREDICT);
+
   const body = {
     model,
     prompt,
     stream: false,
     options: {
       // Ollama uses num_predict for max tokens
-      num_predict: maxTokens || DEFAULT_MAX_TOKENS,
+      num_predict: effectiveTokens,
       temperature: 0.2,   // Low temp — we want deterministic JSON output
     },
     // Ask Ollama to return JSON when the model supports it
@@ -246,7 +253,34 @@ async function callOllama(prompt, maxTokens) {
       throw new Error(`Ollama HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
 
-    const data = await res.json();
+    // Ollama with stream:false should return a single JSON object, but some
+    // versions return NDJSON (one JSON object per line). We read as text and
+    // handle both formats.
+    const raw = await res.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // NDJSON fallback — each line is a JSON object with a partial "response"
+      // field (one token per line). Concatenate all response fields to
+      // reconstruct the full output, since the final done:true line typically
+      // has an empty response.
+      const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+      let fullResponse = "";
+      let foundAny = false;
+      for (const line of lines) {
+        try {
+          const candidate = JSON.parse(line);
+          if (candidate.response !== undefined) {
+            fullResponse += candidate.response;
+            foundAny = true;
+          }
+        } catch { /* skip unparseable lines */ }
+      }
+      if (!foundAny) throw new Error(`Ollama returned unparseable response: ${raw.slice(0, 300)}`);
+      data = { response: fullResponse };
+    }
+
     // Ollama returns { response: "..." } for non-streaming generate
     if (!data.response) throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data).slice(0, 200)}`);
     return data.response;
@@ -303,15 +337,18 @@ async function callProvider(provider, prompt, maxTokens) {
   }
 
   if (provider === "local") {
-    // Retry on connection errors only (Ollama rarely rate-limits)
+    // Retry on connection errors AND Ollama HTTP 500s (model overload / context overflow)
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await callOllama(prompt, tokens);
       } catch (err) {
-        const isConnErr = err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed");
-        if (attempt === MAX_RETRIES || !isConnErr) throw err;
+        const isRetryable =
+          err.message.includes("ECONNREFUSED") ||
+          err.message.includes("fetch failed") ||
+          err.message.includes("Ollama HTTP 500");
+        if (attempt === MAX_RETRIES || !isRetryable) throw err;
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        console.warn(`[Sentri/Ollama] Connection error. Retrying in ${delay / 1000}s...`);
+        console.warn(`[Sentri/Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
         await sleep(delay);
       }
     }
@@ -346,4 +383,56 @@ export function parseJSON(text) {
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "");
   return JSON.parse(clean);
+}
+
+/**
+ * streamText(prompt, onToken, options?)
+ *
+ * Token-streaming variant of generateText().
+ * Calls onToken(string) for each token as it arrives.
+ * Returns the full accumulated text when the stream completes.
+ *
+ * Falls back to a single blocking call (Google / Ollama) that delivers
+ * the entire response as one synthetic "token".
+ */
+export async function streamText(prompt, onToken, options = {}) {
+  const provider = detectProvider();
+  if (!provider) throw new Error("No AI provider configured.");
+
+  if (provider === "anthropic") {
+    const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+    const stream = client.messages.stream({
+      model: buildProviderMeta().anthropic.model,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      messages: [{ role: "user", content: prompt }],
+    });
+    for await (const chunk of stream) {
+      if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+        onToken(chunk.delta.text);
+      }
+    }
+    return (await stream.finalMessage()).content[0].text;
+  }
+
+  if (provider === "openai") {
+    const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+    const stream = await client.chat.completions.create({
+      model: buildProviderMeta().openai.model,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      stream: true,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+    });
+    let full = "";
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content ?? "";
+      if (token) { full += token; onToken(token); }
+    }
+    return full;
+  }
+
+  // Google / Ollama — no streaming SDK; deliver whole response as one token
+  const text = await generateText(prompt, options);
+  onToken(text);
+  return text;
 }

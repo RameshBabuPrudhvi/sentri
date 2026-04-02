@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
@@ -74,11 +74,26 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
   const [status, setStatus] = useState(null);   // null | { ok, error?, availableModels? }
   const [checking, setChecking] = useState(false);
 
+  // Refs to avoid re-triggering the status check when model/callback change
+  const modelRef = useRef(model);
+  const onModelChangeRef = useRef(onModelChange);
+  useEffect(() => { modelRef.current = model; }, [model]);
+  useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
+
   const check = useCallback(async () => {
     setChecking(true);
     try {
       const s = await api.getOllamaStatus();
       setStatus(s);
+      // Sync model state to the exact option value returned by Ollama so the
+      // controlled <select> stays in sync. Ollama tags include a suffix like
+      // ":latest" that the saved config may omit (e.g. "llama3.2" vs
+      // "llama3.2:latest"), causing a value mismatch → flicker loop.
+      const cur = modelRef.current;
+      if (s.availableModels?.length && !s.availableModels.includes(cur)) {
+        const match = s.availableModels.find(m => m.split(":")[0] === cur.split(":")[0]);
+        if (match) onModelChangeRef.current(match);
+      }
     } catch (err) {
       setStatus({ ok: false, error: err.message });
     } finally {
@@ -137,13 +152,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
           </label>
           <select
             className="input"
-            value={
-              // If current model value doesn't exactly match any option (e.g. "llama3.2"
-              // vs "llama3.2:latest"), find the closest match so the dropdown is in sync.
-              status.availableModels.includes(model)
-                ? model
-                : status.availableModels.find(m => m.split(":")[0] === model.split(":")[0]) || model
-            }
+            value={model}
             onChange={e => onModelChange(e.target.value)}
             style={{ height: 38, fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}
           >

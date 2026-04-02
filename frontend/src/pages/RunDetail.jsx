@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +9,7 @@ import {
   Download,
 } from "lucide-react";
 import { api } from "../api.js";
+import { useRunSSE, requestNotifPermission } from "../hooks/useRunSSE.js";
 
 import CrawlView from "../components/CrawlView";
 import GenerateView from "../components/GenerateView";
@@ -35,8 +36,9 @@ export default function RunDetail() {
 
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  const pollRef = useRef(null);
+  const [initialStatus, setInitialStatus] = useState(undefined);
+  const [frames, setFrames] = useState([]);
+  const [llmTokens, setLlmTokens] = useState("");
 
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
@@ -44,21 +46,59 @@ export default function RunDetail() {
     return r;
   }, [runId]);
 
+  // Initial fetch — capture the run's status at load time so useRunSSE can
+  // skip SSE entirely for already-finished runs (prevents spurious notifications).
   useEffect(() => {
-    fetchRun().finally(() => setLoading(false));
+    fetchRun().then((r) => {
+      if (r) setInitialStatus(r.status);
+    }).finally(() => setLoading(false));
   }, [fetchRun]);
 
-  // Poll while running
+  // Request notification permission once when this page is viewed
+  useEffect(() => { requestNotifPermission(); }, []);
+
+  // Reset live-stream state when navigating to a different run
   useEffect(() => {
-    if (!run) return;
-    if (run.status === "running") {
-      pollRef.current = setInterval(async () => {
-        const r = await fetchRun();
-        if (r?.status !== "running") clearInterval(pollRef.current);
-      }, 1500);
+    setFrames([]);
+    setLlmTokens("");
+    setInitialStatus(undefined);
+  }, [runId]);
+
+  // SSE — receives live updates while the run is active.
+  // Pass run?.status as initialStatus so the hook can skip SSE entirely
+  // for already-completed/failed runs (avoids spurious "Run complete" notifications).
+  const { sseDown } = useRunSSE(runId, useCallback((event) => {
+    if (event.type === "snapshot") {
+      setRun(event.run);
+    } else if (event.type === "result") {
+      setRun((prev) => {
+        if (!prev) return prev;
+        const results = [...(prev.results || [])];
+        const idx = results.findIndex((r) => r.testId === event.result.testId);
+        if (idx >= 0) results[idx] = { ...results[idx], ...event.result };
+        else results.push(event.result);
+        return { ...prev, results };
+      });
+    } else if (event.type === "log") {
+      setRun((prev) => {
+        if (!prev) return prev;
+        return { ...prev, logs: [...(prev.logs || []), event.message] };
+      });
+    } else if (event.type === "frame") {
+      // Keep only the latest frame — canvas paints it on rAF
+      setFrames([event.data]);
+    } else if (event.type === "llm_token") {
+      setLlmTokens((prev) => prev + event.token);
+    } else if (event.type === "done") {
+      // Immediately mark as completed so the UI stops showing "running"
+      // (isRunning = run.status === "running" flips to false right away,
+      //  so CrawlView/GenerateView render their completed state instantly)
+      setRun((prev) => prev ? { ...prev, status: event.status ?? "completed" } : prev);
+      setFrames([]); // clear live stream on completion
+      // Then re-fetch to get the full completed run object (stats, results, etc.)
+      fetchRun();
     }
-    return () => clearInterval(pollRef.current);
-  }, [run?.status]);
+  }, [fetchRun]), initialStatus);
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -104,11 +144,13 @@ export default function RunDetail() {
   const results = run.results || [];
   const passed = results.filter((r) => r.status === "passed").length;
   const failed = results.filter((r) => r.status === "failed").length;
-  const total = results.length;
+  // Use run.total (set upfront by the backend) so the count is correct from
+  // the first SSE snapshot — results.length grows as tests complete and would
+  // show "0 test cases" until the first result arrives.
+  const total = run.total ?? results.length;
   const passRate = total > 0 ? Math.round((passed / total) * 100) : null;
 
-  const BASE_URL = window.location.origin.replace(":3000", ":3001");
-  const traceUrl = run.tracePath ? `${BASE_URL}${run.tracePath}` : null;
+  const traceUrl = run.tracePath ?? null;
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -261,13 +303,26 @@ export default function RunDetail() {
         </div>
       )}
 
+      {/* ── SSE fallback banner — shown when polling instead of streaming ── */}
+      {sseDown && isRunning && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", marginBottom: 12,
+          background: "var(--amber-bg)", border: "1px solid #fcd34d",
+          borderRadius: 8, fontSize: "0.76rem", color: "var(--amber)",
+        }}>
+          <RefreshCw size={12} style={{ animation: "spin 2s linear infinite", flexShrink: 0 }} />
+          Live updates unavailable — refreshing every 5 s
+        </div>
+      )}
+
       {/* ── Main content ───────────────────────────────────────────────── */}
       {isCrawl ? (
         <CrawlView run={run} isRunning={isRunning} />
       ) : isGenerate ? (
-        <GenerateView run={run} isRunning={isRunning} />
+        <GenerateView run={run} isRunning={isRunning} llmTokens={llmTokens} />
       ) : (
-        <TestRunView run={run} />
+        <TestRunView run={run} frames={frames} />
       )}
 
       {/* ── Footer ─────────────────────────────────────────────────────── */}

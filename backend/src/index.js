@@ -154,6 +154,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
         type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });
@@ -207,6 +208,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });
@@ -243,7 +245,12 @@ app.patch("/api/tests/:testId", async (req, res) => {
   if (typeof name === "string")        test.name        = name.trim();
   if (typeof description === "string") test.description = description.trim();
   if (typeof priority === "string")    test.priority    = priority;
-  if (typeof playwrightCode === "string") test.playwrightCode = playwrightCode;
+  if (typeof playwrightCode === "string") {
+    if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
+      test.playwrightCodePrev = test.playwrightCode;
+    }
+    test.playwrightCode = playwrightCode;
+  }
 
   const stepsChanged = Array.isArray(steps) &&
     JSON.stringify(steps) !== JSON.stringify(test.steps);
@@ -294,6 +301,10 @@ Return ONLY valid JSON with no markdown fences:
         }
       }
       if (playwrightCode) {
+        // Preserve the previous version so the frontend can show a diff
+        if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
+          test.playwrightCodePrev = test.playwrightCode;
+        }
         test.playwrightCode = playwrightCode;
         test.codeRegeneratedAt = new Date().toISOString();
         codeRegeneratedNow = true;
@@ -445,6 +456,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
       detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
       status: "failed",
     });
+    emitRunEvent(runId, "done", { status: "failed" });
   });
 });
 
@@ -495,6 +507,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
         testId: test.id, testName: test.name,
         detail: `Single test failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });
@@ -511,6 +524,60 @@ app.get("/api/runs/:runId", (req, res) => {
   const run = db.runs[req.params.runId];
   if (!run) return res.status(404).json({ error: "not found" });
   res.json(run);
+});
+
+// ─── SSE: Real-time run events ────────────────────────────────────────────────
+// Registry: runId → Set of SSE response objects
+export const runListeners = new Map();
+
+/**
+ * emitRunEvent(runId, type, payload)
+ * Broadcasts a Server-Sent Event to every client listening on this run.
+ * Called from testRunner.js and crawler.js to push live updates.
+ */
+export function emitRunEvent(runId, type, payload = {}) {
+  const listeners = runListeners.get(runId);
+  if (!listeners || listeners.size === 0) return;
+  const data = JSON.stringify({ type, ...payload });
+  for (const res of listeners) {
+    try { res.write(`data: ${data}\n\n`); } catch { /* client gone */ }
+  }
+}
+
+// GET /api/runs/:id/events  — SSE stream for a single run
+app.get("/api/runs/:runId/events", (req, res) => {
+  const { runId } = req.params;
+  const run = db.runs[runId];
+  if (!run) return res.status(404).json({ error: "not found" });
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
+  res.flushHeaders();
+
+  // Send current snapshot immediately so the client has something to render
+  res.write(`data: ${JSON.stringify({ type: "snapshot", run })}\n\n`);
+
+  // If already done, send done event and close
+  if (run.status !== "running") {
+    res.write(`data: ${JSON.stringify({ type: "done", status: run.status })}\n\n`);
+    return res.end();
+  }
+
+  if (!runListeners.has(runId)) runListeners.set(runId, new Set());
+  runListeners.get(runId).add(res);
+
+  // Heartbeat — keeps the connection alive through proxies / load balancers
+  const heartbeat = setInterval(() => {
+    try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+  }, 20000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    runListeners.get(runId)?.delete(res);
+    if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
+  });
 });
 
 // ─── Dashboard summary ────────────────────────────────────────────────────────
@@ -873,8 +940,28 @@ app.patch("/api/projects/:id/tests/:testId/restore", (req, res) => {
 // NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
 app.post("/api/projects/:id/tests/bulk", (req, res) => {
   const { testIds, action } = req.body;
-  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore"].includes(action))
+  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore", "delete"].includes(action))
     return res.status(400).json({ error: "testIds[] and valid action required" });
+
+  if (action === "delete") {
+    const deleted = [];
+    testIds.forEach((tid) => {
+      const test = db.tests[tid];
+      if (test && test.projectId === req.params.id) {
+        deleted.push({ id: test.id, name: test.name });
+        delete db.tests[tid];
+      }
+    });
+    if (deleted.length) {
+      const project = db.projects[req.params.id];
+      logActivity({
+        type: "test.bulk_delete", projectId: req.params.id, projectName: project?.name || null,
+        detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
+      });
+    }
+    return res.json({ deleted: deleted.length, tests: deleted });
+  }
+
   const statusMap = { approve: "approved", reject: "rejected", restore: "draft" };
   const updated = [];
   testIds.forEach((tid) => {

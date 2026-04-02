@@ -6,19 +6,130 @@
  *   Browse → Add to Cart → Checkout
  */
 
-import { generateText, parseJSON } from "../aiProvider.js";
+import { generateText, streamText, parseJSON, isLocalProvider } from "../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
+
+// ── Step sanitiser — converts Playwright code lines to human-readable steps ──
+
+const CODE_PATTERNS = [
+  /^\s*await\s+/,
+  /^\s*page\./,
+  /^\s*expect\s*\(/,
+  /^\s*const\s+/,
+  /^\s*let\s+/,
+  /^\s*import\s+/,
+  /^\s*test\s*\(/,
+  /^\s*\/\//,
+  /^\s*}\s*\)\s*;?\s*$/,
+];
+
+function looksLikeCode(step) {
+  if (!step || typeof step !== "string") return false;
+  return CODE_PATTERNS.some(re => re.test(step));
+}
+
+/**
+ * Convert a Playwright code line into a human-readable step description.
+ * e.g. "await page.goto('https://example.com')" → "Navigate to https://example.com"
+ */
+function codeToHumanStep(code) {
+  const s = code.trim();
+
+  // page.goto
+  const gotoMatch = s.match(/page\.goto\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (gotoMatch) return `Navigate to ${gotoMatch[1]}`;
+
+  // page.click / page.getByRole(...).click
+  const clickMatch = s.match(/\.click\s*\(/);
+  if (clickMatch) {
+    const label = extractLabel(s);
+    return label ? `Click "${label}"` : "Click element";
+  }
+
+  // page.fill / .fill
+  const fillMatch = s.match(/\.fill\s*\(\s*['"`]?([^'"`),]*)['"`]?\s*,\s*['"`]([^'"`]*)['"`]/);
+  if (fillMatch) return `Enter "${fillMatch[2]}" into ${fillMatch[1] || "field"}`;
+
+  // expect(...).toBeVisible
+  if (/toBeVisible/.test(s)) {
+    const label = extractLabel(s);
+    return label ? `Verify "${label}" is visible` : "Verify element is visible";
+  }
+
+  // expect(...).toHaveURL
+  const urlMatch = s.match(/toHaveURL\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (urlMatch) return `Verify URL is ${urlMatch[1]}`;
+
+  // expect(...).toContainText
+  const textMatch = s.match(/toContainText\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (textMatch) return `Verify text "${textMatch[1]}" is present`;
+
+  // page.waitForLoadState
+  if (/waitForLoadState/.test(s)) return "Wait for page to load";
+
+  // Generic fallback — strip await/page prefix and camelCase → words
+  const stripped = s.replace(/^await\s+/, "").replace(/^page\./, "");
+  const words = stripped.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[()'"`;{}]/g, "").trim();
+  return words.length > 80 ? words.slice(0, 77) + "…" : words || "Perform action";
+}
+
+function extractLabel(code) {
+  // getByRole('button', { name: 'Submit' })
+  const roleMatch = code.match(/getByRole\s*\(\s*['"`][^'"`]*['"`]\s*,\s*\{[^}]*name\s*:\s*['"`]([^'"`]+)['"`]/);
+  if (roleMatch) return roleMatch[1];
+  // getByText('...')
+  const textMatch = code.match(/getByText\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (textMatch) return textMatch[1];
+  // getByLabel('...')
+  const labelMatch = code.match(/getByLabel\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (labelMatch) return labelMatch[1];
+  // getByPlaceholder('...')
+  const phMatch = code.match(/getByPlaceholder\s*\(\s*['"`]([^'"`]+)['"`]/);
+  if (phMatch) return phMatch[1];
+  return null;
+}
+
+/**
+ * sanitiseSteps(tests)
+ * If a test's steps array contains Playwright code instead of human-readable
+ * descriptions (common with smaller LLMs like Mistral 7B), convert them.
+ */
+function sanitiseSteps(tests) {
+  for (const t of tests) {
+    if (!Array.isArray(t.steps) || t.steps.length === 0) continue;
+    const codeCount = t.steps.filter(looksLikeCode).length;
+    // If more than half the steps look like code, convert all of them
+    if (codeCount > t.steps.length / 2) {
+      t.steps = t.steps
+        .filter(s => s && typeof s === "string" && s.trim())
+        .filter(s => !/^\s*}\s*\)\s*;?\s*$/.test(s))           // drop closing braces
+        .filter(s => !/^\s*import\s+/.test(s))                  // drop import lines
+        .filter(s => !/^\s*test\s*\(/.test(s))                  // drop test(...) wrappers
+        .map(s => looksLikeCode(s) ? codeToHumanStep(s) : s);
+    }
+  }
+  return tests;
+}
 
 // ── Journey prompt builder ────────────────────────────────────────────────────
 
 function buildJourneyPrompt(journey, allSnapshots) {
+  const local = isLocalProvider();
   const pageContexts = journey.pages.map(page => {
     const snapshot = allSnapshots[page.url];
+    // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500)
+    const rawElems = (snapshot?.elements || []).slice(0, local ? 8 : 10);
+    const elems = local
+      ? rawElems.map(e => ({
+          tag: e.tag, text: (e.text || "").slice(0, 40), type: e.type,
+          role: e.role, name: e.name, testId: e.testId,
+        }))
+      : rawElems;
     return `
   Page: ${page.url}
   Title: ${page.title}
   Intent: ${page.dominantIntent}
-  Key elements: ${JSON.stringify((snapshot?.elements || []).slice(0, 10), null, 2)}`;
+  Key elements: ${JSON.stringify(elems, null, 2)}`;
   }).join("\n---");
 
   return `You are a senior QA engineer generating comprehensive Playwright tests for a real user journey.
@@ -54,25 +165,44 @@ Return ONLY valid JSON (no markdown):
       "scenario": "positive|negative|edge_case",
       "journeyType": "${journey.type}",
       "isJourneyTest": true,
-      "steps": ["User opens page", "User performs action", "Assert expected outcome"],
+      "steps": ["User opens the login page", "User enters valid credentials and clicks Sign In", "Assert: user is redirected to the dashboard"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // full journey code here\n});"
     }
   ]
-}`;
+}
+
+IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
+BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
+GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
 }
 
 // ── Single page intent-based prompt ──────────────────────────────────────────
 
 function buildIntentPrompt(classifiedPage, snapshot) {
+  const local = isLocalProvider();
+  // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500).
+  // Cloud models get the full element data for richer test generation.
   const elements = classifiedPage.classifiedElements
     .filter(({ confidence }) => confidence > 20)
-    .slice(0, 20)
-    .map(({ element, intent, confidence }) => ({ ...element, intent, confidence }));
+    .slice(0, local ? 12 : 20)
+    .map(({ element, intent, confidence }) => {
+      if (local) {
+        return {
+          tag: element.tag, text: (element.text || "").slice(0, 40),
+          type: element.type, role: element.role,
+          name: element.name, id: element.id,
+          label: element.label, placeholder: element.placeholder,
+          testId: element.testId, intent, confidence,
+        };
+      }
+      return { ...element, intent, confidence };
+    });
 
   const pageType = classifiedPage.dominantIntent;
 
+  const testRange = local ? "3-5" : "5-8";
   const scenarioHints = {
-    AUTH: `Generate 5-8 tests covering:
+    AUTH: `Generate ${testRange} tests covering:
 - POSITIVE: Successful login with valid credentials redirects to dashboard
 - POSITIVE: Registration form accepts valid new user data  
 - NEGATIVE: Wrong password shows clear error message
@@ -81,7 +211,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Password visibility toggle works
 - EDGE: Forgot password link is accessible`,
 
-    SEARCH: `Generate 5-8 tests covering:
+    SEARCH: `Generate ${testRange} tests covering:
 - POSITIVE: Search returns relevant results for valid query
 - POSITIVE: Search filters narrow down results correctly
 - POSITIVE: Clicking a result navigates to detail page
@@ -90,7 +220,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Special characters in search don't break the page
 - EDGE: Very long search query is handled`,
 
-    CHECKOUT: `Generate 5-8 tests covering:
+    CHECKOUT: `Generate ${testRange} tests covering:
 - POSITIVE: Add item to cart and view cart with correct total
 - POSITIVE: Quantity update recalculates cart total
 - POSITIVE: Proceed to checkout from cart page
@@ -99,7 +229,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Remove item from cart updates totals
 - EDGE: Cart persists on page refresh`,
 
-    FORM_SUBMISSION: `Generate 5-8 tests covering:
+    FORM_SUBMISSION: `Generate ${testRange} tests covering:
 - POSITIVE: Form submits with all valid required fields
 - POSITIVE: Success confirmation is shown after submit
 - NEGATIVE: Submit with empty required fields shows validation
@@ -108,7 +238,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Form scrolls to first error field on failed submit
 - EDGE: Character limits enforced on text inputs`,
 
-    NAVIGATION: `Generate 5-8 tests covering:
+    NAVIGATION: `Generate ${testRange} tests covering:
 - POSITIVE: Page title and main heading (H1) are visible and correct
 - POSITIVE: Primary navigation links are present and clickable
 - POSITIVE: Clicking the logo/brand returns to homepage
@@ -118,7 +248,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Keyboard navigation reaches all interactive elements
 - EDGE: Page is correctly structured with semantic headings`,
 
-    CRUD: `Generate 5-8 tests covering:
+    CRUD: `Generate ${testRange} tests covering:
 - POSITIVE: Create new item with valid data succeeds
 - POSITIVE: Created item appears in list immediately  
 - POSITIVE: Edit existing item and save persists changes
@@ -127,7 +257,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Delete shows confirmation dialog
 - EDGE: Cancel edit discards unsaved changes`,
 
-    CONTENT: `Generate 5-8 tests covering:
+    CONTENT: `Generate ${testRange} tests covering:
 - POSITIVE: Main content/article is visible and readable
 - POSITIVE: Images are loaded (no broken images)
 - POSITIVE: Internal links within content navigate correctly
@@ -156,7 +286,7 @@ REQUIRED SCENARIO COVERAGE:
 ${hints}
 
 STRICT RULES:
-1. Generate 5-8 tests — must include BOTH positive AND negative scenarios
+1. Generate ${local ? "3-5" : "5-8"} tests — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
 3. ${SELF_HEALING_PROMPT_RULES}
 4. Every test MUST have at least 2 strong assertions
@@ -178,11 +308,15 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high|medium",
       "type": "${classifiedPage.dominantIntent.toLowerCase()}",
       "scenario": "positive|negative|edge_case",
-      "steps": ["concrete step 1", "concrete step 2", "assert: expected outcome"],
+      "steps": ["User opens the page", "User fills in the search field with a query", "Assert: search results are displayed"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // complete test code\n});"
     }
   ]
-}`;
+}
+
+IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
+BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
+GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
 }
 
 // ── User-requested single test prompt ─────────────────────────────────────────
@@ -223,11 +357,15 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high",
       "type": "user-requested",
       "scenario": "positive",
-      "steps": ["concrete step 1", "concrete step 2", "assert: expected outcome"],
+      "steps": ["User navigates to the application", "User performs the described action", "Assert: expected outcome is verified"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('${name.replace(/'/g, "\\'")}', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
-}`;
+}
+
+IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
+BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
+GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
 }
 
 /**
@@ -237,9 +375,11 @@ Return ONLY valid JSON (no markdown, no code fences):
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl) {
+export async function generateUserRequestedTest(name, description, appUrl, onToken) {
   const prompt = buildUserRequestedPrompt(name, description, appUrl);
-  const text = await generateText(prompt);
+  const text = onToken
+    ? await streamText(prompt, onToken)
+    : await generateText(prompt);
   const parsed = parseJSON(text);
 
   let tests = [];
@@ -252,6 +392,9 @@ export async function generateUserRequestedTest(name, description, appUrl) {
     t.sourceUrl = appUrl;
     if (!t.name || t.name === "descriptive name") t.name = name;
   }
+
+  // Convert Playwright code steps to human-readable descriptions (Mistral/small LLMs)
+  sanitiseSteps(tests);
 
   return tests;
 }
@@ -267,10 +410,14 @@ export async function generateJourneyTest(journey, snapshotsByUrl) {
     const text = await generateText(prompt);
     const result = parseJSON(text);
 
-    if (Array.isArray(result)) return result;
-    if (Array.isArray(result.tests)) return result.tests;
-    if (result && result.name) return [result]; // legacy single-test shape
-    return [];
+    let tests;
+    if (Array.isArray(result)) tests = result;
+    else if (Array.isArray(result.tests)) tests = result.tests;
+    else if (result && result.name) tests = [result]; // legacy single-test shape
+    else return [];
+
+    sanitiseSteps(tests);
+    return tests;
   } catch (err) {
     return [];
   }
@@ -285,9 +432,13 @@ export async function generateIntentTests(classifiedPage, snapshot) {
     const text = await generateText(prompt);
     const parsed = parseJSON(text);
 
-    if (Array.isArray(parsed)) return parsed;
-    if (Array.isArray(parsed.tests)) return parsed.tests;
-    return [];
+    let tests;
+    if (Array.isArray(parsed)) tests = parsed;
+    else if (Array.isArray(parsed.tests)) tests = parsed.tests;
+    else return [];
+
+    sanitiseSteps(tests);
+    return tests;
   } catch (err) {
     return [];
   }
