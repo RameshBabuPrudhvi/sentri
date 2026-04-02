@@ -36,6 +36,7 @@ export default function RunDetail() {
 
   const [run, setRun] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [initialStatus, setInitialStatus] = useState(undefined);
   const [frames, setFrames] = useState([]);
   const [llmTokens, setLlmTokens] = useState("");
 
@@ -45,9 +46,12 @@ export default function RunDetail() {
     return r;
   }, [runId]);
 
-  // Initial fetch
+  // Initial fetch — capture the run's status at load time so useRunSSE can
+  // skip SSE entirely for already-finished runs (prevents spurious notifications).
   useEffect(() => {
-    fetchRun().finally(() => setLoading(false));
+    fetchRun().then((r) => {
+      if (r) setInitialStatus(r.status);
+    }).finally(() => setLoading(false));
   }, [fetchRun]);
 
   // Request notification permission once when this page is viewed
@@ -57,6 +61,7 @@ export default function RunDetail() {
   useEffect(() => {
     setFrames([]);
     setLlmTokens("");
+    setInitialStatus(undefined);
   }, [runId]);
 
   // SSE — receives live updates while the run is active.
@@ -93,7 +98,7 @@ export default function RunDetail() {
       // Then re-fetch to get the full completed run object (stats, results, etc.)
       fetchRun();
     }
-  }, [fetchRun]), run?.status);
+  }, [fetchRun]), initialStatus);
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {

@@ -323,7 +323,6 @@ export async function generateSingleTest(project, run, db, { name, description }
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
-  setStep(run, 8);
   run.pipelineStats = {
     pagesFound: 0,
     rawTestsGenerated: rawTests.length,
@@ -333,6 +332,7 @@ export async function generateSingleTest(project, run, db, { name, description }
     journeysDetected: 0,
     averageQuality: dedupStats.averageQuality,
   };
+  setStep(run, 8);
 
   log(run, `\n📊 Pipeline Summary:`);
   log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
@@ -541,7 +541,6 @@ export async function crawlAndGenerateTests(project, run, db) {
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
-  setStep(run, 8);
   run.pipelineStats = {
     pagesFound: snapshots.length,
     rawTestsGenerated: rawTests.length,
@@ -551,6 +550,7 @@ export async function crawlAndGenerateTests(project, run, db) {
     journeysDetected: journeys.length,
     averageQuality: dedupStats.averageQuality,
   };
+  setStep(run, 8);
 
   log(run, `\n\u{1F4CA} Pipeline Summary:`);
   log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);

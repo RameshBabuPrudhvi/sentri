@@ -237,10 +237,21 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
 
 // ─── Live step preview while a test is running ───────────────────────────────
 
-function RunningStepsPreview({ queuedTest, activeStepIndex }) {
+function RunningStepsPreview({ queuedTest }) {
   const steps = queuedTest?.steps || [];
-  // activeStepIndex is now driven by SSE "step" events from the server
-  const activeStep = typeof activeStepIndex === "number" ? activeStepIndex : 0;
+
+  // Animate which step appears "active" — cycle through steps over time.
+  // The backend does not emit per-step SSE events, so we use a client-side
+  // timer to give visual progress feedback while a test is running.
+  const [activeStep, setActiveStep] = useState(0);
+
+  useEffect(() => {
+    if (steps.length === 0) return;
+    const interval = setInterval(() => {
+      setActiveStep((s) => Math.min(s + 1, steps.length - 1));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [steps.length]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -487,9 +498,9 @@ export default function TestRunView({ run, frames = [] }) {
             ? <LiveBrowserView
                 frames={frames}
                 label={testQueue[selectedCase]?.name}
-                fallback={<RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />}
+                fallback={<RunningStepsPreview queuedTest={testQueue[selectedCase]} />}
               />
-            : <RunningStepsPreview queuedTest={testQueue[selectedCase]} activeStepIndex={0} />
+            : <RunningStepsPreview queuedTest={testQueue[selectedCase]} />
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: "0.82rem" }}>
             Select a test case to preview

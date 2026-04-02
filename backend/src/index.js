@@ -507,6 +507,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
         testId: test.id, testName: test.name,
         detail: `Single test failed: ${err.message}`, status: "failed",
       });
+      emitRunEvent(runId, "done", { status: "failed" });
     });
 
   res.json({ runId });

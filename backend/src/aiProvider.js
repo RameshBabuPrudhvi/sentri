@@ -255,23 +255,30 @@ async function callOllama(prompt, maxTokens) {
 
     // Ollama with stream:false should return a single JSON object, but some
     // versions return NDJSON (one JSON object per line). We read as text and
-    // parse the last non-empty line that contains a "response" field to be safe.
+    // handle both formats.
     const raw = await res.text();
     let data;
     try {
       data = JSON.parse(raw);
     } catch {
-      // NDJSON fallback — split on newlines, find the last parseable line with
-      // a "response" field (the final done:true object from Ollama streaming)
+      // NDJSON fallback — each line is a JSON object with a partial "response"
+      // field (one token per line). Concatenate all response fields to
+      // reconstruct the full output, since the final done:true line typically
+      // has an empty response.
       const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
-      data = null;
-      for (let i = lines.length - 1; i >= 0; i--) {
+      let fullResponse = "";
+      let foundAny = false;
+      for (const line of lines) {
         try {
-          const candidate = JSON.parse(lines[i]);
-          if (candidate.response !== undefined) { data = candidate; break; }
-        } catch { /* keep searching */ }
+          const candidate = JSON.parse(line);
+          if (candidate.response !== undefined) {
+            fullResponse += candidate.response;
+            foundAny = true;
+          }
+        } catch { /* skip unparseable lines */ }
       }
-      if (!data) throw new Error(`Ollama returned unparseable response: ${raw.slice(0, 300)}`);
+      if (!foundAny) throw new Error(`Ollama returned unparseable response: ${raw.slice(0, 300)}`);
+      data = { response: fullResponse };
     }
 
     // Ollama returns { response: "..." } for non-streaming generate

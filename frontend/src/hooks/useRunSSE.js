@@ -156,6 +156,13 @@ export function useRunSSE(runId, onEvent, initialStatus) {
   useEffect(() => {
     if (!runId) return;
 
+    // Wait until the caller has resolved the initial run status before deciding
+    // whether to open an SSE connection. When initialStatus is undefined the
+    // initial fetch hasn't completed yet — connecting now would bypass the
+    // "already done" guard and fire spurious browser notifications for
+    // historical runs.
+    if (initialStatus === undefined) return;
+
     // If the run is already finished, skip SSE/polling entirely.
     // This prevents a spurious "Run complete" browser notification every time
     // the user navigates back to a historical run detail page.
