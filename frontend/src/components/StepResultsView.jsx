@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
+import { cleanTestName } from "../utils/testName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -452,7 +453,7 @@ export default function StepResultsView({ result, run, onBack }) {
             maxWidth: 400,
           }}
         >
-          {result?.testName || result?.name || "Test Case"}
+          {cleanTestName(result?.testName || result?.name) || "Test Case"}
         </span>
       </div>
 
@@ -527,7 +528,7 @@ export default function StepResultsView({ result, run, onBack }) {
               >
                 Test Case
               </div>
-              {result?.testName || result?.name || "Test"}
+              {cleanTestName(result?.testName || result?.name) || "Test"}
               {/* Avatar icon */}
               <div
                 style={{
