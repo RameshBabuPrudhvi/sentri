@@ -45,11 +45,7 @@ export default function CrawlDialsPanel({ onChange }) {
         <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)", flex: 1 }}>
           Test Dials
         </span>
-        <span style={{
-          display: "inline-flex", alignItems: "center",
-          background: "var(--accent-bg)", color: "var(--accent)",
-          padding: "1px 8px", borderRadius: 99, fontSize: "0.7rem", fontWeight: 700, marginRight: 6,
-        }}>
+        <span className="active-count-pill" style={{ marginRight: 6 }}>
           {activeCount} active
         </span>
         <span style={{ color: "var(--text3)", display: "flex" }}>

@@ -217,11 +217,7 @@ export default function TestDials({ onChange }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Test Dials</span>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 4,
-            background: "var(--accent-bg)", color: "var(--accent)",
-            padding: "2px 9px", borderRadius: 99, fontSize: "0.72rem", fontWeight: 600,
-          }}>
+          <span className="active-count-pill">
             {activeCount} active
           </span>
         </div>
@@ -380,7 +376,7 @@ export default function TestDials({ onChange }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <Cpu size={14} color="var(--text3)" />
-            <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text2)" }}>Automation Hooks</span>
+            <span className="dial-label">Automation Hooks</span>
           </div>
           <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", paddingTop: 10 }}>
             <input
@@ -398,24 +394,17 @@ export default function TestDials({ onChange }) {
 
       {/* ── Custom Modifier ── */}
       <div>
-        <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text2)", marginBottom: 8 }}>
+        <div className="dial-label" style={{ marginBottom: 8 }}>
           Custom Modifier
         </div>
         <textarea
+          className="dial-textarea"
           value={cfg.customModifier}
           onChange={e => {
             if (e.target.value.length <= 500) update({ customModifier: e.target.value });
           }}
           placeholder="Add any additional context or specific requirements (max 500 characters)..."
           rows={3}
-          style={{
-            width: "100%", padding: "10px 12px", border: "1px solid var(--border)",
-            borderRadius: "var(--radius)", background: "var(--bg2)", color: "var(--text)",
-            fontSize: "0.85rem", resize: "vertical", fontFamily: "var(--font-sans)",
-            lineHeight: 1.5, outline: "none",
-          }}
-          onFocus={e => { e.target.style.borderColor = "var(--accent)"; e.target.style.boxShadow = "0 0 0 3px rgba(91,110,245,0.1)"; }}
-          onBlur={e => { e.target.style.borderColor = "var(--border)"; e.target.style.boxShadow = "none"; }}
         />
         <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4 }}>
           {cfg.customModifier.length}/500 characters

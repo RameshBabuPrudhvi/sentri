@@ -88,51 +88,6 @@ a:hover { text-decoration: underline; }
   color: var(--text) !important;
 }
 
-/* ── Shared modal primitives ────────────────────────────────────────────────── */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-  z-index: 999; backdrop-filter: blur(2px);
-}
-.modal-panel {
-  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  z-index: 1000; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-  overflow: hidden;
-}
-.modal-close {
-  background: none; border: none; cursor: pointer;
-  color: var(--text3); padding: 2px; display: flex;
-}
-.modal-close:hover { color: var(--text); }
-
-/* ── Dial / form labels ─────────────────────────────────────────────────────── */
-.dial-label {
-  font-size: 0.82rem; font-weight: 600; color: var(--text2);
-}
-
-/* ── Inline error banner ────────────────────────────────────────────────────── */
-.error-banner {
-  background: var(--red-bg); color: var(--red);
-  border-radius: var(--radius); padding: 8px 12px;
-  font-size: 0.82rem; line-height: 1.5;
-}
-
-/* ── Active-count pill badge ────────────────────────────────────────────────── */
-.badge-active-count {
-  display: inline-flex; align-items: center;
-  background: var(--accent-bg); color: var(--accent);
-  padding: 2px 9px; border-radius: 99px;
-  font-size: 0.72rem; font-weight: 600;
-}
-
-/* ── Section accordion header (TestDials collapsible) ───────────────────────── */
-.section-header {
-  width: 100%; display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; background: none; border: none; cursor: pointer;
-  gap: 10px; text-align: left;
-}
-.section-header:hover { background: var(--bg2); }
-
 .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -242,7 +197,7 @@ label {
   border-radius: var(--radius);
 }
 
-/* Modal */
+/* ── Shared modal primitives ────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 999;
   background: rgba(0,0,0,0.45);
@@ -258,20 +213,26 @@ label {
   box-shadow: 0 20px 60px rgba(0,0,0,0.18);
   overflow: hidden;
 }
+.modal-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text3); padding: 2px; display: flex;
+}
+.modal-close:hover { color: var(--text); }
 
-/* Section / accordion header (used by Collapsible, CrawlDialsPanel, etc.) */
+/* ── Section accordion header (TestDials collapsible, CrawlDialsPanel) ────── */
 .section-header {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
   padding: 12px 16px; background: none; border: none; cursor: pointer;
   gap: 10px; text-align: left;
 }
+.section-header:hover { background: var(--bg2); }
 
-/* Dial label — small bold muted heading used in TestDials, form labels, etc. */
+/* ── Dial / form labels ─────────────────────────────────────────────────────── */
 .dial-label {
   font-size: 0.82rem; font-weight: 600; color: var(--text2);
 }
 
-/* Inline error alert */
+/* ── Inline error alert ─────────────────────────────────────────────────────── */
 .alert-error {
   background: var(--red-bg); color: var(--red);
   border-radius: var(--radius); padding: 8px 12px;

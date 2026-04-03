@@ -34,11 +34,7 @@ function Tab({ label, badge, active, onClick }) {
     >
       {label}
       {badge != null && (
-        <span style={{
-          background: "var(--accent-bg)", color: "var(--accent)",
-          fontSize: "0.68rem", fontWeight: 700, padding: "1px 6px",
-          borderRadius: 99,
-        }}>
+        <span className="active-count-pill">
           {badge}
         </span>
       )}
@@ -124,10 +120,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
             Generate a Test Case
           </h2>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}
-          >
+          <button className="modal-close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
