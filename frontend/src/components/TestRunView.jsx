@@ -259,7 +259,7 @@ function RunningStepsPreview({ queuedTest }) {
       {/* Header */}
       <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: 4 }}>
-          {queuedTest?.name || "Running…"}
+          {cleanTestName(queuedTest?.name) || "Running…"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--blue)", animation: "pulse 1.4s ease-in-out infinite" }} />
@@ -456,7 +456,7 @@ export default function TestRunView({ run, frames = [] }) {
                   {queuedTest?.name ? (
                     <>
                       <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {queuedTest.name}
+                        {cleanTestName(queuedTest.name)}
                       </div>
                       <div style={{ fontSize: "0.67rem", color: "var(--blue)", marginTop: 1 }}>Running…</div>
                     </>
@@ -498,7 +498,7 @@ export default function TestRunView({ run, frames = [] }) {
           frames.length > 0
             ? <LiveBrowserView
                 frames={frames}
-                label={testQueue[selectedCase]?.name}
+                label={cleanTestName(testQueue[selectedCase]?.name)}
                 fallback={<RunningStepsPreview queuedTest={testQueue[selectedCase]} />}
               />
             : <RunningStepsPreview queuedTest={testQueue[selectedCase]} />
