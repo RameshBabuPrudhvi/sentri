@@ -588,7 +588,9 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   // The loop classifies each failure (SELECTOR_ISSUE, NAVIGATION_FAIL, etc.),
   // regenerates high-priority failures via AI, and updates the DB so the next
   // run benefits from the improved test code.
-  if (run.failed > 0) {
+  // Skip the feedback loop entirely if the run was aborted — no point in
+  // regenerating tests when the user cancelled the operation.
+  if (run.failed > 0 && run.status !== "aborted" && !signal?.aborted) {
     try {
       const { hasProvider } = await import("./aiProvider.js");
       if (hasProvider()) {
@@ -619,7 +621,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
           log(run, `   📊 Failure breakdown: ${breakdown}`);
         }
 
-        const feedback = await applyFeedbackLoop(run, db);
+        const feedback = await applyFeedbackLoop(run, db, { signal });
         if (feedback.improved > 0) {
           log(run, `   ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
           log(run, `   💡 Regenerated tests will use improved selectors on next run`);

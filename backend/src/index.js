@@ -645,10 +645,12 @@ app.get("/api/runs/:runId/events", (req, res) => {
   if (!runListeners.has(runId)) runListeners.set(runId, new Set());
   runListeners.get(runId).add(res);
 
-  // Heartbeat — keeps the connection alive through proxies / load balancers
+  // Heartbeat — keeps the connection alive through proxies / load balancers.
+  // 10 s interval (down from 20 s) to avoid ECONNRESET from aggressive proxies
+  // or OS TCP stacks during long-running feedback-loop AI calls.
   const heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
-  }, 20000);
+  }, 10000);
 
   req.on("close", () => {
     clearInterval(heartbeat);

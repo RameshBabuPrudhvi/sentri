@@ -136,11 +136,15 @@ export function useRunSSE(runId, onEvent, initialStatus) {
       }
     };
 
-    es.onerror = () => {
+    es.onerror = (evt) => {
       es.close();
       if (doneRef.current) return;
 
       retryCount.current += 1;
+
+      // Log SSE disconnect so ECONNRESET-style failures are visible in devtools
+      // without confusing the user — this is expected during long AI operations.
+      console.debug(`[useRunSSE] SSE disconnected (attempt ${retryCount.current}/${MAX_SSE_RETRIES}), reconnecting…`);
 
       if (retryCount.current > MAX_SSE_RETRIES) {
         startPolling();
