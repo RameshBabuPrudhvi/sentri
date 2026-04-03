@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Settings2, ChevronDown, ChevronUp, Plus, X, Save, RotateCcw,
+  Settings2, ChevronDown, Plus, X, Save, RotateCcw,
   Target, Users, ShieldCheck, FileText, Globe, Cpu, Info,
   Zap, BookOpen, GitBranch, Bug, Lock, BarChart3, Layers,
 } from "lucide-react";
@@ -12,6 +12,8 @@ import {
   loadSavedConfig, saveConfig,
   countActiveDials, buildTestDialsPrompt,
 } from "./testDialsPrompt.js";
+import Collapsible from "./Collapsible.jsx";
+import Tooltip from "./Tooltip.jsx";
 
 // Re-export so existing consumers (CrawlDialsPanel, GenerateTestModal) that
 // import { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx"
@@ -94,63 +96,8 @@ const PRESET_PACKS = [
   },
 ];
 
-// ─── Section accordion ────────────────────────────────────────────────────────
-
-function Section({ icon, label, subtitle, children, defaultOpen = false }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div style={{ borderRadius: "var(--radius)", border: "1px solid var(--border)", overflow: "hidden", background: "var(--surface)" }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 16px", background: "none", border: "none", cursor: "pointer",
-          gap: 10, textAlign: "left",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "var(--text3)", display: "flex" }}>{icon}</span>
-          <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "var(--text)" }}>{label}</span>
-          {subtitle && (
-            <span style={{ fontSize: "0.72rem", color: "var(--text3)", fontStyle: "italic" }}>({subtitle})</span>
-          )}
-        </div>
-        <span style={{ color: "var(--text3)", display: "flex", flexShrink: 0 }}>
-          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </span>
-      </button>
-      {open && (
-        <div style={{ borderTop: "1px solid var(--border)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Tooltip ──────────────────────────────────────────────────────────────────
-
-function Tooltip({ text, children }) {
-  const [show, setShow] = useState(false);
-  return (
-    <span style={{ position: "relative", display: "inline-flex" }}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-    >
-      {children}
-      {show && (
-        <span style={{
-          position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
-          background: "var(--text)", color: "var(--bg)", fontSize: "0.72rem", padding: "5px 9px",
-          borderRadius: 6, whiteSpace: "nowrap", zIndex: 999, pointerEvents: "none",
-          boxShadow: "var(--shadow-sm)", maxWidth: 260, whiteSpace: "normal", lineHeight: 1.4, textAlign: "center",
-        }}>
-          {text}
-        </span>
-      )}
-    </span>
-  );
-}
+// Alias Collapsible as Section to keep JSX below unchanged
+const Section = Collapsible;
 
 // ─── Preset dropdown ──────────────────────────────────────────────────────────
 
