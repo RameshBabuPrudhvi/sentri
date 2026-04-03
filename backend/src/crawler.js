@@ -243,7 +243,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
 
   const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, dialsPrompt, signal);
+  }, { dialsPrompt, signal });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
@@ -473,7 +473,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // AI test generation
   setStep(run, 4);
   log(run, `\u{1F916} Generating intent-driven tests...`);
-  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), dialsPrompt, signal);
+  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, signal });
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
 
   throwIfAborted(signal);
