@@ -243,10 +243,12 @@ app.post("/api/projects/:id/run", async (req, res) => {
   runTests(project, tests, run, db, { signal: abortController.signal })
     .then(() => {
       runAbortControllers.delete(runId);
-      logActivity({
-        type: "test_run.complete", projectId: project.id, projectName: project.name,
-        detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
-      });
+      if (run.status !== "aborted") {
+        logActivity({
+          type: "test_run.complete", projectId: project.id, projectName: project.name,
+          detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
+        });
+      }
     })
     .catch((err) => {
       runAbortControllers.delete(runId);
@@ -502,10 +504,12 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     signal: abortController.signal,
   }).then(createdTestIds => {
     runAbortControllers.delete(runId);
-    logActivity({
-      type: "test.generate", projectId: project.id, projectName: project.name,
-      detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
-    });
+    if (run.status !== "aborted") {
+      logActivity({
+        type: "test.generate", projectId: project.id, projectName: project.name,
+        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
+      });
+    }
   }).catch(err => {
     runAbortControllers.delete(runId);
     if (err.name === "AbortError" || run.status === "aborted") return;
@@ -557,11 +561,13 @@ app.post("/api/tests/:testId/run", async (req, res) => {
   runTests(project, [test], run, db, { signal: abortController.signal })
     .then(() => {
       runAbortControllers.delete(runId);
-      logActivity({
-        type: "test_run.complete", projectId: project.id, projectName: project.name,
-        testId: test.id, testName: test.name,
-        detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
-      });
+      if (run.status !== "aborted") {
+        logActivity({
+          type: "test_run.complete", projectId: project.id, projectName: project.name,
+          testId: test.id, testName: test.name,
+          detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
+        });
+      }
     })
     .catch((err) => {
       runAbortControllers.delete(runId);
