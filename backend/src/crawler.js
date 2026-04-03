@@ -308,8 +308,6 @@ export async function generateSingleTest(project, run, db, { name, description, 
     createdTestIds.push(testId);
   }
 
-  run.finishedAt = new Date().toISOString();
-  run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
   run.pipelineStats = {
     pagesFound: 0,
@@ -322,6 +320,8 @@ export async function generateSingleTest(project, run, db, { name, description, 
   };
 
   finalizeRunIfNotAborted(run, () => {
+    run.finishedAt = new Date().toISOString();
+    run.duration = Date.now() - runStart;
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
@@ -541,8 +541,6 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
-  run.finishedAt = new Date().toISOString();
-  run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
   run.pipelineStats = {
     pagesFound: snapshots.length,
@@ -555,6 +553,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   };
 
   finalizeRunIfNotAborted(run, () => {
+    run.finishedAt = new Date().toISOString();
+    run.duration = Date.now() - runStart;
     setStep(run, 8);
     log(run, `\n\u{1F4CA} Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);

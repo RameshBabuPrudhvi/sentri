@@ -243,9 +243,16 @@ async function callOllama(prompt, maxTokens, externalSignal) {
 
   // If an external abort signal is provided (e.g. user clicked "Stop Task"),
   // forward it to our internal controller so the fetch is cancelled immediately.
+  // We keep a reference to the handler so we can remove it in `finally` —
+  // without cleanup, 60+ sequential AI calls sharing one signal would trigger
+  // a MaxListenersExceededWarning.
+  let onExternalAbort = null;
   if (externalSignal) {
     if (externalSignal.aborted) { clearTimeout(timeoutId); controller.abort(); }
-    else externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    else {
+      onExternalAbort = () => controller.abort();
+      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+    }
   }
 
   try {
@@ -303,6 +310,9 @@ async function callOllama(prompt, maxTokens, externalSignal) {
     throw err;
   } finally {
     clearTimeout(timeoutId);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
   }
 }
 

@@ -11,7 +11,7 @@ import {
   recordHealingFailure,
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
-import { finalizeRunIfNotAborted } from "./abortHelper.js";
+import { finalizeRunIfNotAborted, isRunAborted } from "./abortHelper.js";
 import { emitRunEvent, log } from "./utils/runLogger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -586,13 +586,10 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
 
-  finalizeRunIfNotAborted(run);
-  // Only set finishedAt/duration if the run wasn't already aborted — the abort
-  // endpoint sets these immediately so the UI shows the correct abort timestamp.
-  if (run.status !== "aborted") {
+  finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
-  }
+  });
   log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
 
   // Broadcast a snapshot so the frontend immediately sees the updated status
@@ -600,7 +597,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   // feedback loop performs long-running AI calls below.
   // The final "done" SSE event is still emitted AFTER the feedback loop so
   // fetchRun() always sees the fully stable state.
-  if (run.status !== "aborted") {
+  if (!isRunAborted(run, signal)) {
     emitRunEvent(run.id, "snapshot", { run });
   }
 
@@ -611,7 +608,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   // run benefits from the improved test code.
   // Skip the feedback loop entirely if the run was aborted — no point in
   // regenerating tests when the user cancelled the operation.
-  if (run.failed > 0 && run.status !== "aborted" && !signal?.aborted) {
+  if (run.failed > 0 && !isRunAborted(run, signal)) {
     try {
       const { hasProvider } = await import("./aiProvider.js");
       if (hasProvider()) {
@@ -659,7 +656,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   // Emit "done" only now — after the feedback loop — so the frontend's
   // fetchRun() always sees the final, stable completed state.
   // Skip if already aborted — the abort endpoint already emitted the done event.
-  if (run.status !== "aborted") {
+  if (!isRunAborted(run, signal)) {
     emitRunEvent(run.id, "done", { status: run.status, passed: run.passed, failed: run.failed, total: run.total });
   }
 }

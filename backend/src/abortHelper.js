@@ -16,6 +16,18 @@ export function throwIfAborted(signal) {
 }
 
 /**
+ * Returns true if the run has been aborted (either via run.status or signal).
+ * Centralises the duplicated `run.status !== "aborted" && !signal?.aborted`
+ * guard used across pipeline functions.
+ *
+ * @param {object}                       run
+ * @param {AbortSignal | undefined | null} [signal]
+ */
+export function isRunAborted(run, signal) {
+  return run.status === "aborted" || !!signal?.aborted;
+}
+
+/**
  * Guard that marks a run as "completed" only if it wasn't already aborted,
  * then calls `onComplete` for site-specific logging / SSE emission.
  *

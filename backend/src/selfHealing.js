@@ -196,9 +196,10 @@ export function getSelfHealingHelperCode(healingHints) {
 
       // After clicking, give the page a moment to settle — navigation links
       // and SPAs need time to load the new content before the next assertion.
-      // We try networkidle first (best for full navigations) then fall back
-      // to a short wait (for SPA route changes that don't trigger network).
-      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+      // Use domcontentloaded (not networkidle) because SPAs and e-commerce
+      // sites fire continuous background requests and never reach networkidle,
+      // causing a guaranteed timeout.
+      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
     }
 
     // Helper: restrict a locator to only fillable elements so we never
