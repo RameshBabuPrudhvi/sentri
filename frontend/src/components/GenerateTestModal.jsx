@@ -15,7 +15,7 @@ import { Upload, FileCode2, Clock, X } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
-import { buildTestDialsPrompt, countActiveDials } from "./testDialsPrompt.js";
+import { buildTestDialsPrompt, countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
 
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
@@ -88,10 +88,10 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [description, setDescription] = useState("");
   const [phase, setPhase] = useState("form");   // "form" | "submitting"
   const [error, setError] = useState(null);
-  const [dialsConfig, setDialsConfig] = useState(null);
+  const [dialsConfig, setDialsConfig] = useState(() => loadSavedConfig());
 
   // Active dial count for badge
-  const [activeDialCount, setActiveDialCount] = useState(3);
+  const [activeDialCount, setActiveDialCount] = useState(() => countActiveDials(loadSavedConfig()));
 
   useEffect(() => {
     setTimeout(() => nameRef.current?.focus(), 60);

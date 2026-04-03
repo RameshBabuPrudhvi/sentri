@@ -190,11 +190,17 @@ export default function TestDials({ onChange }) {
   }
 
   function toggleWorkflow(id) {
-    update({ workflow: cfg.workflow.includes(id) ? cfg.workflow.filter(w => w !== id) : [...cfg.workflow, id] });
+    update({
+      workflow: cfg.workflow.includes(id) ? cfg.workflow.filter(w => w !== id) : [...cfg.workflow, id],
+      preset: "",
+    });
   }
 
   function toggleQuality(id) {
-    update({ quality: cfg.quality.includes(id) ? cfg.quality.filter(q => q !== id) : [...cfg.quality, id] });
+    update({
+      quality: cfg.quality.includes(id) ? cfg.quality.filter(q => q !== id) : [...cfg.quality, id],
+      preset: "",
+    });
   }
 
   function handleSave() {
@@ -286,7 +292,7 @@ export default function TestDials({ onChange }) {
             <input
               type="checkbox"
               checked={cfg.workflow.includes(opt.id)}
-              onChange={() => { toggleWorkflow(opt.id); update({ preset: "" }); }}
+              onChange={() => toggleWorkflow(opt.id)}
               style={{ marginTop: 3, accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 }}
             />
             <div>
@@ -308,7 +314,7 @@ export default function TestDials({ onChange }) {
             <input
               type="checkbox"
               checked={cfg.quality.includes(opt.id)}
-              onChange={() => { toggleQuality(opt.id); update({ preset: "" }); }}
+              onChange={() => toggleQuality(opt.id)}
               style={{ accentColor: "var(--accent)", cursor: "pointer", width: 14, height: 14 }}
             />
             <span style={{ fontSize: "0.85rem", color: "var(--text)", fontWeight: cfg.quality.includes(opt.id) ? 500 : 400 }}>

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
+import { loadSavedConfig } from "../components/testDialsPrompt.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 
@@ -77,7 +78,7 @@ export default function ProjectDetail() {
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
   const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
-  const [crawlDialsCfg, setCrawlDialsCfg] = useState(null);
+  const [crawlDialsCfg, setCrawlDialsCfg] = useState(() => loadSavedConfig());
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [search, setSearch]               = useState("");

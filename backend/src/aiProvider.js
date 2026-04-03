@@ -293,6 +293,10 @@ async function callOllama(prompt, maxTokens, externalSignal) {
     return data.response;
   } catch (err) {
     if (err.name === "AbortError") {
+      // Distinguish user-initiated abort from internal timeout
+      if (externalSignal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
       throw new Error(`Ollama request timed out after ${timeoutMs / 1000}s. Try a smaller/faster model or increase OLLAMA_TIMEOUT_MS.`);
     }
     throw err;
