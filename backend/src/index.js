@@ -413,7 +413,7 @@ app.post("/api/projects/:id/tests", (req, res) => {
   const { name, description, steps, playwrightCode, priority, type } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  const testId = uuidv4();
+  const testId = generateTestId(db);
   const test = {
     id: testId,
     projectId: project.id,
@@ -486,7 +486,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     });
   }
 
-  const runId = uuidv4();
+  const runId = generateRunId(db);
   const run = {
     id: runId,
     projectId: project.id,
@@ -539,7 +539,7 @@ app.post("/api/tests/:testId/run", async (req, res) => {
   const project = db.projects[test.projectId];
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const runId = uuidv4();
+  const runId = generateRunId(db);
   const run = {
     id: runId,
     projectId: project.id,

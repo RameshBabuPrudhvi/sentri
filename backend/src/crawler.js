@@ -13,7 +13,7 @@
  */
 
 import { chromium } from "playwright";
-import { v4 as uuidv4 } from "uuid";
+import { generateTestId } from "./utils/idGenerator.js";
 import { getProviderName, streamText } from "./aiProvider.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
@@ -285,7 +285,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
   const createdTestIds = [];
   for (const t of validatedTests) {
-    const testId = uuidv4();
+    const testId = generateTestId(db);
     db.tests[testId] = {
       ...t,
       id: testId,
