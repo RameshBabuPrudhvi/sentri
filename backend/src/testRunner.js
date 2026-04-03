@@ -566,8 +566,15 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     run.duration = Date.now() - runStart;
   }
   log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
-  // NOTE: "done" SSE event is emitted AFTER the feedback loop (see bottom of function)
-  //         so the frontend only receives it once the entire pipeline is truly finished.
+
+  // Broadcast a snapshot so the frontend immediately sees the updated status
+  // (e.g. "completed") instead of staying stuck on "running" while the
+  // feedback loop performs long-running AI calls below.
+  // The final "done" SSE event is still emitted AFTER the feedback loop so
+  // fetchRun() always sees the fully stable state.
+  if (run.status !== "aborted") {
+    emitRunEvent(run.id, "snapshot", { run });
+  }
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Only runs when there are failures and an AI provider is available.
