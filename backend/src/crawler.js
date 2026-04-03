@@ -258,7 +258,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
 
   const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, dialsPrompt);
+  }, dialsPrompt, signal);
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
