@@ -234,7 +234,7 @@ async function takeSnapshot(page) {
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "" }) {
+export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", signal }) {
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
@@ -250,6 +250,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   // ── Step 4: Generate ONE focused test via AI ────────────────────────────
   // Use a dedicated prompt that generates exactly 1 test matching the user's
   // name + description, instead of the crawl pipeline's generic 5-8 tests.
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   setStep(run, 4);
   log(run, `🤖 Generating test from user description...`);
   log(run, `   Name: "${name}"`);
@@ -261,6 +262,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   setStep(run, 5);
   log(run, `🚫 Deduplicating...`);
   const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
@@ -269,6 +271,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   setStep(run, 6);
   log(run, `✨ Enhancing assertions...`);
   // No real snapshots or classified pages — enhanceTests falls back gracefully
@@ -278,6 +281,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
   // ── Step 7: Validate ────────────────────────────────────────────────────
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   setStep(run, 7);
   log(run, `✅ Validating generated tests...`);
   const validatedTests = [];
@@ -344,7 +348,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   return createdTestIds;
 }
 
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "" } = {}) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", signal } = {}) {
   const browser = await chromium.launch({
     headless: process.env.BROWSER_HEADLESS !== "false",
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
@@ -381,6 +385,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   }
 
   while (crawlQueue.hasMore() && crawlQueue.visitedCount < MAX_PAGES) {
+    if (signal?.aborted) { await browser.close(); throw new DOMException("Aborted", "AbortError"); }
     const item = crawlQueue.dequeue();
     if (!item) break;
     const { url, depth } = item;
@@ -440,6 +445,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   await browser.close();
   log(run, `\u2705 Smart crawl done. ${snapshots.length} unique pages found.`);
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
   // Layer 1: Element filtering
   setStep(run, 2);

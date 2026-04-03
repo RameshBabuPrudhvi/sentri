@@ -173,15 +173,22 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
     detail: `Crawl started for ${project.url}`, status: "running",
   });
 
+  // Create an AbortController so this run can be cancelled via POST /api/runs/:id/abort
+  const abortController = new AbortController();
+  runAbortControllers.set(runId, abortController);
+
   // Kick off async - stream updates via polling
-  crawlAndGenerateTests(project, run, db, { dialsPrompt: dialsPrompt || "" })
+  crawlAndGenerateTests(project, run, db, { dialsPrompt: dialsPrompt || "", signal: abortController.signal })
     .then(() => {
+      runAbortControllers.delete(runId);
       logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
         detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
       });
     })
     .catch((err) => {
+      runAbortControllers.delete(runId);
+      if (err.name === "AbortError" || run.status === "aborted") return; // already handled by abort endpoint
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
@@ -228,14 +235,20 @@ app.post("/api/projects/:id/run", async (req, res) => {
     detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`, status: "running",
   });
 
-  runTests(project, tests, run, db)
+  const abortController = new AbortController();
+  runAbortControllers.set(runId, abortController);
+
+  runTests(project, tests, run, db, { signal: abortController.signal })
     .then(() => {
+      runAbortControllers.delete(runId);
       logActivity({
         type: "test_run.complete", projectId: project.id, projectName: project.name,
         detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
       });
     })
     .catch((err) => {
+      runAbortControllers.delete(runId);
+      if (err.name === "AbortError" || run.status === "aborted") return;
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
@@ -476,17 +489,24 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   // run view while the pipeline executes asynchronously in the background.
   res.status(202).json({ runId });
 
+  const abortController = new AbortController();
+  runAbortControllers.set(runId, abortController);
+
   // Run pipeline async after response is flushed
   generateSingleTest(project, run, db, {
     name: name.trim(),
     description: cleanDescription,
     dialsPrompt: dialsPromptGen,
+    signal: abortController.signal,
   }).then(createdTestIds => {
+    runAbortControllers.delete(runId);
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
       detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
     });
   }).catch(err => {
+    runAbortControllers.delete(runId);
+    if (err.name === "AbortError" || run.status === "aborted") return;
     run.status = "failed";
     run.error = err.message;
     run.finishedAt = new Date().toISOString();
@@ -529,8 +549,12 @@ app.post("/api/tests/:testId/run", async (req, res) => {
     detail: `Single test run started — "${test.name}"`, status: "running",
   });
 
-  runTests(project, [test], run, db)
+  const abortController = new AbortController();
+  runAbortControllers.set(runId, abortController);
+
+  runTests(project, [test], run, db, { signal: abortController.signal })
     .then(() => {
+      runAbortControllers.delete(runId);
       logActivity({
         type: "test_run.complete", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
@@ -538,6 +562,8 @@ app.post("/api/tests/:testId/run", async (req, res) => {
       });
     })
     .catch((err) => {
+      runAbortControllers.delete(runId);
+      if (err.name === "AbortError" || run.status === "aborted") return;
       run.status = "failed";
       run.error = err.message;
       run.finishedAt = new Date().toISOString();
@@ -568,6 +594,10 @@ app.get("/api/runs/:runId", (req, res) => {
 // ─── SSE: Real-time run events ────────────────────────────────────────────────
 // Registry: runId → Set of SSE response objects
 export const runListeners = new Map();
+
+// ─── Abort registry: runId → AbortController ──────────────────────────────────
+// Allows in-progress crawl / generate / test_run operations to be cancelled.
+export const runAbortControllers = new Map();
 
 /**
  * emitRunEvent(runId, type, payload)
@@ -617,6 +647,41 @@ app.get("/api/runs/:runId/events", (req, res) => {
     runListeners.get(runId)?.delete(res);
     if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
   });
+});
+
+// ─── Abort a running task ─────────────────────────────────────────────────────
+// POST /api/runs/:runId/abort — cancels a crawl, generate, or test_run in progress
+app.post("/api/runs/:runId/abort", (req, res) => {
+  const run = db.runs[req.params.runId];
+  if (!run) return res.status(404).json({ error: "not found" });
+  if (run.status !== "running") {
+    return res.status(409).json({ error: "Run is not in progress" });
+  }
+
+  const controller = runAbortControllers.get(req.params.runId);
+  if (controller) {
+    controller.abort();
+    runAbortControllers.delete(req.params.runId);
+  }
+
+  // Mark as aborted immediately so the UI updates even if the async
+  // pipeline takes a moment to notice the signal.
+  run.status = "aborted";
+  run.finishedAt = new Date().toISOString();
+  run.error = "Aborted by user";
+
+  const project = db.projects[run.projectId];
+  logActivity({
+    type: `${run.type === "test_run" || run.type === "run" ? "test_run" : run.type}.abort`,
+    projectId: run.projectId,
+    projectName: project?.name || null,
+    detail: `Run aborted by user`,
+    status: "aborted",
+  });
+
+  emitRunEvent(req.params.runId, "done", { status: "aborted" });
+
+  res.json({ ok: true });
 });
 
 // ─── Dashboard summary ────────────────────────────────────────────────────────
