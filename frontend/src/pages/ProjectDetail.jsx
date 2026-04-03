@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, Shield, AlertCircle,
+  RotateCcw, Info, Shield, AlertCircle, StopCircle,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
@@ -323,9 +323,25 @@ export default function ProjectDetail() {
             <RefreshCw size={14} color="var(--blue)" className="spin" />
             <span style={{ fontWeight: 500, fontSize: "0.875rem", color: "var(--blue)" }}>Run in progress…</span>
           </div>
-          <button className="btn btn-ghost btn-xs" onClick={() => navigate(`/runs/${activeRun}`)}>
-            View live <ArrowRight size={12} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              className="btn btn-xs"
+              style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
+              onClick={async () => {
+                try {
+                  await api.abortRun(activeRun);
+                  setActiveRun(null);
+                  showToast("Run aborted", "info");
+                  refresh();
+                } catch (err) { showToast(err.message, "error"); }
+              }}
+            >
+              <StopCircle size={11} /> Stop
+            </button>
+            <button className="btn btn-ghost btn-xs" onClick={() => navigate(`/runs/${activeRun}`)}>
+              View live <ArrowRight size={12} />
+            </button>
+          </div>
         </div>
       )}
 

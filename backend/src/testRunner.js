@@ -458,7 +458,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   return result;
 }
 
-export async function runTests(project, tests, run, db) {
+export async function runTests(project, tests, run, db, { signal } = {}) {
   const runId = run.id;
   const tracePath = path.join(TRACES_DIR, `${runId}.zip`);
 
@@ -501,6 +501,12 @@ export async function runTests(project, tests, run, db) {
 
   try {
     for (let i = 0; i < tests.length; i++) {
+      // Check abort signal between tests so the run stops promptly
+      if (signal?.aborted) {
+        log(run, `  ⛔ Abort signal received — skipping remaining ${tests.length - i} test(s)`);
+        break;
+      }
+
       const test = tests[i];
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
       log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);

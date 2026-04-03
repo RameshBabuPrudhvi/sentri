@@ -60,8 +60,9 @@ export const api = {
     req("POST", `/projects/${projectId}/tests/bulk`, { testIds, action: "delete" }),
 
   // Runs
-  getRuns: (id)    => req("GET", `/projects/${id}/runs`),
-  getRun:  (runId) => req("GET", `/runs/${runId}`),
+  getRuns:   (id)    => req("GET", `/projects/${id}/runs`),
+  getRun:    (runId) => req("GET", `/runs/${runId}`),
+  abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),
 
   // Dashboard
   getDashboard: () => req("GET", "/dashboard"),

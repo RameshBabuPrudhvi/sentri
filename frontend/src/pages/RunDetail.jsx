@@ -7,6 +7,8 @@ import {
   RefreshCw,
   Clock,
   Download,
+  StopCircle,
+  Ban,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE, requestNotifPermission } from "../hooks/useRunSSE.js";
@@ -35,6 +37,7 @@ export default function RunDetail() {
   const [initialStatus, setInitialStatus] = useState(undefined);
   const [frames, setFrames] = useState([]);
   const [llmTokens, setLlmTokens] = useState("");
+  const [aborting, setAborting] = useState(false);
 
   // Cap the streamed token buffer so long-running generation jobs don't
   // accumulate hundreds of thousands of characters and cause layout/memory issues.
@@ -45,6 +48,20 @@ export default function RunDetail() {
     if (r) setRun(r);
     return r;
   }, [runId]);
+
+  const handleAbort = useCallback(async () => {
+    if (aborting) return;
+    setAborting(true);
+    try {
+      await api.abortRun(runId);
+      setRun((prev) => prev ? { ...prev, status: "aborted" } : prev);
+      setFrames([]);
+    } catch (err) {
+      console.error("Abort failed:", err);
+    } finally {
+      setAborting(false);
+    }
+  }, [runId, aborting]);
 
   // Initial fetch — capture the run's status at load time so useRunSSE can
   // skip SSE entirely for already-finished runs (prevents spurious notifications).
@@ -224,8 +241,29 @@ export default function RunDetail() {
               <XCircle size={10} /> Failed
             </span>
           )}
+          {run.status === "aborted" && (
+            <span className="badge badge-gray">
+              <Ban size={10} /> Aborted
+            </span>
+          )}
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            {isRunning && (
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: "var(--red-bg)", color: "var(--red)",
+                  border: "1px solid #fca5a5", fontWeight: 600,
+                }}
+                onClick={handleAbort}
+                disabled={aborting}
+              >
+                {aborting
+                  ? <RefreshCw size={12} className="spin" />
+                  : <StopCircle size={12} />}
+                {aborting ? "Stopping…" : "Stop Task"}
+              </button>
+            )}
             {traceUrl && (
               <a href={traceUrl} download className="btn btn-ghost btn-sm">
                 <Download size={12} /> Trace ZIP
