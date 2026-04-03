@@ -5,10 +5,11 @@
  * "Crawl & Generate Tests" flow in ProjectDetail.
  *
  * Usage:
- *   <CrawlDialsPanel onChange={(cfg) => setCrawlDialsConfig(cfg)} />
+ *   <CrawlDialsPanel onChange={(cfg) => setCrawlDialsCfg(cfg)} />
  *
  * Then pass the raw config object as `dialsConfig` in the crawl request
- * body — the backend validates it and builds the prompt server-side.
+ * body — the backend validates it and builds the prompt server-side
+ * (see backend/src/testDials.js).
  */
 
 import React, { useState } from "react";

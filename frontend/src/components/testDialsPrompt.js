@@ -3,19 +3,17 @@
  *
  * Pure logic helpers for Test Dials — no React dependency.
  *
+ * Prompt building is handled server-side (backend/src/testDials.js) so the
+ * backend controls what text reaches the AI.  The frontend sends the raw
+ * structured config object and never constructs prompt strings.
+ *
  * Exports:
- *   buildTestDialsPrompt(cfg) — serialise config → prompt string for AI
  *   countActiveDials(cfg)     — count how many dial sections are active
  *   loadSavedConfig()         — read persisted config from localStorage
  *   saveConfig(cfg)           — persist config to localStorage
  */
 
 import {
-  STRATEGY_OPTIONS,
-  WORKFLOW_OPTIONS,
-  QUALITY_OPTIONS,
-  FORMAT_OPTIONS,
-  LANGUAGES,
   DEFAULT_CONFIG,
 } from "./testDialsData.js";
 
@@ -44,28 +42,4 @@ export function countActiveDials(cfg) {
   if (cfg.quality?.length > 0) n++;
   if (cfg.format) n++;
   return n;
-}
-
-// ─── Prompt builder ────────────────────────────────────────────────────────────
-
-export function buildTestDialsPrompt(cfg) {
-  if (!cfg) return "";
-
-  const strategy = STRATEGY_OPTIONS.find(s => s.id === cfg.strategy);
-  const format   = FORMAT_OPTIONS.find(f => f.id === cfg.format);
-  const workflows = WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id));
-  const qualities = QUALITY_OPTIONS.filter(q => cfg.quality.includes(q.id));
-
-  const lines = [
-    `TEST GENERATION CONFIGURATION:`,
-    strategy  ? `- Strategy: ${strategy.label}` : "",
-    workflows.length ? `- Perspectives: ${workflows.map(w => w.label).join(", ")}` : "",
-    qualities.length ? `- Quality checks: ${qualities.map(q => q.label).join(", ")}` : "",
-    format    ? `- Output format: ${format.label}` : "",
-    cfg.language !== "en-US" ? `- Output language: ${LANGUAGES.find(l => l.code === cfg.language)?.label}` : "",
-    cfg.automationHooks ? `- Include automation element ID hooks (data-testid attributes)` : "",
-    cfg.customModifier?.trim() ? `- Additional requirements: ${cfg.customModifier.trim()}` : "",
-  ].filter(Boolean).join("\n");
-
-  return lines;
 }
