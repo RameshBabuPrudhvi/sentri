@@ -10,6 +10,15 @@ import { generateText, streamText, parseJSON, isLocalProvider } from "../aiProvi
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 import { throwIfAborted } from "../abortHelper.js";
 
+/**
+ * Append an optional dialsPrompt to a base AI prompt.
+ * Centralises the repeated ternary so callers can just write:
+ *   const prompt = withDials(base, dialsPrompt);
+ */
+function withDials(base, dialsPrompt) {
+  return dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
+}
+
 // ── Step sanitiser — converts Playwright code lines to human-readable steps ──
 
 const CODE_PATTERNS = [
@@ -392,8 +401,7 @@ GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
 export async function generateUserRequestedTest(name, description, appUrl, onToken, dialsPrompt = "", signal) {
-  const base = buildUserRequestedPrompt(name, description, appUrl);
-  const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
+  const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl), dialsPrompt);
   const text = onToken
     ? await streamText(prompt, onToken, { signal })
     : await generateText(prompt, { signal });
@@ -419,8 +427,7 @@ export async function generateUserRequestedTest(name, description, appUrl, onTok
  */
 export async function generateJourneyTest(journey, snapshotsByUrl, dialsPrompt = "", signal) {
   try {
-    const base = buildJourneyPrompt(journey, snapshotsByUrl);
-    const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
+    const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl), dialsPrompt);
     const text = await generateText(prompt, { signal });
     const result = parseJSON(text);
     const tests = extractTestsArray(result);
@@ -439,8 +446,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, dialsPrompt =
  */
 export async function generateIntentTests(classifiedPage, snapshot, dialsPrompt = "", signal) {
   try {
-    const base = buildIntentPrompt(classifiedPage, snapshot);
-    const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
+    const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot), dialsPrompt);
     const text = await generateText(prompt, { signal });
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
