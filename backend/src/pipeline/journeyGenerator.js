@@ -91,6 +91,21 @@ function extractLabel(code) {
 }
 
 /**
+ * extractTestsArray(parsed) — normalise the 3 common AI response shapes into
+ * a plain array of test objects:
+ *   1. Already an array       → return as-is
+ *   2. { tests: [...] }       → unwrap
+ *   3. Single object { name } → wrap in array
+ *   4. Anything else           → empty array
+ */
+function extractTestsArray(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.tests)) return parsed.tests;
+  if (parsed && parsed.name) return [parsed];
+  return [];
+}
+
+/**
  * sanitiseSteps(tests)
  * If a test's steps array contains Playwright code instead of human-readable
  * descriptions (common with smaller LLMs like Mistral 7B), convert them.
@@ -383,11 +398,7 @@ export async function generateUserRequestedTest(name, description, appUrl, onTok
     ? await streamText(prompt, onToken, { signal })
     : await generateText(prompt, { signal });
   const parsed = parseJSON(text);
-
-  let tests = [];
-  if (Array.isArray(parsed)) tests = parsed;
-  else if (Array.isArray(parsed.tests)) tests = parsed.tests;
-  else if (parsed && parsed.name) tests = [parsed];
+  const tests = extractTestsArray(parsed);
 
   // Ensure the test name matches the user's input (AI sometimes renames)
   for (const t of tests) {
@@ -412,12 +423,8 @@ export async function generateJourneyTest(journey, snapshotsByUrl, dialsPrompt =
     const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
     const text = await generateText(prompt, { signal });
     const result = parseJSON(text);
-
-    let tests;
-    if (Array.isArray(result)) tests = result;
-    else if (Array.isArray(result.tests)) tests = result.tests;
-    else if (result && result.name) tests = [result]; // legacy single-test shape
-    else return [];
+    const tests = extractTestsArray(result);
+    if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
     return tests;
@@ -436,11 +443,8 @@ export async function generateIntentTests(classifiedPage, snapshot, dialsPrompt 
     const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
     const text = await generateText(prompt, { signal });
     const parsed = parseJSON(text);
-
-    let tests;
-    if (Array.isArray(parsed)) tests = parsed;
-    else if (Array.isArray(parsed.tests)) tests = parsed.tests;
-    else return [];
+    const tests = extractTestsArray(parsed);
+    if (tests.length === 0) return [];
 
     sanitiseSteps(tests);
     return tests;
