@@ -8,6 +8,7 @@ import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
 import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
+import { resolveDialsPrompt } from "./testDials.js";
 
 dotenv.config();
 
@@ -186,7 +187,10 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
 
-  const { dialsPrompt } = req.body || {};
+  // Accept structured dials config from the client; build the prompt server-side
+  // so the backend controls what text reaches the AI.
+  const { dialsConfig } = req.body || {};
+  const dialsPrompt = resolveDialsPrompt(dialsConfig);
 
   const runId = uuidv4();
   const run = {
@@ -208,7 +212,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
 
   // Kick off async - stream updates via polling
   runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt: dialsPrompt || "", signal }),
+    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, signal }),
     {
       onSuccess: () => logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -465,11 +469,12 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const { name, description, dialsPrompt } = req.body;
+  const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
   const cleanDescription = (description || "").trim();
-  const dialsPromptGen   = (dialsPrompt || "").trim();
+  // Build the dials prompt server-side from the structured config
+  const dialsPrompt = resolveDialsPrompt(dialsConfig);
 
   if (!hasProvider()) {
     return res.status(503).json({
@@ -506,7 +511,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     (signal) => generateSingleTest(project, run, db, {
       name: name.trim(),
       description: cleanDescription,
-      dialsPrompt: dialsPromptGen,
+      dialsPrompt,
       signal,
     }),
     {

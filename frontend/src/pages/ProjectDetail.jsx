@@ -6,7 +6,7 @@ import {
   RotateCcw, Info, Shield, AlertCircle, StopCircle,
 } from "lucide-react";
 import { api } from "../api.js";
-import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
+import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
 import { loadSavedConfig } from "../components/testDialsPrompt.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
@@ -123,8 +123,8 @@ export default function ProjectDetail() {
   async function doCrawl() {
     setActionLoading("crawl");
     try {
-      const dialsPrompt = buildTestDialsPrompt(crawlDialsCfg);
-      const { runId } = await api.crawl(id, dialsPrompt ? { dialsPrompt } : undefined);
+      // Send structured config to the backend — it validates and builds the prompt server-side
+      const { runId } = await api.crawl(id, crawlDialsCfg ? { dialsConfig: crawlDialsCfg } : undefined);
       setActiveRun(runId);
       setActiveRunId(runId);
       showToast("Crawl started — new tests will appear as Draft", "info", runId);
