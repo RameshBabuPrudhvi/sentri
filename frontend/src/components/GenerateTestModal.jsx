@@ -13,7 +13,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Upload, FileCode2, Clock, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
-import TestDials, { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx";
+import TestDials from "./TestDials.jsx";
+import { buildTestDialsPrompt, countActiveDials } from "./testDialsPrompt.js";
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 

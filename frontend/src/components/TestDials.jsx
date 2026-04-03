@@ -4,8 +4,21 @@ import {
   Target, Users, ShieldCheck, FileText, Globe, Cpu, Info,
   Zap, BookOpen, GitBranch, Bug, Lock, BarChart3, Layers,
 } from "lucide-react";
+import {
+  STRATEGY_OPTIONS, WORKFLOW_OPTIONS, QUALITY_OPTIONS,
+  FORMAT_OPTIONS, LANGUAGES, DEFAULT_CONFIG,
+} from "./testDialsData.js";
+import {
+  loadSavedConfig, saveConfig,
+  countActiveDials, buildTestDialsPrompt,
+} from "./testDialsPrompt.js";
 
-// ─── Data definitions ──────────────────────────────────────────────────────────
+// Re-export so existing consumers (CrawlDialsPanel, GenerateTestModal) that
+// import { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx"
+// continue to work without changes.
+export { buildTestDialsPrompt, countActiveDials };
+
+// ─── Preset packs (contain JSX icons, so they live here) ───────────────────────
 
 const PRESET_PACKS = [
   {
@@ -80,90 +93,6 @@ const PRESET_PACKS = [
     format: "concise",
   },
 ];
-
-const STRATEGY_OPTIONS = [
-  { id: "happy_path",    label: "Happy Path Only",         desc: "Only the expected successful flow" },
-  { id: "sad_path",      label: "Sad Path & Error Handling", desc: "Focus on failures and edge errors" },
-  { id: "edge_cases",    label: "Boundary & Edge Cases",   desc: "Extremes, limits, unusual inputs" },
-  { id: "comprehensive", label: "Comprehensive 360 Suite", desc: "All of the above — full coverage" },
-  { id: "exploratory",   label: "Exploratory Charter",     desc: "Free-form discovery testing" },
-  { id: "regression",    label: "Regression Impact Analysis", desc: "Verify existing flows still work" },
-];
-
-const WORKFLOW_OPTIONS = [
-  { id: "e2e",            label: "End-to-End User Journey", desc: "Full flow from start to finish" },
-  { id: "component",      label: "Component-Level Isolation", desc: "Single component or unit" },
-  { id: "multi_role",     label: "Multi-Role Persona",      desc: "Admin, user, guest perspectives" },
-  { id: "first_time_user",label: "First-Time User Experience", desc: "Onboarding, discovery, clarity" },
-  { id: "interruptions",  label: "Interruptions",           desc: "Refresh, network loss, recovery" },
-];
-
-const QUALITY_OPTIONS = [
-  { id: "accessibility",   label: "Accessibility (a11y)",  icon: "♿" },
-  { id: "performance",     label: "Performance",           icon: "⚡" },
-  { id: "security",        label: "Security",              icon: "🔒" },
-  { id: "data_integrity",  label: "Data Integrity",        icon: "🗄" },
-  { id: "api_integration", label: "API & Integration",     icon: "🔌" },
-  { id: "localization",    label: "Localization (L10n)",   icon: "🌐" },
-  { id: "reliability",     label: "Reliability",           icon: "🔁" },
-  { id: "observability",   label: "Observability",         icon: "📊" },
-];
-
-const FORMAT_OPTIONS = [
-  { id: "verbose",  label: "Verbose Steps",        desc: "Detailed numbered steps with expected results" },
-  { id: "concise",  label: "Concise Checklist",    desc: "Short bullet-point checklist" },
-  { id: "gherkin",  label: "Gherkin (Given/When/Then)", desc: "BDD-style feature scenarios" },
-];
-
-const LANGUAGES = [
-  { code: "en-US", label: "English (Default)", flag: "US" },
-  { code: "en-GB", label: "English (UK)",      flag: "GB" },
-  { code: "es",    label: "Spanish",           flag: "ES" },
-  { code: "fr",    label: "French",            flag: "FR" },
-  { code: "de",    label: "German",            flag: "DE" },
-  { code: "ja",    label: "Japanese",          flag: "JP" },
-  { code: "zh",    label: "Chinese",           flag: "CN" },
-  { code: "pt",    label: "Portuguese",        flag: "PT" },
-];
-
-// ─── Default config ────────────────────────────────────────────────────────────
-
-const DEFAULT_CONFIG = {
-  preset: "new_feature",
-  strategy: "comprehensive",
-  workflow: ["e2e", "multi_role"],
-  quality: [],
-  format: "verbose",
-  language: "en-US",
-  automationHooks: false,
-  customModifier: "",
-};
-
-// ─── Storage helpers ───────────────────────────────────────────────────────────
-
-function loadSavedConfig() {
-  try {
-    const s = localStorage.getItem("sentri_testdials");
-    return s ? { ...DEFAULT_CONFIG, ...JSON.parse(s) } : { ...DEFAULT_CONFIG };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-
-function saveConfig(cfg) {
-  try { localStorage.setItem("sentri_testdials", JSON.stringify(cfg)); } catch {}
-}
-
-// ─── Count active dials ────────────────────────────────────────────────────────
-
-function countActive(cfg) {
-  let n = 0;
-  if (cfg.strategy) n++;
-  if (cfg.workflow.length > 0) n++;
-  if (cfg.quality.length > 0) n++;
-  if (cfg.format) n++;
-  return n;
-}
 
 // ─── Section accordion ────────────────────────────────────────────────────────
 
@@ -332,7 +261,7 @@ export default function TestDials({ onChange }) {
     setCfg(fresh);
   }
 
-  const activeCount = countActive(cfg);
+  const activeCount = countActiveDials(cfg);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -576,39 +505,4 @@ export default function TestDials({ onChange }) {
   );
 }
 
-// ─── Export config builder ─────────────────────────────────────────────────────
-// Count how many dial sections are actively configured
-export function countActiveDials(cfg) {
-  if (!cfg) return 0;
-  let n = 0;
-  if (cfg.strategy) n++;
-  if (cfg.workflow?.length > 0) n++;
-  if (cfg.quality?.length > 0) n++;
-  if (cfg.format) n++;
-  return n;
-}
 
-// Converts the TestDials config into a plain object that can be sent to the backend
-// or injected into the AI generation prompt.
-
-export function buildTestDialsPrompt(cfg) {
-  if (!cfg) return "";
-
-  const strategy = STRATEGY_OPTIONS.find(s => s.id === cfg.strategy);
-  const format   = FORMAT_OPTIONS.find(f => f.id === cfg.format);
-  const workflows = WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id));
-  const qualities = QUALITY_OPTIONS.filter(q => cfg.quality.includes(q.id));
-
-  const lines = [
-    `TEST GENERATION CONFIGURATION:`,
-    strategy  ? `- Strategy: ${strategy.label}` : "",
-    workflows.length ? `- Perspectives: ${workflows.map(w => w.label).join(", ")}` : "",
-    qualities.length ? `- Quality checks: ${qualities.map(q => q.label).join(", ")}` : "",
-    format    ? `- Output format: ${format.label}` : "",
-    cfg.language !== "en-US" ? `- Output language: ${LANGUAGES.find(l => l.code === cfg.language)?.label}` : "",
-    cfg.automationHooks ? `- Include automation element ID hooks (data-testid attributes)` : "",
-    cfg.customModifier?.trim() ? `- Additional requirements: ${cfg.customModifier.trim()}` : "",
-  ].filter(Boolean).join("\n");
-
-  return lines;
-}

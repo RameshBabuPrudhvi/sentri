@@ -13,7 +13,8 @@
 
 import React, { useState } from "react";
 import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
-import TestDials, { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx";
+import TestDials from "./TestDials.jsx";
+import { buildTestDialsPrompt, countActiveDials } from "./testDialsPrompt.js";
 
 export { buildTestDialsPrompt };
 
