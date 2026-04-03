@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Play, RefreshCw,
+  Play, RefreshCw, Ban,
   Globe, FlaskConical, Search, ArrowRight, Zap, X,
   CheckCircle2, XCircle,
 } from "lucide-react";
@@ -16,6 +16,7 @@ const STATUS_FILTERS = [
   { key: "running",   tooltip: "Running",   activeColor: "#2563eb", activeBg: "rgba(37,99,235,0.12)",  icon: <RefreshCw    size={14} /> },
   { key: "completed", tooltip: "Completed", activeColor: "#16a34a", activeBg: "rgba(34,197,94,0.12)",  icon: <CheckCircle2 size={14} /> },
   { key: "failed",    tooltip: "Failed",    activeColor: "#dc2626", activeBg: "rgba(239,68,68,0.12)",  icon: <XCircle      size={14} /> },
+  { key: "aborted",   tooltip: "Aborted",   activeColor: "#6b7280", activeBg: "rgba(107,114,128,0.12)", icon: <Ban          size={14} /> },
 ];
 
 const TYPE_FILTERS = [
@@ -80,6 +81,7 @@ export default function Work() {
     running:   runs.filter(r => r.status === "running").length,
     completed: runs.filter(r => r.status === "completed").length,
     failed:    runs.filter(r => r.status === "failed").length,
+    aborted:   runs.filter(r => r.status === "aborted").length,
   }), [runs]);
 
   const typeCounts = useMemo(() => ({

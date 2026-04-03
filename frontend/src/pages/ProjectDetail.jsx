@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle,
+  Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
   RotateCcw, Info, Shield, AlertCircle, StopCircle,
 } from "lucide-react";
@@ -17,6 +17,7 @@ function StatusBadge({ s }) {
   if (s === "failed")    return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
   if (s === "running")   return <span className="badge badge-blue pulse">● Running</span>;
   if (s === "completed") return <span className="badge badge-green">✓ Completed</span>;
+  if (s === "aborted")   return <span className="badge badge-gray"><Ban size={10} /> Aborted</span>;
   return <span className="badge badge-gray">{s}</span>;
 }
 
@@ -683,7 +684,8 @@ export default function ProjectDetail() {
                           {r.status === "completed" && <span className="badge badge-green">✓ Completed</span>}
                           {r.status === "running"   && <span className="badge badge-blue" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>● Running</span>}
                           {r.status === "failed"    && <span className="badge badge-red">✗ Failed</span>}
-                          {!["completed","running","failed"].includes(r.status) && <span className="badge badge-gray">{r.status}</span>}
+                          {r.status === "aborted"   && <span className="badge badge-gray"><Ban size={10} /> Aborted</span>}
+                          {!["completed","running","failed","aborted"].includes(r.status) && <span className="badge badge-gray">{r.status}</span>}
                         </td>
                         <td>
                           {isCrawl && (

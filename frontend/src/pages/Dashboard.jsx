@@ -206,6 +206,8 @@ export default function Dashboard() {
                           ? <RunningBadge />
                           : r.status === "completed"
                           ? <span className="badge badge-green">✓ Completed</span>
+                          : r.status === "aborted"
+                          ? <span className="badge badge-gray">⊘ Aborted</span>
                           : <span className="badge badge-red">✗ Failed</span>}
                         <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>
                           {new Date(r.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
