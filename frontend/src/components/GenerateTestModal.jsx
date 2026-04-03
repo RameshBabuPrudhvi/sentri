@@ -16,6 +16,39 @@ import { api } from "../api.js";
 import TestDials from "./TestDials.jsx";
 import { buildTestDialsPrompt, countActiveDials } from "./testDialsPrompt.js";
 
+// ── Generate CTA (single source of truth) ─────────────────────────────────────
+
+function GenerateCTA({ error, canSubmit, phase, onGenerate, showNameHint }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>AI Generate Test Cases</span>
+        <span style={{ fontSize: "0.72rem", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4 }}>
+          <Clock size={11} /> ~30-60 seconds
+        </span>
+      </div>
+      {error && (
+        <div className="alert-error" style={{ marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <button
+        className="btn btn-primary"
+        style={{ width: "100%", justifyContent: "center", fontWeight: 700, fontSize: "0.9rem" }}
+        onClick={onGenerate}
+        disabled={!canSubmit}
+      >
+        {phase === "submitting" ? "Starting…" : "Generate Test Cases"}
+      </button>
+      {showNameHint && (
+        <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text3)", marginTop: 8 }}>
+          ← Switch to Story tab and enter a test name first
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
 function Tab({ label, badge, active, onClick }) {
@@ -236,25 +269,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* AI Generate section */}
               <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>AI Generate Test Cases</span>
-                  <span style={{ fontSize: "0.72rem", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4 }}>
-                    <Clock size={11} /> ~30-60 seconds
-                  </span>
-                </div>
-                {error && (
-                  <div className="alert-error" style={{ marginBottom: 12 }}>
-                    {error}
-                  </div>
-                )}
-                <button
-                  className="btn btn-primary"
-                  style={{ width: "100%", justifyContent: "center", fontWeight: 700, fontSize: "0.9rem" }}
-                  onClick={handleGenerate}
-                  disabled={!canSubmit}
-                >
-                  {phase === "submitting" ? "Starting…" : "Generate Test Cases"}
-                </button>
+                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
               </div>
             </div>
           )}
@@ -266,30 +281,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* Generate CTA also on dials tab */}
               <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>AI Generate Test Cases</span>
-                  <span style={{ fontSize: "0.72rem", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4 }}>
-                    <Clock size={11} /> ~30-60 seconds
-                  </span>
-                </div>
-                {error && (
-                  <div className="alert-error" style={{ marginBottom: 10 }}>
-                    {error}
-                  </div>
-                )}
-                <button
-                  className="btn btn-primary"
-                  style={{ width: "100%", justifyContent: "center", fontWeight: 700, fontSize: "0.9rem" }}
-                  onClick={handleGenerate}
-                  disabled={!canSubmit}
-                >
-                  {phase === "submitting" ? "Starting…" : "Generate Test Cases"}
-                </button>
-                {!name.trim() && (
-                  <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text3)", marginTop: 8 }}>
-                    ← Switch to Story tab and enter a test name first
-                  </p>
-                )}
+                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} showNameHint={!name.trim()} />
               </div>
             </div>
           )}
@@ -318,14 +310,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* Generate CTA on options tab too */}
               <div style={{ marginTop: 4 }}>
-                <button
-                  className="btn btn-primary"
-                  style={{ width: "100%", justifyContent: "center", fontWeight: 700, fontSize: "0.9rem" }}
-                  onClick={handleGenerate}
-                  disabled={!canSubmit}
-                >
-                  {phase === "submitting" ? "Starting…" : "Generate Test Cases"}
-                </button>
+                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
               </div>
             </div>
           )}
