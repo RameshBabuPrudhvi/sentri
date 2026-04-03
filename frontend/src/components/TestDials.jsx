@@ -18,12 +18,12 @@ import Tooltip from "./Tooltip.jsx";
 // Re-export so consumers can import { countActiveDials } from "./TestDials.jsx"
 export { countActiveDials };
 
-// ─── Preset packs (contain JSX icons, so they live here) ───────────────────────
+// ─── Test Profiles (contain JSX icons, so they live here) ──────────────────────
 
-const PRESET_PACKS = [
+const TEST_PROFILES = [
   {
     id: "smoke",
-    label: "The Smoke Test",
+    label: "Smoke Test",
     icon: <Zap size={13} color="#f59e0b" />,
     description: "Quick sanity checks. Happy paths only.",
     strategy: "happy_path",
@@ -38,7 +38,7 @@ const PRESET_PACKS = [
     description: "Comprehensive coverage for new functionality.",
     strategy: "comprehensive",
     workflow: ["e2e", "multi_role"],
-    quality: [],
+    quality: ["data_integrity"],
     format: "verbose",
     default: true,
   },
@@ -48,17 +48,17 @@ const PRESET_PACKS = [
     icon: <div style={{ width: 11, height: 11, borderRadius: 2, background: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ width: 6, height: 6, borderRadius: 1, background: "#fff" }} /></div>,
     description: "Gherkin-style specs ready for automation.",
     strategy: "comprehensive",
-    workflow: ["e2e"],
+    workflow: ["e2e", "multi_role"],
     quality: [],
     format: "gherkin",
   },
   {
     id: "hardening",
-    label: "Feature Hardening Pack",
+    label: "Edge Case Hardening",
     icon: <div style={{ width: 11, height: 11, borderRadius: "50%", border: "1.5px solid #dc2626" }} />,
     description: "Edge cases, error handling, boundaries.",
     strategy: "edge_cases",
-    workflow: [],
+    workflow: ["interruptions"],
     quality: ["security", "reliability"],
     format: "verbose",
   },
@@ -67,7 +67,7 @@ const PRESET_PACKS = [
     label: "Accessibility Audit",
     icon: <Users size={13} color="#7c3aed" />,
     description: "WCAG 2.1 compliance and keyboard navigation.",
-    strategy: "happy_path",
+    strategy: "comprehensive",
     workflow: ["first_time_user"],
     quality: ["accessibility"],
     format: "verbose",
@@ -78,17 +78,17 @@ const PRESET_PACKS = [
     icon: <Settings2 size={13} color="#6b7280" />,
     description: "Integration points, data validation, API contracts.",
     strategy: "comprehensive",
-    workflow: [],
+    workflow: ["multi_role"],
     quality: ["api_integration", "data_integrity"],
     format: "concise",
   },
   {
     id: "bugfix",
-    label: "Bug Fix Verification",
+    label: "Regression Guard",
     icon: <Bug size={13} color="#dc2626" />,
     description: "Regression checks around a specific fix.",
     strategy: "regression",
-    workflow: [],
+    workflow: ["e2e"],
     quality: ["reliability"],
     format: "concise",
   },
@@ -102,7 +102,7 @@ const Section = Collapsible;
 function PresetDropdown({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const ref = useRef();
-  const selected = PRESET_PACKS.find(p => p.id === value) || PRESET_PACKS[1];
+  const selected = TEST_PROFILES.find(p => p.id === value) || TEST_PROFILES[1];
 
   useEffect(() => {
     function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
@@ -133,7 +133,7 @@ function PresetDropdown({ value, onChange }) {
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)",
           boxShadow: "var(--shadow)", overflow: "hidden",
         }}>
-          {PRESET_PACKS.map(pack => (
+          {TEST_PROFILES.map(pack => (
             <button
               key={pack.id}
               onClick={() => { onChange(pack); setOpen(false); }}
@@ -230,12 +230,12 @@ export default function TestDials({ onChange }) {
         </Tooltip>
       </div>
 
-      {/* ── Preset Packs ── */}
+      {/* ── Test Profiles ── */}
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Layers size={14} color="var(--text3)" />
-            <span className="dial-label">Preset Packs</span>
+            <span className="dial-label">Test Profiles</span>
           </div>
           <button
             onClick={() => {}}

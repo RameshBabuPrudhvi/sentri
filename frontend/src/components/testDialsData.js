@@ -66,7 +66,7 @@ export const DEFAULT_CONFIG = {
   preset: "new_feature",
   strategy: "comprehensive",
   workflow: ["e2e", "multi_role"],
-  quality: [],
+  quality: ["data_integrity"],
   format: "verbose",
   language: "en-US",
   automationHooks: false,
