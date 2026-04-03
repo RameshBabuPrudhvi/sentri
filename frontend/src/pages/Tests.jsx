@@ -11,6 +11,7 @@ import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import GenerateTestModal from "../components/GenerateTestModal.jsx";
 import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
+import ModalShell from "../components/ModalShell.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -63,51 +64,37 @@ function StatusBadge({ result }) {
 function ReviewModal({ projects, onClose }) {
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   return (
-    <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999, backdropFilter: "blur(2px)" }} />
-      <div style={{
-        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-        zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(420px, 95vw)", overflow: "hidden",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 22px 16px", borderBottom: "1px solid var(--border)" }}>
-          <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>Review & Fix Tests</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 2, display: "flex" }}><X size={18} /></button>
+    <ModalShell onClose={onClose} width="min(420px, 95vw)" style={{ overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 22px 16px", borderBottom: "1px solid var(--border)" }}>
+        <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>Review & Fix Tests</h2>
+        <button className="modal-close" onClick={onClose}><X size={18} /></button>
+      </div>
+      <div style={{ padding: "20px 22px 24px" }}>
+        <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 20, lineHeight: 1.6 }}>
+          Go to a project to review generated draft tests, approve them for regression, or reject failing ones.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+          {projects.length === 0 ? (
+            <div style={{ fontSize: "0.82rem", color: "var(--text3)", textAlign: "center", padding: "16px 0" }}>No projects yet.</div>
+          ) : projects.map(p => (
+            <button
+              key={p.id}
+              className="btn btn-ghost btn-sm"
+              style={{ justifyContent: "flex-start", gap: 10 }}
+              onClick={() => { onClose(); navigate(`/projects/${p.id}`); }}
+            >
+              <Flag size={13} color="var(--accent)" />
+              {p.name}
+              <ChevronRight size={13} style={{ marginLeft: "auto" }} />
+            </button>
+          ))}
         </div>
-        <div style={{ padding: "20px 22px 24px" }}>
-          <p style={{ fontSize: "0.82rem", color: "var(--text2)", marginTop: 0, marginBottom: 20, lineHeight: 1.6 }}>
-            Go to a project to review generated draft tests, approve them for regression, or reject failing ones.
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-            {projects.length === 0 ? (
-              <div style={{ fontSize: "0.82rem", color: "var(--text3)", textAlign: "center", padding: "16px 0" }}>No projects yet.</div>
-            ) : projects.map(p => (
-              <button
-                key={p.id}
-                className="btn btn-ghost btn-sm"
-                style={{ justifyContent: "flex-start", gap: 10 }}
-                onClick={() => { onClose(); navigate(`/projects/${p.id}`); }}
-              >
-                <Flag size={13} color="var(--accent)" />
-                {p.name}
-                <ChevronRight size={13} style={{ marginLeft: "auto" }} />
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
-          </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
         </div>
       </div>
-    </>
+    </ModalShell>
   );
 }
 
@@ -884,24 +871,21 @@ export default function Tests() {
 
       {/* Bulk action confirmation modal */}
       {bulkConfirm && (
-        <>
-          <div onClick={() => setBulkConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999 }} />
-          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "28px 32px", width: "min(420px,95vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
-            <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
-            <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
-              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> (all visible draft tests). This cannot be undone easily.
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
-              <button
-                className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
-                onClick={() => executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
-              >
-                {bulkConfirm.action === "approve" ? "Approve all" : "Reject all"}
-              </button>
-            </div>
+        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
+          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
+          <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> (all visible draft tests). This cannot be undone easily.
           </div>
-        </>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
+            <button
+              className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
+              onClick={() => executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
+            >
+              {bulkConfirm.action === "approve" ? "Approve all" : "Reject all"}
+            </button>
+          </div>
+        </ModalShell>
       )}
     </div>
   );
