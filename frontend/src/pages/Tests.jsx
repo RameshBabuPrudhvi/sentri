@@ -12,6 +12,7 @@ import GenerateTestModal from "../components/GenerateTestModal.jsx";
 import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
+import { cleanTestName } from "../utils/testName.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -776,7 +777,7 @@ export default function Tests() {
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <AgentTag type="TA" />
                           <div>
-                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                            <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
                             {t.description && (
                               <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1, maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {t.description}

@@ -10,6 +10,7 @@ import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
 import { loadSavedConfig } from "../components/testDialsPrompt.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
+import { cleanTestName } from "../utils/testName.js";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
@@ -485,7 +486,7 @@ export default function ProjectDetail() {
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <AgentTag type="TA" />
                                 <div>
-                                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
                                   <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
                                     {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
@@ -612,7 +613,7 @@ export default function ProjectDetail() {
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <AgentTag type="TA" />
                             <div>
-                              <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{t.name}</div>
+                              <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
                               <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
                                 {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
                                 {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}

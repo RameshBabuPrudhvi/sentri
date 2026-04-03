@@ -11,6 +11,7 @@ import {
 import StepResultsView from "./StepResultsView";
 import LiveBrowserView from "./LiveBrowserView";
 import ExecutionTimeline from "./ExecutionTimeline";
+import { cleanTestName } from "../utils/testName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {result.testName || result.name || `Test Case ${caseIndex + 1}`}
+            {cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`}
           </div>
           {steps.length > 0 && (
             <div style={{ fontSize: "0.67rem", color: "var(--text3)", marginTop: 1 }}>
@@ -134,7 +135,7 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: 4, lineHeight: 1.4 }}>
-              {result.testName || result.name || `Test Case ${caseIndex + 1}`}
+              {cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span className={`badge ${statusBadgeClass(result.status)}`}>{result.status}</span>
