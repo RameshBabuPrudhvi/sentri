@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { v4 as uuidv4 } from "uuid";
+import { generateTestId, generateRunId, generateProjectId, generateActivityId, initCountersFromExistingData } from "./utils/idGenerator.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
@@ -42,6 +42,10 @@ app.use("/artifacts", express.static(ARTIFACTS_DIR, {
 
 const db = getDb();
 
+// Seed sequential ID counters from any data restored from disk so new IDs
+// don't collide with previously generated ones.
+initCountersFromExistingData(db);
+
 // ─── Seed helper (dev / testing only) ────────────────────────────────────
 // Allows seed.js to inject pre-built run objects directly into the in-memory DB
 // without going through the real crawl/run flow. Disabled in production.
@@ -65,7 +69,7 @@ if (process.env.NODE_ENV !== "production") {
 //   test.bulk_approve    test.bulk_reject      test.bulk_restore
 //   settings.update
 function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
-  const id = uuidv4();
+  const id = generateActivityId(db);
   db.activities[id] = {
     id,
     type,
@@ -86,7 +90,7 @@ app.post("/api/projects", (req, res) => {
   const { name, url, credentials } = req.body;
   if (!name || !url) return res.status(400).json({ error: "name and url required" });
 
-  const id = uuidv4();
+  const id = generateProjectId(db);
   const project = {
     id,
     name,
@@ -192,7 +196,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   const { dialsConfig } = req.body || {};
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
 
-  const runId = uuidv4();
+  const runId = generateRunId(db);
   const run = {
     id: runId,
     projectId: project.id,
@@ -240,7 +244,7 @@ app.post("/api/projects/:id/run", async (req, res) => {
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  const runId = uuidv4();
+  const runId = generateRunId(db);
   const run = {
     id: runId,
     projectId: project.id,
