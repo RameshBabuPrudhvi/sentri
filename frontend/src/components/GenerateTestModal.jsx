@@ -131,7 +131,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const canSubmit = name.trim() && projectId && phase !== "submitting";
 
   return (
-    <ModalShell onClose={onClose} width="min(560px, 96vw)" style={{ maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+    <ModalShell onClose={onClose} width="min(560px, 96vw)" style={{ maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Header */}
       <div style={{
           display: "flex", alignItems: "center", gap: 10,
