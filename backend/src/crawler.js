@@ -516,7 +516,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // Store in db
   for (const t of validatedTests) {
-    const testId = uuidv4();
+    const testId = generateTestId(db);
     db.tests[testId] = {
       // Spread AI-generated fields first so our critical fields below always win.
       // This prevents the AI from accidentally overriding id, projectId, reviewStatus, etc.
