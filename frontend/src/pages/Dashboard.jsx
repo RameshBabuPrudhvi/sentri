@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { ArrowRight, CheckCircle2, FileText } from "lucide-react";
 import { api } from "../api.js";
+import AgentTag from "../components/AgentTag.jsx";
 
 function greeting() {
   const h = new Date().getHours();
@@ -12,16 +13,11 @@ function greeting() {
 }
 
 const RUN_TYPE_META = {
-  crawl:    { label: "Crawl & Generate", avatar: "QA", avatarClass: "avatar-qa" },
-  generate: { label: "AI Generate",      avatar: "QA", avatarClass: "avatar-qa" },
-  run:      { label: "Test Run",         avatar: "TA", avatarClass: "avatar-ta" },
-  test_run: { label: "Test Run",         avatar: "TA", avatarClass: "avatar-ta" },
+  crawl:    { label: "Crawl & Generate", avatar: "QA" },
+  generate: { label: "AI Generate",      avatar: "QA" },
+  run:      { label: "Test Run",         avatar: "TA" },
+  test_run: { label: "Test Run",         avatar: "TA" },
 };
-
-function AgentTag({ type }) {
-  const meta = RUN_TYPE_META[type] || RUN_TYPE_META["run"];
-  return <div className={`avatar ${meta.avatarClass}`}>{meta.avatar}</div>;
-}
 
 function RunningBadge() {
   return (
@@ -198,7 +194,7 @@ export default function Dashboard() {
                       border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg2)",
                       cursor: "pointer", transition: "background 0.12s",
                     }} onClick={() => navigate(`/runs/${r.id}`)}>
-                      <AgentTag type={r.type} />
+                      <AgentTag type={(RUN_TYPE_META[r.type] || RUN_TYPE_META["run"]).avatar} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: 1 }}>{meta.label}</div>
                         <div style={{ fontSize: "0.78rem", color: "var(--text2)" }} className="truncate">

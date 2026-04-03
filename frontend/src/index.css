@@ -82,6 +82,12 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* Sidebar nav hover — fixes missing hover feedback on nav items */
+.nav-link:hover {
+  background: var(--bg3) !important;
+  color: var(--text) !important;
+}
+
 .mono { font-family: var(--font-mono); font-size: 0.85em; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

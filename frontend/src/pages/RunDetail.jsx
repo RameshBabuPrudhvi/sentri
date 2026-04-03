@@ -14,6 +14,7 @@ import { useRunSSE, requestNotifPermission } from "../hooks/useRunSSE.js";
 import CrawlView from "../components/CrawlView";
 import GenerateView from "../components/GenerateView";
 import TestRunView from "../components/TestRunView";
+import AgentTag from "../components/AgentTag.jsx";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,11 +22,6 @@ function fmtMs(ms) {
   if (!ms && ms !== 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function AgentTag({ type = "TA" }) {
-  const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
-  return <div className={`avatar ${s[type] || "avatar-ta"}`}>{type}</div>;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -39,6 +35,10 @@ export default function RunDetail() {
   const [initialStatus, setInitialStatus] = useState(undefined);
   const [frames, setFrames] = useState([]);
   const [llmTokens, setLlmTokens] = useState("");
+
+  // Cap the streamed token buffer so long-running generation jobs don't
+  // accumulate hundreds of thousands of characters and cause layout/memory issues.
+  const LLM_TOKEN_LIMIT = 50_000;
 
   const fetchRun = useCallback(async () => {
     const r = await api.getRun(runId).catch(() => null);
@@ -88,7 +88,15 @@ export default function RunDetail() {
       // Keep only the latest frame — canvas paints it on rAF
       setFrames([event.data]);
     } else if (event.type === "llm_token") {
-      setLlmTokens((prev) => prev + event.token);
+      setLlmTokens((prev) => {
+        const next = prev + event.token;
+        // Keep the most recent LLM_TOKEN_LIMIT chars; prepend a truncation notice
+        // so the user knows older output was trimmed, not lost.
+        if (next.length > LLM_TOKEN_LIMIT) {
+          return "[…output truncated…]\n" + next.slice(next.length - LLM_TOKEN_LIMIT);
+        }
+        return next;
+      });
     } else if (event.type === "done") {
       // Immediately mark as completed so the UI stops showing "running"
       // (isRunning = run.status === "running" flips to false right away,

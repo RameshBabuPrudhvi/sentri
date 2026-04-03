@@ -2,11 +2,12 @@ import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus, Globe, Search, ExternalLink,
-  RefreshCw, FlaskConical, ChevronRight,
+  RefreshCw, FlaskConical, ChevronRight, Trash2, AlertTriangle,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate } from "../utils/formatters";
 import PassRateBar from "../components/PassRateBar";
+import { api } from "../api.js";
 
 function StatusDot({ status }) {
   const colors = {
@@ -23,15 +24,111 @@ function StatusDot({ status }) {
   );
 }
 
+// ── Delete confirmation modal ─────────────────────────────────────────────────
+function DeleteProjectModal({ project, onClose, onDeleted }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Close on Escape
+  React.useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  async function handleDelete() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await api.deleteProject(project.id);
+      onDeleted(project.id);
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to delete project.");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          zIndex: 999, backdropFilter: "blur(2px)",
+        }}
+      />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        zIndex: 1000, background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+        width: "min(440px, 95vw)", padding: "28px 32px",
+      }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10, background: "var(--red-bg)",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>
+            <AlertTriangle size={18} color="var(--red)" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 6 }}>
+              Delete "{project.name}"?
+            </div>
+            <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.6 }}>
+              This will permanently delete the project, all its tests, and all run history.
+              <strong style={{ color: "var(--text)" }}> This cannot be undone.</strong>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div style={{
+            background: "var(--red-bg)", color: "var(--red)",
+            borderRadius: "var(--radius)", padding: "8px 12px",
+            fontSize: "0.82rem", marginBottom: 16,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} disabled={deleting}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-sm"
+            style={{ background: "var(--red)", color: "#fff", border: "none" }}
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            {deleting ? <RefreshCw size={13} className="spin" /> : <Trash2 size={13} />}
+            {deleting ? "Deleting…" : "Delete project"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function Projects() {
-  const { projects, allTests, allRuns, loading } = useProjectData();
+  const { projects: rawProjects, allTests, allRuns, loading } = useProjectData();
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null); // project to confirm-delete
+  const [projects, setProjects] = useState(null); // local override after deletion
   const navigate = useNavigate();
+
+  // Use local state once a deletion has happened so the list updates instantly
+  // without waiting for the hook to re-fetch.
+  const visibleProjects = projects ?? rawProjects;
 
   // Derive per-project stats from the shared hook data
   const projectStats = useMemo(() => {
     const statsMap = {};
-    for (const p of projects) {
+    for (const p of visibleProjects) {
       const tests = allTests.filter(t => t.projectId === p.id);
       const runs  = allRuns.filter(r => r.projectId === p.id);
       const testRuns = runs.filter(r => r.type === "test_run");
@@ -54,9 +151,9 @@ export default function Projects() {
       };
     }
     return statsMap;
-  }, [projects, allTests, allRuns]);
+  }, [visibleProjects, allTests, allRuns]);
 
-  const filtered = projects.filter(p =>
+  const filtered = visibleProjects.filter(p =>
     !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) ||
     (p.url || "").toLowerCase().includes(search.toLowerCase())
   );
@@ -86,7 +183,7 @@ export default function Projects() {
       </div>
 
       {/* Search */}
-      {projects.length > 0 && (
+      {visibleProjects.length > 0 && (
         <div style={{ position: "relative", maxWidth: 340, marginBottom: 16 }}>
           <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
           <input
@@ -104,14 +201,14 @@ export default function Projects() {
         <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
           <Globe size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
           <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 6 }}>
-            {projects.length === 0 ? "No projects yet" : "No results"}
+            {visibleProjects.length === 0 ? "No projects yet" : "No results"}
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
-            {projects.length === 0
+            {visibleProjects.length === 0
               ? "Add your first web app to start generating and running tests."
               : "Try a different search."}
           </div>
-          {projects.length === 0 && (
+          {visibleProjects.length === 0 && (
             <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
               <Plus size={13} /> Add Project
             </button>
@@ -205,13 +302,24 @@ export default function Projects() {
                 </div>
 
                 {/* Quick actions */}
-                <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }} onClick={e => e.stopPropagation()}>
+                <div
+                  style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}
+                  onClick={e => e.stopPropagation()}
+                >
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => navigate(`/projects/${p.id}`)}
                     title="View project"
                   >
                     <FlaskConical size={13} /> Tests
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: "var(--text3)" }}
+                    onClick={() => setDeleteTarget(p)}
+                    title="Delete project"
+                  >
+                    <Trash2 size={13} />
                   </button>
                   <ChevronRight size={16} color="var(--text3)" style={{ marginLeft: 4 }} />
                 </div>
@@ -220,6 +328,15 @@ export default function Projects() {
           );
         })}
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <DeleteProjectModal
+          project={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(id) => setProjects((prev ?? rawProjects).filter(p => p.id !== id))}
+        />
+      )}
     </div>
   );
 }

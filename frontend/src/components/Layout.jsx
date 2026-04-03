@@ -8,8 +8,8 @@ const NAV = [
   { to: "/projects",  icon: FolderOpen,      label: "Projects"  },
   { to: "/tests",     icon: FlaskConical,    label: "Tests"     },
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
-  { to: "/work",      icon: Briefcase,       label: "Work"      },
-  { to: "/context",   icon: Layers,          label: "Context"   },
+  { to: "/work",      icon: Briefcase,       label: "Runs"      },
+  { to: "/context",   icon: Layers,          label: "System"    },
 ];
 
 export default function Layout() {
@@ -52,7 +52,7 @@ function Sidebar() {
       {/* Nav */}
       <nav style={{ padding: "10px 8px", flex: 1 }}>
         {NAV.map(({ to, icon: Icon, label }) => (
-          <NavLink key={to} to={to} style={({ isActive }) => ({
+          <NavLink key={to} to={to} className="nav-link" style={({ isActive }) => ({
             display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
             borderRadius: "var(--radius)", marginBottom: 1,
             fontWeight: isActive ? 600 : 400, fontSize: "0.875rem",
@@ -68,7 +68,7 @@ function Sidebar() {
 
       {/* Settings at bottom */}
       <div style={{ padding: "10px 8px", borderTop: "1px solid var(--border)" }}>
-        <NavLink to="/settings" style={({ isActive }) => ({
+        <NavLink to="/settings" className="nav-link" style={({ isActive }) => ({
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
           borderRadius: "var(--radius)", fontWeight: isActive ? 600 : 400,
           fontSize: "0.875rem", color: isActive ? "var(--accent)" : "var(--text2)",

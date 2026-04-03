@@ -119,9 +119,17 @@ export default function NewProject() {
     ? <div style={{ color: "var(--red)", fontSize: "0.75rem", marginTop: 4 }}>{fieldErrors[name]}</div>
     : null;
 
+  const isDirty = form.name.trim() || form.url.trim() ||
+    (form.hasAuth && (form.username.trim() || form.password.trim()));
+
+  function handleBack() {
+    if (isDirty && !window.confirm("Leave without saving? Your changes will be lost.")) return;
+    navigate(-1);
+  }
+
   return (
     <div className="fade-in" style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={() => navigate(-1)}>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={handleBack}>
         <ArrowLeft size={14} /> Back
       </button>
 

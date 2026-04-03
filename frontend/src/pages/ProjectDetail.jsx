@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
+import AgentTag from "../components/AgentTag.jsx";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
@@ -21,11 +22,6 @@ function ReviewBadge({ status }) {
   if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
   if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
   return <span className="badge badge-amber"><AlertCircle size={10} /> Draft</span>;
-}
-
-function AgentTag({ type = "TA" }) {
-  const s = { QA: "avatar-qa", TA: "avatar-ta", EX: "avatar-ex" };
-  return <div className={`avatar ${s[type] || "avatar-ta"}`}>{type}</div>;
 }
 
 function ConfBar({ score }) {
