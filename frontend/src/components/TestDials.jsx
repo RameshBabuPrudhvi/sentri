@@ -406,7 +406,7 @@ export default function TestDials({ onChange }) {
       <Section
         icon={<Users size={15} />}
         label="Workflow & User Perspective"
-        subtitle={cfg.workflow.length > 0 ? `E2E${cfg.workflow.includes("multi_role") ? ", Multi-role" : ""}` : "None"}
+        subtitle={cfg.workflow.length > 0 ? WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id)).map(w => w.label.split(" ")[0]).slice(0, 2).join(", ") : "None"}
         defaultOpen={false}
       >
         {WORKFLOW_OPTIONS.map(opt => (

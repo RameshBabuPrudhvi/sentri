@@ -118,6 +118,16 @@ app.delete("/api/projects/:id", (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
 
+  // Refuse deletion while async operations are in progress to prevent orphaned data
+  const activeRuns = Object.values(db.runs).filter(
+    r => r.projectId === req.params.id && r.status === "running"
+  );
+  if (activeRuns.length > 0) {
+    return res.status(409).json({
+      error: "Cannot delete project while operations are running. Wait for active crawls or test runs to complete.",
+    });
+  }
+
   // Delete associated tests
   const testIds = Object.keys(db.tests).filter(tid => db.tests[tid].projectId === req.params.id);
   testIds.forEach(tid => delete db.tests[tid]);

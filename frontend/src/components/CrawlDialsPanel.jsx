@@ -19,7 +19,7 @@ export { buildTestDialsPrompt };
 
 export default function CrawlDialsPanel({ onChange }) {
   const [open, setOpen] = useState(false);
-  const [activeCount, setActiveCount] = useState(4);
+  const [activeCount, setActiveCount] = useState(3);
 
   function handleChange(cfg) {
     setActiveCount(countActiveDials(cfg));

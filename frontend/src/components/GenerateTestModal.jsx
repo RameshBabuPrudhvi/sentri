@@ -60,7 +60,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [dialsConfig, setDialsConfig] = useState(null);
 
   // Active dial count for badge
-  const [activeDialCount, setActiveDialCount] = useState(4);
+  const [activeDialCount, setActiveDialCount] = useState(3);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
