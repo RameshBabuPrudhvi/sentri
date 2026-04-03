@@ -12,15 +12,7 @@ import {
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
 import { finalizeRunIfNotAborted } from "./abortHelper.js";
-
-// Lazy-loaded so testRunner can be imported before index.js sets up SSE
-let _emitRunEvent = null;
-async function emitRunEvent(...args) {
-  if (!_emitRunEvent) {
-    try { ({ emitRunEvent: _emitRunEvent } = await import("./index.js")); } catch { return; }
-  }
-  _emitRunEvent?.(...args);
-}
+import { emitRunEvent, log } from "./utils/runLogger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,14 +30,6 @@ const SHOTS_DIR     = path.join(ARTIFACTS_DIR, "screenshots");
 [ARTIFACTS_DIR, VIDEOS_DIR, TRACES_DIR, SHOTS_DIR].forEach((d) => {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
-
-function log(run, msg) {
-  const entry = `[${new Date().toISOString()}] ${msg}`;
-  run.logs.push(entry);
-  console.log(entry);
-  // Broadcast log event to SSE listeners
-  emitRunEvent(run.id, "log", { message: entry });
-}
 
 /**
  * extractTestBody(playwrightCode)

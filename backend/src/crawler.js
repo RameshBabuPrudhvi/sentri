@@ -22,26 +22,10 @@ import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/
 import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
-
-// Lazy SSE emitter — avoids circular-import issues
-let _emitRunEvent = null;
-async function emitRunEvent(...args) {
-  if (!_emitRunEvent) {
-    try { ({ emitRunEvent: _emitRunEvent } = await import("./index.js")); } catch { return; }
-  }
-  _emitRunEvent?.(...args);
-}
+import { emitRunEvent, log } from "./utils/runLogger.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
-
-function log(run, msg) {
-  const entry = `[${new Date().toISOString()}] ${msg}`;
-  run.logs.push(entry);
-  console.log(entry);
-  // Broadcast log event to SSE listeners (mirrors testRunner.js behaviour)
-  emitRunEvent(run.id, "log", { message: entry });
-}
 
 function setStep(run, step) {
   run.currentStep = step;
