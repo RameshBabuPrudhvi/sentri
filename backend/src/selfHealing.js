@@ -193,6 +193,12 @@ export function getSelfHealingHelperCode(healingHints) {
         await ensureReady(el);
         await el.click({ timeout: DEFAULT_TIMEOUT });
       });
+
+      // After clicking, give the page a moment to settle — navigation links
+      // and SPAs need time to load the new content before the next assertion.
+      // We try networkidle first (best for full navigations) then fall back
+      // to a short wait (for SPA route changes that don't trigger network).
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
     }
 
     // Helper: restrict a locator to only fillable elements so we never
@@ -273,6 +279,9 @@ export function getSelfHealingHelperCode(healingHints) {
           ];
 
       const el = await findElement(page, strategies, { healingKey: 'expect::' + text });
+      // Wait for the element to stabilise before asserting — prevents flaky
+      // failures during page transitions, SPA re-renders, and CSS animations.
+      await el.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT }).catch(() => {});
       await expect(el).toBeVisible();
     }
   `;

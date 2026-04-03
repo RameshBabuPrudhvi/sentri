@@ -178,6 +178,8 @@ Requirements:
 7. Negative tests should verify error messages and validation feedback
 8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL') as the very first line inside the test function. Use the actual URL from the PAGE data above.
 9. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use the real page URL provided.
+10. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/dashboard/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures.
+11. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page — assertions that run before the page settles are the #1 cause of flaky tests.
 
 Return ONLY valid JSON (no markdown):
 {
@@ -326,6 +328,8 @@ STRICT RULES:
 10. Only test elements/behaviors that ACTUALLY exist for this type of page
 11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
 12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
+13. STABILITY: For URL assertions use regex patterns or toContainText — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
+14. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page — assertions that run before the page settles are the #1 cause of flaky tests
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -375,6 +379,8 @@ STRICT RULES:
 8. CRITICAL: playwrightCode MUST start with: await page.goto('${appUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 });
 9. CRITICAL: playwrightCode must be fully self-contained and executable on its own
 10. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use '${appUrl}'
+11. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
+12. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
