@@ -264,14 +264,15 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Character limits enforced on text inputs`,
 
     NAVIGATION: `Generate ${testRange} tests covering:
-- POSITIVE: Page title and main heading (H1) are visible and correct
-- POSITIVE: Primary navigation links are present and clickable
-- POSITIVE: Clicking the logo/brand returns to homepage
-- POSITIVE: Key call-to-action buttons are visible and enabled
-- POSITIVE: Page loads without console errors (no 404 resources)
-- NEGATIVE: 404 URL shows appropriate not-found page
-- EDGE: Keyboard navigation reaches all interactive elements
-- EDGE: Page is correctly structured with semantic headings`,
+- POSITIVE: User clicks a navigation link and is taken to the correct destination page with expected content
+- POSITIVE: User navigates to this page, verifies key content loads, then navigates to another section and back
+- POSITIVE: Primary navigation links lead to the correct URLs and load the expected page titles
+- POSITIVE: Key call-to-action buttons trigger the intended user flow (e.g. sign up, get started, learn more)
+- POSITIVE: User completes a multi-step navigation: homepage → section page → detail page → back to homepage
+- NEGATIVE: Broken or dead links are detected (clicking a link does not lead to a 404 or error page)
+- NEGATIVE: Navigation state is preserved correctly after browser back/forward
+- EDGE: Deep-linking directly to this page loads it correctly with all content visible
+- EDGE: Page renders correctly and key interactive elements are functional after a full reload`,
 
     CRUD: `Generate ${testRange} tests covering:
 - POSITIVE: Create new item with valid data succeeds
@@ -283,18 +284,20 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Cancel edit discards unsaved changes`,
 
     CONTENT: `Generate ${testRange} tests covering:
-- POSITIVE: Main content/article is visible and readable
-- POSITIVE: Images are loaded (no broken images)
-- POSITIVE: Internal links within content navigate correctly
-- POSITIVE: Page metadata (title, description) is present
-- NEGATIVE: Page handles missing optional content gracefully
-- EDGE: Long content is paginated or scrollable
-- EDGE: Content is accessible with proper heading hierarchy`,
+- POSITIVE: User opens the page and main content/article is fully visible and readable
+- POSITIVE: User clicks internal links within the content and is navigated to the correct destination
+- POSITIVE: User scrolls through the page and all sections, images, and media load progressively
+- POSITIVE: User clicks a related content link or "read more" and the target page loads with expected content
+- NEGATIVE: Broken images or missing media are detected (no placeholder or 404 resources)
+- NEGATIVE: External links open correctly without breaking the current page state
+- EDGE: User navigates to the page via direct URL and all content renders without requiring prior navigation
+- EDGE: Page content is accessible — headings are hierarchical and interactive elements are reachable`,
   };
 
   const hints = scenarioHints[pageType] || scenarioHints.NAVIGATION;
 
   return `You are a senior QA engineer. Generate comprehensive Playwright tests based on REAL user behavior patterns.
+Every test must simulate a REAL USER ACTION (click, navigate, fill, scroll) and verify the OUTCOME — do NOT generate tests that only check whether elements exist on the page.
 
 PAGE: ${snapshot.url}
 TITLE: ${snapshot.title}
@@ -317,7 +320,7 @@ STRICT RULES:
 4. Every test MUST have at least 2 strong assertions
 5. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
 6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
-7. Skip tests for: footer, social icons, cookie banners, generic navigation boilerplate
+7. Skip tests for: footer, social icons, cookie banners — but DO test primary navigation links and CTAs that lead to real user flows
 8. Tests must be independent — no shared state between tests
 9. For NEGATIVE tests: assert the actual error message or validation indicator is visible
 10. Only test elements/behaviors that ACTUALLY exist for this type of page
@@ -333,7 +336,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high|medium",
       "type": "${classifiedPage.dominantIntent.toLowerCase()}",
       "scenario": "positive|negative|edge_case",
-      "steps": ["User opens the page", "User fills in the search field with a query", "Assert: search results are displayed"],
+      "steps": ["User opens the page", "User clicks a link or button to perform an action", "Assert: expected page or content is displayed"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\n\ntest('...', async ({ page }) => {\n  // complete test code\n});"
     }
   ]
