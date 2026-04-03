@@ -326,7 +326,7 @@ export default function Work() {
                 <tr key={run.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${run.id}`)}>
                   <td>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                      {run.id.slice(0, 8)}…
+                      {run.id.length > 8 ? run.id.slice(0, 8) + "…" : run.id}
                     </span>
                   </td>
                   <td>

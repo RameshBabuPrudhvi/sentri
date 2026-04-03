@@ -207,7 +207,7 @@ export default function RunDetail() {
             fontWeight: 500,
           }}
         >
-          <ArrowLeft size={14} /> Work
+          <ArrowLeft size={14} /> Runs
         </button>
         <span>›</span>
         <span>Run Detail</span>
@@ -224,7 +224,7 @@ export default function RunDetail() {
           }}
         >
           <h1 style={{ fontWeight: 700, fontSize: "1.3rem" }}>
-            Task #{runId.slice(0, 6).toUpperCase()}:{" "}
+            Task #{runId.length > 6 ? runId.slice(0, 6).toUpperCase() + "…" : runId.toUpperCase()}:{" "}
             {isCrawl ? "Crawl & Generate" : isGenerate ? "AI Generate" : "Test Run"}
           </h1>
 
@@ -286,7 +286,7 @@ export default function RunDetail() {
           }}
         >
           <span style={{ fontFamily: "var(--font-mono)" }}>
-            #{runId.slice(0, 8)}
+            #{runId.length > 8 ? runId.slice(0, 8) + "…" : runId}
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <AgentTag type="TA" /> Sentri Agent

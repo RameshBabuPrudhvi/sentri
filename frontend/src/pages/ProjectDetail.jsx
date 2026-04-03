@@ -478,7 +478,7 @@ export default function ProjectDetail() {
                             </td>
                             <td>
                               <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                                {t.id.slice(0, 8)}…
+                                {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
                               </span>
                             </td>
                             <td style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
@@ -605,7 +605,7 @@ export default function ProjectDetail() {
                       <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
                         <td>
                           <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                            {t.id.slice(0, 8)}…
+                            {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
                           </span>
                         </td>
                         <td>
@@ -671,7 +671,7 @@ export default function ProjectDetail() {
                       <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${r.id}`)}>
                         <td>
                           <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text3)" }}>
-                            {r.id.slice(0, 8)}…
+                            {r.id.length > 8 ? r.id.slice(0, 8) + "…" : r.id}
                           </span>
                         </td>
                         <td>

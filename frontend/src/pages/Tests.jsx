@@ -769,7 +769,7 @@ export default function Tests() {
                       </td>
                       <td>
                         <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                          {t.id.slice(0, 8)}…
+                          {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
                         </span>
                       </td>
                       <td>
