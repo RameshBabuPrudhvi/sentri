@@ -18,6 +18,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { throwIfAborted } from "./abortHelper.js";
 
 // ── Runtime key store (set via /api/settings, survives until process restart) ─
 const runtimeKeys = {};
@@ -426,7 +427,7 @@ export async function streamText(prompt, onToken, options = {}) {
       messages: [{ role: "user", content: prompt }],
     }, { signal });
     for await (const chunk of stream) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      throwIfAborted(signal);
       if (chunk.type === "content_block_delta" && chunk.delta?.text) {
         onToken(chunk.delta.text);
       }
@@ -445,7 +446,7 @@ export async function streamText(prompt, onToken, options = {}) {
     }, { signal });
     let full = "";
     for await (const chunk of stream) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      throwIfAborted(signal);
       const token = chunk.choices[0]?.delta?.content ?? "";
       if (token) { full += token; onToken(token); }
     }

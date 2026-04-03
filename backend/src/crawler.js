@@ -515,7 +515,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Layer 5: Validate generated tests — reject malformed / placeholder tests
   setStep(run, 7);
@@ -533,7 +533,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Store in db
   for (const t of validatedTests) {

@@ -12,6 +12,7 @@
  */
 
 import { generateText, parseJSON } from "../aiProvider.js";
+import { throwIfAborted } from "../abortHelper.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -181,7 +182,7 @@ export async function regenerateFailingTest(improvement, signal) {
   const { test, failureCategory, errorMessage, snapshot } = improvement;
 
   try {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfAborted(signal);
     const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot);
     const text = await generateText(prompt, { signal });
     const improved = parseJSON(text);

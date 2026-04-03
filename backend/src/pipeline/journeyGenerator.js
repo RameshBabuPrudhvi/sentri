@@ -8,6 +8,7 @@
 
 import { generateText, streamText, parseJSON, isLocalProvider } from "../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
+import { throwIfAborted } from "../abortHelper.js";
 
 // ── Step sanitiser — converts Playwright code lines to human-readable steps ──
 
@@ -460,7 +461,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
   // 1. Generate journey tests (highest value — multi-page flows)
   for (const journey of journeys) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
     const journeyTests = await generateJourneyTest(journey, snapshotsByUrl, dialsPrompt, signal);
     for (const jt of journeyTests) {
@@ -473,7 +474,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
   // 2. Comprehensive tests for HIGH-PRIORITY pages not covered by journeys
   for (const classifiedPage of classifiedPages) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfAborted(signal);
     if (!classifiedPage.isHighPriority) continue;
     if (coveredUrls.has(classifiedPage.url)) continue;
 
@@ -490,7 +491,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
   // 3. Comprehensive tests for ALL remaining pages (NAVIGATION, CONTENT, etc.)
   //    Previously these only got 1 basic test — now they get full 5-8 test coverage
   for (const classifiedPage of classifiedPages) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfAborted(signal);
     if (classifiedPage.isHighPriority || coveredUrls.has(classifiedPage.url)) continue;
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
