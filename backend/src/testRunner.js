@@ -559,8 +559,12 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   }
 
   finalizeRunIfNotAborted(run);
-  run.finishedAt = new Date().toISOString();
-  run.duration = Date.now() - runStart;
+  // Only set finishedAt/duration if the run wasn't already aborted — the abort
+  // endpoint sets these immediately so the UI shows the correct abort timestamp.
+  if (run.status !== "aborted") {
+    run.finishedAt = new Date().toISOString();
+    run.duration = Date.now() - runStart;
+  }
   log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
   // NOTE: "done" SSE event is emitted AFTER the feedback loop (see bottom of function)
   //         so the frontend only receives it once the entire pipeline is truly finished.

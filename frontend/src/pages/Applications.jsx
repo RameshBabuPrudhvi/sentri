@@ -4,7 +4,7 @@ import {
   Plus, Globe, Search, ExternalLink,
   RefreshCw, FlaskConical, ChevronRight, Trash2,
 } from "lucide-react";
-import useProjectData from "../hooks/useProjectData";
+import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData";
 import { fmtRelativeDate } from "../utils/formatters";
 import PassRateBar from "../components/PassRateBar";
 import DeleteProjectModal from "../components/DeleteProjectModal.jsx";
@@ -26,20 +26,15 @@ function StatusDot({ status }) {
 }
 
 export default function Projects() {
-  const { projects: rawProjects, allTests, allRuns, loading } = useProjectData();
+  const { projects, allTests, allRuns, loading, refresh } = useProjectData();
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null); // project to confirm-delete
-  const [projects, setProjects] = useState(null); // local override after deletion
   const navigate = useNavigate();
-
-  // Use local state once a deletion has happened so the list updates instantly
-  // without waiting for the hook to re-fetch.
-  const visibleProjects = projects ?? rawProjects;
 
   // Derive per-project stats from the shared hook data
   const projectStats = useMemo(() => {
     const statsMap = {};
-    for (const p of visibleProjects) {
+    for (const p of projects) {
       const tests = allTests.filter(t => t.projectId === p.id);
       const runs  = allRuns.filter(r => r.projectId === p.id);
       const testRuns = runs.filter(r => r.type === "test_run");
@@ -62,9 +57,9 @@ export default function Projects() {
       };
     }
     return statsMap;
-  }, [visibleProjects, allTests, allRuns]);
+  }, [projects, allTests, allRuns]);
 
-  const filtered = visibleProjects.filter(p =>
+  const filtered = projects.filter(p =>
     !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) ||
     (p.url || "").toLowerCase().includes(search.toLowerCase())
   );
@@ -94,7 +89,7 @@ export default function Projects() {
       </div>
 
       {/* Search */}
-      {visibleProjects.length > 0 && (
+      {projects.length > 0 && (
         <div style={{ position: "relative", maxWidth: 340, marginBottom: 16 }}>
           <Search size={13} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
           <input
@@ -112,14 +107,14 @@ export default function Projects() {
         <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
           <Globe size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
           <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 6 }}>
-            {visibleProjects.length === 0 ? "No projects yet" : "No results"}
+            {projects.length === 0 ? "No projects yet" : "No results"}
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
-            {visibleProjects.length === 0
+            {projects.length === 0
               ? "Add your first web app to start generating and running tests."
               : "Try a different search."}
           </div>
-          {visibleProjects.length === 0 && (
+          {projects.length === 0 && (
             <button className="btn btn-primary btn-sm" onClick={() => navigate("/projects/new")}>
               <Plus size={13} /> Add Project
             </button>
@@ -245,7 +240,7 @@ export default function Projects() {
         <DeleteProjectModal
           project={deleteTarget}
           onClose={() => setDeleteTarget(null)}
-          onDeleted={(id) => setProjects(prev => (prev ?? rawProjects).filter(p => p.id !== id))}
+          onDeleted={() => { invalidateProjectDataCache(); refresh(); }}
         />
       )}
     </div>

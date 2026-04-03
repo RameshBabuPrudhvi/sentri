@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { api } from "../api.js";
+import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import ModalShell from "./ModalShell.jsx";
 
 /**
@@ -20,6 +21,9 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
     setError(null);
     try {
       await api.deleteProject(project.id);
+      // Bust the shared cache so Dashboard, Tests, Runs pages don't show
+      // the deleted project for the remainder of the 30-second TTL.
+      invalidateProjectDataCache();
       onDeleted(project.id);
       onClose();
     } catch (err) {
