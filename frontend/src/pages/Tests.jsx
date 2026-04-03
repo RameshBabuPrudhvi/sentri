@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
+import GenerateTestModal from "../components/GenerateTestModal.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -1064,10 +1065,9 @@ export default function Tests() {
 
       {/* Modals */}
       {showCreateModal && (
-        <CreateTestModal
+        <GenerateTestModal
           projects={projects}
           onClose={() => setShowCreateModal(false)}
-          defaultProjectId={projects[0]?.id || ""}
         />
       )}
       {showRunModal && (

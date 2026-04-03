@@ -13,7 +13,7 @@
 
 import React, { useState } from "react";
 import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
-import TestDials, { buildTestDialsPrompt } from "./TestDials.jsx";
+import TestDials, { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx";
 
 export { buildTestDialsPrompt };
 
@@ -22,12 +22,7 @@ export default function CrawlDialsPanel({ onChange }) {
   const [activeCount, setActiveCount] = useState(4);
 
   function handleChange(cfg) {
-    let n = 0;
-    if (cfg?.strategy) n++;
-    if (cfg?.workflow?.length) n++;
-    if (cfg?.quality?.length) n++;
-    if (cfg?.format) n++;
-    setActiveCount(n);
+    setActiveCount(countActiveDials(cfg));
     onChange?.(cfg);
   }
 

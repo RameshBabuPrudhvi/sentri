@@ -6,6 +6,7 @@ import {
   RotateCcw, Info, Shield, AlertCircle,
 } from "lucide-react";
 import { api } from "../api.js";
+import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
@@ -79,6 +80,7 @@ export default function ProjectDetail() {
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
   const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
+  const [crawlDialsCfg, setCrawlDialsCfg] = useState(null);
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [search, setSearch]               = useState("");
@@ -123,7 +125,8 @@ export default function ProjectDetail() {
   async function doCrawl() {
     setActionLoading("crawl");
     try {
-      const { runId } = await api.crawl(id);
+      const dialsPrompt = buildTestDialsPrompt(crawlDialsCfg);
+      const { runId } = await api.crawl(id, dialsPrompt ? { dialsPrompt } : undefined);
       setActiveRun(runId);
       setActiveRunId(runId);
       showToast("Crawl started — new tests will appear as Draft", "info", runId);
@@ -270,17 +273,22 @@ export default function ProjectDetail() {
               <a href={project.url} target="_blank" rel="noreferrer" style={{ fontSize: "0.78rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>{project.url}</a>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-ghost btn-sm" onClick={doCrawl} disabled={!!actionLoading}>
-              {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
-              {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate Tests"}
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={doRun}
-              disabled={!!actionLoading || approvedTests.length === 0}
-              title={approvedTests.length === 0 ? "Approve tests first to run regression" : undefined}>
-              {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-              Run Regression ({approvedTests.length})
-            </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-ghost btn-sm" onClick={doCrawl} disabled={!!actionLoading}>
+                {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
+                {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate Tests"}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={doRun}
+                disabled={!!actionLoading || approvedTests.length === 0}
+                title={approvedTests.length === 0 ? "Approve tests first to run regression" : undefined}>
+                {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
+                Run Regression ({approvedTests.length})
+              </button>
+            </div>
+            <div style={{ width: "100%", minWidth: 300, maxWidth: 440 }}>
+              <CrawlDialsPanel onChange={setCrawlDialsCfg} />
+            </div>
           </div>
         </div>
 

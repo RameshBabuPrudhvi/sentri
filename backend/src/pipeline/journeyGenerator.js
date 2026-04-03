@@ -375,8 +375,9 @@ GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl, onToken) {
-  const prompt = buildUserRequestedPrompt(name, description, appUrl);
+export async function generateUserRequestedTest(name, description, appUrl, onToken, dialsPrompt = "") {
+  const base = buildUserRequestedPrompt(name, description, appUrl);
+  const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
   const text = onToken
     ? await streamText(prompt, onToken)
     : await generateText(prompt);
@@ -404,9 +405,10 @@ export async function generateUserRequestedTest(name, description, appUrl, onTok
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
-export async function generateJourneyTest(journey, snapshotsByUrl) {
+export async function generateJourneyTest(journey, snapshotsByUrl, dialsPrompt = "") {
   try {
-    const prompt = buildJourneyPrompt(journey, snapshotsByUrl);
+    const base = buildJourneyPrompt(journey, snapshotsByUrl);
+    const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
     const text = await generateText(prompt);
     const result = parseJSON(text);
 
@@ -426,9 +428,10 @@ export async function generateJourneyTest(journey, snapshotsByUrl) {
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
  */
-export async function generateIntentTests(classifiedPage, snapshot) {
+export async function generateIntentTests(classifiedPage, snapshot, dialsPrompt = "") {
   try {
-    const prompt = buildIntentPrompt(classifiedPage, snapshot);
+    const base = buildIntentPrompt(classifiedPage, snapshot);
+    const prompt = dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
     const text = await generateText(prompt);
     const parsed = parseJSON(text);
 
@@ -450,13 +453,13 @@ export async function generateIntentTests(classifiedPage, snapshot) {
  * Orchestrates full test generation: journeys first, then per-page intent tests.
  * ALL pages get comprehensive tests — not just high-priority ones.
  */
-export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress) {
+export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, dialsPrompt = "") {
   const allTests = [];
 
   // 1. Generate journey tests (highest value — multi-page flows)
   for (const journey of journeys) {
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
-    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl);
+    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl, dialsPrompt);
     for (const jt of journeyTests) {
       allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
     }
@@ -474,7 +477,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
 
-    const tests = await generateIntentTests(classifiedPage, snapshot);
+    const tests = await generateIntentTests(classifiedPage, snapshot, dialsPrompt);
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }
@@ -488,7 +491,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
-    const tests = await generateIntentTests(classifiedPage, snapshot);
+    const tests = await generateIntentTests(classifiedPage, snapshot, dialsPrompt);
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }

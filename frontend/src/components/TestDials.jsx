@@ -577,6 +577,17 @@ export default function TestDials({ onChange }) {
 }
 
 // ─── Export config builder ─────────────────────────────────────────────────────
+// Count how many dial sections are actively configured
+export function countActiveDials(cfg) {
+  if (!cfg) return 0;
+  let n = 0;
+  if (cfg.strategy) n++;
+  if (cfg.workflow?.length > 0) n++;
+  if (cfg.quality?.length > 0) n++;
+  if (cfg.format) n++;
+  return n;
+}
+
 // Converts the TestDials config into a plain object that can be sent to the backend
 // or injected into the AI generation prompt.
 

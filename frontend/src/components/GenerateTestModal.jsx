@@ -13,7 +13,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Upload, FileCode2, Clock, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
-import TestDials, { buildTestDialsPrompt } from "./TestDials.jsx";
+import TestDials, { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx";
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
@@ -72,15 +72,9 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     setTimeout(() => nameRef.current?.focus(), 60);
   }, []);
 
-  // Count active dials whenever config changes
+  // Recount whenever dialsConfig changes
   useEffect(() => {
-    if (!dialsConfig) return;
-    let n = 0;
-    if (dialsConfig.strategy) n++;
-    if (dialsConfig.workflow?.length) n++;
-    if (dialsConfig.quality?.length) n++;
-    if (dialsConfig.format) n++;
-    setActiveDialCount(n);
+    setActiveDialCount(countActiveDials(dialsConfig));
   }, [dialsConfig]);
 
   async function handleGenerate(e) {

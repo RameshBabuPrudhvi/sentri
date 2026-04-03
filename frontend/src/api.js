@@ -37,7 +37,7 @@ export const api = {
   deleteProject: (id)   => req("DELETE", `/projects/${id}`),
 
   // Crawl & Run
-  crawl:         (id)    => req("POST", `/projects/${id}/crawl`, undefined, TIMEOUT_LONG),
+  crawl:         (id, body) => req("POST", `/projects/${id}/crawl`, body || undefined, TIMEOUT_LONG),
   runTests:      (id)    => req("POST", `/projects/${id}/run`,   undefined, TIMEOUT_LONG),
   runSingleTest: (testId)=> req("POST", `/tests/${testId}/run`,  undefined, TIMEOUT_LONG),
 

@@ -234,7 +234,7 @@ async function takeSnapshot(page) {
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description }) {
+export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "" }) {
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
@@ -257,7 +257,7 @@ export async function generateSingleTest(project, run, db, { name, description }
 
   const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  });
+  }, dialsPrompt);
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
@@ -344,7 +344,7 @@ export async function generateSingleTest(project, run, db, { name, description }
   return createdTestIds;
 }
 
-export async function crawlAndGenerateTests(project, run, db) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "" } = {}) {
   const browser = await chromium.launch({
     headless: process.env.BROWSER_HEADLESS !== "false",
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
@@ -477,7 +477,7 @@ export async function crawlAndGenerateTests(project, run, db) {
   // AI test generation
   setStep(run, 4);
   log(run, `\u{1F916} Generating intent-driven tests...`);
-  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg));
+  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), dialsPrompt);
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
 
   // Layer 3: Deduplication

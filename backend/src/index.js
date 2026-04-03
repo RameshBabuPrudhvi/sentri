@@ -120,6 +120,8 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
 
+  const { dialsPrompt } = req.body || {};
+
   const runId = uuidv4();
   const run = {
     id: runId,
@@ -139,7 +141,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   });
 
   // Kick off async - stream updates via polling
-  crawlAndGenerateTests(project, run, db)
+  crawlAndGenerateTests(project, run, db, { dialsPrompt: dialsPrompt || "" })
     .then(() => {
       logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -408,6 +410,13 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
+  // Split TestDials config back out of description (embedded by frontend buildTestDialsPrompt)
+  const DIALS_SENTINEL = "TEST GENERATION CONFIGURATION:";
+  const descFull = (description || "").trim();
+  const dialsSplit = descFull.indexOf(DIALS_SENTINEL);
+  const cleanDescription = dialsSplit >= 0 ? descFull.slice(0, dialsSplit).trim() : descFull;
+  const dialsPromptGen   = dialsSplit >= 0 ? descFull.slice(dialsSplit).trim() : "";
+
   if (!hasProvider()) {
     return res.status(503).json({
       error: "No AI provider configured. Add an API key in Settings to use AI test generation.",
@@ -425,7 +434,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
     tests: [],
     pagesFound: 0,
     // Store the generation input so the frontend can display it
-    generateInput: { name: name.trim(), description: (description || "").trim() },
+    generateInput: { name: name.trim(), description: cleanDescription },
   };
   db.runs[runId] = run;
 
@@ -441,7 +450,8 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   // Run pipeline async after response is flushed
   generateSingleTest(project, run, db, {
     name: name.trim(),
-    description: (description || "").trim(),
+    description: cleanDescription,
+    dialsPrompt: dialsPromptGen,
   }).then(createdTestIds => {
     logActivity({
       type: "test.generate", projectId: project.id, projectName: project.name,
