@@ -15,6 +15,7 @@
 import { chromium } from "playwright";
 import { v4 as uuidv4 } from "uuid";
 import { getProviderName, streamText } from "./aiProvider.js";
+import { throwIfAborted } from "./abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
@@ -250,7 +251,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   // ── Step 4: Generate ONE focused test via AI ────────────────────────────
   // Use a dedicated prompt that generates exactly 1 test matching the user's
   // name + description, instead of the crawl pipeline's generic 5-8 tests.
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
   setStep(run, 4);
   log(run, `🤖 Generating test from user description...`);
   log(run, `   Name: "${name}"`);
@@ -262,7 +263,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
   setStep(run, 5);
   log(run, `🚫 Deduplicating...`);
   const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
@@ -271,7 +272,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
   setStep(run, 6);
   log(run, `✨ Enhancing assertions...`);
   // No real snapshots or classified pages — enhanceTests falls back gracefully
@@ -281,7 +282,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
   // ── Step 7: Validate ────────────────────────────────────────────────────
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
   setStep(run, 7);
   log(run, `✅ Validating generated tests...`);
   const validatedTests = [];
@@ -389,7 +390,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   }
 
   while (crawlQueue.hasMore() && crawlQueue.visitedCount < MAX_PAGES) {
-    if (signal?.aborted) { await browser.close(); throw new DOMException("Aborted", "AbortError"); }
+    if (signal?.aborted) { await browser.close(); throwIfAborted(signal); }
     const item = crawlQueue.dequeue();
     if (!item) break;
     const { url, depth } = item;
@@ -450,7 +451,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   await browser.close();
   log(run, `\u2705 Smart crawl done. ${snapshots.length} unique pages found.`);
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Layer 1: Element filtering
   setStep(run, 2);
@@ -462,14 +463,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   });
   for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Layer 2: Intent classification (AI-assisted when heuristic confidence is low)
   setStep(run, 3);
   log(run, `\u{1F9E0} Classifying page intents...`);
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfAborted(signal);
     const classified = await classifyPageWithAI(snap, snap.elements);
     if (classified._aiAssisted) {
       log(run, `   \u{1F916} AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
@@ -488,7 +489,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     log(run, `\u{1F5FA}\uFE0F  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
   }
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // AI test generation
   setStep(run, 4);
@@ -496,7 +497,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), dialsPrompt, signal);
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Layer 3: Deduplication
   setStep(run, 5);
@@ -506,7 +507,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
 
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  throwIfAborted(signal);
 
   // Layer 4: Assertion enhancement
   setStep(run, 6);
