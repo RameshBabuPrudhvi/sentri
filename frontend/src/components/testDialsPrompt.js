@@ -41,5 +41,6 @@ export function countActiveDials(cfg) {
   if (cfg.workflow?.length > 0) n++;
   if (cfg.quality?.length > 0) n++;
   if (cfg.format) n++;
+  if (cfg.testCount && cfg.testCount !== "auto") n++;
   return n;
 }

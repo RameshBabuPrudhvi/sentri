@@ -59,12 +59,21 @@ export const LANGUAGES = [
   { code: "pt",    label: "Portuguese" },
 ];
 
+export const TEST_COUNT_OPTIONS = [
+  { id: "single",        label: "Single Test (1)" },
+  { id: "few",           label: "Few (3–5)" },
+  { id: "moderate",      label: "Moderate (6–10)" },
+  { id: "comprehensive", label: "Many (10–20)" },
+  { id: "auto",          label: "Auto (AI decides)" },
+];
+
 // Quick lookup sets for validation
 const VALID_STRATEGIES = new Set(STRATEGY_OPTIONS.map(s => s.id));
 const VALID_WORKFLOWS  = new Set(WORKFLOW_OPTIONS.map(w => w.id));
 const VALID_QUALITIES  = new Set(QUALITY_OPTIONS.map(q => q.id));
 const VALID_FORMATS    = new Set(FORMAT_OPTIONS.map(f => f.id));
-const VALID_LANGUAGES  = new Set(LANGUAGES.map(l => l.code));
+const VALID_LANGUAGES   = new Set(LANGUAGES.map(l => l.code));
+const VALID_TEST_COUNTS = new Set(TEST_COUNT_OPTIONS.map(t => t.id));
 
 const CUSTOM_MODIFIER_MAX_LENGTH = 500;
 
@@ -94,6 +103,8 @@ export function validateDialsConfig(raw) {
 
   const language = VALID_LANGUAGES.has(raw.language) ? raw.language : "en-US";
 
+  const testCount = VALID_TEST_COUNTS.has(raw.testCount) ? raw.testCount : "auto";
+
   const automationHooks = raw.automationHooks === true;
 
   // Sanitise free-text: trim, cap length, strip anything that looks like a
@@ -107,7 +118,7 @@ export function validateDialsConfig(raw) {
     .replace(/```/g, "")
     .trim();
 
-  return { strategy, workflow, quality, format, language, automationHooks, customModifier };
+  return { strategy, workflow, quality, format, language, testCount, automationHooks, customModifier };
 }
 
 // ─── Build the prompt fragment from a validated config ──────────────────────
@@ -122,14 +133,17 @@ export function validateDialsConfig(raw) {
 export function buildDialsPrompt(cfg) {
   if (!cfg) return "";
 
-  const strategy  = STRATEGY_OPTIONS.find(s => s.id === cfg.strategy);
-  const format    = FORMAT_OPTIONS.find(f => f.id === cfg.format);
-  const workflows = WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id));
-  const qualities = QUALITY_OPTIONS.filter(q => cfg.quality.includes(q.id));
+  const strategy   = STRATEGY_OPTIONS.find(s => s.id === cfg.strategy);
+  const format     = FORMAT_OPTIONS.find(f => f.id === cfg.format);
+  const testCount  = TEST_COUNT_OPTIONS.find(t => t.id === cfg.testCount);
+  const workflows  = WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id));
+  const qualities  = QUALITY_OPTIONS.filter(q => cfg.quality.includes(q.id));
 
   const lines = [
     "TEST GENERATION CONFIGURATION:",
     strategy          ? `- Strategy: ${strategy.label}`                                                    : "",
+    testCount && cfg.testCount !== "auto"
+                      ? `- Number of tests: ${testCount.label} — generate exactly this many test cases`    : "",
     workflows.length  ? `- Perspectives: ${workflows.map(w => w.label).join(", ")}`                        : "",
     qualities.length  ? `- Quality checks: ${qualities.map(q => q.label).join(", ")}`                      : "",
     format            ? `- Output format: ${format.label}`                                                 : "",

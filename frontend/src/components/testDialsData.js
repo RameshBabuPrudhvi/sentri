@@ -60,6 +60,16 @@ export const LANGUAGES = [
   { code: "pt",    label: "Portuguese",        flag: "PT" },
 ];
 
+// ─── Test count options ────────────────────────────────────────────────────────
+
+export const TEST_COUNT_OPTIONS = [
+  { id: "single", label: "Single Test",        desc: "Generate exactly 1 test case" },
+  { id: "few",    label: "Few (3–5)",           desc: "A small focused set of tests" },
+  { id: "moderate", label: "Moderate (6–10)",   desc: "Balanced coverage" },
+  { id: "comprehensive", label: "Many (10–20)", desc: "Broad coverage suite" },
+  { id: "auto",   label: "Auto (AI decides)",   desc: "Let the AI determine the right number" },
+];
+
 // ─── Default config ────────────────────────────────────────────────────────────
 
 export const DEFAULT_CONFIG = {
@@ -71,4 +81,5 @@ export const DEFAULT_CONFIG = {
   language: "en-US",
   automationHooks: false,
   customModifier: "",
+  testCount: "auto",
 };

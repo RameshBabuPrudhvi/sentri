@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Settings2, ChevronDown, Plus, X, Save, RotateCcw,
   Target, Users, ShieldCheck, FileText, Globe, Cpu, Info,
-  Zap, BookOpen, GitBranch, Bug, Lock, BarChart3, Layers,
+  Zap, BookOpen, GitBranch, Bug, Lock, BarChart3, Layers, Hash,
 } from "lucide-react";
 import {
   STRATEGY_OPTIONS, WORKFLOW_OPTIONS, QUALITY_OPTIONS,
-  FORMAT_OPTIONS, LANGUAGES, DEFAULT_CONFIG,
+  FORMAT_OPTIONS, LANGUAGES, DEFAULT_CONFIG, TEST_COUNT_OPTIONS,
 } from "./testDialsData.js";
 import {
   loadSavedConfig, saveConfig,
@@ -273,6 +273,34 @@ export default function TestDials({ onChange }) {
             />
             <div>
               <div style={{ fontSize: "0.85rem", color: "var(--text)", fontWeight: cfg.strategy === opt.id ? 500 : 400 }}>{opt.label}</div>
+            </div>
+          </label>
+        ))}
+      </Section>
+
+      {/* ── Test Count ── */}
+      <Section
+        icon={<Hash size={15} />}
+        label="Test Count"
+        subtitle={TEST_COUNT_OPTIONS.find(o => o.id === cfg.testCount)?.label || "Auto"}
+        defaultOpen={false}
+      >
+        <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+          <Info size={11} /> Choose how many test cases to generate: a single focused test or a full suite
+        </div>
+        {TEST_COUNT_OPTIONS.map(opt => (
+          <label key={opt.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "2px 0" }}>
+            <input
+              type="radio"
+              name="testCount"
+              value={opt.id}
+              checked={cfg.testCount === opt.id}
+              onChange={() => update({ testCount: opt.id, preset: "" })}
+              style={{ marginTop: 3, accentColor: "var(--accent)", cursor: "pointer" }}
+            />
+            <div>
+              <div style={{ fontSize: "0.85rem", color: "var(--text)", fontWeight: cfg.testCount === opt.id ? 500 : 400 }}>{opt.label}</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--text3)" }}>{opt.desc}</div>
             </div>
           </label>
         ))}
