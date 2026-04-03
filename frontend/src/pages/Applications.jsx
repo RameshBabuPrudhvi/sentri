@@ -334,7 +334,7 @@ export default function Projects() {
         <DeleteProjectModal
           project={deleteTarget}
           onClose={() => setDeleteTarget(null)}
-          onDeleted={(id) => setProjects((prev ?? rawProjects).filter(p => p.id !== id))}
+          onDeleted={(id) => setProjects(prev => (prev ?? rawProjects).filter(p => p.id !== id))}
         />
       )}
     </div>

@@ -85,16 +85,14 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
     setPhase("submitting");
     try {
-      // Build an enriched description that includes TestDials config
+      // Send dialsPrompt as a dedicated field (matching the crawl endpoint pattern)
+      // instead of embedding it in the description string.
       const dialsPrompt = dialsConfig ? buildTestDialsPrompt(dialsConfig) : "";
-      const enrichedDescription = [
-        description.trim(),
-        dialsPrompt,
-      ].filter(Boolean).join("\n\n");
 
       const { runId } = await api.generateTest(projectId, {
         name: name.trim(),
-        description: enrichedDescription,
+        description: description.trim(),
+        dialsPrompt,
       });
       onClose();
       navigate(`/runs/${runId}`);

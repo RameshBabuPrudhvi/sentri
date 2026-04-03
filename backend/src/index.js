@@ -114,6 +114,29 @@ app.get("/api/projects/:id", (req, res) => {
   res.json(project);
 });
 
+app.delete("/api/projects/:id", (req, res) => {
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  // Delete associated tests
+  const testIds = Object.keys(db.tests).filter(tid => db.tests[tid].projectId === req.params.id);
+  testIds.forEach(tid => delete db.tests[tid]);
+
+  // Delete associated runs
+  const runIds = Object.keys(db.runs).filter(rid => db.runs[rid].projectId === req.params.id);
+  runIds.forEach(rid => delete db.runs[rid]);
+
+  // Delete the project itself
+  delete db.projects[req.params.id];
+
+  logActivity({
+    type: "project.delete", projectId: req.params.id, projectName: project.name,
+    detail: `Project deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs removed)`,
+  });
+
+  res.json({ ok: true, deletedTests: testIds.length, deletedRuns: runIds.length });
+});
+
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
 app.post("/api/projects/:id/crawl", async (req, res) => {
@@ -407,15 +430,11 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const { name, description } = req.body;
+  const { name, description, dialsPrompt } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  // Split TestDials config back out of description (embedded by frontend buildTestDialsPrompt)
-  const DIALS_SENTINEL = "TEST GENERATION CONFIGURATION:";
-  const descFull = (description || "").trim();
-  const dialsSplit = descFull.indexOf(DIALS_SENTINEL);
-  const cleanDescription = dialsSplit >= 0 ? descFull.slice(0, dialsSplit).trim() : descFull;
-  const dialsPromptGen   = dialsSplit >= 0 ? descFull.slice(dialsSplit).trim() : "";
+  const cleanDescription = (description || "").trim();
+  const dialsPromptGen   = (dialsPrompt || "").trim();
 
   if (!hasProvider()) {
     return res.status(503).json({
