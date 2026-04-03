@@ -173,13 +173,13 @@ Requirements:
 2. Each test must flow through multiple pages/steps logically
 3. ${SELF_HEALING_PROMPT_RULES}
 4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
-5. Add page.waitForLoadState() between navigation steps
+5. After every page.goto() call use { waitUntil: 'domcontentloaded' } — do NOT use waitForLoadState('networkidle') as many real-world sites (e.g. SPAs, e-commerce) fire continuous background requests and never reach networkidle, causing a 30 s timeout.
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
-8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL') as the very first line inside the test function. Use the actual URL from the PAGE data above.
+8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL', { waitUntil: 'domcontentloaded', timeout: 30000 }) as the very first line inside the test function. Use the actual URL from the PAGE data above.
 9. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use the real page URL provided.
 10. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/dashboard/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures.
-11. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page — assertions that run before the page settles are the #1 cause of flaky tests.
+11. STABILITY: After clicking a button or link that triggers navigation, wrap the click in Promise.all with page.waitForNavigation({ waitUntil: 'domcontentloaded' }) — e.g. await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). Never use waitForLoadState('networkidle') after a click — it times out on sites with background polling. For asserting dynamic content (search results, filters), use await page.waitForSelector('selector', { timeout: 15000 }) instead.
 
 Return ONLY valid JSON (no markdown):
 {
@@ -231,7 +231,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
   const scenarioHints = {
     AUTH: `Generate ${testRange} tests covering:
 - POSITIVE: Successful login with valid credentials redirects to dashboard
-- POSITIVE: Registration form accepts valid new user data  
+- POSITIVE: Registration form accepts valid new user data
 - NEGATIVE: Wrong password shows clear error message
 - NEGATIVE: Empty required fields show validation errors
 - NEGATIVE: Invalid email format blocked before submit
@@ -278,7 +278,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 
     CRUD: `Generate ${testRange} tests covering:
 - POSITIVE: Create new item with valid data succeeds
-- POSITIVE: Created item appears in list immediately  
+- POSITIVE: Created item appears in list immediately
 - POSITIVE: Edit existing item and save persists changes
 - NEGATIVE: Create with duplicate name shows error
 - NEGATIVE: Required fields block save when empty
@@ -329,7 +329,7 @@ STRICT RULES:
 11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
 12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
 13. STABILITY: For URL assertions use regex patterns or toContainText — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
-14. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page — assertions that run before the page settles are the #1 cause of flaky tests
+14. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites (Amazon, etc.) continuously fire background requests and never reach networkidle, causing a guaranteed 30 s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content that loads after interaction (search results, filtered lists, modal contents), use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -380,7 +380,7 @@ STRICT RULES:
 9. CRITICAL: playwrightCode must be fully self-contained and executable on its own
 10. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use '${appUrl}'
 11. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
-12. STABILITY: Add await page.waitForLoadState('networkidle') after every page.goto() and after clicking links that navigate to a new page
+12. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle'). After clicking something that navigates, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For dynamic content assertions use await page.waitForSelector('selector', { timeout: 15000 }) before expect().
 
 Return ONLY valid JSON (no markdown, no code fences):
 {

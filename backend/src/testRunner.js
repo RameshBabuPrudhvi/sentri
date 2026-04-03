@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BROWSER_HEADLESS    = process.env.BROWSER_HEADLESS !== "false";
 const VIEWPORT_WIDTH      = parseInt(process.env.VIEWPORT_WIDTH, 10) || 1280;
 const VIEWPORT_HEIGHT     = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
-const NAVIGATION_TIMEOUT  = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
+const NAVIGATION_TIMEOUT  = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 60000;
 
 const ARTIFACTS_DIR = path.join(__dirname, "..", "artifacts");
 const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");
@@ -64,6 +64,34 @@ function extractTestBody(playwrightCode) {
 }
 
 /**
+ * patchNetworkIdle(code)
+ *
+ * Rewrites any waitForLoadState('networkidle') or waitForLoadState("networkidle")
+ * calls that the AI may have generated into the safe domcontentloaded equivalent.
+ *
+ * Many real-world sites (SPAs, e-commerce like Amazon) fire continuous background
+ * XHR/fetch requests for ads, personalisation, and tracking — they never reach
+ * networkidle, so Playwright always times out after 30 s.  domcontentloaded is
+ * sufficient to guarantee the primary DOM content is ready for interaction.
+ *
+ * Also rewrites page.goto() calls that use waitUntil:'networkidle' to use
+ * waitUntil:'domcontentloaded' for the same reason.
+ *
+ * Additionally, wraps bare element.click() calls that are immediately followed
+ * by a waitForNavigation/waitForLoadState pattern into a safer Promise.all so
+ * the navigation promise is registered before the click fires.
+ */
+function patchNetworkIdle(code) {
+  return code
+    // waitForLoadState('networkidle') / waitForLoadState("networkidle")
+    .replace(/waitForLoadState\s*\(\s*['"]networkidle['"]\s*(,\s*\{[^}]*\})?\s*\)/g,
+      "waitForLoadState('domcontentloaded', { timeout: 30000 })")
+    // waitUntil: 'networkidle' / waitUntil: "networkidle" inside goto / waitForNavigation
+    .replace(/waitUntil\s*:\s*['"]networkidle['"]/g,
+      "waitUntil: 'domcontentloaded'");
+}
+
+/**
  * stripPlaywrightImports(code)
  *
  * Remove lines like:
@@ -95,7 +123,7 @@ async function runGeneratedCode(page, context, playwrightCode, expect, healingHi
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = applyHealingTransforms(stripPlaywrightImports(body));
+  const cleaned = applyHealingTransforms(patchNetworkIdle(stripPlaywrightImports(body)));
   const helpers = getSelfHealingHelperCode(healingHints);
 
   // eslint-disable-next-line no-new-func

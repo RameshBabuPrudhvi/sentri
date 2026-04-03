@@ -611,8 +611,12 @@ export function emitRunEvent(runId, type, payload = {}) {
   if (!listeners || listeners.size === 0) return;
   const data = JSON.stringify({ type, ...payload });
   for (const res of listeners) {
-    try { res.write(`data: ${data}\n\n`); } catch { /* client gone */ }
+    try {
+        res.write(`data: ${data}\n\n`);
+        if (type === "done") res.end();
+    } catch { /* client gone */ }
   }
+  if (type === "done") runListeners.delete(runId);
 }
 
 // GET /api/runs/:id/events  — SSE stream for a single run
