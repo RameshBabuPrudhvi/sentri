@@ -421,6 +421,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, dialsPrompt =
     sanitiseSteps(tests);
     return tests;
   } catch (err) {
+    if (err.name === "AbortError" || signal?.aborted) throw err;
     return [];
   }
 }
@@ -443,6 +444,7 @@ export async function generateIntentTests(classifiedPage, snapshot, dialsPrompt 
     sanitiseSteps(tests);
     return tests;
   } catch (err) {
+    if (err.name === "AbortError" || signal?.aborted) throw err;
     return [];
   }
 }
