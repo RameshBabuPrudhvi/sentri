@@ -573,10 +573,13 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
 
-  run.status = "completed";
+  // Only mark completed if the run wasn't already aborted by the user
+  if (run.status !== "aborted") {
+    run.status = "completed";
+  }
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
-  log(run, `🏁 Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+  log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
   // NOTE: "done" SSE event is emitted AFTER the feedback loop (see bottom of function)
   //         so the frontend only receives it once the entire pipeline is truly finished.
 
@@ -632,5 +635,8 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
 
   // Emit "done" only now — after the feedback loop — so the frontend's
   // fetchRun() always sees the final, stable completed state.
-  emitRunEvent(run.id, "done", { status: "completed", passed: run.passed, failed: run.failed, total: run.total });
+  // Skip if already aborted — the abort endpoint already emitted the done event.
+  if (run.status !== "aborted") {
+    emitRunEvent(run.id, "done", { status: run.status, passed: run.passed, failed: run.failed, total: run.total });
+  }
 }

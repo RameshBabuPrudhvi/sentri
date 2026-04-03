@@ -181,10 +181,12 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   crawlAndGenerateTests(project, run, db, { dialsPrompt: dialsPrompt || "", signal: abortController.signal })
     .then(() => {
       runAbortControllers.delete(runId);
-      logActivity({
-        type: "crawl.complete", projectId: project.id, projectName: project.name,
-        detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
-      });
+      if (run.status !== "aborted") {
+        logActivity({
+          type: "crawl.complete", projectId: project.id, projectName: project.name,
+          detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
+        });
+      }
     })
     .catch((err) => {
       runAbortControllers.delete(runId);

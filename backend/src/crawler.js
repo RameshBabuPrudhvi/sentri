@@ -323,7 +323,6 @@ export async function generateSingleTest(project, run, db, { name, description, 
     createdTestIds.push(testId);
   }
 
-  run.status = "completed";
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
@@ -336,14 +335,19 @@ export async function generateSingleTest(project, run, db, { name, description, 
     journeysDetected: 0,
     averageQuality: dedupStats.averageQuality,
   };
-  setStep(run, 8);
 
-  log(run, `\n📊 Pipeline Summary:`);
-  log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
-  log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
+  // Only mark completed if the run wasn't already aborted by the user
+  if (run.status !== "aborted") {
+    run.status = "completed";
+    setStep(run, 8);
 
-  // Signal completion to SSE clients so the frontend stops showing "Running"
-  emitRunEvent(run.id, "done", { status: "completed" });
+    log(run, `\n📊 Pipeline Summary:`);
+    log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
+    log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
+
+    // Signal completion to SSE clients so the frontend stops showing "Running"
+    emitRunEvent(run.id, "done", { status: "completed" });
+  }
 
   return createdTestIds;
 }
@@ -458,11 +462,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   });
   for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
 
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
   // Layer 2: Intent classification (AI-assisted when heuristic confidence is low)
   setStep(run, 3);
   log(run, `\u{1F9E0} Classifying page intents...`);
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const classified = await classifyPageWithAI(snap, snap.elements);
     if (classified._aiAssisted) {
       log(run, `   \u{1F916} AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
@@ -481,11 +488,15 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     log(run, `\u{1F5FA}\uFE0F  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
   }
 
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
   // AI test generation
   setStep(run, 4);
   log(run, `\u{1F916} Generating intent-driven tests...`);
-  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), dialsPrompt);
+  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), dialsPrompt, signal);
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
   // Layer 3: Deduplication
   setStep(run, 5);
@@ -495,11 +506,15 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
 
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
   // Layer 4: Assertion enhancement
   setStep(run, 6);
   log(run, `\u2728 Enhancing assertions...`);
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
   // Layer 5: Validate generated tests — reject malformed / placeholder tests
   setStep(run, 7);
@@ -516,6 +531,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     }
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
   // Store in db
   for (const t of validatedTests) {
@@ -544,7 +561,6 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
-  run.status = "completed";
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   run.testsGenerated = run.tests.length;
@@ -557,13 +573,18 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     journeysDetected: journeys.length,
     averageQuality: dedupStats.averageQuality,
   };
-  setStep(run, 8);
 
-  log(run, `\n\u{1F4CA} Pipeline Summary:`);
-  log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
-  log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
-  log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
+  // Only mark completed if the run wasn't already aborted by the user
+  if (run.status !== "aborted") {
+    run.status = "completed";
+    setStep(run, 8);
 
-  // Signal completion to SSE clients so the frontend stops showing "Running"
-  emitRunEvent(run.id, "done", { status: "completed" });
+    log(run, `\n\u{1F4CA} Pipeline Summary:`);
+    log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
+    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
+    log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
+
+    // Signal completion to SSE clients so the frontend stops showing "Running"
+    emitRunEvent(run.id, "done", { status: "completed" });
+  }
 }
