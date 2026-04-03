@@ -15,7 +15,7 @@
 import { chromium } from "playwright";
 import { v4 as uuidv4 } from "uuid";
 import { getProviderName, streamText } from "./aiProvider.js";
-import { throwIfAborted } from "./abortHelper.js";
+import { throwIfAborted, finalizeRunIfNotAborted } from "./abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
@@ -337,18 +337,13 @@ export async function generateSingleTest(project, run, db, { name, description, 
     averageQuality: dedupStats.averageQuality,
   };
 
-  // Only mark completed if the run wasn't already aborted by the user
-  if (run.status !== "aborted") {
-    run.status = "completed";
+  finalizeRunIfNotAborted(run, () => {
     setStep(run, 8);
-
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
     log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
-
-    // Signal completion to SSE clients so the frontend stops showing "Running"
     emitRunEvent(run.id, "done", { status: "completed" });
-  }
+  });
 
   return createdTestIds;
 }
@@ -575,17 +570,12 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     averageQuality: dedupStats.averageQuality,
   };
 
-  // Only mark completed if the run wasn't already aborted by the user
-  if (run.status !== "aborted") {
-    run.status = "completed";
+  finalizeRunIfNotAborted(run, () => {
     setStep(run, 8);
-
     log(run, `\n\u{1F4CA} Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
     log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
     log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
-
-    // Signal completion to SSE clients so the frontend stops showing "Running"
     emitRunEvent(run.id, "done", { status: "completed" });
-  }
+  });
 }

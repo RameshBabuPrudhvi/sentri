@@ -11,6 +11,7 @@ import {
   recordHealingFailure,
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
+import { finalizeRunIfNotAborted } from "./abortHelper.js";
 
 // Lazy-loaded so testRunner can be imported before index.js sets up SSE
 let _emitRunEvent = null;
@@ -573,10 +574,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
 
-  // Only mark completed if the run wasn't already aborted by the user
-  if (run.status !== "aborted") {
-    run.status = "completed";
-  }
+  finalizeRunIfNotAborted(run);
   run.finishedAt = new Date().toISOString();
   run.duration = Date.now() - runStart;
   log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
