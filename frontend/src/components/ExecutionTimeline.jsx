@@ -1,3 +1,5 @@
+import { cleanTestName } from "../utils/testName.js";
+
 /**
  * ExecutionTimeline — Gantt-style horizontal timeline
  *
@@ -114,14 +116,14 @@ export default function ExecutionTimeline({ results = [], onSelect }) {
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   fontWeight: 500,
                 }}>
-                  {r.testName || r.name || `Test ${i + 1}`}
+                  {cleanTestName(r.testName || r.name) || `Test ${i + 1}`}
                 </div>
 
                 {/* Timeline track */}
                 <div style={{ flex: 1, position: "relative", height: ROW_H, minWidth: 200, paddingRight: 12 }}>
                   {/* Bar */}
                   <div
-                    title={`${r.testName || "Test"} — ${r.durationMs ?? 0}ms — ${r.status}`}
+                    title={`${cleanTestName(r.testName) || "Test"} — ${r.durationMs ?? 0}ms — ${r.status}`}
                     style={{
                       position: "absolute",
                       top: "50%", transform: "translateY(-50%)",
