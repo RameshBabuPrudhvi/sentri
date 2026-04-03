@@ -13,6 +13,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Upload, FileCode2, Clock, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
+import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
 import { buildTestDialsPrompt, countActiveDials } from "./testDialsPrompt.js";
 
@@ -93,12 +94,6 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [activeDialCount, setActiveDialCount] = useState(3);
 
   useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  useEffect(() => {
     setTimeout(() => nameRef.current?.focus(), 60);
   }, []);
 
@@ -136,17 +131,9 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const canSubmit = name.trim() && projectId && phase !== "submitting";
 
   return (
-    <>
-      {/* Backdrop */}
-      <div className="modal-backdrop" onClick={onClose} />
-
-      {/* Modal */}
-      <div className="modal-panel" style={{
-        width: "min(560px, 96vw)", maxHeight: "92vh",
-        display: "flex", flexDirection: "column",
-      }}>
-        {/* Header */}
-        <div style={{
+    <ModalShell onClose={onClose} width="min(560px, 96vw)" style={{ maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+      {/* Header */}
+      <div style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "18px 22px 0", flexShrink: 0,
         }}>
