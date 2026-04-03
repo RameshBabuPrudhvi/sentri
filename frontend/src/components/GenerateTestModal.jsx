@@ -109,17 +109,11 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   return (
     <>
       {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999, backdropFilter: "blur(2px)" }}
-      />
+      <div className="modal-backdrop" onClick={onClose} />
 
       {/* Modal */}
-      <div style={{
-        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-        zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(560px, 96vw)", maxHeight: "92vh", overflow: "hidden",
+      <div className="modal-panel" style={{
+        width: "min(560px, 96vw)", maxHeight: "92vh",
         display: "flex", flexDirection: "column",
       }}>
         {/* Header */}
@@ -170,7 +164,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
                 {/* Project selector */}
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  <label className="dial-label" style={{ display: "block", marginBottom: 5 }}>
                     Project
                   </label>
                   <select
@@ -190,7 +184,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
                 {/* Test name */}
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  <label className="dial-label" style={{ display: "block", marginBottom: 5 }}>
                     Test Name
                   </label>
                   <input
@@ -206,7 +200,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
                 {/* Description / story textarea */}
                 <div style={{ marginBottom: 8 }}>
-                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+                  <label className="dial-label" style={{ display: "block", marginBottom: 5 }}>
                     Paste your User Stories, Issues, Epics, or Requirements here...
                   </label>
                   <textarea
@@ -256,7 +250,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                   </span>
                 </div>
                 {error && (
-                  <div style={{ background: "var(--red-bg)", color: "var(--red)", borderRadius: "var(--radius)", padding: "8px 12px", fontSize: "0.82rem", marginBottom: 12, lineHeight: 1.5 }}>
+                  <div className="alert-error" style={{ marginBottom: 12 }}>
                     {error}
                   </div>
                 )}
@@ -286,7 +280,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                   </span>
                 </div>
                 {error && (
-                  <div style={{ background: "var(--red-bg)", color: "var(--red)", borderRadius: "var(--radius)", padding: "8px 12px", fontSize: "0.82rem", marginBottom: 10 }}>
+                  <div className="alert-error" style={{ marginBottom: 10 }}>
                     {error}
                   </div>
                 )}

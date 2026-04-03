@@ -45,22 +45,8 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
 
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          zIndex: 999, backdropFilter: "blur(2px)",
-        }}
-      />
-      <div style={{
-        position: "fixed", top: "50%", left: "50%",
-        transform: "translate(-50%, -50%)",
-        zIndex: 1000, background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(420px, 95vw)", overflow: "hidden",
-      }}>
+      <div className="modal-backdrop" onClick={onClose} />
+      <div className="modal-panel" style={{ width: "min(420px, 95vw)" }}>
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "18px 22px 16px", borderBottom: "1px solid var(--border)",
@@ -104,11 +90,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           )}
 
           {error && (
-            <div style={{
-              background: "var(--red-bg)", color: "var(--red)",
-              borderRadius: "var(--radius)", padding: "8px 12px",
-              fontSize: "0.82rem", marginBottom: 16,
-            }}>
+            <div className="alert-error" style={{ marginBottom: 16 }}>
               {error}
             </div>
           )}

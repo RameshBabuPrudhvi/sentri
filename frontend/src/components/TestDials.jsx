@@ -235,7 +235,7 @@ export default function TestDials({ onChange }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Layers size={14} color="var(--text3)" />
-            <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text2)" }}>Preset Packs</span>
+            <span className="dial-label">Preset Packs</span>
           </div>
           <button
             onClick={() => {}}
@@ -355,7 +355,7 @@ export default function TestDials({ onChange }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <Globe size={14} color="var(--text3)" />
-            <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text2)" }}>Output Language</span>
+            <span className="dial-label">Output Language</span>
           </div>
           <div style={{ position: "relative" }}>
             <select

@@ -51,22 +51,8 @@ function DeleteProjectModal({ project, onClose, onDeleted }) {
 
   return (
     <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          zIndex: 999, backdropFilter: "blur(2px)",
-        }}
-      />
-      <div style={{
-        position: "fixed", top: "50%", left: "50%",
-        transform: "translate(-50%, -50%)",
-        zIndex: 1000, background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
-        width: "min(440px, 95vw)", padding: "28px 32px",
-      }}>
+      <div className="modal-backdrop" onClick={onClose} />
+      <div className="modal-panel" style={{ width: "min(440px, 95vw)", padding: "28px 32px" }}>
         <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 20 }}>
           <div style={{
             width: 40, height: 40, borderRadius: 10, background: "var(--red-bg)",
@@ -86,11 +72,7 @@ function DeleteProjectModal({ project, onClose, onDeleted }) {
         </div>
 
         {error && (
-          <div style={{
-            background: "var(--red-bg)", color: "var(--red)",
-            borderRadius: "var(--radius)", padding: "8px 12px",
-            fontSize: "0.82rem", marginBottom: 16,
-          }}>
+          <div className="alert-error" style={{ marginBottom: 16 }}>
             {error}
           </div>
         )}
