@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
+import { cleanTestName } from "../utils/testName.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -346,35 +347,69 @@ export default function TestDetail() {
 
   function handleExport() {
     if (!test) return;
-    const exportData = {
-      id: test.id,
-      name: test.name,
-      description: test.description || "",
-      type: test.type || "",
-      priority: test.priority || "medium",
-      reviewStatus: test.reviewStatus || "draft",
-      sourceUrl: test.sourceUrl || "",
-      steps: test.steps || [],
-      playwrightCode: test.playwrightCode || null,
-      lastResult: test.lastResult || null,
-      lastRunAt: test.lastRunAt || null,
-      createdAt: test.createdAt || null,
-      project: project ? { id: project.id, name: project.name, url: project.url } : null,
-      runHistory: runs.slice(0, 20).map(run => {
-        const result = run.results?.find(r => r.testId === testId);
-        return {
-          runId: run.id,
-          status: result?.status || run.status,
-          durationMs: result?.durationMs || null,
-          startedAt: run.startedAt || null,
-        };
-      }),
-      exportedAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+
+    // Helper: wrap a value in double-quotes, escaping any inner double-quotes
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+
+    const steps = (test.steps || []).join(" | ");
+    const projectName = project?.name || "";
+    const projectUrl  = project?.url  || "";
+
+    // ── Header row ──
+    const headers = [
+      "Test ID", "Name", "Description", "Type", "Priority",
+      "Review Status", "Source URL", "Steps", "Last Result",
+      "Last Run At", "Created At", "Project Name", "Project URL",
+      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At",
+      "Exported At",
+    ];
+
+    const exportedAt = new Date().toISOString();
+    const runHistory = runs.slice(0, 20).map(run => {
+      const result = run.results?.find(r => r.testId === testId);
+      return {
+        runId: run.id,
+        status: result?.status || run.status,
+        durationMs: result?.durationMs ?? "",
+        startedAt: run.startedAt || "",
+      };
+    });
+
+    // Build one row per run-history entry; if no runs, emit a single row
+    const baseFields = [
+      esc(test.id),
+      esc(test.name),
+      esc(test.description || ""),
+      esc(test.type || ""),
+      esc(test.priority || "medium"),
+      esc(test.reviewStatus || "draft"),
+      esc(test.sourceUrl || ""),
+      esc(steps),
+      esc(test.lastResult || ""),
+      esc(test.lastRunAt || ""),
+      esc(test.createdAt || ""),
+      esc(projectName),
+      esc(projectUrl),
+    ];
+
+    const rows = [headers.map(esc).join(",")];
+    if (runHistory.length === 0) {
+      rows.push([...baseFields, esc(""), esc(""), esc(""), esc(""), esc(exportedAt)].join(","));
+    } else {
+      for (const rh of runHistory) {
+        rows.push([
+          ...baseFields,
+          esc(rh.runId), esc(rh.status), esc(rh.durationMs), esc(rh.startedAt),
+          esc(exportedAt),
+        ].join(","));
+      }
+    }
+
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
   }
 
@@ -482,7 +517,7 @@ export default function TestDetail() {
         </div>
       ) : (
         <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 24 }}>
-          {test.name}
+          {cleanTestName(test.name)}
         </h1>
       )}
 
@@ -898,7 +933,7 @@ export default function TestDetail() {
                     )}
                   </div>
                   <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 2 }}>
-                    {test.name}
+                    {cleanTestName(test.name)}
                   </div>
                 </div>
 
