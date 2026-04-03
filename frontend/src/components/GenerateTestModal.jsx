@@ -15,7 +15,7 @@ import { Upload, FileCode2, Clock, X } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
-import { buildTestDialsPrompt, countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
+import { countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
 
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
@@ -110,14 +110,12 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
     setPhase("submitting");
     try {
-      // Send dialsPrompt as a dedicated field (matching the crawl endpoint pattern)
-      // instead of embedding it in the description string.
-      const dialsPrompt = dialsConfig ? buildTestDialsPrompt(dialsConfig) : "";
-
+      // Send the structured config object — the backend validates it and builds
+      // the prompt server-side via resolveDialsPrompt(), matching the crawl endpoint.
       const { runId } = await api.generateTest(projectId, {
         name: name.trim(),
         description: description.trim(),
-        dialsPrompt,
+        dialsConfig: dialsConfig || undefined,
       });
       onClose();
       navigate(`/runs/${runId}`);

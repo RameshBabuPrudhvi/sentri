@@ -10,15 +10,13 @@ import {
 } from "./testDialsData.js";
 import {
   loadSavedConfig, saveConfig,
-  countActiveDials, buildTestDialsPrompt,
+  countActiveDials,
 } from "./testDialsPrompt.js";
 import Collapsible from "./Collapsible.jsx";
 import Tooltip from "./Tooltip.jsx";
 
-// Re-export so existing consumers (CrawlDialsPanel, GenerateTestModal) that
-// import { buildTestDialsPrompt, countActiveDials } from "./TestDials.jsx"
-// continue to work without changes.
-export { buildTestDialsPrompt, countActiveDials };
+// Re-export so consumers can import { countActiveDials } from "./TestDials.jsx"
+export { countActiveDials };
 
 // ─── Preset packs (contain JSX icons, so they live here) ───────────────────────
 

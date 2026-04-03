@@ -7,16 +7,14 @@
  * Usage:
  *   <CrawlDialsPanel onChange={(cfg) => setCrawlDialsConfig(cfg)} />
  *
- * Then pass the config to buildTestDialsPrompt() and include it in the
- * crawl request body so the backend can embed it in the AI prompt.
+ * Then pass the raw config object as `dialsConfig` in the crawl request
+ * body — the backend validates it and builds the prompt server-side.
  */
 
 import React, { useState } from "react";
 import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
 import TestDials from "./TestDials.jsx";
-import { buildTestDialsPrompt, countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
-
-export { buildTestDialsPrompt };
+import { countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
 
 export default function CrawlDialsPanel({ onChange }) {
   const [open, setOpen] = useState(false);
