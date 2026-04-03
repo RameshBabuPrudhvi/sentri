@@ -11,7 +11,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Upload, FileCode2, Clock, ChevronDown } from "lucide-react";
+import { Upload, FileCode2, Clock, X } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
@@ -302,7 +302,6 @@ export default function GenerateTestModal({ projects = [], onClose }) {
             </div>
           )}
         </div>
-      </div>
-    </>
+    </ModalShell>
   );
 }

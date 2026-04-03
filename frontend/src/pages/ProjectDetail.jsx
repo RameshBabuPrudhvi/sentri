@@ -8,6 +8,7 @@ import {
 import { api } from "../api.js";
 import CrawlDialsPanel, { buildTestDialsPrompt } from "../components/CrawlDialsPanel.jsx";
 import AgentTag from "../components/AgentTag.jsx";
+import ModalShell from "../components/ModalShell.jsx";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
@@ -722,26 +723,23 @@ export default function ProjectDetail() {
 
       {/* Bulk action confirmation modal */}
       {bulkConfirm && (
-        <>
-          <div onClick={() => setBulkConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999 }} />
-          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1000, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "28px 32px", width: "min(420px,95vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.18)" }}>
-            <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
-            <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
-              You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
-              <button
-                className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
-                onClick={() => bulkConfirm.action === "delete"
-                  ? executeBulkDelete(bulkConfirm.ids)
-                  : executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
-              >
-                {bulkConfirm.action === "approve" ? "Approve all" : bulkConfirm.action === "delete" ? "Delete all" : "Reject all"}
-              </button>
-            </div>
+        <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
+          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
+          <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
           </div>
-        </>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
+            <button
+              className={`btn btn-sm ${bulkConfirm.action === "approve" ? "btn-primary" : "btn-danger"}`}
+              onClick={() => bulkConfirm.action === "delete"
+                ? executeBulkDelete(bulkConfirm.ids)
+                : executeBulkAction(bulkConfirm.action, bulkConfirm.ids)}
+            >
+              {bulkConfirm.action === "approve" ? "Approve all" : bulkConfirm.action === "delete" ? "Delete all" : "Reject all"}
+            </button>
+          </div>
+        </ModalShell>
       )}
 
       {/* Fix #20: Keyboard shortcut hint */}
