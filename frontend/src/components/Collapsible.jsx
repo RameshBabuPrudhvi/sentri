@@ -21,12 +21,8 @@ export default function Collapsible({ icon, label, subtitle, children, defaultOp
   return (
     <div style={{ borderRadius: "var(--radius)", border: "1px solid var(--border)", overflow: "hidden", background: "var(--surface)" }}>
       <button
+        className="section-header"
         onClick={() => setOpen(o => !o)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 16px", background: "none", border: "none", cursor: "pointer",
-          gap: 10, textAlign: "left",
-        }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: "var(--text3)", display: "flex" }}>{icon}</span>

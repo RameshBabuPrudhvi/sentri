@@ -54,13 +54,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
             Run Regression Tests
           </h2>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--text3)", padding: 2, display: "flex",
-            }}
-          >
+          <button className="modal-close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
