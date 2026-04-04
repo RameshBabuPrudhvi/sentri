@@ -436,6 +436,12 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
       result.screenshotPath = `/artifacts/screenshots/${shotName}`;
     } catch {}
   } finally {
+    // Capture the final page URL so the frontend BrowserChrome shows it
+    // instead of "about:blank". Falls back to test.sourceUrl if the page
+    // was already closed or never navigated.
+    try { result.url = page.url(); } catch { /* page already closed */ }
+    if (!result.url || result.url === "about:blank") result.url = test.sourceUrl || "";
+
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
     result.network = networkLogs;
