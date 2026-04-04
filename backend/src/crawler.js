@@ -22,7 +22,7 @@ import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/
 import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyGenerator.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./pipeline/deduplicator.js";
 import { enhanceTests } from "./pipeline/assertionEnhancer.js";
-import { emitRunEvent, log } from "./utils/runLogger.js";
+import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -277,7 +277,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
       validatedTests.push(t);
     } else {
       rejected++;
-      log(run, `   ❌ Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
+      logWarn(run, `Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
     }
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
@@ -363,7 +363,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
       log(run, `🔑 Logged in as ${project.credentials.username}`);
     } catch (e) {
-      log(run, `⚠️  Login failed: ${e.message}`);
+      logWarn(run, `Login failed: ${e.message}`);
     }
     await loginPage.close();
   }
@@ -421,14 +421,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
         }
       }
     } catch (err) {
-      log(run, `⚠️  Failed: ${url} — ${err.message}`);
+      logWarn(run, `Failed: ${url} — ${err.message}`);
     } finally {
       await page.close();
     }
   }
 
   await browser.close();
-  log(run, `✅ Smart crawl done. ${snapshots.length} unique pages found.`);
+  logSuccess(run, `Smart crawl done. ${snapshots.length} unique pages found.`);
 
   throwIfAborted(signal);
 

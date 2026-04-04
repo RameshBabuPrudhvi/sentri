@@ -12,7 +12,7 @@ import {
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
-import { emitRunEvent, log } from "./utils/runLogger.js";
+import { emitRunEvent, log, logWarn, logError, logSuccess, ICON } from "./utils/runLogger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -492,7 +492,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     run.status = "failed";
     run.error = `Browser launch failed: ${launchErr.message}`;
     run.finishedAt = new Date().toISOString();
-    log(run, `❌ Browser launch failed: ${launchErr.message}`);
+    logError(run, `Browser launch failed: ${launchErr.message}`);
     throw launchErr;
   }
 
@@ -509,7 +509,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     run.status = "failed";
     run.error = `Trace context setup failed: ${ctxErr.message}`;
     run.finishedAt = new Date().toISOString();
-    log(run, `❌ Trace context setup failed: ${ctxErr.message}`);
+    logError(run, `Trace context setup failed: ${ctxErr.message}`);
     throw ctxErr;
   }
 
@@ -522,7 +522,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     for (let i = 0; i < tests.length; i++) {
       // Check abort signal between tests so the run stops promptly
       if (signal?.aborted) {
-        log(run, `  ⛔ Abort signal received — skipping remaining ${tests.length - i} test(s)`);
+        logWarn(run, `Abort signal received — skipping remaining ${tests.length - i} test(s)`);
         break;
       }
 
@@ -538,13 +538,13 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
 
         if (result.status === "passed") {
           run.passed++;
-          log(run, `    ✅ PASSED (${result.durationMs}ms)`);
+          logSuccess(run, `PASSED (${result.durationMs}ms)`);
         } else if (result.status === "warning") {
           run.passed++;
-          log(run, `    ⚠️  WARNING: ${result.error}`);
+          logWarn(run, `WARNING: ${result.error}`);
         } else {
           run.failed++;
-          log(run, `    ❌ FAILED: ${result.error}`);
+          logError(run, `FAILED: ${result.error}`);
         }
 
         // Emit result event (without the heavy base64 screenshot)
@@ -568,7 +568,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
           status: "failed", error: err.message,
           durationMs: 0, network: [], consoleLogs: [],
         });
-        log(run, `    ❌ FAILED (exception): ${err.message}`);
+        logError(run, `FAILED (exception): ${err.message}`);
       }
     }
   } finally {
@@ -578,7 +578,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
       run.tracePath = `/artifacts/traces/${runId}.zip`;
       log(run, `  📊 Trace saved`);
     } catch (e) {
-      log(run, `  ⚠️  Trace save failed: ${e.message}`);
+      logWarn(run, `Trace save failed: ${e.message}`);
     }
     await traceContext.close().catch(() => {});
     await browser.close().catch((err) => {
@@ -647,7 +647,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
 
         const feedback = await applyFeedbackLoop(run, db, { signal });
         if (feedback.improved > 0) {
-          log(run, `    ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
+          logSuccess(run, `Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
           log(run, `    💡 Regenerated tests will use improved selectors on next run`);
           run.feedbackLoop = feedback;
         } else {
@@ -655,7 +655,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
         }
       }
     } catch (err) {
-      log(run, `    ⚠️  Feedback loop error: ${err.message}`);
+      logWarn(run, `Feedback loop error: ${err.message}`);
     }
   }
 

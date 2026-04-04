@@ -7,9 +7,31 @@
  * Timestamp format, log level, and output mode (human / JSON) are
  * controlled via .env — see logFormatter.js for details:
  *   LOG_LEVEL, LOG_DATE_FORMAT, LOG_TIMEZONE, LOG_JSON
+ *
+ * ── Level-specific helpers ────────────────────────────────────────────────
+ *
+ * Instead of passing raw emoji + level strings at every call-site, use the
+ * dedicated helpers so icon conventions are centralised here:
+ *
+ *   log(run, msg)           — INFO  (no prefix, gray in UI)
+ *   logWarn(run, msg)       — WARN  (⚠️  prefix, amber in UI)
+ *   logError(run, msg)      — ERROR (❌ prefix, red in UI)
+ *   logSuccess(run, msg)    — INFO  (✅ prefix, green in UI)
+ *
+ * If an icon change is needed in future (e.g. swap ❌ → 🔴), update the
+ * single constant below — every caller benefits automatically.
  */
 
 import { formatTimestamp, formatLogLine, shouldLog } from "./logFormatter.js";
+
+// ── Centralised icon prefixes (single source of truth) ────────────────────
+const ICON = {
+  warn:    "⚠️ ",
+  error:   "❌",
+  success: "✅",
+  abort:   "⛔",
+};
+export { ICON };
 
 // Lazy SSE emitter — avoids circular-import issues with index.js
 let _emitRunEvent = null;
@@ -19,6 +41,8 @@ export async function emitRunEvent(...args) {
   }
   _emitRunEvent?.(...args);
 }
+
+// ── Core log function ─────────────────────────────────────────────────────
 
 /**
  * Append a timestamped log entry to the run, print to stdout, and
@@ -45,4 +69,23 @@ export function log(run, msg, level = "info") {
   run.logs.push(entry);
   console.log(formatLogLine(level, run.id, msg));
   emitRunEvent(run.id, "log", { message: entry });
+}
+
+// ── Level-specific helpers ────────────────────────────────────────────────
+// Centralise the emoji prefix so callers never hard-code icons.
+// If the icon convention changes, update ICON above — all callers benefit.
+
+/** Log a warning — prefixes with ⚠️, level "warn". */
+export function logWarn(run, msg) {
+  log(run, `${ICON.warn} ${msg}`, "warn");
+}
+
+/** Log an error — prefixes with ❌, level "error". */
+export function logError(run, msg) {
+  log(run, `${ICON.error} ${msg}`, "error");
+}
+
+/** Log a success — prefixes with ✅, level "info". */
+export function logSuccess(run, msg) {
+  log(run, `${ICON.success} ${msg}`);
 }
