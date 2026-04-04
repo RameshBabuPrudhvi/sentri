@@ -15,37 +15,59 @@
 // ─── Canonical option definitions (single source of truth) ─────────────────
 
 export const STRATEGY_OPTIONS = [
-  { id: "happy_path",    label: "Happy Path Only" },
-  { id: "sad_path",      label: "Sad Path & Error Handling" },
-  { id: "edge_cases",    label: "Boundary & Edge Cases" },
-  { id: "comprehensive", label: "Comprehensive 360 Suite" },
-  { id: "exploratory",   label: "Exploratory Charter" },
-  { id: "regression",    label: "Regression Impact Analysis" },
+  { id: "happy_path",    label: "Happy Path Only",
+    instruction: "Generate ONLY positive/happy-path tests — every test must follow the expected successful user flow from start to finish. Do NOT include error handling, validation failures, or edge cases." },
+  { id: "sad_path",      label: "Sad Path & Error Handling",
+    instruction: "Focus on NEGATIVE tests — invalid inputs, missing required fields, wrong credentials, expired sessions, permission denials. Every test must trigger an error state and assert that the application displays a clear, user-facing error message or validation indicator." },
+  { id: "edge_cases",    label: "Boundary & Edge Cases",
+    instruction: "Focus on BOUNDARY and EDGE-CASE tests — empty strings, maximum-length inputs, special characters (unicode, emoji, SQL injection strings), zero-quantity values, rapid repeated clicks, browser back/forward during flows, and race conditions. Each test must push the application to its limits." },
+  { id: "comprehensive", label: "Comprehensive 360 Suite",
+    instruction: "Generate a BALANCED mix of positive (happy path), negative (error handling), and edge-case tests. Aim for roughly 50% positive, 30% negative, and 20% edge cases. Cover the full spectrum of user interactions on the page." },
+  { id: "exploratory",   label: "Exploratory Charter",
+    instruction: "Generate EXPLORATORY tests that probe unexpected user behaviours — unusual navigation sequences, interacting with elements in non-obvious order, combining features in ways a typical user would not, and verifying the application recovers gracefully from unexpected states." },
+  { id: "regression",    label: "Regression Impact Analysis",
+    instruction: "Generate REGRESSION tests that verify existing core functionality still works correctly — focus on the most critical user flows (login, checkout, data submission, navigation) and assert that their expected outcomes have not changed. Prioritise stability assertions (URLs, key text, element visibility) over exploratory coverage." },
 ];
 
 export const WORKFLOW_OPTIONS = [
-  { id: "e2e",             label: "End-to-End User Journey" },
-  { id: "component",       label: "Component-Level Isolation" },
-  { id: "multi_role",      label: "Multi-Role Persona" },
-  { id: "first_time_user", label: "First-Time User Experience" },
-  { id: "interruptions",   label: "Interruptions" },
+  { id: "e2e",             label: "End-to-End User Journey",
+    instruction: "Tests must span multiple pages/steps as a complete user flow (e.g. login → dashboard → action → logout). Assert outcomes at each transition point." },
+  { id: "component",       label: "Component-Level Isolation",
+    instruction: "Tests must focus on a SINGLE component or widget in isolation — test all its interactive states (default, hover, active, disabled, error) without navigating away from the current page." },
+  { id: "multi_role",      label: "Multi-Role Persona",
+    instruction: "Generate separate tests for DIFFERENT user roles (e.g. admin, regular user, guest/unauthenticated). Each test must assert role-specific behaviour — elements visible to admin but hidden from guest, restricted actions returning permission errors, etc." },
+  { id: "first_time_user", label: "First-Time User Experience",
+    instruction: "Tests must simulate a BRAND-NEW user who has never seen the application — verify onboarding flows, empty states, tooltip/help text visibility, and that the first interaction path is intuitive and error-free." },
+  { id: "interruptions",   label: "Interruptions",
+    instruction: "Tests must simulate INTERRUPTED flows — page refresh mid-form, browser back button during checkout, network disconnect/reconnect, session timeout during a multi-step process. Assert the application recovers gracefully or preserves user data." },
 ];
 
 export const QUALITY_OPTIONS = [
-  { id: "accessibility",   label: "Accessibility (a11y)" },
-  { id: "performance",     label: "Performance" },
-  { id: "security",        label: "Security" },
-  { id: "data_integrity",  label: "Data Integrity" },
-  { id: "api_integration", label: "API & Integration" },
-  { id: "localization",    label: "Localization (L10n)" },
-  { id: "reliability",     label: "Reliability" },
-  { id: "observability",   label: "Observability" },
+  { id: "accessibility",   label: "Accessibility (a11y)",
+    instruction: "Include accessibility assertions: verify ARIA roles/labels are present on interactive elements, check keyboard navigation (Tab order, Enter/Space activation), assert focus indicators are visible, and verify screen-reader-friendly alt text on images. Use getByRole() selectors to confirm semantic HTML." },
+  { id: "performance",     label: "Performance",
+    instruction: "Add performance-sensitive assertions: verify that key pages load within acceptable timeouts, assert that large lists or images use lazy loading (elements appear on scroll), and check that no critical resource requests return 4xx/5xx status codes in the network log." },
+  { id: "security",        label: "Security",
+    instruction: "Include security-focused tests: attempt XSS payloads (<script>alert(1)</script>) in input fields and assert they are escaped/rejected, verify that sensitive pages redirect unauthenticated users to login, check that password fields mask input, and assert that CSRF tokens or auth headers are present on form submissions." },
+  { id: "data_integrity",  label: "Data Integrity",
+    instruction: "Include data integrity assertions: after creating/editing a record, reload the page and assert the data persists correctly. Verify that numeric fields reject non-numeric input, date fields enforce valid ranges, and that duplicate submissions are blocked or handled idempotently." },
+  { id: "api_integration", label: "API & Integration",
+    instruction: "Include API-level assertions: use page.waitForResponse() to intercept key API calls and assert they return 2xx status codes with expected response shapes. Verify that form submissions trigger the correct backend endpoints and that error responses from the API surface as user-visible messages." },
+  { id: "localization",    label: "Localization (L10n)",
+    instruction: "Include localisation checks: verify that UI text does not overflow containers (test with longer locale strings if possible), assert that date/number formats match the expected locale, and check that translated strings are present and not showing raw i18n keys like 'common.submit'." },
+  { id: "reliability",     label: "Reliability",
+    instruction: "Include reliability/resilience tests: retry flaky user actions (e.g. double-click submit), test behaviour after page refresh mid-flow, verify that error recovery paths return the user to a usable state, and assert that concurrent operations (e.g. two tabs) do not corrupt shared state." },
+  { id: "observability",   label: "Observability",
+    instruction: "Include observability assertions: check the browser console for JavaScript errors (page.on('console') / page.on('pageerror')), verify that no uncaught exceptions are thrown during the test flow, and assert that key analytics or telemetry events fire (if observable via network requests)." },
 ];
 
 export const FORMAT_OPTIONS = [
-  { id: "verbose", label: "Verbose Steps" },
-  { id: "concise", label: "Concise Checklist" },
-  { id: "gherkin", label: "Gherkin (Given/When/Then)" },
+  { id: "verbose", label: "Verbose Steps",
+    instruction: "Format each test with DETAILED numbered steps — each step must include the exact user action AND the expected result. Example: '1. Click the \"Submit\" button → A success toast appears with text \"Saved successfully\"'." },
+  { id: "concise", label: "Concise Checklist",
+    instruction: "Format each test as a SHORT bullet-point checklist — one line per action/assertion, no prose. Example: '• Fill email → valid@test.com • Click Submit • Assert: success message visible'." },
+  { id: "gherkin", label: "Gherkin (Given/When/Then)",
+    instruction: "Format each test's steps using strict Gherkin syntax: 'Given [precondition]', 'When [action]', 'Then [expected outcome]', with 'And' for additional clauses. Each step must start with exactly one of these keywords." },
 ];
 
 export const LANGUAGES = [
@@ -141,12 +163,12 @@ export function buildDialsPrompt(cfg) {
 
   const lines = [
     "TEST GENERATION CONFIGURATION:",
-    strategy          ? `- Strategy: ${strategy.label}`                                                    : "",
+    strategy          ? `- Strategy: ${strategy.instruction}`                                              : "",
     testCount && cfg.testCount !== "auto"
                       ? `- Number of tests: ${testCount.label} — generate exactly this many test cases`    : "",
-    workflows.length  ? `- Perspectives: ${workflows.map(w => w.label).join(", ")}`                        : "",
-    qualities.length  ? `- Quality checks: ${qualities.map(q => q.label).join(", ")}`                      : "",
-    format            ? `- Output format: ${format.label}`                                                 : "",
+    ...(workflows.length ? [`- Perspectives:`, ...workflows.map(w => `    • ${w.instruction}`)]            : []),
+    ...(qualities.length ? [`- Quality checks — include ALL of the following:`, ...qualities.map(q => `    • ${q.instruction}`)] : []),
+    format            ? `- Output format: ${format.instruction}`                                           : "",
     cfg.language !== "en-US" ? `- Output language: ${LANGUAGES.find(l => l.code === cfg.language)?.label}` : "",
     cfg.automationHooks      ? "- Include automation element ID hooks (data-testid attributes)"             : "",
     cfg.customModifier       ? `- Additional requirements: ${cfg.customModifier}`                           : "",
