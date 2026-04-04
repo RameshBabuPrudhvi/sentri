@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Plus, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
-  AlertCircle, ListFilter, ArrowUpDown, Trash2,
+  AlertCircle, ArrowUpDown, Trash2,
   ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { api } from "../api.js";

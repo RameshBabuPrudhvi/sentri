@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  Settings2, ChevronDown, Plus, X, Save, RotateCcw,
+  Settings2, ChevronDown, Plus, Save, RotateCcw,
   Target, Users, ShieldCheck, FileText, Globe, Cpu, Info,
-  Zap, BookOpen, GitBranch, Bug, Lock, BarChart3, Layers, Hash,
+  Zap, Bug, Layers, Hash,
 } from "lucide-react";
 import {
   STRATEGY_OPTIONS, WORKFLOW_OPTIONS, QUALITY_OPTIONS,
