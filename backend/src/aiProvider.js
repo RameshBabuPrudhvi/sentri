@@ -18,7 +18,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { throwIfAborted } from "./abortHelper.js";
+import { throwIfAborted } from "./utils/abortHelper.js";
 
 // ── Runtime key store (set via /api/settings, survives until process restart) ─
 const runtimeKeys = {};

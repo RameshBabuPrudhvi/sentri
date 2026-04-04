@@ -12,7 +12,7 @@
  */
 
 import { generateText, parseJSON } from "../aiProvider.js";
-import { throwIfAborted } from "../abortHelper.js";
+import { throwIfAborted } from "../utils/abortHelper.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 

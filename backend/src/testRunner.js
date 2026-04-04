@@ -11,7 +11,7 @@ import {
   recordHealingFailure,
 } from "./selfHealing.js";
 import { applyFeedbackLoop, analyzeRunResults } from "./pipeline/feedbackLoop.js";
-import { finalizeRunIfNotAborted, isRunAborted } from "./abortHelper.js";
+import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log } from "./utils/runLogger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

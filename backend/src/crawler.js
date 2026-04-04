@@ -15,7 +15,7 @@
 import { chromium } from "playwright";
 import { generateTestId } from "./utils/idGenerator.js";
 import { getProviderName, streamText } from "./aiProvider.js";
-import { throwIfAborted, finalizeRunIfNotAborted } from "./abortHelper.js";
+import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./pipeline/smartCrawl.js";
 import { filterElements, hasHighValueElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPage, classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";

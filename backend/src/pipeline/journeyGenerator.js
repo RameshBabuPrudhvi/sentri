@@ -8,7 +8,7 @@
 
 import { generateText, streamText, parseJSON, isLocalProvider } from "../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
-import { throwIfAborted } from "../abortHelper.js";
+import { throwIfAborted } from "../utils/abortHelper.js";
 
 /**
  * Resolve the test count instruction for prompt builders.
