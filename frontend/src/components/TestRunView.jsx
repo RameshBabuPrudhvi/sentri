@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
   XCircle,
@@ -7,10 +8,14 @@ import {
   RefreshCw,
   ArrowRight,
   Lock,
+  Play,
+  ExternalLink,
 } from "lucide-react";
+import { api } from "../api.js";
 import StepResultsView from "./StepResultsView";
 import LiveBrowserView from "./LiveBrowserView";
 import ExecutionTimeline from "./ExecutionTimeline";
+import OutcomeBanner from "./OutcomeBanner.jsx";
 import { cleanTestName } from "../utils/testName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -343,11 +348,13 @@ function RunningStepsPreview({ queuedTest }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function TestRunView({ run, frames = [] }) {
+  const navigate = useNavigate();
   const results = run?.results || run?.steps || [];
   const testQueue = run?.testQueue || [];
 
   const [selectedCase, setSelectedCase] = useState(0);
   const [drilledCase, setDrilledCase]   = useState(null); // null = suite overview
+  const [rerunning, setRerunning]       = useState(false);
 
   const listRef = useRef(null);
   const isRunning = run?.status === "running";
@@ -520,6 +527,57 @@ export default function TestRunView({ run, frames = [] }) {
                     }}
                   />
                 </div>
+      )}
+
+      {/* ── Post-run footer — next steps after completion ── */}
+      {!isRunning && results.length > 0 && (
+        <OutcomeBanner
+          variant={failed > 0 ? "error" : "success"}
+          title={failed > 0
+            ? `${failed} test${failed !== 1 ? "s" : ""} failed — ${passed} of ${total} passed`
+            : `All ${passed} test${passed !== 1 ? "s" : ""} passed`}
+          subtitle={failed > 0
+            ? "Review failing tests, fix the issues, then re-run to verify."
+            : "Your regression suite is green. No action needed."}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          {failed > 0 && run?.projectId && (
+            <button
+              className="btn btn-sm"
+              style={{
+                background: "var(--surface)", color: "var(--text)",
+                border: "1px solid var(--border)", fontWeight: 600, gap: 6,
+              }}
+              onClick={() => navigate(`/projects/${run.projectId}`)}
+            >
+              <ExternalLink size={12} /> Review Tests
+            </button>
+          )}
+          {run?.projectId && (
+            <button
+              className="btn btn-sm"
+              style={{
+                background: failed > 0 ? "var(--red)" : "var(--green)",
+                color: "#fff", border: "none", fontWeight: 700, gap: 6,
+              }}
+              disabled={rerunning}
+              onClick={async () => {
+                setRerunning(true);
+                try {
+                  const { runId } = await api.runTests(run.projectId);
+                  navigate(`/runs/${runId}`);
+                } catch (err) {
+                  console.error("Re-run failed:", err);
+                  setRerunning(false);
+                }
+              }}
+            >
+              {rerunning
+                ? <><RefreshCw size={12} className="spin" /> Starting…</>
+                : <><Play size={12} /> {failed > 0 ? "Re-run Tests" : "Run Again"}</>}
+            </button>
+          )}
+        </OutcomeBanner>
       )}
     </div>
   );

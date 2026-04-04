@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import OutcomeBanner from "./OutcomeBanner.jsx";
 
 /**
  * Completion CTA banner — shown after a crawl or generate run finishes
@@ -20,20 +21,11 @@ export default function CompletionCTA({ run, isRunning }) {
   }
 
   return (
-    <div style={{
-      padding: "16px 18px", background: "var(--green-bg)",
-      border: "1px solid #86efac", borderRadius: "var(--radius)",
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      gap: 12,
-    }}>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--green)", marginBottom: 3 }}>
-          🎉 {testCount} test{testCount === 1 ? "" : "s"} generated successfully
-        </div>
-        <div style={{ fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.5 }}>
-          Your tests are saved as drafts — review and approve them to add to your regression suite.
-        </div>
-      </div>
+    <OutcomeBanner
+      variant="success"
+      title={`🎉 ${testCount} test${testCount === 1 ? "" : "s"} generated successfully`}
+      subtitle="Your tests are saved as drafts — review and approve them to add to your regression suite."
+    >
       <button
         className="btn btn-sm"
         style={{
@@ -44,6 +36,6 @@ export default function CompletionCTA({ run, isRunning }) {
       >
         View Generated Tests <ArrowRight size={13} />
       </button>
-    </div>
+    </OutcomeBanner>
   );
 }
