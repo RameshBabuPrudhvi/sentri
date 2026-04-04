@@ -20,6 +20,35 @@ import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js"
 const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
 const MAX_ATTACHMENT_SIZE = 100_000; // 100 KB — keeps the AI prompt manageable
 
+// ── Sample prompts for the Examples popover ─────────────────────────────────────
+
+const EXAMPLE_PROMPTS = [
+  {
+    name: "User login with valid credentials",
+    description: "As a registered user I want to log in with my email and password so that I reach the dashboard. Verify the login form accepts valid credentials, redirects to /dashboard, and displays the user's name in the header.",
+  },
+  {
+    name: "Add item to cart and update quantity",
+    description: "As a shopper I want to add a product to my cart and change the quantity so that the cart total updates correctly. Cover adding from the product page, incrementing/decrementing quantity, and verifying the subtotal recalculates.",
+  },
+  {
+    name: "Search returns relevant results",
+    description: "As a user I want to search for a keyword and see matching results so I can find what I need. Verify the search input accepts text, results load within 3 seconds, each result contains the search term, and an empty query shows a helpful empty state.",
+  },
+  {
+    name: "Form validation blocks invalid submission",
+    description: "As a user filling out the contact form I expect validation errors when I submit with empty required fields or an invalid email format. Verify each error message appears next to the correct field, the form does not submit, and errors clear when corrected.",
+  },
+  {
+    name: "Responsive navigation menu on mobile",
+    description: "As a mobile user I want the hamburger menu to open and close correctly so I can navigate the site. Verify the menu toggle works, all primary links are visible, clicking a link navigates to the correct page, and the menu closes after selection.",
+  },
+  {
+    name: "Password reset email flow",
+    description: "As a user who forgot my password I want to request a reset link, receive a confirmation message, and be able to set a new password. Verify the forgot-password page accepts an email, shows a success toast, rejects invalid email formats, and rate-limits repeated requests.",
+  },
+];
+
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
 function GenerateCTA({ error, canSubmit, phase, onGenerate, showNameHint }) {
@@ -93,6 +122,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [phase, setPhase] = useState("form");   // "form" | "submitting"
   const [error, setError] = useState(null);
   const [dialsConfig, setDialsConfig] = useState(() => loadSavedConfig());
+  const [showExamples, setShowExamples] = useState(false);
   const fileInputRef = useRef();
 
   // Active dial count for badge
@@ -126,6 +156,23 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   function removeAttachment(fileName) {
     setAttachments(prev => prev.filter(a => a.name !== fileName));
   }
+
+  function applyExample(ex) {
+    setName(ex.name);
+    setDescription(ex.description);
+    setShowExamples(false);
+    if (error) setError(null);
+  }
+
+  // Close examples popover on outside click
+  useEffect(() => {
+    if (!showExamples) return;
+    function close(e) {
+      if (!e.target.closest("[data-examples-popover]")) setShowExamples(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [showExamples]);
 
   // Recount whenever dialsConfig changes
   useEffect(() => {
@@ -320,13 +367,56 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                   )}
                 </div>
 
-                {/* Char count + examples */}
+                {/* Char count + actions */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
                   <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
                     {(name + description).length} chars{attachments.length > 0 && ` + ${attachments.reduce((n, a) => n + a.content.length, 0)} from attachments`}
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn btn-ghost btn-xs">📚 Examples</button>
+                    <div data-examples-popover style={{ position: "relative" }}>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => setShowExamples(v => !v)}
+                      >
+                        📚 Examples
+                      </button>
+                      {showExamples && (
+                        <div style={{
+                          position: "absolute", bottom: "calc(100% + 6px)", right: 0,
+                          width: 340, maxHeight: 320, overflowY: "auto",
+                          background: "var(--surface)", border: "1px solid var(--border)",
+                          borderRadius: "var(--radius)", boxShadow: "var(--shadow)",
+                          zIndex: 300, padding: 6,
+                        }}>
+                          <div style={{ fontSize: "0.72rem", color: "var(--text3)", padding: "6px 8px 4px",
+                            fontWeight: 600, letterSpacing: "0.02em" }}>
+                            Click to fill — you can edit before generating
+                          </div>
+                          {EXAMPLE_PROMPTS.map((ex, i) => (
+                            <button
+                              key={i}
+                              onClick={() => applyExample(ex)}
+                              style={{
+                                width: "100%", textAlign: "left", padding: "8px 10px",
+                                background: "none", border: "none", cursor: "pointer",
+                                borderRadius: 6, display: "flex", flexDirection: "column", gap: 2,
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
+                              onMouseLeave={e => e.currentTarget.style.background = "none"}
+                            >
+                              <span style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>
+                                {ex.name}
+                              </span>
+                              <span style={{ fontSize: "0.72rem", color: "var(--text3)", lineHeight: 1.4,
+                                display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                                overflow: "hidden" }}>
+                                {ex.description}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button className="btn btn-ghost btn-xs">
                       <Clock size={11} /> History (0)
                     </button>
