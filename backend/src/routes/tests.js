@@ -204,9 +204,9 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
   // Default to "single" for the generate endpoint (user-requested tests)
   // to preserve the original contract of generating exactly 1 test.
   // The crawl endpoint defaults to "auto" which generates 5-8 tests per page.
-  // Use strict equality — "auto" is truthy so `|| "single"` would never trigger.
+  // Use strict equality — "ai_decides" is truthy so `|| "one"` would never trigger.
   const rawTestCount = validatedGenDials?.testCount;
-  const testCount = (rawTestCount && rawTestCount !== "auto") ? rawTestCount : "single";
+  const testCount = (rawTestCount && rawTestCount !== "ai_decides") ? rawTestCount : "one";
 
   if (!hasProvider()) {
     return res.status(503).json({

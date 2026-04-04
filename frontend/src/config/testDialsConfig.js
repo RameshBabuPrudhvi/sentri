@@ -4,85 +4,268 @@
  * Pure data definitions for Test Dials configuration options.
  * No React dependency — safe to import from any module.
  *
- * Moved from components/testDialsData.js → config/testDialsConfig.js
- * because this is static configuration data, not a React component.
+ * FIELD MAP (old → new):
+ *   strategy        → approach          (renamed: "Coverage approach")
+ *   workflow[]      → perspectives[]    (renamed: "Test perspective")
+ *   quality[]       → quality[]         (unchanged — IDs & labels kept)
+ *   format          → format            (IDs updated, labels plain-English)
+ *   testCount       → testCount         (IDs fixed — "comprehensive" collision removed)
+ *   automationHooks → options.selectorHints (expanded into options object)
+ *   customModifier  → customInstructions    (renamed)
+ *   preset          → profile               (renamed)
  */
 
-// ─── Strategy options ──────────────────────────────────────────────────────────
+// ─── Coverage approach ─────────────────────────────────────────────────────────
+// Replaces STRATEGY_OPTIONS. Old "sad_path" + "edge_cases" merged into
+// "errors_and_edges" — most users lumped them together anyway.
 
-export const STRATEGY_OPTIONS = [
-  { id: "happy_path",    label: "Happy Path Only",         desc: "Only the expected successful flow" },
-  { id: "sad_path",      label: "Sad Path & Error Handling", desc: "Focus on failures and edge errors" },
-  { id: "edge_cases",    label: "Boundary & Edge Cases",   desc: "Extremes, limits, unusual inputs" },
-  { id: "comprehensive", label: "Comprehensive 360 Suite", desc: "All of the above — full coverage" },
-  { id: "exploratory",   label: "Exploratory Charter",     desc: "Free-form discovery testing" },
-  { id: "regression",    label: "Regression Impact Analysis", desc: "Verify existing flows still work" },
+export const APPROACH_OPTIONS = [
+  {
+    id: "positive_only",
+    label: "Positive paths only",
+    desc: "Only the expected successful flows — no error states or edge cases",
+  },
+  {
+    id: "errors_and_edges",
+    label: "Errors & edge cases",
+    desc: "Invalid inputs, boundary values, failures, permission denials",
+  },
+  {
+    id: "full_coverage",
+    label: "Full coverage",
+    desc: "Balanced mix — roughly 50% positive, 30% negative, 20% edge cases",
+  },
+  {
+    id: "exploratory",
+    label: "Exploratory",
+    desc: "Unusual sequences and unexpected combos — find what we haven't thought of",
+  },
+  {
+    id: "stability_check",
+    label: "Stability check",
+    desc: "Verify existing flows haven't broken — use after a fix or refactor",
+  },
 ];
 
-// ─── Workflow options ──────────────────────────────────────────────────────────
+// ─── Test perspective ──────────────────────────────────────────────────────────
+// Replaces WORKFLOW_OPTIONS. Renamed "workflow" → "perspectives".
+// "Interruptions" → "interrupted_flows" for clarity.
 
-export const WORKFLOW_OPTIONS = [
-  { id: "e2e",            label: "End-to-End User Journey", desc: "Full flow from start to finish" },
-  { id: "component",      label: "Component-Level Isolation", desc: "Single component or unit" },
-  { id: "multi_role",     label: "Multi-Role Persona",      desc: "Admin, user, guest perspectives" },
-  { id: "first_time_user",label: "First-Time User Experience", desc: "Onboarding, discovery, clarity" },
-  { id: "interruptions",  label: "Interruptions",           desc: "Refresh, network loss, recovery" },
+export const PERSPECTIVE_OPTIONS = [
+  {
+    id: "full_journey",
+    label: "Full user journey",
+    desc: "Spans multiple pages — login to logout",
+  },
+  {
+    id: "single_component",
+    label: "Single component",
+    desc: "One widget or section, all its interactive states",
+  },
+  {
+    id: "multi_role",
+    label: "Multiple roles",
+    desc: "Admin, user, guest — each sees different things",
+  },
+  {
+    id: "first_time_user",
+    label: "First-time user",
+    desc: "Onboarding, empty states, help text",
+  },
+  {
+    id: "interrupted_flows",
+    label: "Interrupted flows",
+    desc: "Page refresh, back button, network drop mid-session",
+  },
 ];
 
-// ─── Quality check options ─────────────────────────────────────────────────────
+// ─── Quality checks ────────────────────────────────────────────────────────────
+// IDs unchanged (backend references them). Two label fixes:
+//   "API & Integration" → "API responses"  (clearer)
+//   "Observability"     → "Console errors" (non-SRE users don't know "observability")
 
 export const QUALITY_OPTIONS = [
-  { id: "accessibility",   label: "Accessibility (a11y)",  icon: "♿" },
-  { id: "performance",     label: "Performance",           icon: "⚡" },
-  { id: "security",        label: "Security",              icon: "🔒" },
-  { id: "data_integrity",  label: "Data Integrity",        icon: "🗄" },
-  { id: "api_integration", label: "API & Integration",     icon: "🔌" },
-  { id: "localization",    label: "Localization (L10n)",   icon: "🌐" },
-  { id: "reliability",     label: "Reliability",           icon: "🔁" },
-  { id: "observability",   label: "Observability",         icon: "📊" },
+  { id: "accessibility",   label: "Accessibility"  },
+  { id: "performance",     label: "Performance"    },
+  { id: "security",        label: "Security"       },
+  { id: "data_integrity",  label: "Data integrity" },
+  { id: "api_integration", label: "API responses"  },
+  { id: "localization",    label: "Localization"   },
+  { id: "reliability",     label: "Reliability"    },
+  { id: "observability",   label: "Console errors" },
 ];
 
-// ─── Output format options ─────────────────────────────────────────────────────
+// ─── Output format ─────────────────────────────────────────────────────────────
+// IDs updated to match backend rewrite. Labels now plain English.
+//   "verbose"  → "step_by_step"
+//   "concise"  → "checklist"
+//   "gherkin"  → "gherkin" (kept)
 
 export const FORMAT_OPTIONS = [
-  { id: "verbose",  label: "Verbose Steps",        desc: "Detailed numbered steps with expected results" },
-  { id: "concise",  label: "Concise Checklist",    desc: "Short bullet-point checklist" },
-  { id: "gherkin",  label: "Gherkin (Given/When/Then)", desc: "BDD-style feature scenarios" },
+  {
+    id: "step_by_step",
+    label: "Step by step",
+    desc: "Numbered actions with expected result on each line",
+  },
+  {
+    id: "checklist",
+    label: "Checklist",
+    desc: "Short bullet per action — fast to read, fast to execute",
+  },
+  {
+    id: "gherkin",
+    label: "Gherkin / BDD",
+    desc: "Given / When / Then — ready to paste into Cucumber or Playwright",
+  },
 ];
 
-// ─── Output language options ───────────────────────────────────────────────────
+// ─── Output language ───────────────────────────────────────────────────────────
+// Unchanged.
 
 export const LANGUAGES = [
-  { code: "en-US", label: "English (Default)", flag: "US" },
-  { code: "en-GB", label: "English (UK)",      flag: "GB" },
-  { code: "es",    label: "Spanish",           flag: "ES" },
-  { code: "fr",    label: "French",            flag: "FR" },
-  { code: "de",    label: "German",            flag: "DE" },
-  { code: "ja",    label: "Japanese",          flag: "JP" },
-  { code: "zh",    label: "Chinese",           flag: "CN" },
-  { code: "pt",    label: "Portuguese",        flag: "PT" },
+  { code: "en-US", label: "English (US)" },
+  { code: "en-GB", label: "English (UK)" },
+  { code: "es",    label: "Spanish"      },
+  { code: "fr",    label: "French"       },
+  { code: "de",    label: "German"       },
+  { code: "ja",    label: "Japanese"     },
+  { code: "zh",    label: "Chinese"      },
+  { code: "pt",    label: "Portuguese"   },
 ];
 
-// ─── Test count options ────────────────────────────────────────────────────────
+// ─── Number of tests ───────────────────────────────────────────────────────────
+// BUG FIX: old id "comprehensive" collided with STRATEGY_OPTIONS id "comprehensive".
+// New IDs: one | small | medium | large | ai_decides — no collision anywhere.
 
 export const TEST_COUNT_OPTIONS = [
-  { id: "single", label: "Single Test",        desc: "Generate exactly 1 test case" },
-  { id: "few",    label: "Few (3–5)",           desc: "A small focused set of tests" },
-  { id: "moderate", label: "Moderate (6–10)",   desc: "Balanced coverage" },
-  { id: "comprehensive", label: "Many (10–20)", desc: "Broad coverage suite" },
-  { id: "auto",   label: "Auto (AI decides)",   desc: "Let the AI determine the right number" },
+  { id: "one",       label: "1",          desc: "Single focused test"       },
+  { id: "small",     label: "3–5",        desc: "Small, focused set"        },
+  { id: "medium",    label: "6–10",       desc: "Solid coverage"            },
+  { id: "large",     label: "10–20",      desc: "Full suite"                },
+  { id: "ai_decides",label: "AI decides", desc: "AI picks the right number" },
+];
+
+// ─── Extra options ─────────────────────────────────────────────────────────────
+// Replaces single automationHooks boolean. Expanded into named toggles.
+
+export const OPTION_TOGGLES = [
+  {
+    id: "selectorHints",
+    label: "Add selector hints",
+    desc: "Suggests data-testid attributes — useful when handing tests to an automation engineer",
+  },
+  {
+    id: "preconditions",
+    label: "Include preconditions",
+    desc: "States required setup before each test (logged-in user, specific data, etc.)",
+  },
+  {
+    id: "testDataExamples",
+    label: "Include test data examples",
+    desc: "Provides sample values (emails, IDs, amounts) so tests are runnable immediately",
+  },
+  {
+    id: "markPriority",
+    label: "Flag high-priority tests",
+    desc: "Labels the most critical tests as P1 so teams know where to start",
+  },
+];
+
+// ─── Quick profiles ────────────────────────────────────────────────────────────
+// Moved here from TestDials.jsx (no JSX needed — pure data).
+// "Smoke Test" removed — replaced by "Quick sanity check" (plain English, same intent).
+// "Regression Guard" kept as label but maps to approach "stability_check" so it no
+// longer clashes with the old strategy option "Regression Impact Analysis".
+
+export const PROFILE_OPTIONS = [
+  {
+    id: "new_feature",
+    label: "New feature",
+    desc: "Shipping something new — cover positive, negative, and edge cases",
+    approach: "full_coverage",
+    perspectives: ["full_journey", "multi_role"],
+    quality: ["data_integrity"],
+    format: "step_by_step",
+    testCount: "ai_decides",
+    default: true,
+  },
+  {
+    id: "quick_check",
+    label: "Quick sanity check",
+    desc: "Before a deploy — verify the most critical flows still work",
+    approach: "positive_only",
+    perspectives: ["full_journey"],
+    quality: [],
+    format: "checklist",
+    testCount: "small",
+  },
+  {
+    id: "after_bugfix",
+    label: "After a bug fix",
+    desc: "Confirm the fix holds and nothing nearby broke",
+    approach: "stability_check",
+    perspectives: ["full_journey"],
+    quality: ["reliability"],
+    format: "checklist",
+    testCount: "small",
+  },
+  {
+    id: "edge_hardening",
+    label: "Edge case hardening",
+    desc: "Push the limits — invalid inputs, broken sessions, boundary values",
+    approach: "errors_and_edges",
+    perspectives: ["interrupted_flows"],
+    quality: ["security", "reliability"],
+    format: "step_by_step",
+    testCount: "medium",
+  },
+  {
+    id: "accessibility_review",
+    label: "Accessibility review",
+    desc: "WCAG 2.1 — keyboard nav, screen readers, focus indicators",
+    approach: "full_coverage",
+    perspectives: ["first_time_user"],
+    quality: ["accessibility"],
+    format: "step_by_step",
+    testCount: "medium",
+  },
+  {
+    id: "api_contracts",
+    label: "API & data layer",
+    desc: "Integration points, request/response shapes, data persistence",
+    approach: "full_coverage",
+    perspectives: ["multi_role"],
+    quality: ["api_integration", "data_integrity"],
+    format: "checklist",
+    testCount: "small",
+  },
+  {
+    id: "bdd_spec",
+    label: "BDD / automation spec",
+    desc: "Gherkin-formatted scenarios ready for Cucumber or Playwright",
+    approach: "full_coverage",
+    perspectives: ["full_journey", "multi_role"],
+    quality: [],
+    format: "gherkin",
+    testCount: "medium",
+  },
 ];
 
 // ─── Default config ────────────────────────────────────────────────────────────
 
 export const DEFAULT_CONFIG = {
-  preset: "new_feature",
-  strategy: "comprehensive",
-  workflow: ["e2e", "multi_role"],
-  quality: ["data_integrity"],
-  format: "verbose",
-  language: "en-US",
-  automationHooks: false,
-  customModifier: "",
-  testCount: "auto",
+  profile:      "new_feature",
+  approach:     "full_coverage",
+  perspectives: ["full_journey", "multi_role"],
+  quality:      ["data_integrity"],
+  format:       "step_by_step",
+  testCount:    "ai_decides",
+  options: {
+    selectorHints:    false,
+    preconditions:    false,
+    testDataExamples: false,
+    markPriority:     false,
+  },
+  language:           "en-US",
+  customInstructions: "",
 };

@@ -16,7 +16,7 @@ import { isLocalProvider } from "../aiProvider.js";
  * ranges.  The instruction is worded imperatively so the LLM treats it as a
  * hard constraint rather than a suggestion.
  *
- * @param {string} testCount — validated dial value (single|few|moderate|comprehensive|auto)
+ * @param {string} testCount — validated dial value (one|small|medium|large|ai_decides)
  * @param {boolean} [local]  — true when using a local provider (Ollama).
  *                              Defaults to isLocalProvider() when omitted.
  * @returns {string} e.g. "Generate EXACTLY 1 test" or "Generate 5-8 tests"
@@ -24,12 +24,12 @@ import { isLocalProvider } from "../aiProvider.js";
 export function resolveTestCountInstruction(testCount, local) {
   if (local === undefined) local = isLocalProvider();
   switch (testCount) {
-    case "single":        return "Generate EXACTLY 1 test";
-    case "few":           return "Generate EXACTLY 3-5 tests";
-    case "moderate":      return "Generate EXACTLY 6-10 tests";
-    case "comprehensive": return "Generate EXACTLY 10-20 tests";
-    case "auto":
-    default:              return `Generate ${local ? "3-5" : "5-8"} tests`;
+    case "one":       return "Generate EXACTLY 1 test";
+    case "small":     return "Generate EXACTLY 3-5 tests";
+    case "medium":    return "Generate EXACTLY 6-10 tests";
+    case "large":     return "Generate EXACTLY 10-20 tests";
+    case "ai_decides":
+    default:          return `Generate ${local ? "3-5" : "5-8"} tests`;
   }
 }
 

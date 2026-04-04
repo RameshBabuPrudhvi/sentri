@@ -5,29 +5,25 @@
  * Handles localStorage persistence and active-dial counting.
  *
  * Prompt building is handled server-side (backend/src/testDials.js) so the
- * backend controls what text reaches the AI.  The frontend sends the raw
+ * backend controls what text reaches the AI. The frontend sends the raw
  * structured config object and never constructs prompt strings.
- *
- * Moved from components/testDialsPrompt.js → utils/testDialsStorage.js
- * because this is pure logic (no JSX), and "Prompt" was misleading since
- * prompt building moved to the backend.
- *
- * Exports:
- *   countActiveDials(cfg)     — count how many dial sections are active
- *   loadSavedConfig()         — read persisted config from localStorage
- *   saveConfig(cfg)           — persist config to localStorage
  */
 
-import {
-  DEFAULT_CONFIG,
-} from "../config/testDialsConfig.js";
+import { DEFAULT_CONFIG } from "../config/testDialsConfig.js";
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
 
 export function loadSavedConfig() {
   try {
     const s = localStorage.getItem("sentri_testdials");
-    return s ? { ...DEFAULT_CONFIG, ...JSON.parse(s) } : { ...DEFAULT_CONFIG };
+    if (!s) return { ...DEFAULT_CONFIG };
+    const saved = JSON.parse(s);
+    // Deep-merge options object so new toggle keys get their defaults
+    return {
+      ...DEFAULT_CONFIG,
+      ...saved,
+      options: { ...DEFAULT_CONFIG.options, ...(saved.options || {}) },
+    };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -38,14 +34,18 @@ export function saveConfig(cfg) {
 }
 
 // ─── Count active dials ────────────────────────────────────────────────────────
+// An "active" dial is one that contributes non-default signal to the AI prompt.
 
 export function countActiveDials(cfg) {
   if (!cfg) return 0;
   let n = 0;
-  if (cfg.strategy) n++;
-  if (cfg.workflow?.length > 0) n++;
-  if (cfg.quality?.length > 0) n++;
-  if (cfg.format) n++;
-  if (cfg.testCount && cfg.testCount !== "auto") n++;
+  if (cfg.approach)              n++;   // approach is always set, always counts
+  if (cfg.perspectives?.length)  n++;
+  if (cfg.quality?.length)       n++;
+  if (cfg.format)                n++;   // format always set
+  if (cfg.testCount && cfg.testCount !== "ai_decides") n++;
+  if (cfg.options) {
+    n += Object.values(cfg.options).filter(Boolean).length;
+  }
   return n;
 }
