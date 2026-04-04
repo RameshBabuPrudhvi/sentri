@@ -29,6 +29,9 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 | 🤖 **Multi-AI Test Generation** | Anthropic Claude Sonnet, Google Gemini 2.5 Flash, OpenAI GPT-4o-mini, or Ollama local models — switch with one env var |
 | 🦙 **Ollama (Local Models)** | Run models locally with Ollama — completely free and private, no API key needed. NDJSON response fallback, `OLLAMA_MAX_PREDICT` token cap, and HTTP 500 retry for robust local inference |
 | ✦ **Create Test from Description** | Describe a scenario in plain English; AI generates steps + a Playwright script in seconds |
+| 🎛️ **Test Dials** | Configurable AI generation: pick strategy (happy path, edge cases, comprehensive…), workflow perspective, quality checks, output format, test count, and language. Presets like "Smoke Test" and "BDD Blueprint" auto-fill multiple dials. Config is validated server-side to prevent prompt injection |
+| ⛔ **Abort / Cancel** | Stop any running crawl, generation, or test run via the UI or `POST /api/runs/:id/abort`. `AbortSignal` is threaded through the entire pipeline so AI calls, browser operations, and feedback loops halt immediately |
+| 🆔 **Human-Readable IDs** | Sequential IDs (`TC-1`, `RUN-2`, `PRJ-3`, `ACT-4`) replace UUIDs — easier to reference in conversations and bug reports. Counters persist in the DB and rehydrate on startup |
 | 🧬 **Self-Healing Tests** | Multi-strategy element finding with adaptive healing history — tests auto-recover when selectors change. Visualised with a **Healing Timeline** showing the fallback chain |
 | 🔄 **Two-Phase AI Pipeline** | PLAN → GENERATE split avoids token truncation; AI-assisted intent classification for ambiguous pages |
 | 📡 **Real-Time SSE Streaming** | Server-Sent Events replace polling — live log, result, frame, and LLM token events pushed to the browser with automatic reconnection and exponential backoff |
@@ -43,17 +46,19 @@ Sentri is an autonomous QA platform that removes the manual burden of writing an
 | 🗺️ **Site Graph** | D3 force-directed graph of crawled pages with live node status, edge inference, and a "+ Generate test" action per page |
 | 🔑 **Auth Support** | Login to your app before crawling using CSS selectors for username/password fields |
 | ⚙️ **Runtime API Key Config** | Set or change your AI provider key in the Settings UI — no server restart needed |
-| 📊 **Live Dashboard** | Real-time pass/fail metrics, run history, pass rate trends, and per-project analytics |
-| 📝 **Activity Log** | Complete timeline of all user and system actions — crawls, runs, edits, approvals |
+| 📊 **Rich Dashboard** | Pass rate, defect category breakdown, flaky test detection, test growth sparkline, MTTR, run status distribution, test review pipeline, and auto-fix / self-healing stats |
+| 📝 **Activity Log** | Complete timeline of all user and system actions — crawls, runs, edits, approvals, aborts |
 | ⚡ **Async Test Generation** | `POST /projects/:id/tests/generate` returns `202 { runId }` immediately; the AI pipeline runs in the background |
 | 🔗 **API Resilience** | `AbortController`-based timeouts (30s default, 5min for long ops), connection testing, and API key validation endpoints |
 | 📦 **Data Caching** | `useProjectData` hook with module-level 30s TTL cache + batch `/api/tests` endpoint to eliminate N+1 fetches |
+| 🪵 **Centralized Logging** | Env-driven log level, timestamp format, timezone, and optional JSON-lines mode (`LOG_LEVEL`, `LOG_DATE_FORMAT`, `LOG_TIMEZONE`, `LOG_JSON`) |
 | 🌙 **Dark Mode** | Automatic dark mode via `prefers-color-scheme` — all UI components adapt seamlessly |
 | ⌨️ **Keyboard Shortcuts** | `a` approve, `r` reject, `/` search, `Esc` clear — speed up test review workflows |
 | 🔍 **Global Test Search** | Search across all tests from the sidebar; results open the `/tests` page with URL-synced filters |
 | 📄 **Pagination & Sorting** | Tests page and project review tab paginate at 50/page with sortable columns and URL-synced filters |
 | ☑️ **Bulk Actions** | Select multiple tests for bulk approve/reject/delete with confirmation modal for "select all" operations |
 | 🔔 **Browser Notifications** | Optional desktop notifications when a run completes, with favicon badge (⏳/✅/❌) while running |
+| 🗑️ **Project Deletion** | Cascade-delete a project and all its tests, runs, and activities — with an active-run guard to prevent orphaned data |
 | 🛡️ **Error Boundary & 404** | Graceful crash recovery and a proper 404 page for unknown routes |
 | 🐳 **Docker Ready** | Full Docker Compose setup for instant deployment |
 
@@ -130,6 +135,7 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google — 
 ### 3a. Crawl & Generate Tests (Automated)
 
 - Open your project and click **Crawl & Generate Tests**
+- Optionally expand the **Test Dials** panel to configure strategy, test count, workflow perspective, quality checks, output format, and language before starting
 - Sentri visits your app, follows internal links, snapshots each page (including form structures, semantic sections, and heading hierarchy), and sends those snapshots through an 8-step pipeline:
   1. **Crawl** — discover pages up to 3 levels deep
   2. **Filter** — remove noise from interactive elements
@@ -140,17 +146,15 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google — 
   7. **Validate** — reject malformed or placeholder tests before they enter the DB
   8. **Done** — store validated tests as Draft
 - Watch crawl progress live in the **Site Graph** — a D3 force-directed map of discovered pages with status indicators
+- Click **Stop** at any time to abort the crawl — all in-progress AI calls and browser operations are cancelled immediately
 - All generated tests appear in the **Generated Tests** tab as **Draft**
 
 ### 3b. Create a Test from Description (Manual)
 
-- Click **Create Tests** from the Tests page
-- Select your project (auto-populated), enter a test name and plain-English description
-- AI generates detailed test steps and a Playwright script — review and edit the steps in a multi-phase wizard:
-  - **Form** → describe what you want to test
-  - **Generating** → AI analyses your description and writes steps + Playwright code. Watch output arrive token-by-token in the **LLM Stream Panel**
-  - **Review** → edit, add, remove, or reorder steps before saving
-  - **Done** → test saved as Draft
+- Click **Create Tests** from the Tests page — opens the **Generate Test Modal** with two tabs:
+  - **Story** — select your project, enter a test name and plain-English description
+  - **Test Dials** — configure AI generation behaviour (strategy, test count, format, etc.)
+- AI generates detailed test steps and a Playwright script. Watch output arrive token-by-token in the **LLM Stream Panel**
 - The test is saved as **Draft** in your project's Generated Tests queue
 
 ### 4. Review & Approve Tests
@@ -166,26 +170,28 @@ Go to **Settings** and paste in an API key for Anthropic, OpenAI, or Google — 
 - Add, remove, or reorder steps inline
 - On save, Playwright code is **automatically regenerated** from your updated steps via AI
 - Click **Show changes** to view a **Code Diff** (Myers line diff) of the previous vs. current Playwright code
-- Export test data + run history as JSON from the test detail page
+- Export test data + run history as CSV from the test detail page
 
 ### 6. Run Regression
 
 - Click **Run Regression** to execute all approved tests
 - Tests run with **self-healing**: if a selector breaks, the runtime tries multiple fallback strategies (role, label, text, aria-label, title) and remembers which strategy won for future runs
 - Watch live progress via **SSE streaming** — no more polling. The Run Detail view updates in real time with logs, results, and a **live browser view** (CDP screencast at ~7 FPS)
+- Click **Stop Task** at any time to abort the run — remaining tests are skipped and the run is marked as "aborted"
 - The **Execution Timeline** (Gantt chart) shows each test's start time and duration
 - Click any test case to drill into its **Step Results** — **OverlayCanvas** draws bounding boxes on screenshots, plus network requests, console logs, and DOM snapshot
 - The **Healing Timeline** visualises which selector strategies were tried and which one won
 - After failures, an automatic **feedback loop** classifies each failure and auto-regenerates high-priority failing tests
+- A post-run **Outcome Banner** offers "Review Tests" and "Re-run Tests" actions
 
 ### 7. Monitor
 
-- The **Dashboard** (`/dashboard`) shows aggregate pass rate, test counts, run history chart (shown with 1+ runs), and a first-time onboarding banner for new users
+- The **Dashboard** (`/dashboard`) shows pass rate, defect category breakdown (selector / navigation / timeout / assertion), flaky test count, test growth sparkline, MTTR, run status distribution, test review pipeline, auto-fix and self-healing stats, and recent activity
 - The **Tests** page (`/tests`) provides a unified view of all tests across all projects with sortable columns, pagination (50/page), bulk select/approve/reject, keyboard shortcuts (`a`/`r`/`Esc`), and URL-synced filters (`?q=`, `?status=`, `?review=`)
-- The **Projects** page (`/projects`) shows per-project health at a glance with pass rate bars and test counts
-- The **Work** page (`/work`) lists all runs across all projects with search, status filters, type filters, and an inline **New Run** modal
+- The **Projects** page (`/projects`) shows per-project health at a glance with pass rate bars, test counts, and a delete button with cascade confirmation
+- The **Runs** page (`/work`) lists all runs across all projects with search, status filters (including "aborted"), type filters, and an inline **New Run** modal
 - The **Reports** page (`/reports`) provides pass/fail trend charts, per-project breakdown, flaky test detection, and top failures with CSV export (disabled when no runs match the current filter)
-- The **Context** page (`/context`) displays AI provider status and per-application environment details
+- The **System** page (`/context`) displays AI provider status and per-application environment details
 
 ---
 
@@ -230,6 +236,10 @@ Ollama must be running on the same machine as the Sentri backend (or set `OLLAMA
 | `OLLAMA_MAX_PREDICT` | No | `4096` | Max token output cap for Ollama — prevents context overflow HTTP 500s on small models |
 | `OLLAMA_TIMEOUT_MS` | No | `120000` | Timeout (ms) for Ollama API calls — increase for slow machines or large models |
 | `PORT` | No | `3001` | Backend server port |
+| `LOG_LEVEL` | No | `info` | Minimum severity to print: `debug`, `info`, `warn`, or `error` |
+| `LOG_DATE_FORMAT` | No | `iso` | Timestamp format: `iso`, `utc`, `local`, or `epoch` |
+| `LOG_TIMEZONE` | No | system | IANA timezone for `local` format (e.g. `America/New_York`) |
+| `LOG_JSON` | No | `false` | Emit structured JSON lines on stdout instead of human-readable text |
 
 See [`backend/.env.example`](backend/.env.example) for the full template.
 
