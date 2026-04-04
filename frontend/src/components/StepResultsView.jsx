@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   Globe,
   Lock,
   MoreHorizontal,
+  ExternalLink,
 } from "lucide-react";
 import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
@@ -374,8 +376,10 @@ function BrowserChrome({ url, children, isLoading = false }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function StepResultsView({ result, run, onBack }) {
+  const navigate = useNavigate();
   const steps = result?.steps || [];
   const stepStatuses = inferStepStatuses(steps, result);
+  const testId = result?.testId;
 
   const [activeStepIdx, setActiveStepIdx] = useState(() => {
     // Start on the first failed/running step, else 0
@@ -455,6 +459,31 @@ export default function StepResultsView({ result, run, onBack }) {
         >
           {cleanTestName(result?.testName || result?.name) || "Test Case"}
         </span>
+        {testId && (
+          <>
+            <span style={{ color: "var(--border2)" }}>›</span>
+            <button
+              onClick={() => navigate(`/tests/${testId}`)}
+              title="Go to test detail to edit steps"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--accent)",
+                fontWeight: 600,
+                fontSize: "0.78rem",
+                padding: "2px 0",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {testId}
+              <ExternalLink size={11} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* ── Main split ──────────────────────────────────────────────────── */}
@@ -524,9 +553,35 @@ export default function StepResultsView({ result, run, onBack }) {
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
                   marginBottom: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
                 }}
               >
-                Test Case
+                <span>Test Case</span>
+                {testId && (
+                  <button
+                    onClick={() => navigate(`/tests/${testId}`)}
+                    title="View & edit test steps"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 3,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--accent)",
+                      fontWeight: 700,
+                      fontSize: "0.68rem",
+                      padding: 0,
+                      fontFamily: "var(--font-mono)",
+                      textTransform: "none",
+                      letterSpacing: "normal",
+                    }}
+                  >
+                    {testId} <ExternalLink size={9} />
+                  </button>
+                )}
               </div>
               {cleanTestName(result?.testName || result?.name) || "Test"}
               {/* Avatar icon */}
