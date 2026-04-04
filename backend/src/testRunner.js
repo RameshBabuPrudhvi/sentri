@@ -161,10 +161,14 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
 
   // Now that the feedback loop is done, finalize the run status.
   // This is the single place where status transitions to "completed".
+  // Guard the log() call inside the callback so it only fires when the run
+  // actually transitions to "completed". After an abort, the SSE "done" event
+  // has already been emitted and the stream is closed — logging here would
+  // append to run.logs but the SSE broadcast would be silently lost.
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
-    log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+    logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
   });
 
   // Emit "done" only now — after the feedback loop — so the frontend's

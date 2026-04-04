@@ -202,13 +202,15 @@ export function classifyPage(snapshot, filteredElements) {
 }
 
 /**
- * classifyPageWithAI(snapshot, filteredElements) → page intent summary
+ * classifyPageWithAI(snapshot, filteredElements, { signal }) → page intent summary
  *
  * Same as classifyPage but falls back to the AI when heuristic confidence
  * is below AI_THRESHOLD. Call this from the crawler pipeline instead of
  * classifyPage when an AI provider is available.
+ *
+ * @param {AbortSignal} [signal] — forwarded to AI calls so abort stops classification
  */
-export async function classifyPageWithAI(snapshot, filteredElements) {
+export async function classifyPageWithAI(snapshot, filteredElements, { signal } = {}) {
   // AI fallback disabled to conserve LLM API quota (Gemini free tier: 20 calls/day).
   // The heuristic classifier has been improved with better keyword scoring and
   // element-type weighting, so AI assistance is not needed for typical pages.
@@ -220,7 +222,8 @@ export async function classifyPageWithAI(snapshot, filteredElements) {
   if (heuristic.intentConfidence >= AI_THRESHOLD) return heuristic;
   try {
     if (!hasProvider()) return heuristic;
-    const aiResult = await aiClassifyPage(snapshot);
+    if (signal?.aborted) return heuristic;
+    const aiResult = await aiClassifyPage(snapshot, signal);
     if (!aiResult) return heuristic;
     const isHighPriority = HIGH_PRIORITY_INTENTS.has(aiResult.intent);
     return {
@@ -230,7 +233,8 @@ export async function classifyPageWithAI(snapshot, filteredElements) {
       isHighPriority,
       _aiAssisted: true,
     };
-  } catch {
+  } catch (err) {
+    if (err.name === "AbortError") throw err;
     return heuristic;
   }
   */

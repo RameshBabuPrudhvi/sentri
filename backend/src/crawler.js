@@ -130,7 +130,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
-    const classified = await classifyPageWithAI(snap, snap.elements);
+    const classified = await classifyPageWithAI(snap, snap.elements, { signal });
     if (classified._aiAssisted) {
       log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
     }
