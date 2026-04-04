@@ -158,8 +158,8 @@ export function buildDialsPrompt(cfg) {
   const strategy   = STRATEGY_OPTIONS.find(s => s.id === cfg.strategy);
   const format     = FORMAT_OPTIONS.find(f => f.id === cfg.format);
   const testCount  = TEST_COUNT_OPTIONS.find(t => t.id === cfg.testCount);
-  const workflows  = WORKFLOW_OPTIONS.filter(w => cfg.workflow.includes(w.id));
-  const qualities  = QUALITY_OPTIONS.filter(q => cfg.quality.includes(q.id));
+  const workflows  = WORKFLOW_OPTIONS.filter(w => (cfg.workflow || []).includes(w.id));
+  const qualities  = QUALITY_OPTIONS.filter(q => (cfg.quality || []).includes(q.id));
 
   const lines = [
     "TEST GENERATION CONFIGURATION:",
