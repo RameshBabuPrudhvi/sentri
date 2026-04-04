@@ -772,7 +772,7 @@ app.get("/api/dashboard", (req, res) => {
   const testResultStatuses = {};   // testId → Set<"passed"|"failed">
   const testRunResults = runs.filter((r) => (r.type === "test_run" || r.type === "run") && r.results?.length);
   for (const r of testRunResults) {
-    for (const res of r.results) {
+    for (const result of r.results) {
       // Accumulate per-test statuses for flaky detection
       if (!testResultStatuses[res.testId]) testResultStatuses[res.testId] = new Set();
       if (res.status) testResultStatuses[res.testId].add(res.status);
