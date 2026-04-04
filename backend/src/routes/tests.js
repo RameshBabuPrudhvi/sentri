@@ -6,6 +6,7 @@
 
 import { Router } from "express";
 import { getDb } from "../db.js";
+import { saveDb } from "../db.js";
 import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
@@ -226,7 +227,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     generateInput: { name: name.trim(), description: cleanDescription },
   };
   db.runs[runId] = run;
-
+saveDb();
   logActivity({
     type: "test.generate", projectId: project.id, projectName: project.name,
     detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
@@ -279,7 +280,7 @@ router.post("/tests/:testId/run", async (req, res) => {
     testQueue: [{ id: test.id, name: test.name, steps: test.steps || [] }],
   };
   db.runs[runId] = run;
-
+saveDb();
   logActivity({
     type: "test_run.start", projectId: project.id, projectName: project.name,
     testId: test.id, testName: test.name,

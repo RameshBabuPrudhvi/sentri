@@ -41,6 +41,12 @@ function saveToDisk(db) {
   }
 }
 
+/** Immediately flush the current DB state to disk. Call after any write that
+ *  must survive a crash or nodemon restart (e.g. creating a new run). */
+export function saveDb() {
+  if (_db) saveToDisk(_db);
+}
+
 export function getDb() {
   if (!_db) {
     const restored = loadFromDisk();
@@ -74,6 +80,25 @@ export function getDb() {
     if (!_db.projects)        _db.projects = {};
     if (!_db.tests)           _db.tests = {};
     if (!_db.runs)            _db.runs = {};
+
+    // ── Orphan recovery ───────────────────────────────────────────────────────
+    // Any run still marked "running" after a restore is an orphan — its async
+    // task died with the previous process. Mark it "interrupted" so the SSE
+    // endpoint can close immediately and the UI shows a clear status instead
+    // of waiting forever.
+    let orphanCount = 0;
+    for (const run of Object.values(_db.runs)) {
+      if (run.status === "running") {
+        run.status = "interrupted";
+        run.finishedAt = run.finishedAt || new Date().toISOString();
+        run.error = "Server restarted while run was in progress";
+        orphanCount++;
+      }
+    }
+    if (orphanCount > 0) {
+      console.warn(`[db] Marked ${orphanCount} orphaned run(s) as interrupted`);
+      saveToDisk(_db); // persist the corrected statuses immediately
+    }
 
     // Periodic persistence — every 30s
     setInterval(() => saveToDisk(_db), PERSIST_INTERVAL_MS).unref();

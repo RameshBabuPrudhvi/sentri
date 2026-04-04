@@ -58,7 +58,10 @@ router.get("/runs/:runId/events", (req, res) => {
   // Send current snapshot immediately so the client has something to render
   res.write(`data: ${JSON.stringify({ type: "snapshot", run })}\n\n`);
 
-  // If already done, send done event and close
+  // If already done (completed, failed, aborted, interrupted), send snapshot +
+  // done event and close immediately. This handles SSE reconnections that
+  // arrive after the run finished — including when the connection dropped
+  // during the feedback loop (ECONNRESET) and the client reconnects post-completion.
   if (run.status !== "running") {
     res.write(`data: ${JSON.stringify({ type: "done", status: run.status })}\n\n`);
     return res.end();
@@ -68,11 +71,12 @@ router.get("/runs/:runId/events", (req, res) => {
   runListeners.get(runId).add(res);
 
   // Heartbeat — keeps the connection alive through proxies / load balancers.
-  // 10 s interval (down from 20 s) to avoid ECONNRESET from aggressive proxies
-  // or OS TCP stacks during long-running feedback-loop AI calls.
+  // 5 s interval: long AI feedback-loop calls (30–120 s) can cause aggressive
+  // OS TCP stacks or proxies to reset the idle SSE connection. A shorter
+  // heartbeat keeps the pipe warm without meaningful overhead.
   const heartbeat = setInterval(() => {
     try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
-  }, 10000);
+  }, 5000);
 
   req.on("close", () => {
     clearInterval(heartbeat);

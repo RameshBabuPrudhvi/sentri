@@ -5,7 +5,7 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
+import { getDb, saveDb } from "../db.js";
 import { generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
@@ -40,6 +40,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
     pagesFound: 0,
   };
   db.runs[runId] = run;
+  saveDb(); // flush immediately so a nodemon restart doesn't lose this run
 
   logActivity({
     type: "crawl.start", projectId: project.id, projectName: project.name,
@@ -90,6 +91,7 @@ router.post("/projects/:id/run", async (req, res) => {
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   db.runs[runId] = run;
+  saveDb(); // flush immediately so a nodemon restart doesn't lose this run
 
   logActivity({
     type: "test_run.start", projectId: project.id, projectName: project.name,
