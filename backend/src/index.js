@@ -8,7 +8,7 @@ import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
 import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
 import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
-import { resolveDialsPrompt } from "./testDials.js";
+import { resolveDialsPrompt, resolveDialsConfig } from "./testDials.js";
 
 dotenv.config();
 
@@ -195,6 +195,8 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
   // so the backend controls what text reaches the AI.
   const { dialsConfig } = req.body || {};
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
+  const validatedDials = resolveDialsConfig(dialsConfig);
+  const testCount = validatedDials?.testCount || "auto";
 
   const runId = generateRunId(db);
   const run = {
@@ -216,7 +218,7 @@ app.post("/api/projects/:id/crawl", async (req, res) => {
 
   // Kick off async - stream updates via polling
   runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, signal }),
+    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, testCount, signal }),
     {
       onSuccess: () => logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -479,6 +481,8 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   const cleanDescription = (description || "").trim();
   // Build the dials prompt server-side from the structured config
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
+  const validatedGenDials = resolveDialsConfig(dialsConfig);
+  const testCount = validatedGenDials?.testCount || "auto";
 
   if (!hasProvider()) {
     return res.status(503).json({
@@ -516,6 +520,7 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
       name: name.trim(),
       description: cleanDescription,
       dialsPrompt,
+      testCount,
       signal,
     }),
     {

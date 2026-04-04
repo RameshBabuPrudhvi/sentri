@@ -219,7 +219,7 @@ async function takeSnapshot(page) {
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", signal }) {
+export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "auto", signal }) {
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
@@ -243,7 +243,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
 
   const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
-  }, { dialsPrompt, signal });
+  }, { dialsPrompt, testCount, signal });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
 
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
@@ -332,7 +332,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   return createdTestIds;
 }
 
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", signal } = {}) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "auto", signal } = {}) {
   const browser = await chromium.launch({
     headless: process.env.BROWSER_HEADLESS !== "false",
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
@@ -473,7 +473,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // AI test generation
   setStep(run, 4);
   log(run, `\u{1F916} Generating intent-driven tests...`);
-  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, signal });
+  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
   log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
 
   throwIfAborted(signal);

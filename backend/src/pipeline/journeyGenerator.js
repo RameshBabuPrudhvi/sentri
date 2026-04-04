@@ -11,6 +11,29 @@ import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 import { throwIfAborted } from "../abortHelper.js";
 
 /**
+ * Resolve the test count instruction for prompt builders.
+ *
+ * Maps the validated testCount dial value to an authoritative instruction
+ * string that replaces the previously hardcoded "Generate 3-5 / 5-8 tests"
+ * ranges.  The instruction is worded imperatively so the LLM treats it as a
+ * hard constraint rather than a suggestion.
+ *
+ * @param {string} testCount — validated dial value (single|few|moderate|comprehensive|auto)
+ * @param {boolean} local    — true when using a local provider (Ollama)
+ * @returns {string} e.g. "Generate EXACTLY 1 test" or "Generate 5-8 tests"
+ */
+function resolveTestCountInstruction(testCount, local) {
+  switch (testCount) {
+    case "single":        return "Generate EXACTLY 1 test";
+    case "few":           return "Generate EXACTLY 3-5 tests";
+    case "moderate":      return "Generate EXACTLY 6-10 tests";
+    case "comprehensive": return "Generate EXACTLY 10-20 tests";
+    case "auto":
+    default:              return `Generate ${local ? "3-5" : "5-8"} tests`;
+  }
+}
+
+/**
  * Inject an optional dialsPrompt into a base AI prompt, placing it
  * **before** the STRICT RULES / Requirements section so the LLM sees the
  * user's configuration (strategy, test count, format, etc.) before the
@@ -162,7 +185,7 @@ function sanitiseSteps(tests) {
 
 // ── Journey prompt builder ────────────────────────────────────────────────────
 
-function buildJourneyPrompt(journey, allSnapshots) {
+function buildJourneyPrompt(journey, allSnapshots, { testCount = "auto" } = {}) {
   const local = isLocalProvider();
   const pageContexts = journey.pages.map(page => {
     const snapshot = allSnapshots[page.url];
@@ -190,7 +213,7 @@ DESCRIPTION: ${journey.description}
 PAGES IN THIS JOURNEY:
 ${pageContexts}
 
-Generate 3-5 end-to-end Playwright tests covering this journey from multiple angles.
+${resolveTestCountInstruction(testCount, local)} end-to-end Playwright tests covering this journey from multiple angles.
 
 Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)

@@ -196,3 +196,14 @@ export function resolveDialsPrompt(input) {
   const cfg = validateDialsConfig(input);
   return buildDialsPrompt(cfg);
 }
+
+/**
+ * resolveDialsConfig(rawConfigOrString) → validated config object | null
+ *
+ * Like resolveDialsPrompt but returns the validated config object so callers
+ * can extract individual fields (e.g. testCount) to thread into prompt builders.
+ */
+export function resolveDialsConfig(input) {
+  if (typeof input === "string") return null;
+  return validateDialsConfig(input);
+}
