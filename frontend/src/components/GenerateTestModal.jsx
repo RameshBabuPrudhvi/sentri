@@ -15,7 +15,7 @@ import { Upload, FileCode2, Clock, X } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
-import { countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
+import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
 
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 

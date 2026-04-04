@@ -15,7 +15,7 @@
 import React, { useState } from "react";
 import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
 import TestDials from "./TestDials.jsx";
-import { countActiveDials, loadSavedConfig } from "./testDialsPrompt.js";
+import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
 
 export default function CrawlDialsPanel({ onChange }) {
   const [open, setOpen] = useState(false);

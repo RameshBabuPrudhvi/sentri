@@ -7,11 +7,11 @@ import {
 import {
   STRATEGY_OPTIONS, WORKFLOW_OPTIONS, QUALITY_OPTIONS,
   FORMAT_OPTIONS, LANGUAGES, DEFAULT_CONFIG, TEST_COUNT_OPTIONS,
-} from "./testDialsData.js";
+} from "../config/testDialsConfig.js";
 import {
   loadSavedConfig, saveConfig,
   countActiveDials,
-} from "./testDialsPrompt.js";
+} from "../utils/testDialsStorage.js";
 import Collapsible from "./Collapsible.jsx";
 import Tooltip from "./Tooltip.jsx";
 
