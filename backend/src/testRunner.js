@@ -586,17 +586,17 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
 
-  finalizeRunIfNotAborted(run, () => {
-    run.finishedAt = new Date().toISOString();
-    run.duration = Date.now() - runStart;
-  });
-  log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+  // NOTE: We intentionally keep run.status === "running" here so that:
+  //   1. The abort endpoint (POST /api/runs/:id/abort) still works during the
+  //      feedback loop — it checks run.status === "running".
+  //   2. SSE reconnections don't prematurely close — the /events endpoint sends
+  //      an immediate "done" + res.end() when run.status !== "running", which
+  //      would cut off the client while the feedback loop is still active.
+  // The status is set to "completed" only after the feedback loop finishes.
+  log(run, `🏁 Run finishing: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
 
-  // Broadcast a snapshot so the frontend immediately sees the updated status
-  // (e.g. "completed") instead of staying stuck on "running" while the
-  // feedback loop performs long-running AI calls below.
-  // The final "done" SSE event is still emitted AFTER the feedback loop so
-  // fetchRun() always sees the fully stable state.
+  // Broadcast a snapshot so the frontend sees updated pass/fail counts while
+  // the feedback loop performs long-running AI calls below.
   if (!isRunAborted(run, signal)) {
     emitRunEvent(run.id, "snapshot", { run });
   }
@@ -652,6 +652,14 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
       log(run, `   ⚠️  Feedback loop error: ${err.message}`);
     }
   }
+
+  // Now that the feedback loop is done, finalize the run status.
+  // This is the single place where status transitions to "completed".
+  finalizeRunIfNotAborted(run, () => {
+    run.finishedAt = new Date().toISOString();
+    run.duration = Date.now() - runStart;
+  });
+  log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
 
   // Emit "done" only now — after the feedback loop — so the frontend's
   // fetchRun() always sees the final, stable completed state.
