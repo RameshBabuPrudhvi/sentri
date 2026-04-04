@@ -124,7 +124,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   throwIfAborted(signal);
 
-  // Layer 2: Intent classification (AI-assisted when heuristic confidence is low)
+  // ── Step 3: Intent classification ───────────────────────────────────────
   setStep(run, 3);
   log(run, `🧠 Classifying page intents...`);
   const classifiedPages = [];
@@ -150,7 +150,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   throwIfAborted(signal);
 
-  // AI test generation
+  // ── Step 4: AI test generation ──────────────────────────────────────────
   setStep(run, 4);
   log(run, `🤖 Generating intent-driven tests...`);
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
@@ -158,79 +158,19 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   throwIfAborted(signal);
 
-  // Layer 3: Deduplication
-  setStep(run, 5);
-  log(run, `🚫 Deduplicating...`);
-  const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
-  const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
-  const finalTests = deduplicateAcrossRuns(unique, existingTests);
-  log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
+  // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
+  const { validatedTests, enhancedTests, rejected, removed, enhancedCount, dedupStats } =
+    await runPostGenerationPipeline(rawTests, project, db, run, { snapshotsByUrl, classifiedPagesByUrl, signal });
 
-  throwIfAborted(signal);
-
-  // Layer 4: Assertion enhancement
-  setStep(run, 6);
-  log(run, `✨ Enhancing assertions...`);
-  const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
-  log(run, `   ${enhancedCount} tests had assertions strengthened`);
-
-  throwIfAborted(signal);
-
-  // Layer 5: Validate generated tests — reject malformed / placeholder tests
-  setStep(run, 7);
-  log(run, `✅ Validating generated tests...`);
-  const validatedTests = [];
-  let rejected = 0;
-  for (const t of enhancedTests) {
-    const issues = validateTest(t, project.url);
-    if (issues.length === 0) {
-      validatedTests.push(t);
-    } else {
-      rejected++;
-      logWarn(run, `Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
-    }
-  }
-  log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
-
-  throwIfAborted(signal);
-
-  // Store in db
-  for (const t of validatedTests) {
-    const testId = generateTestId(db);
-    db.tests[testId] = {
-      // Spread AI-generated fields first so our critical fields below always win.
-      // This prevents the AI from accidentally overriding id, projectId, reviewStatus, etc.
-      ...t,
-      id: testId,
-      projectId: project.id,
-      sourceUrl: t.sourceUrl,
-      pageTitle: t.pageTitle,
-      createdAt: new Date().toISOString(),
-      lastResult: null,
-      lastRunAt: null,
-      qualityScore: t._quality || 0,
-      isJourneyTest: t.isJourneyTest || false,
-      journeyType: t.journeyType || null,
-      assertionEnhanced: t._assertionEnhanced || false,
-      // All crawl-generated tests start as draft — humans must approve before regression
-      reviewStatus: "draft",
-      reviewedAt: null,
-    };
-    run.tests.push(testId);
-  }
+  // ── Step 8: Store & Done ────────────────────────────────────────────────
+  persistGeneratedTests(validatedTests, project, db, run);
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   run.testsGenerated = run.tests.length;
-  run.pipelineStats = {
-    pagesFound: snapshots.length,
-    rawTestsGenerated: rawTests.length,
-    duplicatesRemoved: removed,
-    assertionsEnhanced: enhancedCount,
-    validationRejected: rejected,
-    journeysDetected: journeys.length,
-    averageQuality: dedupStats.averageQuality,
-  };
+  run.pipelineStats = buildPipelineStats({
+    pagesFound: snapshots.length, rawTests, removed, enhancedCount, rejected, journeys, dedupStats,
+  });
 
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
