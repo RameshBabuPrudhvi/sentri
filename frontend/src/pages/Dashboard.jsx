@@ -132,7 +132,6 @@ export default function Dashboard() {
               { label: "Aborted",   count: rbs.aborted || 0,   color: "#6b7280",      icon: <Ban size={12} /> },
               { label: "Running",   count: rbs.running || 0,   color: "var(--blue)",  icon: <Clock size={12} /> },
             ];
-            const total = segs.reduce((s, x) => s + x.count, 0);
             return (
               <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 14 }}>Run Status Distribution</div>
@@ -145,11 +144,7 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-                {total > 0 && (
-                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginTop: 12, background: "var(--bg3)" }}>
-                    {segs.map((s) => s.count > 0 ? <div key={s.label} style={{ width: `${(s.count / total) * 100}%`, background: s.color }} /> : null)}
-                  </div>
-                )}
+                <StackedBar segments={segs} />
               </div>
             );
           })()}
@@ -161,7 +156,6 @@ export default function Dashboard() {
               { label: "Draft",    count: tbr.draft || 0,    color: "var(--amber)" },
               { label: "Rejected", count: tbr.rejected || 0, color: "var(--red)" },
             ];
-            const total = segs.reduce((s, x) => s + x.count, 0);
             return (
               <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
                 <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 14 }}>Test Review Pipeline</div>
@@ -174,11 +168,7 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-                {total > 0 && (
-                  <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginTop: 12, background: "var(--bg3)" }}>
-                    {segs.map((s) => s.count > 0 ? <div key={s.label} style={{ width: `${(s.count / total) * 100}%`, background: s.color }} /> : null)}
-                  </div>
-                )}
+                <StackedBar segments={segs} />
               </div>
             );
           })()}
