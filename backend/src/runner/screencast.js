@@ -24,7 +24,7 @@ import { emitRunEvent } from "../utils/runLogger.js";
  */
 export async function startScreencast(page, runId) {
   // Only start if there are active SSE listeners
-  const { runListeners } = await import("../index.js").catch(() => ({}));
+  const { runListeners } = await import("../routes/sse.js").catch(() => ({}));
   if (!runListeners?.get(runId)?.size) return null;
 
   let cdpSession;
