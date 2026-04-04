@@ -164,8 +164,8 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
+    log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
   });
-  log(run, `🏁 Run ${run.status}: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
 
   // Emit "done" only now — after the feedback loop — so the frontend's
   // fetchRun() always sees the final, stable completed state.

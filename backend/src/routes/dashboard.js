@@ -57,12 +57,17 @@ router.get("/dashboard", (req, res) => {
   for (const t of tests) { const s = t.reviewStatus || "draft"; if (s in testsByReview) testsByReview[s]++; }
 
   // ── Tests created / generated (today & this week) ───────────────────────
+  // Each AI generation logs TWO test.generate activities: one at start
+  // (status "running") and one on completion (status "completed" / default).
+  // Only count completed activities to avoid double-counting.
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
   let testsCreatedToday = 0, testsCreatedThisWeek = 0, testsGeneratedTotal = 0;
   for (const a of activities) {
     if (a.type !== "test.create" && a.type !== "test.generate") continue;
+    // Skip "running" status entries to avoid double-counting start + completion
+    if (a.status === "running") continue;
     testsGeneratedTotal++;
     if (a.createdAt >= todayStart) testsCreatedToday++;
     if (a.createdAt >= weekStart) testsCreatedThisWeek++;
@@ -112,6 +117,7 @@ router.get("/dashboard", (req, res) => {
   }
   for (const a of activities) {
     if (a.type !== "test.create" && a.type !== "test.generate") continue;
+    if (a.status === "running") continue; // skip start entries (same as above)
     if (a.createdAt < growthStart.toISOString()) continue;
     const aTime = new Date(a.createdAt).getTime();
     for (let i = GROWTH_WEEKS - 1; i >= 0; i--) {

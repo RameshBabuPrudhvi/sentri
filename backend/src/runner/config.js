@@ -17,7 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const BROWSER_HEADLESS   = process.env.BROWSER_HEADLESS !== "false";
 export const VIEWPORT_WIDTH     = parseInt(process.env.VIEWPORT_WIDTH, 10) || 1280;
 export const VIEWPORT_HEIGHT    = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
-export const NAVIGATION_TIMEOUT = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 60000;
+export const NAVIGATION_TIMEOUT = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
 
 // ── Artifact paths ────────────────────────────────────────────────────────────
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
