@@ -349,8 +349,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const snapshotsByUrl = {};
   const pathPatternsSeen = new Set();
 
-  log(run, `\u{1F577}\uFE0F  Starting smart crawl of ${project.url}`);
-  log(run, `\u{1F916} AI provider: ${getProviderName()}`);
+  log(run, `🕷️  Starting smart crawl of ${project.url}`);
+  log(run, `🤖 AI provider: ${getProviderName()}`);
   setStep(run, 1);
 
   if (project.credentials?.usernameSelector) {
@@ -361,9 +361,9 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       await loginPage.fill(project.credentials.passwordSelector, project.credentials.password);
       await loginPage.click(project.credentials.submitSelector);
       await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-      log(run, `\u{1F511} Logged in as ${project.credentials.username}`);
+      log(run, `🔑 Logged in as ${project.credentials.username}`);
     } catch (e) {
-      log(run, `\u26A0\uFE0F  Login failed: ${e.message}`);
+      log(run, `⚠️  Login failed: ${e.message}`);
     }
     await loginPage.close();
   }
@@ -378,14 +378,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
     const pathPattern = extractPathPattern(url);
     if (pathPatternsSeen.has(pathPattern) && depth > 0) {
-      log(run, `\u23ED\uFE0F  Skipping duplicate structure: ${url}`);
+      log(run, `⏭️  Skipping duplicate structure: ${url}`);
       continue;
     }
     pathPatternsSeen.add(pathPattern);
 
     const page = await context.newPage();
     try {
-      log(run, `\u{1F4C4} Visiting (depth ${depth}): ${url}`);
+      log(run, `📄 Visiting (depth ${depth}): ${url}`);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
       // takeSnapshot() now calls waitForLoadState('networkidle') internally,
       // so we no longer need the arbitrary 800ms static wait here.
@@ -394,7 +394,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
       const structureFP = fingerprintStructure(snapshot);
       if (crawlQueue.isStructureDuplicate(structureFP) && depth > 1) {
-        log(run, `\u23ED\uFE0F  Skipping duplicate layout: ${url}`);
+        log(run, `⏭️  Skipping duplicate layout: ${url}`);
         await page.close();
         continue;
       }
@@ -421,20 +421,20 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
         }
       }
     } catch (err) {
-      log(run, `\u26A0\uFE0F  Failed: ${url} \u2014 ${err.message}`);
+      log(run, `⚠️  Failed: ${url} — ${err.message}`);
     } finally {
       await page.close();
     }
   }
 
   await browser.close();
-  log(run, `\u2705 Smart crawl done. ${snapshots.length} unique pages found.`);
+  log(run, `✅ Smart crawl done. ${snapshots.length} unique pages found.`);
 
   throwIfAborted(signal);
 
   // Layer 1: Element filtering
   setStep(run, 2);
-  log(run, `\u{1F50D} Filtering elements (removing noise)...`);
+  log(run, `🔍 Filtering elements (removing noise)...`);
   const filteredSnapshots = snapshots.map(snap => {
     const filtered = filterElements(snap.elements);
     log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
@@ -446,13 +446,13 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // Layer 2: Intent classification (AI-assisted when heuristic confidence is low)
   setStep(run, 3);
-  log(run, `\u{1F9E0} Classifying page intents...`);
+  log(run, `🧠 Classifying page intents...`);
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
     const classified = await classifyPageWithAI(snap, snap.elements);
     if (classified._aiAssisted) {
-      log(run, `   \u{1F916} AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
+      log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
     }
     classifiedPages.push(classified);
   }
@@ -465,16 +465,16 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // Journey detection
   const journeys = buildUserJourneys(classifiedPages);
   if (journeys.length > 0) {
-    log(run, `\u{1F5FA}\uFE0F  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
+    log(run, `🗺️  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
   }
 
   throwIfAborted(signal);
 
   // AI test generation
   setStep(run, 4);
-  log(run, `\u{1F916} Generating intent-driven tests...`);
+  log(run, `🤖 Generating intent-driven tests...`);
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
-  log(run, `\u{1F4DD} Raw tests: ${rawTests.length}`);
+  log(run, `📝 Raw tests: ${rawTests.length}`);
 
   throwIfAborted(signal);
 

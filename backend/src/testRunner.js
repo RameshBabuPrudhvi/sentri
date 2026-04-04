@@ -655,7 +655,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
         }
       }
     } catch (err) {
-      log(run, `   ⚠️  Feedback loop error: ${err.message}`);
+      log(run, `    ⚠️  Feedback loop error: ${err.message}`);
     }
   }
 
