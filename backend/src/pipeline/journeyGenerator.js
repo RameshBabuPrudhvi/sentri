@@ -11,12 +11,36 @@ import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 import { throwIfAborted } from "../abortHelper.js";
 
 /**
- * Append an optional dialsPrompt to a base AI prompt.
- * Centralises the repeated ternary so callers can just write:
- *   const prompt = withDials(base, dialsPrompt);
+ * Inject an optional dialsPrompt into a base AI prompt, placing it
+ * **before** the STRICT RULES / Requirements section so the LLM sees the
+ * user's configuration (strategy, test count, format, etc.) before the
+ * hardcoded generation defaults.  LLMs prioritise earlier context, so
+ * appending dials at the very end caused them to be ignored when they
+ * conflicted with rules like "Generate 5-8 tests".
+ *
+ * Injection strategy:
+ *   1. Look for "STRICT RULES:" — used by buildIntentPrompt & buildUserRequestedPrompt
+ *   2. Else look for "Requirements:" — used by buildJourneyPrompt
+ *   3. Fallback: append at the end (safe default)
  */
 function withDials(base, dialsPrompt) {
-  return dialsPrompt ? `${base}\n\n${dialsPrompt}` : base;
+  if (!dialsPrompt) return base;
+
+  // Find the best injection point — before the rules section
+  const markers = ["STRICT RULES:", "Requirements:"];
+  for (const marker of markers) {
+    const idx = base.indexOf(marker);
+    if (idx !== -1) {
+      return (
+        base.slice(0, idx).trimEnd() +
+        "\n\n" + dialsPrompt + "\n\n" +
+        base.slice(idx)
+      );
+    }
+  }
+
+  // Fallback: append at end (shouldn't happen with current prompts)
+  return `${base}\n\n${dialsPrompt}`;
 }
 
 // ── Step sanitiser — converts Playwright code lines to human-readable steps ──
