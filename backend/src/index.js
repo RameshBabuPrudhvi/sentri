@@ -9,6 +9,7 @@ import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
 import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "./testDials.js";
+import { classifyFailure } from "./pipeline/feedbackLoop.js";
 
 dotenv.config();
 
@@ -766,6 +767,30 @@ app.get("/api/dashboard", (req, res) => {
   const durations = completedTestRuns.filter((r) => r.duration > 0).map((r) => r.duration);
   const avgRunDurationMs = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
 
+  // ── Defect / failure category breakdown (across all test run results) ───
+  const defectBreakdown = { SELECTOR_ISSUE: 0, NAVIGATION_FAIL: 0, TIMEOUT: 0, ASSERTION_FAIL: 0, UNKNOWN: 0 };
+  const testResultStatuses = {};   // testId → Set<"passed"|"failed">
+  const testRunResults = runs.filter((r) => (r.type === "test_run" || r.type === "run") && r.results?.length);
+  for (const r of testRunResults) {
+    for (const res of r.results) {
+      // Accumulate per-test statuses for flaky detection
+      if (!testResultStatuses[res.testId]) testResultStatuses[res.testId] = new Set();
+      if (res.status) testResultStatuses[res.testId].add(res.status);
+      // Classify failures
+      if (res.status === "failed" && res.error) {
+        const cat = classifyFailure(res.error);
+        if (cat in defectBreakdown) defectBreakdown[cat]++;
+        else defectBreakdown.UNKNOWN++;
+      }
+    }
+  }
+
+  // ── Flaky test count (tests with both "passed" and "failed" across runs) ─
+  let flakyTestCount = 0;
+  for (const statuses of Object.values(testResultStatuses)) {
+    if (statuses.has("passed") && statuses.has("failed")) flakyTestCount++;
+  }
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -782,6 +807,8 @@ app.get("/api/dashboard", (req, res) => {
     healingEntries,
     healingSuccesses,
     avgRunDurationMs,
+    defectBreakdown,
+    flakyTestCount,
   });
 });
 

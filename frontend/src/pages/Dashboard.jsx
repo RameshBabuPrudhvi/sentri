@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp,
-  FlaskConical, FileText, Wrench, Clock, Plus, Shield,
+  ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
+  FlaskConical, FileText, Wrench, Clock, Plus, Shield, Crosshair,
 } from "lucide-react";
 import { api } from "../api.js";
 import { fmtDurationMs } from "../utils/formatters.js";
@@ -58,6 +58,7 @@ export default function Dashboard() {
   const chartData = (data?.history || []).map((r, i) => ({ name: `#${i + 1}`, passed: r.passed, failed: r.failed }));
   const rbs = data?.runsByStatus || {};
   const tbr = data?.testsByReview || {};
+  const dfb = data?.defectBreakdown || {};
 
   if (loading) return (
     <div style={{ maxWidth: 860, margin: "0 auto" }}>
@@ -124,7 +125,60 @@ export default function Dashboard() {
             <StatCard label="Self-Healed" value={data?.healingSuccesses ?? 0} sub={`${data?.healingEntries ?? 0} elements tracked`} color="var(--purple)" icon={<Shield size={16} />} />
           </div>
 
-          {/* ── Row 3: Run Status Distribution ─────────────────────── */}
+          {/* ── Row 3: Flaky Tests + Defect Breakdown ─────────────── */}
+          {data?.totalRuns > 0 && (() => {
+            const defectSegs = [
+              { label: "Selector",   count: dfb.SELECTOR_ISSUE || 0,  color: "var(--purple)" },
+              { label: "Navigation", count: dfb.NAVIGATION_FAIL || 0, color: "var(--blue)" },
+              { label: "Timeout",    count: dfb.TIMEOUT || 0,         color: "var(--amber)" },
+              { label: "Assertion",  count: dfb.ASSERTION_FAIL || 0,  color: "var(--red)" },
+              { label: "Other",      count: dfb.UNKNOWN || 0,         color: "#6b7280" },
+            ];
+            const totalDefects = defectSegs.reduce((s, x) => s + x.count, 0);
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 16 }}>
+                <StatCard
+                  label="Flaky Tests"
+                  value={data?.flakyTestCount ?? 0}
+                  sub={data?.flakyTestCount > 0 ? "Inconsistent results" : "None detected"}
+                  color={data?.flakyTestCount > 0 ? "var(--amber)" : "var(--green)"}
+                  icon={<AlertTriangle size={16} />}
+                />
+                <div className="card" style={{ padding: "20px 24px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Crosshair size={14} color="var(--text3)" />
+                      <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Defect Categories</span>
+                    </div>
+                    {totalDefects > 0 && (
+                      <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{totalDefects} total failures</span>
+                    )}
+                  </div>
+                  {totalDefects === 0 ? (
+                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>
+                      <CheckCircle2 size={13} color="var(--green)" style={{ marginRight: 6, verticalAlign: "middle" }} />
+                      No failures recorded
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                        {defectSegs.filter((s) => s.count > 0).map((s) => (
+                          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
+                            <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{s.label}</span>
+                            <span style={{ fontSize: "0.82rem", fontWeight: 700, color: s.color }}>{s.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <StackedBar segments={defectSegs} />
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Row 4: Run Status Distribution ─────────────────────── */}
           {data?.totalRuns > 0 && (() => {
             const segs = [
               { label: "Completed", count: rbs.completed || 0, color: "var(--green)", icon: <CheckCircle2 size={12} /> },
@@ -149,7 +203,7 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* ── Row 4: Test Review Pipeline ────────────────────────── */}
+          {/* ── Row 5: Test Review Pipeline ────────────────────────── */}
           {data?.totalTests > 0 && (() => {
             const segs = [
               { label: "Approved", count: tbr.approved || 0, color: "var(--green)" },
@@ -173,10 +227,10 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* ── Row 5: Pass / Fail Trend Chart ────────────────────── */}
+          {/* ── Row 6: Pass / Fail Trend Chart ────────────────────── */}
           <PassFailChart data={chartData} height={150} idPrefix="dash" title="Pass / Fail Trend" subtitle={`Last ${chartData.length} runs`} />
 
-          {/* ── Row 6: Recent Activity ────────────────────────────── */}
+          {/* ── Row 7: Recent Activity ────────────────────────────── */}
           {runs.length > 0 && (
             <div className="card" style={{ padding: 24 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
