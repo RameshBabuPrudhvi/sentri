@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
 import useLogBuffer from "../hooks/useLogBuffer.js";
 import PipelineCard from "./PipelineCard.jsx";
-import CompletionCTA from "./CompletionCTA.jsx";
+import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
 import ActivityLogCard from "./ActivityLogCard.jsx";
 import RunSidebar from "./RunSidebar.jsx";
 
@@ -106,7 +106,7 @@ export default function CrawlView({ run, isRunning }) {
           isRunning={isRunning}
         />
 
-        <CompletionCTA run={run} isRunning={isRunning} />
+        <GenerationSuccessBanner run={run} isRunning={isRunning} />
 
         {/* Site map card */}
         <div className="card" style={{ overflow: "hidden" }}>

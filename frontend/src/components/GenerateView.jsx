@@ -2,7 +2,7 @@ import React from "react";
 import LLMStreamPanel from "./LLMStreamPanel.jsx";
 import useLogBuffer from "../hooks/useLogBuffer.js";
 import PipelineCard from "./PipelineCard.jsx";
-import CompletionCTA from "./CompletionCTA.jsx";
+import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
 import ActivityLogCard from "./ActivityLogCard.jsx";
 import RunSidebar from "./RunSidebar.jsx";
 
@@ -59,7 +59,7 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
           </span>
         </div>
 
-        <CompletionCTA run={run} isRunning={isRunning} />
+        <GenerationSuccessBanner run={run} isRunning={isRunning} />
 
         <ActivityLogCard logs={logs} isRunning={isRunning} emptyLabel="Starting generation…" />
 
