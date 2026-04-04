@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Clock, RefreshCw, Map, List } from "lucide-react";
+import { CheckCircle2, Clock, RefreshCw, Map, List, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
 
@@ -358,6 +358,35 @@ export default function CrawlView({ run, isRunning }) {
             ))}
           </div>
         </div>
+
+        {/* ── Completion CTA — navigate to generated tests ── */}
+        {!isRunning && run?.status === "completed" && run?.projectId && (run?.tests?.length > 0 || (run?.testsGenerated ?? 0) > 0) && (
+          <div style={{
+            padding: "16px 18px", background: "var(--green-bg)",
+            border: "1px solid #86efac", borderRadius: "var(--radius)",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: 12,
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--green)", marginBottom: 3 }}>
+                🎉 {run.tests?.length || run.testsGenerated} test{(run.tests?.length || run.testsGenerated) === 1 ? "" : "s"} generated successfully
+              </div>
+              <div style={{ fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.5 }}>
+                Your tests are saved as drafts — review and approve them to add to your regression suite.
+              </div>
+            </div>
+            <button
+              className="btn btn-sm"
+              style={{
+                background: "var(--green)", color: "#fff", border: "none",
+                fontWeight: 700, whiteSpace: "nowrap", gap: 6, flexShrink: 0,
+              }}
+              onClick={() => navigate(`/projects/${run.projectId}`)}
+            >
+              View Generated Tests <ArrowRight size={13} />
+            </button>
+          </div>
+        )}
 
         {/* Site map card */}
         <div className="card" style={{ overflow: "hidden" }}>

@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from "react";
 import { CheckCircle2, Clock, RefreshCw, SkipForward } from "lucide-react";
 import LLMStreamPanel from "./LLMStreamPanel.jsx";
+import useLogBuffer from "../hooks/useLogBuffer.js";
+import CompletionCTA from "./CompletionCTA.jsx";
+import ActivityLogCard from "./ActivityLogCard.jsx";
+import RunSidebar from "./RunSidebar.jsx";
 
 // Pipeline stages for AI Generate flow.
 // Steps 1 & 2 (Crawl & Filter) are skipped — user provides test name + description directly.
@@ -16,31 +20,7 @@ const PIPELINE_STAGES = [
 ];
 
 export default function GenerateView({ run, isRunning, llmTokens = "" }) {
-  const [logsOpen, setLogsOpen] = React.useState(!!isRunning);
-  const logRef = useRef(null);
-
-  const logBufferRef = useRef([]);
-  const [logBuffer, setLogBuffer] = React.useState([]);
-
-  React.useEffect(() => {
-    const incoming = run?.logs || [];
-    if (incoming.length > logBufferRef.current.length) {
-      logBufferRef.current = incoming;
-      setLogBuffer([...incoming]);
-    }
-  }, [run?.logs?.length]);
-
-  React.useEffect(() => {
-    setLogsOpen(!!isRunning);
-  }, [isRunning]);
-
-  React.useEffect(() => {
-    if (isRunning && logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logBuffer.length, isRunning]);
-
-  const logs = logBuffer;
+  const logs = useLogBuffer(run);
   const ps = run?.pipelineStats || {};
   const currentStep = run?.currentStep ?? 0;
 
@@ -219,69 +199,9 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
           </span>
         </div>
 
-        {/* Logs card */}
-        <div className="card" style={{ overflow: "hidden" }}>
-          <button
-            onClick={() => setLogsOpen((o) => !o)}
-            style={{
-              width: "100%", background: "none", border: "none", cursor: "pointer",
-              padding: "12px 16px",
-              borderBottom: logsOpen ? "1px solid var(--border)" : "none",
-              display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: "0.875rem" }}>Activity Log</span>
-              {isRunning && (
-                <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: "var(--blue)" }}>
-                  <RefreshCw size={9} style={{ animation: "spin 1s linear infinite" }} />
-                  Updating
-                </span>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>{logs.length} entries</span>
-              <span style={{ fontSize: "0.72rem", color: "var(--accent)", fontWeight: 600 }}>
-                {logsOpen ? "▲ Hide" : "▼ Show"}
-              </span>
-            </div>
-          </button>
+        <CompletionCTA run={run} isRunning={isRunning} />
 
-          {logsOpen && (
-            <div ref={logRef} style={{ background: "#0d1117", padding: "10px 14px", maxHeight: 340, overflowY: "auto" }}>
-              {logs.length === 0 ? (
-                <div style={{ padding: 20, textAlign: "center", color: "#475569", fontSize: "0.78rem" }}>
-                  {isRunning ? "Starting generation…" : "No log entries."}
-                </div>
-              ) : (
-                logs.map((l, i) => {
-                  const isError   = l.includes("❌") || l.toLowerCase().includes("error") || l.toLowerCase().includes("failed");
-                  const isSuccess = l.includes("✅") || l.includes("🎉") || l.toLowerCase().includes("done") || l.includes("🟢");
-                  const isWarn    = l.includes("⚠") || l.includes("0 ");
-                  const color     = isError ? "#f87171" : isSuccess ? "#4ade80" : isWarn ? "#fbbf24" : "#94a3b8";
-                  return (
-                    <div key={i} style={{
-                      fontFamily: "var(--font-mono)", fontSize: "0.71rem",
-                      color, lineHeight: 1.95,
-                      borderBottom: "1px solid rgba(255,255,255,0.025)",
-                    }}>
-                      <span style={{ color: "#1e293b", marginRight: 10, userSelect: "none", fontVariantNumeric: "tabular-nums" }}>
-                        {String(i + 1).padStart(3, "0")}
-                      </span>
-                      {l}
-                    </div>
-                  );
-                })
-              )}
-              {isRunning && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 10, color: "#334155", fontSize: "0.71rem", fontFamily: "var(--font-mono)" }}>
-                  <RefreshCw size={9} style={{ animation: "spin 1s linear infinite" }} />
-                  waiting for next update…
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <ActivityLogCard logs={logs} isRunning={isRunning} emptyLabel="Starting generation…" />
 
         {/* ── LLM streaming panel — sits below the pipeline/log card ── */}
         <LLMStreamPanel tokens={llmTokens} isRunning={isRunning} />
@@ -289,93 +209,24 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
       </div>
 
       {/* ── RIGHT: Stats + Run Info ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-        {/* Results stats card */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
-            {isRunning ? "Live Results" : "Results"}
-          </div>
-          {stats.map((s, i) => (
-            <div key={i} style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "9px 0",
-              borderBottom: i < stats.length - 1 ? "1px solid var(--border)" : "none",
-            }}>
-              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{s.label}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "0.95rem", color: s.val != null ? s.color : "var(--text3)", display: "flex", alignItems: "center" }}>
-                {s.val != null ? s.val : isRunning
-                  ? <RefreshCw size={11} style={{ animation: "spin 1.2s linear infinite", color: "var(--border)" }} />
-                  : <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>—</span>
-                }
-              </span>
+      <RunSidebar stats={stats} run={run} isRunning={isRunning} failLabel="Generation failed — check logs for details.">
+        {/* Generate input context */}
+        {run?.generateInput && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+              Test Input
             </div>
-          ))}
-        </div>
-
-        {/* Run info card */}
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
-            Run Info
-          </div>
-          {[
-            {
-              label: "Status",
-              val: (
-                <span className={`badge ${isRunning ? "badge-blue" : run?.status === "completed" ? "badge-green" : "badge-red"}`}>
-                  {isRunning
-                    ? <><RefreshCw size={9} style={{ animation: "spin 1s linear infinite" }} /> Running</>
-                    : run?.status}
-                </span>
-              ),
-            },
-            {
-              label: "Started",
-              val: <span style={{ fontSize: "0.78rem", color: "var(--text2)", fontFamily: "var(--font-mono)" }}>
-                {run?.startedAt ? new Date(run.startedAt).toLocaleTimeString() : "—"}
-              </span>,
-            },
-            {
-              label: "Duration",
-              val: <span style={{ fontSize: "0.78rem", color: "var(--text2)", fontFamily: "var(--font-mono)" }}>
-                {run?.duration ? `${(run.duration / 1000).toFixed(1)}s` : isRunning ? "…" : "—"}
-              </span>,
-            },
-          ].map((row, i) => (
-            <div key={i} style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "8px 0",
-              borderBottom: i < 2 ? "1px solid var(--border)" : "none",
-            }}>
-              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{row.label}</span>
-              {row.val}
+            <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+              {run.generateInput.name}
             </div>
-          ))}
-
-          {/* Generate input context */}
-          {run?.generateInput && (
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-                Test Input
+            {run.generateInput.description && (
+              <div style={{ fontSize: "0.73rem", color: "var(--text2)", lineHeight: 1.5 }}>
+                {run.generateInput.description}
               </div>
-              <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
-                {run.generateInput.name}
-              </div>
-              {run.generateInput.description && (
-                <div style={{ fontSize: "0.73rem", color: "var(--text2)", lineHeight: 1.5 }}>
-                  {run.generateInput.description}
-                </div>
-              )}
-            </div>
-          )}
-
-          {!isRunning && run?.status === "failed" && (
-            <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--red-bg)", borderRadius: 8, fontSize: "0.78rem", color: "var(--red)" }}>
-              {run.error || "Generation failed — check logs for details."}
-            </div>
-          )}
-        </div>
-      </div>
+            )}
+          </div>
+        )}
+      </RunSidebar>
     </div>
   );
 }
