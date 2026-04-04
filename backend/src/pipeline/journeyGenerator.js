@@ -404,19 +404,22 @@ GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
 // generates 5-8 generic tests from crawled page data, this prompt generates
 // exactly ONE focused test that matches the user's stated intent.
 
-function buildUserRequestedPrompt(name, description, appUrl) {
-  return `You are a senior QA engineer. A user has asked you to create ONE specific Playwright test.
+function buildUserRequestedPrompt(name, description, appUrl, { testCount = "auto" } = {}) {
+  const local = isLocalProvider();
+  const countInstruction = resolveTestCountInstruction(testCount, local);
+
+  return `You are a senior QA engineer. A user has asked you to create a specific Playwright test.
 
 TEST NAME: ${name}
 USER DESCRIPTION: ${description || "(no description provided)"}
 APPLICATION URL: ${appUrl}
 
-Your job is to generate a SINGLE test that precisely matches the user's request above.
+Your job is to generate test(s) that precisely match the user's request above.
 Do NOT generate generic tests. Do NOT generate tests unrelated to the title and description.
-The test MUST directly verify what the user described — nothing more, nothing less.
+The test(s) MUST directly verify what the user described — nothing more, nothing less.
 
 STRICT RULES:
-1. Generate EXACTLY 1 test — focused entirely on what the user described
+1. ${countInstruction} — focused entirely on what the user described
 2. The test name should match or closely reflect the user's provided name
 3. Steps must be specific to the described scenario, not generic page checks
 4. ${SELF_HEALING_PROMPT_RULES}
@@ -456,8 +459,8 @@ GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl, onToken, { dialsPrompt = "", signal } = {}) {
-  const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl), dialsPrompt);
+export async function generateUserRequestedTest(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+  const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
   const text = onToken
     ? await streamText(prompt, onToken, { signal })
     : await generateText(prompt, { signal });
