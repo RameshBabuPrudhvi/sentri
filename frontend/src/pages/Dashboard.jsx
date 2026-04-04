@@ -5,9 +5,11 @@ import {
   FlaskConical, FileText, Wrench, Clock, Plus, Shield,
 } from "lucide-react";
 import { api } from "../api.js";
+import { fmtDurationMs } from "../utils/formatters.js";
 import AgentTag from "../components/AgentTag.jsx";
 import StatCard from "../components/StatCard.jsx";
 import PassFailChart from "../components/PassFailChart.jsx";
+import StackedBar from "../components/StackedBar.jsx";
 
 function greeting() {
   const h = new Date().getHours();
@@ -56,13 +58,6 @@ export default function Dashboard() {
   const chartData = (data?.history || []).map((r, i) => ({ name: `#${i + 1}`, passed: r.passed, failed: r.failed }));
   const rbs = data?.runsByStatus || {};
   const tbr = data?.testsByReview || {};
-
-  function fmtDuration(ms) {
-    if (!ms) return "—";
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-  }
 
   if (loading) return (
     <div style={{ maxWidth: 860, margin: "0 auto" }}>
@@ -118,7 +113,7 @@ export default function Dashboard() {
             <StatCard label="Pass Rate" value={data?.passRate != null ? `${data.passRate}%` : "—"} sub={data?.passRate >= 80 ? "Healthy" : data?.passRate != null ? "Needs attention" : "No runs yet"} color={data?.passRate >= 80 ? "var(--green)" : data?.passRate != null ? "var(--amber)" : "var(--text3)"} icon={<TrendingUp size={16} />} />
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<FlaskConical size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
-            <StatCard label="Avg Duration" value={fmtDuration(data?.avgRunDurationMs)} sub="Per test run" color="var(--accent)" icon={<Clock size={16} />} />
+            <StatCard label="Avg Duration" value={fmtDurationMs(data?.avgRunDurationMs)} sub="Per test run" color="var(--accent)" icon={<Clock size={16} />} />
           </div>
 
           {/* ── Row 2: Tests Created / Fixed / Healing ─────────────── */}

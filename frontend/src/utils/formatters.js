@@ -29,7 +29,15 @@ export function fmtShortDate(iso) {
  */
 export function fmtDuration(startedAt, finishedAt) {
   if (!startedAt || !finishedAt) return "—";
-  const ms = new Date(finishedAt) - new Date(startedAt);
+  return fmtDurationMs(new Date(finishedAt) - new Date(startedAt));
+}
+
+/**
+ * Duration from raw milliseconds — "1.2s", "3m 12s", etc.
+ * Returns `fallback` (default "—") when ms is falsy or zero.
+ */
+export function fmtDurationMs(ms, fallback = "—") {
+  if (!ms) return fallback;
   if (ms < 1000)  return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
