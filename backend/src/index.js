@@ -1,15 +1,23 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { generateTestId, generateRunId, generateProjectId, generateActivityId, initCountersFromExistingData } from "./utils/idGenerator.js";
+import { initCountersFromExistingData } from "./utils/idGenerator.js";
 import path from "path";
 import { fileURLToPath } from "url";
-import { crawlAndGenerateTests, generateSingleTest } from "./crawler.js";
-import { runTests } from "./testRunner.js";
 import { getDb } from "./db.js";
-import { getProviderName, hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "./aiProvider.js";
-import { resolveDialsPrompt, resolveDialsConfig } from "./testDials.js";
-import { classifyFailure } from "./pipeline/feedbackLoop.js";
+
+// ─── Route modules ────────────────────────────────────────────────────────────
+import projectsRouter from "./routes/projects.js";
+import runsRouter from "./routes/runs.js";
+import sseRouter from "./routes/sse.js";
+import dashboardRouter from "./routes/dashboard.js";
+import settingsRouter from "./routes/settings.js";
+import systemRouter from "./routes/system.js";
+
+// Re-export SSE symbols so existing imports from "./index.js" keep working
+// during incremental migration (runLogger.js, crawler.js, testRunner.js).
+export { emitRunEvent, runListeners } from "./routes/sse.js";
+export { runAbortControllers } from "./utils/runWithAbort.js";
 
 dotenv.config();
 
@@ -57,237 +65,28 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// ─── Activity Logger ──────────────────────────────────────────────────────────
-// Records user/system actions so the Work page shows a complete timeline.
-//
-// Standard naming convention — dot-separated: <resource>.<action>
-//   project.create
-//   crawl.start          crawl.complete        crawl.fail
-//   test_run.start       test_run.complete     test_run.fail
-//   test.create          test.generate         test.regenerate
-//   test.edit            test.delete
-//   test.approve         test.reject           test.restore
-//   test.bulk_approve    test.bulk_reject      test.bulk_restore
-//   settings.update
-function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
-  const id = generateActivityId(db);
-  db.activities[id] = {
-    id,
-    type,
-    projectId: projectId || null,
-    projectName: projectName || null,
-    testId: testId || null,
-    testName: testName || null,
-    detail: detail || null,
-    status: status || "completed",
-    createdAt: new Date().toISOString(),
-  };
-  return db.activities[id];
-}
+// ─── Mount route modules ──────────────────────────────────────────────────────
+app.use("/api/projects", projectsRouter);
+app.use("/api", runsRouter);
+app.use("/api", sseRouter);
+app.use("/api", dashboardRouter);
+app.use("/api", settingsRouter);
+app.use("/api", systemRouter);
 
-// ─── Projects ────────────────────────────────────────────────────────────────
+// Health check (root-level, not under /api)
+app.get("/health", (req, res) => res.json({ ok: true }));
 
-app.post("/api/projects", (req, res) => {
-  const { name, url, credentials } = req.body;
-  if (!name || !url) return res.status(400).json({ error: "name and url required" });
+// ─── Test routes (TODO: extract to routes/tests.js in a follow-up) ────────────
+// These remain here temporarily because the file is too large for a single
+// extraction step. All other routes have been moved to backend/src/routes/*.js.
 
-  const id = generateProjectId(db);
-  const project = {
-    id,
-    name,
-    url,
-    credentials: credentials || null,
-    createdAt: new Date().toISOString(),
-    status: "idle",
-  };
-  db.projects[id] = project;
-
-  logActivity({
-    type: "project.create", projectId: id, projectName: name,
-    detail: `Project created — "${name}" (${url})`,
-  });
-
-  res.json(project);
-});
-
-app.get("/api/projects", (req, res) => {
-  res.json(Object.values(db.projects));
-});
-
-app.get("/api/projects/:id", (req, res) => {
-  const project = db.projects[req.params.id];
-  if (!project) return res.status(404).json({ error: "not found" });
-  res.json(project);
-});
-
-app.delete("/api/projects/:id", (req, res) => {
-  const project = db.projects[req.params.id];
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  // Refuse deletion while async operations are in progress to prevent orphaned data
-  const activeRuns = Object.values(db.runs).filter(
-    r => r.projectId === req.params.id && r.status === "running"
-  );
-  if (activeRuns.length > 0) {
-    return res.status(409).json({
-      error: "Cannot delete project while operations are running. Wait for active crawls or test runs to complete.",
-    });
-  }
-
-  // Delete associated tests
-  const testIds = Object.keys(db.tests).filter(tid => db.tests[tid].projectId === req.params.id);
-  testIds.forEach(tid => delete db.tests[tid]);
-
-  // Delete associated runs
-  const runIds = Object.keys(db.runs).filter(rid => db.runs[rid].projectId === req.params.id);
-  runIds.forEach(rid => delete db.runs[rid]);
-
-  // Delete associated activities
-  const activityIds = Object.keys(db.activities).filter(aid => db.activities[aid].projectId === req.params.id);
-  activityIds.forEach(aid => delete db.activities[aid]);
-
-  // Delete the project itself
-  delete db.projects[req.params.id];
-
-  logActivity({
-    type: "project.delete", projectId: req.params.id, projectName: project.name,
-    detail: `Project deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs removed)`,
-  });
-
-  res.json({ ok: true, deletedTests: testIds.length, deletedRuns: runIds.length });
-});
-
-// ─── Abortable run helper ─────────────────────────────────────────────────────
-// Encapsulates the AbortController lifecycle, success/failure logging, and error
-// handling that every async pipeline route (crawl, run, generate) repeats.
-//
-//   runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
-//
-// - Creates & registers an AbortController so POST /api/runs/:id/abort works.
-// - Calls asyncFn(signal) and attaches .then/.catch handlers.
-// - On success: cleans up controller, calls onSuccess(result) unless aborted.
-// - On failure: cleans up controller, marks run as failed, logs activity, emits SSE.
-// - AbortErrors are silently swallowed (already handled by the abort endpoint).
-function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity }) {
-  const abortController = new AbortController();
-  runAbortControllers.set(runId, abortController);
-
-  asyncFn(abortController.signal)
-    .then((result) => {
-      runAbortControllers.delete(runId);
-      if (run.status !== "aborted") {
-        onSuccess?.(result);
-      }
-    })
-    .catch((err) => {
-      runAbortControllers.delete(runId);
-      if (err.name === "AbortError" || run.status === "aborted") return;
-      run.status = "failed";
-      run.error = err.message;
-      run.finishedAt = new Date().toISOString();
-      logActivity({ ...onFailActivity(err), status: "failed" });
-      emitRunEvent(runId, "done", { status: "failed" });
-    });
-}
-
-// ─── Crawl & Generate Tests ───────────────────────────────────────────────────
-
-app.post("/api/projects/:id/crawl", async (req, res) => {
-  const project = db.projects[req.params.id];
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  // Accept structured dials config from the client; build the prompt server-side
-  // so the backend controls what text reaches the AI.
-  const { dialsConfig } = req.body || {};
-  const dialsPrompt = resolveDialsPrompt(dialsConfig);
-  const validatedDials = resolveDialsConfig(dialsConfig);
-  const testCount = validatedDials?.testCount || "auto";
-
-  const runId = generateRunId(db);
-  const run = {
-    id: runId,
-    projectId: project.id,
-    type: "crawl",
-    status: "running",
-    startedAt: new Date().toISOString(),
-    logs: [],
-    tests: [],
-    pagesFound: 0,
-  };
-  db.runs[runId] = run;
-
-  logActivity({
-    type: "crawl.start", projectId: project.id, projectName: project.name,
-    detail: `Crawl started for ${project.url}`, status: "running",
-  });
-
-  // Kick off async - stream updates via polling
-  runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, testCount, signal }),
-    {
-      onSuccess: () => logActivity({
-        type: "crawl.complete", projectId: project.id, projectName: project.name,
-        detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
-      }),
-      onFailActivity: (err) => ({
-        type: "crawl.fail", projectId: project.id, projectName: project.name,
-        detail: `Crawl failed: ${err.message}`,
-      }),
-    },
-  );
-
-  res.json({ runId });
-});
-
-// ─── Run Tests ────────────────────────────────────────────────────────────────
-
-app.post("/api/projects/:id/run", async (req, res) => {
-  const project = db.projects[req.params.id];
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  const allTests = Object.values(db.tests).filter((t) => t.projectId === project.id);
-  // Only run approved tests — draft/rejected tests must not enter regression
-  const tests = allTests.filter((t) => t.reviewStatus === "approved");
-  if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
-  if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
-
-  const runId = generateRunId(db);
-  const run = {
-    id: runId,
-    projectId: project.id,
-    type: "test_run",
-    status: "running",
-    startedAt: new Date().toISOString(),
-    logs: [],
-    results: [],
-    passed: 0,
-    failed: 0,
-    total: tests.length,
-    testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
-  };
-  db.runs[runId] = run;
-
-  logActivity({
-    type: "test_run.start", projectId: project.id, projectName: project.name,
-    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`, status: "running",
-  });
-
-  runWithAbort(runId, run,
-    (signal) => runTests(project, tests, run, db, { signal }),
-    {
-      onSuccess: () => logActivity({
-        type: "test_run.complete", projectId: project.id, projectName: project.name,
-        detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
-      }),
-      onFailActivity: (err) => ({
-        type: "test_run.fail", projectId: project.id, projectName: project.name,
-        detail: `Test run failed: ${err.message}`,
-      }),
-    },
-  );
-
-  res.json({ runId });
-});
+import { generateTestId, generateRunId } from "./utils/idGenerator.js";
+import { logActivity } from "./utils/activityLogger.js";
+import { runWithAbort } from "./utils/runWithAbort.js";
+import { hasProvider } from "./aiProvider.js";
+import { resolveDialsPrompt, resolveDialsConfig } from "./testDials.js";
+import { generateSingleTest } from "./crawler.js";
+import { runTests } from "./testRunner.js";
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

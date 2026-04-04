@@ -33,11 +33,11 @@ const ICON = {
 };
 export { ICON };
 
-// Lazy SSE emitter — avoids circular-import issues with index.js
+// SSE emitter — now imported directly from routes/sse.js (no circular dependency)
 let _emitRunEvent = null;
 export async function emitRunEvent(...args) {
   if (!_emitRunEvent) {
-    try { ({ emitRunEvent: _emitRunEvent } = await import("../index.js")); } catch { return; }
+    try { ({ emitRunEvent: _emitRunEvent } = await import("../routes/sse.js")); } catch { return; }
   }
   _emitRunEvent?.(...args);
 }
