@@ -599,7 +599,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   //      an immediate "done" + res.end() when run.status !== "running", which
   //      would cut off the client while the feedback loop is still active.
   // The status is set to "completed" only after the feedback loop finishes.
-  log(run, `🏁 Run finishing: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+  log(run, `📋 Test execution done: ${run.passed} passed, ${run.failed} failed out of ${run.total} — starting post-run analysis…`);
 
   // Broadcast a snapshot so the frontend sees updated pass/fail counts while
   // the feedback loop performs long-running AI calls below.
@@ -642,16 +642,16 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
         }
         if (Object.keys(categories).length > 0) {
           const breakdown = Object.entries(categories).map(([k, v]) => `${k}: ${v}`).join(", ");
-          log(run, `   📊 Failure breakdown: ${breakdown}`);
+          log(run, `    📊 Failure breakdown: ${breakdown}`);
         }
 
         const feedback = await applyFeedbackLoop(run, db, { signal });
         if (feedback.improved > 0) {
-          log(run, `   ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
-          log(run, `   💡 Regenerated tests will use improved selectors on next run`);
+          log(run, `    ✅ Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
+          log(run, `    💡 Regenerated tests will use improved selectors on next run`);
           run.feedbackLoop = feedback;
         } else {
-          log(run, `   ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
+          log(run, `    ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
         }
       }
     } catch (err) {

@@ -61,9 +61,9 @@ export default function ActivityLogCard({ logs = [], isRunning, emptyLabel = "No
             </div>
           ) : (
             logs.map((l, i) => {
-              const isError   = l.includes("❌") || l.toLowerCase().includes("error") || l.toLowerCase().includes("failed");
-              const isSuccess = l.includes("✅") || l.includes("🎉") || l.toLowerCase().includes("done") || l.includes("🟢");
-              const isWarn    = l.includes("⚠") || l.includes("0 ");
+              const isError   = l.includes("❌") || l.includes("FAILED");
+              const isSuccess = l.includes("✅") || l.includes("🎉") || l.includes("PASSED") || l.includes("🟢");
+              const isWarn    = l.includes("⚠") || l.includes("⛔") || l.includes("Rejected");
               const color     = isError ? "#f87171" : isSuccess ? "#4ade80" : isWarn ? "#fbbf24" : "#94a3b8";
               return (
                 <div key={i} style={{

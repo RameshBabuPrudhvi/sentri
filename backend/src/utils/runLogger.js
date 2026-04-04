@@ -17,10 +17,18 @@ export async function emitRunEvent(...args) {
 /**
  * Append a timestamped log entry to the run, print to stdout, and
  * broadcast via SSE so the frontend live-log updates in real time.
+ *
+ * The entry stored in run.logs (and sent to the frontend) uses a compact
+ * format:  [ISO-timestamp] message
+ *
+ * The server stdout line includes the run ID so concurrent runs are
+ * distinguishable in aggregated server logs:
+ *   [ISO-timestamp] [RUN-42] message
  */
 export function log(run, msg) {
-  const entry = `[${new Date().toISOString()}] ${msg}`;
+  const ts = new Date().toISOString();
+  const entry = `[${ts}] ${msg}`;
   run.logs.push(entry);
-  console.log(entry);
+  console.log(`[${ts}] [${run.id}] ${msg}`);
   emitRunEvent(run.id, "log", { message: entry });
 }
