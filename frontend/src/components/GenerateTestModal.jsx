@@ -11,11 +11,14 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileCode2, Clock, X } from "lucide-react";
+import { Upload, FileCode2, Clock, X, Paperclip, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
 import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
+
+const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
+const MAX_ATTACHMENT_SIZE = 100_000; // 100 KB — keeps the AI prompt manageable
 
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
@@ -86,9 +89,11 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [attachments, setAttachments] = useState([]);  // [{name, content}]
   const [phase, setPhase] = useState("form");   // "form" | "submitting"
   const [error, setError] = useState(null);
   const [dialsConfig, setDialsConfig] = useState(() => loadSavedConfig());
+  const fileInputRef = useRef();
 
   // Active dial count for badge
   const [activeDialCount, setActiveDialCount] = useState(() => countActiveDials(loadSavedConfig()));
@@ -96,6 +101,31 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   useEffect(() => {
     setTimeout(() => nameRef.current?.focus(), 60);
   }, []);
+
+  function handleFileSelect(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // reset so the same file can be re-selected
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 100 KB.`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result;
+        setAttachments(prev => {
+          if (prev.some(a => a.name === file.name)) return prev; // dedupe
+          return [...prev, { name: file.name, content }];
+        });
+      };
+      reader.onerror = () => setError(`Failed to read "${file.name}".`);
+      reader.readAsText(file);
+    }
+  }
+
+  function removeAttachment(fileName) {
+    setAttachments(prev => prev.filter(a => a.name !== fileName));
+  }
 
   // Recount whenever dialsConfig changes
   useEffect(() => {
@@ -108,13 +138,26 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     if (!name.trim()) { setError("Test name is required."); setTab("story"); return; }
     if (!projectId)   { setError("Please select a project."); setTab("story"); return; }
 
+    // Merge attachment content into the description so it reaches the AI prompt.
+    // The backend pipes `description` directly into userRequestedPrompt.js — no
+    // backend changes needed.
+    let fullDescription = description.trim();
+    if (attachments.length > 0) {
+      const attachmentBlock = attachments
+        .map(a => `--- Attached file: ${a.name} ---\n${a.content}`)
+        .join("\n\n");
+      fullDescription = fullDescription
+        ? `${fullDescription}\n\n${attachmentBlock}`
+        : attachmentBlock;
+    }
+
     setPhase("submitting");
     try {
       // Send the structured config object — the backend validates it and builds
       // the prompt server-side via resolveDialsPrompt(), matching the crawl endpoint.
       const { runId } = await api.generateTest(projectId, {
         name: name.trim(),
-        description: description.trim(),
+        description: fullDescription,
         dialsConfig: dialsConfig || undefined,
       });
       onClose();
@@ -224,18 +267,63 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                   />
                 </div>
 
-                {/* Attachments row */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-                  <span style={{ fontSize: "0.78rem", color: "var(--text2)", fontWeight: 500 }}>Attachments</span>
-                  <button className="btn btn-ghost btn-xs" style={{ gap: 5 }}>
-                    <Upload size={11} /> Add Attachment
-                  </button>
+                {/* Attachments */}
+                <div style={{ marginTop: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text2)", fontWeight: 500 }}>
+                      Attachments {attachments.length > 0 && `(${attachments.length})`}
+                    </span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      style={{ gap: 5 }}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Paperclip size={11} /> Add Attachment
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ACCEPTED_EXTENSIONS}
+                      multiple
+                      onChange={handleFileSelect}
+                      style={{ display: "none" }}
+                    />
+                  </div>
+                  {attachments.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                      {attachments.map(a => (
+                        <div key={a.name} style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "5px 10px", background: "var(--bg2)",
+                          border: "1px solid var(--border)", borderRadius: "var(--radius)",
+                          fontSize: "0.78rem",
+                        }}>
+                          <Paperclip size={11} color="var(--text3)" style={{ flexShrink: 0 }} />
+                          <span style={{ flex: 1, color: "var(--text)", overflow: "hidden",
+                            textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {a.name}
+                          </span>
+                          <span style={{ fontSize: "0.7rem", color: "var(--text3)", flexShrink: 0 }}>
+                            {Math.round(a.content.length / 1000)}k chars
+                          </span>
+                          <button
+                            onClick={() => removeAttachment(a.name)}
+                            style={{ background: "none", border: "none", cursor: "pointer",
+                              color: "var(--text3)", padding: 0, display: "flex" }}
+                            title="Remove attachment"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Char count + examples */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
                   <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
-                    {(name + description).length} chars
+                    {(name + description).length} chars{attachments.length > 0 && ` + ${attachments.reduce((n, a) => n + a.content.length, 0)} from attachments`}
                   </span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btn btn-ghost btn-xs">📚 Examples</button>
@@ -244,7 +332,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                     </button>
                     <button
                       className="btn btn-ghost btn-xs"
-                      onClick={() => { setName(""); setDescription(""); }}
+                      onClick={() => { setName(""); setDescription(""); setAttachments([]); }}
                     >
                       Clear
                     </button>
