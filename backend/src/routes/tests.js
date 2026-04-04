@@ -201,9 +201,9 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
   const cleanDescription = (description || "").trim();
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedGenDials = resolveDialsConfig(dialsConfig);
-  // Default to "single" for the generate endpoint (user-requested tests)
+  // Default to "one" for the generate endpoint (user-requested tests)
   // to preserve the original contract of generating exactly 1 test.
-  // The crawl endpoint defaults to "auto" which generates 5-8 tests per page.
+  // The crawl endpoint defaults to "ai_decides" which generates 5-8 tests per page.
   // Use strict equality — "ai_decides" is truthy so `|| "one"` would never trigger.
   const rawTestCount = validatedGenDials?.testCount;
   const testCount = (rawTestCount && rawTestCount !== "ai_decides") ? rawTestCount : "one";

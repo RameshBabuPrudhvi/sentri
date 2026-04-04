@@ -101,7 +101,8 @@ export default function TestDials({ onChange }) {
   const [cfg, setCfg] = useState(loadSavedConfig);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => { onChange?.(cfg); }, [cfg]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps — onChange identity is stable
+  useEffect(() => { onChange?.(cfg); }, [cfg, onChange]);
 
   function update(patch) {
     setCfg(prev => ({ ...prev, ...patch }));
@@ -110,12 +111,14 @@ export default function TestDials({ onChange }) {
   function applyProfile(profile) {
     setCfg(prev => ({
       ...prev,
-      profile:      profile.id,
-      approach:     profile.approach,
-      perspectives: [...profile.perspectives],
-      quality:      [...profile.quality],
-      format:       profile.format,
-      testCount:    profile.testCount,
+      profile:            profile.id,
+      approach:           profile.approach,
+      perspectives:       [...profile.perspectives],
+      quality:            [...profile.quality],
+      format:             profile.format,
+      testCount:          profile.testCount,
+      options:            { ...DEFAULT_CONFIG.options },
+      customInstructions: "",
     }));
   }
 

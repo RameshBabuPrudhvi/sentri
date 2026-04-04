@@ -26,7 +26,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   const { dialsConfig } = req.body || {};
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedDials = resolveDialsConfig(dialsConfig);
-  const testCount = validatedDials?.testCount || "auto";
+  const testCount = validatedDials?.testCount || "ai_decides";
 
   const runId = generateRunId(db);
   const run = {

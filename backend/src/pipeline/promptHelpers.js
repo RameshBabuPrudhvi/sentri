@@ -36,12 +36,12 @@ export function resolveTestCountInstruction(testCount, local) {
 /**
  * Inject an optional dialsPrompt into a base AI prompt, placing it
  * **before** the STRICT RULES / Requirements section so the LLM sees the
- * user's configuration (strategy, test count, format, etc.) before the
+ * user's configuration (approach, test count, format, etc.) before the
  * hardcoded generation defaults.  LLMs prioritise earlier context, so
  * appending dials at the very end caused them to be ignored when they
  * conflicted with rules like "Generate 5-8 tests".
  *
- * Injection strategy:
+ * Injection approach:
  *   1. Look for "STRICT RULES:" — used by buildIntentPrompt & buildUserRequestedPrompt
  *   2. Else look for "Requirements:" — used by buildJourneyPrompt
  *   3. Fallback: append at the end (safe default)
