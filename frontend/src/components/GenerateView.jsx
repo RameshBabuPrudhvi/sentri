@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import { CheckCircle2, Clock, RefreshCw, SkipForward } from "lucide-react";
 import LLMStreamPanel from "./LLMStreamPanel.jsx";
 import useLogBuffer from "../hooks/useLogBuffer.js";
