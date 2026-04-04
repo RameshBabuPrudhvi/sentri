@@ -66,6 +66,15 @@ router.delete("/:id", (req, res) => {
   const testIds = Object.keys(db.tests).filter(tid => db.tests[tid].projectId === req.params.id);
   testIds.forEach(tid => delete db.tests[tid]);
 
+  // Delete associated healing history (keyed as "<testId>::<action>::<label>")
+  if (db.healingHistory) {
+    const testIdSet = new Set(testIds);
+    for (const key of Object.keys(db.healingHistory)) {
+      const testId = key.split("::")[0];
+      if (testIdSet.has(testId)) delete db.healingHistory[key];
+    }
+  }
+
   // Delete associated runs
   const runIds = Object.keys(db.runs).filter(rid => db.runs[rid].projectId === req.params.id);
   runIds.forEach(rid => delete db.runs[rid]);
