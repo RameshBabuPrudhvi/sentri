@@ -2,13 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
-  FlaskConical, FileText, Wrench, Clock, Plus, Shield, Crosshair,
+  FlaskConical, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
 } from "lucide-react";
 import { api } from "../api.js";
 import { fmtDurationMs } from "../utils/formatters.js";
 import AgentTag from "../components/AgentTag.jsx";
 import StatCard from "../components/StatCard.jsx";
 import PassFailChart from "../components/PassFailChart.jsx";
+import SparklineChart from "../components/SparklineChart.jsx";
 import StackedBar from "../components/StackedBar.jsx";
 
 function greeting() {
@@ -114,7 +115,7 @@ export default function Dashboard() {
             <StatCard label="Pass Rate" value={data?.passRate != null ? `${data.passRate}%` : "—"} sub={data?.passRate >= 80 ? "Healthy" : data?.passRate != null ? "Needs attention" : "No runs yet"} color={data?.passRate >= 80 ? "var(--green)" : data?.passRate != null ? "var(--amber)" : "var(--text3)"} icon={<TrendingUp size={16} />} />
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<FlaskConical size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
-            <StatCard label="Avg Duration" value={fmtDurationMs(data?.avgRunDurationMs)} sub="Per test run" color="var(--accent)" icon={<Clock size={16} />} />
+            <StatCard label="Avg Duration" value={fmtDurationMs(data?.avgRunDurationMs)} sub={data?.mttrMs ? `MTTR: ${fmtDurationMs(data.mttrMs)}` : "Per test run"} color="var(--accent)" icon={<Clock size={16} />} />
           </div>
 
           {/* ── Row 2: Tests Created / Fixed / Healing ─────────────── */}
@@ -227,10 +228,29 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* ── Row 6: Pass / Fail Trend Chart ────────────────────── */}
+          {/* ── Row 6: Test Suite Growth ─────────────────────────── */}
+          {(data?.testGrowth?.length ?? 0) >= 2 && (
+            <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Activity size={14} color="var(--accent)" />
+                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Test Suite Growth</span>
+                </div>
+                <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>Last 8 weeks</span>
+              </div>
+              <SparklineChart
+                data={data.testGrowth.map((d) => ({ name: d.week, value: d.count }))}
+                height={64}
+                color="var(--accent)"
+                tooltipFn={(d) => `${d.name}: ${d.value} tests`}
+              />
+            </div>
+          )}
+
+          {/* ── Row 7: Pass / Fail Trend Chart ────────────────────── */}
           <PassFailChart data={chartData} height={150} idPrefix="dash" title="Pass / Fail Trend" subtitle={`Last ${chartData.length} runs`} />
 
-          {/* ── Row 7: Recent Activity ────────────────────────────── */}
+          {/* ── Row 8: Recent Activity ────────────────────────────── */}
           {runs.length > 0 && (
             <div className="card" style={{ padding: 24 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>

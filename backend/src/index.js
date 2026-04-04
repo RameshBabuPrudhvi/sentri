@@ -791,6 +791,67 @@ app.get("/api/dashboard", (req, res) => {
     if (statuses.has("passed") && statuses.has("failed")) flakyTestCount++;
   }
 
+  // ── Test growth — cumulative test count per week (last 8 weeks) ─────────
+  // Buckets are ISO-week start dates; each entry = { week, count }.
+  const GROWTH_WEEKS = 8;
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const growthStart = new Date(now.getTime() - GROWTH_WEEKS * weekMs);
+  const weekBuckets = {};
+  // Seed empty buckets so the chart always has 8 data points
+  for (let i = 0; i < GROWTH_WEEKS; i++) {
+    const d = new Date(growthStart.getTime() + i * weekMs);
+    const key = d.toISOString().slice(0, 10);
+    weekBuckets[key] = 0;
+  }
+  for (const a of activities) {
+    if (a.type !== "test.create" && a.type !== "test.generate") continue;
+    if (a.createdAt < growthStart.toISOString()) continue;
+    // Find which bucket this activity falls into
+    const aTime = new Date(a.createdAt).getTime();
+    for (let i = GROWTH_WEEKS - 1; i >= 0; i--) {
+      const bucketStart = growthStart.getTime() + i * weekMs;
+      if (aTime >= bucketStart) {
+        const key = new Date(bucketStart).toISOString().slice(0, 10);
+        weekBuckets[key] = (weekBuckets[key] || 0) + 1;
+        break;
+      }
+    }
+  }
+  // Convert to cumulative array
+  const testGrowth = [];
+  let cumulative = tests.length;
+  // Subtract recent additions to find the starting point
+  const sortedKeys = Object.keys(weekBuckets).sort();
+  const totalRecent = sortedKeys.reduce((s, k) => s + weekBuckets[k], 0);
+  cumulative = Math.max(0, tests.length - totalRecent);
+  for (const key of sortedKeys) {
+    cumulative += weekBuckets[key];
+    testGrowth.push({ week: key, count: cumulative });
+  }
+
+  // ── MTTR — mean time to recovery (failed → passed) ─────────────────────
+  // For each test, walk chronological runs and find failed→passed transitions.
+  // MTTR = average of (recovery_run.startedAt − failure_run.startedAt).
+  const chronologicalRuns = runs
+    .filter((r) => (r.type === "test_run" || r.type === "run") && r.results?.length && r.startedAt)
+    .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt));
+  const lastFailTime = {};  // testId → ISO timestamp of most recent failure
+  const recoveryDeltas = [];
+  for (const r of chronologicalRuns) {
+    for (const res of r.results) {
+      if (res.status === "failed") {
+        lastFailTime[res.testId] = r.startedAt;
+      } else if (res.status === "passed" && lastFailTime[res.testId]) {
+        const delta = new Date(r.startedAt) - new Date(lastFailTime[res.testId]);
+        if (delta > 0) recoveryDeltas.push(delta);
+        delete lastFailTime[res.testId];
+      }
+    }
+  }
+  const mttrMs = recoveryDeltas.length
+    ? Math.round(recoveryDeltas.reduce((s, d) => s + d, 0) / recoveryDeltas.length)
+    : null;
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -809,6 +870,8 @@ app.get("/api/dashboard", (req, res) => {
     avgRunDurationMs,
     defectBreakdown,
     flakyTestCount,
+    testGrowth,
+    mttrMs,
   });
 });
 
