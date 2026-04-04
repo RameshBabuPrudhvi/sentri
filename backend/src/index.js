@@ -703,27 +703,85 @@ app.get("/api/dashboard", (req, res) => {
   const projects = Object.values(db.projects);
   const runs = Object.values(db.runs);
   const tests = Object.values(db.tests);
+  const activities = Object.values(db.activities);
 
-  const lastRuns = runs
-    .filter((r) => r.type === "test_run" && r.status === "completed")
+  // ── Pass rate (last 10 completed test runs) ─────────────────────────────
+  const completedTestRuns = runs
+    .filter((r) => (r.type === "test_run" || r.type === "run") && r.status === "completed")
     .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
     .slice(0, 10);
 
   const passRate =
-    lastRuns.length
+    completedTestRuns.length
       ? Math.round(
-          (lastRuns.reduce((s, r) => s + (r.passed || 0), 0) /
-            lastRuns.reduce((s, r) => s + (r.total || 1), 0)) *
+          (completedTestRuns.reduce((s, r) => s + (r.passed || 0), 0) /
+            completedTestRuns.reduce((s, r) => s + (r.total || 1), 0)) *
             100
         )
       : null;
+
+  // ── Chart history — last 20 test runs with results (chronological) ──────
+  const history = runs
+    .filter((r) => (r.type === "test_run" || r.type === "run") && r.passed != null)
+    .sort((a, b) => new Date(a.startedAt) - new Date(b.startedAt))
+    .slice(-20)
+    .map((r) => ({ passed: r.passed || 0, failed: r.failed || 0, total: r.total || 0, date: r.startedAt }));
+
+  // ── Recent runs — ALL statuses so failures/aborts are visible ───────────
+  const recentRuns = runs
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+    .slice(0, 8)
+    .map((r) => {
+      const p = db.projects[r.projectId];
+      return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total };
+    });
+
+  // ── Run status distribution ─────────────────────────────────────────────
+  const runsByStatus = { completed: 0, failed: 0, aborted: 0, running: 0 };
+  for (const r of runs) { if (r.status in runsByStatus) runsByStatus[r.status]++; }
+
+  // ── Test review pipeline ────────────────────────────────────────────────
+  const testsByReview = { draft: 0, approved: 0, rejected: 0 };
+  for (const t of tests) { const s = t.reviewStatus || "draft"; if (s in testsByReview) testsByReview[s]++; }
+
+  // ── Tests created / generated (today & this week) ───────────────────────
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
+  let testsCreatedToday = 0, testsCreatedThisWeek = 0, testsGeneratedTotal = 0;
+  for (const a of activities) {
+    if (a.type !== "test.create" && a.type !== "test.generate") continue;
+    testsGeneratedTotal++;
+    if (a.createdAt >= todayStart) testsCreatedToday++;
+    if (a.createdAt >= weekStart) testsCreatedThisWeek++;
+  }
+
+  // ── Tests auto-fixed (feedback loop + self-healing) ─────────────────────
+  let testsAutoFixed = 0;
+  for (const r of runs) { if (r.feedbackLoop?.improved) testsAutoFixed += r.feedbackLoop.improved; }
+  const healingEntries = Object.keys(db.healingHistory || {}).length;
+  const healingSuccesses = Object.values(db.healingHistory || {}).filter((h) => h.strategyIndex >= 0 && h.succeededAt).length;
+
+  // ── Average run duration (completed test runs) ──────────────────────────
+  const durations = completedTestRuns.filter((r) => r.duration > 0).map((r) => r.duration);
+  const avgRunDurationMs = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : null;
 
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
     totalRuns: runs.length,
     passRate,
-    recentRuns: lastRuns.slice(0, 5),
+    history,
+    recentRuns,
+    runsByStatus,
+    testsByReview,
+    testsCreatedToday,
+    testsCreatedThisWeek,
+    testsGeneratedTotal,
+    testsAutoFixed,
+    healingEntries,
+    healingSuccesses,
+    avgRunDurationMs,
   });
 });
 
