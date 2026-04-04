@@ -7,10 +7,10 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
-import { loadSavedConfig } from "../components/testDialsPrompt.js";
+import { loadSavedConfig } from "../utils/testDialsStorage.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;

@@ -1,4 +1,4 @@
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 /**
  * ExecutionTimeline — Gantt-style horizontal timeline

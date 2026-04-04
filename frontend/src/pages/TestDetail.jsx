@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

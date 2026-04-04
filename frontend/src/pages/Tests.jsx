@@ -12,7 +12,7 @@ import GenerateTestModal from "../components/GenerateTestModal.jsx";
 import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.

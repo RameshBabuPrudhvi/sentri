@@ -16,7 +16,7 @@ import StepResultsView from "./StepResultsView";
 import LiveBrowserView from "./LiveBrowserView";
 import ExecutionTimeline from "./ExecutionTimeline";
 import OutcomeBanner from "./OutcomeBanner.jsx";
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

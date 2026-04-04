@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
-import { cleanTestName } from "../utils/testName.js";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
