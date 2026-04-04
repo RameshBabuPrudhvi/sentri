@@ -180,8 +180,47 @@ const CUSTOM_MAX_LENGTH  = 500;
  * Drops unknown IDs silently. Caps customInstructions at 500 chars.
  * Returns null when input is falsy or not an object.
  */
+// ─── Backward-compat migration maps ─────────────────────────────────────────
+// Stale clients (cached browser tabs that haven't refreshed) may still send the
+// old field names / option IDs.  We migrate them in-place before validation so
+// the user's intent is preserved instead of silently dropped.
+
+const APPROACH_MIGRATION = {
+  happy_path: "positive_only", sad_path: "errors_and_edges",
+  edge_cases: "errors_and_edges", comprehensive: "full_coverage",
+  regression: "stability_check",
+};
+const FORMAT_MIGRATION    = { verbose: "step_by_step", concise: "checklist" };
+const COUNT_MIGRATION     = { single: "one", few: "small", moderate: "medium", comprehensive: "large", auto: "ai_decides" };
+const PERSPECTIVE_MIGRATION = { e2e: "full_journey", component: "single_component", interruptions: "interrupted_flows" };
+
+function migrateRaw(raw) {
+  // Migrate renamed top-level field names
+  if (raw.strategy    && !raw.approach)          raw.approach          = raw.strategy;
+  if (raw.workflow    && !raw.perspectives)       raw.perspectives     = raw.workflow;
+  if (raw.customModifier && !raw.customInstructions) raw.customInstructions = raw.customModifier;
+
+  // Migrate automationHooks → options.selectorHints
+  if (raw.automationHooks === true && !raw.options) {
+    raw.options = { selectorHints: true };
+  }
+
+  // Migrate renamed option IDs
+  if (raw.approach  && APPROACH_MIGRATION[raw.approach])  raw.approach  = APPROACH_MIGRATION[raw.approach];
+  if (raw.format    && FORMAT_MIGRATION[raw.format])      raw.format    = FORMAT_MIGRATION[raw.format];
+  if (raw.testCount && COUNT_MIGRATION[raw.testCount])    raw.testCount = COUNT_MIGRATION[raw.testCount];
+
+  // Migrate perspective IDs inside the array
+  if (Array.isArray(raw.perspectives)) {
+    raw.perspectives = raw.perspectives.map(id => PERSPECTIVE_MIGRATION[id] || id);
+  }
+}
+
 export function validateDialsConfig(raw) {
   if (!raw || typeof raw !== "object") return null;
+
+  // Apply backward-compat migrations for stale clients
+  migrateRaw(raw);
 
   const approach = VALID_APPROACHES.has(raw.approach) ? raw.approach : null;
 

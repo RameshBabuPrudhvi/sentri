@@ -84,7 +84,7 @@ function buildScenarioHints(testCountInstr) {
 
 // ── Main prompt builder ──────────────────────────────────────────────────────
 
-export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "auto" } = {}) {
+export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500).
   // Cloud models get the full element data for richer test generation.

@@ -11,7 +11,7 @@ import { isLocalProvider } from "../../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 
-export function buildUserRequestedPrompt(name, description, appUrl, { testCount = "auto" } = {}) {
+export function buildUserRequestedPrompt(name, description, appUrl, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   const countInstruction = resolveTestCountInstruction(testCount, local);
 

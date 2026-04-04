@@ -9,7 +9,7 @@ import { isLocalProvider } from "../../aiProvider.js";
 import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 
-export function buildJourneyPrompt(journey, allSnapshots, { testCount = "auto" } = {}) {
+export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   const pageContexts = journey.pages.map(page => {
     const snapshot = allSnapshots[page.url];

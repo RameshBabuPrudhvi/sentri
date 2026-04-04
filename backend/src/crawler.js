@@ -50,7 +50,7 @@ function setStep(run, step) {
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "auto", signal }) {
+export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
@@ -100,7 +100,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   return createdTestIds;
 }
 
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const runStart = Date.now();
 
   // ── Step 1: Smart crawl ─────────────────────────────────────────────────
