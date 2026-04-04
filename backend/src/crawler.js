@@ -480,7 +480,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // Layer 3: Deduplication
   setStep(run, 5);
-  log(run, `\u{1F6AB} Deduplicating...`);
+  log(run, `🚫 Deduplicating...`);
   const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
   const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
@@ -490,7 +490,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // Layer 4: Assertion enhancement
   setStep(run, 6);
-  log(run, `\u2728 Enhancing assertions...`);
+  log(run, `✨ Enhancing assertions...`);
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
 
@@ -498,7 +498,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // Layer 5: Validate generated tests — reject malformed / placeholder tests
   setStep(run, 7);
-  log(run, `\u2705 Validating generated tests...`);
+  log(run, `✅ Validating generated tests...`);
   const validatedTests = [];
   let rejected = 0;
   for (const t of enhancedTests) {
@@ -507,7 +507,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       validatedTests.push(t);
     } else {
       rejected++;
-      log(run, `   \u274C Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
+      log(run, `   ❌ Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
     }
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
@@ -556,10 +556,10 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
     setStep(run, 8);
-    log(run, `\n\u{1F4CA} Pipeline Summary:`);
+    log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
     log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
-    log(run, `\u{1F389} Done! ${run.tests.length} high-quality tests generated.`);
+    log(run, `🎉 Done! ${run.tests.length} high-quality tests generated.`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 }

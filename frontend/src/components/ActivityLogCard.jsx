@@ -61,10 +61,13 @@ export default function ActivityLogCard({ logs = [], isRunning, emptyLabel = "No
             </div>
           ) : (
             logs.map((l, i) => {
+              // Color classification — matches the exact emoji/keyword markers
+              // emitted by crawler.js and testRunner.js log() calls.
+              // Priority: error > warning > success > info (gray default).
               const isError   = l.includes("❌") || l.includes("FAILED");
-              const isSuccess = l.includes("✅") || l.includes("🎉") || l.includes("PASSED") || l.includes("🟢");
-              const isWarn    = l.includes("⚠") || l.includes("⛔") || l.includes("Rejected");
-              const color     = isError ? "#f87171" : isSuccess ? "#4ade80" : isWarn ? "#fbbf24" : "#94a3b8";
+              const isWarn    = !isError && (l.includes("⚠") || l.includes("⛔"));
+              const isSuccess = !isError && !isWarn && (l.includes("✅") || l.includes("🎉") || l.includes("PASSED") || l.includes("🟢"));
+              const color     = isError ? "#f87171" : isWarn ? "#fbbf24" : isSuccess ? "#4ade80" : "#94a3b8";
               return (
                 <div key={i} style={{
                   fontFamily: "var(--font-mono)", fontSize: "0.71rem",

@@ -470,7 +470,7 @@ async function executeTest(test, browser, runId, stepIndex, runStart, db) {
       }
       fs.rmSync(testVideoDir, { recursive: true, force: true });
     } catch (videoErr) {
-      console.warn(`Video move failed for step ${stepIndex}:`, videoErr.message);
+      console.warn(`[testRunner] Video move failed for step ${stepIndex}:`, videoErr.message);
     }
   }
 
