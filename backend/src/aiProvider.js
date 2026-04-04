@@ -248,8 +248,10 @@ async function callOllama(prompt, maxTokens, externalSignal) {
   // a MaxListenersExceededWarning.
   let onExternalAbort = null;
   if (externalSignal) {
-    if (externalSignal.aborted) { clearTimeout(timeoutId); controller.abort(); }
-    else {
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      throw new DOMException("Aborted", "AbortError");
+    } else {
       onExternalAbort = () => controller.abort();
       externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }

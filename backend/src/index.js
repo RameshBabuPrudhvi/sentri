@@ -142,6 +142,10 @@ app.delete("/api/projects/:id", (req, res) => {
   const runIds = Object.keys(db.runs).filter(rid => db.runs[rid].projectId === req.params.id);
   runIds.forEach(rid => delete db.runs[rid]);
 
+  // Delete associated activities
+  const activityIds = Object.keys(db.activities).filter(aid => db.activities[aid].projectId === req.params.id);
+  activityIds.forEach(aid => delete db.activities[aid]);
+
   // Delete the project itself
   delete db.projects[req.params.id];
 
@@ -483,7 +487,10 @@ app.post("/api/projects/:id/tests/generate", async (req, res) => {
   // Build the dials prompt server-side from the structured config
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedGenDials = resolveDialsConfig(dialsConfig);
-  const testCount = validatedGenDials?.testCount || "auto";
+  // Default to "single" for the generate endpoint (user-requested tests)
+  // to preserve the original contract of generating exactly 1 test.
+  // The crawl endpoint defaults to "auto" which generates 5-8 tests per page.
+  const testCount = validatedGenDials?.testCount || "single";
 
   if (!hasProvider()) {
     return res.status(503).json({
@@ -599,13 +606,14 @@ app.get("/api/runs/:runId", (req, res) => {
   res.json(run);
 });
 
+// ─── Abort registry: runId → AbortController ──────────────────────────────────
+// Allows in-progress crawl / generate / test_run operations to be cancelled.
+// Declared before runWithAbort() which references it.
+export const runAbortControllers = new Map();
+
 // ─── SSE: Real-time run events ────────────────────────────────────────────────
 // Registry: runId → Set of SSE response objects
 export const runListeners = new Map();
-
-// ─── Abort registry: runId → AbortController ──────────────────────────────────
-// Allows in-progress crawl / generate / test_run operations to be cancelled.
-export const runAbortControllers = new Map();
 
 /**
  * emitRunEvent(runId, type, payload)
@@ -614,9 +622,17 @@ export const runAbortControllers = new Map();
  */
 export function emitRunEvent(runId, type, payload = {}) {
   const listeners = runListeners.get(runId);
-  if (!listeners || listeners.size === 0) return;
+  if (!listeners || listeners.size === 0) {
+    // Even with no active listeners, clean up the registry on "done" so
+    // the Map doesn't grow unboundedly with stale runId keys.
+    if (type === "done") runListeners.delete(runId);
+    return;
+  }
   const data = JSON.stringify({ type, ...payload });
-  for (const res of listeners) {
+  // Snapshot the Set before iterating — res.end() triggers the "close"
+  // handler which mutates the Set, causing concurrent-modification issues.
+  const snapshot = [...listeners];
+  for (const res of snapshot) {
     try {
         res.write(`data: ${data}\n\n`);
         if (type === "done") res.end();
@@ -682,6 +698,7 @@ app.post("/api/runs/:runId/abort", (req, res) => {
   // pipeline takes a moment to notice the signal.
   run.status = "aborted";
   run.finishedAt = new Date().toISOString();
+  run.duration = run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null;
   run.error = "Aborted by user";
 
   const project = db.projects[run.projectId];
@@ -774,11 +791,11 @@ app.get("/api/dashboard", (req, res) => {
   for (const r of testRunResults) {
     for (const result of r.results) {
       // Accumulate per-test statuses for flaky detection
-      if (!testResultStatuses[res.testId]) testResultStatuses[res.testId] = new Set();
-      if (res.status) testResultStatuses[res.testId].add(res.status);
+      if (!testResultStatuses[result.testId]) testResultStatuses[result.testId] = new Set();
+      if (result.status) testResultStatuses[result.testId].add(result.status);
       // Classify failures
-      if (res.status === "failed" && res.error) {
-        const cat = classifyFailure(res.error);
+      if (result.status === "failed" && result.error) {
+        const cat = classifyFailure(result.error);
         if (cat in defectBreakdown) defectBreakdown[cat]++;
         else defectBreakdown.UNKNOWN++;
       }
@@ -838,13 +855,13 @@ app.get("/api/dashboard", (req, res) => {
   const lastFailTime = {};  // testId → ISO timestamp of most recent failure
   const recoveryDeltas = [];
   for (const r of chronologicalRuns) {
-    for (const res of r.results) {
-      if (res.status === "failed") {
-        lastFailTime[res.testId] = r.startedAt;
-      } else if (res.status === "passed" && lastFailTime[res.testId]) {
-        const delta = new Date(r.startedAt) - new Date(lastFailTime[res.testId]);
+    for (const result of r.results) {
+      if (result.status === "failed") {
+        lastFailTime[result.testId] = r.startedAt;
+      } else if (result.status === "passed" && lastFailTime[result.testId]) {
+        const delta = new Date(r.startedAt) - new Date(lastFailTime[result.testId]);
         if (delta > 0) recoveryDeltas.push(delta);
-        delete lastFailTime[res.testId];
+        delete lastFailTime[result.testId];
       }
     }
   }

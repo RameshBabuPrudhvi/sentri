@@ -52,9 +52,11 @@ export default function CrawlDialsPanel({ onChange }) {
         </span>
       </button>
 
-      <div style={{ borderTop: open ? "1px solid var(--border)" : "none", padding: open ? 16 : 0, display: open ? "block" : "none" }}>
-        <TestDials onChange={handleChange} />
-      </div>
+      {open && (
+        <div style={{ borderTop: "1px solid var(--border)", padding: 16 }}>
+          <TestDials onChange={handleChange} />
+        </div>
+      )}
     </div>
   );
 }
