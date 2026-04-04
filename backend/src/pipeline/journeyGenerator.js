@@ -252,7 +252,7 @@ GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
 
 // ── Single page intent-based prompt ──────────────────────────────────────────
 
-function buildIntentPrompt(classifiedPage, snapshot) {
+function buildIntentPrompt(classifiedPage, snapshot, { testCount = "auto" } = {}) {
   const local = isLocalProvider();
   // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500).
   // Cloud models get the full element data for richer test generation.
@@ -274,9 +274,9 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 
   const pageType = classifiedPage.dominantIntent;
 
-  const testRange = local ? "3-5" : "5-8";
+  const testCountInstr = resolveTestCountInstruction(testCount, local);
   const scenarioHints = {
-    AUTH: `Generate ${testRange} tests covering:
+    AUTH: `${testCountInstr} covering:
 - POSITIVE: Successful login with valid credentials redirects to dashboard
 - POSITIVE: Registration form accepts valid new user data
 - NEGATIVE: Wrong password shows clear error message
@@ -285,7 +285,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Password visibility toggle works
 - EDGE: Forgot password link is accessible`,
 
-    SEARCH: `Generate ${testRange} tests covering:
+    SEARCH: `${testCountInstr} covering:
 - POSITIVE: Search returns relevant results for valid query
 - POSITIVE: Search filters narrow down results correctly
 - POSITIVE: Clicking a result navigates to detail page
@@ -294,7 +294,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Special characters in search don't break the page
 - EDGE: Very long search query is handled`,
 
-    CHECKOUT: `Generate ${testRange} tests covering:
+    CHECKOUT: `${testCountInstr} covering:
 - POSITIVE: Add item to cart and view cart with correct total
 - POSITIVE: Quantity update recalculates cart total
 - POSITIVE: Proceed to checkout from cart page
@@ -303,7 +303,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Remove item from cart updates totals
 - EDGE: Cart persists on page refresh`,
 
-    FORM_SUBMISSION: `Generate ${testRange} tests covering:
+    FORM_SUBMISSION: `${testCountInstr} covering:
 - POSITIVE: Form submits with all valid required fields
 - POSITIVE: Success confirmation is shown after submit
 - NEGATIVE: Submit with empty required fields shows validation
@@ -312,7 +312,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Form scrolls to first error field on failed submit
 - EDGE: Character limits enforced on text inputs`,
 
-    NAVIGATION: `Generate ${testRange} tests covering:
+    NAVIGATION: `${testCountInstr} covering:
 - POSITIVE: User clicks a navigation link and is taken to the correct destination page with expected content
 - POSITIVE: User navigates to this page, verifies key content loads, then navigates to another section and back
 - POSITIVE: Primary navigation links lead to the correct URLs and load the expected page titles
@@ -323,7 +323,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Deep-linking directly to this page loads it correctly with all content visible
 - EDGE: Page renders correctly and key interactive elements are functional after a full reload`,
 
-    CRUD: `Generate ${testRange} tests covering:
+    CRUD: `${testCountInstr} covering:
 - POSITIVE: Create new item with valid data succeeds
 - POSITIVE: Created item appears in list immediately
 - POSITIVE: Edit existing item and save persists changes
@@ -332,7 +332,7 @@ function buildIntentPrompt(classifiedPage, snapshot) {
 - EDGE: Delete shows confirmation dialog
 - EDGE: Cancel edit discards unsaved changes`,
 
-    CONTENT: `Generate ${testRange} tests covering:
+    CONTENT: `${testCountInstr} covering:
 - POSITIVE: User opens the page and main content/article is fully visible and readable
 - POSITIVE: User clicks internal links within the content and is navigated to the correct destination
 - POSITIVE: User scrolls through the page and all sections, images, and media load progressively
@@ -363,7 +363,7 @@ REQUIRED SCENARIO COVERAGE:
 ${hints}
 
 STRICT RULES:
-1. Generate ${local ? "3-5" : "5-8"} tests — must include BOTH positive AND negative scenarios
+1. ${testCountInstr} — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
 3. ${SELF_HEALING_PROMPT_RULES}
 4. Every test MUST have at least 2 strong assertions
@@ -481,9 +481,9 @@ export async function generateUserRequestedTest(name, description, appUrl, onTok
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
-export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", signal } = {}) {
+export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "auto", signal } = {}) {
   try {
-    const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl), dialsPrompt);
+    const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
     const text = await generateText(prompt, { signal });
     const result = parseJSON(text);
     const tests = extractTestsArray(result);
@@ -500,9 +500,9 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
  */
-export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", signal } = {}) {
+export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "auto", signal } = {}) {
   try {
-    const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot), dialsPrompt);
+    const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
     const text = await generateText(prompt, { signal });
     const parsed = parseJSON(text);
     const tests = extractTestsArray(parsed);
@@ -522,14 +522,14 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
  * Orchestrates full test generation: journeys first, then per-page intent tests.
  * ALL pages get comprehensive tests — not just high-priority ones.
  */
-export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", signal } = {}) {
+export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "auto", signal } = {}) {
   const allTests = [];
 
   // 1. Generate journey tests (highest value — multi-page flows)
   for (const journey of journeys) {
     throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
-    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, signal });
+    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal });
     for (const jt of journeyTests) {
       allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
     }
@@ -548,7 +548,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
 
-    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, signal });
+    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal });
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }
@@ -563,7 +563,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
-    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, signal });
+    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal });
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }
