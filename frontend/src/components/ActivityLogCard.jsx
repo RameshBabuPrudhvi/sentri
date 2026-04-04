@@ -61,12 +61,14 @@ export default function ActivityLogCard({ logs = [], isRunning, emptyLabel = "No
             </div>
           ) : (
             logs.map((l, i) => {
-              // Color classification — matches the exact emoji/keyword markers
-              // emitted by crawler.js and testRunner.js log() calls.
+              // Color classification — matches the ICON prefixes centralised in
+              // backend/src/utils/runLogger.js (ICON.error = "❌", ICON.warn = "⚠️",
+              // ICON.success = "✅", ICON.abort = "⛔").
+              // If those icons change, update the markers here to match.
               // Priority: error > warning > success > info (gray default).
               const isError   = l.includes("❌") || l.includes("FAILED");
               const isWarn    = !isError && (l.includes("⚠") || l.includes("⛔"));
-              const isSuccess = !isError && !isWarn && (l.includes("✅") || l.includes("🎉") || l.includes("PASSED") || l.includes("🟢"));
+              const isSuccess = !isError && !isWarn && (l.includes("✅") || l.includes("PASSED") || l.includes("🟢"));
               const color     = isError ? "#f87171" : isWarn ? "#fbbf24" : isSuccess ? "#4ade80" : "#94a3b8";
               return (
                 <div key={i} style={{

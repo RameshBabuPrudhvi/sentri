@@ -325,7 +325,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
-    log(run, `🎉 Done! ${run.tests.length} test(s) generated for "${name}".`);
+    logSuccess(run, `Done! ${run.tests.length} test(s) generated for "${name}".`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 
@@ -507,7 +507,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       validatedTests.push(t);
     } else {
       rejected++;
-      log(run, `   ❌ Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
+      logWarn(run, `Rejected "${t.name || "unnamed"}": ${issues.join("; ")}`);
     }
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
@@ -559,7 +559,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
     log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
-    log(run, `🎉 Done! ${run.tests.length} high-quality tests generated.`);
+    logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 }
