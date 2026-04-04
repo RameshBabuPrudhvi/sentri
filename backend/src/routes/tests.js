@@ -12,7 +12,7 @@ import { runWithAbort } from "../utils/runWithAbort.js";
 import { hasProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateSingleTest } from "../crawler.js";
-import { runTests } from "../testRunner.js";
+import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 
 const router = Router();
 

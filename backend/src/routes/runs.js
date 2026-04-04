@@ -12,7 +12,7 @@ import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
-import { runTests } from "../testRunner.js";
+import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 
 const router = Router();
 
