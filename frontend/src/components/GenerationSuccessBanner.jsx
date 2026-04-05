@@ -32,7 +32,7 @@ export default function GenerationSuccessBanner({ run, isRunning }) {
           background: "var(--green)", color: "#fff", border: "none",
           fontWeight: 700, whiteSpace: "nowrap", gap: 6, flexShrink: 0,
         }}
-        onClick={() => navigate(`/projects/${run.projectId}?from_run=${run.id}`)}
+        onClick={() => navigate(`/projects/${run.projectId}`)}
       >
         View Generated Tests <ArrowRight size={13} />
       </button>

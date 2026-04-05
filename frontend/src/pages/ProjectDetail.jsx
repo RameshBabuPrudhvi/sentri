@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
@@ -70,10 +70,12 @@ function Toast({ msg, type, visible, onViewRun, runId }) {
   );
 }
 
+// Tests created within this window are considered "new" and highlighted.
+const NEW_TEST_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
@@ -90,30 +92,22 @@ export default function ProjectDetail() {
   const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
   const PAGE_SIZE = 50;
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
+  const [showNewBadges, setShowNewBadges] = useState(true);
 
-  // ── Highlight newly generated tests when arriving from a run ──────────────
-  // The GenerationSuccessBanner navigates here with ?from_run=<runId>.
-  // We resolve which test IDs were created by that run and highlight them.
-  const [newTestIds, setNewTestIds] = useState(new Set());
-
-  useEffect(() => {
-    const fromRun = searchParams.get("from_run");
-    if (!fromRun) return;
-    // Fetch the run to get its test IDs, then clear the URL param
-    api.getRun(fromRun).then(run => {
-      if (run?.tests?.length) {
-        setNewTestIds(new Set(run.tests));
-        // Auto-clear highlight after 30s so it doesn't persist forever
-        setTimeout(() => setNewTestIds(new Set()), 30_000);
+  // ── Highlight recently created tests ──────────────────────────────────────
+  // Any test created within the last 5 minutes is "new" — works regardless of
+  // how the user navigated here (breadcrumbs, back button, direct link, etc.)
+  const newTestIds = useMemo(() => {
+    if (!showNewBadges) return new Set();
+    const cutoff = Date.now() - NEW_TEST_THRESHOLD_MS;
+    const ids = new Set();
+    for (const t of tests) {
+      if (t.createdAt && new Date(t.createdAt).getTime() > cutoff) {
+        ids.add(t.id);
       }
-    }).catch(() => {});
-    // Clear the param from the URL so refresh doesn't re-trigger
-    setSearchParams(prev => { const n = new URLSearchParams(prev); n.delete("from_run"); return n; }, { replace: true });
-    // Ensure we're on the Tests tab showing drafts
-    setTab("review");
-    setReviewFilter("draft");
-    setReviewPage(1);
-  }, [searchParams, setSearchParams]);
+    }
+    return ids;
+  }, [tests, showNewBadges]);
 
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
@@ -428,7 +422,7 @@ export default function ProjectDetail() {
               <button
                 className="btn btn-ghost btn-xs"
                 style={{ marginLeft: "auto", flexShrink: 0 }}
-                onClick={() => setNewTestIds(new Set())}
+                onClick={() => setShowNewBadges(false)}
               >
                 Dismiss
               </button>
