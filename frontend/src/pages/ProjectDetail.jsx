@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, Shield, AlertCircle, StopCircle,
+  RotateCcw, Info, AlertCircle, StopCircle,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
@@ -11,6 +11,7 @@ import { loadSavedConfig } from "../utils/testDialsStorage.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
+import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 
 function StatusBadge({ s }) {
   if (!s) return <span className="badge badge-gray">Not run</span>;
@@ -230,10 +231,6 @@ export default function ProjectDetail() {
     return statusOk && searchOk;
   });
 
-  const regressionTests = approvedTests.filter(t =>
-    !search || t.name?.toLowerCase().includes(search.toLowerCase())
-  );
-
   // Paginate review tab (50 per page)
   const reviewTotalPages = Math.max(1, Math.ceil(filteredByReview.length / PAGE_SIZE));
   const pagedReview = filteredByReview.slice((reviewPage - 1) * PAGE_SIZE, reviewPage * PAGE_SIZE);
@@ -349,15 +346,15 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* Draft-pending reminder */}
-      {draftTests.length > 0 && tab !== "runs" && (
+      {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
+      {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
         <div style={{ marginBottom: 16, padding: "10px 16px", background: "var(--amber-bg)", border: "1px solid #fcd34d", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
           <Info size={14} color="var(--amber)" style={{ flexShrink: 0 }} />
           <span style={{ fontSize: "0.82rem", color: "#92400e" }}>
             <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
           </span>
           <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto", flexShrink: 0 }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
-            Review <ArrowRight size={11} />
+            Review drafts <ArrowRight size={11} />
           </button>
         </div>
       )}
@@ -365,9 +362,8 @@ export default function ProjectDetail() {
       {/* Tabs */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 14 }}>
         {[
-          ["review",     "Generated Tests (Review Required)"],
-          ["regression", `Regression Suite (${approvedTests.length})`],
-          ["runs",       `Runs (${runs.length})`],
+          ["review", `Tests (${tests.length})`],
+          ["runs",   `Runs (${runs.length})`],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             background: "none", border: "none", cursor: "pointer",
@@ -460,10 +456,10 @@ export default function ProjectDetail() {
                         </th>
                         <th>Test ID</th>
                         <th>Test Name</th>
-                        <th>Review Status</th>
+                        <th>Status</th>
+                        <th>Review</th>
+                        <th>Type</th>
                         <th>Confidence</th>
-                        <th>Source Page</th>
-                        <th>Generated</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -497,18 +493,16 @@ export default function ProjectDetail() {
                                 </div>
                               </div>
                             </td>
+                            <td><StatusBadge s={t.lastResult} /></td>
                             <td><ReviewBadge status={rs} /></td>
+                            <td>
+                              {t.type && (
+                                <span className={`badge ${testTypeBadgeClass(t.type)}`}>
+                                  {testTypeLabel(t.type, true)}
+                                </span>
+                              )}
+                            </td>
                             <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
-                            <td>
-                              <span style={{ fontSize: "0.73rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
-                                {t.sourceUrl ? t.sourceUrl.replace(/^https?:\/\/[^/]+/, "") || "/" : "—"}
-                              </span>
-                            </td>
-                            <td>
-                              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                                {t.createdAt ? new Date(t.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                              </span>
-                            </td>
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                                 {rs === "draft" && (
@@ -556,96 +550,6 @@ export default function ProjectDetail() {
                   </div>
                 </div>
               )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── REGRESSION SUITE TAB ── */}
-      {tab === "regression" && (
-        <div>
-          <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--green-bg)", border: "1px solid #86efac", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
-            <Shield size={14} color="var(--green)" style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
-              Only <strong>approved tests</strong> appear here. Draft and rejected tests cannot enter regression.
-            </span>
-          </div>
-
-          {approvedTests.length === 0 ? (
-            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
-              <Shield size={32} style={{ opacity: 0.2, marginBottom: 12 }} />
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>No approved tests yet</div>
-              <div style={{ fontSize: "0.875rem", marginBottom: 16 }}>Review and approve generated tests to populate this suite.</div>
-              <button className="btn btn-primary btn-sm" onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
-                Go to review queue <ArrowRight size={13} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <div style={{ position: "relative" }}>
-                  <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
-                  <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Search regression tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 220 }} />
-                </div>
-                <div style={{ flex: 1 }} />
-                <button className="btn btn-primary btn-sm" onClick={doRun} disabled={!!actionLoading}>
-                  {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-                  Run All ({approvedTests.length})
-                </button>
-              </div>
-              <div className="card">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Test ID</th><th>Test Name</th><th>Last Result</th><th>Type</th><th>Priority</th><th>Confidence</th><th>Last Run</th><th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regressionTests.map(t => (
-                      <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
-                        <td>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                            {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <AgentTag type="TA" />
-                            <div>
-                              <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
-                              <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                                {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                                {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
-                                {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
-                                {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td><StatusBadge s={t.lastResult} /></td>
-                        <td><span className="badge badge-gray">{t.type || "—"}</span></td>
-                        <td>
-                          <span className={`badge ${t.priority === "high" ? "badge-red" : t.priority === "medium" ? "badge-amber" : "badge-gray"}`}>
-                            {t.priority || "—"}
-                          </span>
-                        </td>
-                        <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
-                        <td>
-                          <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                            {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn btn-ghost btn-xs" onClick={e => { e.stopPropagation(); reviewOne(t.id, "restore"); }} title="Move back to Draft">
-                            <RotateCcw size={11} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </>
           )}
         </div>
