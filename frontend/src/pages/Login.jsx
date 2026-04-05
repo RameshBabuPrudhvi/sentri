@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
+import { API_BASE } from "../utils/api.js";
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || "";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -71,7 +72,7 @@ export default function Login() {
     const code = params.get("code");
     const provider = params.get("provider");
     const err = params.get("error");
-    if (err) { setError(decodeURIComponent(err)); window.history.replaceState({}, "", "/login"); return; }
+    if (err) { setError(decodeURIComponent(err)); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); return; }
     if (code && provider) handleOAuthCallback(provider, code);
   }, []);
 
@@ -81,12 +82,12 @@ export default function Login() {
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
     try {
-      const res = await fetch(`/api/auth/${provider}/callback?code=${code}`);
+      const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "OAuth login failed");
       await login(data.token, data.user);
-      window.history.replaceState({}, "", "/login");
-    } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", "/login"); }
+      window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
+    } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
   }
 
   function handleGitHubLogin() {
@@ -112,7 +113,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const endpoint = mode === "login" ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/register`;
       const body = mode === "login" ? { email, password } : { name, email, password };
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();

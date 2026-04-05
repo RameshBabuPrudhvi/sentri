@@ -15,6 +15,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_BASE } from "../utils/api.js";
 
 const AuthContext = createContext(null);
 
@@ -103,7 +104,7 @@ export function AuthProvider({ children }) {
 
   function logout() {
     // Optionally call /api/auth/logout to invalidate server-side session
-    fetch("/api/auth/logout", {
+    fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => { /* fire-and-forget */ });
@@ -120,7 +121,8 @@ export function AuthProvider({ children }) {
       ...(options.headers || {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
-    const res = await fetch(url, { ...options, headers });
+    const fullUrl = url.startsWith("/api") ? `${API_BASE}${url}` : url;
+    const res = await fetch(fullUrl, { ...options, headers });
     if (res.status === 401) {
       clearSession();
       throw new Error("Session expired. Please sign in again.");

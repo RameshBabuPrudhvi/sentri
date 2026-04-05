@@ -41,7 +41,7 @@ class ErrorBoundary extends React.Component {
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
             <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
-            <button className="btn btn-ghost" onClick={() => { window.location.href = "/dashboard"; }}>Go to Dashboard</button>
+            <button className="btn btn-ghost" onClick={() => { window.location.href = import.meta.env.BASE_URL + "dashboard"; }}>Go to Dashboard</button>
           </div>
         </div>
       );
@@ -52,7 +52,7 @@ class ErrorBoundary extends React.Component {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AuthProvider>
         <ErrorBoundary>
           <Routes>

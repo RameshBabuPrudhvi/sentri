@@ -293,7 +293,7 @@ export default function Dashboard() {
                       : "Latest runs across all projects"}
                   </div>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => navigate("/work")}>View all</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => navigate("/runs")}>View all</button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {runs.map((r) => {

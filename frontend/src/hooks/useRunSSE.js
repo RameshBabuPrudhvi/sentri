@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { API_BASE } from "../utils/api.js";
 
 // ── Favicon badge ─────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     const poll = async () => {
       if (doneRef.current) return;
       try {
-        const res = await fetch(`/api/runs/${runId}`);
+        const res = await fetch(`${API_BASE}/api/runs/${runId}`);
         if (res.ok) {
           const run = await res.json();
           onEventRef.current?.({ type: "snapshot", run });
@@ -112,7 +113,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
   const connect = useCallback(() => {
     if (!runId || doneRef.current) return;
 
-    const es = new EventSource(`/api/runs/${runId}/events`);
+    const es = new EventSource(`${API_BASE}/api/runs/${runId}/events`);
     esRef.current = es;
 
     es.onmessage = (e) => {

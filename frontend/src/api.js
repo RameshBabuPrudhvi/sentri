@@ -1,4 +1,6 @@
-const BASE = "/api";
+import { API_BASE } from "./utils/api.js";
+
+const BASE = `${API_BASE}/api`;
 
 // Default timeouts (ms)
 const TIMEOUT_DEFAULT = 30_000;
