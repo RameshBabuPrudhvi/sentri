@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
   libxfixes3 \
   libxrandr2 \
   libgbm1 \
-  libasound2t64 \
+  libasound2 \
   libpango-1.0-0 \
   libcairo2 \
   && rm -rf /var/lib/apt/lists/*
@@ -24,7 +24,7 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 COPY src/ ./src/
 
