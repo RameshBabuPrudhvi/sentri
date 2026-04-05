@@ -84,9 +84,17 @@ export function scoreTest(test) {
   if (test.priority === "medium") score += 5;
 
   // Reward by test type — covers both legacy intent-based types (auth, checkout,
-  // form_submission) and new industry-standard types (e2e, security, regression, etc.)
-  const highValueTypes = ["form", "auth", "checkout", "e2e", "security", "regression", "integration", "accessibility", "performance"];
-  if (highValueTypes.some(t => (test.type || "").toLowerCase().includes(t))) score += 15;
+  // form_submission) and new industry-standard types (functional, e2e, smoke, etc.)
+  // Uses a Set with exact match to avoid false positives from substring matching
+  // (e.g. "form" matching "performance").
+  const HIGH_VALUE_TYPES = new Set([
+    // Legacy intent-based types (from crawl pipeline)
+    "form", "form_submission", "auth", "checkout", "crud", "search",
+    // Industry-standard types (from new prompt templates)
+    "functional", "smoke", "regression", "e2e", "integration",
+    "accessibility", "security", "performance",
+  ]);
+  if (HIGH_VALUE_TYPES.has((test.type || "").toLowerCase())) score += 15;
 
   // Reward stable selectors
   if (code.includes("getByRole") || code.includes("getByLabel") || code.includes("getByText")) score += 10;

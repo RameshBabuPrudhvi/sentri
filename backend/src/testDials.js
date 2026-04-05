@@ -184,7 +184,7 @@ const CUSTOM_MAX_LENGTH  = 500;
 export function validateDialsConfig(raw) {
   if (!raw || typeof raw !== "object") return null;
 
-  const approach = VALID_APPROACHES.has(raw.approach) ? raw.approach : null;
+  const approach = VALID_APPROACHES.has(raw.approach) ? raw.approach : "full_coverage";
 
   const perspectives = Array.isArray(raw.perspectives)
     ? raw.perspectives.filter(id => VALID_PERSPECTIVES.has(id))
@@ -194,7 +194,7 @@ export function validateDialsConfig(raw) {
     ? raw.quality.filter(id => VALID_QUALITIES.has(id))
     : [];
 
-  const format = VALID_FORMATS.has(raw.format) ? raw.format : null;
+  const format = VALID_FORMATS.has(raw.format) ? raw.format : "step_by_step";
 
   const language = VALID_LANGUAGES.has(raw.language) ? raw.language : "en-US";
 
