@@ -164,6 +164,11 @@ router.post("/projects/:id/tests", (req, res) => {
     isJourneyTest: false,
     reviewStatus: "draft",
     reviewedAt: null,
+    // Match shape of AI-generated tests so all pipeline stages work uniformly
+    promptVersion: null,
+    modelUsed: null,
+    linkedIssueKey: null,
+    tags: [],
   };
 
   db.tests[testId] = test;
@@ -201,6 +206,13 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
 
   const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
+
+  // Sanitise name: strip prompt-injection markers (same regex as description/customInstructions)
+  const cleanName = name.trim()
+    .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
+    .replace(/```/g, "")
+    .trim();
+  if (!cleanName) return res.status(400).json({ error: "name is required" });
 
   // ── Prompt guardrails ────────────────────────────────────────────────────
   // Cap description at 50 KB to prevent context window overflow.
@@ -246,7 +258,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     logs: [],
     tests: [],
     pagesFound: 0,
-    generateInput: { name: name.trim(), description: cleanDescription },
+    generateInput: { name: cleanName, description: cleanDescription },
     // Prompt audit trail — stored on every run for compliance, debugging, cost attribution
     promptAudit: {
       descriptionLength: cleanDescription.length,
@@ -265,14 +277,14 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
 saveDb();
   logActivity({
     type: "test.generate", projectId: project.id, projectName: project.name,
-    detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
+    detail: `Test generation pipeline started for "${cleanName}"`, status: "running",
   });
 
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
     (signal) => generateSingleTest(project, run, db, {
-      name: name.trim(),
+      name: cleanName,
       description: cleanDescription,
       dialsPrompt,
       testCount,
@@ -281,11 +293,11 @@ saveDb();
     {
       onSuccess: (createdTestIds) => logActivity({
         type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
+        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${cleanName}"`,
       }),
       onFailActivity: (err) => ({
         type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
+        detail: `Test generation failed for "${cleanName}" — ${err.message}`,
       }),
     },
   );

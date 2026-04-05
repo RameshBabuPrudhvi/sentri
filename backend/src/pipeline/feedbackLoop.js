@@ -218,9 +218,9 @@ Fix by:
     TIMEOUT: `The test timed out waiting for elements.
 Fix by:
 - Increasing timeout: { timeout: 30000 }
-- Waiting for network idle before assertions
-- Using waitForSelector before interactions
-- Adding page.waitForLoadState()`,
+- Using await page.waitForSelector('selector', { timeout: 15000 }) before assertions
+- Using { waitUntil: 'domcontentloaded' } after navigation — NEVER use 'networkidle'
+- Adding await page.waitForLoadState('domcontentloaded') after page.goto()`,
 
     ASSERTION_FAIL: `The assertion failed - the actual value didn't match expected.
 Fix by:
