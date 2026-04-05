@@ -1,34 +1,25 @@
 /**
  * AppLogo.jsx
  *
- * SVG logo for Sentri — shield icon + wordmark.
+ * SVG logo for Sentri — gradient shield icon + wordmark.
+ * The shield always uses the brand gradient so it's visible on any background.
+ * The wordmark uses var(--text) by default so it adapts to light/dark mode
+ * automatically, or accepts an explicit `color` override for custom contexts
+ * (e.g. the Login page's dark background).
  *
  * Props:
- *   size     — controls height of the icon variant (default 40)
+ *   size     — controls height of the icon (default 40)
  *   variant  — "icon" | "wordmark" | "full" (default "full")
- *   theme    — "dark" | "light" (default "dark")
+ *   color    — explicit wordmark color; omit to use var(--text)
  *   style    — additional inline styles for the wrapper
  */
 
 import React, { useId } from "react";
 
-const BRAND = {
-  dark: {
-    shield:       "#1e2235",
-    shieldBorder: "#3d4466",
-    wordmark:     "#f1f5f9",
-  },
-  light: {
-    shield:       "#f0f2ff",
-    shieldBorder: "#c7cdf5",
-    wordmark:     "#0f172a",
-  },
-};
-
-function IconMark({ size = 40, theme = "dark" }) {
-  const c = BRAND[theme];
+function IconMark({ size = 40 }) {
   const uid = useId();
-  const gradId = `sentri-ray-${uid}`;
+  const shieldGradId = `sentri-shield-${uid}`;
+  const rayGradId = `sentri-ray-${uid}`;
   const glowId = `sentri-glow-${uid}`;
   return (
     <svg
@@ -41,12 +32,16 @@ function IconMark({ size = 40, theme = "dark" }) {
       role="img"
     >
       <defs>
-        <linearGradient id={gradId} x1="8" y1="10" x2="32" y2="30" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#818cf8" />
-          <stop offset="100%" stopColor="#a855f7" />
+        <linearGradient id={shieldGradId} x1="5" y1="3" x2="35" y2="37" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#8b5cf6" />
+        </linearGradient>
+        <linearGradient id={rayGradId} x1="12" y1="15" x2="28" y2="26" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#e0e7ff" />
         </linearGradient>
         <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="1.5" result="blur" />
+          <feGaussianBlur stdDeviation="1" result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
@@ -54,37 +49,26 @@ function IconMark({ size = 40, theme = "dark" }) {
         </filter>
       </defs>
 
-      {/* Shield body */}
+      {/* Shield body — brand gradient, always visible */}
       <path
         d="M20 3L5 9v10c0 8.5 6.5 16 15 18 8.5-2 15-9.5 15-18V9L20 3z"
-        fill={c.shield}
-        stroke={c.shieldBorder}
-        strokeWidth="1.2"
+        fill={`url(#${shieldGradId})`}
       />
 
-      {/* Gradient checkmark */}
+      {/* White checkmark */}
       <path
         d="M12 20.5l5.5 5.5 10.5-11"
-        stroke={`url(#${gradId})`}
+        stroke={`url(#${rayGradId})`}
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"
         filter={`url(#${glowId})`}
       />
-
-      {/* Subtle inner highlight */}
-      <path
-        d="M20 5.5L7 11v8.5"
-        stroke="rgba(255,255,255,0.07)"
-        strokeWidth="1"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }
 
-function Wordmark({ height = 20, theme = "dark" }) {
-  const c = BRAND[theme];
+function Wordmark({ height = 20, color }) {
   return (
     <span
       style={{
@@ -93,7 +77,7 @@ function Wordmark({ height = 20, theme = "dark" }) {
         fontSize: height,
         lineHeight: 1,
         letterSpacing: "-0.04em",
-        color: c.wordmark,
+        color: color || "var(--text)",
         userSelect: "none",
         whiteSpace: "nowrap",
       }}
@@ -107,15 +91,15 @@ function Wordmark({ height = 20, theme = "dark" }) {
 export default function AppLogo({
   size    = 40,
   variant = "full",
-  theme   = "dark",
+  color,
   style   = {},
 }) {
   if (variant === "icon") {
-    return <IconMark size={size} theme={theme} />;
+    return <IconMark size={size} />;
   }
 
   if (variant === "wordmark") {
-    return <Wordmark height={Math.round(size * 0.5)} theme={theme} />;
+    return <Wordmark height={Math.round(size * 0.5)} color={color} />;
   }
 
   // "full" — icon + wordmark side by side
@@ -125,8 +109,8 @@ export default function AppLogo({
       role="banner"
       aria-label="Sentri"
     >
-      <IconMark size={size} theme={theme} />
-      <Wordmark height={Math.round(size * 0.5)} theme={theme} />
+      <IconMark size={size} />
+      <Wordmark height={Math.round(size * 0.5)} color={color} />
     </div>
   );
 }

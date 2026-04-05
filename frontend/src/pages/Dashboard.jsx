@@ -92,7 +92,7 @@ export default function Dashboard() {
         </svg>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
           <div>
-            <AppLogo size={48} variant="full" theme="dark" />
+            <AppLogo size={48} variant="full" />
             <p style={{ marginTop: 12, color: "var(--text2)", fontSize: "0.875rem", maxWidth: 480, lineHeight: 1.6 }}>
               {greeting()}! Here's your real-time overview — system health, key metrics, and what your agents are up to right now.
             </p>

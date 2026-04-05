@@ -232,7 +232,7 @@ export default function Login() {
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand">
-            <AppLogo size={36} variant="full" theme="dark" />
+            <AppLogo size={36} variant="full" color="#f1f5f9" />
           </div>
 
           <div className="lp-hero">

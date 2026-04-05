@@ -37,7 +37,7 @@ function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{ padding: "16px 16px 14px", borderBottom: "1px solid var(--border)" }}>
-        <AppLogo size={30} variant="full" theme="dark" />
+        <AppLogo size={30} variant="full" />
       </div>
 
       {/* Workspace — no interactive styling until feature exists (Fix #16) */}
