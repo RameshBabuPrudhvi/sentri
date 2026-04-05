@@ -176,7 +176,10 @@ export function buildQualityAnalytics(improvements, testMap) {
     insights.push(`${byCategory.TIMEOUT} test(s) timed out — likely using waitForLoadState('networkidle') or insufficient timeouts. Check for SPA-heavy pages.`);
   }
   if (failedAssertionMethods.toHaveURL > 0) {
-    insights.push(`toHaveURL is the most fragile assertion (${failedAssertionMethods.toHaveURL} failures). Prefer asserting visible page content over URL patterns.`);
+    const maxMethod = Object.entries(failedAssertionMethods).sort((a, b) => b[1] - a[1])[0];
+    const qualifier = maxMethod && maxMethod[0] === "toHaveURL" ? "the most fragile" : "a fragile";
+    insights.push(`toHaveURL is ${qualifier} assertion (${failedAssertionMethods.toHaveURL} failure${failedAssertionMethods.toHaveURL !== 1 ? "s" : ""}). Prefer asserting visible page content over URL patterns.`);
+  }
   }
 
   return {
