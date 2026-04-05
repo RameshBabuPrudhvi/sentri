@@ -106,6 +106,16 @@ export default function ProjectDetail() {
     return () => clearInterval(timer);
   }, [showNewBadges]);
 
+  // Fetch traceability data when the tab is first switched to "traceability".
+  // Previously this was an IIFE inside the render body which violated React's
+  // rule against calling setState during render and caused duplicate API calls
+  // in concurrent mode.
+  useEffect(() => {
+    if (tab !== "traceability" || traceability || traceLoading) return;
+    setTraceLoading(true);
+    api.getTraceability(id).then(setTraceability).catch(() => {}).finally(() => setTraceLoading(false));
+  }, [tab, traceability, traceLoading, id]);
+
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
     setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
@@ -759,13 +769,6 @@ export default function ProjectDetail() {
       {/* ── TRACEABILITY TAB ── */}
       {tab === "traceability" && (
         <div>
-          {/* Load traceability data on first view */}
-          {!traceability && !traceLoading && (() => {
-            setTraceLoading(true);
-            api.getTraceability(id).then(setTraceability).catch(() => {}).finally(() => setTraceLoading(false));
-            return null;
-          })()}
-
           {traceLoading && (
             <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
               <RefreshCw size={20} className="spin" style={{ opacity: 0.3, marginBottom: 12 }} />
