@@ -131,8 +131,8 @@ STRICT RULES:
 1. ${testCountInstr} — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
 3. ${SELF_HEALING_PROMPT_RULES}
-4. Every test MUST have at least 2 strong assertions
-5. STRONG assertions (preferred): toBeVisible(), toContainText(), toHaveValue(), toBeEnabled(), toHaveCount(). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 13) — never with path or query patterns.
+4. Every test MUST have at least 2 strong assertions that verify SPECIFIC VISIBLE CONTENT on the page (exact text, element count, field value) — not just that "a page loaded" or "an element exists"
+5. STRONG assertions (preferred): toBeVisible() on elements found by specific text/role, toContainText('exact text'), toHaveValue('specific value'), toBeEnabled(), toHaveCount(N). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 13) — never with path or query patterns.
 6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
 7. Skip tests for: footer, social icons, cookie banners — but DO test primary navigation links and CTAs that lead to real user flows
 8. Tests must be independent — no shared state between tests
@@ -152,7 +152,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high|medium",
       "type": "functional|smoke|regression|e2e|integration|accessibility|security|performance",
       "scenario": "positive|negative|edge_case",
-      "steps": ["User opens the page", "User clicks a link or button to perform an action", "Verify the expected page or content is displayed"],
+      "steps": ["User opens the page and sees the main heading and navigation", "User clicks the primary call-to-action button", "The next view loads and the expected heading or confirmation text is visible", "User verifies key content is present — e.g. a list of items, a form, or a success message"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
@@ -170,7 +170,10 @@ IMPORTANT: "type" must be one of these industry-standard test types — pick the
 If unsure, use "functional".
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "Assert: success message visible", "assert page contains text"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button", "A success message is displayed", "The dashboard page loads with the user's name in the header"]
-When the output format is Gherkin / BDD, write steps as: "Given the user is on the login page", "When the user clicks Sign In", "Then the dashboard is displayed".`;
+Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result — never write vague steps like "page loads successfully" or "URL reflects the section".
+BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed", "The form works correctly"]
+GOOD steps (specific & user-friendly): ["User sees the heading 'Create Account' and a form with Name, Email, and Password fields", "User fills in Name with 'Jane' and Email with 'jane@test.com' and clicks 'Sign Up'", "A confirmation message 'Account created' appears below the form", "The form fields are cleared and a 'Go to Dashboard' link is visible"]
+When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".
+
+IMPORTANT: In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state. Read the actual PAGE DATA above (title, headings, elements) and assert against REAL content from that page.`;
 }

@@ -30,8 +30,8 @@ STRICT RULES:
 2. The test name should match or closely reflect the user's provided name
 3. Steps must be specific to the described scenario, not generic page checks
 4. ${SELF_HEALING_PROMPT_RULES}
-5. Every test MUST have at least 2 strong assertions
-6. STRONG assertions (preferred): toBeVisible(), toContainText(), toHaveValue(), toBeEnabled(), toHaveCount(). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 11) — never with path or query patterns.
+5. Every test MUST have at least 2 strong assertions that verify SPECIFIC VISIBLE CONTENT on the page (exact text, element count, field value) — not just that "a page loaded" or "an element exists"
+6. STRONG assertions (preferred): toBeVisible() on elements found by specific text/role, toContainText('exact text'), toHaveValue('specific value'), toBeEnabled(), toHaveCount(N). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 11) — never with path or query patterns.
 7. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
 8. CRITICAL: playwrightCode MUST start with: await page.goto('${appUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 });
 9. CRITICAL: playwrightCode must be fully self-contained and executable on its own
@@ -48,7 +48,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high",
       "type": "functional|smoke|regression|e2e|integration|accessibility|security|performance",
       "scenario": "positive|negative|edge_case",
-      "steps": ["User navigates to the application", "User performs the described action", "The expected outcome is visible on the page"],
+      "steps": ["User opens the application and sees the main page with its heading and navigation", "User performs the action described above (click, fill, submit, navigate)", "The expected outcome is visible — a confirmation message, updated content, or new page heading appears", "User verifies the final state matches what was requested — correct text, values, or element states are shown"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('${name.replace(/'/g, "\\'")}', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
@@ -66,7 +66,10 @@ IMPORTANT: "type" must be one of these industry-standard test types — pick the
 If unsure, use "functional".
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "Assert: success message visible", "assert form is submitted"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button", "A success confirmation message appears", "The user's profile name is shown in the header"]
-When the output format is Gherkin / BDD, write steps as: "Given the user is on the login page", "When the user clicks Sign In", "Then a welcome message is displayed".`;
+Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result — never write vague steps like "page loads successfully" or "the expected outcome is visible".
+BAD steps (too vague):  ["The page loads successfully", "The expected outcome is visible on the page", "The URL reflects the section", "The feature works correctly"]
+GOOD steps (specific & user-friendly): ["User sees the heading 'Create Account' and a form with Name, Email, and Password fields", "User fills in Name with 'Jane' and Email with 'jane@test.com' and clicks 'Sign Up'", "A confirmation message 'Account created' appears below the form", "The form fields are cleared and a 'Go to Dashboard' link is visible"]
+When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".
+
+IMPORTANT: In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state. Base your assertions on the APPLICATION URL and USER DESCRIPTION provided above — use real content the user would expect to see.`;
 }

@@ -43,7 +43,7 @@ Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
 3. ${SELF_HEALING_PROMPT_RULES}
-4. Include at least 3 meaningful assertions per test (toBeVisible, toContainText, toHaveValue, toHaveCount) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly. Use toHaveURL() ONLY with a loose hostname-only regex (see rule 10) — never with path or query patterns.
+4. Include at least 3 meaningful assertions per test that verify SPECIFIC VISIBLE CONTENT (exact heading text, button labels, field values, item counts) — not just that "a page loaded". Preferred: toBeVisible() on elements found by specific text/role, toContainText('exact text'), toHaveValue('specific value'), toHaveCount(N). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 10) — never with path or query patterns.
 5. After every page.goto() call use { waitUntil: 'domcontentloaded' } — do NOT use waitForLoadState('networkidle') as many real-world sites (e.g. SPAs, e-commerce) fire continuous background requests and never reach networkidle, causing a 30 s timeout.
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
@@ -63,7 +63,7 @@ Return ONLY valid JSON (no markdown):
       "scenario": "positive|negative|edge_case",
       "journeyType": "${journey.type}",
       "isJourneyTest": true,
-      "steps": ["User opens the login page", "User enters valid credentials and clicks Sign In", "User is redirected to the dashboard"],
+      "steps": ["User opens the first page and sees the expected heading and key interactive elements", "User performs the main action (fill form, click button, select option) to move to the next step", "The next page loads and the user sees a confirmation or the expected content for that step", "User continues through the journey and verifies the final outcome — a success message, completed state, or summary view"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full journey code here\\n});"
     }
   ]
@@ -80,7 +80,10 @@ IMPORTANT: "type" must be one of these industry-standard test types — pick the
   - "performance"    — load times, responsiveness, resource usage
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "Assert: user is on dashboard", "assert cart total equals $50"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button", "The dashboard loads with the user's name in the header"]
-When the output format is Gherkin / BDD, write steps as: "Given the user is on the login page", "When the user enters valid credentials and clicks Sign In", "Then the user is redirected to the dashboard".`;
+Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result — never write vague steps like "page loads successfully" or "user is redirected".
+BAD steps (too vague):  ["The page loads successfully", "User is redirected to the dashboard", "The URL reflects the checkout page", "The flow works correctly"]
+GOOD steps (specific & user-friendly): ["User sees the heading 'Create Account' and a form with Name, Email, and Password fields", "User fills in Name with 'Jane' and Email with 'jane@test.com' and clicks 'Sign Up'", "A confirmation message 'Account created' appears below the form", "User clicks 'Go to Dashboard' and the dashboard shows 'Welcome, Jane' in the header"]
+When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".
+
+IMPORTANT: In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state. Read the actual PAGE DATA above (titles, intents, elements) and assert against REAL content from those pages.`;
 }
