@@ -436,14 +436,32 @@ export default function TestDetail() {
 
       {/* ── Breadcrumb + toolbar ─────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        {/* Breadcrumb */}
+        {/* Breadcrumb: Project > Tests > Test Details (when project is known) */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text3)" }}>
-          <button
-            onClick={() => navigate("/tests")}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
-          >
-            Tests
-          </button>
+          {project ? (
+            <>
+              <button
+                onClick={() => navigate(`/projects/${test.projectId}`)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
+              >
+                {project.name}
+              </button>
+              <ChevronRight size={13} />
+              <button
+                onClick={() => navigate(`/projects/${test.projectId}`)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, fontSize: "0.82rem" }}
+              >
+                Tests
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => navigate("/tests")}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
+            >
+              Tests
+            </button>
+          )}
           <ChevronRight size={13} />
           <span style={{ color: "var(--text)" }}>Test Details</span>
         </div>
