@@ -185,14 +185,14 @@ router.post("/projects/:id/tests", (req, res) => {
 router.delete("/projects/:id/tests/:testId", (req, res) => {
   const db = getDb();
   const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
   const project = db.projects[req.params.id];
-  if (test) {
-    logActivity({
-      type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
-      testId: req.params.testId, testName: test.name,
-      detail: `Test deleted — "${test.name}"`,
-    });
-  }
+  logActivity({
+    type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
+    testId: req.params.testId, testName: test.name,
+    detail: `Test deleted — "${test.name}"`,
+  });
   delete db.tests[req.params.testId];
   res.json({ ok: true });
 });
