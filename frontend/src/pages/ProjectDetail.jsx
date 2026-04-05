@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, StopCircle,
+  RotateCcw, Info, StopCircle, Download, ChevronDown,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
@@ -79,6 +79,7 @@ export default function ProjectDetail() {
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // ── Highlight recently created tests ──────────────────────────────────────
   // Any test created within the last 5 minutes is "new" — works regardless of
@@ -300,6 +301,82 @@ export default function ProjectDetail() {
                 {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
                 Run Regression ({approvedTests.length})
               </button>
+              {/* Export dropdown */}
+              {tests.length > 0 && (
+                <div style={{ position: "relative" }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowExportMenu(v => !v)}
+                    style={{ gap: 4 }}
+                  >
+                    <Download size={13} /> Export <ChevronDown size={11} />
+                  </button>
+                  {showExportMenu && (
+                    <>
+                      <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowExportMenu(false)} />
+                      <div style={{
+                        position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 100,
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)", boxShadow: "var(--shadow)",
+                        minWidth: 220, padding: 4,
+                      }}>
+                        <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                          Export all {tests.length} tests
+                        </div>
+                        {[
+                          { label: "JUnit XML",     desc: "CI pipelines (Jenkins, GitHub Actions)", url: api.exportJUnitUrl(id) },
+                          { label: "Xray JSON",     desc: "Jira Xray test management",              url: api.exportXrayUrl(id) },
+                          { label: "TestRail CSV",   desc: "TestRail bulk import",                   url: api.exportTestRailUrl(id) },
+                        ].map(fmt => (
+                          <a
+                            key={fmt.label}
+                            href={fmt.url}
+                            download
+                            onClick={() => setShowExportMenu(false)}
+                            style={{
+                              display: "block", padding: "8px 12px", borderRadius: 6,
+                              textDecoration: "none", color: "var(--text)",
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "none"}
+                          >
+                            <div style={{ fontSize: "0.84rem", fontWeight: 500 }}>{fmt.label}</div>
+                            <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 1 }}>{fmt.desc}</div>
+                          </a>
+                        ))}
+                        {approvedTests.length > 0 && (
+                          <>
+                            <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                            <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                              Approved only ({approvedTests.length})
+                            </div>
+                            {[
+                              { label: "JUnit XML (approved)",   url: api.exportJUnitUrl(id, "approved") },
+                              { label: "Xray JSON (approved)",   url: api.exportXrayUrl(id, "approved") },
+                              { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(id, "approved") },
+                            ].map(fmt => (
+                              <a
+                                key={fmt.label}
+                                href={fmt.url}
+                                download
+                                onClick={() => setShowExportMenu(false)}
+                                style={{
+                                  display: "block", padding: "7px 12px", borderRadius: 6,
+                                  textDecoration: "none", color: "var(--text)", fontSize: "0.82rem",
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
+                                onMouseLeave={e => e.currentTarget.style.background = "none"}
+                              >
+                                {fmt.label}
+                              </a>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ width: "100%", minWidth: 300, maxWidth: 440 }}>
               <CrawlDialsPanel onChange={setCrawlDialsCfg} />

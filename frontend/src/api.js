@@ -84,6 +84,12 @@ export const api = {
   // URL reachability test (NewProject)
   testConnection: (url) => req("POST", "/test-connection", { url }),
 
+  // Export — returns download URLs (not JSON — use window.open or <a>)
+  exportJUnitUrl:    (projectId, status) => `${BASE}/projects/${projectId}/tests/export/junit${status ? `?status=${status}` : ""}`,
+  exportXrayUrl:     (projectId, status) => `${BASE}/projects/${projectId}/tests/export/xray${status ? `?status=${status}` : ""}`,
+  exportTestRailUrl: (projectId, status) => `${BASE}/projects/${projectId}/tests/export/testrail${status ? `?status=${status}` : ""}`,
+  getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
+
   // System info & data management
   getSystemInfo:   () => req("GET",    "/system"),
   clearRuns:       () => req("DELETE", "/data/runs"),
