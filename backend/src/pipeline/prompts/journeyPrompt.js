@@ -3,13 +3,15 @@
  *
  * Builds the AI prompt for generating end-to-end Playwright tests that span
  * multiple pages (e.g. Login → Dashboard → Action → Logout).
+ *
+ * Returns { system, user } for structured message support.
  */
 
 import { isLocalProvider } from "../../aiProvider.js";
-import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
+import { buildSystemPrompt, buildOutputSchemaBlock } from "./outputSchema.js";
 
-export function buildJourneyPrompt(journey, allSnapshots, { testCount = "auto" } = {}) {
+export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   const pageContexts = journey.pages.map(page => {
     const snapshot = allSnapshots[page.url];
@@ -28,9 +30,9 @@ export function buildJourneyPrompt(journey, allSnapshots, { testCount = "auto" }
   Key elements: ${JSON.stringify(elems, null, 2)}`;
   }).join("\n---");
 
-  return `You are a senior QA engineer generating comprehensive Playwright tests for a real user journey.
+  const firstUrl = journey.pages[0]?.url || "";
 
-JOURNEY: ${journey.name}
+  const user = `JOURNEY: ${journey.name}
 TYPE: ${journey.type}
 DESCRIPTION: ${journey.description}
 
@@ -42,34 +44,11 @@ ${resolveTestCountInstruction(testCount, local)} end-to-end Playwright tests cov
 Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
-3. ${SELF_HEALING_PROMPT_RULES}
-4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
-5. After every page.goto() call use { waitUntil: 'domcontentloaded' } — do NOT use waitForLoadState('networkidle') as many real-world sites (e.g. SPAs, e-commerce) fire continuous background requests and never reach networkidle, causing a 30 s timeout.
-6. Tests must represent REAL user goals and behaviors
-7. Negative tests should verify error messages and validation feedback
-8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL', { waitUntil: 'domcontentloaded', timeout: 30000 }) as the very first line inside the test function. Use the actual URL from the PAGE data above.
-9. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use the real page URL provided.
-10. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/dashboard/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures.
-11. STABILITY: After clicking a button or link that triggers navigation, wrap the click in Promise.all with page.waitForNavigation({ waitUntil: 'domcontentloaded' }) — e.g. await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). Never use waitForLoadState('networkidle') after a click — it times out on sites with background polling. For asserting dynamic content (search results, filters), use await page.waitForSelector('selector', { timeout: 15000 }) instead.
+3. Include at least 3 meaningful assertions per test that verify SPECIFIC VISIBLE CONTENT
+4. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('${firstUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 }). Use the actual URL from the PAGE data above — never a placeholder.
+5. Read the actual PAGE DATA above (titles, intents, elements) and assert against REAL content from those pages
 
-Return ONLY valid JSON (no markdown):
-{
-  "tests": [
-    {
-      "name": "descriptive journey test name",
-      "description": "what user goal this validates",
-      "priority": "high",
-      "type": "${journey.type.toLowerCase()}",
-      "scenario": "positive|negative|edge_case",
-      "journeyType": "${journey.type}",
-      "isJourneyTest": true,
-      "steps": ["User opens the login page", "User enters valid credentials and clicks Sign In", "Assert: user is redirected to the dashboard"],
-      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full journey code here\\n});"
-    }
-  ]
-}
+${buildOutputSchemaBlock({ isJourney: true, journeyType: journey.type })}`;
 
-IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
+  return { system: buildSystemPrompt(), user };
 }

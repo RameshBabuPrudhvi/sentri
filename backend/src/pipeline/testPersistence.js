@@ -10,6 +10,8 @@
  */
 
 import { generateTestId } from "../utils/idGenerator.js";
+import { getProviderName } from "../aiProvider.js";
+import { PROMPT_VERSION } from "./prompts/outputSchema.js";
 
 /**
  * Write validated test objects into db.tests and update the run record.
@@ -45,6 +47,13 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
       // All generated tests start as draft — humans must approve before regression
       reviewStatus: "draft",
       reviewedAt: null,
+      // Traceability — which prompt version and AI model produced this test
+      promptVersion: PROMPT_VERSION,
+      modelUsed: getProviderName(),
+      // Requirement traceability — linked Jira/issue key (set via API or Import Issue)
+      linkedIssueKey: t.linkedIssueKey || null,
+      // Tags for filtering and traceability matrix grouping
+      tags: Array.isArray(t.tags) ? t.tags : [],
     };
     run.tests.push(testId);
     createdTestIds.push(testId);

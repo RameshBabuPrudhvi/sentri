@@ -2,13 +2,17 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Play, Edit2, RefreshCw, Download,
-  CheckCircle2, XCircle, Clock, AlertCircle,
+  CheckCircle2, XCircle, Clock,
   ChevronRight, Calendar, User, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, Code2, GitMerge,
+  Link2, Tag,
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
+import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
+import { exportCsv } from "../utils/exportCsv.js";
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,20 +29,6 @@ function fmtDateTime(iso) {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
   return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function StatusBadge({ result }) {
-  if (!result)              return <span className="badge badge-gray"><Clock size={10} /> Not Run</span>;
-  if (result === "passed")  return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (result === "failed")  return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  if (result === "running") return <span className="badge badge-blue pulse">● Running</span>;
-  return <span className="badge badge-amber">{result}</span>;
-}
-
-function ReviewBadge({ status }) {
-  if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
-  if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
-  return <span className="badge badge-amber"><AlertCircle size={10} /> Draft Test</span>;
 }
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
@@ -187,6 +177,12 @@ export default function TestDetail() {
   const [editPriority, setEditPriority] = useState("medium");
   const [saving, setSaving]           = useState(false);
   const [editError, setEditError]     = useState(null);
+
+  // ── Traceability fields (inline editing) ──────────────────────────────────
+  const [editingIssueKey, setEditingIssueKey] = useState(false);
+  const [issueKeyDraft, setIssueKeyDraft]     = useState("");
+  const [editingTags, setEditingTags]         = useState(false);
+  const [tagsDraft, setTagsDraft]             = useState("");
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
@@ -348,69 +344,62 @@ export default function TestDetail() {
   function handleExport() {
     if (!test) return;
 
-    // Helper: wrap a value in double-quotes, escaping any inner double-quotes
-    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-
-    const steps = (test.steps || []).join(" | ");
     const projectName = project?.name || "";
     const projectUrl  = project?.url  || "";
+    const exportedAt  = new Date().toISOString();
+    const steps       = (test.steps || []).length > 0 ? test.steps : [""];
 
-    // ── Header row ──
-    const headers = [
-      "Test ID", "Name", "Description", "Type", "Priority",
-      "Review Status", "Source URL", "Steps", "Last Result",
-      "Last Run At", "Created At", "Project Name", "Project URL",
-      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At",
-      "Exported At",
-    ];
-
-    const exportedAt = new Date().toISOString();
     const runHistory = runs.slice(0, 20).map(run => {
       const result = run.results?.find(r => r.testId === testId);
       return {
-        runId: run.id,
-        status: result?.status || run.status,
+        runId:      run.id,
+        status:     result?.status || run.status,
         durationMs: result?.durationMs ?? "",
-        startedAt: run.startedAt || "",
+        startedAt:  run.startedAt || "",
       };
     });
 
-    // Build one row per run-history entry; if no runs, emit a single row
-    const baseFields = [
-      esc(test.id),
-      esc(test.name),
-      esc(test.description || ""),
-      esc(test.type || ""),
-      esc(test.priority || "medium"),
-      esc(test.reviewStatus || "draft"),
-      esc(test.sourceUrl || ""),
-      esc(steps),
-      esc(test.lastResult || ""),
-      esc(test.lastRunAt || ""),
-      esc(test.createdAt || ""),
-      esc(projectName),
-      esc(projectUrl),
+    // Industry standard: Test ID | Name | Description | Step # | Step |
+    // Project | Priority | Type | Review Status | Status | Last Run At |
+    // Created At | Source URL | Journey | Run ID | Run Status | Duration (ms) | Run Started At | Exported At
+    const headers = [
+      "Test ID", "Name", "Description", "Step #", "Step",
+      "Project", "Priority", "Type", "Review Status",
+      "Status", "Last Run At", "Created At", "Source URL", "Journey",
+      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At", "Exported At",
     ];
 
-    const rows = [headers.map(esc).join(",")];
-    if (runHistory.length === 0) {
-      rows.push([...baseFields, esc(""), esc(""), esc(""), esc(""), esc(exportedAt)].join(","));
-    } else {
-      for (const rh of runHistory) {
+    const rows = [];
+    steps.forEach((step, stepIdx) => {
+      // Repeat run history per step row — if no runs, emit one row per step
+      const runs_ = runHistory.length > 0 ? runHistory : [null];
+      runs_.forEach((rh, rhIdx) => {
         rows.push([
-          ...baseFields,
-          esc(rh.runId), esc(rh.status), esc(rh.durationMs), esc(rh.startedAt),
-          esc(exportedAt),
-        ].join(","));
-      }
-    }
+          stepIdx === 0 && rhIdx === 0 ? test.id                                    : "",
+          stepIdx === 0 && rhIdx === 0 ? cleanTestName(test.name)                   : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.description || "")                   : "",
+          step ? stepIdx + 1 : "",
+          step || "",
+          stepIdx === 0 && rhIdx === 0 ? projectName                                : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.priority || "medium")                : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.type || "")                          : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.reviewStatus || "draft")             : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.lastResult || "")                    : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.lastRunAt || "")                     : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.createdAt || "")                     : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.sourceUrl || projectUrl || "")       : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.isJourneyTest ? "Yes" : "No")        : "",
+          rh ? rh.runId      : "",
+          rh ? rh.status     : "",
+          rh ? rh.durationMs : "",
+          rh ? rh.startedAt  : "",
+          stepIdx === 0 && rhIdx === 0 ? exportedAt : "",
+        ]);
+      });
+    });
 
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    const filename = `sentri-test-${cleanTestName(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    exportCsv(headers, rows, filename);
   }
 
   async function handleRunTest() {
@@ -447,14 +436,32 @@ export default function TestDetail() {
 
       {/* ── Breadcrumb + toolbar ─────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        {/* Breadcrumb */}
+        {/* Breadcrumb: Project > Tests > Test Details (when project is known) */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text3)" }}>
-          <button
-            onClick={() => navigate("/tests")}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
-          >
-            Tests
-          </button>
+          {project ? (
+            <>
+              <button
+                onClick={() => navigate(`/projects/${test.projectId}`)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
+              >
+                {project.name}
+              </button>
+              <ChevronRight size={13} />
+              <button
+                onClick={() => navigate(`/projects/${test.projectId}`)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, fontSize: "0.82rem" }}
+              >
+                Tests
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => navigate("/tests")}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
+            >
+              Tests
+            </button>
+          )}
           <ChevronRight size={13} />
           <span style={{ color: "var(--text)" }}>Test Details</span>
         </div>
@@ -750,31 +757,56 @@ export default function TestDetail() {
                   No steps defined for this test.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {test.steps.map((step, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: "flex", alignItems: "flex-start", gap: 16,
-                        padding: "12px 0",
-                        borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
-                      }}
-                    >
-                      <div style={{
-                        width: 26, height: 26, borderRadius: 6,
-                        background: "var(--bg2)", border: "1px solid var(--border)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "0.75rem", fontWeight: 700, color: "var(--text2)",
-                        flexShrink: 0, marginTop: 1,
-                      }}>
-                        {idx + 1}
-                      </div>
-                      <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
-                        {step}
-                      </span>
+                (() => {
+                  const bdd = isBddTest(test.steps);
+                  const gherkinKw = /^(Given|When|Then|And|But)\b/i;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {test.steps.map((step, idx) => {
+                        const trimmed = (step || "").trim();
+                        const kwMatch = bdd ? trimmed.match(gherkinKw) : null;
+                        const keyword = kwMatch ? kwMatch[1] : null;
+                        const rest = keyword ? trimmed.slice(keyword.length) : trimmed;
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              display: "flex", alignItems: "flex-start", gap: 16,
+                              padding: "12px 0",
+                              borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                            }}
+                          >
+                            <div style={{
+                              width: 26, height: 26, borderRadius: 6,
+                              background: bdd ? "var(--accent-bg)" : "var(--bg2)",
+                              border: bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: "0.75rem", fontWeight: 700,
+                              color: bdd ? "var(--accent)" : "var(--text2)",
+                              flexShrink: 0, marginTop: 1,
+                            }}>
+                              {idx + 1}
+                            </div>
+                            <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                              {keyword ? (
+                                <>
+                                  <span style={{
+                                    fontWeight: 700, color: "var(--accent)",
+                                    fontFamily: "var(--font-mono)", fontSize: "0.82rem",
+                                    letterSpacing: "0.01em",
+                                  }}>
+                                    {keyword}
+                                  </span>
+                                  {rest}
+                                </>
+                              ) : step}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()
               )
             )}
 
@@ -1288,19 +1320,123 @@ export default function TestDetail() {
           {/* Type */}
           {test.type && (
             <InfoRow label="Type">
-              <span className="badge badge-blue">{test.type}</span>
+              <span className={`badge ${testTypeBadgeClass(test.type)}`}>
+                {testTypeLabel(test.type)}
+              </span>
             </InfoRow>
           )}
 
           {/* Tags */}
-          {(test.isJourneyTest || test.scenario) && (
+          {(test.isJourneyTest || test.scenario || isBddTest(test.steps)) && (
             <InfoRow label="Tags">
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {test.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                {test.scenario === "positive"  && <span className="badge badge-green">Positive</span>}
-                {test.scenario === "negative"  && <span className="badge badge-red">Negative</span>}
-                {test.scenario === "edge_case" && <span className="badge badge-amber">Edge Case</span>}
+                <ScenarioBadges test={test} isBddTest={isBddTest} />
               </div>
+            </InfoRow>
+          )}
+
+          {/* Linked Issue */}
+          <InfoRow label="Linked Issue" icon={<Link2 size={14} />}>
+            {editingIssueKey ? (
+              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                <input
+                  className="input"
+                  value={issueKeyDraft}
+                  onChange={e => setIssueKeyDraft(e.target.value)}
+                  placeholder="PROJ-123"
+                  style={{ height: 28, fontSize: "0.78rem", flex: 1, fontFamily: "var(--font-mono)" }}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); });
+                    }
+                    if (e.key === "Escape") setEditingIssueKey(false);
+                  }}
+                />
+                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                  onClick={() => api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); })}>
+                  <Save size={10} />
+                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingIssueKey(false)}>
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                {test.linkedIssueKey ? (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+                    {test.linkedIssueKey}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Not linked</span>
+                )}
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginLeft: "auto", padding: "2px 6px" }}
+                  onClick={() => { setIssueKeyDraft(test.linkedIssueKey || ""); setEditingIssueKey(true); }}
+                >
+                  <Edit2 size={10} />
+                </button>
+              </div>
+            )}
+          </InfoRow>
+
+          {/* Tags */}
+          <InfoRow label="Tags" icon={<Tag size={14} />}>
+            {editingTags ? (
+              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                <input
+                  className="input"
+                  value={tagsDraft}
+                  onChange={e => setTagsDraft(e.target.value)}
+                  placeholder="smoke, regression, login"
+                  style={{ height: 28, fontSize: "0.78rem", flex: 1 }}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
+                      api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                    }
+                    if (e.key === "Escape") setEditingTags(false);
+                  }}
+                />
+                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                  onClick={() => {
+                    const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
+                    api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                  }}>
+                  <Save size={10} />
+                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingTags(false)}>
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, flexWrap: "wrap" }}>
+                {(test.tags || []).length > 0 ? (
+                  test.tags.map((tag, i) => (
+                    <span key={i} className="badge badge-gray" style={{ fontSize: "0.7rem" }}>{tag}</span>
+                  ))
+                ) : (
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>No tags</span>
+                )}
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginLeft: "auto", padding: "2px 6px" }}
+                  onClick={() => { setTagsDraft((test.tags || []).join(", ")); setEditingTags(true); }}
+                >
+                  <Edit2 size={10} />
+                </button>
+              </div>
+            )}
+          </InfoRow>
+
+          {/* Prompt version / model (read-only, shown if available) */}
+          {test.promptVersion && (
+            <InfoRow label="Generated by">
+              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                {test.modelUsed || "AI"} · prompt v{test.promptVersion}
+              </span>
             </InfoRow>
           )}
 

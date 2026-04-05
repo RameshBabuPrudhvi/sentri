@@ -15,6 +15,7 @@
 
 import { emitRunEvent } from "../routes/sse.js";
 import { logActivity } from "./activityLogger.js";
+import { saveDb } from "../db.js";
 
 // ─── Abort registry: runId → AbortController ──────────────────────────────────
 // Allows in-progress crawl / generate / test_run operations to be cancelled.
@@ -30,6 +31,10 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       if (run.status !== "aborted") {
         onSuccess?.(result);
       }
+      // Persist completed run (results, pass/fail counts, duration, feedback
+      // loop improvements). Without this, a crash before the 30s periodic
+      // flush restores the run as "interrupted" with all results gone.
+      saveDb();
     })
     .catch((err) => {
       runAbortControllers.delete(runId);
@@ -39,5 +44,6 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       run.finishedAt = new Date().toISOString();
       logActivity({ ...onFailActivity(err), status: "failed" });
       emitRunEvent(runId, "done", { status: "failed" });
+      saveDb(); // persist failed status so it isn't misreported as "interrupted"
     });
 }

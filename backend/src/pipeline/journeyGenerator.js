@@ -24,7 +24,7 @@ import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces 5-8 crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function generateUserRequestedTest(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
   const text = onToken
     ? await streamText(prompt, onToken, { signal })
@@ -49,7 +49,7 @@ export async function generateUserRequestedTest(name, description, appUrl, onTok
 /**
  * generateJourneyTest(journey, snapshotsByUrl) → array of test objects or []
  */
-export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   try {
     const prompt = withDials(buildJourneyPrompt(journey, snapshotsByUrl, { testCount }), dialsPrompt);
     const text = await generateText(prompt, { signal });
@@ -68,7 +68,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
 /**
  * generateIntentTests(classifiedPage, snapshot) → Array of test objects
  */
-export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function generateIntentTests(classifiedPage, snapshot, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   try {
     const prompt = withDials(buildIntentPrompt(classifiedPage, snapshot, { testCount }), dialsPrompt);
     const text = await generateText(prompt, { signal });
@@ -90,7 +90,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
  * Orchestrates full test generation: journeys first, then per-page intent tests.
  * ALL pages get comprehensive tests — not just high-priority ones.
  */
-export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const allTests = [];
 
   // 1. Generate journey tests (highest value — multi-page flows)

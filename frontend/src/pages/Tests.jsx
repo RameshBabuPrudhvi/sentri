@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Search, Plus, X, CheckCircle2, XCircle, Clock,
+  Search, Download, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
   AlertCircle, ArrowUpDown, Trash2,
   ThumbsUp, ThumbsDown,
@@ -13,6 +13,9 @@ import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
+import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
+import { exportCsv } from "../utils/exportCsv.js";
+import { StatusBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -50,13 +53,6 @@ function relativeTime(dateStr) {
     }
   }
   return "—";
-}
-
-function StatusBadge({ result }) {
-  if (!result) return <span className="badge badge-gray"><Clock size={10} /> Not run</span>;
-  if (result === "passed") return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (result === "failed") return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  return <span className="badge badge-amber">{result}</span>;
 }
 
 
@@ -299,6 +295,9 @@ export default function Tests() {
         if (sortCol === "status") { av = a.lastResult || ""; bv = b.lastResult || ""; }
         else if (sortCol === "lastRun") { av = a.lastRunAt || ""; bv = b.lastRunAt || ""; }
         else if (sortCol === "project") { av = projMap[a.projectId]?.name || ""; bv = projMap[b.projectId]?.name || ""; }
+        else if (sortCol === "reviewStatus") { av = a.reviewStatus || "draft"; bv = b.reviewStatus || "draft"; }
+        else if (sortCol === "type") { av = a.type || ""; bv = b.type || ""; }
+        else if (sortCol === "priority") { av = a.priority || "medium"; bv = b.priority || "medium"; }
         else { av = ""; bv = ""; }
         const cmp = av < bv ? -1 : av > bv ? 1 : 0;
         return sortDir === "asc" ? cmp : -cmp;
@@ -478,6 +477,57 @@ export default function Tests() {
     return () => window.removeEventListener("keydown", handler);
   }, [selected, filtered]);
 
+  // ── Export filtered tests to CSV (fetches full test details including steps) ──
+  const [exportLoading, setExportLoading] = useState(false);
+
+  async function handleExportCSV() {
+    if (filtered.length === 0) return;
+    setExportLoading(true);
+    try {
+      // Fetch full test details for each filtered test so we get the steps array.
+      // We batch with Promise.allSettled so a single failure doesn't abort the export.
+      const fullTests = await Promise.allSettled(
+        filtered.map(t => api.getTest(t.id))
+      );
+
+      const headers = [
+        "Test ID", "Name", "Description", "Step #", "Step",
+        "Project", "Priority", "Type", "Review Status",
+        "Status", "Last Run At", "Created At", "Source URL", "Journey",
+      ];
+
+      const rows = [];
+      fullTests.forEach((result, idx) => {
+        const t = result.status === "fulfilled" ? result.value : filtered[idx];
+        const steps = Array.isArray(t.steps) && t.steps.length > 0 ? t.steps : [""];
+        steps.forEach((step, stepIdx) => {
+          rows.push([
+            stepIdx === 0 ? t.id : "",
+            stepIdx === 0 ? cleanTestName(t.name) : "",
+            stepIdx === 0 ? (t.description || "") : "",
+            step ? stepIdx + 1 : "",
+            step || "",
+            stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
+            stepIdx === 0 ? (t.priority || "medium") : "",
+            stepIdx === 0 ? (t.type || "") : "",
+            stepIdx === 0 ? (t.reviewStatus || "draft") : "",
+            stepIdx === 0 ? (t.lastResult || "") : "",
+            stepIdx === 0 ? (t.lastRunAt || "") : "",
+            stepIdx === 0 ? (t.createdAt || "") : "",
+            stepIdx === 0 ? (t.sourceUrl || "") : "",
+            stepIdx === 0 ? (t.isJourneyTest ? "Yes" : "No") : "",
+          ]);
+        });
+      });
+
+      exportCsv(headers, rows, `sentri-tests-${new Date().toISOString().slice(0, 10)}.csv`);
+    } catch (err) {
+      console.error("CSV export failed:", err);
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
   const quickActions = [
     {
       icon: <Sparkles size={16} />,
@@ -516,11 +566,13 @@ export default function Tests() {
           </p>
         </div>
         <button
-          className="btn btn-primary btn-sm"
-          onClick={() => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true)}
-          title={projects.length === 0 ? "Create a project first" : undefined}
+          className="btn btn-ghost btn-sm"
+          onClick={handleExportCSV}
+          disabled={filtered.length === 0 || exportLoading}
+          title={filtered.length === 0 ? "No tests to export" : `Export ${filtered.length} filtered test${filtered.length !== 1 ? "s" : ""} as CSV (includes test steps)`}
         >
-          <Plus size={14} /> New Test
+          {exportLoading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+          {exportLoading ? "Exporting…" : "Export CSV"}
         </button>
       </div>
 
@@ -746,10 +798,12 @@ export default function Tests() {
                   </th>
                   <th>Test ID</th>
                   <th>Test Name</th>
+                  <SortHeader col="project">Project</SortHeader>
+                  <SortHeader col="priority">Priority</SortHeader>
+                  <SortHeader col="type">Type</SortHeader>
+                  <SortHeader col="reviewStatus">Review</SortHeader>
                   <SortHeader col="status">Status</SortHeader>
                   <SortHeader col="lastRun">Last Run</SortHeader>
-                  <SortHeader col="project">Project</SortHeader>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -783,14 +837,11 @@ export default function Tests() {
                                 {t.description}
                               </div>
                             )}
+                            <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                              <ScenarioBadges test={t} isBddTest={isBddTest} />
+                            </div>
                           </div>
                         </div>
-                      </td>
-                      <td><StatusBadge result={t.lastResult} /></td>
-                      <td>
-                        <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
-                          {relativeTime(t.lastRunAt)}
-                        </span>
                       </td>
                       <td>
                         {projMap[t.projectId] && (
@@ -804,13 +855,36 @@ export default function Tests() {
                         )}
                       </td>
                       <td>
+                        {t.priority === "high"
+                          ? <span className="badge badge-red">High</span>
+                          : t.priority === "low"
+                            ? <span className="badge badge-gray">Low</span>
+                            : t.priority
+                              ? <span className="badge badge-gray" style={{ textTransform: "capitalize" }}>{t.priority}</span>
+                              : null}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {t.type && (
+                            <span className={`badge ${testTypeBadgeClass(t.type)}`}>
+                              {testTypeLabel(t.type, true)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                           {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
+                          {t.reviewStatus === "approved" && <span className="badge badge-green">Approved</span>}
                           {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
-                          {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
-                          {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
-                          {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
-                          {/* Row hover actions */}
+                        </div>
+                      </td>
+                      <td><StatusBadge result={t.lastResult} /></td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
+                            {relativeTime(t.lastRunAt)}
+                          </span>
                           {isHovered && (
                             <div style={{ display: "flex", gap: 4, marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
                               <button className="btn btn-ghost btn-xs" title="Run test" onClick={e => runSingleTest(e, t.id)} disabled={actionLoading === t.id}>

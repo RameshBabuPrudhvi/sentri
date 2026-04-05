@@ -1,14 +1,20 @@
 /**
- * feedbackLoop.js — Layer 5: Analyze run results and improve failing tests
+ * feedbackLoop.js — Layer 5: Analyze run results, track failure patterns, improve tests
  *
  * Pipeline: generate → run → analyze → improve → rerun
  *
  * Failure categories:
  *   SELECTOR_ISSUE    — element not found, locator broke
- *   WEAK_ASSERTION    — test passed but assertion was too loose
- *   FLAKY             — passed sometimes, failed sometimes
+ *   ASSERTION_FAIL    — assertion value mismatch
  *   NAVIGATION_FAIL   — page didn't load or wrong URL
  *   TIMEOUT           — element wait exceeded timeout
+ *   URL_MISMATCH      — toHaveURL assertion failed (redirect/CAPTCHA)
+ *   UNKNOWN           — unclassified failure
+ *
+ * Quality analytics (P3):
+ *   - Failure breakdown by category, test type, prompt version, assertion pattern
+ *   - Flaky test detection across run history
+ *   - Actionable insights for prompt improvement
  */
 
 import { generateText, parseJSON } from "../aiProvider.js";
@@ -24,6 +30,11 @@ const FAILURE_PATTERNS = {
     /waiting for locator/i,
     /element handle is not attached/i,
     /strict mode violation/i,
+  ],
+  URL_MISMATCH: [
+    /toHaveURL.*received/i,
+    /expected.*toHaveURL.*received/i,
+    /page\.url\(\).*not.*match/i,
   ],
   NAVIGATION_FAIL: [
     /net::ERR/i,
@@ -53,6 +64,17 @@ export function classifyFailure(errorMessage) {
   return "UNKNOWN";
 }
 
+// ── Assertion pattern extraction ──────────────────────────────────────────────
+// Extracts which Playwright assertion method caused the failure so we can
+// track which assertion types are most fragile across runs.
+
+const ASSERTION_METHOD_RE = /\.(toHaveURL|toHaveTitle|toBeVisible|toContainText|toHaveText|toHaveValue|toBeEnabled|toBeDisabled|toHaveCount|toBeChecked)\b/i;
+
+function extractFailedAssertionMethod(errorMessage) {
+  const match = (errorMessage || "").match(ASSERTION_METHOD_RE);
+  return match ? match[1] : null;
+}
+
 // ── Flakiness detection ───────────────────────────────────────────────────────
 
 export function detectFlakiness(testHistory) {
@@ -60,6 +82,115 @@ export function detectFlakiness(testHistory) {
   if (testHistory.length < 2) return false;
   const statuses = new Set(testHistory);
   return statuses.has("passed") && statuses.has("failed");
+}
+
+/**
+ * detectFlakyTests(db, projectId) → Map<testId, flakyInfo>
+ *
+ * Scans all run results for a project and identifies tests that have both
+ * passed and failed across different runs.
+ */
+export function detectFlakyTests(db, projectId) {
+  const testResults = new Map(); // testId → { passes, fails }
+
+  for (const run of Object.values(db.runs || {})) {
+    if (run.projectId !== projectId || !run.results) continue;
+    for (const result of run.results) {
+      if (!testResults.has(result.testId)) {
+        testResults.set(result.testId, { passes: 0, fails: 0 });
+      }
+      const entry = testResults.get(result.testId);
+      if (result.status === "passed") entry.passes++;
+      if (result.status === "failed") entry.fails++;
+    }
+  }
+
+  const flakyTests = new Map();
+  for (const [testId, { passes, fails }] of testResults) {
+    if (passes > 0 && fails > 0) {
+      const test = db.tests[testId];
+      const total = passes + fails;
+      flakyTests.set(testId, {
+        testId,
+        name: test?.name || "Unknown",
+        passCount: passes,
+        failCount: fails,
+        flakyRate: Math.round((Math.min(passes, fails) / total) * 100),
+      });
+    }
+  }
+
+  return flakyTests;
+}
+
+// ── Quality analytics ────────────────────────────────────────────────────────
+// Correlates failures with test metadata (type, promptVersion, modelUsed,
+// assertion patterns) to produce actionable insights for prompt improvement.
+
+/**
+ * buildQualityAnalytics(improvements, testMap) → analytics object
+ *
+ * Produces a structured breakdown of failures for the run record.
+ */
+export function buildQualityAnalytics(improvements, testMap) {
+  const byCategory = {};
+  const byType = {};
+  const byPromptVersion = {};
+  const byModel = {};
+  const failedAssertionMethods = {};
+
+  for (const imp of improvements) {
+    const t = imp.test;
+
+    // By failure category
+    byCategory[imp.failureCategory] = (byCategory[imp.failureCategory] || 0) + 1;
+
+    // By test type
+    const type = t.type || "unknown";
+    byType[type] = (byType[type] || 0) + 1;
+
+    // By prompt version
+    const pv = t.promptVersion || "unknown";
+    byPromptVersion[pv] = (byPromptVersion[pv] || 0) + 1;
+
+    // By AI model
+    const model = t.modelUsed || "unknown";
+    byModel[model] = (byModel[model] || 0) + 1;
+
+    // By assertion method that failed
+    const method = extractFailedAssertionMethod(imp.errorMessage);
+    if (method) {
+      failedAssertionMethods[method] = (failedAssertionMethods[method] || 0) + 1;
+    }
+  }
+
+  // Generate actionable insights
+  const insights = [];
+  if (byCategory.URL_MISMATCH > 0) {
+    insights.push(`${byCategory.URL_MISMATCH} test(s) failed on URL assertions — consider switching to content-based assertions (toBeVisible, toContainText) instead of toHaveURL.`);
+  }
+  if (byCategory.SELECTOR_ISSUE > 0) {
+    insights.push(`${byCategory.SELECTOR_ISSUE} test(s) failed on selectors — the AI may be generating CSS selectors instead of using self-healing helpers (safeClick, safeFill, safeExpect).`);
+  }
+  if (byCategory.TIMEOUT > 0) {
+    insights.push(`${byCategory.TIMEOUT} test(s) timed out — likely using waitForLoadState('networkidle') or insufficient timeouts. Check for SPA-heavy pages.`);
+  }
+  if (failedAssertionMethods.toHaveURL > 0) {
+    const maxMethod = Object.entries(failedAssertionMethods).sort((a, b) => b[1] - a[1])[0];
+    const qualifier = maxMethod && maxMethod[0] === "toHaveURL" ? "the most fragile" : "a fragile";
+    insights.push(`toHaveURL is ${qualifier} assertion (${failedAssertionMethods.toHaveURL} failure${failedAssertionMethods.toHaveURL !== 1 ? "s" : ""}). Prefer asserting visible page content over URL patterns.`);
+  }
+  }
+
+  return {
+    byCategory,
+    byType,
+    byPromptVersion,
+    byModel,
+    failedAssertionMethods,
+    insights,
+    totalFailures: improvements.length,
+  };
 }
 
 // ── Improvement prompt builder ────────────────────────────────────────────────
@@ -73,18 +204,26 @@ Rewrite using more resilient selectors:
 - Add .first() to avoid strict mode violations
 - Avoid nth-child, position-based selectors`,
 
+    URL_MISMATCH: `The test failed because a toHaveURL() assertion didn't match the actual URL.
+Real-world sites redirect unpredictably (CAPTCHAs, consent pages, geo-redirects, login walls).
+Fix by:
+- REMOVE the toHaveURL() assertion entirely
+- Replace it with a CONTENT assertion: await expect(page.getByText('expected heading')).toBeVisible()
+- If you must check the URL, use the LOOSEST hostname-only regex: await expect(page).toHaveURL(/example\\.com/i)
+- NEVER match on path segments or query params`,
+
     NAVIGATION_FAIL: `The test failed due to navigation issues.
 Fix by:
-- Adding proper waitUntil: 'networkidle' or 'domcontentloaded'
+- Using { waitUntil: 'domcontentloaded' } instead of 'networkidle'
 - Adding a retry mechanism for page.goto()
 - Checking the URL is correct and accessible`,
 
     TIMEOUT: `The test timed out waiting for elements.
 Fix by:
 - Increasing timeout: { timeout: 30000 }
-- Waiting for network idle before assertions
-- Using waitForSelector before interactions
-- Adding page.waitForLoadState()`,
+- Using await page.waitForSelector('selector', { timeout: 15000 }) before assertions
+- Using { waitUntil: 'domcontentloaded' } after navigation — NEVER use 'networkidle'
+- Adding await page.waitForLoadState('domcontentloaded') after page.goto()`,
 
     ASSERTION_FAIL: `The assertion failed - the actual value didn't match expected.
 Fix by:
@@ -124,7 +263,7 @@ Return ONLY valid JSON (no markdown):
   "name": "improved test name",
   "description": "what was fixed and why",
   "priority": "${test.priority || "medium"}",
-  "type": "${test.type || "visibility"}",
+  "type": "${test.type || "functional"}",
   "steps": ["step 1", "step 2"],
   "playwrightCode": "full improved playwright test code"
 }`;
@@ -140,6 +279,10 @@ Return ONLY valid JSON (no markdown):
 export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
   const improvements = [];
   const stats = { total: 0, passed: 0, failed: 0, flaky: 0, needsRegeneration: 0 };
+
+  // High-priority categories that should be auto-fixed — these are almost always
+  // prompt-quality issues rather than real application bugs.
+  const HIGH_PRIORITY_CATEGORIES = new Set(["SELECTOR_ISSUE", "URL_MISMATCH", "TIMEOUT"]);
 
   for (const result of runResults) {
     stats.total++;
@@ -163,7 +306,8 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
         failureCategory,
         errorMessage: result.error,
         snapshot,
-        priority: failureCategory === "SELECTOR_ISSUE" ? "high" : "medium",
+        assertionMethod: extractFailedAssertionMethod(result.error),
+        priority: HIGH_PRIORITY_CATEGORIES.has(failureCategory) ? "high" : "medium",
       });
       stats.needsRegeneration++;
     }
@@ -215,7 +359,7 @@ export async function regenerateFailingTest(improvement, signal) {
  * Accepts an optional AbortSignal so long-running AI calls can be cancelled.
  */
 export async function applyFeedbackLoop(run, db, { signal } = {}) {
-  if (!run.results?.length) return { improved: 0, skipped: 0 };
+  if (!run.results?.length) return { improved: 0, skipped: 0, analytics: null };
 
   // Build lookup maps
   const testMap = {};
@@ -231,6 +375,20 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
 
   const { improvements, stats } = analyzeRunResults(run.results, testMap, snapshotsByUrl);
 
+  // Build quality analytics — correlate failures with prompt version, model, type
+  const analytics = buildQualityAnalytics(improvements, testMap);
+
+  // Detect flaky tests across all runs for this project
+  const projectId = run.projectId;
+  if (projectId) {
+    const flakyTests = detectFlakyTests(db, projectId);
+    analytics.flakyTests = Array.from(flakyTests.values());
+    stats.flaky = flakyTests.size;
+  }
+
+  // Store analytics on the run record so the frontend can display them
+  run.qualityAnalytics = analytics;
+
   let improved = 0;
   for (const improvement of improvements) {
     if (improvement.priority !== "high") continue; // Only auto-fix high priority failures
@@ -242,5 +400,5 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
     }
   }
 
-  return { improved, skipped: improvements.length - improved, stats };
+  return { improved, skipped: improvements.length - improved, stats, analytics };
 }

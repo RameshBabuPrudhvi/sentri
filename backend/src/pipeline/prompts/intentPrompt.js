@@ -4,11 +4,15 @@
  * Builds the AI prompt for generating Playwright tests based on the
  * classified intent of a single page (AUTH, SEARCH, CHECKOUT, etc.)
  * and its interactive elements.
+ *
+ * Returns { system, user } for structured message support.
+ * System message: persona, rules, schema (from outputSchema.js)
+ * User message: page data, elements, scenario hints, page-specific rules
  */
 
 import { isLocalProvider } from "../../aiProvider.js";
-import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
+import { buildSystemPrompt, buildOutputSchemaBlock } from "./outputSchema.js";
 
 // ── Scenario hints per page type ─────────────────────────────────────────────
 
@@ -84,7 +88,7 @@ function buildScenarioHints(testCountInstr) {
 
 // ── Main prompt builder ──────────────────────────────────────────────────────
 
-export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "auto" } = {}) {
+export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500).
   // Cloud models get the full element data for richer test generation.
@@ -110,16 +114,14 @@ export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "auto"
   const scenarioHints = buildScenarioHints(testCountInstr);
   const hints = scenarioHints[pageType] || scenarioHints.NAVIGATION;
 
-  return `You are a senior QA engineer. Generate comprehensive Playwright tests based on REAL user behavior patterns.
-Every test must simulate a REAL USER ACTION (click, navigate, fill, scroll) and verify the OUTCOME — do NOT generate tests that only check whether elements exist on the page.
-
-PAGE: ${snapshot.url}
-TITLE: ${snapshot.title}
-DOMINANT INTENT: ${pageType}
-FORMS ON PAGE: ${snapshot.forms}
-H1 TEXT: ${snapshot.h1 || "none"}
-DESCRIPTION: ${snapshot.metaDescription || "none"}
-HEADINGS: ${JSON.stringify(snapshot.headings || [], null, 2)}
+  const user = `PAGE DATA:
+  URL: ${snapshot.url}
+  Title: ${snapshot.title}
+  Dominant intent: ${pageType}
+  Forms on page: ${snapshot.forms}
+  H1: ${snapshot.h1 || "none"}
+  Description: ${snapshot.metaDescription || "none"}
+  Headings: ${JSON.stringify(snapshot.headings || [], null, 2)}
 
 CLASSIFIED INTERACTIVE ELEMENTS:
 ${JSON.stringify(elements, null, 2)}
@@ -130,35 +132,10 @@ ${hints}
 STRICT RULES:
 1. ${testCountInstr} — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
-3. ${SELF_HEALING_PROMPT_RULES}
-4. Every test MUST have at least 2 strong assertions
-5. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
-6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
-7. Skip tests for: footer, social icons, cookie banners — but DO test primary navigation links and CTAs that lead to real user flows
-8. Tests must be independent — no shared state between tests
-9. For NEGATIVE tests: assert the actual error message or validation indicator is visible
-10. Only test elements/behaviors that ACTUALLY exist for this type of page
-11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
-12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
-13. STABILITY: For URL assertions use regex patterns or toContainText — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
-14. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites (Amazon, etc.) continuously fire background requests and never reach networkidle, causing a guaranteed 30 s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content that loads after interaction (search results, filtered lists, modal contents), use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.
+3. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
+4. Read the actual PAGE DATA above (title, headings, elements) and assert against REAL content from that page
 
-Return ONLY valid JSON (no markdown, no code fences):
-{
-  "tests": [
-    {
-      "name": "descriptive name that includes what scenario (positive/negative) is tested",
-      "description": "specific user goal or failure scenario being validated",
-      "priority": "high|medium",
-      "type": "${classifiedPage.dominantIntent.toLowerCase()}",
-      "scenario": "positive|negative|edge_case",
-      "steps": ["User opens the page", "User clicks a link or button to perform an action", "Assert: expected page or content is displayed"],
-      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});"
-    }
-  ]
-}
+${buildOutputSchemaBlock()}`;
 
-IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
+  return { system: buildSystemPrompt(), user };
 }

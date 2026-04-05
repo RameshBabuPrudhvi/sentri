@@ -50,7 +50,7 @@ function setStep(run, step) {
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "auto", signal }) {
+export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
@@ -100,7 +100,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   return createdTestIds;
 }
 
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "auto", signal } = {}) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const runStart = Date.now();
 
   // ── Step 1: Smart crawl ─────────────────────────────────────────────────
@@ -142,10 +142,15 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
   }
 
-  // Journey detection
-  const journeys = buildUserJourneys(classifiedPages);
+  // Journey detection — pass snapshotsByUrl so link-graph analysis can discover
+  // cross-intent journeys (e.g. pricing → signup → dashboard)
+  const journeys = buildUserJourneys(classifiedPages, snapshotsByUrl);
   if (journeys.length > 0) {
-    log(run, `🗺️  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
+    log(run, `🗺️  Detected ${journeys.length} user journey(s):`);
+    for (const j of journeys) {
+      const via = j._discoveredBy ? ` [${j._discoveredBy}]` : "";
+      log(run, `   • ${j.name} (${j.pages.length} pages)${via}`);
+    }
   }
 
   throwIfAborted(signal);

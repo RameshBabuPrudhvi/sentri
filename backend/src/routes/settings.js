@@ -92,6 +92,10 @@ router.post("/settings", (req, res) => {
 // DELETE /api/settings/:provider — remove a key or deactivate local provider
 router.delete("/settings/:provider", (req, res) => {
   const { provider } = req.params;
+  const validProviders = ["anthropic", "openai", "google", "local"];
+  if (!validProviders.includes(provider)) {
+    return res.status(400).json({ error: `provider must be one of: ${validProviders.join(", ")}` });
+  }
 
   if (provider === "local") {
     setRuntimeOllama({ baseUrl: "", model: "", disabled: true });

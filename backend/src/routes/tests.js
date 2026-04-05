@@ -14,6 +14,7 @@ import { hasProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateSingleTest } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
+import { buildJUnitXml, buildXrayJson, buildTestRailCsv } from "../utils/exportFormats.js";
 
 const router = Router();
 
@@ -43,11 +44,14 @@ router.patch("/tests/:testId", async (req, res) => {
   const test = db.tests[req.params.testId];
   if (!test) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode, playwrightCode } = req.body;
+  const { steps, name, description, priority, regenerateCode, playwrightCode, linkedIssueKey, tags } = req.body;
 
   if (typeof name === "string")        test.name        = name.trim();
   if (typeof description === "string") test.description = description.trim();
   if (typeof priority === "string")    test.priority    = priority;
+  // Traceability fields
+  if (typeof linkedIssueKey === "string") test.linkedIssueKey = linkedIssueKey.trim() || null;
+  if (Array.isArray(tags)) test.tags = tags.map(t => String(t).trim()).filter(Boolean);
   if (typeof playwrightCode === "string") {
     if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
       test.playwrightCodePrev = test.playwrightCode;
@@ -124,6 +128,8 @@ Return ONLY valid JSON with no markdown fences:
       : "Test metadata updated",
   });
 
+  saveDb(); // user edits must survive crashes — don't rely on the 30s interval
+
   const response = { ...test };
   if (regenerateCode && !codeRegeneratedNow) {
     response._codeStale = true;
@@ -160,9 +166,15 @@ router.post("/projects/:id/tests", (req, res) => {
     isJourneyTest: false,
     reviewStatus: "draft",
     reviewedAt: null,
+    // Match shape of AI-generated tests so all pipeline stages work uniformly
+    promptVersion: null,
+    modelUsed: null,
+    linkedIssueKey: null,
+    tags: [],
   };
 
   db.tests[testId] = test;
+  saveDb();
 
   logActivity({
     type: "test.create", projectId: project.id, projectName: project.name,
@@ -176,15 +188,16 @@ router.post("/projects/:id/tests", (req, res) => {
 router.delete("/projects/:id/tests/:testId", (req, res) => {
   const db = getDb();
   const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
   const project = db.projects[req.params.id];
-  if (test) {
-    logActivity({
-      type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
-      testId: req.params.testId, testName: test.name,
-      detail: `Test deleted — "${test.name}"`,
-    });
-  }
+  logActivity({
+    type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
+    testId: req.params.testId, testName: test.name,
+    detail: `Test deleted — "${test.name}"`,
+  });
   delete db.tests[req.params.testId];
+  saveDb();
   res.json({ ok: true });
 });
 
@@ -198,15 +211,40 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
   const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  const cleanDescription = (description || "").trim();
+  // Sanitise name: strip prompt-injection markers (same regex as description/customInstructions)
+  const cleanName = name.trim()
+    .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
+    .replace(/```/g, "")
+    .trim();
+  if (!cleanName) return res.status(400).json({ error: "name is required" });
+
+  // ── Prompt guardrails ────────────────────────────────────────────────────
+  // Cap description at 50 KB to prevent context window overflow.
+  // The frontend caps total attachments at 45 KB, leaving headroom for the
+  // user's typed description. 50 KB of text is ~12K tokens.
+  const MAX_DESCRIPTION_LENGTH = 50_000;
+  const rawDescription = (description || "").trim();
+  if (rawDescription.length > MAX_DESCRIPTION_LENGTH) {
+    return res.status(400).json({
+      error: `Description is too long (${Math.round(rawDescription.length / 1000)}KB). Maximum is ${MAX_DESCRIPTION_LENGTH / 1000}KB. Try removing large attachments.`,
+    });
+  }
+
+  // Sanitise description: strip prompt-injection markers the same way
+  // testDials.js sanitises customInstructions. Attachment content from the
+  // frontend is concatenated into this field, so it's the main free-text vector.
+  const cleanDescription = rawDescription
+    .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
+    .replace(/```/g, "")
+    .trim();
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedGenDials = resolveDialsConfig(dialsConfig);
-  // Default to "single" for the generate endpoint (user-requested tests)
+  // Default to "one" for the generate endpoint (user-requested tests)
   // to preserve the original contract of generating exactly 1 test.
-  // The crawl endpoint defaults to "auto" which generates 5-8 tests per page.
-  // Use strict equality — "auto" is truthy so `|| "single"` would never trigger.
+  // The crawl endpoint defaults to "ai_decides" which generates 5-8 tests per page.
+  // Use strict equality — "ai_decides" is truthy so `|| "one"` would never trigger.
   const rawTestCount = validatedGenDials?.testCount;
-  const testCount = (rawTestCount && rawTestCount !== "auto") ? rawTestCount : "single";
+  const testCount = (rawTestCount && rawTestCount !== "ai_decides") ? rawTestCount : "one";
 
   if (!hasProvider()) {
     return res.status(503).json({
@@ -224,20 +262,33 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     logs: [],
     tests: [],
     pagesFound: 0,
-    generateInput: { name: name.trim(), description: cleanDescription },
+    generateInput: { name: cleanName, description: cleanDescription },
+    // Prompt audit trail — stored on every run for compliance, debugging, cost attribution
+    promptAudit: {
+      descriptionLength: cleanDescription.length,
+      dialsConfigSummary: validatedGenDials ? {
+        approach: validatedGenDials.approach,
+        testCount: validatedGenDials.testCount,
+        format: validatedGenDials.format,
+        perspectives: validatedGenDials.perspectives?.length || 0,
+        quality: validatedGenDials.quality?.length || 0,
+        hasCustomInstructions: !!(validatedGenDials.customInstructions),
+      } : null,
+      requestedAt: new Date().toISOString(),
+    },
   };
   db.runs[runId] = run;
 saveDb();
   logActivity({
     type: "test.generate", projectId: project.id, projectName: project.name,
-    detail: `Test generation pipeline started for "${name.trim()}"`, status: "running",
+    detail: `Test generation pipeline started for "${cleanName}"`, status: "running",
   });
 
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
     (signal) => generateSingleTest(project, run, db, {
-      name: name.trim(),
+      name: cleanName,
       description: cleanDescription,
       dialsPrompt,
       testCount,
@@ -246,11 +297,11 @@ saveDb();
     {
       onSuccess: (createdTestIds) => logActivity({
         type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${name.trim()}"`,
+        detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${cleanName}"`,
       }),
       onFailActivity: (err) => ({
         type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation failed for "${name.trim()}" — ${err.message}`,
+        detail: `Test generation failed for "${cleanName}" — ${err.message}`,
       }),
     },
   );
@@ -321,6 +372,7 @@ router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -337,6 +389,7 @@ router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -353,6 +406,7 @@ router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test restored to draft — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -379,6 +433,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
         detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
       });
     }
+    saveDb();
     return res.json({ deleted: deleted.length, tests: deleted });
   }
 
@@ -399,7 +454,104 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
   }
+  saveDb();
   res.json({ updated: updated.length, tests: updated });
+});
+
+// ─── Export endpoints — enterprise test management integration ────────────────
+
+// GET /api/projects/:id/tests/export/junit — JUnit XML for CI pipelines
+router.get("/projects/:id/tests/export/junit", (req, res) => {
+  const db = getDb();
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  // Optional filter: ?status=approved to export only approved tests
+  const status = req.query.status;
+  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
+
+  const xml = buildJUnitXml(filtered, { suiteName: project.name, projectUrl: project.url });
+  res.setHeader("Content-Type", "application/xml");
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-tests.xml"`);
+  res.send(xml);
+});
+
+// GET /api/projects/:id/tests/export/xray — Xray JSON for Jira import
+router.get("/projects/:id/tests/export/xray", (req, res) => {
+  const db = getDb();
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  const status = req.query.status;
+  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
+
+  // Extract project key from linked issues or use project name as fallback
+  const projectKey = filtered.find(t => t.linkedIssueKey)?.linkedIssueKey?.split("-")[0] || "PROJ";
+  const json = buildXrayJson(filtered, { projectKey });
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-xray.json"`);
+  res.send(json);
+});
+
+// GET /api/projects/:id/tests/export/testrail — TestRail CSV for bulk import
+router.get("/projects/:id/tests/export/testrail", (req, res) => {
+  const db = getDb();
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  const status = req.query.status;
+  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
+
+  const csv = buildTestRailCsv(filtered);
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-testrail.csv"`);
+  res.send(csv);
+});
+
+// GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)
+router.get("/projects/:id/tests/traceability", (req, res) => {
+  const db = getDb();
+  const project = db.projects[req.params.id];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+
+  // Group tests by linked issue key
+  const byIssue = {};
+  const unlinked = [];
+  for (const t of tests) {
+    const entry = {
+      testId: t.id,
+      name: t.name,
+      type: t.type,
+      priority: t.priority,
+      scenario: t.scenario,
+      reviewStatus: t.reviewStatus,
+      lastResult: t.lastResult,
+      lastRunAt: t.lastRunAt,
+      promptVersion: t.promptVersion,
+      tags: t.tags || [],
+    };
+    if (t.linkedIssueKey) {
+      if (!byIssue[t.linkedIssueKey]) byIssue[t.linkedIssueKey] = [];
+      byIssue[t.linkedIssueKey].push(entry);
+    } else {
+      unlinked.push(entry);
+    }
+  }
+
+  res.json({
+    projectId: project.id,
+    projectName: project.name,
+    totalTests: tests.length,
+    linkedIssues: Object.keys(byIssue).length,
+    unlinkedTests: unlinked.length,
+    matrix: byIssue,
+    unlinked,
+  });
 });
 
 export default router;

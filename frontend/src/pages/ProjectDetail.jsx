@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
+  Search, Play, Trash2, ArrowRight, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, Shield, AlertCircle, StopCircle,
+  RotateCcw, Info, StopCircle, Download, ChevronDown, Link2,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
@@ -11,22 +11,8 @@ import { loadSavedConfig } from "../utils/testDialsStorage.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
-
-function StatusBadge({ s }) {
-  if (!s) return <span className="badge badge-gray">Not run</span>;
-  if (s === "passed")    return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (s === "failed")    return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  if (s === "running")   return <span className="badge badge-blue pulse">● Running</span>;
-  if (s === "completed") return <span className="badge badge-green">✓ Completed</span>;
-  if (s === "aborted")   return <span className="badge badge-gray"><Ban size={10} /> Aborted</span>;
-  return <span className="badge badge-gray">{s}</span>;
-}
-
-function ReviewBadge({ status }) {
-  if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
-  if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
-  return <span className="badge badge-amber"><AlertCircle size={10} /> Draft</span>;
-}
+import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -69,6 +55,9 @@ function Toast({ msg, type, visible, onViewRun, runId }) {
   );
 }
 
+// Tests created within this window are considered "new" and highlighted.
+const NEW_TEST_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -88,6 +77,44 @@ export default function ProjectDetail() {
   const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
   const PAGE_SIZE = 50;
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
+  const [showNewBadges, setShowNewBadges] = useState(true);
+  const [now, setNow] = useState(Date.now);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [traceability, setTraceability]     = useState(null);
+  const [traceLoading, setTraceLoading]     = useState(false);
+
+  // ── Highlight recently created tests ──────────────────────────────────────
+  // Any test created within the last 5 minutes is "new" — works regardless of
+  // how the user navigated here (breadcrumbs, back button, direct link, etc.)
+  const newTestIds = useMemo(() => {
+    if (!showNewBadges) return new Set();
+    const cutoff = now - NEW_TEST_THRESHOLD_MS;
+    const ids = new Set();
+    for (const t of tests) {
+      if (t.createdAt && new Date(t.createdAt).getTime() > cutoff) {
+        ids.add(t.id);
+      }
+    }
+    return ids;
+  }, [tests, showNewBadges, now]);
+
+  // Auto-expire "NEW" badges: tick `now` every 60s so the useMemo re-evaluates
+  // and drops tests that have aged past the 5-minute threshold.
+  useEffect(() => {
+    if (!showNewBadges) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [showNewBadges]);
+
+  // Fetch traceability data when the tab is first switched to "traceability".
+  // Previously this was an IIFE inside the render body which violated React's
+  // rule against calling setState during render and caused duplicate API calls
+  // in concurrent mode.
+  useEffect(() => {
+    if (tab !== "traceability" || traceability || traceLoading) return;
+    setTraceLoading(true);
+    api.getTraceability(id).then(setTraceability).catch(() => {}).finally(() => setTraceLoading(false));
+  }, [tab, traceability, traceLoading, id]);
 
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
@@ -228,11 +255,12 @@ export default function ProjectDetail() {
       t.name?.toLowerCase().includes(search.toLowerCase()) ||
       t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
     return statusOk && searchOk;
+  }).sort((a, b) => {
+    // Newest first — so tests from the latest generation run appear at the top
+    const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return db - da;
   });
-
-  const regressionTests = approvedTests.filter(t =>
-    !search || t.name?.toLowerCase().includes(search.toLowerCase())
-  );
 
   // Paginate review tab (50 per page)
   const reviewTotalPages = Math.max(1, Math.ceil(filteredByReview.length / PAGE_SIZE));
@@ -285,6 +313,82 @@ export default function ProjectDetail() {
                 {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
                 Run Regression ({approvedTests.length})
               </button>
+              {/* Export dropdown */}
+              {tests.length > 0 && (
+                <div style={{ position: "relative" }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowExportMenu(v => !v)}
+                    style={{ gap: 4 }}
+                  >
+                    <Download size={13} /> Export <ChevronDown size={11} />
+                  </button>
+                  {showExportMenu && (
+                    <>
+                      <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowExportMenu(false)} />
+                      <div style={{
+                        position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 100,
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)", boxShadow: "var(--shadow)",
+                        minWidth: 220, padding: 4,
+                      }}>
+                        <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                          Export all {tests.length} tests
+                        </div>
+                        {[
+                          { label: "JUnit XML",     desc: "CI pipelines (Jenkins, GitHub Actions)", url: api.exportJUnitUrl(id) },
+                          { label: "Xray JSON",     desc: "Jira Xray test management",              url: api.exportXrayUrl(id) },
+                          { label: "TestRail CSV",   desc: "TestRail bulk import",                   url: api.exportTestRailUrl(id) },
+                        ].map(fmt => (
+                          <a
+                            key={fmt.label}
+                            href={fmt.url}
+                            download
+                            onClick={() => setShowExportMenu(false)}
+                            style={{
+                              display: "block", padding: "8px 12px", borderRadius: 6,
+                              textDecoration: "none", color: "var(--text)",
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "none"}
+                          >
+                            <div style={{ fontSize: "0.84rem", fontWeight: 500 }}>{fmt.label}</div>
+                            <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 1 }}>{fmt.desc}</div>
+                          </a>
+                        ))}
+                        {approvedTests.length > 0 && (
+                          <>
+                            <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                            <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                              Approved only ({approvedTests.length})
+                            </div>
+                            {[
+                              { label: "JUnit XML (approved)",   url: api.exportJUnitUrl(id, "approved") },
+                              { label: "Xray JSON (approved)",   url: api.exportXrayUrl(id, "approved") },
+                              { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(id, "approved") },
+                            ].map(fmt => (
+                              <a
+                                key={fmt.label}
+                                href={fmt.url}
+                                download
+                                onClick={() => setShowExportMenu(false)}
+                                style={{
+                                  display: "block", padding: "7px 12px", borderRadius: 6,
+                                  textDecoration: "none", color: "var(--text)", fontSize: "0.82rem",
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
+                                onMouseLeave={e => e.currentTarget.style.background = "none"}
+                              >
+                                {fmt.label}
+                              </a>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ width: "100%", minWidth: 300, maxWidth: 440 }}>
               <CrawlDialsPanel onChange={setCrawlDialsCfg} />
@@ -349,15 +453,15 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* Draft-pending reminder */}
-      {draftTests.length > 0 && tab !== "runs" && (
+      {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
+      {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
         <div style={{ marginBottom: 16, padding: "10px 16px", background: "var(--amber-bg)", border: "1px solid #fcd34d", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
           <Info size={14} color="var(--amber)" style={{ flexShrink: 0 }} />
           <span style={{ fontSize: "0.82rem", color: "#92400e" }}>
             <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
           </span>
           <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto", flexShrink: 0 }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
-            Review <ArrowRight size={11} />
+            Review drafts <ArrowRight size={11} />
           </button>
         </div>
       )}
@@ -365,9 +469,9 @@ export default function ProjectDetail() {
       {/* Tabs */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 14 }}>
         {[
-          ["review",     "Generated Tests (Review Required)"],
-          ["regression", `Regression Suite (${approvedTests.length})`],
-          ["runs",       `Runs (${runs.length})`],
+          ["review", `Tests (${tests.length})`],
+          ["runs",   `Runs (${runs.length})`],
+          ["traceability", "Traceability"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             background: "none", border: "none", cursor: "pointer",
@@ -388,6 +492,27 @@ export default function ProjectDetail() {
       {/* ── GENERATED TESTS / REVIEW TAB ── */}
       {tab === "review" && (
         <div>
+          {/* New tests banner — only show on draft or all filter (new tests are always drafts) */}
+          {newTestIds.size > 0 && (reviewFilter === "draft" || reviewFilter === "all") && (
+            <div style={{
+              marginBottom: 14, padding: "10px 16px",
+              background: "var(--green-bg)", border: "1px solid #86efac",
+              borderRadius: 10, display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ fontSize: "1rem" }}>✨</span>
+              <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
+                <strong>{newTestIds.size} new test{newTestIds.size !== 1 ? "s" : ""}</strong> generated — review and approve to add to regression.
+              </span>
+              <button
+                className="btn btn-ghost btn-xs"
+                style={{ marginLeft: "auto", flexShrink: 0 }}
+                onClick={() => setShowNewBadges(false)}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {tests.length === 0 ? (
             <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
@@ -460,10 +585,10 @@ export default function ProjectDetail() {
                         </th>
                         <th>Test ID</th>
                         <th>Test Name</th>
-                        <th>Review Status</th>
+                        <th>Status</th>
+                        <th>Review</th>
+                        <th>Type</th>
                         <th>Confidence</th>
-                        <th>Source Page</th>
-                        <th>Generated</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -471,8 +596,12 @@ export default function ProjectDetail() {
                       {pagedReview.map(t => {
                         const rs = t.reviewStatus || "draft";
                         const isSelected = selected.has(t.id);
+                        const isNew = newTestIds.has(t.id);
                         return (
-                          <tr key={t.id} style={{ background: isSelected ? "var(--accent-bg)" : undefined }}>
+                          <tr key={t.id} style={{
+                            background: isSelected ? "var(--accent-bg)" : isNew ? "rgba(34,197,94,0.06)" : undefined,
+                            transition: "background 0.3s",
+                          }}>
                             <td style={{ paddingRight: 0 }}>
                               <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
                                 style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
@@ -486,29 +615,33 @@ export default function ProjectDetail() {
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <AgentTag type="TA" />
                                 <div>
-                                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</span>
+                                    {isNew && (
+                                      <span style={{
+                                        fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px",
+                                        borderRadius: 4, background: "var(--green)", color: "#fff",
+                                        letterSpacing: "0.03em", lineHeight: 1.5,
+                                      }}>NEW</span>
+                                    )}
+                                  </div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
                                   <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                                    {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                                    {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
-                                    {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
-                                    {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                                    <ScenarioBadges test={t} isBddTest={isBddTest} />
                                   </div>
                                 </div>
                               </div>
                             </td>
+                            <td><StatusBadge s={t.lastResult} /></td>
                             <td><ReviewBadge status={rs} /></td>
-                            <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
                             <td>
-                              <span style={{ fontSize: "0.73rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
-                                {t.sourceUrl ? t.sourceUrl.replace(/^https?:\/\/[^/]+/, "") || "/" : "—"}
-                              </span>
+                              {t.type && (
+                                <span className={`badge ${testTypeBadgeClass(t.type)}`}>
+                                  {testTypeLabel(t.type, true)}
+                                </span>
+                              )}
                             </td>
-                            <td>
-                              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                                {t.createdAt ? new Date(t.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                              </span>
-                            </td>
+                            <td><ConfBar score={t.qualityScore != null ? Math.min(100, Math.round(t.qualityScore)) : null} /></td>
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                                 {rs === "draft" && (
@@ -556,96 +689,6 @@ export default function ProjectDetail() {
                   </div>
                 </div>
               )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── REGRESSION SUITE TAB ── */}
-      {tab === "regression" && (
-        <div>
-          <div style={{ marginBottom: 14, padding: "10px 16px", background: "var(--green-bg)", border: "1px solid #86efac", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
-            <Shield size={14} color="var(--green)" style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
-              Only <strong>approved tests</strong> appear here. Draft and rejected tests cannot enter regression.
-            </span>
-          </div>
-
-          {approvedTests.length === 0 ? (
-            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
-              <Shield size={32} style={{ opacity: 0.2, marginBottom: 12 }} />
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>No approved tests yet</div>
-              <div style={{ fontSize: "0.875rem", marginBottom: 16 }}>Review and approve generated tests to populate this suite.</div>
-              <button className="btn btn-primary btn-sm" onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
-                Go to review queue <ArrowRight size={13} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <div style={{ position: "relative" }}>
-                  <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
-                  <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="Search regression tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 220 }} />
-                </div>
-                <div style={{ flex: 1 }} />
-                <button className="btn btn-primary btn-sm" onClick={doRun} disabled={!!actionLoading}>
-                  {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-                  Run All ({approvedTests.length})
-                </button>
-              </div>
-              <div className="card">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Test ID</th><th>Test Name</th><th>Last Result</th><th>Type</th><th>Priority</th><th>Confidence</th><th>Last Run</th><th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regressionTests.map(t => (
-                      <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.id}`)}>
-                        <td>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
-                            {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <AgentTag type="TA" />
-                            <div>
-                              <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
-                              <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                                {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                                {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
-                                {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
-                                {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td><StatusBadge s={t.lastResult} /></td>
-                        <td><span className="badge badge-gray">{t.type || "—"}</span></td>
-                        <td>
-                          <span className={`badge ${t.priority === "high" ? "badge-red" : t.priority === "medium" ? "badge-amber" : "badge-gray"}`}>
-                            {t.priority || "—"}
-                          </span>
-                        </td>
-                        <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
-                        <td>
-                          <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                            {t.lastRunAt ? new Date(t.lastRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn btn-ghost btn-xs" onClick={e => { e.stopPropagation(); reviewOne(t.id, "restore"); }} title="Move back to Draft">
-                            <RotateCcw size={11} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </>
           )}
         </div>
@@ -719,6 +762,162 @@ export default function ProjectDetail() {
                   })}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* ── TRACEABILITY TAB ── */}
+      {tab === "traceability" && (
+        <div>
+          {traceLoading && (
+            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+              <RefreshCw size={20} className="spin" style={{ opacity: 0.3, marginBottom: 12 }} />
+              <div>Loading traceability matrix…</div>
+            </div>
+          )}
+
+          {traceability && (
+            <>
+              {/* Summary stats */}
+              <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+                {[
+                  { label: "Total tests",    val: traceability.totalTests,   color: "var(--text)" },
+                  { label: "Linked issues",   val: traceability.linkedIssues, color: "var(--accent)" },
+                  { label: "Unlinked tests",  val: traceability.unlinkedTests, color: traceability.unlinkedTests > 0 ? "var(--amber)" : "var(--green)" },
+                ].map((s, i) => (
+                  <div key={i} className="card" style={{ padding: "16px 20px", flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val}</div>
+                    <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Linked issues matrix */}
+              {Object.keys(traceability.matrix || {}).length > 0 && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Link2 size={15} color="var(--accent)" />
+                    <h3 style={{ fontWeight: 700, fontSize: "0.95rem", margin: 0 }}>Requirement → Test Coverage</h3>
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Issue Key</th>
+                        <th>Tests</th>
+                        <th>Types</th>
+                        <th>Status</th>
+                        <th>Last Result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(traceability.matrix).map(([issueKey, issueTests]) => (
+                        <tr key={issueKey}>
+                          <td>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: "var(--accent)", fontWeight: 600 }}>
+                              {issueKey}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              {issueTests.map(t => (
+                                <span
+                                  key={t.testId}
+                                  style={{ fontSize: "0.78rem", color: "var(--text)", cursor: "pointer" }}
+                                  onClick={() => navigate(`/tests/${t.testId}`)}
+                                >
+                                  {t.name}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              {[...new Set(issueTests.map(t => t.type).filter(Boolean))].map(type => (
+                                <span key={type} className={`badge ${testTypeBadgeClass(type)}`} style={{ fontSize: "0.65rem" }}>
+                                  {testTypeLabel(type, true)}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              {[...new Set(issueTests.map(t => t.reviewStatus))].map(rs => (
+                                <ReviewBadge key={rs} status={rs} />
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              {[...new Set(issueTests.map(t => t.lastResult).filter(Boolean))].map(r => (
+                                <StatusBadge key={r} s={r} />
+                              ))}
+                              {issueTests.every(t => !t.lastResult) && <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Not run</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Unlinked tests */}
+              {traceability.unlinked?.length > 0 && (
+                <div className="card">
+                  <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: 8 }}>
+                    <Info size={15} color="var(--amber)" />
+                    <h3 style={{ fontWeight: 700, fontSize: "0.95rem", margin: 0 }}>
+                      Unlinked Tests ({traceability.unlinked.length})
+                    </h3>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text3)", marginLeft: 8 }}>
+                      These tests aren't linked to any requirement — link them via Test Detail to improve coverage visibility.
+                    </span>
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Test Name</th>
+                        <th>Type</th>
+                        <th>Priority</th>
+                        <th>Review</th>
+                        <th>Last Result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {traceability.unlinked.slice(0, 20).map(t => (
+                        <tr key={t.testId} style={{ cursor: "pointer" }} onClick={() => navigate(`/tests/${t.testId}`)}>
+                          <td style={{ fontSize: "0.82rem" }}>{t.name}</td>
+                          <td>
+                            {t.type && <span className={`badge ${testTypeBadgeClass(t.type)}`} style={{ fontSize: "0.65rem" }}>{testTypeLabel(t.type, true)}</span>}
+                          </td>
+                          <td>
+                            <span className={`badge ${t.priority === "high" ? "badge-red" : "badge-gray"}`} style={{ fontSize: "0.65rem" }}>
+                              {t.priority || "medium"}
+                            </span>
+                          </td>
+                          <td><ReviewBadge status={t.reviewStatus} /></td>
+                          <td><StatusBadge s={t.lastResult} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {traceability.unlinked.length > 20 && (
+                    <div style={{ padding: "10px 20px", fontSize: "0.78rem", color: "var(--text3)", textAlign: "center" }}>
+                      Showing 20 of {traceability.unlinked.length} unlinked tests
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Empty state */}
+              {Object.keys(traceability.matrix || {}).length === 0 && traceability.unlinked?.length === 0 && (
+                <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+                  <Link2 size={32} style={{ opacity: 0.2, marginBottom: 12 }} />
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>No traceability data yet</div>
+                  <div style={{ fontSize: "0.875rem" }}>Link tests to Jira issues in the Test Detail page to build your requirement → test → result matrix.</div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

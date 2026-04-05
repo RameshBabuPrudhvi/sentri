@@ -32,7 +32,7 @@ router.post("/", (req, res) => {
     detail: `Project created — "${name}" (${url})`,
   });
 
-  res.json(project);
+  res.status(201).json(project);
 });
 
 router.get("/", (req, res) => {
