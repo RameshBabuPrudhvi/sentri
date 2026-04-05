@@ -124,7 +124,7 @@ Return ONLY valid JSON (no markdown):
   "name": "improved test name",
   "description": "what was fixed and why",
   "priority": "${test.priority || "medium"}",
-  "type": "${test.type || "visibility"}",
+  "type": "${test.type || "functional"}",
   "steps": ["step 1", "step 2"],
   "playwrightCode": "full improved playwright test code"
 }`;

@@ -4,11 +4,15 @@
  * Builds the AI prompt for generating Playwright tests based on the
  * classified intent of a single page (AUTH, SEARCH, CHECKOUT, etc.)
  * and its interactive elements.
+ *
+ * Returns { system, user } for structured message support.
+ * System message: persona, rules, schema (from outputSchema.js)
+ * User message: page data, elements, scenario hints, page-specific rules
  */
 
 import { isLocalProvider } from "../../aiProvider.js";
-import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
+import { buildSystemPrompt, buildOutputSchemaBlock } from "./outputSchema.js";
 
 // ── Scenario hints per page type ─────────────────────────────────────────────
 
@@ -110,16 +114,14 @@ export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_de
   const scenarioHints = buildScenarioHints(testCountInstr);
   const hints = scenarioHints[pageType] || scenarioHints.NAVIGATION;
 
-  return `You are a senior QA engineer. Generate comprehensive Playwright tests based on REAL user behavior patterns.
-Every test must simulate a REAL USER ACTION (click, navigate, fill, scroll) and verify the OUTCOME — do NOT generate tests that only check whether elements exist on the page.
-
-PAGE: ${snapshot.url}
-TITLE: ${snapshot.title}
-DOMINANT INTENT: ${pageType}
-FORMS ON PAGE: ${snapshot.forms}
-H1 TEXT: ${snapshot.h1 || "none"}
-DESCRIPTION: ${snapshot.metaDescription || "none"}
-HEADINGS: ${JSON.stringify(snapshot.headings || [], null, 2)}
+  const user = `PAGE DATA:
+  URL: ${snapshot.url}
+  Title: ${snapshot.title}
+  Dominant intent: ${pageType}
+  Forms on page: ${snapshot.forms}
+  H1: ${snapshot.h1 || "none"}
+  Description: ${snapshot.metaDescription || "none"}
+  Headings: ${JSON.stringify(snapshot.headings || [], null, 2)}
 
 CLASSIFIED INTERACTIVE ELEMENTS:
 ${JSON.stringify(elements, null, 2)}
@@ -130,50 +132,10 @@ ${hints}
 STRICT RULES:
 1. ${testCountInstr} — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
-3. ${SELF_HEALING_PROMPT_RULES}
-4. Every test MUST have at least 2 strong assertions that verify SPECIFIC VISIBLE CONTENT on the page (exact text, element count, field value) — not just that "a page loaded" or "an element exists"
-5. STRONG assertions (preferred): toBeVisible() on elements found by specific text/role, toContainText('exact text'), toHaveValue('specific value'), toBeEnabled(), toHaveCount(N). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 13) — never with path or query patterns.
-6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
-7. Skip tests for: footer, social icons, cookie banners — but DO test primary navigation links and CTAs that lead to real user flows
-8. Tests must be independent — no shared state between tests
-9. For NEGATIVE tests: assert the actual error message or validation indicator is visible
-10. Only test elements/behaviors that ACTUALLY exist for this type of page
-11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
-12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
-13. STABILITY — URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs like /sorry, consent pages, geo-redirects, login walls, URL-encoded params like %3F instead of ?). Instead: (a) PREFER asserting visible page CONTENT — e.g. await expect(page.getByText('Search results')).toBeVisible() — over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/google\\.com/i) — never match on path segments or query params that may be rewritten. (c) For search flows, assert that results appeared on the page (visible text, result count, a result link) rather than checking the URL contains the query string.
-14. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites (Amazon, etc.) continuously fire background requests and never reach networkidle, causing a guaranteed 30 s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content that loads after interaction (search results, filtered lists, modal contents), use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.
+3. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
+4. Read the actual PAGE DATA above (title, headings, elements) and assert against REAL content from that page
 
-Return ONLY valid JSON (no markdown, no code fences):
-{
-  "tests": [
-    {
-      "name": "descriptive name that includes what scenario (positive/negative) is tested",
-      "description": "specific user goal or failure scenario being validated",
-      "priority": "high|medium",
-      "type": "functional|smoke|regression|e2e|integration|accessibility|security|performance",
-      "scenario": "positive|negative|edge_case",
-      "steps": ["User opens the page and sees the main heading and navigation", "User clicks the primary call-to-action button", "The next view loads and the expected heading or confirmation text is visible", "User verifies key content is present — e.g. a list of items, a form, or a success message"],
-      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});"
-    }
-  ]
-}
+${buildOutputSchemaBlock()}`;
 
-IMPORTANT: "type" must be one of these industry-standard test types — pick the best match:
-  - "functional"     — verifies a specific feature works as expected
-  - "smoke"          — quick sanity check of critical paths
-  - "regression"     — confirms existing functionality after a change
-  - "e2e"            — end-to-end flow spanning multiple pages/steps
-  - "integration"    — verifies interactions between components or APIs
-  - "accessibility"  — WCAG compliance, keyboard nav, screen readers
-  - "security"       — auth, permissions, input sanitisation
-  - "performance"    — load times, responsiveness, resource usage
-If unsure, use "functional".
-
-IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
-Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result — never write vague steps like "page loads successfully" or "URL reflects the section".
-BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed", "The form works correctly"]
-GOOD steps (specific & user-friendly): ["User sees the heading 'Create Account' and a form with Name, Email, and Password fields", "User fills in Name with 'Jane' and Email with 'jane@test.com' and clicks 'Sign Up'", "A confirmation message 'Account created' appears below the form", "The form fields are cleared and a 'Go to Dashboard' link is visible"]
-When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".
-
-IMPORTANT: In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state. Read the actual PAGE DATA above (title, headings, elements) and assert against REAL content from that page.`;
+  return { system: buildSystemPrompt(), user };
 }
