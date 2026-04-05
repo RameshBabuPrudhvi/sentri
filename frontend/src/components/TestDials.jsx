@@ -365,66 +365,77 @@ export default function TestDials({ onChange }) {
         ))}
       </Section>
 
-      {/* ⑦ Language + Extra options */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {/* Output language */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            <Globe size={14} color="var(--text3)" />
-            <span className="dial-label">Language</span>
-          </div>
-          <div style={{ position: "relative" }}>
-            <select
-              value={cfg.language}
-              onChange={e => update({ language: e.target.value })}
-              style={{
-                width: "100%", padding: "8px 10px",
-                border: "1px solid var(--border)", borderRadius: "var(--radius)",
-                background: "var(--bg2)", color: "var(--text)",
-                fontSize: "0.85rem", cursor: "pointer", appearance: "none",
-              }}
-            >
-              {LANGUAGES.map(l => (
-                <option key={l.code} value={l.code}>{l.label}</option>
-              ))}
-            </select>
-            <ChevronDown size={12} color="var(--text3)" style={{
-              position: "absolute", right: 10, top: "50%",
-              transform: "translateY(-50%)", pointerEvents: "none",
-            }} />
-          </div>
+      {/* ⑦ Extra options */}
+      <Section
+        icon={<Settings2 size={15} />}
+        label="Extra options"
+        subtitle={
+          Object.values(cfg.options || {}).filter(Boolean).length > 0
+            ? `${Object.values(cfg.options).filter(Boolean).length} on`
+            : "None"
+        }
+        defaultOpen={false}
+      >
+        <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginBottom: 6,
+          display: "flex", alignItems: "center", gap: 6 }}>
+          <Info size={11} /> Additional output tweaks — each adds detail to the generated tests.
         </div>
+        {OPTION_TOGGLES.map(t => (
+          <label key={t.id} style={{ display: "flex", alignItems: "flex-start",
+            gap: 10, cursor: "pointer", padding: "3px 0" }}>
+            <input
+              type="checkbox"
+              checked={cfg.options?.[t.id] ?? false}
+              onChange={() => toggleOption(t.id)}
+              style={{ marginTop: 3, accentColor: "var(--accent)", cursor: "pointer",
+                width: 14, height: 14 }}
+            />
+            <div>
+              <div style={{ fontSize: "0.85rem", color: "var(--text)",
+                fontWeight: cfg.options?.[t.id] ? 500 : 400 }}>
+                {t.label}
+              </div>
+              <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 1 }}>
+                {t.desc}
+              </div>
+            </div>
+          </label>
+        ))}
+      </Section>
 
-        {/* Extra options — compact toggle list */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            <Settings2 size={14} color="var(--text3)" />
-            <span className="dial-label">Extra options</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {OPTION_TOGGLES.map(t => (
-              <Tooltip key={t.id} text={t.desc}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8,
-                  cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={cfg.options?.[t.id] ?? false}
-                    onChange={() => toggleOption(t.id)}
-                    style={{ accentColor: "var(--accent)", width: 13, height: 13,
-                      cursor: "pointer" }}
-                  />
-                  <span style={{ fontSize: "0.78rem", color: "var(--text2)",
-                    lineHeight: 1.4 }}>
-                    {t.label}
-                  </span>
-                </label>
-              </Tooltip>
+      {/* ⑧ Output language */}
+      <div style={{
+        borderRadius: "var(--radius)", border: "1px solid var(--border)",
+        background: "var(--surface)", padding: "12px 16px",
+        display: "flex", alignItems: "center", gap: 12,
+      }}>
+        <Globe size={15} color="var(--text3)" style={{ flexShrink: 0 }} />
+        <span style={{ fontSize: "0.875rem", fontWeight: 500, color: "var(--text)", flexShrink: 0 }}>
+          Language
+        </span>
+        <div style={{ position: "relative", flex: 1 }}>
+          <select
+            value={cfg.language}
+            onChange={e => update({ language: e.target.value })}
+            style={{
+              width: "100%", padding: "7px 28px 7px 10px",
+              border: "1px solid var(--border)", borderRadius: "var(--radius)",
+              background: "var(--bg2)", color: "var(--text)",
+              fontSize: "0.85rem", cursor: "pointer", appearance: "none",
+            }}
+          >
+            {LANGUAGES.map(l => (
+              <option key={l.code} value={l.code}>{l.label}</option>
             ))}
-          </div>
+          </select>
+          <ChevronDown size={12} color="var(--text3)" style={{
+            position: "absolute", right: 10, top: "50%",
+            transform: "translateY(-50%)", pointerEvents: "none",
+          }} />
         </div>
       </div>
 
-      {/* ⑧ Custom instructions */}
+      {/* ⑨ Custom instructions */}
       <div>
         <div className="dial-label" style={{ marginBottom: 8 }}>Custom instructions</div>
         <textarea
