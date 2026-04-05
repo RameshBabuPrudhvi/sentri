@@ -216,8 +216,8 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
 
   // ── Prompt guardrails ────────────────────────────────────────────────────
   // Cap description at 50 KB to prevent context window overflow.
-  // The frontend allows 500 KB of attachments, but 50 KB of text is ~12K tokens
-  // which is a reasonable limit for the user message portion.
+  // The frontend caps total attachments at 45 KB, leaving headroom for the
+  // user's typed description. 50 KB of text is ~12K tokens.
   const MAX_DESCRIPTION_LENGTH = 50_000;
   const rawDescription = (description || "").trim();
   if (rawDescription.length > MAX_DESCRIPTION_LENGTH) {
