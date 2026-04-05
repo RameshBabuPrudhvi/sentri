@@ -58,16 +58,16 @@ export async function runFeedbackLoop(run, tests, db, signal) {
     }
     if (Object.keys(categories).length > 0) {
       const breakdown = Object.entries(categories).map(([k, v]) => `${k}: ${v}`).join(", ");
-      log(run, `    📊 Failure breakdown: ${breakdown}`);
+      log(run, `📊 Failure breakdown: ${breakdown}`);
     }
 
     const feedback = await applyFeedbackLoop(run, db, { signal });
     if (feedback.improved > 0) {
       logSuccess(run, `Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
-      log(run, `    💡 Regenerated tests will use improved selectors on next run`);
+      log(run, `💡 Regenerated tests will use improved selectors on next run`);
       run.feedbackLoop = feedback;
     } else {
-      log(run, `    ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
+      log(run, `ℹ️  No tests auto-regenerated (${feedback.skipped} low-priority failures skipped)`);
     }
   } catch (err) {
     logWarn(run, `Feedback loop error: ${err.message}`);

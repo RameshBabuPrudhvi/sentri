@@ -75,7 +75,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
 
       const test = tests[i];
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
-      log(run, `  ▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
+      log(run, `▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
 
       try {
         const result = await executeTest(test, browser, runId, i, runStart, db);
@@ -123,7 +123,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     try {
       await traceContext.tracing.stop({ path: tracePath });
       run.tracePath = `/artifacts/traces/${runId}.zip`;
-      log(run, `  📊 Trace saved`);
+      log(run, `📊 Trace saved`);
     } catch (e) {
       logWarn(run, `Trace save failed: ${e.message}`);
     }
