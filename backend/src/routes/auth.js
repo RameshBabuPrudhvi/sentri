@@ -21,7 +21,7 @@
 
 import express from "express";
 import crypto from "crypto";
-import { getDb } from "../db.js";
+import { getDb, saveDb } from "../db.js";
 
 const router = express.Router();
 
@@ -167,6 +167,7 @@ router.post("/register", async (req, res) => {
     const user = { id, name, email, passwordHash, role: "user", createdAt: now, updatedAt: now };
     db.users = db.users || {};
     db.users[id] = user;
+    saveDb();
 
     return res.status(201).json({ message: "Account created successfully." });
   } catch (err) {
@@ -388,6 +389,7 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
     const now = new Date().toISOString();
     user      = { id, name, email, passwordHash: null, role: "user", avatar, createdAt: now, updatedAt: now };
     db.users[id] = user;
+    saveDb();
   }
 
   // Always keep OAuth provider link up to date
