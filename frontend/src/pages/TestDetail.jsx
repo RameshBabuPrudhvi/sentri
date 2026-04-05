@@ -9,6 +9,7 @@ import {
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
+import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1288,26 +1289,8 @@ export default function TestDetail() {
           {/* Type */}
           {test.type && (
             <InfoRow label="Type">
-              <span className={`badge ${
-                test.type === "e2e"           ? "badge-purple" :
-                test.type === "smoke"         ? "badge-amber"  :
-                test.type === "regression"    ? "badge-blue"   :
-                test.type === "integration"   ? "badge-blue"   :
-                test.type === "accessibility" ? "badge-green"  :
-                test.type === "security"      ? "badge-red"    :
-                test.type === "performance"   ? "badge-amber"  :
-                "badge-blue"
-              }`}>
-                {({
-                  functional:    "Functional",
-                  smoke:         "Smoke",
-                  regression:    "Regression",
-                  e2e:           "End-to-End",
-                  integration:   "Integration",
-                  accessibility: "Accessibility",
-                  security:      "Security",
-                  performance:   "Performance",
-                })[test.type] || test.type}
+              <span className={`badge ${testTypeBadgeClass(test.type)}`}>
+                {testTypeLabel(test.type)}
               </span>
             </InfoRow>
           )}

@@ -13,6 +13,7 @@ import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
+import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -810,28 +811,8 @@ export default function Tests() {
                           {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
                           {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
                           {t.type && (
-                            <span className={`badge ${
-                              t.type === "e2e"           ? "badge-purple" :
-                              t.type === "smoke"         ? "badge-amber"  :
-                              t.type === "regression"    ? "badge-blue"   :
-                              t.type === "integration"   ? "badge-blue"   :
-                              t.type === "accessibility" ? "badge-green"  :
-                              t.type === "security"      ? "badge-red"    :
-                              t.type === "performance"   ? "badge-amber"  :
-                              t.type === "manual"        ? "badge-blue"   :
-                              "badge-gray"
-                            }`} style={{ marginLeft: 4 }}>
-                              {({
-                                functional:    "Functional",
-                                smoke:         "Smoke",
-                                regression:    "Regression",
-                                e2e:           "E2E",
-                                integration:   "Integration",
-                                accessibility: "A11y",
-                                security:      "Security",
-                                performance:   "Perf",
-                                manual:        "Manual",
-                              })[t.type] || t.type}
+                            <span className={`badge ${testTypeBadgeClass(t.type)}`} style={{ marginLeft: 4 }}>
+                              {testTypeLabel(t.type, true)}
                             </span>
                           )}
                           {/* Row hover actions */}
