@@ -371,6 +371,98 @@ export default function RunDetail() {
         <TestRunView run={run} frames={frames} />
       )}
 
+      {/* ── Quality Analytics (shown when run has analytics data) ──────── */}
+      {run.qualityAnalytics && run.qualityAnalytics.totalFailures > 0 && (
+        <div className="card" style={{ padding: 24, marginTop: 20 }}>
+          <h2 style={{ fontWeight: 700, fontSize: "1rem", marginTop: 0, marginBottom: 16 }}>
+            Quality Insights
+          </h2>
+
+          {/* Insights */}
+          {run.qualityAnalytics.insights?.length > 0 && (
+            <div style={{ marginBottom: 18, display: "flex", flexDirection: "column", gap: 8 }}>
+              {run.qualityAnalytics.insights.map((insight, i) => (
+                <div key={i} style={{
+                  padding: "10px 14px", background: "var(--amber-bg)",
+                  border: "1px solid #fcd34d", borderRadius: 8,
+                  fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
+                }}>
+                  💡 {insight}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Breakdown grids */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+            {/* By category */}
+            {Object.keys(run.qualityAnalytics.byCategory || {}).length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+                  By failure category
+                </div>
+                {Object.entries(run.qualityAnalytics.byCategory).map(([cat, count]) => (
+                  <div key={cat} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
+                    <span style={{ color: "var(--text2)" }}>{cat.replace(/_/g, " ")}</span>
+                    <span style={{ fontWeight: 600, color: "var(--red)" }}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* By test type */}
+            {Object.keys(run.qualityAnalytics.byType || {}).length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+                  By test type
+                </div>
+                {Object.entries(run.qualityAnalytics.byType).map(([type, count]) => (
+                  <div key={type} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
+                    <span style={{ color: "var(--text2)", textTransform: "capitalize" }}>{type}</span>
+                    <span style={{ fontWeight: 600, color: "var(--text)" }}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* By assertion method */}
+            {Object.keys(run.qualityAnalytics.failedAssertionMethods || {}).length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+                  Failed assertion types
+                </div>
+                {Object.entries(run.qualityAnalytics.failedAssertionMethods).map(([method, count]) => (
+                  <div key={method} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "3px 0" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text2)" }}>{method}</span>
+                    <span style={{ fontWeight: 600, color: "var(--red)" }}>{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Flaky tests */}
+          {run.qualityAnalytics.flakyTests?.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>
+                Flaky tests ({run.qualityAnalytics.flakyTests.length})
+              </div>
+              {run.qualityAnalytics.flakyTests.map(ft => (
+                <div key={ft.testId} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "0.82rem",
+                }}>
+                  <span style={{ color: "var(--text)" }}>{ft.name}</span>
+                  <span style={{ color: "var(--amber)", fontWeight: 600, fontSize: "0.78rem" }}>
+                    {ft.passCount}✓ / {ft.failCount}✗ ({ft.flakyRate}% flaky)
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Footer ─────────────────────────────────────────────────────── */}
       <div
         style={{

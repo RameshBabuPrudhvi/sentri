@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle, Clock,
   ChevronRight, Calendar, User, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, Code2, GitMerge,
+  Link2, Tag,
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
@@ -176,6 +177,12 @@ export default function TestDetail() {
   const [editPriority, setEditPriority] = useState("medium");
   const [saving, setSaving]           = useState(false);
   const [editError, setEditError]     = useState(null);
+
+  // ── Traceability fields (inline editing) ──────────────────────────────────
+  const [editingIssueKey, setEditingIssueKey] = useState(false);
+  const [issueKeyDraft, setIssueKeyDraft]     = useState("");
+  const [editingTags, setEditingTags]         = useState(false);
+  const [tagsDraft, setTagsDraft]             = useState("");
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
@@ -1307,6 +1314,111 @@ export default function TestDetail() {
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 <ScenarioBadges test={test} isBddTest={isBddTest} />
               </div>
+            </InfoRow>
+          )}
+
+          {/* Linked Issue */}
+          <InfoRow label="Linked Issue" icon={<Link2 size={14} />}>
+            {editingIssueKey ? (
+              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                <input
+                  className="input"
+                  value={issueKeyDraft}
+                  onChange={e => setIssueKeyDraft(e.target.value)}
+                  placeholder="PROJ-123"
+                  style={{ height: 28, fontSize: "0.78rem", flex: 1, fontFamily: "var(--font-mono)" }}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); });
+                    }
+                    if (e.key === "Escape") setEditingIssueKey(false);
+                  }}
+                />
+                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                  onClick={() => api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); })}>
+                  <Save size={10} />
+                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingIssueKey(false)}>
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                {test.linkedIssueKey ? (
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+                    {test.linkedIssueKey}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Not linked</span>
+                )}
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginLeft: "auto", padding: "2px 6px" }}
+                  onClick={() => { setIssueKeyDraft(test.linkedIssueKey || ""); setEditingIssueKey(true); }}
+                >
+                  <Edit2 size={10} />
+                </button>
+              </div>
+            )}
+          </InfoRow>
+
+          {/* Tags */}
+          <InfoRow label="Tags" icon={<Tag size={14} />}>
+            {editingTags ? (
+              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                <input
+                  className="input"
+                  value={tagsDraft}
+                  onChange={e => setTagsDraft(e.target.value)}
+                  placeholder="smoke, regression, login"
+                  style={{ height: 28, fontSize: "0.78rem", flex: 1 }}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
+                      api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                    }
+                    if (e.key === "Escape") setEditingTags(false);
+                  }}
+                />
+                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                  onClick={() => {
+                    const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
+                    api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
+                  }}>
+                  <Save size={10} />
+                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingTags(false)}>
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, flexWrap: "wrap" }}>
+                {(test.tags || []).length > 0 ? (
+                  test.tags.map((tag, i) => (
+                    <span key={i} className="badge badge-gray" style={{ fontSize: "0.7rem" }}>{tag}</span>
+                  ))
+                ) : (
+                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>No tags</span>
+                )}
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginLeft: "auto", padding: "2px 6px" }}
+                  onClick={() => { setTagsDraft((test.tags || []).join(", ")); setEditingTags(true); }}
+                >
+                  <Edit2 size={10} />
+                </button>
+              </div>
+            )}
+          </InfoRow>
+
+          {/* Prompt version / model (read-only, shown if available) */}
+          {test.promptVersion && (
+            <InfoRow label="Generated by">
+              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                {test.modelUsed || "AI"} · prompt v{test.promptVersion}
+              </span>
             </InfoRow>
           )}
 
