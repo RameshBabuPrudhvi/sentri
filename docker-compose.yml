@@ -1,7 +1,14 @@
-version: "3.9"
+# docker-compose.yml — Run the full Sentri stack.
+#
+# Local build:       docker compose up --build
+# From GHCR images:  docker compose pull && docker compose up
+#
+# Frontend (nginx) proxies /api/* → backend:3001 automatically.
+# Open http://localhost:3000 in your browser.
 
 services:
   backend:
+    image: ghcr.io/rameshbabuprudhvi/sentri-backend:latest
     build: ./backend
     container_name: sentri-backend
     environment:
@@ -9,7 +16,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
       - PORT=3001
+      - NODE_ENV=production
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
     ports:
@@ -19,17 +28,18 @@ services:
       - seccomp=unconfined
     shm_size: "256mb"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/dashboard').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
 
   frontend:
+    image: ghcr.io/rameshbabuprudhvi/sentri-frontend:latest
     build: ./frontend
     container_name: sentri-frontend
     ports:
-      - "80:80"
+      - "3000:80"
     depends_on:
       backend:
         condition: service_healthy

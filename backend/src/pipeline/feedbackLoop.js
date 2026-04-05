@@ -180,7 +180,6 @@ export function buildQualityAnalytics(improvements, testMap) {
     const qualifier = maxMethod && maxMethod[0] === "toHaveURL" ? "the most fragile" : "a fragile";
     insights.push(`toHaveURL is ${qualifier} assertion (${failedAssertionMethods.toHaveURL} failure${failedAssertionMethods.toHaveURL !== 1 ? "s" : ""}). Prefer asserting visible page content over URL patterns.`);
   }
-  }
 
   return {
     byCategory,

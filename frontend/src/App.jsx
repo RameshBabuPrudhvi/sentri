@@ -1,6 +1,9 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext.jsx";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Layout from "./components/Layout.jsx";
+import Login from "./pages/Login.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Tests from "./pages/Tests.jsx";
 import ProjectDetail from "./pages/ProjectDetail.jsx";
@@ -8,12 +11,11 @@ import NewProject from "./pages/NewProject.jsx";
 import RunDetail from "./pages/RunDetail.jsx";
 import TestDetail from "./pages/TestDetail.jsx";
 import Settings from "./pages/Settings.jsx";
-import Projects from "./pages/Applications";
-import Reports from "./pages/Reports";
-import Work from "./pages/Work";
-import Context from "./pages/Context";
+import Projects from "./pages/Applications.jsx";
+import Reports from "./pages/Reports.jsx";
+import Runs from "./pages/Runs.jsx";
+import Context from "./pages/Context.jsx";
 
-// ── 404 page ────────────────────────────────────────────────────────────────
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
     <div style={{ fontSize: "3rem", marginBottom: 16 }}>404</div>
@@ -25,7 +27,6 @@ const NotFound = () => (
   </div>
 );
 
-// ── Global error boundary ────────────────────────────────────────────────────
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -40,7 +41,7 @@ class ErrorBoundary extends React.Component {
           </div>
           <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
             <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
-            <button className="btn btn-ghost" onClick={() => { window.location.href = "/dashboard"; }}>Go to Dashboard</button>
+            <button className="btn btn-ghost" onClick={() => { window.location.href = import.meta.env.BASE_URL + "dashboard"; }}>Go to Dashboard</button>
           </div>
         </div>
       );
@@ -51,29 +52,37 @@ class ErrorBoundary extends React.Component {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <ErrorBoundary>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/tests" element={<Tests />} />
-            {/* /projects/new must come before /projects/:id to avoid shadowing */}
-            <Route path="/projects/new" element={<NewProject />} />
-            <Route path="/projects/:id" element={<ProjectDetail />} />
-            <Route path="/runs/:runId" element={<RunDetail />} />
-            <Route path="/tests/:testId" element={<TestDetail />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/work" element={<Work />} />
-            <Route path="/context" element={<Context />} />
-            {/* Redirect old route so bookmarks/links still work */}
-            <Route path="/applications" element={<Navigate to="/projects" replace />} />
-            <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
-      </ErrorBoundary>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
+      <AuthProvider>
+        <ErrorBoundary>
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
+
+            {/* Protected — wrapped in Layout */}
+            <Route element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/tests" element={<Tests />} />
+              <Route path="/projects/new" element={<NewProject />} />
+              <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/runs/:runId" element={<RunDetail />} />
+              <Route path="/tests/:testId" element={<TestDetail />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/runs" element={<Runs />} />
+              <Route path="/context" element={<Context />} />
+              <Route path="/applications" element={<Navigate to="/projects" replace />} />
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </ErrorBoundary>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
