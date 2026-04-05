@@ -1,7 +1,8 @@
 import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -84,7 +85,10 @@ function Sidebar() {
 
 function TopBar() {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [q, setQ] = React.useState("");
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef(null);
 
   function handleSearch(e) {
     if (e.key === "Enter" && q.trim()) {
@@ -96,6 +100,24 @@ function TopBar() {
   function clearSearch() {
     setQ("");
   }
+
+  function handleLogout() {
+    logout();
+    navigate("/login", { replace: true });
+  }
+
+  // Close menu when clicking outside
+  React.useEffect(() => {
+    function onClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const initials = user?.name
+    ? user.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()
+    : user?.email?.[0]?.toUpperCase() ?? "?";
 
   return (
     <header style={{
@@ -121,7 +143,59 @@ function TopBar() {
       </div>
       <div style={{ flex: 1 }} />
       <ProviderBadge />
-      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.78rem", flexShrink: 0 }}>R</div>
+
+      {/* User menu */}
+      <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
+        <button
+          onClick={() => setMenuOpen(v => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            background: "none", border: "1px solid transparent", borderRadius: 8,
+            padding: "3px 6px 3px 3px", cursor: "pointer",
+            transition: "border-color 0.15s, background 0.15s",
+            ...(menuOpen ? { background: "var(--bg2)", borderColor: "var(--border)" } : {}),
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          onMouseLeave={e => { if (!menuOpen) { e.currentTarget.style.background = "none"; e.currentTarget.style.borderColor = "transparent"; } }}
+          aria-label="User menu"
+        >
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: "0.72rem" }}>
+            {initials}
+          </div>
+          <ChevronDown size={13} color="var(--text3)" style={{ transition: "transform 0.2s", transform: menuOpen ? "rotate(180deg)" : "none" }} />
+        </button>
+
+        {menuOpen && (
+          <div style={{
+            position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 100,
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+            minWidth: 200, overflow: "hidden",
+          }}>
+            {/* User info */}
+            <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{user?.name || "User"}</div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{user?.email}</div>
+            </div>
+            {/* Logout */}
+            <button
+              onClick={handleLogout}
+              style={{
+                display: "flex", alignItems: "center", gap: 9,
+                width: "100%", padding: "10px 14px",
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: "0.83rem", color: "var(--text2)", textAlign: "left",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "#ef4444"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text2)"; }}
+            >
+              <LogOut size={14} />
+              Sign out
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 }
