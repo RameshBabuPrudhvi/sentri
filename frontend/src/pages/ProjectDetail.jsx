@@ -93,13 +93,14 @@ export default function ProjectDetail() {
   const PAGE_SIZE = 50;
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
+  const [now, setNow] = useState(Date.now);
 
   // ── Highlight recently created tests ──────────────────────────────────────
   // Any test created within the last 5 minutes is "new" — works regardless of
   // how the user navigated here (breadcrumbs, back button, direct link, etc.)
   const newTestIds = useMemo(() => {
     if (!showNewBadges) return new Set();
-    const cutoff = Date.now() - NEW_TEST_THRESHOLD_MS;
+    const cutoff = now - NEW_TEST_THRESHOLD_MS;
     const ids = new Set();
     for (const t of tests) {
       if (t.createdAt && new Date(t.createdAt).getTime() > cutoff) {
@@ -107,7 +108,15 @@ export default function ProjectDetail() {
       }
     }
     return ids;
-  }, [tests, showNewBadges]);
+  }, [tests, showNewBadges, now]);
+
+  // Auto-expire "NEW" badges: tick `now` every 60s so the useMemo re-evaluates
+  // and drops tests that have aged past the 5-minute threshold.
+  useEffect(() => {
+    if (!showNewBadges) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [showNewBadges]);
 
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
@@ -408,8 +417,8 @@ export default function ProjectDetail() {
       {/* ── GENERATED TESTS / REVIEW TAB ── */}
       {tab === "review" && (
         <div>
-          {/* New tests banner — shown when arriving from a completed generation run */}
-          {newTestIds.size > 0 && (
+          {/* New tests banner — only show on draft or all filter (new tests are always drafts) */}
+          {newTestIds.size > 0 && (reviewFilter === "draft" || reviewFilter === "all") && (
             <div style={{
               marginBottom: 14, padding: "10px 16px",
               background: "var(--green-bg)", border: "1px solid #86efac",
