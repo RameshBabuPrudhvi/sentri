@@ -50,6 +50,30 @@ const EXAMPLE_PROMPTS = [
   },
 ];
 
+// ── Toggle switch (used by Options tab) ──────────────────────────────────────
+
+function Toggle({ value, onChange, disabled }) {
+  return (
+    <button
+      onClick={() => !disabled && onChange(!value)}
+      style={{
+        width: 38, height: 22, borderRadius: 11, border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+        background: value ? "var(--accent)" : "var(--bg3, #d1d5db)",
+        position: "relative", flexShrink: 0, transition: "background 0.2s",
+        opacity: disabled ? 0.5 : 1,
+      }}
+      title={disabled ? "Assignee disabled" : undefined}
+    >
+      <span style={{
+        position: "absolute", top: 3, left: value ? 19 : 3,
+        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+        transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+      }} />
+    </button>
+  );
+}
+
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
 function GenerateCTA({ error, canSubmit, phase, onGenerate, showNameHint }) {
@@ -130,6 +154,15 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
   // Active dial count for badge
   const [activeDialCount, setActiveDialCount] = useState(() => countActiveDials(loadSavedConfig()));
+
+  // ── Options tab state (must live at top level — no hooks in conditionals) ──
+  const [splitByAC, setSplitByAC] = useState(true);
+  const [stepsAsTables, setStepsAsTables] = useState(false);
+  const [prependKey, setPrependKey] = useState(true);
+  const [assigneeEnabled, setAssigneeEnabled] = useState(false);
+  const [assignee, setAssignee] = useState("");
+  const [folderOverride, setFolderOverride] = useState("");
+  const [autoSync, setAutoSync] = useState(false);
 
   useEffect(() => {
     setTimeout(() => nameRef.current?.focus(), 60);
@@ -443,9 +476,23 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                     <div data-examples-popover style={{ position: "relative" }}>
                       <button
                         className="btn btn-ghost btn-xs"
+                        style={{
+                          display: "flex", alignItems: "center", gap: 5,
+                          background: showExamples ? "var(--bg2)" : undefined,
+                          border: showExamples ? "1px solid var(--border)" : undefined,
+                          borderRadius: 6, padding: "4px 8px",
+                        }}
                         onClick={() => setShowExamples(v => !v)}
                       >
-                        📚 Examples
+                        {showExamples && (
+                          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ flexShrink: 0 }}>
+                            <path d="M2 5.5L4.5 8L9 3" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                        Examples
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0, opacity: 0.5 }}>
+                          <path d="M2.5 3.75L5 6.25L7.5 3.75" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                       </button>
                       {showExamples && (
                         <div style={{
@@ -453,34 +500,50 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                           width: 340, maxHeight: 320, overflowY: "auto",
                           background: "var(--surface)", border: "1px solid var(--border)",
                           borderRadius: "var(--radius)", boxShadow: "var(--shadow)",
-                          zIndex: 300, padding: 6,
+                          zIndex: 300, padding: 4,
                         }}>
-                          <div style={{ fontSize: "0.72rem", color: "var(--text3)", padding: "6px 8px 4px",
-                            fontWeight: 600, letterSpacing: "0.02em" }}>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text3)", padding: "6px 10px 4px",
+                            fontWeight: 600, letterSpacing: "0.03em", textTransform: "uppercase" }}>
                             Click to fill — you can edit before generating
                           </div>
-                          {EXAMPLE_PROMPTS.map((ex, i) => (
-                            <button
-                              key={i}
-                              onClick={() => applyExample(ex)}
-                              style={{
-                                width: "100%", textAlign: "left", padding: "8px 10px",
-                                background: "none", border: "none", cursor: "pointer",
-                                borderRadius: 6, display: "flex", flexDirection: "column", gap: 2,
-                              }}
-                              onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                              onMouseLeave={e => e.currentTarget.style.background = "none"}
-                            >
-                              <span style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>
-                                {ex.name}
-                              </span>
-                              <span style={{ fontSize: "0.72rem", color: "var(--text3)", lineHeight: 1.4,
-                                display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                                overflow: "hidden" }}>
-                                {ex.description}
-                              </span>
-                            </button>
-                          ))}
+                          {EXAMPLE_PROMPTS.map((ex, i) => {
+                            const isActive = name === ex.name;
+                            return (
+                              <button
+                                key={i}
+                                onClick={() => applyExample(ex)}
+                                style={{
+                                  width: "100%", textAlign: "left", padding: "8px 10px",
+                                  background: isActive ? "var(--accent-bg)" : "none",
+                                  border: "none", cursor: "pointer",
+                                  borderRadius: 6, display: "flex", alignItems: "flex-start", gap: 8,
+                                }}
+                                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "var(--bg2)"; }}
+                                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                              >
+                                <span style={{
+                                  flexShrink: 0, width: 14, height: 14, marginTop: 2,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                }}>
+                                  {isActive && (
+                                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                      <path d="M2 6L5 9L10 3" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg>
+                                  )}
+                                </span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: "0.82rem", fontWeight: 500, color: isActive ? "var(--accent)" : "var(--text)" }}>
+                                    {ex.name}
+                                  </div>
+                                  <div style={{ fontSize: "0.72rem", color: "var(--text3)", lineHeight: 1.4,
+                                    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                                    overflow: "hidden", marginTop: 2 }}>
+                                    {ex.description}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -515,28 +578,76 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
           {/* ── Options tab ── */}
           {tab === "options" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, color: "var(--text2)", fontSize: "0.875rem" }}>
-              <p style={{ color: "var(--text3)", fontSize: "0.82rem", lineHeight: 1.6 }}>
-                Additional options for this generation run.
-              </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 16 }}>
+                Test Generation Settings
+              </div>
 
-              <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input type="checkbox" style={{ accentColor: "var(--accent)", width: 14, height: 14 }} />
-                  <span style={{ fontSize: "0.85rem" }}>Save as Draft (require human review before running)</span>
+              {/* Toggle row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
+                  <Toggle value={splitByAC} onChange={setSplitByAC} />
+                  Split by Acceptance Criteria
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input type="checkbox" defaultChecked style={{ accentColor: "var(--accent)", width: 14, height: 14 }} />
-                  <span style={{ fontSize: "0.85rem" }}>Generate Playwright automation code</span>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
+                  <Toggle value={stepsAsTables} onChange={setStepsAsTables} />
+                  Steps as Tables
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input type="checkbox" style={{ accentColor: "var(--accent)", width: 14, height: 14 }} />
-                  <span style={{ fontSize: "0.85rem" }}>Add to Pull Request on completion</span>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
+                  <Toggle value={prependKey} onChange={setPrependKey} />
+                  Prepend Key
                 </label>
               </div>
 
-              {/* Generate CTA on options tab too */}
-              <div style={{ marginTop: 4 }}>
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 16px" }} />
+
+              {/* Set Assignee + Folder Override */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
+                    <input
+                      type="checkbox"
+                      checked={assigneeEnabled}
+                      onChange={e => setAssigneeEnabled(e.target.checked)}
+                      style={{ accentColor: "var(--accent)", width: 13, height: 13 }}
+                    />
+                    Set Assignee
+                  </label>
+                  <input
+                    className="input"
+                    value={assignee}
+                    onChange={e => setAssignee(e.target.value)}
+                    placeholder="Assignee disabled"
+                    disabled={!assigneeEnabled}
+                    style={{ height: 34, fontSize: "0.82rem", opacity: assigneeEnabled ? 1 : 0.5 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: 8, fontSize: "0.82rem", color: "var(--text2)", fontWeight: 500 }}>
+                    Folder Override <span style={{ color: "var(--text3)", fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  <input
+                    className="input"
+                    value={folderOverride}
+                    onChange={e => setFolderOverride(e.target.value)}
+                    placeholder="Leave empty to auto-derive from story"
+                    style={{ height: 34, fontSize: "0.82rem" }}
+                  />
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 16px" }} />
+
+              {/* Auto-sync */}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
+                <Toggle value={autoSync} onChange={setAutoSync} />
+                Auto-sync to Test Management
+              </label>
+
+              {/* Generate CTA */}
+              <div style={{ marginTop: 24 }}>
                 <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
               </div>
             </div>
