@@ -33,7 +33,7 @@ const FAILURE_PATTERNS = {
   ],
   URL_MISMATCH: [
     /toHaveURL.*received/i,
-    /expected.*url.*received/i,
+    /expected.*toHaveURL.*received/i,
     /page\.url\(\).*not.*match/i,
   ],
   NAVIGATION_FAIL: [
