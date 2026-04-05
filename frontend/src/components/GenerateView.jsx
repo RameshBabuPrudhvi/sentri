@@ -5,6 +5,7 @@ import PipelineCard from "./PipelineCard.jsx";
 import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
 import ActivityLogCard from "./ActivityLogCard.jsx";
 import RunSidebar from "./RunSidebar.jsx";
+import { cleanTestName } from "../utils/formatTestName.js";
 
 // Pipeline stages for AI Generate flow.
 // Steps 1 & 2 (Crawl & Filter) are skipped — user provides test name + description directly.
@@ -77,7 +78,7 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
               Test Input
             </div>
             <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
-              {run.generateInput.name}
+              {cleanTestName(run.generateInput.name)}
             </div>
             {run.generateInput.description && (
               <div style={{ fontSize: "0.73rem", color: "var(--text2)", lineHeight: 1.5 }}>
