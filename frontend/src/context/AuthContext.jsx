@@ -24,8 +24,11 @@ const USER_KEY  = "sentri_user";
 /** Decode JWT payload without verifying (verification happens server-side) */
 function decodeJwt(token) {
   try {
-    const payload = token.split(".")[1];
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    let payload = token.split(".")[1];
+    // Convert base64url → base64 and add padding so atob never fails
+    payload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    payload = payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "=");
+    return JSON.parse(atob(payload));
   } catch {
     return null;
   }

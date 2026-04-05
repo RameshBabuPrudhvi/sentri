@@ -100,13 +100,15 @@ function checkRateLimit(ip) {
   return { allowed: true };
 }
 
-// Purge expired revoked tokens periodically
-setInterval(() => {
+// Purge expired revoked tokens periodically.
+// .unref() so this timer doesn't keep the process alive (e.g. during tests).
+const _purgeInterval = setInterval(() => {
   const now = Date.now() / 1000;
   for (const [jti, exp] of revokedTokens) {
     if (exp < now) revokedTokens.delete(jti);
   }
 }, 60 * 60 * 1000);
+_purgeInterval.unref();
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
