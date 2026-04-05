@@ -457,8 +457,33 @@ export default function StepResultsView({ result, run, onBack }) {
             maxWidth: 400,
           }}
         >
-          Step Results
+          {cleanTestName(result?.testName || result?.name) || "Test Case"}
         </span>
+        {testId && (
+          <>
+            <span style={{ color: "var(--border2)" }}>›</span>
+            <button
+              onClick={() => navigate(`/tests/${testId}`)}
+              title="Go to test detail to edit steps"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--accent)",
+                fontWeight: 600,
+                fontSize: "0.78rem",
+                padding: "2px 0",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {testId}
+              <ExternalLink size={11} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* ── Main split ──────────────────────────────────────────────────── */}
