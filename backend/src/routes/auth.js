@@ -203,7 +203,7 @@ router.post("/login", async (req, res) => {
 
     // Always run verifyPassword (even on non-existent user) to prevent timing attacks
     const dummyHash = "00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-    const valid = user ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
+    const valid = user?.passwordHash ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
 
     if (!user || !valid) {
       return res.status(401).json({ error: "Invalid email or password." });
