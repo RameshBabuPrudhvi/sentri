@@ -276,7 +276,12 @@ export function buildDialsPrompt(cfg) {
       : "",
   ].filter(Boolean);
 
-  return lines.length > 1 ? lines.join("\n") : "";
+  const result = lines.length > 1 ? lines.join("\n") : "";
+  if (result && process.env.LOG_LEVEL === "debug") {
+    console.log("[buildDialsPrompt] Validated config:", JSON.stringify(cfg, null, 2));
+    console.log("[buildDialsPrompt] Generated fragment (%d chars):\n%s", result.length, result);
+  }
+  return result;
 }
 
 // ─── Convenience entry-points ───────────────────────────────────────────────────

@@ -7,6 +7,7 @@
  */
 
 import { isLocalProvider } from "../aiProvider.js";
+import { shouldLog, formatLogLine } from "../utils/logFormatter.js";
 
 /**
  * Resolve the test count instruction for prompt builders.
@@ -47,21 +48,40 @@ export function resolveTestCountInstruction(testCount, local) {
  *   3. Fallback: append at the end (safe default)
  */
 export function withDials(base, dialsPrompt) {
-  if (!dialsPrompt) return base;
+  if (!dialsPrompt) {
+    if (shouldLog("debug")) {
+      console.log(formatLogLine("debug", null, `[withDials] No dials prompt — using base prompt (${base.length} chars)`));
+    }
+    return base;
+  }
+
+  let final;
 
   // Find the best injection point — before the rules section
   const markers = ["STRICT RULES:", "Requirements:"];
   for (const marker of markers) {
     const idx = base.indexOf(marker);
     if (idx !== -1) {
-      return (
+      final = (
         base.slice(0, idx).trimEnd() +
         "\n\n" + dialsPrompt + "\n\n" +
         base.slice(idx)
       );
+      if (shouldLog("debug")) {
+        console.log(formatLogLine("debug", null, `[withDials] Injected dials before "${marker}" — final prompt (${final.length} chars):`));
+        console.log("─── DIALS FRAGMENT ───\n" + dialsPrompt + "\n─── END DIALS ───");
+        console.log("─── FULL PROMPT ───\n" + final + "\n─── END PROMPT ───");
+      }
+      return final;
     }
   }
 
   // Fallback: append at end (shouldn't happen with current prompts)
-  return `${base}\n\n${dialsPrompt}`;
+  final = `${base}\n\n${dialsPrompt}`;
+  if (shouldLog("debug")) {
+    console.log(formatLogLine("debug", null, `[withDials] Fallback — appended dials at end — final prompt (${final.length} chars):`));
+    console.log("─── DIALS FRAGMENT ───\n" + dialsPrompt + "\n─── END DIALS ───");
+    console.log("─── FULL PROMPT ───\n" + final + "\n─── END PROMPT ───");
+  }
+  return final;
 }
