@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Play, Edit2, RefreshCw, Download,
-  CheckCircle2, XCircle, Clock, AlertCircle,
+  CheckCircle2, XCircle, Clock,
   ChevronRight, Calendar, User, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, Code2, GitMerge,
 } from "lucide-react";
@@ -11,6 +11,7 @@ import DiffView from "../components/DiffView.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -27,20 +28,6 @@ function fmtDateTime(iso) {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
   return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function StatusBadge({ result }) {
-  if (!result)              return <span className="badge badge-gray"><Clock size={10} /> Not Run</span>;
-  if (result === "passed")  return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (result === "failed")  return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  if (result === "running") return <span className="badge badge-blue pulse">● Running</span>;
-  return <span className="badge badge-amber">{result}</span>;
-}
-
-function ReviewBadge({ status }) {
-  if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
-  if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
-  return <span className="badge badge-amber"><AlertCircle size={10} /> Draft Test</span>;
 }
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
@@ -1318,11 +1305,7 @@ export default function TestDetail() {
           {(test.isJourneyTest || test.scenario || isBddTest(test.steps)) && (
             <InfoRow label="Tags">
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {test.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                {isBddTest(test.steps) && <span className="badge badge-green">BDD</span>}
-                {test.scenario === "positive"  && <span className="badge badge-green">Positive</span>}
-                {test.scenario === "negative"  && <span className="badge badge-red">Negative</span>}
-                {test.scenario === "edge_case" && <span className="badge badge-amber">Edge Case</span>}
+                <ScenarioBadges test={test} isBddTest={isBddTest} />
               </div>
             </InfoRow>
           )}

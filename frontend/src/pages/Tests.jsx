@@ -15,6 +15,7 @@ import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
+import { StatusBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -52,13 +53,6 @@ function relativeTime(dateStr) {
     }
   }
   return "—";
-}
-
-function StatusBadge({ result }) {
-  if (!result) return <span className="badge badge-gray"><Clock size={10} /> Not run</span>;
-  if (result === "passed") return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (result === "failed") return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  return <span className="badge badge-amber">{result}</span>;
 }
 
 
@@ -844,11 +838,7 @@ export default function Tests() {
                               </div>
                             )}
                             <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                              {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                              {isBddTest(t.steps) && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>BDD</span>}
-                              {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
-                              {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
-                              {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                              <ScenarioBadges test={t} isBddTest={isBddTest} />
                             </div>
                           </div>
                         </div>

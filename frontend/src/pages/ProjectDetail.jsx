@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
+  Search, Play, Trash2, ArrowRight, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, AlertCircle, StopCircle,
+  RotateCcw, Info, StopCircle,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
@@ -12,22 +12,7 @@ import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
-
-function StatusBadge({ s }) {
-  if (!s) return <span className="badge badge-gray">Not run</span>;
-  if (s === "passed")    return <span className="badge badge-green"><CheckCircle2 size={10} /> Passing</span>;
-  if (s === "failed")    return <span className="badge badge-red"><XCircle size={10} /> Failing</span>;
-  if (s === "running")   return <span className="badge badge-blue pulse">● Running</span>;
-  if (s === "completed") return <span className="badge badge-green">✓ Completed</span>;
-  if (s === "aborted")   return <span className="badge badge-gray"><Ban size={10} /> Aborted</span>;
-  return <span className="badge badge-gray">{s}</span>;
-}
-
-function ReviewBadge({ status }) {
-  if (status === "approved") return <span className="badge badge-green"><CheckCircle2 size={10} /> Approved</span>;
-  if (status === "rejected") return <span className="badge badge-red"><XCircle size={10} /> Rejected</span>;
-  return <span className="badge badge-amber"><AlertCircle size={10} /> Draft</span>;
-}
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -552,11 +537,7 @@ export default function ProjectDetail() {
                                   </div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
                                   <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                                    {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                                    {isBddTest(t.steps) && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>BDD</span>}
-                                    {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
-                                    {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
-                                    {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                                    <ScenarioBadges test={t} isBddTest={isBddTest} />
                                   </div>
                                 </div>
                               </div>
