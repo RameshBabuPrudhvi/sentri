@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import AppLogo from "../components/AppLogo.jsx";
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || "";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -153,9 +154,7 @@ export default function Login() {
         .lp-orb-1{width:300px;height:300px;top:-60px;left:-60px;background:rgba(99,102,241,0.15);animation-delay:0s}
         .lp-orb-2{width:200px;height:200px;bottom:80px;right:40px;background:rgba(139,92,246,0.12);animation-delay:3s}
         .lp-orb-3{width:150px;height:150px;top:50%;left:60%;background:rgba(59,130,246,0.1);animation-delay:5s}
-        .lp-brand{display:flex;align-items:center;gap:12px;position:relative;z-index:1;animation:slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both}
-        .lp-logo-wrap{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(99,102,241,0.4)}
-        .lp-brand-name{font-family:'Syne',sans-serif;font-size:1.25rem;font-weight:700;color:#fff;letter-spacing:-0.3px}
+        .lp-brand{position:relative;z-index:1;animation:slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both}
         .lp-hero{position:relative;z-index:1}
         .lp-eyebrow{display:inline-flex;align-items:center;gap:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:999px;padding:4px 14px;margin-bottom:28px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.1s both}
         .lp-eyebrow-dot{width:6px;height:6px;border-radius:50%;background:#6366f1;animation:dotPulse 2s ease infinite}
@@ -233,10 +232,7 @@ export default function Login() {
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand">
-            <div className="lp-logo-wrap">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M5 12l5 5L19 7" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <span className="lp-brand-name">Sentri</span>
+            <AppLogo size={36} variant="full" theme="dark" />
           </div>
 
           <div className="lp-hero">
