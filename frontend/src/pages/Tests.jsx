@@ -497,10 +497,9 @@ export default function Tests() {
       );
 
       const headers = [
-        "Test ID", "Name", "Description", "Type", "Scenario", "Priority",
-        "Review Status", "Last Result", "Last Run At", "Created At",
-        "Source URL", "Project", "Journey",
-        "Step #", "Step",
+        "Test ID", "Name", "Description", "Step #", "Step",
+        "Project", "Priority", "Type", "Review Status",
+        "Status", "Last Run At", "Created At", "Source URL", "Journey",
       ];
 
       const rows = [];
@@ -509,22 +508,20 @@ export default function Tests() {
         const steps = Array.isArray(t.steps) && t.steps.length > 0 ? t.steps : [""];
         steps.forEach((step, stepIdx) => {
           rows.push([
-            // Only populate test-level fields on the first step row
             stepIdx === 0 ? t.id : "",
-            stepIdx === 0 ? t.name : "",
+            stepIdx === 0 ? cleanTestName(t.name) : "",
             stepIdx === 0 ? (t.description || "") : "",
-            stepIdx === 0 ? (t.type || "") : "",
-            stepIdx === 0 ? (t.scenario || "") : "",
+            step ? stepIdx + 1 : "",
+            step || "",
+            stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
             stepIdx === 0 ? (t.priority || "medium") : "",
+            stepIdx === 0 ? (t.type || "") : "",
             stepIdx === 0 ? (t.reviewStatus || "draft") : "",
             stepIdx === 0 ? (t.lastResult || "") : "",
             stepIdx === 0 ? (t.lastRunAt || "") : "",
             stepIdx === 0 ? (t.createdAt || "") : "",
             stepIdx === 0 ? (t.sourceUrl || "") : "",
-            stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
             stepIdx === 0 ? (t.isJourneyTest ? "Yes" : "No") : "",
-            step ? stepIdx + 1 : "",
-            step || "",
           ]);
         });
       });

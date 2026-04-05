@@ -350,42 +350,61 @@ export default function TestDetail() {
   function handleExport() {
     if (!test) return;
 
-    const steps = (test.steps || []).join(" | ");
     const projectName = project?.name || "";
     const projectUrl  = project?.url  || "";
-    const exportedAt = new Date().toISOString();
-
-    const headers = [
-      "Test ID", "Name", "Description", "Type", "Priority",
-      "Review Status", "Source URL", "Steps", "Last Result",
-      "Last Run At", "Created At", "Project Name", "Project URL",
-      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At",
-      "Exported At",
-    ];
-
-    const baseFields = [
-      test.id, test.name, test.description || "", test.type || "",
-      test.priority || "medium", test.reviewStatus || "draft",
-      test.sourceUrl || "", steps, test.lastResult || "",
-      test.lastRunAt || "", test.createdAt || "", projectName, projectUrl,
-    ];
+    const exportedAt  = new Date().toISOString();
+    const steps       = (test.steps || []).length > 0 ? test.steps : [""];
 
     const runHistory = runs.slice(0, 20).map(run => {
       const result = run.results?.find(r => r.testId === testId);
       return {
-        runId: run.id,
-        status: result?.status || run.status,
+        runId:      run.id,
+        status:     result?.status || run.status,
         durationMs: result?.durationMs ?? "",
-        startedAt: run.startedAt || "",
+        startedAt:  run.startedAt || "",
       };
     });
 
-    // One row per run-history entry; if no runs, emit a single row
-    const rows = runHistory.length === 0
-      ? [[ ...baseFields, "", "", "", "", exportedAt ]]
-      : runHistory.map(rh => [ ...baseFields, rh.runId, rh.status, rh.durationMs, rh.startedAt, exportedAt ]);
+    // Industry standard: Test ID | Name | Description | Step # | Step |
+    // Project | Priority | Type | Review Status | Status | Last Run At |
+    // Created At | Source URL | Journey | Run ID | Run Status | Duration (ms) | Run Started At | Exported At
+    const headers = [
+      "Test ID", "Name", "Description", "Step #", "Step",
+      "Project", "Priority", "Type", "Review Status",
+      "Status", "Last Run At", "Created At", "Source URL", "Journey",
+      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At", "Exported At",
+    ];
 
-    const filename = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    const rows = [];
+    steps.forEach((step, stepIdx) => {
+      // Repeat run history per step row — if no runs, emit one row per step
+      const runs_ = runHistory.length > 0 ? runHistory : [null];
+      runs_.forEach((rh, rhIdx) => {
+        rows.push([
+          stepIdx === 0 && rhIdx === 0 ? test.id                                    : "",
+          stepIdx === 0 && rhIdx === 0 ? cleanTestName(test.name)                   : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.description || "")                   : "",
+          step ? stepIdx + 1 : "",
+          step || "",
+          stepIdx === 0 && rhIdx === 0 ? projectName                                : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.priority || "medium")                : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.type || "")                          : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.reviewStatus || "draft")             : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.lastResult || "")                    : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.lastRunAt || "")                     : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.createdAt || "")                     : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.sourceUrl || projectUrl || "")       : "",
+          stepIdx === 0 && rhIdx === 0 ? (test.isJourneyTest ? "Yes" : "No")        : "",
+          rh ? rh.runId      : "",
+          rh ? rh.status     : "",
+          rh ? rh.durationMs : "",
+          rh ? rh.startedAt  : "",
+          stepIdx === 0 && rhIdx === 0 ? exportedAt : "",
+        ]);
+      });
+    });
+
+    const filename = `sentri-test-${cleanTestName(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     exportCsv(headers, rows, filename);
   }
 
