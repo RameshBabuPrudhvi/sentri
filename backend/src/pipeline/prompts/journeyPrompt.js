@@ -63,7 +63,7 @@ Return ONLY valid JSON (no markdown):
       "scenario": "positive|negative|edge_case",
       "journeyType": "${journey.type}",
       "isJourneyTest": true,
-      "steps": ["User opens the login page", "User enters valid credentials and clicks Sign In", "Assert: user is redirected to the dashboard"],
+      "steps": ["User opens the login page", "User enters valid credentials and clicks Sign In", "User is redirected to the dashboard"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // full journey code here\\n});"
     }
   ]
@@ -79,7 +79,8 @@ IMPORTANT: "type" must be one of these industry-standard test types — pick the
   - "security"       — auth, permissions, input sanitisation
   - "performance"    — load times, responsiveness, resource usage
 
-IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
+IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
+BAD steps:  ["await page.goto('...')", "Assert: user is on dashboard", "assert cart total equals $50"]
+GOOD steps: ["User opens the homepage", "User clicks the Sign In button", "The dashboard loads with the user's name in the header"]
+When the output format is Gherkin / BDD, write steps as: "Given the user is on the login page", "When the user enters valid credentials and clicks Sign In", "Then the user is redirected to the dashboard".`;
 }

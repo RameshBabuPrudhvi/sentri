@@ -129,7 +129,7 @@ export const FORMAT_OPTIONS = [
   {
     id: "checklist",
     label: "Checklist",
-    instruction: "Format each test as a SHORT bullet-point checklist — one line per action/assertion, no prose. Example: '• Fill email → valid@test.com • Click Submit • Assert: success message visible'.",
+    instruction: "Format each test as a SHORT bullet-point checklist — one line per action/verification, no prose. Example: '• Fill email → valid@test.com • Click Submit • Success message appears'.",
   },
   {
     id: "gherkin",

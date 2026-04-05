@@ -48,7 +48,7 @@ Return ONLY valid JSON (no markdown, no code fences):
       "priority": "high",
       "type": "functional|smoke|regression|e2e|integration|accessibility|security|performance",
       "scenario": "positive|negative|edge_case",
-      "steps": ["User navigates to the application", "User performs the described action", "Assert: expected outcome is verified"],
+      "steps": ["User navigates to the application", "User performs the described action", "The expected outcome is visible on the page"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('${name.replace(/'/g, "\\'")}', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
@@ -65,7 +65,8 @@ IMPORTANT: "type" must be one of these industry-standard test types — pick the
   - "performance"    — load times, responsiveness, resource usage
 If unsure, use "functional".
 
-IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
-BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
-GOOD steps: ["User opens the homepage", "User clicks the Sign In button"]`;
+IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
+BAD steps:  ["await page.goto('...')", "Assert: success message visible", "assert form is submitted"]
+GOOD steps: ["User opens the homepage", "User clicks the Sign In button", "A success confirmation message appears", "The user's profile name is shown in the header"]
+When the output format is Gherkin / BDD, write steps as: "Given the user is on the login page", "When the user clicks Sign In", "Then a welcome message is displayed".`;
 }
