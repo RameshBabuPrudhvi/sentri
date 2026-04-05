@@ -150,13 +150,24 @@ Return ONLY valid JSON (no markdown, no code fences):
       "name": "descriptive name that includes what scenario (positive/negative) is tested",
       "description": "specific user goal or failure scenario being validated",
       "priority": "high|medium",
-      "type": "${classifiedPage.dominantIntent.toLowerCase()}",
+      "type": "functional|smoke|regression|e2e|integration|accessibility|security|performance",
       "scenario": "positive|negative|edge_case",
       "steps": ["User opens the page", "User clicks a link or button to perform an action", "Assert: expected page or content is displayed"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('...', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
 }
+
+IMPORTANT: "type" must be one of these industry-standard test types — pick the best match:
+  - "functional"     — verifies a specific feature works as expected
+  - "smoke"          — quick sanity check of critical paths
+  - "regression"     — confirms existing functionality after a change
+  - "e2e"            — end-to-end flow spanning multiple pages/steps
+  - "integration"    — verifies interactions between components or APIs
+  - "accessibility"  — WCAG compliance, keyboard nav, screen readers
+  - "security"       — auth, permissions, input sanitisation
+  - "performance"    — load times, responsiveness, resource usage
+If unsure, use "functional".
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
 BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]

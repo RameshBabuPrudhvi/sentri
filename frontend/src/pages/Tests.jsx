@@ -809,7 +809,31 @@ export default function Tests() {
                           {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
                           {t.isJourneyTest && <span className="badge badge-purple" style={{ marginLeft: 4 }}>Journey</span>}
                           {t.priority === "high" && <span className="badge badge-red" style={{ marginLeft: 4 }}>High</span>}
-                          {t.type === "manual" && <span className="badge badge-blue" style={{ marginLeft: 4 }}>Manual</span>}
+                          {t.type && (
+                            <span className={`badge ${
+                              t.type === "e2e"           ? "badge-purple" :
+                              t.type === "smoke"         ? "badge-amber"  :
+                              t.type === "regression"    ? "badge-blue"   :
+                              t.type === "integration"   ? "badge-blue"   :
+                              t.type === "accessibility" ? "badge-green"  :
+                              t.type === "security"      ? "badge-red"    :
+                              t.type === "performance"   ? "badge-amber"  :
+                              t.type === "manual"        ? "badge-blue"   :
+                              "badge-gray"
+                            }`} style={{ marginLeft: 4 }}>
+                              {({
+                                functional:    "Functional",
+                                smoke:         "Smoke",
+                                regression:    "Regression",
+                                e2e:           "E2E",
+                                integration:   "Integration",
+                                accessibility: "A11y",
+                                security:      "Security",
+                                performance:   "Perf",
+                                manual:        "Manual",
+                              })[t.type] || t.type}
+                            </span>
+                          )}
                           {/* Row hover actions */}
                           {isHovered && (
                             <div style={{ display: "flex", gap: 4, marginLeft: "auto" }} onClick={e => e.stopPropagation()}>

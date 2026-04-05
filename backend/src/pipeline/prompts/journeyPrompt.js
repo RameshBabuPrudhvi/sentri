@@ -59,7 +59,7 @@ Return ONLY valid JSON (no markdown):
       "name": "descriptive journey test name",
       "description": "what user goal this validates",
       "priority": "high",
-      "type": "${journey.type.toLowerCase()}",
+      "type": "e2e|functional|smoke|regression|integration|accessibility|security|performance",
       "scenario": "positive|negative|edge_case",
       "journeyType": "${journey.type}",
       "isJourneyTest": true,
@@ -68,6 +68,16 @@ Return ONLY valid JSON (no markdown):
     }
   ]
 }
+
+IMPORTANT: "type" must be one of these industry-standard test types — pick the best match:
+  - "e2e"            — end-to-end flow spanning multiple pages/steps (default for journeys)
+  - "functional"     — verifies a specific feature works as expected
+  - "smoke"          — quick sanity check of critical paths
+  - "regression"     — confirms existing functionality after a change
+  - "integration"    — verifies interactions between components or APIs
+  - "accessibility"  — WCAG compliance, keyboard nav, screen readers
+  - "security"       — auth, permissions, input sanitisation
+  - "performance"    — load times, responsiveness, resource usage
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
 BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
