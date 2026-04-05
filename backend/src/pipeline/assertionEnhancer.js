@@ -38,6 +38,18 @@ export function hasNoAssertions(playwrightCode) {
   return !playwrightCode.includes("expect(");
 }
 
+// ── Map industry-standard test types → intent-based template keys ─────────────
+// The prompt templates now ask the AI to emit types like "functional", "e2e", etc.
+// When classifiedPage is unavailable (single-test flow), we fall back to
+// test.type — map the few types that have a clear intent affinity so the
+// enhancer picks a meaningful template instead of always falling to VISIBILITY.
+
+const TYPE_TO_INTENT = {
+  SECURITY:      "AUTH",          // security tests often probe auth flows
+  E2E:           "NAVIGATION",    // multi-page journeys → navigation template
+  INTEGRATION:   "FORM_SUBMISSION", // integration tests often hit form/API endpoints
+};
+
 // ── Assertion templates by intent/type ───────────────────────────────────────
 
 const ASSERTION_TEMPLATES = {
@@ -99,7 +111,8 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // If no assertions at all — inject based on intent
   if (hasNoAssertions(code)) {
-    const intent = classifiedPage?.dominantIntent || test.type?.toUpperCase() || "NAVIGATION";
+    const rawIntent = classifiedPage?.dominantIntent || test.type?.toUpperCase() || "NAVIGATION";
+    const intent = TYPE_TO_INTENT[rawIntent] || rawIntent;
     const template = ASSERTION_TEMPLATES[intent] || ASSERTION_TEMPLATES.VISIBILITY;
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
 

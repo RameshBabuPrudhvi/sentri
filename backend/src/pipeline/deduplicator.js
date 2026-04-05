@@ -84,8 +84,8 @@ export function scoreTest(test) {
   if (test.priority === "medium") score += 5;
 
   // Reward by test type — covers both legacy intent-based types (auth, checkout,
-  // form_submission) and new industry-standard types (e2e, security, regression)
-  const highValueTypes = ["form", "auth", "checkout", "e2e", "security", "regression", "integration"];
+  // form_submission) and new industry-standard types (e2e, security, regression, etc.)
+  const highValueTypes = ["form", "auth", "checkout", "e2e", "security", "regression", "integration", "accessibility", "performance"];
   if (highValueTypes.some(t => (test.type || "").toLowerCase().includes(t))) score += 15;
 
   // Reward stable selectors
