@@ -18,8 +18,8 @@ import TestDials from "./TestDials.jsx";
 import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
 
 const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
-const MAX_ATTACHMENT_SIZE  = 100_000;   // 100 KB per file
-const MAX_TOTAL_ATTACHMENT = 500_000;   // 500 KB cumulative — keeps the AI prompt manageable
+const MAX_ATTACHMENT_SIZE  = 40_000;    // 40 KB per file
+const MAX_TOTAL_ATTACHMENT = 45_000;    // 45 KB cumulative — backend caps description at 50 KB
 
 // ── Sample prompts for the Examples popover ─────────────────────────────────────
 
@@ -173,7 +173,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     e.target.value = ""; // reset so the same file can be re-selected
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_SIZE) {
-        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 100 KB per file.`);
+        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 40 KB per file.`);
         continue;
       }
       const reader = new FileReader();
@@ -186,7 +186,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           if (prev.some(a => a.name === file.name)) return prev; // dedupe
           const totalSize = prev.reduce((n, a) => n + a.content.length, 0) + content.length;
           if (totalSize > MAX_TOTAL_ATTACHMENT) {
-            setError(`Total attachment size would exceed 500 KB. Remove an existing file first.`);
+            setError(`Total attachment size would exceed 45 KB. Remove an existing file first.`);
             return prev;
           }
           return [...prev, { name: file.name, content }];

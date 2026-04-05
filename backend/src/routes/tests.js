@@ -128,6 +128,8 @@ Return ONLY valid JSON with no markdown fences:
       : "Test metadata updated",
   });
 
+  saveDb(); // user edits must survive crashes — don't rely on the 30s interval
+
   const response = { ...test };
   if (regenerateCode && !codeRegeneratedNow) {
     response._codeStale = true;
@@ -172,6 +174,7 @@ router.post("/projects/:id/tests", (req, res) => {
   };
 
   db.tests[testId] = test;
+  saveDb();
 
   logActivity({
     type: "test.create", projectId: project.id, projectName: project.name,
@@ -185,15 +188,16 @@ router.post("/projects/:id/tests", (req, res) => {
 router.delete("/projects/:id/tests/:testId", (req, res) => {
   const db = getDb();
   const test = db.tests[req.params.testId];
+  if (!test || test.projectId !== req.params.id)
+    return res.status(404).json({ error: "not found" });
   const project = db.projects[req.params.id];
-  if (test) {
-    logActivity({
-      type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
-      testId: req.params.testId, testName: test.name,
-      detail: `Test deleted — "${test.name}"`,
-    });
-  }
+  logActivity({
+    type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
+    testId: req.params.testId, testName: test.name,
+    detail: `Test deleted — "${test.name}"`,
+  });
   delete db.tests[req.params.testId];
+  saveDb();
   res.json({ ok: true });
 });
 
@@ -216,8 +220,8 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
 
   // ── Prompt guardrails ────────────────────────────────────────────────────
   // Cap description at 50 KB to prevent context window overflow.
-  // The frontend allows 500 KB of attachments, but 50 KB of text is ~12K tokens
-  // which is a reasonable limit for the user message portion.
+  // The frontend caps total attachments at 45 KB, leaving headroom for the
+  // user's typed description. 50 KB of text is ~12K tokens.
   const MAX_DESCRIPTION_LENGTH = 50_000;
   const rawDescription = (description || "").trim();
   if (rawDescription.length > MAX_DESCRIPTION_LENGTH) {
@@ -368,6 +372,7 @@ router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -384,6 +389,7 @@ router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -400,6 +406,7 @@ router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
     testId: test.id, testName: test.name,
     detail: `Test restored to draft — "${test.name}"`,
   });
+  saveDb();
   res.json(test);
 });
 
@@ -426,6 +433,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
         detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
       });
     }
+    saveDb();
     return res.json({ deleted: deleted.length, tests: deleted });
   }
 
@@ -446,6 +454,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
   }
+  saveDb();
   res.json({ updated: updated.length, tests: updated });
 });
 

@@ -72,8 +72,14 @@ export default function NewProject() {
   }
 
   async function testConnection() {
-    const urlVal = form.url.trim();
+    let urlVal = form.url.trim();
     if (!urlVal) { setTestResult({ ok: false, msg: "Enter a URL first." }); return; }
+    // Apply the same https:// prefix that onBlur adds — avoids a race where
+    // blur hasn't updated state yet when the user clicks "Test" immediately.
+    if (urlVal && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlVal)) {
+      urlVal = "https://" + urlVal;
+      setForm(f => ({ ...f, url: urlVal }));
+    }
     try { new URL(urlVal); } catch { setTestResult({ ok: false, msg: "Invalid URL format." }); return; }
     setTesting(true);
     setTestResult(null);

@@ -49,7 +49,7 @@ export function buildJUnitXml(tests, { suiteName = "Sentri Tests", projectUrl = 
 
     let inner = "";
     if (t.lastResult === "failed") {
-      inner = `\n      <failure message="${xmlEscape(t.lastError || "Test failed")}" type="${xmlEscape(t.type || "AssertionError")}" />`;
+      inner = `\n      <failure message="${xmlEscape(t.lastError || "Test failed")}" type="AssertionError" />`;
     }
 
     // Steps as system-out for traceability

@@ -34,15 +34,16 @@ export function validateTest(test, projectUrl) {
 
   // Type must be a known industry-standard value (warn, don't reject — the AI
   // occasionally invents types like "user-flow" which are still usable tests)
-  if (test.type && !VALID_TYPES_SET.has(test.type.toLowerCase())) {
-    // Normalise to "functional" so downstream pipeline stages get a valid type
-    test.type = "functional";
+  if (test.type) {
+    const lower = test.type.toLowerCase();
+    test.type = VALID_TYPES_SET.has(lower) ? lower : "functional";
   }
 
   // Scenario must be one of the expected values
   const validScenarios = new Set(["positive", "negative", "edge_case"]);
-  if (test.scenario && !validScenarios.has(test.scenario.toLowerCase())) {
-    test.scenario = "positive";
+  if (test.scenario) {
+    const lower = test.scenario.toLowerCase();
+    test.scenario = validScenarios.has(lower) ? lower : "positive";
   }
 
   // Playwright code: if present, must be parseable (contain `async` and braces)

@@ -114,7 +114,7 @@ export function classifyElement(element) {
 
 const AI_THRESHOLD = parseInt(process.env.AI_CLASSIFY_THRESHOLD, 10) || 40;
 
-async function aiClassifyPage(snapshot) {
+async function aiClassifyPage(snapshot, signal) {
   const elements = (snapshot.elements || []).slice(0, 15).map(e => ({
     tag: e.tag, text: (e.text || "").slice(0, 40), role: e.role, type: e.type,
   }));
@@ -147,7 +147,7 @@ Return ONLY valid JSON (no markdown):
   "reason": "one-sentence explanation"
 }`;
 
-  const text = await generateText(prompt, { maxTokens: 256 });
+  const text = await generateText(prompt, { maxTokens: 256, signal });
   const result = parseJSON(text);
   const intent = (result.intent || "").toUpperCase();
   const validIntents = ["AUTH", "CHECKOUT", "SEARCH", "FORM_SUBMISSION", "CRUD", "NAVIGATION", "CONTENT"];
