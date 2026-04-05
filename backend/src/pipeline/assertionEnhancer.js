@@ -38,27 +38,16 @@ export function hasNoAssertions(playwrightCode) {
   return !playwrightCode.includes("expect(");
 }
 
-// ── Map industry-standard test types → intent-based template keys ─────────────
-// The prompt templates now ask the AI to emit types like "functional", "e2e", etc.
-// When classifiedPage is unavailable (single-test flow), we fall back to
-// test.type — map every new type to the closest intent-based template so the
-// enhancer picks meaningful assertions instead of always falling to VISIBILITY.
+// ── Assertion templates ──────────────────────────────────────────────────────
+// Two tiers of templates:
+//   1. INTENT templates — used when classifiedPage is available (crawl pipeline)
+//   2. TYPE templates  — used when test.type is an industry-standard type
+//                        (single-test flow, or crawl tests with new type enum)
+//
+// The enhancer tries classifiedPage.dominantIntent first, then test.type,
+// then falls back to FALLBACK.
 
-const TYPE_TO_INTENT = {
-  // New industry-standard types → best-fit intent template
-  FUNCTIONAL:    "NAVIGATION",       // generic feature verification → page load + content
-  SMOKE:         "NAVIGATION",       // quick sanity → page load + content
-  REGRESSION:    "NAVIGATION",       // stability check → page load + content
-  E2E:           "NAVIGATION",       // multi-page journeys → navigation template
-  INTEGRATION:   "FORM_SUBMISSION",  // API/component integration → form/submit template
-  ACCESSIBILITY: "NAVIGATION",       // a11y checks → page structure + visibility
-  SECURITY:      "AUTH",             // auth, permissions, XSS → auth template
-  PERFORMANCE:   "NAVIGATION",       // load times → page load assertions
-};
-
-// ── Assertion templates by intent/type ───────────────────────────────────────
-
-const ASSERTION_TEMPLATES = {
+const INTENT_TEMPLATES = {
   AUTH: (snapshot) => `
   // Assert successful authentication
   await expect(page).not.toHaveURL(${JSON.stringify(snapshot.url)});
@@ -90,11 +79,59 @@ const ASSERTION_TEMPLATES = {
   await expect(page.locator('form').first()).toBeVisible();
   await expect(page.locator('button').filter({ hasText: /pay|order|confirm/i }).first()).toBeVisible().catch(() => {});`,
 
-  VISIBILITY: (snapshot) => `
+  CONTENT: (snapshot) => `
   // Assert page content loaded
   await expect(page).toHaveTitle(/.+/);
-  await expect(page.locator('main, [role="main"], body').first()).toBeVisible();`,
+  await expect(page.locator('main, [role="main"], article, body').first()).toBeVisible();`,
 };
+
+const TYPE_TEMPLATES = {
+  functional: (snapshot) => `
+  // Assert feature works — page loads with expected content
+  await expect(page).toHaveTitle(/.+/);
+  await expect(page.locator('h1, h2, main').first()).toBeVisible();`,
+
+  smoke: (snapshot) => `
+  // Smoke check — page loads without errors
+  await expect(page).toHaveURL(${JSON.stringify(snapshot.url)});
+  await expect(page).toHaveTitle(/.+/);`,
+
+  regression: (snapshot) => `
+  // Regression — verify existing content unchanged
+  await expect(page).toHaveURL(${JSON.stringify(snapshot.url)});
+  await expect(page).toHaveTitle(/.+/);
+  await expect(page.locator('h1, h2, main').first()).toBeVisible();`,
+
+  e2e: (snapshot) => `
+  // E2E — verify navigation and content across pages
+  await expect(page).toHaveTitle(/.+/);
+  await expect(page.locator('h1, h2, main').first()).toBeVisible();`,
+
+  integration: (snapshot) => `
+  // Integration — verify form/API interaction
+  await expect(page.locator('form').first()).toBeVisible();
+  await expect(page.locator('button[type="submit"], input[type="submit"]').first()).toBeEnabled();`,
+
+  accessibility: (snapshot) => `
+  // Accessibility — verify semantic structure
+  await expect(page.locator('main, [role="main"]').first()).toBeVisible();
+  await expect(page.locator('h1').first()).toBeVisible();`,
+
+  security: (snapshot) => `
+  // Security — verify auth boundary
+  await expect(page).not.toHaveURL(${JSON.stringify(snapshot.url)});
+  await expect(page.locator('body')).not.toContainText('Invalid');`,
+
+  performance: (snapshot) => `
+  // Performance — verify page loads within timeout
+  await expect(page).toHaveURL(${JSON.stringify(snapshot.url)});
+  await expect(page).toHaveTitle(/.+/);`,
+};
+
+const FALLBACK_TEMPLATE = (snapshot) => `
+  // Assert page content loaded
+  await expect(page).toHaveTitle(/.+/);
+  await expect(page.locator('main, [role="main"], body').first()).toBeVisible();`;
 
 // ── Page load assertion (always included) ────────────────────────────────────
 
@@ -115,11 +152,13 @@ function buildPageLoadAssertion(url, title) {
 export function enhanceTest(test, snapshot, classifiedPage) {
   let code = test.playwrightCode || "";
 
-  // If no assertions at all — inject based on intent
+  // If no assertions at all — inject based on intent or type
   if (hasNoAssertions(code)) {
-    const rawIntent = classifiedPage?.dominantIntent || test.type?.toUpperCase() || "NAVIGATION";
-    const intent = TYPE_TO_INTENT[rawIntent] || rawIntent;
-    const template = ASSERTION_TEMPLATES[intent] || ASSERTION_TEMPLATES.VISIBILITY;
+    // Two-tier lookup: classifiedPage intent → test.type → fallback
+    const intent = classifiedPage?.dominantIntent;
+    const template = (intent && INTENT_TEMPLATES[intent])
+      || TYPE_TEMPLATES[(test.type || "").toLowerCase()]
+      || FALLBACK_TEMPLATE;
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
 
     // Inject before closing brace of the test

@@ -16,6 +16,8 @@
  */
 
 import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
+import { isLocalProvider } from "../../aiProvider.js";
+import { buildFewShotBlock } from "./fewShotExamples.js";
 
 // ─── Valid test types ────────────────────────────────────────────────────────
 
@@ -85,13 +87,23 @@ FIELD RULES:
   Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result.
   BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed"]
   GOOD steps (specific):  ["User sees the heading 'Create Account' and a form with Name, Email, and Password fields", "User fills in Name with 'Jane' and Email with 'jane@test.com' and clicks 'Sign Up'", "A confirmation message 'Account created' appears below the form"]
-  When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".`.trim();
+  When the output format is Gherkin / BDD, write steps as: "Given the user is on the registration page", "When the user fills in the form and clicks 'Sign Up'", "Then a confirmation message 'Account created' is displayed".
+
+${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 }
 
 // ─── System prompt ───────────────────────────────────────────────────────────
 // Contains the persona, self-healing rules, assertion rules, and stability
 // rules. These are constant across all prompt types and belong in the
 // "system" message role so the LLM treats them with highest priority.
+
+// ─── Prompt version ──────────────────────────────────────────────────────────
+// Bump this when the system prompt, schema, or rules change materially.
+// Stored on every generated test so teams can track which prompt version
+// produced which tests, A/B test prompt changes, and roll back if quality
+// regresses.
+
+export const PROMPT_VERSION = "2.0.0";
 
 export function buildSystemPrompt() {
   return `You are a senior QA automation engineer generating production-grade Playwright test suites.

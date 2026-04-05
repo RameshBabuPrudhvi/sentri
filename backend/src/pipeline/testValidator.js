@@ -1,11 +1,15 @@
 /**
  * testValidator.js — Rejects malformed or placeholder tests before they enter the DB
  *
- * Pure function — no external dependencies, trivially unit-testable.
+ * Pure function — no external dependencies beyond the shared type enum.
  *
  * Exports:
  *   validateTest(test, projectUrl) → string[]  (empty = valid)
  */
+
+import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
+
+const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
 
 /**
  * Validate a single AI-generated test object.
@@ -26,6 +30,19 @@ export function validateTest(test, projectUrl) {
   // Must have at least one step
   if (!Array.isArray(test.steps) || test.steps.length === 0) {
     issues.push("no test steps defined");
+  }
+
+  // Type must be a known industry-standard value (warn, don't reject — the AI
+  // occasionally invents types like "user-flow" which are still usable tests)
+  if (test.type && !VALID_TYPES_SET.has(test.type.toLowerCase())) {
+    // Normalise to "functional" so downstream pipeline stages get a valid type
+    test.type = "functional";
+  }
+
+  // Scenario must be one of the expected values
+  const validScenarios = new Set(["positive", "negative", "edge_case"]);
+  if (test.scenario && !validScenarios.has(test.scenario.toLowerCase())) {
+    test.scenario = "positive";
   }
 
   // Playwright code: if present, must be parseable (contain `async` and braces)
