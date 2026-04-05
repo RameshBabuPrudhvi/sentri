@@ -50,6 +50,10 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
       // Traceability — which prompt version and AI model produced this test
       promptVersion: PROMPT_VERSION,
       modelUsed: getProviderName(),
+      // Requirement traceability — linked Jira/issue key (set via API or Import Issue)
+      linkedIssueKey: t.linkedIssueKey || null,
+      // Tags for filtering and traceability matrix grouping
+      tags: Array.isArray(t.tags) ? t.tags : [],
     };
     run.tests.push(testId);
     createdTestIds.push(testId);
