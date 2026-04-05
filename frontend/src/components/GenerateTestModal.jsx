@@ -11,7 +11,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, X, Paperclip, Trash2 } from "lucide-react";
+import { Upload, Clock, X, Paperclip, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
@@ -124,6 +124,8 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const [error, setError] = useState(null);
   const [dialsConfig, setDialsConfig] = useState(() => loadSavedConfig());
   const [showExamples, setShowExamples] = useState(false);
+  const [showImportIssue, setShowImportIssue] = useState(false);
+  const [importIssueText, setImportIssueText] = useState("");
   const fileInputRef = useRef();
 
   // Active dial count for badge
@@ -170,6 +172,26 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     setName(ex.name);
     setDescription(ex.description);
     setShowExamples(false);
+    if (error) setError(null);
+  }
+
+  // Parse pasted Jira / issue text into name + description.
+  // Accepts formats like:
+  //   "PROJ-123 Login fails for SSO users\nAs a user..."  (key + title on first line)
+  //   "Login fails for SSO users\nAs a user..."           (just title on first line)
+  function handleImportIssue() {
+    const raw = importIssueText.trim();
+    if (!raw) return;
+    const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+    // First line → test name (strip leading Jira key like "PROJ-123 " if present)
+    const firstLine = lines[0] || "";
+    const parsedName = firstLine.replace(/^[A-Z][A-Z0-9]+-\d+\s*[-:.]?\s*/, "").trim();
+    // Remaining lines → description
+    const parsedDesc = lines.slice(1).join("\n").trim();
+    if (parsedName) setName(parsedName);
+    if (parsedDesc) setDescription(prev => prev ? `${prev}\n\n${parsedDesc}` : parsedDesc);
+    setImportIssueText("");
+    setShowImportIssue(false);
     if (error) setError(null);
   }
 
@@ -260,9 +282,53 @@ export default function GenerateTestModal({ projects = [], onClose }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Story Input card */}
               <div>
-                <div style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                   <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Story Input</span>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    style={{ gap: 5 }}
+                    onClick={() => setShowImportIssue(v => !v)}
+                  >
+                    <Upload size={11} /> Import Issue
+                  </button>
                 </div>
+
+                {/* Import Issue panel — paste Jira issue text */}
+                {showImportIssue && (
+                  <div style={{
+                    marginBottom: 12, padding: 12, background: "var(--bg2)",
+                    border: "1px solid var(--border)", borderRadius: "var(--radius)",
+                    display: "flex", flexDirection: "column", gap: 8,
+                  }}>
+                    <div style={{ fontSize: "0.78rem", color: "var(--text2)", fontWeight: 500 }}>
+                      Paste a Jira issue (title on first line, description below)
+                    </div>
+                    <textarea
+                      className="input"
+                      value={importIssueText}
+                      onChange={e => setImportIssueText(e.target.value)}
+                      placeholder={"PROJ-123 Login fails for SSO users\nAs a user with SSO enabled, I expect to be redirected to the IdP and returned to the dashboard after authentication..."}
+                      rows={4}
+                      style={{ resize: "vertical", lineHeight: 1.5, paddingTop: 8, fontSize: "0.82rem" }}
+                      autoFocus
+                    />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => { setShowImportIssue(false); setImportIssueText(""); }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-primary btn-xs"
+                        onClick={handleImportIssue}
+                        disabled={!importIssueText.trim()}
+                      >
+                        Import
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Project selector */}
                 <div style={{ marginBottom: 12 }}>
