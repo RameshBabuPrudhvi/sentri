@@ -142,10 +142,15 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
   }
 
-  // Journey detection
-  const journeys = buildUserJourneys(classifiedPages);
+  // Journey detection — pass snapshotsByUrl so link-graph analysis can discover
+  // cross-intent journeys (e.g. pricing → signup → dashboard)
+  const journeys = buildUserJourneys(classifiedPages, snapshotsByUrl);
   if (journeys.length > 0) {
-    log(run, `🗺️  Detected ${journeys.length} user journey(s): ${journeys.map(j => j.name).join(", ")}`);
+    log(run, `🗺️  Detected ${journeys.length} user journey(s):`);
+    for (const j of journeys) {
+      const via = j._discoveredBy ? ` [${j._discoveredBy}]` : "";
+      log(run, `   • ${j.name} (${j.pages.length} pages)${via}`);
+    }
   }
 
   throwIfAborted(signal);

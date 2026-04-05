@@ -241,30 +241,41 @@ export async function classifyPageWithAI(snapshot, filteredElements, { signal } 
 }
 
 /**
- * buildUserJourneys(classifiedPages) → Array of journey objects
+ * buildUserJourneys(classifiedPages, snapshotsByUrl?) → Array of journey objects
  *
  * Chains related pages into GENUINE multi-page user journeys.
  * Single-page intents are NOT wrapped as journeys — they are handled
  * separately by generateIntentTests in journeyGenerator.js.
+ *
+ * Detection strategies (applied in order):
+ *   1. Intent-based patterns — AUTH→dashboard, multi-CHECKOUT, multi-SEARCH, multi-CRUD
+ *   2. Link-graph analysis   — when snapshots are provided, discover cross-intent
+ *      journeys by following outbound links between classified pages
+ *   3. Form→confirmation     — FORM_SUBMISSION page linking to a CONTENT/NAVIGATION page
  */
-export function buildUserJourneys(classifiedPages) {
+export function buildUserJourneys(classifiedPages, snapshotsByUrl = {}) {
   const journeys = [];
+  const usedUrls = new Set(); // track URLs already in a journey to avoid overlap
 
-  // Find auth flow — login page → post-login destination
+  // ── 1. Intent-based pattern matching (original logic, improved) ────────────
+
+  // Auth flow — login page → post-login destination
   const authPages = classifiedPages.filter(p => p.dominantIntent === "AUTH");
   const dashboardPages = classifiedPages.filter(p =>
     p.url.includes("dashboard") || p.url.includes("home") || p.title.toLowerCase().includes("dashboard")
   );
   if (authPages.length > 0 && dashboardPages.length > 0) {
+    const pages = [...authPages, ...dashboardPages].slice(0, 3);
     journeys.push({
       name: "Authentication Flow",
       type: "AUTH",
-      pages: [...authPages, ...dashboardPages].slice(0, 3),
+      pages,
       description: "User login and post-login navigation",
     });
+    pages.forEach(p => usedUrls.add(p.url));
   }
 
-  // Find checkout flow — only if we have multiple checkout-related pages
+  // Checkout flow — only if we have multiple checkout-related pages
   const cartPages = classifiedPages.filter(p => p.dominantIntent === "CHECKOUT");
   if (cartPages.length >= 2) {
     journeys.push({
@@ -273,9 +284,10 @@ export function buildUserJourneys(classifiedPages) {
       pages: cartPages,
       description: "Add to cart and purchase flow",
     });
+    cartPages.forEach(p => usedUrls.add(p.url));
   }
 
-  // Find search → results flow
+  // Search → results flow
   const searchPages = classifiedPages.filter(p => p.dominantIntent === "SEARCH");
   if (searchPages.length >= 2) {
     journeys.push({
@@ -284,24 +296,117 @@ export function buildUserJourneys(classifiedPages) {
       pages: searchPages,
       description: "Search and filter functionality",
     });
+    searchPages.forEach(p => usedUrls.add(p.url));
   }
 
-  // Find CRUD flow — list → create/edit → detail
+  // CRUD flow — list → create/edit → detail
   const crudPages = classifiedPages.filter(p => p.dominantIntent === "CRUD");
   if (crudPages.length >= 2) {
+    const pages = crudPages.slice(0, 4);
     journeys.push({
       name: "CRUD Flow",
       type: "CRUD",
-      pages: crudPages.slice(0, 4),
+      pages,
       description: "Create, read, update, delete workflow",
     });
+    pages.forEach(p => usedUrls.add(p.url));
+  }
+
+  // ── 2. Link-graph journey discovery ────────────────────────────────────────
+  // When snapshots include outbound links, we can discover cross-intent journeys
+  // that the pattern matcher misses (e.g. pricing → signup → dashboard).
+
+  if (Object.keys(snapshotsByUrl).length > 0) {
+    const classifiedByUrl = {};
+    for (const cp of classifiedPages) classifiedByUrl[cp.url] = cp;
+
+    // Build adjacency: page URL → set of classified page URLs it links to
+    const adjacency = {};
+    for (const cp of classifiedPages) {
+      const snap = snapshotsByUrl[cp.url];
+      if (!snap?.outboundLinks) continue;
+      adjacency[cp.url] = new Set();
+      for (const link of snap.outboundLinks) {
+        if (classifiedByUrl[link] && link !== cp.url) {
+          adjacency[cp.url].add(link);
+        }
+      }
+    }
+
+    // Find chains of 2-4 pages connected by links that aren't already in a journey
+    for (const startPage of classifiedPages) {
+      if (usedUrls.has(startPage.url)) continue;
+      if (!adjacency[startPage.url]?.size) continue;
+      // Only start chains from high-priority pages
+      if (!startPage.isHighPriority) continue;
+
+      const chain = [startPage];
+      const chainUrls = new Set([startPage.url]);
+      let current = startPage;
+
+      // Greedy walk: follow the first link to another classified page
+      for (let step = 0; step < 3; step++) {
+        const neighbors = adjacency[current.url];
+        if (!neighbors) break;
+        let next = null;
+        for (const neighborUrl of neighbors) {
+          if (!chainUrls.has(neighborUrl) && !usedUrls.has(neighborUrl)) {
+            next = classifiedByUrl[neighborUrl];
+            break;
+          }
+        }
+        if (!next) break;
+        chain.push(next);
+        chainUrls.add(next.url);
+        current = next;
+      }
+
+      if (chain.length >= 2) {
+        const intents = chain.map(p => p.dominantIntent).join(" → ");
+        journeys.push({
+          name: `${chain[0].dominantIntent} → ${chain[chain.length - 1].dominantIntent} Flow`,
+          type: chain[0].dominantIntent,
+          pages: chain,
+          description: `Cross-page flow: ${intents}`,
+          _discoveredBy: "link_graph",
+        });
+        chain.forEach(p => usedUrls.add(p.url));
+      }
+    }
+  }
+
+  // ── 3. Form → confirmation journey ─────────────────────────────────────────
+  // A FORM_SUBMISSION page that links to a CONTENT or NAVIGATION page is likely
+  // a "submit form → see confirmation" flow.
+
+  const formPages = classifiedPages.filter(p =>
+    p.dominantIntent === "FORM_SUBMISSION" && !usedUrls.has(p.url)
+  );
+  for (const formPage of formPages) {
+    const snap = snapshotsByUrl[formPage.url];
+    if (!snap?.outboundLinks) continue;
+    for (const link of snap.outboundLinks) {
+      const target = classifiedPages.find(p =>
+        p.url === link &&
+        !usedUrls.has(p.url) &&
+        (p.dominantIntent === "CONTENT" || p.dominantIntent === "NAVIGATION")
+      );
+      if (target) {
+        journeys.push({
+          name: "Form Submission Flow",
+          type: "FORM_SUBMISSION",
+          pages: [formPage, target],
+          description: `Submit form on ${formPage.title} → confirmation on ${target.title}`,
+          _discoveredBy: "form_confirmation",
+        });
+        usedUrls.add(formPage.url);
+        usedUrls.add(target.url);
+        break; // one confirmation page per form is enough
+      }
+    }
   }
 
   // DO NOT create single-page "journeys" — those are handled by generateIntentTests.
-  // The old code wrapped every uncovered page as a fake journey, causing:
-  // 1. Massive AI API cost (separate call per page)
-  // 2. Duplicate tests (journey + intent tests for the same page)
-  // 3. Low-quality journey tests (no multi-page context to work with)
 
   return journeys;
 }

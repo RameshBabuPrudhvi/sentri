@@ -130,6 +130,13 @@ export async function takeSnapshot(page) {
       hasTabs: document.querySelectorAll("[role='tablist'], [role='tab']").length > 0,
       hasTable: document.querySelectorAll("table, [role='grid']").length > 0,
       metaDescription: document.querySelector('meta[name="description"]')?.content?.slice(0, 120) || "",
+      // Outbound same-origin links — used by buildUserJourneys() for link-graph
+      // journey discovery. Normalised (no hash, no query) and deduped.
+      outboundLinks: [...new Set(
+        Array.from(document.querySelectorAll("a[href]"))
+          .map(a => { try { const u = new URL(a.href, location.href); u.hash = ""; u.search = ""; return u.origin === location.origin ? u.toString() : null; } catch { return null; } })
+          .filter(Boolean)
+      )].slice(0, 50),
     };
   });
 }
