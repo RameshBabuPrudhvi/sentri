@@ -132,7 +132,7 @@ STRICT RULES:
 2. Each test validates a REAL user goal or validates graceful failure handling
 3. ${SELF_HEALING_PROMPT_RULES}
 4. Every test MUST have at least 2 strong assertions
-5. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
+5. STRONG assertions (preferred): toBeVisible(), toContainText(), toHaveValue(), toBeEnabled(), toHaveCount(). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 13) — never with path or query patterns.
 6. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
 7. Skip tests for: footer, social icons, cookie banners — but DO test primary navigation links and CTAs that lead to real user flows
 8. Tests must be independent — no shared state between tests
@@ -140,7 +140,7 @@ STRICT RULES:
 10. Only test elements/behaviors that ACTUALLY exist for this type of page
 11. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
 12. CRITICAL: playwrightCode must be fully self-contained and executable on its own
-13. STABILITY: For URL assertions use regex patterns or toContainText — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
+13. STABILITY — URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs like /sorry, consent pages, geo-redirects, login walls, URL-encoded params like %3F instead of ?). Instead: (a) PREFER asserting visible page CONTENT — e.g. await expect(page.getByText('Search results')).toBeVisible() — over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/google\\.com/i) — never match on path segments or query params that may be rewritten. (c) For search flows, assert that results appeared on the page (visible text, result count, a result link) rather than checking the URL contains the query string.
 14. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites (Amazon, etc.) continuously fire background requests and never reach networkidle, causing a guaranteed 30 s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content that loads after interaction (search results, filtered lists, modal contents), use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.
 
 Return ONLY valid JSON (no markdown, no code fences):

@@ -43,13 +43,13 @@ Requirements:
 1. Cover BOTH positive paths (happy paths) AND negative paths (error states, edge cases)
 2. Each test must flow through multiple pages/steps logically
 3. ${SELF_HEALING_PROMPT_RULES}
-4. Include at least 3 meaningful assertions per test (toHaveURL, toBeVisible, toContainText) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly.
+4. Include at least 3 meaningful assertions per test (toBeVisible, toContainText, toHaveValue, toHaveCount) — assertions may still use expect(page.getByRole(...)) or expect(page.getByText(...)) directly. Use toHaveURL() ONLY with a loose hostname-only regex (see rule 10) — never with path or query patterns.
 5. After every page.goto() call use { waitUntil: 'domcontentloaded' } — do NOT use waitForLoadState('networkidle') as many real-world sites (e.g. SPAs, e-commerce) fire continuous background requests and never reach networkidle, causing a 30 s timeout.
 6. Tests must represent REAL user goals and behaviors
 7. Negative tests should verify error messages and validation feedback
 8. CRITICAL: Each test's playwrightCode MUST be fully self-contained — it MUST start with await page.goto('FULL_URL', { waitUntil: 'domcontentloaded', timeout: 30000 }) as the very first line inside the test function. Use the actual URL from the PAGE data above.
 9. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use the real page URL provided.
-10. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/dashboard/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures.
+10. STABILITY — URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs like /sorry, consent pages, geo-redirects, login walls, URL-encoded params like %3F instead of ?). Instead: (a) PREFER asserting visible page CONTENT — e.g. await expect(page.getByText('Dashboard')).toBeVisible() — over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/example\\.com/i) — never match on path segments or query params that may be rewritten. (c) For search or filter flows, assert that results appeared on the page rather than checking the URL.
 11. STABILITY: After clicking a button or link that triggers navigation, wrap the click in Promise.all with page.waitForNavigation({ waitUntil: 'domcontentloaded' }) — e.g. await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). Never use waitForLoadState('networkidle') after a click — it times out on sites with background polling. For asserting dynamic content (search results, filters), use await page.waitForSelector('selector', { timeout: 15000 }) instead.
 
 Return ONLY valid JSON (no markdown):

@@ -31,12 +31,12 @@ STRICT RULES:
 3. Steps must be specific to the described scenario, not generic page checks
 4. ${SELF_HEALING_PROMPT_RULES}
 5. Every test MUST have at least 2 strong assertions
-6. STRONG assertions: toHaveURL(), toBeVisible(), toContainText(), toHaveValue(), toBeEnabled()
+6. STRONG assertions (preferred): toBeVisible(), toContainText(), toHaveValue(), toBeEnabled(), toHaveCount(). Use toHaveURL() ONLY with a loose hostname-only regex (see rule 11) — never with path or query patterns.
 7. WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true)
 8. CRITICAL: playwrightCode MUST start with: await page.goto('${appUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 });
 9. CRITICAL: playwrightCode must be fully self-contained and executable on its own
 10. CRITICAL: Do NOT use placeholder URLs like 'https://example.com' — use '${appUrl}'
-11. STABILITY: For URL assertions use regex patterns — e.g. await expect(page).toHaveURL(/\\/about/i) instead of exact URL strings, because query params, trailing slashes, and redirects cause false failures
+11. STABILITY — URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs like /sorry, consent pages, geo-redirects, login walls, URL-encoded params like %3F instead of ?). Instead: (a) PREFER asserting visible page CONTENT — e.g. await expect(page.getByText('Welcome')).toBeVisible() — over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/example\\.com/i) — never match on path segments or query params that may be rewritten. (c) For search flows, assert that results appeared on the page rather than checking the URL contains the query string.
 12. STABILITY: After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle'). After clicking something that navigates, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For dynamic content assertions use await page.waitForSelector('selector', { timeout: 15000 }) before expect().
 
 Return ONLY valid JSON (no markdown, no code fences):
