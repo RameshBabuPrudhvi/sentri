@@ -198,7 +198,13 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
   const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
-  const cleanDescription = (description || "").trim();
+  // Sanitise description: strip prompt-injection markers the same way
+  // testDials.js sanitises customInstructions. Attachment content from the
+  // frontend is concatenated into this field, so it's the main free-text vector.
+  const cleanDescription = (description || "").trim()
+    .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
+    .replace(/```/g, "")
+    .trim();
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedGenDials = resolveDialsConfig(dialsConfig);
   // Default to "one" for the generate endpoint (user-requested tests)

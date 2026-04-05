@@ -11,14 +11,15 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileCode2, Clock, X, Paperclip, Trash2 } from "lucide-react";
+import { Clock, X, Paperclip, Trash2 } from "lucide-react";
 import { api } from "../api.js";
 import ModalShell from "./ModalShell.jsx";
 import TestDials from "./TestDials.jsx";
 import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
 
 const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";
-const MAX_ATTACHMENT_SIZE = 100_000; // 100 KB — keeps the AI prompt manageable
+const MAX_ATTACHMENT_SIZE  = 100_000;   // 100 KB per file
+const MAX_TOTAL_ATTACHMENT = 500_000;   // 500 KB cumulative — keeps the AI prompt manageable
 
 // ── Sample prompts for the Examples popover ─────────────────────────────────────
 
@@ -137,14 +138,22 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     e.target.value = ""; // reset so the same file can be re-selected
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_SIZE) {
-        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 100 KB.`);
+        setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 100 KB per file.`);
         continue;
       }
       const reader = new FileReader();
       reader.onload = () => {
-        const content = reader.result;
+        // Strip common prompt-injection markers (mirrors backend testDials.js sanitisation)
+        const content = reader.result
+          .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
+          .replace(/```/g, "");
         setAttachments(prev => {
           if (prev.some(a => a.name === file.name)) return prev; // dedupe
+          const totalSize = prev.reduce((n, a) => n + a.content.length, 0) + content.length;
+          if (totalSize > MAX_TOTAL_ATTACHMENT) {
+            setError(`Total attachment size would exceed 500 KB. Remove an existing file first.`);
+            return prev;
+          }
           return [...prev, { name: file.name, content }];
         });
       };
@@ -251,16 +260,8 @@ export default function GenerateTestModal({ projects = [], onClose }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Story Input card */}
               <div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ marginBottom: 10 }}>
                   <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Story Input</span>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn btn-ghost btn-xs" style={{ gap: 5 }}>
-                      <Upload size={11} /> Import Issue
-                    </button>
-                    <button className="btn btn-ghost btn-xs" style={{ gap: 5 }}>
-                      <FileCode2 size={11} /> Import Code
-                    </button>
-                  </div>
                 </div>
 
                 {/* Project selector */}
@@ -417,9 +418,6 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                         </div>
                       )}
                     </div>
-                    <button className="btn btn-ghost btn-xs">
-                      <Clock size={11} /> History (0)
-                    </button>
                     <button
                       className="btn btn-ghost btn-xs"
                       onClick={() => { setName(""); setDescription(""); setAttachments([]); }}
