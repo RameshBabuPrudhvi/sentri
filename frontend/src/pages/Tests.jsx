@@ -807,12 +807,12 @@ export default function Tests() {
                   </th>
                   <th>Test ID</th>
                   <th>Test Name</th>
-                  <SortHeader col="status">Status</SortHeader>
-                  <SortHeader col="lastRun">Last Run</SortHeader>
                   <SortHeader col="project">Project</SortHeader>
-                  <SortHeader col="reviewStatus">Review</SortHeader>
                   <SortHeader col="priority">Priority</SortHeader>
                   <SortHeader col="type">Type</SortHeader>
+                  <SortHeader col="reviewStatus">Review</SortHeader>
+                  <SortHeader col="status">Status</SortHeader>
+                  <SortHeader col="lastRun">Last Run</SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -849,12 +849,6 @@ export default function Tests() {
                           </div>
                         </div>
                       </td>
-                      <td><StatusBadge result={t.lastResult} /></td>
-                      <td>
-                        <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
-                          {relativeTime(t.lastRunAt)}
-                        </span>
-                      </td>
                       <td>
                         {projMap[t.projectId] && (
                           <span
@@ -865,14 +859,6 @@ export default function Tests() {
                             {projMap[t.projectId].name}
                           </span>
                         )}
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
-                          {t.reviewStatus === "approved" && <span className="badge badge-green">Approved</span>}
-                          {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
-                          {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
-                        </div>
                       </td>
                       <td>
                         {t.priority === "high"
@@ -890,7 +876,22 @@ export default function Tests() {
                               {testTypeLabel(t.type, true)}
                             </span>
                           )}
-                          {/* Row hover actions */}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
+                          {t.reviewStatus === "approved" && <span className="badge badge-green">Approved</span>}
+                          {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
+                          {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                        </div>
+                      </td>
+                      <td><StatusBadge result={t.lastResult} /></td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize: "0.8rem", color: "var(--text2)" }} title={t.lastRunAt ? new Date(t.lastRunAt).toLocaleString() : undefined}>
+                            {relativeTime(t.lastRunAt)}
+                          </span>
                           {isHovered && (
                             <div style={{ display: "flex", gap: 4, marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
                               <button className="btn btn-ghost btn-xs" title="Run test" onClick={e => runSingleTest(e, t.id)} disabled={actionLoading === t.id}>
