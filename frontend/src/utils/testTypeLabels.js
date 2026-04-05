@@ -67,3 +67,25 @@ export function testTypeLabel(type, short = false) {
   const map = short ? TEST_TYPE_SHORT_LABELS : TEST_TYPE_LABELS;
   return map[type] || type || "Unknown";
 }
+
+// ─── BDD / Gherkin detection ────────────────────────────────────────────────
+
+const GHERKIN_RE = /^(Given|When|Then|And|But)\b/i;
+
+/**
+ * Detect whether a test's steps follow BDD / Gherkin syntax.
+ * Returns true when at least 2 steps start with a Gherkin keyword
+ * (Given / When / Then / And / But).
+ *
+ * @param {string[]} steps
+ * @returns {boolean}
+ */
+export function isBddTest(steps) {
+  if (!Array.isArray(steps) || steps.length < 2) return false;
+  let hits = 0;
+  for (const s of steps) {
+    if (GHERKIN_RE.test((s || "").trim())) hits++;
+    if (hits >= 2) return true;
+  }
+  return false;
+}

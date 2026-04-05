@@ -13,7 +13,7 @@ import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
-import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
+import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
@@ -843,6 +843,13 @@ export default function Tests() {
                                 {t.description}
                               </div>
                             )}
+                            <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                              {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                              {isBddTest(t.steps) && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>BDD</span>}
+                              {t.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
+                              {t.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
+                              {t.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -880,7 +887,6 @@ export default function Tests() {
                           {t.reviewStatus === "draft" && <span className="badge badge-amber">Draft</span>}
                           {t.reviewStatus === "approved" && <span className="badge badge-green">Approved</span>}
                           {t.reviewStatus === "rejected" && <span className="badge badge-red">Rejected</span>}
-                          {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
                         </div>
                       </td>
                       <td><StatusBadge result={t.lastResult} /></td>

@@ -9,7 +9,7 @@ import {
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
-import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
+import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -745,31 +745,56 @@ export default function TestDetail() {
                   No steps defined for this test.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {test.steps.map((step, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        display: "flex", alignItems: "flex-start", gap: 16,
-                        padding: "12px 0",
-                        borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
-                      }}
-                    >
-                      <div style={{
-                        width: 26, height: 26, borderRadius: 6,
-                        background: "var(--bg2)", border: "1px solid var(--border)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "0.75rem", fontWeight: 700, color: "var(--text2)",
-                        flexShrink: 0, marginTop: 1,
-                      }}>
-                        {idx + 1}
-                      </div>
-                      <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
-                        {step}
-                      </span>
+                (() => {
+                  const bdd = isBddTest(test.steps);
+                  const gherkinKw = /^(Given|When|Then|And|But)\b/i;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {test.steps.map((step, idx) => {
+                        const trimmed = (step || "").trim();
+                        const kwMatch = bdd ? trimmed.match(gherkinKw) : null;
+                        const keyword = kwMatch ? kwMatch[1] : null;
+                        const rest = keyword ? trimmed.slice(keyword.length) : trimmed;
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              display: "flex", alignItems: "flex-start", gap: 16,
+                              padding: "12px 0",
+                              borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                            }}
+                          >
+                            <div style={{
+                              width: 26, height: 26, borderRadius: 6,
+                              background: bdd ? "var(--accent-bg)" : "var(--bg2)",
+                              border: bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              fontSize: "0.75rem", fontWeight: 700,
+                              color: bdd ? "var(--accent)" : "var(--text2)",
+                              flexShrink: 0, marginTop: 1,
+                            }}>
+                              {idx + 1}
+                            </div>
+                            <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                              {keyword ? (
+                                <>
+                                  <span style={{
+                                    fontWeight: 700, color: "var(--accent)",
+                                    fontFamily: "var(--font-mono)", fontSize: "0.82rem",
+                                    letterSpacing: "0.01em",
+                                  }}>
+                                    {keyword}
+                                  </span>
+                                  {rest}
+                                </>
+                              ) : step}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()
               )
             )}
 
@@ -1290,10 +1315,11 @@ export default function TestDetail() {
           )}
 
           {/* Tags */}
-          {(test.isJourneyTest || test.scenario) && (
+          {(test.isJourneyTest || test.scenario || isBddTest(test.steps)) && (
             <InfoRow label="Tags">
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {test.isJourneyTest && <span className="badge badge-purple">Journey</span>}
+                {isBddTest(test.steps) && <span className="badge badge-green">BDD</span>}
                 {test.scenario === "positive"  && <span className="badge badge-green">Positive</span>}
                 {test.scenario === "negative"  && <span className="badge badge-red">Negative</span>}
                 {test.scenario === "edge_case" && <span className="badge badge-amber">Edge Case</span>}
