@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import AppLogo from "./AppLogo.jsx";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -35,11 +36,8 @@ function Sidebar() {
       position: "sticky", top: 0, height: "100vh", overflowY: "auto",
     }}>
       {/* Logo */}
-      <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#5b6ef5,#7c3aed)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 14 }}>S</div>
-          <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text)" }}>Sentri</span>
-        </div>
+      <div style={{ padding: "16px 16px 14px", borderBottom: "1px solid var(--border)" }}>
+        <AppLogo size={30} variant="full" theme="dark" />
       </div>
 
       {/* Workspace — no interactive styling until feature exists (Fix #16) */}
