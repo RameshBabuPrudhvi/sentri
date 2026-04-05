@@ -163,6 +163,7 @@ router.post("/runs/:runId/abort", (req, res) => {
   });
 
   emitRunEvent(req.params.runId, "done", { status: "aborted" });
+  saveDb(); // flush immediately — without this, a restart within the 30s window loses the abort
 
   res.json({ ok: true });
 });
