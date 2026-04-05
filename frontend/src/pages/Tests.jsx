@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Search, Plus, X, CheckCircle2, XCircle, Clock,
+  Search, Download, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
   AlertCircle, ArrowUpDown, Trash2,
   ThumbsUp, ThumbsDown,
@@ -479,6 +479,41 @@ export default function Tests() {
     return () => window.removeEventListener("keydown", handler);
   }, [selected, filtered]);
 
+  // ── Export filtered tests to CSV ─────────────────────────────────────────
+  function handleExportCSV() {
+    if (filtered.length === 0) return;
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const headers = [
+      "Test ID", "Name", "Description", "Type", "Scenario", "Priority",
+      "Review Status", "Last Result", "Last Run At", "Created At",
+      "Source URL", "Project", "Journey",
+    ];
+    const rows = [headers.map(esc).join(",")];
+    for (const t of filtered) {
+      rows.push([
+        esc(t.id),
+        esc(t.name),
+        esc(t.description || ""),
+        esc(t.type || ""),
+        esc(t.scenario || ""),
+        esc(t.priority || "medium"),
+        esc(t.reviewStatus || "draft"),
+        esc(t.lastResult || ""),
+        esc(t.lastRunAt || ""),
+        esc(t.createdAt || ""),
+        esc(t.sourceUrl || ""),
+        esc(projMap[t.projectId]?.name || ""),
+        esc(t.isJourneyTest ? "Yes" : "No"),
+      ].join(","));
+    }
+    const csv = rows.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `sentri-tests-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  }
+
   const quickActions = [
     {
       icon: <Sparkles size={16} />,
@@ -517,11 +552,12 @@ export default function Tests() {
           </p>
         </div>
         <button
-          className="btn btn-primary btn-sm"
-          onClick={() => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true)}
-          title={projects.length === 0 ? "Create a project first" : undefined}
+          className="btn btn-ghost btn-sm"
+          onClick={handleExportCSV}
+          disabled={filtered.length === 0}
+          title={filtered.length === 0 ? "No tests to export" : `Export ${filtered.length} filtered test${filtered.length !== 1 ? "s" : ""} as CSV`}
         >
-          <Plus size={14} /> New Test
+          <Download size={14} /> Export CSV
         </button>
       </div>
 
