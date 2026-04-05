@@ -10,6 +10,7 @@ import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
+import { exportCsv } from "../utils/exportCsv.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -349,14 +350,11 @@ export default function TestDetail() {
   function handleExport() {
     if (!test) return;
 
-    // Helper: wrap a value in double-quotes, escaping any inner double-quotes
-    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-
     const steps = (test.steps || []).join(" | ");
     const projectName = project?.name || "";
     const projectUrl  = project?.url  || "";
+    const exportedAt = new Date().toISOString();
 
-    // ── Header row ──
     const headers = [
       "Test ID", "Name", "Description", "Type", "Priority",
       "Review Status", "Source URL", "Steps", "Last Result",
@@ -365,7 +363,13 @@ export default function TestDetail() {
       "Exported At",
     ];
 
-    const exportedAt = new Date().toISOString();
+    const baseFields = [
+      test.id, test.name, test.description || "", test.type || "",
+      test.priority || "medium", test.reviewStatus || "draft",
+      test.sourceUrl || "", steps, test.lastResult || "",
+      test.lastRunAt || "", test.createdAt || "", projectName, projectUrl,
+    ];
+
     const runHistory = runs.slice(0, 20).map(run => {
       const result = run.results?.find(r => r.testId === testId);
       return {
@@ -376,42 +380,13 @@ export default function TestDetail() {
       };
     });
 
-    // Build one row per run-history entry; if no runs, emit a single row
-    const baseFields = [
-      esc(test.id),
-      esc(test.name),
-      esc(test.description || ""),
-      esc(test.type || ""),
-      esc(test.priority || "medium"),
-      esc(test.reviewStatus || "draft"),
-      esc(test.sourceUrl || ""),
-      esc(steps),
-      esc(test.lastResult || ""),
-      esc(test.lastRunAt || ""),
-      esc(test.createdAt || ""),
-      esc(projectName),
-      esc(projectUrl),
-    ];
+    // One row per run-history entry; if no runs, emit a single row
+    const rows = runHistory.length === 0
+      ? [[ ...baseFields, "", "", "", "", exportedAt ]]
+      : runHistory.map(rh => [ ...baseFields, rh.runId, rh.status, rh.durationMs, rh.startedAt, exportedAt ]);
 
-    const rows = [headers.map(esc).join(",")];
-    if (runHistory.length === 0) {
-      rows.push([...baseFields, esc(""), esc(""), esc(""), esc(""), esc(exportedAt)].join(","));
-    } else {
-      for (const rh of runHistory) {
-        rows.push([
-          ...baseFields,
-          esc(rh.runId), esc(rh.status), esc(rh.durationMs), esc(rh.startedAt),
-          esc(exportedAt),
-        ].join(","));
-      }
-    }
-
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    const filename = `sentri-test-${(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    exportCsv(headers, rows, filename);
   }
 
   async function handleRunTest() {

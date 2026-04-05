@@ -14,6 +14,7 @@ import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel } from "../utils/testTypeLabels.js";
+import { exportCsv } from "../utils/exportCsv.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -482,36 +483,18 @@ export default function Tests() {
   // ── Export filtered tests to CSV ─────────────────────────────────────────
   function handleExportCSV() {
     if (filtered.length === 0) return;
-    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const headers = [
       "Test ID", "Name", "Description", "Type", "Scenario", "Priority",
       "Review Status", "Last Result", "Last Run At", "Created At",
       "Source URL", "Project", "Journey",
     ];
-    const rows = [headers.map(esc).join(",")];
-    for (const t of filtered) {
-      rows.push([
-        esc(t.id),
-        esc(t.name),
-        esc(t.description || ""),
-        esc(t.type || ""),
-        esc(t.scenario || ""),
-        esc(t.priority || "medium"),
-        esc(t.reviewStatus || "draft"),
-        esc(t.lastResult || ""),
-        esc(t.lastRunAt || ""),
-        esc(t.createdAt || ""),
-        esc(t.sourceUrl || ""),
-        esc(projMap[t.projectId]?.name || ""),
-        esc(t.isJourneyTest ? "Yes" : "No"),
-      ].join(","));
-    }
-    const csv = rows.join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `sentri-tests-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+    const rows = filtered.map(t => [
+      t.id, t.name, t.description || "", t.type || "", t.scenario || "",
+      t.priority || "medium", t.reviewStatus || "draft", t.lastResult || "",
+      t.lastRunAt || "", t.createdAt || "", t.sourceUrl || "",
+      projMap[t.projectId]?.name || "", t.isJourneyTest ? "Yes" : "No",
+    ]);
+    exportCsv(headers, rows, `sentri-tests-${new Date().toISOString().slice(0, 10)}.csv`);
   }
 
   const quickActions = [
