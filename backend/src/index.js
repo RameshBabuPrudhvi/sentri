@@ -13,6 +13,7 @@ import sseRouter from "./routes/sse.js";
 import dashboardRouter from "./routes/dashboard.js";
 import settingsRouter from "./routes/settings.js";
 import systemRouter from "./routes/system.js";
+import authRouter from "./routes/auth.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -52,6 +53,7 @@ app.use("/api", sseRouter);
 app.use("/api", dashboardRouter);
 app.use("/api", settingsRouter);
 app.use("/api", systemRouter);
+app.use("/api/auth", authRouter);
 
 // Health check (root-level, not under /api)
 app.get("/health", (req, res) => res.json({ ok: true }));

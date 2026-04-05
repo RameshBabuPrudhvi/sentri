@@ -52,6 +52,8 @@ export function getDb() {
     const restored = loadFromDisk();
 
     _db = restored || {
+      users: {},
+      oauthIds: {},
       projects: {},
       tests: {},
       runs: {},
@@ -75,6 +77,8 @@ export function getDb() {
     };
 
     // Ensure all expected keys exist (restored data may be from an older schema)
+    if (!_db.users)           _db.users = {};
+    if (!_db.oauthIds)        _db.oauthIds = {};
     if (!_db.activities)      _db.activities = {};
     if (!_db.healingHistory)  _db.healingHistory = {};
     if (!_db.projects)        _db.projects = {};
