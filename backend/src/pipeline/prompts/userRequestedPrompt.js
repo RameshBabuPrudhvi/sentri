@@ -46,13 +46,15 @@ Return ONLY valid JSON (no markdown, no code fences):
       "name": "${name}",
       "description": "${(description || "").replace(/"/g, '\\"').slice(0, 200)}",
       "priority": "high",
-      "type": "user-requested",
-      "scenario": "positive",
+      "type": "auth|search|checkout|form_submission|navigation|crud|content",
+      "scenario": "positive|negative|edge_case",
       "steps": ["User navigates to the application", "User performs the described action", "Assert: expected outcome is verified"],
       "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('${name.replace(/'/g, "\\'")}', async ({ page }) => {\\n  // complete test code\\n});"
     }
   ]
 }
+
+IMPORTANT: "type" must be one of: auth, search, checkout, form_submission, navigation, crud, content — pick the one that best matches the user's description. If none fits well, use "navigation".
 
 IMPORTANT: The "steps" array must contain SHORT HUMAN-READABLE descriptions of what the user does (plain English), NOT Playwright code. Playwright code goes ONLY in "playwrightCode".
 BAD steps:  ["await page.goto('...')", "await page.click('.btn')"]
