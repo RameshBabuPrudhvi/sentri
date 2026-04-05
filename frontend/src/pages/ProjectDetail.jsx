@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, CheckCircle2, XCircle, Ban,
   AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
@@ -73,6 +73,7 @@ function Toast({ msg, type, visible, onViewRun, runId }) {
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
@@ -89,6 +90,30 @@ export default function ProjectDetail() {
   const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
   const PAGE_SIZE = 50;
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
+
+  // ── Highlight newly generated tests when arriving from a run ──────────────
+  // The GenerationSuccessBanner navigates here with ?from_run=<runId>.
+  // We resolve which test IDs were created by that run and highlight them.
+  const [newTestIds, setNewTestIds] = useState(new Set());
+
+  useEffect(() => {
+    const fromRun = searchParams.get("from_run");
+    if (!fromRun) return;
+    // Fetch the run to get its test IDs, then clear the URL param
+    api.getRun(fromRun).then(run => {
+      if (run?.tests?.length) {
+        setNewTestIds(new Set(run.tests));
+        // Auto-clear highlight after 30s so it doesn't persist forever
+        setTimeout(() => setNewTestIds(new Set()), 30_000);
+      }
+    }).catch(() => {});
+    // Clear the param from the URL so refresh doesn't re-trigger
+    setSearchParams(prev => { const n = new URLSearchParams(prev); n.delete("from_run"); return n; }, { replace: true });
+    // Ensure we're on the Tests tab showing drafts
+    setTab("review");
+    setReviewFilter("draft");
+    setReviewPage(1);
+  }, [searchParams, setSearchParams]);
 
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
@@ -229,6 +254,11 @@ export default function ProjectDetail() {
       t.name?.toLowerCase().includes(search.toLowerCase()) ||
       t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
     return statusOk && searchOk;
+  }).sort((a, b) => {
+    // Newest first — so tests from the latest generation run appear at the top
+    const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return db - da;
   });
 
   // Paginate review tab (50 per page)
@@ -384,6 +414,27 @@ export default function ProjectDetail() {
       {/* ── GENERATED TESTS / REVIEW TAB ── */}
       {tab === "review" && (
         <div>
+          {/* New tests banner — shown when arriving from a completed generation run */}
+          {newTestIds.size > 0 && (
+            <div style={{
+              marginBottom: 14, padding: "10px 16px",
+              background: "var(--green-bg)", border: "1px solid #86efac",
+              borderRadius: 10, display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ fontSize: "1rem" }}>✨</span>
+              <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
+                <strong>{newTestIds.size} new test{newTestIds.size !== 1 ? "s" : ""}</strong> generated — review and approve to add to regression.
+              </span>
+              <button
+                className="btn btn-ghost btn-xs"
+                style={{ marginLeft: "auto", flexShrink: 0 }}
+                onClick={() => setNewTestIds(new Set())}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {tests.length === 0 ? (
             <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
@@ -467,8 +518,12 @@ export default function ProjectDetail() {
                       {pagedReview.map(t => {
                         const rs = t.reviewStatus || "draft";
                         const isSelected = selected.has(t.id);
+                        const isNew = newTestIds.has(t.id);
                         return (
-                          <tr key={t.id} style={{ background: isSelected ? "var(--accent-bg)" : undefined }}>
+                          <tr key={t.id} style={{
+                            background: isSelected ? "var(--accent-bg)" : isNew ? "rgba(34,197,94,0.06)" : undefined,
+                            transition: "background 0.3s",
+                          }}>
                             <td style={{ paddingRight: 0 }}>
                               <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
                                 style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
@@ -482,7 +537,16 @@ export default function ProjectDetail() {
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                 <AgentTag type="TA" />
                                 <div>
-                                  <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</span>
+                                    {isNew && (
+                                      <span style={{
+                                        fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px",
+                                        borderRadius: 4, background: "var(--green)", color: "#fff",
+                                        letterSpacing: "0.03em", lineHeight: 1.5,
+                                      }}>NEW</span>
+                                    )}
+                                  </div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
                                   <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
                                     {t.isJourneyTest && <span className="badge badge-purple">Journey</span>}
