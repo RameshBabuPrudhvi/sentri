@@ -584,26 +584,6 @@ export default function StepResultsView({ result, run, onBack }) {
                 )}
               </div>
               {cleanTestName(result?.testName || result?.name) || "Test"}
-              {/* Avatar icon */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: 10,
-                  right: 10,
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  background: "var(--accent)",
-                  color: "#fff",
-                  fontSize: "0.6rem",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                AI
-              </div>
             </div>
 
             {/* Step rows */}
