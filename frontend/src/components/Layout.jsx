@@ -10,7 +10,7 @@ const NAV = [
   { to: "/projects",  icon: FolderOpen,      label: "Projects"  },
   { to: "/tests",     icon: FlaskConical,    label: "Tests"     },
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
-  { to: "/work",      icon: Briefcase,       label: "Runs"      },
+  { to: "/runs",      icon: Briefcase,       label: "Runs"      },
   { to: "/context",   icon: Layers,          label: "System"    },
 ];
 

@@ -6,7 +6,7 @@ import ModalShell from "./ModalShell.jsx";
 
 /**
  * Shared modal for running regression tests for a project.
- * Replaces the duplicate RunAllModal (Tests.jsx) and RunModal (Work.jsx).
+ * Replaces the duplicate RunAllModal (Tests.jsx) and RunModal (Runs.jsx).
  *
  * Props:
  *   projects        — array of project objects { id, name }

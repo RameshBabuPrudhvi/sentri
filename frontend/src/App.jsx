@@ -13,7 +13,7 @@ import TestDetail from "./pages/TestDetail.jsx";
 import Settings from "./pages/Settings.jsx";
 import Projects from "./pages/Applications.jsx";
 import Reports from "./pages/Reports.jsx";
-import Work from "./pages/Work.jsx";
+import Runs from "./pages/Runs.jsx";
 import Context from "./pages/Context.jsx";
 
 const NotFound = () => (
@@ -75,7 +75,7 @@ export default function App() {
               <Route path="/tests/:testId" element={<TestDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/reports" element={<Reports />} />
-              <Route path="/work" element={<Work />} />
+              <Route path="/runs" element={<Runs />} />
               <Route path="/context" element={<Context />} />
               <Route path="/applications" element={<Navigate to="/projects" replace />} />
               <Route path="*" element={<NotFound />} />
