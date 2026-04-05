@@ -551,7 +551,7 @@ export default function ProjectDetail() {
                                 </span>
                               )}
                             </td>
-                            <td><ConfBar score={t.qualityScore != null ? Math.round(t.qualityScore * 100) : null} /></td>
+                            <td><ConfBar score={t.qualityScore != null ? Math.min(100, Math.round(t.qualityScore)) : null} /></td>
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                                 {rs === "draft" && (
