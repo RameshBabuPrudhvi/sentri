@@ -16,13 +16,16 @@ import { getDb } from "../db.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
+import { validateProjectPayload, sanitise } from "../utils/validate.js";
 
 const router = Router();
 
 router.post("/", (req, res) => {
+  const validationErr = validateProjectPayload(req.body);
+  if (validationErr) return res.status(400).json({ error: validationErr });
+
   const db = getDb();
   const { name, url, credentials } = req.body;
-  if (!name || !url) return res.status(400).json({ error: "name and url required" });
 
   const id = generateProjectId(db);
   const project = {

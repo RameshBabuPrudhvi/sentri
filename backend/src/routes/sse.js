@@ -57,6 +57,10 @@ router.get("/runs/:runId/events", (req, res) => {
   const run = db.runs[runId];
   if (!run) return res.status(404).json({ error: "not found" });
 
+  // Verify the run's project exists (future: check user ownership here)
+  const project = db.projects[run.projectId];
+  if (!project) return res.status(404).json({ error: "project not found" });
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");

@@ -26,7 +26,12 @@
 
 import express from "express";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { getDb, saveDb } from "../db.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const router = express.Router();
 
@@ -107,27 +112,63 @@ function verifyJwt(token, secret) {
   } catch { return null; }
 }
 
-/** Cached dev-mode fallback secret — derived once, reused for the process lifetime. */
-let _devFallbackSecret = null;
+/**
+ * Cached JWT secret — resolved once on first call, reused for the process lifetime.
+ * @type {string|null}
+ * @private
+ */
+let _cachedSecret = null;
 
+/**
+ * Get the JWT signing secret.
+ *
+ * Resolution order:
+ * 1. `JWT_SECRET` env var (required in production, recommended everywhere)
+ * 2. Dev/test only: auto-generate a random 256-bit secret and persist it to
+ *    `backend/data/.jwt-secret` so tokens survive server restarts. This file
+ *    is gitignored and unique per checkout.
+ *
+ * @returns {string} The secret (always ≥ 32 chars).
+ * @throws {Error} In production if `JWT_SECRET` is missing or too short.
+ */
 function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (secret && secret.length >= 32) return secret;
+  if (_cachedSecret) return _cachedSecret;
+
+  const envSecret = process.env.JWT_SECRET;
+  if (envSecret && envSecret.length >= 32) {
+    _cachedSecret = envSecret;
+    return _cachedSecret;
+  }
 
   if (process.env.NODE_ENV === "production") {
     throw new Error("[auth] FATAL: JWT_SECRET is missing or too short. Set a 32+ char secret in .env for production.");
   }
 
-  // Dev-only: derive a deterministic secret from the project directory so tokens
-  // survive server restarts (nodemon, Docker recreate) without requiring .env setup.
-  // The secret is unique per machine/checkout path but not random — acceptable for
-  // local development where the threat model is convenience, not security.
-  if (!_devFallbackSecret) {
-    const seed = `dev-jwt-secret:${process.cwd()}`;
-    _devFallbackSecret = crypto.createHash("sha256").update(seed).digest("base64url");
-    console.warn("[auth] WARNING: JWT_SECRET not set — using deterministic dev secret. Sessions survive restarts but set JWT_SECRET for production.");
+  // Dev/test: auto-generate and persist a random secret so tokens survive restarts.
+  // Much safer than the old deterministic derivation from process.cwd().
+  const secretPath = path.join(__dirname, "..", "..", "data", ".jwt-secret");
+
+  try {
+    const existing = fs.readFileSync(secretPath, "utf-8").trim();
+    if (existing.length >= 32) {
+      _cachedSecret = existing;
+      console.warn("[auth] WARNING: Using auto-generated JWT secret from data/.jwt-secret. Set JWT_SECRET in .env for production.");
+      return _cachedSecret;
+    }
+  } catch { /* file doesn't exist yet */ }
+
+  // Generate a new random secret and persist it
+  const newSecret = crypto.randomBytes(32).toString("base64url");
+  try {
+    const dir = path.dirname(secretPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(secretPath, newSecret, "utf-8");
+    console.warn("[auth] Generated new JWT secret → data/.jwt-secret. Set JWT_SECRET in .env for production.");
+  } catch (err) {
+    console.warn("[auth] Could not persist JWT secret to disk:", err.message);
   }
-  return _devFallbackSecret;
+  _cachedSecret = newSecret;
+  return _cachedSecret;
 }
 
 // ─── In-memory stores (replace with DB/Redis in production) ─────────────────

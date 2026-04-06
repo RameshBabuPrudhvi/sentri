@@ -33,6 +33,7 @@ import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateSingleTest } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
+import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 
 const router = Router();
 
@@ -58,6 +59,9 @@ router.get("/tests/:testId", (req, res) => {
 
 // PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
 router.patch("/tests/:testId", async (req, res) => {
+  const validationErr = validateTestUpdate(req.body);
+  if (validationErr) return res.status(400).json({ error: validationErr });
+
   const db = getDb();
   const test = db.tests[req.params.testId];
   if (!test) return res.status(404).json({ error: "not found" });
@@ -158,12 +162,14 @@ Return ONLY valid JSON with no markdown fences:
 
 // ── Manual test creation ──────────────────────────────────────────────────────
 router.post("/projects/:id/tests", (req, res) => {
+  const validationErr = validateTestPayload(req.body);
+  if (validationErr) return res.status(400).json({ error: validationErr });
+
   const db = getDb();
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const { name, description, steps, playwrightCode, priority, type } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
   const testId = generateTestId(db);
   const test = {
@@ -430,10 +436,11 @@ router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
 
 // NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
 router.post("/projects/:id/tests/bulk", (req, res) => {
+  const validationErr = validateBulkAction(req.body);
+  if (validationErr) return res.status(400).json({ error: validationErr });
+
   const db = getDb();
   const { testIds, action } = req.body;
-  if (!testIds || !Array.isArray(testIds) || !["approve", "reject", "restore", "delete"].includes(action))
-    return res.status(400).json({ error: "testIds[] and valid action required" });
 
   if (action === "delete") {
     const deleted = [];
