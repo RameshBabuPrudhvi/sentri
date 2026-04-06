@@ -1,4 +1,4 @@
-import { API_BASE } from "./utils/api.js";
+import { API_BASE, parseJsonResponse } from "./utils/api.js";
 
 const BASE = `${API_BASE}/api`;
 
@@ -25,10 +25,10 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
   clearTimeout(timer);
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
     throw new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
   }
-  return res.json();
+  return parseJsonResponse(res);
 }
 
 export const api = {

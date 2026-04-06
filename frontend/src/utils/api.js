@@ -12,3 +12,16 @@
  */
 
 export const API_BASE = import.meta.env.VITE_API_URL || "";
+
+/**
+ * Safely parse a JSON response.
+ * Throws a user-friendly error when the server returns non-JSON (e.g. HTML
+ * from Vite's SPA fallback, nginx, or a misconfigured proxy).
+ */
+export async function parseJsonResponse(res) {
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) {
+    throw new Error("Unable to reach the server. Please check that the backend is running.");
+  }
+  return res.json();
+}

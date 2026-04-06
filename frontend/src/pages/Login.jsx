@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
-import { API_BASE } from "../utils/api.js";
+import { API_BASE, parseJsonResponse } from "../utils/api.js";
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || "";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -83,7 +83,7 @@ export default function Login() {
     setOauthLoading(provider); setError("");
     try {
       const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`);
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "OAuth login failed");
       await login(data.token, data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
@@ -116,7 +116,7 @@ export default function Login() {
       const endpoint = mode === "login" ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/register`;
       const body = mode === "login" ? { email, password } : { name, email, password };
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       if (mode === "register") { setSuccess("Account created! You can now sign in."); setMode("login"); setPassword(""); }
       else await login(data.token, data.user);
