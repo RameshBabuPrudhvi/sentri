@@ -5,6 +5,11 @@ export default defineConfig({
   description: 'Autonomous QA Platform — AI-powered test generation, self-healing execution, and real-time observability.',
   base: '/sentri/docs/',
 
+  // Localhost URLs in guide pages are intentional examples, not real links
+  ignoreDeadLinks: [
+    /^https?:\/\/localhost/,
+  ],
+
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/sentri/docs/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#6366f1' }],
