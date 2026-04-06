@@ -96,7 +96,8 @@ function resolveActionType(el) {
   if (tag === "input") {
     if (["text", "email", "password", "search", "tel", "number", "url", "date", ""].includes(type)) return "fill";
     if (["checkbox", "radio"].includes(type)) return "check";
-    if (type === "submit" || type === "button") return "submit";
+    if (type === "submit") return "submit";
+    if (type === "button") return "click";
     return null; // hidden, file, etc. — skip
   }
 
