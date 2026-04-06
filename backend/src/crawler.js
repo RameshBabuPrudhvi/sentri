@@ -26,9 +26,12 @@ import { filterElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
 import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyGenerator.js";
 import { crawlPages } from "./pipeline/crawlBrowser.js";
+import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
+
+const EXPLORER_MODE = (process.env.EXPLORER_MODE || "crawl").toLowerCase();
 
 function setStep(run, step) {
   run.currentStep = step;
@@ -117,53 +120,117 @@ export async function generateSingleTest(project, run, db, { name, description, 
 export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const runStart = Date.now();
 
-  // ── Step 1: Smart crawl ─────────────────────────────────────────────────
-  log(run, `🕷️  Starting smart crawl of ${project.url}`);
+  // ── Step 1: Smart crawl or state exploration ─────────────────────────────
+  log(run, `🕷️  Starting ${EXPLORER_MODE === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   setStep(run, 1);
 
-  const { snapshots, snapshotsByUrl } = await crawlPages(project, run, { signal });
+  let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl;
 
-  throwIfAborted(signal);
+  if (EXPLORER_MODE === "state") {
+    // ── State-based exploration (new engine) ─────────────────────────────
+    const exploration = await exploreStates(project, run, { signal });
+    snapshots = exploration.snapshots;
+    snapshotsByUrl = exploration.snapshotsByUrl;
 
-  // ── Step 2: Element filtering ───────────────────────────────────────────
-  setStep(run, 2);
-  log(run, `🔍 Filtering elements (removing noise)...`);
-  const filteredSnapshots = snapshots.map(snap => {
-    const filtered = filterElements(snap.elements);
-    log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
-    return { ...snap, elements: filtered };
-  });
-  for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
-
-  throwIfAborted(signal);
-
-  // ── Step 3: Intent classification ───────────────────────────────────────
-  setStep(run, 3);
-  log(run, `🧠 Classifying page intents...`);
-  const classifiedPages = [];
-  for (const snap of filteredSnapshots) {
     throwIfAborted(signal);
-    const classified = await classifyPageWithAI(snap, snap.elements, { signal });
-    if (classified._aiAssisted) {
-      log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
-    }
-    classifiedPages.push(classified);
-  }
-  const classifiedPagesByUrl = {};
-  for (const cp of classifiedPages) {
-    classifiedPagesByUrl[cp.url] = cp;
-    log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
-  }
 
-  // Journey detection — pass snapshotsByUrl so link-graph analysis can discover
-  // cross-intent journeys (e.g. pricing → signup → dashboard)
-  const journeys = buildUserJourneys(classifiedPages, snapshotsByUrl);
-  if (journeys.length > 0) {
-    log(run, `🗺️  Detected ${journeys.length} user journey(s):`);
-    for (const j of journeys) {
-      const via = j._discoveredBy ? ` [${j._discoveredBy}]` : "";
-      log(run, `   • ${j.name} (${j.pages.length} pages)${via}`);
+    // ── Step 2: Element filtering ─────────────────────────────────────────
+    setStep(run, 2);
+    log(run, `🔍 Filtering elements (removing noise)...`);
+    const filteredSnapshots = snapshots.map(snap => {
+      const filtered = filterElements(snap.elements);
+      log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
+      return { ...snap, elements: filtered };
+    });
+    for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
+
+    throwIfAborted(signal);
+
+    // ── Step 3: Intent classification ─────────────────────────────────────
+    setStep(run, 3);
+    log(run, `🧠 Classifying page intents...`);
+    classifiedPages = [];
+    for (const snap of filteredSnapshots) {
+      throwIfAborted(signal);
+      const classified = await classifyPageWithAI(snap, snap.elements, { signal });
+      if (classified._aiAssisted) {
+        log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
+      }
+      classifiedPages.push(classified);
+    }
+    classifiedPagesByUrl = {};
+    for (const cp of classifiedPages) {
+      classifiedPagesByUrl[cp.url] = cp;
+      log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
+    }
+
+    // Use observed flows from the state explorer as journeys
+    journeys = exploration.journeys;
+    if (journeys.length > 0) {
+      log(run, `🗺️  Discovered ${journeys.length} observed flow(s):`);
+      for (const j of journeys) {
+        const via = j._discoveredBy ? ` [${j._discoveredBy}]` : "";
+        log(run, `   • ${j.name} (${j.pages.length} pages)${via}`);
+      }
+    }
+
+    // Also discover link-graph journeys from classified pages as a supplement
+    const linkJourneys = buildUserJourneys(classifiedPages, snapshotsByUrl);
+    const explorerUrls = new Set(journeys.flatMap(j => j.pages.map(p => p.url)));
+    for (const lj of linkJourneys) {
+      // Only add link-graph journeys that cover pages not already in observed flows
+      if (!lj.pages.some(p => explorerUrls.has(p.url))) {
+        journeys.push(lj);
+      }
+    }
+  } else {
+    // ── Legacy link-based crawl ──────────────────────────────────────────
+    const crawlResult = await crawlPages(project, run, { signal });
+    snapshots = crawlResult.snapshots;
+    snapshotsByUrl = crawlResult.snapshotsByUrl;
+
+    throwIfAborted(signal);
+
+    // ── Step 2: Element filtering ─────────────────────────────────────────
+    setStep(run, 2);
+    log(run, `🔍 Filtering elements (removing noise)...`);
+    const filteredSnapshots = snapshots.map(snap => {
+      const filtered = filterElements(snap.elements);
+      log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
+      return { ...snap, elements: filtered };
+    });
+    for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
+
+    throwIfAborted(signal);
+
+    // ── Step 3: Intent classification ─────────────────────────────────────
+    setStep(run, 3);
+    log(run, `🧠 Classifying page intents...`);
+    classifiedPages = [];
+    for (const snap of filteredSnapshots) {
+      throwIfAborted(signal);
+      const classified = await classifyPageWithAI(snap, snap.elements, { signal });
+      if (classified._aiAssisted) {
+        log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
+      }
+      classifiedPages.push(classified);
+    }
+    classifiedPagesByUrl = {};
+    for (const cp of classifiedPages) {
+      classifiedPagesByUrl[cp.url] = cp;
+      log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
+    }
+
+    // Journey detection — pass snapshotsByUrl so link-graph analysis can discover
+    // cross-intent journeys (e.g. pricing → signup → dashboard)
+    journeys = buildUserJourneys(classifiedPages, snapshotsByUrl);
+    if (journeys.length > 0) {
+      log(run, `🗺️  Detected ${journeys.length} user journey(s):`);
+      for (const j of journeys) {
+        const via = j._discoveredBy ? ` [${j._discoveredBy}]` : "";
+        log(run, `   • ${j.name} (${j.pages.length} pages)${via}`);
+      }
     }
   }
 
@@ -184,8 +251,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // ── Step 8: Store & Done ────────────────────────────────────────────────
   persistGeneratedTests(validatedTests, project, db, run);
 
-  run.snapshots = filteredSnapshots;
-  run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
+  run.snapshots = snapshots;
+  run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   run.testsGenerated = run.tests.length;
   run.pipelineStats = buildPipelineStats({
     pagesFound: snapshots.length, rawTests, removed, enhancedCount, rejected, journeys, dedupStats,
