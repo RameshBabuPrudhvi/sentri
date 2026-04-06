@@ -372,7 +372,7 @@ export default function Login() {
                 : (<>Already have an account?{" "}<button className="lp-swb" onClick={()=>{setMode("login");setError("");setSuccess("");setPassword("");setConfirmPassword("");}}>Sign in</button></>)
               }
             </p>
-            <p className="lp-tos">By continuing you agree to our <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>
+            <p className="lp-tos">By continuing you agree to our <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>
             <p className="lp-tos" style={{marginTop:8}}><a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer">Documentation</a></p>
           </div>
         </div>
