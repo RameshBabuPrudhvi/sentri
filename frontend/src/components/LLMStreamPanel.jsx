@@ -45,6 +45,7 @@ export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
   const parsed = tryParseJson(tokens);
   const tokenCount = countTokens(tokens);
   const isEmpty = !tokens;
+  const isTruncated = tokens.startsWith("⚠");
 
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", marginTop: 12 }}>
@@ -125,6 +126,16 @@ export default function LLMStreamPanel({ tokens = "", isRunning = false }) {
             background: "#0d1117", color: "#c9d1d9",
           }}
         >
+          {isTruncated && (
+            <div style={{
+              padding: "6px 10px", marginBottom: 8,
+              background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.3)",
+              borderRadius: 6, fontSize: "0.68rem", color: "#f5a623",
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              ⚠ Output exceeded {Math.round(50000 / 1000)}k characters — older content was trimmed. Showing most recent output only.
+            </div>
+          )}
           {isEmpty ? (
             <div style={{
               padding: "24px 14px", textAlign: "center",

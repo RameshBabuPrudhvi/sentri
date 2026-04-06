@@ -107,10 +107,8 @@ export default function RunDetail() {
     } else if (event.type === "llm_token") {
       setLlmTokens((prev) => {
         const next = prev + event.token;
-        // Keep the most recent LLM_TOKEN_LIMIT chars; prepend a truncation notice
-        // so the user knows older output was trimmed, not lost.
         if (next.length > LLM_TOKEN_LIMIT) {
-          return "[…output truncated…]\n" + next.slice(next.length - LLM_TOKEN_LIMIT);
+          return "⚠ Older output truncated (>" + Math.round(LLM_TOKEN_LIMIT / 1000) + "k chars) — showing most recent output\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + next.slice(next.length - LLM_TOKEN_LIMIT);
         }
         return next;
       });
