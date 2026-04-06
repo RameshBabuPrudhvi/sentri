@@ -612,6 +612,29 @@ export default function Dashboard() {
   const tbr = data?.testsByReview || {};
   const dfb = data?.defectBreakdown || {};
 
+  // ── Trend: compare last 5 runs vs prior 5 for ▲/▼ indicator ──
+  const history = data?.history || [];
+  const recentHalf = history.slice(-5);
+  const priorHalf  = history.slice(-10, -5);
+  const calcPct = (arr) => {
+    const p = arr.reduce((s, r) => s + (r.passed || 0), 0);
+    const t = arr.reduce((s, r) => s + (r.passed || 0) + (r.failed || 0), 0);
+    return t > 0 ? Math.round((p / t) * 100) : null;
+  };
+  const recentPct = calcPct(recentHalf);
+  const priorPct  = calcPct(priorHalf);
+  const trendDelta = (recentPct !== null && priorPct !== null) ? recentPct - priorPct : null;
+  const trendLabel = trendDelta === null ? null
+    : trendDelta > 0 ? `▲ ${trendDelta}pp` : trendDelta < 0 ? `▼ ${Math.abs(trendDelta)}pp` : "— stable";
+
+  // ── Today's failures from recent runs ──
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayRuns = (data?.recentRuns || []).filter(r =>
+    r.startedAt && new Date(r.startedAt) >= todayStart && (r.type === "test_run" || r.type === "run")
+  );
+  const todayFailed = todayRuns.reduce((s, r) => s + (r.failed || 0), 0);
+  const todayTotal  = todayRuns.reduce((s, r) => s + (r.total || 0), 0);
+
   if (loading) return (
     <div className="page-container">
       {[120, 200, 300].map((h, i) => <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 16 }} />)}
@@ -670,16 +693,24 @@ export default function Dashboard() {
         <>
           {/* ── Row 1: Core Health KPIs ── */}
           <div className="stat-grid">
-            <StatCard label="Pass Rate" value={data?.passRate != null ? `${data.passRate}%` : "—"} sub={data?.passRate >= 80 ? "Healthy" : data?.passRate != null ? "Needs attention" : "No runs yet"} color={data?.passRate >= 80 ? "var(--green)" : data?.passRate != null ? "var(--amber)" : "var(--text3)"} icon={<TrendingUp size={16} />} />
+            <StatCard
+              label="Pass Rate"
+              value={data?.passRate != null ? `${data.passRate}%` : "—"}
+              sub={trendLabel
+                ? `${trendLabel} vs prior runs`
+                : data?.passRate >= 80 ? "Healthy" : data?.passRate != null ? "Needs attention" : "No runs yet"}
+              color={data?.passRate >= 80 ? "var(--green)" : data?.passRate != null ? "var(--amber)" : "var(--text3)"}
+              icon={<TrendingUp size={16} />}
+            />
+            <StatCard label="Failures Today" value={todayFailed} sub={todayTotal > 0 ? `of ${todayTotal} assertions · ${todayRuns.length} run${todayRuns.length !== 1 ? "s" : ""}` : "No runs today"} color={todayFailed > 0 ? "var(--red)" : "var(--green)"} icon={<XCircle size={16} />} />
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<FlaskConical size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
-            <StatCard label="Avg Duration" value={fmtDurationMs(data?.avgRunDurationMs)} sub={data?.mttrMs ? `MTTR: ${fmtDurationMs(data.mttrMs)}` : "Per test run"} color="var(--accent)" icon={<Clock size={16} />} />
           </div>
 
-          {/* ── Row 2: Tests Created / Fixed / Healing ── */}
+          {/* ── Row 2: Duration / Created / Fixed / Healing ── */}
           <div className="stat-grid">
-            <StatCard label="Created Today" value={data?.testsCreatedToday ?? 0} sub={`${data?.testsCreatedThisWeek ?? 0} this week`} color="var(--accent)" icon={<Plus size={16} />} />
-            <StatCard label="AI Generated" value={data?.testsGeneratedTotal ?? 0} sub="All time" color="var(--blue)" icon={<FlaskConical size={16} />} />
+            <StatCard label="Avg Duration" value={fmtDurationMs(data?.avgRunDurationMs)} sub={data?.mttrMs ? `MTTR: ${fmtDurationMs(data.mttrMs)}` : "Per test run"} color="var(--accent)" icon={<Clock size={16} />} />
+            <StatCard label="Created Today" value={data?.testsCreatedToday ?? 0} sub={`${data?.testsCreatedThisWeek ?? 0} this week · ${data?.testsGeneratedTotal ?? 0} total`} color="var(--blue)" icon={<Plus size={16} />} />
             <StatCard label="Auto-Fixed" value={data?.testsAutoFixed ?? 0} sub="By feedback loop" color="var(--green)" icon={<Wrench size={16} />} />
             <StatCard label="Self-Healed" value={data?.healingSuccesses ?? 0} sub={`${data?.healingEntries ?? 0} elements tracked`} color="var(--purple)" icon={<Shield size={16} />} />
           </div>
