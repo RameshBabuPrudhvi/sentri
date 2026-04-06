@@ -77,7 +77,7 @@ function Toggle({ value, onChange, disabled }) {
 
 // ── Generate CTA (single source of truth) ─────────────────────────────────────
 
-function GenerateCTA({ error, canSubmit, phase, onGenerate, showNameHint }) {
+function GenerateCTA({ canSubmit, phase, onGenerate, showNameHint }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -86,11 +86,6 @@ function GenerateCTA({ error, canSubmit, phase, onGenerate, showNameHint }) {
           <Clock size={11} /> ~30-60 seconds
         </span>
       </div>
-      {error && (
-        <div className="alert-error" style={{ marginBottom: 12 }}>
-          {error}
-        </div>
-      )}
       <button
         className="btn btn-primary"
         style={{ width: "100%", justifyContent: "center", fontWeight: 700, fontSize: "0.9rem" }}
@@ -347,6 +342,15 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           <Tab label="Options" active={tab === "options"} onClick={() => setTab("options")} />
         </div>
 
+        {/* Persistent error banner — visible on all tabs, never lost on tab switch */}
+        {error && (
+          <div style={{ padding: "0 22px", flexShrink: 0 }}>
+            <div className="alert-error" style={{ marginTop: 12 }}>
+              {error}
+            </div>
+          </div>
+        )}
+
         {/* Body */}
         <div style={{ overflowY: "auto", flex: 1, padding: "20px 22px" }}>
 
@@ -432,7 +436,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                     ref={nameRef}
                     className="input"
                     value={name}
-                    onChange={e => { setName(e.target.value); if (error) setError(null); }}
+                    onChange={e => setName(e.target.value)}
                     placeholder="e.g. Dashboard loads all employee charts"
                     style={{ height: 38 }}
                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) handleGenerate(e); }}
@@ -599,7 +603,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* AI Generate section */}
               <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 16 }}>
-                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
+                <GenerateCTA canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
               </div>
             </div>
           )}
@@ -611,7 +615,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* Generate CTA also on dials tab */}
               <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} showNameHint={!name.trim()} />
+                <GenerateCTA canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} showNameHint={!name.trim()} />
               </div>
             </div>
           )}
@@ -754,7 +758,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
               {/* Generate CTA */}
               <div style={{ marginTop: 24 }}>
-                <GenerateCTA error={error} canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
+                <GenerateCTA canSubmit={canSubmit} phase={phase} onGenerate={handleGenerate} />
               </div>
             </div>
           )}
