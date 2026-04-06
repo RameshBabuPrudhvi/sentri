@@ -101,14 +101,14 @@ export default function Login() {
   function handleGitHubLogin() {
     if (!GITHUB_CLIENT_ID) { setError("GitHub OAuth not configured. Add VITE_GITHUB_CLIENT_ID to .env"); return; }
     const state = crypto.randomUUID(); sessionStorage.setItem("oauth_state", state);
-    const ru = encodeURIComponent(`${window.location.origin}/login?provider=github`);
+    const ru = encodeURIComponent(`${window.location.origin}${import.meta.env.BASE_URL}login?provider=github`);
     window.location.href = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${ru}&scope=user:email&state=${state}`;
   }
 
   function handleGoogleLogin() {
     if (!GOOGLE_CLIENT_ID) { setError("Google OAuth not configured. Add VITE_GOOGLE_CLIENT_ID to .env"); return; }
     const state = crypto.randomUUID(); sessionStorage.setItem("oauth_state", state);
-    const ru = encodeURIComponent(`${window.location.origin}/login?provider=google`);
+    const ru = encodeURIComponent(`${window.location.origin}${import.meta.env.BASE_URL}login?provider=google`);
     const sc = encodeURIComponent("openid email profile");
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${ru}&response_type=code&scope=${sc}&state=${state}&access_type=offline&prompt=select_account`;
   }
