@@ -1,8 +1,23 @@
-name: CD — Build & Push Images
+name: CD — Deploy Pages & Push Images
+
+# Single deploy workflow triggered on push to main:
+#   1. GitHub Pages  — Frontend SPA + VitePress docs + JSDoc
+#   2. GHCR          — Backend & Frontend Docker images
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: cd
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -10,12 +25,81 @@ env:
   FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/sentri-frontend
 
 jobs:
-  build-and-push:
-    name: Build & Push to GHCR
+  # ── 1. GitHub Pages — Frontend + Docs ──────────────────────────────────────
+  pages:
+    name: GitHub Pages — Frontend + Docs
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write   # needed to push to ghcr.io
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── Build frontend SPA ──────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build frontend with GitHub Pages base path
+        working-directory: frontend
+        run: npm run build
+        env:
+          GITHUB_PAGES: "true"
+          VITE_API_URL: ${{ vars.VITE_API_URL || '' }}
+
+      # ── Generate JSDoc (backend API docs) ───────────────────────────────────
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Generate JSDoc
+        working-directory: backend
+        run: npx jsdoc -c jsdoc.json
+
+      # ── Build VitePress docs ────────────────────────────────────────────────
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm install
+
+      - name: Copy JSDoc output into VitePress public folder
+        run: |
+          mkdir -p docs/public/jsdoc
+          cp -r backend/docs-api/* docs/public/jsdoc/
+
+      - name: Build VitePress
+        working-directory: docs
+        run: npm run build
+
+      # ── Merge all outputs into a single deploy folder ───────────────────────
+      #   /sentri/          → frontend SPA
+      #   /sentri/docs/     → VitePress guide + API reference
+      #   /sentri/docs/jsdoc/ → JSDoc auto-generated code docs
+      - name: Assemble Pages output
+        run: |
+          mkdir -p _site
+          cp -r frontend/dist/* _site/
+          mkdir -p _site/docs
+          cp -r docs/.vitepress/dist/* _site/docs/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # ── 2. Docker — Build & Push to GHCR ──────────────────────────────────────
+  docker:
+    name: Docker — Build & Push to GHCR
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +111,6 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          # GITHUB_TOKEN is automatically available — no secret needed
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -79,4 +162,3 @@ jobs:
           echo "Pull with:"
           echo "  docker pull ${{ env.BACKEND_IMAGE }}:latest"
           echo "  docker pull ${{ env.FRONTEND_IMAGE }}:latest"
-

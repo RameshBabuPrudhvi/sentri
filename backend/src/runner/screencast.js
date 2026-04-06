@@ -18,9 +18,9 @@ import { emitRunEvent } from "../utils/runLogger.js";
  * screencast and detaches the session.  Returns null if no clients are
  * connected (avoids encoding overhead when nobody is watching).
  *
- * @param {import('playwright').Page} page
+ * @param {Object} page - Playwright Page instance.
  * @param {string} runId
- * @returns {Promise<(() => Promise<void>) | null>}
+ * @returns {Promise<?function(): Promise<void>>} Resolves to a cleanup function, or `null` if no SSE clients.
  */
 export async function startScreencast(page, runId) {
   // Only start if there are active SSE listeners
