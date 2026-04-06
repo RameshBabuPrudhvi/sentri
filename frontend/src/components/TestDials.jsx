@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Settings2, ChevronDown, Save, RotateCcw,
   Target, Users, ShieldCheck, FileText, Globe, Info,
-  Hash, SlidersHorizontal, Compass,
+  Hash, SlidersHorizontal,
 } from "lucide-react";
 import {
   APPROACH_OPTIONS,
@@ -11,7 +11,6 @@ import {
   FORMAT_OPTIONS,
   LANGUAGES,
   TEST_COUNT_OPTIONS,
-  EXPLORE_MODE_OPTIONS,
   OPTION_TOGGLES,
   PROFILE_OPTIONS,
   DEFAULT_CONFIG,
@@ -191,42 +190,7 @@ export default function TestDials({ onChange }) {
         <ProfileDropdown value={cfg.profile} onChange={applyProfile} />
       </div>
 
-      {/* ② Explore mode */}
-      <Section
-        icon={<Compass size={15} />}
-        label="Explore mode"
-        subtitle={EXPLORE_MODE_OPTIONS.find(o => o.id === cfg.exploreMode)?.label || "Link crawl"}
-        defaultOpen={false}
-      >
-        <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginBottom: 6,
-          display: "flex", alignItems: "center", gap: 6 }}>
-          <Info size={11} /> How should Sentri discover your app before generating tests?
-        </div>
-        {EXPLORE_MODE_OPTIONS.map(opt => (
-          <label key={opt.id} style={{ display: "flex", alignItems: "flex-start",
-            gap: 10, cursor: "pointer", padding: "3px 0" }}>
-            <input
-              type="radio"
-              name="exploreMode"
-              value={opt.id}
-              checked={cfg.exploreMode === opt.id}
-              onChange={() => update({ exploreMode: opt.id, profile: "" })}
-              style={{ marginTop: 3, accentColor: "var(--accent)", cursor: "pointer" }}
-            />
-            <div>
-              <div style={{ fontSize: "0.85rem", color: "var(--text)",
-                fontWeight: cfg.exploreMode === opt.id ? 500 : 400 }}>
-                {opt.label}
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1 }}>
-                {opt.desc}
-              </div>
-            </div>
-          </label>
-        ))}
-      </Section>
-
-      {/* ③ Coverage approach */}
+      {/* ② Coverage approach */}
       <Section
         icon={<Target size={15} />}
         label="Coverage approach"
