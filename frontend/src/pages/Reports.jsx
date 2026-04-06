@@ -112,7 +112,7 @@ export default function Reports() {
   }, [filteredRuns, allTests, flakyTests]);
 
   if (loading) return (
-    <div style={{ maxWidth: 960, margin: "0 auto" }}>
+    <div className="page-container" style={{ maxWidth: 960 }}>
       {[60, 100, 300, 200].map((h, i) => (
         <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 14 }} />
       ))}
@@ -122,13 +122,13 @@ export default function Reports() {
   const hasData = testRuns.length > 0;
 
   return (
-    <div className="fade-in" style={{ maxWidth: 960, margin: "0 auto" }}>
+    <div className="fade-in page-container" style={{ maxWidth: 960 }}>
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="page-header">
         <div>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 3 }}>Reports</h1>
-          <p style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+          <h1 className="page-title">Reports</h1>
+          <p className="page-subtitle">
             Test analytics, pass rate trends, and quality insights
           </p>
         </div>
@@ -163,10 +163,10 @@ export default function Reports() {
 
       {/* No data state */}
       {!hasData ? (
-        <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
+        <div className="card empty-state">
           <BarChart2 size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
-          <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 6 }}>No test runs yet</div>
-          <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
+          <div className="empty-state-title">No test runs yet</div>
+          <div className="empty-state-desc">
             Run tests to start generating reports and analytics.
           </div>
           <button className="btn btn-primary btn-sm" onClick={() => navigate("/tests")}>
@@ -176,7 +176,7 @@ export default function Reports() {
       ) : (
         <>
           {/* Stats row */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+          <div className="stat-grid" style={{ marginBottom: 20 }}>
             <StatCard
               label="Total Runs"
               value={stats.totalRuns}
@@ -219,7 +219,7 @@ export default function Reports() {
 
             {/* Project breakdown */}
             <div className="card" style={{ padding: 22 }}>
-              <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: 16 }}>Per-Project Breakdown</div>
+              <div className="section-title" style={{ marginBottom: 16 }}>Per-Project Breakdown</div>
               {projectBreakdown.length === 0
                 ? <div style={{ color: "var(--text3)", fontSize: "0.85rem" }}>No projects.</div>
                 : (
@@ -235,10 +235,7 @@ export default function Reports() {
                         }}
                         onClick={() => navigate(`/projects/${p.id}`)}
                       >
-                        <div style={{
-                          width: 32, height: 32, borderRadius: 8, background: "var(--accent-bg)",
-                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                        }}>
+                        <div className="icon-box-sm" style={{ background: "var(--accent-bg)" }}>
                           <FlaskConical size={14} color="var(--accent)" />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -274,13 +271,15 @@ export default function Reports() {
             </div>
 
             {/* Right column: flaky + top failing */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="flex-col gap-lg">
 
               {/* Flaky tests */}
               <div className="card" style={{ padding: 22 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
-                  <AlertTriangle size={14} color="var(--amber)" />
-                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Flaky Tests</span>
+                <div className="flex-between" style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <AlertTriangle size={14} color="var(--amber)" />
+                    <span className="section-title" style={{ marginBottom: 0 }}>Flaky Tests</span>
+                  </div>
                   {flakyTests.length > 0 && (
                     <span className="badge badge-amber" style={{ marginLeft: "auto" }}>{flakyTests.length}</span>
                   )}
@@ -314,9 +313,9 @@ export default function Reports() {
                 <div className="card" style={{ padding: 22 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 14 }}>
                     <XCircle size={14} color="var(--red)" />
-                    <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Top Failures</span>
+                    <span className="section-title" style={{ marginBottom: 0 }}>Top Failures</span>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div className="flex-col gap-sm">
                     {topFailing.map(t => (
                       <div
                         key={t.id}

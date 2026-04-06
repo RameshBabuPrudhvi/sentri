@@ -67,7 +67,7 @@ export default function Projects() {
   );
 
   if (loading) return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div className="page-container" style={{ maxWidth: 900 }}>
       {[80, ...Array(3).fill(130)].map((h, i) => (
         <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 12 }} />
       ))}
@@ -75,13 +75,13 @@ export default function Projects() {
   );
 
   return (
-    <div className="fade-in" style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div className="fade-in page-container" style={{ maxWidth: 900 }}>
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="page-header">
         <div>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 3 }}>Projects</h1>
-          <p style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+          <h1 className="page-title">Projects</h1>
+          <p className="page-subtitle">
             Web applications configured for autonomous testing
           </p>
         </div>
@@ -106,12 +106,12 @@ export default function Projects() {
 
       {/* Empty state */}
       {filtered.length === 0 && (
-        <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
+        <div className="card empty-state">
           <Globe size={36} color="var(--text3)" style={{ marginBottom: 14 }} />
-          <div style={{ fontWeight: 600, fontSize: "1.05rem", marginBottom: 6 }}>
+          <div className="empty-state-title">
             {projects.length === 0 ? "No projects yet" : "No results"}
           </div>
-          <div style={{ fontSize: "0.85rem", color: "var(--text2)", marginBottom: 20 }}>
+          <div className="empty-state-desc">
             {projects.length === 0
               ? "Add your first web app to start generating and running tests."
               : "Try a different search."}
@@ -125,7 +125,7 @@ export default function Projects() {
       )}
 
       {/* Application cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="flex-col" style={{ gap: 10 }}>
         {filtered.map(p => {
           const s = projectStats[p.id] || {};
           const status = s.activeRun ? "running"
@@ -145,11 +145,7 @@ export default function Projects() {
               <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
 
                 {/* Icon */}
-                <div style={{
-                  width: 42, height: 42, borderRadius: 10,
-                  background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}>
+                <div className="icon-box icon-box-accent">
                   <Globe size={18} color="var(--accent)" />
                 </div>
 
@@ -180,7 +176,7 @@ export default function Projects() {
                   {/* Stats row */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.6fr", gap: 16 }}>
                     <div>
-                      <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Tests</div>
+                      <div className="section-label" style={{ marginBottom: 3 }}>Tests</div>
                       <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}>
                         {s.totalTests ?? 0}
                         {s.draft > 0 && (
@@ -191,19 +187,19 @@ export default function Projects() {
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Approved</div>
+                      <div className="section-label" style={{ marginBottom: 3 }}>Approved</div>
                       <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--green)" }}>
                         {s.approved ?? 0}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Last Run</div>
+                      <div className="section-label" style={{ marginBottom: 3 }}>Last Run</div>
                       <div style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
                         {fmtRelativeDate(s.lastRun?.startedAt, "Never")}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 5 }}>Pass Rate</div>
+                      <div className="section-label" style={{ marginBottom: 5 }}>Pass Rate</div>
                       <PassRateBar rate={s.passRate} />
                     </div>
                   </div>

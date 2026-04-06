@@ -247,7 +247,7 @@ export default function Login() {
         <div className="lp-left">
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
-          <div className="lp-brand" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div className="lp-brand flex-between">
             <AppLogo size={36} variant="full" color="#f1f5f9" />
             <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{fontSize:"0.78rem",color:"#64748b",textDecoration:"none",display:"flex",alignItems:"center",gap:5,transition:"color 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.color="#a5b4fc"}} onMouseLeave={e=>{e.currentTarget.style.color="#64748b"}}>
               Docs

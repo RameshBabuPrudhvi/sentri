@@ -560,10 +560,10 @@ export default function Tests() {
   return (
     <div className="fade-in">
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="page-header">
         <div>
-          <h1 style={{ fontSize: "1.4rem", fontWeight: 700, marginBottom: 2 }}>Tests</h1>
-          <p style={{ fontSize: "0.82rem", color: "var(--text2)", margin: 0 }}>
+          <h1 className="page-title">Tests</h1>
+          <p className="page-subtitle">
             Manage, run, and review test cases across all projects
           </p>
         </div>
@@ -579,7 +579,7 @@ export default function Tests() {
       </div>
 
       {/* Quick Actions */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
+      <div className="stat-grid-3 mb-lg">
         {quickActions.map((a, i) => (
           <div
             key={i}
@@ -825,7 +825,7 @@ export default function Tests() {
                           style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
                       </td>
                       <td>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                        <span className="mono-id">
                           {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
                         </span>
                       </td>
