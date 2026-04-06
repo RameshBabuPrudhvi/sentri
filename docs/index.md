@@ -34,5 +34,5 @@ features:
     details: Configure strategy, workflow, quality checks, output format, language, and test count. Presets auto-fill. Validated server-side.
   - icon: 🐳
     title: Docker Ready
-    details: "docker compose up --build" and you're running. GitHub Pages + Render deployment supported out of the box.
+    details: '"docker compose up --build" and you''re running. GitHub Pages + Render deployment supported out of the box.'
 ---
