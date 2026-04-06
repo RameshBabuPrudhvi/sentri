@@ -58,26 +58,58 @@ add_module_header() {
   echo "  ✅ $file → @module ${module_path} (prepended)"
 }
 
-echo "Adding @module JSDoc headers to pipeline/ and runner/ files..."
+echo "Adding @module JSDoc headers to all files without one..."
 echo ""
 
-# Pipeline modules
+echo "── Backend pipeline/ ──"
 for f in backend/src/pipeline/*.js; do
   name=$(basename "$f" .js)
   add_module_header "$f" "pipeline/${name}"
 done
 
-# Runner modules
+echo ""
+echo "── Backend runner/ ──"
 for f in backend/src/runner/*.js; do
   name=$(basename "$f" .js)
   add_module_header "$f" "runner/${name}"
 done
 
-# Pipeline prompt templates
+echo ""
+echo "── Backend pipeline/prompts/ ──"
 for f in backend/src/pipeline/prompts/*.js; do
   [ -f "$f" ] || continue
   name=$(basename "$f" .js)
   add_module_header "$f" "pipeline/prompts/${name}"
+done
+
+echo ""
+echo "── Frontend pages/ ──"
+for f in frontend/src/pages/*.jsx; do
+  name=$(basename "$f" .jsx)
+  add_module_header "$f" "pages/${name}"
+done
+
+echo ""
+echo "── Frontend components/ ──"
+for f in frontend/src/components/*.jsx; do
+  name=$(basename "$f" .jsx)
+  add_module_header "$f" "components/${name}"
+done
+
+echo ""
+echo "── Frontend config/ ──"
+for f in frontend/src/config/*.js; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" .js)
+  add_module_header "$f" "config/${name}"
+done
+
+echo ""
+echo "── Frontend root files ──"
+for f in frontend/src/App.jsx frontend/src/main.jsx frontend/src/demo.js; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" | sed 's/\.\(jsx\|js\)$//')
+  add_module_header "$f" "${name}"
 done
 
 echo ""
