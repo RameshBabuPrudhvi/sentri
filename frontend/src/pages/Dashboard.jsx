@@ -624,38 +624,25 @@ export default function Dashboard() {
     <div className="fade-in page-container">
 
       {/* ── Hero Banner ─────────────────────────────────────────────── */}
-      <div style={{
-        marginBottom: 32, padding: "28px 32px", borderRadius: 16,
-        background: "linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(168,85,247,0.06) 100%)",
-        border: "1px solid rgba(99,102,241,0.18)", position: "relative", overflow: "hidden",
-      }}>
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse 60% 80% at 95% 50%, rgba(99,102,241,0.08) 0%, transparent 70%)" }} />
-        <svg style={{ position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)", opacity: 0.04, pointerEvents: "none" }} width="180" height="180" viewBox="0 0 40 40" fill="none">
+      <div className="dash-hero">
+        <div className="dash-hero-glow" />
+        <svg className="dash-hero-shield" width="180" height="180" viewBox="0 0 40 40" fill="none">
           <path d="M20 1L3 8v11c0 9.5 7.2 18.2 17 20 9.8-1.8 17-10.5 17-20V8L20 1z" fill="#6366f1" />
         </svg>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
+        <div className="dash-hero-content">
           <div>
             <AppLogo size={48} variant="full" />
-            <p style={{ marginTop: 12, color: "var(--text2)", fontSize: "0.875rem", maxWidth: 480, lineHeight: 1.6 }}>
+            <p className="dash-hero-desc">
               {greeting()}! Here's your real-time overview — system health, key metrics, and what your agents are up to right now.
             </p>
           </div>
 
-          {/* ── Top-right: badge + date + Export PDF button ── */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
-            <span style={{
-              fontSize: "0.7rem", fontWeight: 600, letterSpacing: "0.08em",
-              textTransform: "uppercase", color: "#818cf8",
-              background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)",
-              borderRadius: 999, padding: "3px 10px",
-            }}>
-              Autonomous QA
-            </span>
-            <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+          <div className="dash-hero-meta">
+            <span className="dash-hero-pill">Autonomous QA</span>
+            <span className="dash-hero-date">
               {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
             </span>
-            {/* Export PDF sits exactly here — the yellow-highlighted area */}
             <ExportPDFButton />
           </div>
         </div>
@@ -663,10 +650,10 @@ export default function Dashboard() {
 
       {/* Error banner */}
       {loadError && (
-        <div className="card" style={{ padding: "32px 40px", textAlign: "center", marginBottom: 16, border: "1px solid #fca5a5" }}>
-          <div style={{ fontSize: "1.5rem", marginBottom: 10 }}>⚠️</div>
-          <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: 6, color: "var(--text)" }}>Could not load dashboard data</div>
-          <div style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 16 }}>The API may be temporarily unavailable. Your data is safe.</div>
+        <div className="card empty-state mb-md" style={{ border: "1px solid #fca5a5" }}>
+          <div className="empty-state-icon">⚠️</div>
+          <div className="empty-state-title">Could not load dashboard data</div>
+          <div className="empty-state-desc">The API may be temporarily unavailable. Your data is safe.</div>
           <button className="btn btn-ghost btn-sm" onClick={() => window.location.reload()}>Retry</button>
         </div>
       )}
@@ -724,12 +711,12 @@ export default function Dashboard() {
                     </div>
                   ) : (
                     <>
-                      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                      <div className="legend-row" style={{ gap: 14 }}>
                         {defectSegs.filter(s => s.count > 0).map(s => (
-                          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-                            <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{s.label}</span>
-                            <span style={{ fontSize: "0.82rem", fontWeight: 700, color: s.color }}>{s.count}</span>
+                          <div key={s.label} className="legend-item" style={{ gap: 5 }}>
+                            <span className="legend-dot" style={{ background: s.color }} />
+                            <span className="legend-label" style={{ fontSize: "0.78rem" }}>{s.label}</span>
+                            <span className="legend-value" style={{ fontSize: "0.82rem", color: s.color }}>{s.count}</span>
                           </div>
                         ))}
                       </div>
@@ -752,12 +739,12 @@ export default function Dashboard() {
             return (
               <div className="card card-padded mb-md">
                 <div className="section-title">Run Status Distribution</div>
-                <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="legend-row">
                   {segs.map(s => (
-                    <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div key={s.label} className="legend-item">
                       <span style={{ color: s.color, display: "flex" }}>{s.icon}</span>
-                      <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>{s.label}</span>
-                      <span style={{ fontSize: "0.92rem", fontWeight: 700, color: s.color }}>{s.count}</span>
+                      <span className="legend-label">{s.label}</span>
+                      <span className="legend-value" style={{ color: s.color }}>{s.count}</span>
                     </div>
                   ))}
                 </div>
@@ -776,12 +763,12 @@ export default function Dashboard() {
             return (
               <div className="card card-padded mb-md">
                 <div className="section-title">Test Review Pipeline</div>
-                <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="legend-row">
                   {segs.map(s => (
-                    <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-                      <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>{s.label}</span>
-                      <span style={{ fontSize: "0.92rem", fontWeight: 700, color: s.color }}>{s.count}</span>
+                    <div key={s.label} className="legend-item">
+                      <span className="legend-dot" style={{ background: s.color }} />
+                      <span className="legend-label">{s.label}</span>
+                      <span className="legend-value" style={{ color: s.color }}>{s.count}</span>
                     </div>
                   ))}
                 </div>
@@ -810,10 +797,10 @@ export default function Dashboard() {
           {/* ── Row 8: Recent Activity ── */}
           {runs.length > 0 && (
             <div className="card card-padded">
-              <div className="flex-between" style={{ marginBottom: 18 }}>
+              <div className="flex-between mb-md">
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: "1rem" }}>Recent Activity</div>
-                  <div style={{ fontSize: "0.8rem", color: "var(--text3)", marginTop: 2 }}>
+                  <div className="section-title" style={{ marginBottom: 2 }}>Recent Activity</div>
+                  <div className="page-subtitle" style={{ fontSize: "0.8rem" }}>
                     {runs.filter(r => r.status === "running").length > 0
                       ? `${runs.filter(r => r.status === "running").length} task(s) in progress`
                       : "Latest runs across all projects"}
@@ -829,16 +816,16 @@ export default function Dashboard() {
                       <AgentTag type={(RUN_TYPE_META[r.type] || RUN_TYPE_META["run"]).avatar} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: 1 }}>{meta.label}</div>
-                        <div style={{ fontSize: "0.78rem", color: "var(--text2)" }} className="truncate">
+                        <div className="page-subtitle truncate" style={{ fontSize: "0.78rem" }}>
                           {r.projectName || `Project ${r.projectId?.slice(0, 8)}`}
                         </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <div className="flex-center gap-sm" style={{ flexShrink: 0 }}>
                         {r.status === "running" ? <RunningBadge />
                           : r.status === "completed" ? <span className="badge badge-green">✓ Completed</span>
                           : r.status === "aborted"   ? <span className="badge badge-gray">⊘ Aborted</span>
                           :                            <span className="badge badge-red">✗ Failed</span>}
-                        <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>
+                        <span className="dash-hero-date">
                           {new Date(r.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </span>
                         <ArrowRight size={14} color="var(--text3)" />
