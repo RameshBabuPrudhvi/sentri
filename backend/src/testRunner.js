@@ -1,14 +1,19 @@
 /**
- * testRunner.js — Thin orchestrator for test execution
+ * @module testRunner
+ * @description Thin orchestrator for Playwright test execution.
  *
- * Delegates heavy sub-tasks to focused modules under runner/:
- *   - runner/config.js              — env constants, artifact dir setup
- *   - runner/codeParsing.js         — extractTestBody (used for hasCode check)
- *   - runner/executeTest.js         — single-test execution
- *   - runner/feedbackIntegration.js — post-run AI feedback loop
+ * Owns the browser lifecycle, per-test loop, trace management, and final
+ * status transition. Delegates heavy sub-tasks to focused modules:
  *
- * This file owns only the browser lifecycle, the per-test loop, trace
- * management, and the final status transition.
+ * | Module                          | Responsibility                        |
+ * |---------------------------------|---------------------------------------|
+ * | `runner/config.js`              | Env constants, artifact dir setup     |
+ * | `runner/codeParsing.js`         | `extractTestBody` (hasCode check)     |
+ * | `runner/executeTest.js`         | Single-test execution                 |
+ * | `runner/feedbackIntegration.js` | Post-run AI feedback loop             |
+ *
+ * ### Exports
+ * - {@link runTests} — Execute an array of approved tests against a project.
  */
 
 import { chromium } from "playwright";
@@ -24,6 +29,19 @@ import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLog
 // This file only re-uses extractTestBody (imported above) for the "hasCode"
 // log message inside the test loop.
 
+/**
+ * Execute an array of approved tests against a project using Playwright.
+ * Launches Chromium, runs each test with self-healing, collects results,
+ * saves traces/videos, runs the AI feedback loop, and finalises the run.
+ *
+ * @param {Object}      project          - The project `{ id, name, url }`.
+ * @param {Object[]}    tests            - Array of test objects to execute.
+ * @param {Object}      run              - The run record (mutated in place).
+ * @param {Object}      db               - The database object from {@link module:db.getDb}.
+ * @param {Object}      [options]
+ * @param {AbortSignal} [options.signal] - Abort signal for cancellation.
+ * @returns {Promise<void>}
+ */
 export async function runTests(project, tests, run, db, { signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;

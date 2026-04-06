@@ -1,18 +1,25 @@
 /**
- * aiProvider.js — Multi-AI provider abstraction for Sentri
+ * @module aiProvider
+ * @description Multi-AI provider abstraction layer.
  *
- * Supports:
- *   - Anthropic Claude  (ANTHROPIC_API_KEY)
- *   - OpenAI GPT        (OPENAI_API_KEY)
- *   - Google Gemini     (GOOGLE_API_KEY)
- *   - Ollama / local    (AI_PROVIDER=local, no key needed)
+ * ### Supported providers
+ * | Provider         | Env Variable        | Default Model              |
+ * |------------------|---------------------|----------------------------|
+ * | Anthropic Claude | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514   |
+ * | OpenAI GPT       | `OPENAI_API_KEY`    | gpt-4o-mini                |
+ * | Google Gemini    | `GOOGLE_API_KEY`    | gemini-2.5-flash           |
+ * | Ollama (local)   | `AI_PROVIDER=local` | llama3.2 (configurable)    |
  *
- * Priority order:
- *   AI_PROVIDER env var (explicit) → auto-detect (Anthropic → OpenAI → Google → Ollama)
+ * **Detection order:** `AI_PROVIDER` env var (explicit) → auto-detect (Anthropic → OpenAI → Google → Ollama).
  *
- * Ollama env vars:
- *   OLLAMA_BASE_URL  — default: http://localhost:11434
- *   OLLAMA_MODEL     — default: llama3.2  (any model pulled with `ollama pull <name>`)
+ * ### Exports
+ * - {@link generateText} — Single-shot text generation.
+ * - {@link streamText} — Token-streaming text generation (Anthropic/OpenAI; fallback for others).
+ * - {@link parseJSON} — Parse AI response text as JSON (strips markdown fences).
+ * - {@link getProvider}, {@link hasProvider}, {@link isLocalProvider}, {@link getProviderName}, {@link getProviderMeta} — Provider detection.
+ * - {@link setRuntimeKey}, {@link setRuntimeOllama} — Runtime configuration (Settings page).
+ * - {@link getConfiguredKeys} — Masked key status for the Settings UI.
+ * - {@link checkOllamaConnection} — Ollama connectivity check.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -30,12 +37,24 @@ let runtimeOllamaModel   = "";
 // Set to true by DELETE /api/settings/local; cleared by POST /api/settings with local provider.
 let runtimeOllamaDisabled = false;
 
+/**
+ * Set an AI provider API key at runtime (via Settings page).
+ * @param {string} provider - `"anthropic"` | `"openai"` | `"google"`.
+ * @param {string} key      - The API key string.
+ */
 export function setRuntimeKey(provider, key) {
   if (provider === "anthropic") runtimeKeys.ANTHROPIC_API_KEY = key;
   if (provider === "openai")    runtimeKeys.OPENAI_API_KEY    = key;
   if (provider === "google")    runtimeKeys.GOOGLE_API_KEY    = key;
 }
 
+/**
+ * Configure Ollama runtime settings (via Settings page).
+ * @param {Object}  [opts]
+ * @param {string}  [opts.baseUrl]  - Ollama server URL.
+ * @param {string}  [opts.model]    - Model name (e.g. `"llama3.2"`).
+ * @param {boolean} [opts.disabled] - Set `true` to deactivate Ollama.
+ */
 export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
   if (baseUrl  !== undefined) runtimeOllamaBaseUrl  = baseUrl;
   if (model    !== undefined) runtimeOllamaModel    = model;
@@ -102,19 +121,29 @@ function detectProvider() {
   return null;
 }
 
+/** @returns {string|null} Current provider ID (`"anthropic"`, `"openai"`, `"google"`, `"local"`), or `null`. */
 export function getProvider()     { try { return detectProvider(); } catch { return null; } }
+/** @returns {boolean} `true` if any AI provider is configured. */
 export function hasProvider()     { return getProvider() !== null; }
+/** @returns {boolean} `true` if the active provider is Ollama (local). */
 export function isLocalProvider() { return getProvider() === "local"; }
+/** @returns {string} Human-readable provider name (e.g. `"Claude Sonnet"`), or `"No provider configured"`. */
 export function getProviderName() {
   const p = getProvider();
   return p ? buildProviderMeta()[p].name : "No provider configured";
 }
+/** @returns {{provider: string, name: string, model: string, color: string}|null} Full provider metadata, or `null`. */
 export function getProviderMeta() {
   const p = getProvider();
   return p ? { provider: p, ...buildProviderMeta()[p] } : null;
 }
 
-// Returns masked keys + Ollama config for the settings UI
+/**
+ * Returns masked API keys and Ollama config for the Settings UI.
+ * Never returns full keys — only masked versions for display.
+ *
+ * @returns {{anthropic: string, openai: string, google: string, activeProvider: string|null, ollamaBaseUrl: string, ollamaModel: string}}
+ */
 export function getConfiguredKeys() {
   const p = getProvider();
   return {
@@ -136,6 +165,11 @@ function maskKey(key) {
 
 // ── Ollama connectivity check ─────────────────────────────────────────────────
 
+/**
+ * Check Ollama server connectivity and verify the configured model is available.
+ *
+ * @returns {Promise<{ok: boolean, model?: string, baseUrl?: string, availableModels?: string[], error?: string}>}
+ */
 export async function checkOllamaConnection() {
   const base = getOllamaBaseUrl();
   const model = getOllamaModel();
@@ -412,9 +446,15 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * generateText(prompt, options?)
- * @param {string} prompt
- * @param {{ maxTokens?: number, signal?: AbortSignal }} options
+ * Generate text from an AI provider (single-shot, non-streaming).
+ * Automatically detects the active provider and routes the request.
+ *
+ * @param {string|{system: string, user: string}} prompt - Plain string or structured `{ system, user }` messages.
+ * @param {Object}      [options]
+ * @param {number}      [options.maxTokens] - Max output tokens (default 16384).
+ * @param {AbortSignal} [options.signal]    - Abort signal for cancellation.
+ * @returns {Promise<string>} The generated text response.
+ * @throws {Error} If no AI provider is configured.
  */
 export async function generateText(prompt, options) {
   const provider = detectProvider();
@@ -429,6 +469,13 @@ export async function generateText(prompt, options) {
   return callProvider(provider, prompt, options?.maxTokens, options?.signal);
 }
 
+/**
+ * Parse AI response text as JSON. Strips markdown code fences if present.
+ *
+ * @param {string} text - Raw AI response text.
+ * @returns {Object} Parsed JSON object.
+ * @throws {SyntaxError} If the text is not valid JSON after cleanup.
+ */
 export function parseJSON(text) {
   const clean = text.trim()
     .replace(/^```json\s*/i, "")
@@ -438,18 +485,20 @@ export function parseJSON(text) {
 }
 
 /**
- * streamText(prompt, onToken, options?)
- *
- * Token-streaming variant of generateText().
- * Calls onToken(string) for each token as it arrives.
+ * Token-streaming variant of {@link generateText}.
+ * Calls `onToken(string)` for each token as it arrives.
  * Returns the full accumulated text when the stream completes.
  *
  * Falls back to a single blocking call (Google / Ollama) that delivers
  * the entire response as one synthetic "token".
  *
- * @param {string} prompt
- * @param {(token: string) => void} onToken
- * @param {{ maxTokens?: number, signal?: AbortSignal }} options
+ * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
+ * @param {(token: string) => void} onToken - Callback invoked for each token.
+ * @param {Object}      [options]
+ * @param {number}      [options.maxTokens] - Max output tokens.
+ * @param {AbortSignal} [options.signal]    - Abort signal for cancellation.
+ * @returns {Promise<string>} The full accumulated response text.
+ * @throws {Error} If no AI provider is configured.
  */
 export async function streamText(promptOrMessages, onToken, options = {}) {
   const provider = detectProvider();

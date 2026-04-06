@@ -1,22 +1,23 @@
 /**
- * testDials.js — Server-side Test Dials: validation + prompt builder
+ * @module testDials
+ * @description Server-side Test Dials — validation and AI prompt builder.
  *
  * The frontend sends a structured config object. This module validates it
  * against known option IDs and builds the prompt fragment injected into AI
  * calls. Keeping this server-side means:
  *
- *   1. The backend controls what text reaches the AI — no prompt injection risk.
- *   2. The same builder can be reused by backend-only flows (scheduled runs, API).
- *   3. Unknown / malicious option IDs are silently dropped.
- *   4. customInstructions is length-capped and stripped of injection markers.
+ * 1. The backend controls what text reaches the AI — no prompt injection risk.
+ * 2. The same builder can be reused by backend-only flows (scheduled runs, API).
+ * 3. Unknown / malicious option IDs are silently dropped.
+ * 4. `customInstructions` is length-capped and stripped of injection markers.
  *
- * FIELD MAP (old → new, mirrored from frontend testDialsConfig.js):
- *   strategy        → approach
- *   workflow[]      → perspectives[]
- *   format ids      → step_by_step | checklist | gherkin  (was verbose|concise|gherkin)
- *   testCount ids   → one|small|medium|large|ai_decides   (was single|few|moderate|comprehensive|auto)
- *   automationHooks → options.selectorHints
- *   customModifier  → customInstructions
+ * ### Exports
+ * - {@link validateDialsConfig} — Validate and sanitise raw config from the frontend.
+ * - {@link buildDialsPrompt} — Build a prompt fragment from a validated config.
+ * - {@link resolveDialsPrompt} — Single entry-point for route handlers (validate + build).
+ * - {@link resolveDialsConfig} — Like resolveDialsPrompt but returns the config object.
+ * - Option arrays: {@link APPROACH_OPTIONS}, {@link PERSPECTIVE_OPTIONS},
+ *   {@link QUALITY_OPTIONS}, {@link FORMAT_OPTIONS}, {@link LANGUAGES}, {@link TEST_COUNT_OPTIONS}.
  */
 
 // ─── Canonical option definitions ──────────────────────────────────────────────
@@ -176,10 +177,21 @@ const CUSTOM_MAX_LENGTH  = 500;
 // ─── Validate & sanitise ────────────────────────────────────────────────────────
 
 /**
- * validateDialsConfig(raw) → sanitised config object | null
+ * Validate and sanitise a raw Test Dials config from the frontend.
+ * Drops unknown IDs silently. Caps `customInstructions` at 500 chars.
  *
- * Drops unknown IDs silently. Caps customInstructions at 500 chars.
- * Returns null when input is falsy or not an object.
+ * @param {Object|null} raw - Raw config object from the request body.
+ * @returns {DialsConfig|null} Sanitised config, or `null` if input is falsy.
+ *
+ * @typedef {Object} DialsConfig
+ * @property {string}   approach           - Approach ID (e.g. `"full_coverage"`).
+ * @property {string[]} perspectives       - Array of perspective IDs.
+ * @property {string[]} quality            - Array of quality check IDs.
+ * @property {string}   format             - Format ID (e.g. `"step_by_step"`).
+ * @property {string}   language           - Language code (e.g. `"en-US"`).
+ * @property {string}   testCount          - Test count ID (e.g. `"ai_decides"`).
+ * @property {Object}   options            - Boolean option flags.
+ * @property {string}   customInstructions - Free-text instructions (sanitised, max 500 chars).
  */
 export function validateDialsConfig(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -222,10 +234,11 @@ export function validateDialsConfig(raw) {
 // ─── Build the prompt fragment ──────────────────────────────────────────────────
 
 /**
- * buildDialsPrompt(cfg) → string
+ * Build a prompt fragment from a validated Test Dials config.
+ * Returns `""` when config is `null` or has no active dials.
  *
- * Accepts a validated config and returns a prompt fragment ready to be
- * injected into an AI prompt. Returns "" when config is null or empty.
+ * @param {DialsConfig|null} cfg - Validated config from {@link validateDialsConfig}.
+ * @returns {string} Prompt fragment ready to be injected into an AI call.
  */
 export function buildDialsPrompt(cfg) {
   if (!cfg) return "";
@@ -287,10 +300,11 @@ export function buildDialsPrompt(cfg) {
 // ─── Convenience entry-points ───────────────────────────────────────────────────
 
 /**
- * resolveDialsPrompt(rawConfig) → string
+ * Single entry-point for route handlers — validates and builds the prompt in one call.
+ * Rejects raw strings to prevent prompt injection; only structured config objects accepted.
  *
- * Single entry-point for route handlers. Rejects raw strings to prevent
- * prompt injection — only structured config objects are accepted.
+ * @param {Object|string|null} input - Raw config from request body.
+ * @returns {string} Prompt fragment, or `""` if input is invalid/string.
  */
 export function resolveDialsPrompt(input) {
   if (typeof input === "string") return "";
@@ -298,10 +312,11 @@ export function resolveDialsPrompt(input) {
 }
 
 /**
- * resolveDialsConfig(rawConfig) → validated config | null
+ * Like {@link resolveDialsPrompt} but returns the validated config object
+ * so callers can extract individual fields (e.g. `testCount`) directly.
  *
- * Like resolveDialsPrompt but returns the config object so callers can
- * extract individual fields (e.g. testCount) directly.
+ * @param {Object|string|null} input - Raw config from request body.
+ * @returns {DialsConfig|null} Validated config, or `null` if invalid/string.
  */
 export function resolveDialsConfig(input) {
   if (typeof input === "string") return null;

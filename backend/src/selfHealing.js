@@ -1,11 +1,22 @@
 /**
- * selfHealing.js — Self-Healing Utility for Playwright
+ * @module selfHealing
+ * @description Self-Healing Utility for Playwright test execution.
  *
- * Features:
+ * ### Features
  * - Multi-strategy element finding with retry logic
  * - Healing history: records which strategy index succeeded per element so
  *   future runs try the winning strategy first (adaptive self-healing)
  * - Comprehensive ARIA role coverage in assertion transforms
+ * - Code transform engine that rewrites raw Playwright calls into self-healing helpers
+ *
+ * ### Exports
+ * - {@link recordHealing} — Record a successful healing result.
+ * - {@link recordHealingFailure} — Record a failed healing attempt.
+ * - {@link getHealingHint} — Get the previously-successful strategy index.
+ * - {@link getHealingHistoryForTest} — Serialise healing history for runtime injection.
+ * - {@link getSelfHealingHelperCode} — Generate the runtime helper code string.
+ * - {@link applyHealingTransforms} — Rewrite Playwright code to use self-healing helpers.
+ * - {@link SELF_HEALING_PROMPT_RULES} — Prompt rules for AI code generation.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,6 +30,12 @@
 
 /**
  * Record a successful healing result in the DB.
+ *
+ * @param {Object} db             - The database object from {@link module:db.getDb}.
+ * @param {string} testId         - Test ID (e.g. `"TC-1"`).
+ * @param {string} action         - Action type (`"click"`, `"fill"`, `"expect"`).
+ * @param {string} label          - Element label/text used in the action.
+ * @param {number} strategyIndex  - Index of the winning strategy in the waterfall.
  */
 export function recordHealing(db, testId, action, label, strategyIndex) {
   if (!db?.healingHistory) return;
@@ -32,6 +49,11 @@ export function recordHealing(db, testId, action, label, strategyIndex) {
 
 /**
  * Record a failed healing attempt (all strategies exhausted).
+ *
+ * @param {Object} db      - The database object.
+ * @param {string} testId  - Test ID.
+ * @param {string} action  - Action type.
+ * @param {string} label   - Element label/text.
  */
 export function recordHealingFailure(db, testId, action, label) {
   if (!db?.healingHistory) return;
@@ -43,6 +65,12 @@ export function recordHealingFailure(db, testId, action, label) {
 
 /**
  * Get the previously-successful strategy index for an action+label, or -1.
+ *
+ * @param {Object} db      - The database object.
+ * @param {string} testId  - Test ID.
+ * @param {string} action  - Action type.
+ * @param {string} label   - Element label/text.
+ * @returns {number}         Strategy index (0-based), or `-1` if no history.
  */
 export function getHealingHint(db, testId, action, label) {
   if (!db?.healingHistory) return -1;
@@ -52,6 +80,10 @@ export function getHealingHint(db, testId, action, label) {
 
 /**
  * Serialise healing history for a test so it can be injected into runtime code.
+ *
+ * @param {Object} db      - The database object.
+ * @param {string} testId  - Test ID.
+ * @returns {Object<string, number>} Map of `"action::label"` → winning strategy index.
  */
 export function getHealingHistoryForTest(db, testId) {
   if (!db?.healingHistory) return {};
@@ -73,6 +105,14 @@ const HEALING_ELEMENT_TIMEOUT = parseInt(process.env.HEALING_ELEMENT_TIMEOUT, 10
 const HEALING_RETRY_COUNT     = parseInt(process.env.HEALING_RETRY_COUNT, 10) || 3;
 const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) || 400;
 
+/**
+ * Generate the self-healing runtime helper code as a string for injection
+ * into Playwright test execution context. Includes `findElement`, `safeClick`,
+ * `safeFill`, `safeExpect`, and retry logic.
+ *
+ * @param {Object<string, number>} [healingHints] - Map of `"action::label"` → strategy index from previous runs.
+ * @returns {string} JavaScript code string to be prepended to test execution.
+ */
 export function getSelfHealingHelperCode(healingHints) {
   // healingHints is an optional map of "<action>::<label>" → strategyIndex
   const hintsJSON = JSON.stringify(healingHints || {});
@@ -315,6 +355,13 @@ function looksLikeCssSelector(arg) {
 // Escape single quotes in captured text so injecting into '...' strings is safe.
 function esc(s) { return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 
+/**
+ * Rewrite raw Playwright code to use self-healing helpers (`safeClick`, `safeFill`, `safeExpect`).
+ * Only transforms human-readable text selectors — CSS/XPath selectors are left untouched.
+ *
+ * @param {string} code - Raw Playwright test code.
+ * @returns {string} Transformed code with self-healing helper calls.
+ */
 export function applyHealingTransforms(code) {
   return code
     // ── Interaction transforms ──────────────────────────────────────────────

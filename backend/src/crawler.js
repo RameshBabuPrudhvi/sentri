@@ -1,22 +1,23 @@
 /**
- * crawler.js — Sentri autonomous QA pipeline (thin orchestration layer)
+ * @module crawler
+ * @description Autonomous QA pipeline — thin orchestration layer for the 8-stage
+ * test generation pipeline.
  *
- * 8-layer pipeline:
- *   1. Smart crawl           (pipeline/crawlBrowser.js)
- *   2. Element filtering     (pipeline/elementFilter.js)
- *   3. Intent classification (pipeline/intentClassifier.js)
- *   4. Journey generation    (pipeline/journeyGenerator.js)
- *   5. Deduplication         (pipeline/pipelineOrchestrator.js)
- *   6. Assertion enhancement (pipeline/pipelineOrchestrator.js)
- *   7. Validate generated tests (pipeline/pipelineOrchestrator.js)
- *   8. Feedback loop         (pipeline/feedbackLoop.js — runs post-execution)
+ * ### Pipeline stages
+ * | # | Stage                | Module                              |
+ * |---|----------------------|-------------------------------------|
+ * | 1 | Smart crawl          | `pipeline/crawlBrowser.js`          |
+ * | 2 | Element filtering    | `pipeline/elementFilter.js`         |
+ * | 3 | Intent classification| `pipeline/intentClassifier.js`      |
+ * | 4 | Journey generation   | `pipeline/journeyGenerator.js`      |
+ * | 5 | Deduplication        | `pipeline/pipelineOrchestrator.js`  |
+ * | 6 | Assertion enhancement| `pipeline/pipelineOrchestrator.js`  |
+ * | 7 | Validate tests       | `pipeline/pipelineOrchestrator.js`  |
+ * | 8 | Feedback loop        | `pipeline/feedbackLoop.js`          |
  *
- * Sub-concerns extracted to focused modules:
- *   - pipeline/pageSnapshot.js       — takeSnapshot()
- *   - pipeline/testValidator.js      — validateTest()
- *   - pipeline/testPersistence.js    — persistGeneratedTests(), buildPipelineStats()
- *   - pipeline/crawlBrowser.js       — crawlPages()
- *   - pipeline/pipelineOrchestrator.js — runPostGenerationPipeline()
+ * ### Exports
+ * - {@link generateSingleTest} — Generate ONE test from a user description (skips crawl).
+ * - {@link crawlAndGenerateTests} — Full 8-stage pipeline from URL crawl.
  */
 
 import { getProviderName } from "./aiProvider.js";
@@ -100,6 +101,19 @@ export async function generateSingleTest(project, run, db, { name, description, 
   return createdTestIds;
 }
 
+/**
+ * Full 8-stage pipeline: crawl a project URL, classify pages, generate tests,
+ * deduplicate, enhance, validate, and persist.
+ *
+ * @param {Object} project                - The project `{ id, name, url, credentials? }`.
+ * @param {Object} run                    - The run record (mutated in place with results).
+ * @param {Object} db                     - The database object from {@link module:db.getDb}.
+ * @param {Object} [options]
+ * @param {string} [options.dialsPrompt]  - Pre-built prompt fragment from Test Dials config.
+ * @param {string} [options.testCount]    - Test count hint (`"one"` | `"small"` | `"medium"` | `"large"` | `"ai_decides"`).
+ * @param {AbortSignal} [options.signal]  - Abort signal for cancellation.
+ * @returns {Promise<void>}
+ */
 export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const runStart = Date.now();
 
