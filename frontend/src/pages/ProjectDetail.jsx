@@ -125,6 +125,12 @@ export default function ProjectDetail() {
     try {
       const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
       setProject(p); setTests(t); setRuns(r);
+      // Clamp reviewPage so it doesn't point past the last page after
+      // a review action removes tests from the current filter view.
+      setReviewPage(prev => {
+        const total = Math.max(1, Math.ceil(t.length / PAGE_SIZE));
+        return prev > total ? total : prev;
+      });
     } catch (err) {
       console.error("ProjectDetail refresh error:", err);
       // Don't wipe existing state on transient errors — only set project to null
