@@ -167,8 +167,8 @@ export default function Login() {
         .lp-orb-1{width:300px;height:300px;top:-60px;left:-60px;background:rgba(99,102,241,0.15);animation-delay:0s}
         .lp-orb-2{width:200px;height:200px;bottom:80px;right:40px;background:rgba(139,92,246,0.12);animation-delay:3s}
         .lp-orb-3{width:150px;height:150px;top:50%;left:60%;background:rgba(59,130,246,0.1);animation-delay:5s}
-        .lp-brand{position:relative;z-index:1;animation:slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both}
-        .lp-hero{position:relative;z-index:1}
+        .lp-brand{position:relative;z-index:1;animation:slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both;flex-shrink:0}
+        .lp-hero{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:center}
         .lp-eyebrow{display:inline-flex;align-items:center;gap:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:999px;padding:4px 14px;margin-bottom:28px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.1s both}
         .lp-eyebrow-dot{width:6px;height:6px;border-radius:50%;background:#6366f1;animation:dotPulse 2s ease infinite}
         .lp-eyebrow span{font-size:0.72rem;font-weight:500;color:#a5b4fc;letter-spacing:0.5px;text-transform:uppercase}
@@ -245,7 +245,7 @@ export default function Login() {
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <AppLogo size={28} variant="full" color="#f1f5f9" />
+            <AppLogo size={36} variant="full" color="#f1f5f9" />
             <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{fontSize:"0.78rem",color:"#64748b",textDecoration:"none",display:"flex",alignItems:"center",gap:5,transition:"color 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.color="#a5b4fc"}} onMouseLeave={e=>{e.currentTarget.style.color="#64748b"}}>
               Docs
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
