@@ -32,6 +32,7 @@ import { discoverActions } from "./actionDiscovery.js";
 import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPattern } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
+import { decryptCredentials } from "../utils/credentialEncryption.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -184,15 +185,16 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
-    if (project.credentials?.usernameSelector) {
+    const creds = decryptCredentials(project.credentials);
+    if (creds?.usernameSelector) {
       const loginPage = await context.newPage();
       try {
         await loginPage.goto(project.url, { timeout: 15000 });
-        await loginPage.fill(project.credentials.usernameSelector, project.credentials.username);
-        await loginPage.fill(project.credentials.passwordSelector, project.credentials.password);
-        await loginPage.click(project.credentials.submitSelector);
+        await loginPage.fill(creds.usernameSelector, creds.username);
+        await loginPage.fill(creds.passwordSelector, creds.password);
+        await loginPage.click(creds.submitSelector);
         await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-        log(run, `🔑 Logged in as ${project.credentials.username}`);
+        log(run, `🔑 Logged in as ${creds.username}`);
       } catch (e) { logWarn(run, `Login failed: ${e.message}`); }
       finally { await loginPage.close().catch(() => {}); }
     }

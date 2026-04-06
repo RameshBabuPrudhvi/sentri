@@ -4,7 +4,10 @@
  *
  * Every page and component uses `api.*` methods instead of raw `fetch`.
  * Provides automatic timeout, JSON parsing with non-JSON error guard,
- * and structured error messages.
+ * authenticated requests via JWT Bearer token, and structured error messages.
+ *
+ * On 401 responses the stored token is cleared and the user is redirected
+ * to the login page so stale sessions don't silently fail.
  *
  * @example
  * import { api } from "./api.js";
@@ -24,8 +27,42 @@ const TIMEOUT_DEFAULT = 30_000;
 /** @type {number} Extended timeout for long-running operations like crawl and test runs (5 minutes). */
 const TIMEOUT_LONG    = 300_000;
 
+/** localStorage keys — must match AuthContext.jsx */
+const TOKEN_KEY = "app_auth_token";
+const USER_KEY  = "app_auth_user";
+
 /**
- * Internal fetch wrapper with timeout, JSON parsing, and error handling.
+ * Read the stored JWT token from localStorage.
+ * Returns null if no token is stored or localStorage is unavailable.
+ * @returns {string|null}
+ * @private
+ */
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+/**
+ * Handle a 401 Unauthorized response by clearing the stored session
+ * and redirecting to the login page. This ensures stale tokens don't
+ * leave the user in a broken state where every API call silently fails.
+ * @private
+ */
+function handleUnauthorized() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch { /* localStorage unavailable */ }
+  // Redirect to login — use the Vite BASE_URL so subpath deploys work
+  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  window.location.href = `${base}/login`;
+}
+
+/**
+ * Internal fetch wrapper with timeout, JSON parsing, auth, and error handling.
+ *
+ * Automatically injects the `Authorization: Bearer <token>` header when a
+ * JWT token is available in localStorage. On 401 responses, clears the
+ * session and redirects to `/login`.
  *
  * @param   {string}  method           - HTTP method (`GET`, `POST`, `PATCH`, `DELETE`).
  * @param   {string}  path             - API path relative to `/api` (e.g. `"/projects"`).
@@ -38,11 +75,16 @@ const TIMEOUT_LONG    = 300_000;
 async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
+
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   let res;
   try {
     res = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -52,6 +94,12 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
     throw err;
   }
   clearTimeout(timer);
+
+  // Handle expired / revoked tokens globally
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));

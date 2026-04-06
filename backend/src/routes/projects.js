@@ -15,6 +15,7 @@ import { Router } from "express";
 import { getDb } from "../db.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { encryptCredentials } from "../utils/credentialEncryption.js";
 
 const router = Router();
 
@@ -28,7 +29,7 @@ router.post("/", (req, res) => {
     id,
     name,
     url,
-    credentials: credentials || null,
+    credentials: encryptCredentials(credentials) || null,
     createdAt: new Date().toISOString(),
     status: "idle",
   };
@@ -42,16 +43,37 @@ router.post("/", (req, res) => {
   res.status(201).json(project);
 });
 
+/**
+ * Strip encrypted credential values from a project before sending to the client.
+ * Only returns whether auth is configured, not the actual secrets.
+ * @param {Object} project
+ * @returns {Object}
+ * @private
+ */
+function sanitiseProjectForClient(project) {
+  if (!project) return project;
+  const { credentials, ...rest } = project;
+  return {
+    ...rest,
+    credentials: credentials ? {
+      usernameSelector: credentials.usernameSelector || "",
+      passwordSelector: credentials.passwordSelector || "",
+      submitSelector: credentials.submitSelector || "",
+      _hasAuth: true,
+    } : null,
+  };
+}
+
 router.get("/", (req, res) => {
   const db = getDb();
-  res.json(Object.values(db.projects));
+  res.json(Object.values(db.projects).map(sanitiseProjectForClient));
 });
 
 router.get("/:id", (req, res) => {
   const db = getDb();
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
-  res.json(project);
+  res.json(sanitiseProjectForClient(project));
 });
 
 router.delete("/:id", (req, res) => {

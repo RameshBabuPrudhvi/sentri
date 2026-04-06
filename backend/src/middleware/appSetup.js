@@ -15,6 +15,7 @@
 
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -27,8 +28,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
 
 // ─── Global middleware ────────────────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
+
+// Security headers: X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.
+// CSP is relaxed for the SPA — tighten in production once asset hashes are known.
+app.use(helmet({
+  contentSecurityPolicy: false,       // SPA serves its own CSP via meta tag or nginx
+  crossOriginEmbedderPolicy: false,   // required for Playwright trace viewer iframes
+}));
+
+// CORS — restrict origins in production, allow all in development.
+// Set CORS_ORIGIN env var to the frontend URL (e.g. "https://sentri.example.com").
+const corsOrigin = process.env.CORS_ORIGIN || "*";
+app.use(cors({
+  origin: corsOrigin === "*" ? true : corsOrigin.split(",").map(o => o.trim()),
+  credentials: true,
+}));
+
+app.use(express.json({ limit: "1mb" }));
 
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
 /**

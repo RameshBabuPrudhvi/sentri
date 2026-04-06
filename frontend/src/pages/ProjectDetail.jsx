@@ -421,16 +421,19 @@ export default function ProjectDetail() {
                 <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
-            {approvedTests.length > 0 && (
-              <div style={{ marginLeft: "auto", alignSelf: "center" }}>
-                <div className="progress-bar progress-bar-green" style={{ width: 140 }}>
-                  <div className="progress-bar-fill" style={{ width: `${Math.round(passed / approvedTests.length * 100)}%` }} />
+            {approvedTests.length > 0 && (() => {
+              const pct = Math.round((passed / approvedTests.length) * 100);
+              return (
+                <div style={{ marginLeft: "auto", alignSelf: "center" }}>
+                  <div className="progress-bar progress-bar-green" style={{ width: 140 }}>
+                    <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 4, textAlign: "right" }}>
+                    {pct}% passing
+                  </div>
                 </div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 4, textAlign: "right" }}>
-                  {Math.round(passed / approvedTests.length * 100)}% passing
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </div>

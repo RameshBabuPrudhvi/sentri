@@ -166,11 +166,17 @@ _purgeInterval.unref();
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 /**
- * Express middleware that validates a Bearer JWT token.
+ * Express middleware that validates a JWT token.
+ *
+ * Checks for the token in this order:
+ * 1. `Authorization: Bearer <token>` header (standard for JSON API calls)
+ * 2. `?token=<jwt>` query parameter (fallback for SSE / EventSource which
+ *    cannot send custom headers)
+ *
  * On success, attaches the decoded payload to `req.authUser`.
  * On failure, responds with `401 Unauthorized`.
  *
- * @param {Object}   req  - Express request (reads `Authorization` header).
+ * @param {Object}   req  - Express request.
  * @param {Object}   res  - Express response.
  * @param {Function} next - Express next middleware.
  * @returns {void}
@@ -182,11 +188,19 @@ _purgeInterval.unref();
  * });
  */
 export function requireAuth(req, res, next) {
+  // 1. Try Authorization header (preferred)
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  let token = null;
+  if (authHeader?.startsWith("Bearer ")) {
+    token = authHeader.slice(7);
+  }
+  // 2. Fallback to ?token= query param (for EventSource / SSE)
+  if (!token && req.query.token) {
+    token = req.query.token;
+  }
+  if (!token) {
     return res.status(401).json({ error: "Authentication required." });
   }
-  const token = authHeader.slice(7);
   const payload = verifyJwt(token, getJwtSecret());
   if (!payload) return res.status(401).json({ error: "Invalid or expired token." });
   if (payload.jti && revokedTokens.has(payload.jti)) {

@@ -12,6 +12,7 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./smartCrawl.js";
 import { takeSnapshot } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
+import { decryptCredentials } from "../utils/credentialEncryption.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -44,15 +45,16 @@ export async function crawlPages(project, run, { signal } = {}) {
     const pathPatternsSeen = new Set();
 
     // ── Optional login ──────────────────────────────────────────────────────
-    if (project.credentials?.usernameSelector) {
+    const creds = decryptCredentials(project.credentials);
+    if (creds?.usernameSelector) {
       const loginPage = await context.newPage();
       try {
         await loginPage.goto(project.url, { timeout: 15000 });
-        await loginPage.fill(project.credentials.usernameSelector, project.credentials.username);
-        await loginPage.fill(project.credentials.passwordSelector, project.credentials.password);
-        await loginPage.click(project.credentials.submitSelector);
+        await loginPage.fill(creds.usernameSelector, creds.username);
+        await loginPage.fill(creds.passwordSelector, creds.password);
+        await loginPage.click(creds.submitSelector);
         await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-        log(run, `🔑 Logged in as ${project.credentials.username}`);
+        log(run, `🔑 Logged in as ${creds.username}`);
       } catch (e) {
         logWarn(run, `Login failed: ${e.message}`);
       } finally {

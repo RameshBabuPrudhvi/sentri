@@ -18,6 +18,14 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { API_BASE } from "../utils/api.js";
 
+/** localStorage key — must match AuthContext.jsx and api.js */
+const TOKEN_KEY = "app_auth_token";
+
+/** Read the stored JWT token for SSE and polling requests. */
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
 // ── Favicon badge ─────────────────────────────────────────────────────────────
 
 function setFaviconStatus(status) {
@@ -103,7 +111,10 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     const poll = async () => {
       if (doneRef.current) return;
       try {
-        const res = await fetch(`${API_BASE}/api/runs/${runId}`);
+        const headers = {};
+        const tk = getToken();
+        if (tk) headers["Authorization"] = `Bearer ${tk}`;
+        const res = await fetch(`${API_BASE}/api/runs/${runId}`, { headers });
         if (res.ok) {
           const run = await res.json();
           onEventRef.current?.({ type: "snapshot", run });
@@ -125,7 +136,11 @@ export function useRunSSE(runId, onEvent, initialStatus) {
   const connect = useCallback(() => {
     if (!runId || doneRef.current) return;
 
-    const es = new EventSource(`${API_BASE}/api/runs/${runId}/events`);
+    // EventSource cannot send custom headers, so pass the JWT as a query param.
+    // The backend requireAuth middleware accepts ?token= as a fallback.
+    const tk = getToken();
+    const sseUrl = `${API_BASE}/api/runs/${runId}/events${tk ? `?token=${encodeURIComponent(tk)}` : ""}`;
+    const es = new EventSource(sseUrl);
     esRef.current = es;
 
     es.onmessage = (e) => {
