@@ -30,6 +30,9 @@ jobs:
       - name: Syntax check all source files
         run: find src -name '*.js' -exec node --check {} +
 
+      - name: Generate JSDoc (validates all doc comments)
+        run: npm run docs
+
       - name: Smoke test — server starts and responds
         run: |
           node src/index.js &
@@ -89,13 +92,11 @@ jobs:
           path: frontend/dist/
           retention-days: 3
 
-  # ── JSDoc validation ────────────────────────────────────────────────────
-  jsdoc:
-    name: Backend — JSDoc Generation
+  # ── Docs (VitePress + JSDoc assembly) ────────────────────────────────────
+  docs:
+    name: Docs — VitePress Build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
+    needs: [backend]
 
     steps:
       - uses: actions/checkout@v4
@@ -105,11 +106,26 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
+      - name: Install backend dependencies
+        working-directory: backend
         run: npm install
 
-      - name: Generate JSDoc (validates all doc comments)
-        run: npm run docs
+      - name: Generate JSDoc
+        working-directory: backend
+        run: npx jsdoc -c jsdoc.json
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm install
+
+      - name: Copy JSDoc output into VitePress public folder
+        run: |
+          mkdir -p docs/public/jsdoc
+          cp -r backend/docs-api/* docs/public/jsdoc/
+
+      - name: Build VitePress
+        working-directory: docs
+        run: npm run build
 
   # ── Docker build ──────────────────────────────────────────────────────────
   docker:
