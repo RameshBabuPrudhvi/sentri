@@ -265,6 +265,13 @@ export default function GenerateTestModal({ projects = [], onClose }) {
 
     setPhase("submitting");
     try {
+      // Pre-flight: check if an AI provider is configured before calling the LLM
+      const config = await api.getConfig().catch(() => null);
+      if (!config?.hasProvider) {
+        setError("No AI provider configured — go to Settings to add an API key or enable Ollama.");
+        setPhase("form");
+        return;
+      }
       // Send the structured config object — the backend validates it and builds
       // the prompt server-side via resolveDialsPrompt(), matching the crawl endpoint.
       const { runId } = await api.generateTest(projectId, {

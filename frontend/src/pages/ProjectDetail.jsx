@@ -152,6 +152,13 @@ export default function ProjectDetail() {
   async function doCrawl() {
     setActionLoading("crawl");
     try {
+      // Pre-flight: check if an AI provider is configured before starting
+      const config = await api.getConfig().catch(() => null);
+      if (!config?.hasProvider) {
+        showToast("No AI provider configured — go to Settings to add an API key or enable Ollama.", "error");
+        setActionLoading(null);
+        return;
+      }
       // Send structured config to the backend — it validates and builds the prompt server-side
       const { runId } = await api.crawl(id, crawlDialsCfg ? { dialsConfig: crawlDialsCfg } : undefined);
       setActiveRun(runId);
