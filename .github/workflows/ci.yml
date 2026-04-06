@@ -104,7 +104,8 @@ jobs:
       - name: Build backend Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: .
+          file: backend/Dockerfile
           push: false
           tags: sentri-backend:ci
           # GitHub Actions cache — speeds up repeat builds significantly
@@ -114,7 +115,8 @@ jobs:
       - name: Build frontend Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: .
+          file: frontend/Dockerfile
           push: false
           tags: sentri-frontend:ci
           cache-from: type=gha
