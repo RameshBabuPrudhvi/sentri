@@ -19,8 +19,8 @@ import { API_BASE } from "../utils/api.js";
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = "sentri_token";
-const USER_KEY  = "sentri_user";
+const TOKEN_KEY = "app_auth_token";
+const USER_KEY  = "app_auth_user";
 
 /** Decode JWT payload without verifying (verification happens server-side) */
 function decodeJwt(token) {
