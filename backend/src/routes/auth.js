@@ -10,12 +10,12 @@
  *   GET  /api/auth/google/callback — Google OAuth token exchange
  *
  * Security measures:
- *   • Passwords hashed with bcrypt (cost factor 12)
+ *   • Passwords hashed with scrypt (64-byte key, 16-byte random salt)
  *   • JWT signed with HS256, 8-hour expiry
  *   • Rate limiting: 10 login attempts per IP per 15 minutes
- *   • Revoked tokens kept in an in-memory Set (production: use Redis)
+ *   • Revoked tokens kept in an in-memory Map (production: use Redis)
  *   • Input validation and sanitisation on every endpoint
- *   • OAuth state parameter validated to prevent CSRF
+ *   • OAuth state parameter validated on the frontend to prevent CSRF
  *   • No sensitive data (passwords, raw OAuth tokens) returned to client
  */
 
@@ -54,25 +54,38 @@ function signJwt(payload, secret, expiresInSec = 8 * 60 * 60) {
 }
 
 function verifyJwt(token, secret) {
-  const parts = token?.split(".");
-  if (parts?.length !== 3) return null;
-  const [header, body, sig] = parts;
-  const expected = crypto.createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   try {
+    const parts = token?.split(".");
+    if (parts?.length !== 3) return null;
+    const [header, body, sig] = parts;
+    const expected = crypto.createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
     const payload = JSON.parse(Buffer.from(body, "base64url").toString());
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch { return null; }
 }
 
+/** Auto-generated fallback for local development only — never used in production. */
+let _devFallbackSecret = null;
+
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
-  if (!secret || secret.length < 32) {
-    console.warn("[auth] WARNING: JWT_SECRET is missing or too short. Using insecure fallback — set JWT_SECRET in .env for production.");
-    return "sentri-dev-secret-change-in-production-must-be-32-chars-minimum";
+  if (secret && secret.length >= 32) return secret;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[auth] FATAL: JWT_SECRET is missing or too short. Set a 32+ char secret in .env for production.");
   }
-  return secret;
+
+  // Dev-only: generate a random secret per process so tokens are never forgeable
+  // from source code alone. Tokens won't survive server restarts — acceptable in dev.
+  if (!_devFallbackSecret) {
+    _devFallbackSecret = crypto.randomBytes(48).toString("base64url");
+    console.warn("[auth] WARNING: JWT_SECRET not set — using random per-process secret (dev only). Tokens will not survive restarts.");
+  }
+  return _devFallbackSecret;
 }
 
 // ─── In-memory stores (replace with DB/Redis in production) ─────────────────

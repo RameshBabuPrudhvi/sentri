@@ -73,7 +73,7 @@ export default function Login() {
     const provider = params.get("provider");
     const err = params.get("error");
     if (err) { setError(decodeURIComponent(err)); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); return; }
-    if (code && provider) handleOAuthCallback(provider, code);
+    if (code && provider && ["github", "google"].includes(provider)) handleOAuthCallback(provider, code);
   }, []);
 
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
@@ -82,6 +82,13 @@ export default function Login() {
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
     try {
+      const params = new URLSearchParams(location.search);
+      const returnedState = params.get("state");
+      const savedState = sessionStorage.getItem("oauth_state");
+      sessionStorage.removeItem("oauth_state");
+      if (!returnedState || returnedState !== savedState) {
+        throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
+      }
       const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`);
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "OAuth login failed");
