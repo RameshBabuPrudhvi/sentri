@@ -93,7 +93,11 @@ export default function Work() {
   const filtered = useMemo(() => runs.filter(r => {
     if (statusFilter !== "all" && r.status !== statusFilter) return false;
     if (typeFilter   !== "all" && r.type   !== typeFilter)   return false;
-    if (search.trim() && !(r.projectName || "").toLowerCase().includes(search.toLowerCase())) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const haystack = `${r.id} ${r.projectName || ""} ${r.type || ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   }), [runs, statusFilter, typeFilter, search]);
 
@@ -170,7 +174,7 @@ export default function Work() {
               className="input"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search by project…"
+              placeholder="Search by run ID, project, or type…"
               style={{ paddingLeft: 28, paddingRight: search ? 30 : 12, height: 32, fontSize: "0.82rem" }}
             />
             {search && (

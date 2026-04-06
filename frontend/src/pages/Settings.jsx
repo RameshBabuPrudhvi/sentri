@@ -246,6 +246,17 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
     return () => clearTimeout(timer);
   }, [confirmingDelete]);
 
+  // Warn before navigating away with unsaved API key input
+  useEffect(() => {
+    if (!input.trim()) return;
+    function handleBeforeUnload(e) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [input]);
+
   // Ollama-specific local state — sync with props when parent reloads settings.
   // Always sync (not just when truthy) so deactivation resets to defaults.
   const [ollamaUrl, setOllamaUrl]   = useState(ollamaBaseUrl || "http://localhost:11434");
