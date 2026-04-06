@@ -17,7 +17,8 @@
  * - {@link resolveDialsPrompt} — Single entry-point for route handlers (validate + build).
  * - {@link resolveDialsConfig} — Like resolveDialsPrompt but returns the config object.
  * - Option arrays: {@link APPROACH_OPTIONS}, {@link PERSPECTIVE_OPTIONS},
- *   {@link QUALITY_OPTIONS}, {@link FORMAT_OPTIONS}, {@link LANGUAGES}, {@link TEST_COUNT_OPTIONS}.
+ *   {@link QUALITY_OPTIONS}, {@link FORMAT_OPTIONS}, {@link LANGUAGES},
+ *   {@link TEST_COUNT_OPTIONS}, {@link EXPLORE_MODE_OPTIONS}.
  */
 
 // ─── Canonical option definitions ──────────────────────────────────────────────

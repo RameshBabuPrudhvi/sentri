@@ -12,6 +12,14 @@
  * - `utils/abortHelper.throwIfAborted` — abort signal support
  * - `utils/runLogger.*` — SSE logging
  *
+ * ### Tuning (from Test Dials → `options.explorerTuning`)
+ * | Parameter       | Range       | Default | Description                          |
+ * |-----------------|-------------|---------|--------------------------------------|
+ * | `maxStates`     | 5–100       | 30      | Max unique states before stopping    |
+ * | `maxDepth`      | 1–10        | 3       | Exploration depth from start URL     |
+ * | `maxActions`    | 1–20        | 8       | Actions to try per state             |
+ * | `actionTimeout` | 1000–15000  | 5000    | Per-action timeout in ms             |
+ *
  * ### Exports
  * - {@link exploreStates} — full state exploration from a project URL
  */

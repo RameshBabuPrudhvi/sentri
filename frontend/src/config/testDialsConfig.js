@@ -13,6 +13,11 @@
  *   automationHooks → options.selectorHints (expanded into options object)
  *   customModifier  → customInstructions    (renamed)
  *   preset          → profile               (renamed)
+ *   (new)           → exploreMode           ("crawl" | "state" — controls Step 1 discovery)
+ *   (new)           → exploreMaxStates      (5–100, state explorer budget)
+ *   (new)           → exploreMaxDepth       (1–10, state explorer depth)
+ *   (new)           → exploreMaxActions     (1–20, actions per state)
+ *   (new)           → exploreActionTimeout  (1000–15000ms, per-action timeout)
  */
 
 // ─── Coverage approach ─────────────────────────────────────────────────────────

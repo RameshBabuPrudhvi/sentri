@@ -21,15 +21,16 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | You can't see what the test is doing | Live browser screencast, real-time SSE log stream, per-step screenshots with bounding-box overlays |
 | Tests fail and nobody knows why | AI feedback loop classifies every failure (selector / timeout / assertion / navigation) and auto-regenerates the worst offenders |
 | Vendor lock-in on AI providers | Swap between Anthropic, OpenAI, Google, or **Ollama (free, local, private)** with one setting — no code changes |
+| Crawlers only see links, not flows | State Exploration mode clicks, fills, and submits — discovers auth flows, checkout funnels, and multi-step wizards that link crawlers miss |
 | Generated tests are shallow | 8-stage pipeline: classify page intent → plan → generate → deduplicate → enhance assertions → validate — not just "write a test for this HTML" |
 
 ---
 
 ## How It Works
 
-1. **Crawl** — Chromium explores your app, maps pages with a live D3 site graph
-2. **Generate** — 8-stage AI pipeline: crawl → filter → classify → plan → generate → deduplicate → enhance → validate
-3. **Describe** — or skip crawling — write a plain-English scenario and AI generates the test
+1. **Discover** — Two modes: **Link Crawl** follows `<a>` tags to map pages, or **State Exploration** executes real UI actions (click, fill, submit) to discover multi-step flows. Pick the mode from Test Dials before each crawl
+2. **Generate** — 8-stage AI pipeline: discover → filter → classify → plan → generate → deduplicate → enhance → validate
+3. **Describe** — or skip discovery — write a plain-English scenario and AI generates the test
 4. **Review** — every test lands in Draft. Approve/reject with keyboard shortcuts before anything runs
 5. **Execute** — one-click regression with live browser view, SSE log stream, and per-step screenshots
 6. **Self-heal** — multi-strategy selector waterfall that remembers what worked per element
@@ -44,7 +45,8 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | Feature | What it actually does |
 |---|---|
 | 🧬 **Adaptive Self-Healing** | Not just "retry with a different selector" — records which strategy won per element and tries it first next run. Tests get more resilient over time |
-| 🎛️ **Test Dials** | 6 strategies × 5 workflows × 8 quality checks × 3 formats × 8 languages. Presets auto-fill. Config validated server-side to block prompt injection |
+| 🎛️ **Test Dials** | 6 strategies × 5 workflows × 8 quality checks × 3 formats × 8 languages × 2 explore modes. Presets auto-fill. Config validated server-side to block prompt injection |
+| 🧭 **State Exploration** | Goes beyond link crawling — clicks buttons, fills forms, submits, and tracks state transitions to discover real multi-step user flows. Tunable per-run: max states, depth, actions per state, action timeout |
 | 🔄 **Two-Phase AI Pipeline** | PLAN → GENERATE split avoids token truncation. Intent classification (AUTH/CHECKOUT/SEARCH/CRUD/NAVIGATION/CONTENT) focuses each prompt |
 | 📡 **Real-Time SSE** | No polling. Server-Sent Events push log, result, frame, and LLM token events to the browser with auto-reconnect and exponential backoff |
 | 🖥️ **Live Browser View** | CDP screencast at ~7 FPS rendered on a `<canvas>` — watch the browser do what your test does |
