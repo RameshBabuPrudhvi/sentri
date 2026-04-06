@@ -1,14 +1,14 @@
 /**
  * @module components/AppLogo
- * @description SVG logo — gradient shield icon + wordmark.
+ * @description SVG logo — animated "watching eyes" icon + wordmark.
  *
- * The shield always uses the brand gradient so it's visible on any background.
+ * The icon uses a rotating rainbow-gradient border (Google brand colours)
+ * with two animated eyeballs that look side-to-side and blink.
  * The wordmark uses `var(--text)` by default so it adapts to light/dark mode
  * automatically, or accepts an explicit `color` override for custom contexts
  * (e.g. the Login page's dark background).
  *
  * This is the **single source of truth** for the brand visual identity.
- * Change the wordmark text on line 86 and the SVG on lines 52–66 to rebrand.
  *
  * @param {Object} props
  * @param {number}  [props.size=40]       - Controls height of the icon in pixels.
@@ -25,9 +25,7 @@ import React, { useId } from "react";
 
 function IconMark({ size = 40 }) {
   const uid = useId();
-  const shieldGradId = `sentri-eyes-${uid}`;
-  const rayGradId = `sentri-ray-${uid}`;
-  const glowId = `sentri-glow-${uid}`;
+  const gradId = `sentri-snake-${uid}`;
   return (
     <svg
       width={size}
@@ -39,13 +37,12 @@ function IconMark({ size = 40 }) {
       role="img"
     >
       <defs>
-
-          <linearGradient id="snakeGradient" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#4285F4"/>
-            <stop offset="25%" stop-color="#EA4335"/>
-            <stop offset="50%" stop-color="#FBBC05"/>
-            <stop offset="75%" stop-color="#34A853"/>
-            <stop offset="100%" stop-color="#4285F4"/>
+          <linearGradient id={gradId} gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#4285F4"/>
+            <stop offset="25%" stopColor="#EA4335"/>
+            <stop offset="50%" stopColor="#FBBC05"/>
+            <stop offset="75%" stopColor="#34A853"/>
+            <stop offset="100%" stopColor="#4285F4"/>
 
             <animateTransform attributeName="gradientTransform"
               type="rotate" from="0 100 100" to="360 100 100" dur="2s"
@@ -56,8 +53,8 @@ function IconMark({ size = 40 }) {
         <rect x="40" y="70" width="120" height="70" rx="35" fill="#020817"/>
 
         <rect x="40" y="70" width="120" height="70" rx="35"
-              fill="none" stroke="url(#snakeGradient)" stroke-width="6"
-              stroke-linecap="round"/>
+              fill="none" stroke={`url(#${gradId})`} strokeWidth="6"
+              strokeLinecap="round"/>
         <g>
           <ellipse cx="80" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
 
