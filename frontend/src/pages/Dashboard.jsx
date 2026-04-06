@@ -562,16 +562,16 @@ function ExportPDFButton() {
     <button
       onClick={handleClick}
       disabled={loading}
+      className="btn btn-ghost btn-sm"
       style={{
-        display: "inline-flex", alignItems: "center", gap: 7,
-        padding: "6px 14px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.35)",
-        background: "rgba(99,102,241,0.12)", cursor: loading ? "not-allowed" : "pointer",
-        fontSize: "0.78rem", fontWeight: 600, color: "#818cf8",
-        transition: "all 0.15s", backdropFilter: "blur(4px)",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        color: "var(--accent)",
+        fontWeight: 600,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
         opacity: loading ? 0.7 : 1,
+        cursor: loading ? "not-allowed" : "pointer",
       }}
-      onMouseEnter={e => { if (!loading) { e.currentTarget.style.background = "rgba(99,102,241,0.22)"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.55)"; } }}
-      onMouseLeave={e => { e.currentTarget.style.background = "rgba(99,102,241,0.12)"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.35)"; }}
       title="Download executive PDF report"
     >
       {loading
