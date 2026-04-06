@@ -1,11 +1,16 @@
 /**
- * appSetup.js — Express app creation, global middleware, and static file serving.
+ * @module middleware/appSetup
+ * @description Express app creation, global middleware, and static file serving.
  *
- * Extracted from index.js so the app instance can be imported by tests
+ * Extracted from `index.js` so the app instance can be imported by tests
  * or other modules without triggering side effects (DB init, listen).
  *
- * Usage:
- *   import { app, ARTIFACTS_DIR } from "./middleware/appSetup.js";
+ * ### Exports
+ * - {@link app} — The Express application instance.
+ * - {@link ARTIFACTS_DIR} — Absolute path to the Playwright artifacts directory.
+ *
+ * @example
+ * import { app, ARTIFACTS_DIR } from "./middleware/appSetup.js";
  */
 
 import express from "express";
@@ -15,6 +20,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** @type {import('express').Express} The Express application instance. */
 export const app = express();
 
 // ─── Global middleware ────────────────────────────────────────────────────────
@@ -22,6 +28,7 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
+/** @type {string} Absolute path to the Playwright artifacts directory (screenshots, videos, traces). */
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
 app.use("/artifacts", express.static(ARTIFACTS_DIR, {
   setHeaders(res, fp) {

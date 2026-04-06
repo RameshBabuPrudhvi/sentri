@@ -1,17 +1,24 @@
 /**
- * AppLogo.jsx
+ * @module components/AppLogo
+ * @description SVG logo — gradient shield icon + wordmark.
  *
- * SVG logo for Sentri — gradient shield icon + wordmark.
  * The shield always uses the brand gradient so it's visible on any background.
- * The wordmark uses var(--text) by default so it adapts to light/dark mode
+ * The wordmark uses `var(--text)` by default so it adapts to light/dark mode
  * automatically, or accepts an explicit `color` override for custom contexts
  * (e.g. the Login page's dark background).
  *
- * Props:
- *   size     — controls height of the icon (default 40)
- *   variant  — "icon" | "wordmark" | "full" (default "full")
- *   color    — explicit wordmark color; omit to use var(--text)
- *   style    — additional inline styles for the wrapper
+ * This is the **single source of truth** for the brand visual identity.
+ * Change the wordmark text on line 86 and the SVG on lines 52–66 to rebrand.
+ *
+ * @param {Object} props
+ * @param {number}  [props.size=40]       - Controls height of the icon in pixels.
+ * @param {string}  [props.variant="full"] - `"icon"` | `"wordmark"` | `"full"`.
+ * @param {string}  [props.color]          - Explicit wordmark color; omit to use `var(--text)`.
+ * @param {Object}  [props.style]          - Additional inline styles for the wrapper.
+ * @returns {React.ReactElement}
+ *
+ * @example
+ * <AppLogo size={36} variant="full" color="#f1f5f9" />
  */
 
 import React, { useId } from "react";

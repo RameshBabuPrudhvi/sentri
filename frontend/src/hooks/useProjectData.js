@@ -1,8 +1,20 @@
+/**
+ * @module hooks/useProjectData
+ * @description Shared data-fetching hook with 30-second TTL cache.
+ *
+ * Fetches projects, tests, and runs in parallel. The module-level cache
+ * survives component unmount/remount so navigating Projects → Tests → Projects
+ * doesn't refetch everything.
+ *
+ * ### Exports
+ * - {@link useProjectData} (default) — The hook itself.
+ * - {@link invalidateProjectDataCache} — Bust the cache after mutations.
+ */
+
 import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "../api";
 
 // module-level cache with 30s TTL — survives component unmount/remount
-// so navigating Projects → Tests → Projects doesn't refetch everything
 const CACHE_TTL = 30_000;
 const cache = {
   projects:  { data: null, ts: 0 },
@@ -18,7 +30,10 @@ function setCache(key, data) {
   cache[key] = { data, ts: Date.now() };
 }
 
-// Exported so other components (e.g. after mutations) can bust the cache
+/**
+ * Bust the project data cache. Call after mutations (create/delete project,
+ * approve/reject tests, etc.) so the next render fetches fresh data.
+ */
 export function invalidateProjectDataCache() {
   cache.projects.ts = 0;
   cache.runs.ts     = 0;
@@ -26,21 +41,21 @@ export function invalidateProjectDataCache() {
 }
 
 /**
- * Shared hook that fetches projects + tests + runs in parallel.
+ * Shared hook that fetches projects, tests, and runs in parallel with caching.
  *
- * Returns:
- *   projects  — project list
- *   allTests  — flat list of all tests across projects
- *   allRuns   — flat list of all runs (sorted newest-first), each enriched
- *               with projectId, projectName, projectUrl
- *   projMap   — { [projectId]: projectName }
- *   testRuns  — allRuns filtered to type === "test_run"
- *   loading   — true while initial fetch is in progress
- *   refresh   — call to force a fresh fetch (busts cache)
+ * @param {Object}  [options]
+ * @param {boolean} [options.fetchTests=true] - Also fetch tests per project.
+ * @param {boolean} [options.fetchRuns=true]  - Also fetch runs per project.
+ * @returns {UseProjectDataResult}
  *
- * Options:
- *   fetchTests — also fetch tests per project (default true)
- *   fetchRuns  — also fetch runs per project (default true)
+ * @typedef {Object} UseProjectDataResult
+ * @property {Array}   projects  - Project list.
+ * @property {Array}   allTests  - Flat list of all tests across projects.
+ * @property {Array}   allRuns   - Flat list of all runs (sorted newest-first), enriched with `projectId`, `projectName`, `projectUrl`.
+ * @property {Array}   testRuns  - `allRuns` filtered to `type === "test_run"`.
+ * @property {Object}  projMap   - `{ [projectId]: projectName }`.
+ * @property {boolean} loading   - `true` while initial fetch is in progress.
+ * @property {Function} refresh  - Call to force a fresh fetch (busts cache).
  */
 export default function useProjectData({ fetchTests = true, fetchRuns = true } = {}) {
   const [projects, setProjects] = useState(() => cache.projects.data || []);

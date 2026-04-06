@@ -1,21 +1,30 @@
 /**
- * testDialsStorage.js
+ * @module utils/testDialsStorage
+ * @description Pure logic helpers for Test Dials — no React dependency.
  *
- * Pure logic helpers for Test Dials — no React dependency.
- * Handles localStorage persistence and active-dial counting.
+ * Handles `localStorage` persistence and active-dial counting.
+ * Prompt building is handled server-side (`backend/src/testDials.js`) so the
+ * backend controls what text reaches the AI.
  *
- * Prompt building is handled server-side (backend/src/testDials.js) so the
- * backend controls what text reaches the AI. The frontend sends the raw
- * structured config object and never constructs prompt strings.
+ * ### Exports
+ * - {@link loadSavedConfig} — Load saved config from localStorage.
+ * - {@link saveConfig} — Persist config to localStorage.
+ * - {@link countActiveDials} — Count how many dials are active (non-default).
  */
 
 import { DEFAULT_CONFIG } from "../config/testDialsConfig.js";
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Load the saved Test Dials config from localStorage.
+ * Falls back to `DEFAULT_CONFIG` if nothing is saved or parsing fails.
+ *
+ * @returns {Object} The merged config object.
+ */
 export function loadSavedConfig() {
   try {
-    const s = localStorage.getItem("sentri_testdials");
+    const s = localStorage.getItem("app_test_dials");
     if (!s) return { ...DEFAULT_CONFIG };
     const saved = JSON.parse(s);
     // Deep-merge options object so new toggle keys get their defaults
@@ -29,13 +38,22 @@ export function loadSavedConfig() {
   }
 }
 
+/**
+ * Persist a Test Dials config to localStorage.
+ * @param {Object} cfg - The config object to save.
+ */
 export function saveConfig(cfg) {
-  try { localStorage.setItem("sentri_testdials", JSON.stringify(cfg)); } catch {}
+  try { localStorage.setItem("app_test_dials", JSON.stringify(cfg)); } catch {}
 }
 
 // ─── Count active dials ────────────────────────────────────────────────────────
-// An "active" dial is one that contributes non-default signal to the AI prompt.
 
+/**
+ * Count how many dials are active (contribute non-default signal to the AI prompt).
+ *
+ * @param {Object|null} cfg - The config object.
+ * @returns {number} Number of active dials.
+ */
 export function countActiveDials(cfg) {
   if (!cfg) return 0;
   let n = 0;

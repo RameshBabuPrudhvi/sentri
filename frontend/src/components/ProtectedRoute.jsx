@@ -1,9 +1,19 @@
 /**
- * ProtectedRoute.jsx
+ * @module components/ProtectedRoute
+ * @description Route guard that requires authentication.
  *
- * Wraps routes that require an authenticated user.
- * If the user is not logged in they are redirected to /login,
- * and the current location is saved so they can be sent back after login.
+ * Wraps routes that require a signed-in user. If the user is not authenticated,
+ * they are redirected to `/login` with the current location saved in state
+ * so they can be sent back after sign-in.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.children - Protected child routes/components.
+ * @returns {React.ReactElement|null}
+ *
+ * @example
+ * <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+ *   <Route path="/dashboard" element={<Dashboard />} />
+ * </Route>
  */
 
 import { Navigate, useLocation } from "react-router-dom";

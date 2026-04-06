@@ -1,3 +1,20 @@
+/**
+ * @module hooks/useRunSSE
+ * @description SSE (Server-Sent Events) hook for real-time run monitoring.
+ *
+ * Opens a stream at `GET /api/runs/:runId/events` and dispatches events
+ * to the caller. Reconnects with exponential backoff; falls back to polling
+ * after 5 consecutive failures.
+ *
+ * ### Side-effects
+ * - Updates the page favicon to ⏳/✅/❌ to reflect run state.
+ * - Fires a browser `Notification` on the `"done"` event (if permission granted).
+ *
+ * ### Exports
+ * - {@link useRunSSE} — The hook itself.
+ * - {@link requestNotifPermission} — Request browser notification permission.
+ */
+
 import { useEffect, useRef, useCallback, useState } from "react";
 import { API_BASE } from "../utils/api.js";
 
@@ -56,23 +73,16 @@ const MAX_SSE_RETRIES  = 5;
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 /**
- * useRunSSE(runId, onEvent, initialStatus)
+ * Hook that opens an SSE stream for real-time run monitoring.
  *
- * Opens an SSE stream at GET /api/runs/:runId/events.
- * Fires onEvent({ type, ...payload }) for every event.
- *
- * Pass `initialStatus` (e.g. "completed" / "failed") to skip SSE entirely
+ * Pass `initialStatus` (e.g. `"completed"` / `"failed"`) to skip SSE entirely
  * for runs that are already finished — prevents spurious "Run complete"
  * browser notifications when reopening a historical run.
  *
- * Resilience:
- *   - Reconnects with exponential backoff (1.5s → 3s → 6s … capped at 30s)
- *   - After MAX_SSE_RETRIES consecutive failures, falls back to polling every 5s
- *   - Returns { sseDown } — true when in polling fallback mode
- *
- * Side-effects:
- *   - Updates the page favicon to ⏳/✅/❌ to reflect run state
- *   - Fires a browser Notification on the "done" event (if permission granted)
+ * @param {string|null}    runId         - The run ID to monitor (e.g. `"RUN-1"`).
+ * @param {Function}       onEvent       - Callback: `({ type, ...payload }) => void`.
+ * @param {string|undefined} initialStatus - Initial run status; `undefined` = still loading.
+ * @returns {{ sseDown: boolean }} `sseDown` is `true` when in polling fallback mode.
  */
 export function useRunSSE(runId, onEvent, initialStatus) {
   const onEventRef    = useRef(onEvent);

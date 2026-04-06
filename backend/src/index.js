@@ -1,3 +1,22 @@
+/**
+ * @module index
+ * @description Server entry point. Initialises the database, mounts all route
+ * modules on the Express app, and starts listening.
+ *
+ * ### Mounted routes
+ * | Prefix             | Module              |
+ * |--------------------|---------------------|
+ * | `/api/projects`    | `routes/projects`   |
+ * | `/api` (tests)     | `routes/tests`      |
+ * | `/api` (runs)      | `routes/runs`       |
+ * | `/api` (SSE)       | `routes/sse`        |
+ * | `/api` (dashboard) | `routes/dashboard`  |
+ * | `/api` (settings)  | `routes/settings`   |
+ * | `/api` (system)    | `routes/system`     |
+ * | `/api/auth`        | `routes/auth`       |
+ * | `/health`          | Health check        |
+ */
+
 import dotenv from "dotenv";
 import { initCountersFromExistingData } from "./utils/idGenerator.js";
 import { getDb } from "./db.js";

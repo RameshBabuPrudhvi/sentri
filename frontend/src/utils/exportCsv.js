@@ -1,11 +1,16 @@
 /**
- * exportCsv.js
+ * @module utils/exportCsv
+ * @description Shared CSV export utilities.
  *
- * Shared CSV export utilities. Used by Tests.jsx (bulk export) and
- * TestDetail.jsx (single-test export with run history).
+ * Used by Tests.jsx (bulk export) and TestDetail.jsx (single-test export
+ * with run history). Centralises CSV escaping, Blob creation, and download
+ * trigger so each page only needs to define its column schema + row mapper.
  *
- * Centralises the CSV escaping, Blob creation, and download trigger
- * so each page only needs to define its column schema + row mapper.
+ * ### Exports
+ * - {@link csvEscape} — Escape a value for CSV.
+ * - {@link buildCsv} — Build a CSV string from headers + rows.
+ * - {@link downloadCsv} — Trigger a CSV file download.
+ * - {@link exportCsv} — Build + download in one call.
  */
 
 /**
