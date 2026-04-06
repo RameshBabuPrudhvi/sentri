@@ -56,6 +56,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(null);
@@ -91,7 +92,7 @@ export default function Login() {
       }
       const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`);
       const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "OAuth login failed");
+      if (!res.ok) throw new Error(data.error || "OAuth sign-in failed");
       await login(data.token, data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
     } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
@@ -114,9 +115,13 @@ export default function Login() {
 
   async function handleSubmit(e) {
     e.preventDefault(); setError(""); setSuccess("");
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      setError("Please enter a valid email address."); return;
+    }
     if (mode === "register") {
       if (!name.trim()) { setError("Full name is required."); return; }
       if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+      if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     }
     setLoading(true);
     try {
@@ -125,7 +130,7 @@ export default function Login() {
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
-      if (mode === "register") { setSuccess("Account created! You can now sign in."); setMode("login"); setPassword(""); }
+      if (mode === "register") { setSuccess("Account created! You can now sign in."); setMode("login"); setPassword(""); setConfirmPassword(""); }
       else await login(data.token, data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -334,8 +339,17 @@ export default function Login() {
                   </div>
                 )}
               </div>
+              {mode==="register" && (
+                <div className="lp-field fe">
+                  <div className="lp-lrow"><label className="lp-lbl" htmlFor="reg-confirm-pw">Confirm password</label></div>
+                  <input id="reg-confirm-pw" type={showPassword?"text":"password"} className="lp-in" placeholder="Re-enter your password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} autoComplete="new-password" required disabled={loading}/>
+                  {confirmPassword && password !== confirmPassword && (
+                    <div style={{fontSize:"0.75rem",color:"#f87171",marginTop:6}}>Passwords do not match.</div>
+                  )}
+                </div>
+              )}
 
-              <button type="submit" className="lp-sub" disabled={loading||!!oauthLoading}>
+              <button type="submit" className="lp-sub" disabled={loading||!!oauthLoading||(mode==="register"&&password!==confirmPassword)}>
                 {loading && <Spinner/>}
                 {loading?(mode==="login"?"Signing in…":"Creating account…"):(mode==="login"?"Sign in to Sentri":"Create account")}
               </button>
@@ -343,8 +357,8 @@ export default function Login() {
 
             <p className="lp-sw">
               {mode==="login"
-                ? (<>Don't have an account?{" "}<button className="lp-swb" onClick={()=>{setMode("register");setError("");setSuccess("");}}>Sign up free</button></>)
-                : (<>Already have an account?{" "}<button className="lp-swb" onClick={()=>{setMode("login");setError("");setSuccess("");}}>Sign in</button></>)
+                ? (<>Don't have an account?{" "}<button className="lp-swb" onClick={()=>{setMode("register");setError("");setSuccess("");setPassword("");setConfirmPassword("");}}>Create account</button></>)
+                : (<>Already have an account?{" "}<button className="lp-swb" onClick={()=>{setMode("login");setError("");setSuccess("");setPassword("");setConfirmPassword("");}}>Sign in</button></>)
               }
             </p>
             <p className="lp-tos">By continuing you agree to our <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>

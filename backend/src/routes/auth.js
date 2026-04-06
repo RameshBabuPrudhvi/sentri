@@ -200,7 +200,7 @@ router.post("/login", async (req, res) => {
   const rate = checkRateLimit(ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
-    return res.status(429).json({ error: `Too many login attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+    return res.status(429).json({ error: `Too many sign-in attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
   }
 
   try {
@@ -231,7 +231,7 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     console.error("[auth/login]", err);
-    return res.status(500).json({ error: "Login failed. Please try again." });
+    return res.status(500).json({ error: "Sign-in failed. Please try again." });
   }
 });
 
@@ -243,7 +243,7 @@ router.post("/login", async (req, res) => {
 router.post("/logout", requireAuth, (req, res) => {
   const { jti, exp } = req.authUser;
   if (jti) revokedTokens.set(jti, exp);
-  return res.json({ message: "Logged out successfully." });
+  return res.json({ message: "Signed out successfully." });
 });
 
 /**
