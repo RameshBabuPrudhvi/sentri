@@ -1,0 +1,19 @@
+.git
+.github
+*.md
+LICENSE
+
+# Dependencies (rebuilt inside the container)
+backend/node_modules
+frontend/node_modules
+
+# Build artifacts
+frontend/dist
+
+# Environment files (secrets should not be baked into images)
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Data and logs
+backend/data
