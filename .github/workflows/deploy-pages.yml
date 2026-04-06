@@ -1,3 +1,0 @@
-# Moved to cd.yml — all deploy logic (GitHub Pages + Docker push) is now
-# in a single workflow. This file can be deleted once branch protection
-# rules no longer reference it.
