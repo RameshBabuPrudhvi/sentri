@@ -25,52 +25,88 @@ import React, { useId } from "react";
 
 function IconMark({ size = 40 }) {
   const uid = useId();
-  const shieldGradId = `sentri-shield-${uid}`;
+  const shieldGradId = `sentri-eyes-${uid}`;
   const rayGradId = `sentri-ray-${uid}`;
   const glowId = `sentri-glow-${uid}`;
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 40 40"
+      viewBox="0 0 200 200"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-label="Sentri logo mark"
       role="img"
     >
       <defs>
-        <linearGradient id={shieldGradId} x1="5" y1="3" x2="35" y2="37" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#6366f1" />
-          <stop offset="100%" stopColor="#8b5cf6" />
-        </linearGradient>
-        <linearGradient id={rayGradId} x1="12" y1="15" x2="28" y2="26" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#e0e7ff" />
-        </linearGradient>
-        <filter id={glowId} x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="1" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
 
-      {/* Shield body — brand gradient, always visible */}
-      <path
-        d="M20 3L5 9v10c0 8.5 6.5 16 15 18 8.5-2 15-9.5 15-18V9L20 3z"
-        fill={`url(#${shieldGradId})`}
-      />
+          <linearGradient id="snakeGradient" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#4285F4"/>
+            <stop offset="25%" stop-color="#EA4335"/>
+            <stop offset="50%" stop-color="#FBBC05"/>
+            <stop offset="75%" stop-color="#34A853"/>
+            <stop offset="100%" stop-color="#4285F4"/>
 
-      {/* White checkmark */}
-      <path
-        d="M12 20.5l5.5 5.5 10.5-11"
-        stroke={`url(#${rayGradId})`}
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        filter={`url(#${glowId})`}
-      />
+            <animateTransform attributeName="gradientTransform"
+              type="rotate" from="0 100 100" to="360 100 100" dur="2s"
+              repeatCount="indefinite"/>
+          </linearGradient>
+        </defs>
+
+        <rect x="40" y="70" width="120" height="70" rx="35" fill="#020817"/>
+
+        <rect x="40" y="70" width="120" height="70" rx="35"
+              fill="none" stroke="url(#snakeGradient)" stroke-width="6"
+              stroke-linecap="round"/>
+        <g>
+          <ellipse cx="80" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
+
+          <g>
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              values="-4 0; 0 0; 4 0; 0 0; -4 0"
+              keyTimes="0;0.25;0.5;0.75;1"
+              dur="2.4s"
+              repeatCount="indefinite"/>
+
+            <ellipse cx="80" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+            <circle cx="76" cy="99" r="3" fill="#fff"/>
+          </g>
+
+          <rect x="58" y="90" width="44" height="30" fill="#020817">
+            <animate attributeName="height"
+                     values="0;0;30;0;0"
+                     keyTimes="0;0.45;0.5;0.55;1"
+                     dur="2.4s"
+                     repeatCount="indefinite"/>
+          </rect>
+        </g>
+        <g>
+          <ellipse cx="120" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
+
+          <g>
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              values="-4 0; 0 0; 4 0; 0 0; -4 0"
+              keyTimes="0;0.25;0.5;0.75;1"
+              dur="2.4s"
+              repeatCount="indefinite"/>
+
+            <ellipse cx="120" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+            <circle cx="116" cy="99" r="3" fill="#fff"/>
+          </g>
+
+          <rect x="98" y="90" width="44" height="30" fill="#020817">
+            <animate attributeName="height"
+                     values="0;0;30;0;0"
+                     keyTimes="0;0.45;0.5;0.55;1"
+                     dur="2.4s"
+                     repeatCount="indefinite"/>
+          </rect>
+        </g>
+
     </svg>
   );
 }

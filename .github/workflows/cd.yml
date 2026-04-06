@@ -52,6 +52,8 @@ jobs:
         env:
           GITHUB_PAGES: "true"
           VITE_API_URL: ${{ vars.VITE_API_URL || '' }}
+          VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID || '' }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID || '' }}
 
       # ── Generate JSDoc (backend API docs) ───────────────────────────────────
       - name: Install backend dependencies
