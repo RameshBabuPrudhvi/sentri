@@ -9,6 +9,8 @@
  * | POST   | `/api/auth/login`             | Email/password sign-in               |
  * | POST   | `/api/auth/logout`            | Token revocation (server-side)       |
  * | GET    | `/api/auth/me`                | Return current user from token       |
+ * | POST   | `/api/auth/forgot-password`   | Request a password reset token       |
+ * | POST   | `/api/auth/reset-password`    | Reset password using a valid token   |
  * | GET    | `/api/auth/github/callback`   | GitHub OAuth token exchange          |
  * | GET    | `/api/auth/google/callback`   | Google OAuth token exchange          |
  *
@@ -133,6 +135,10 @@ function getJwtSecret() {
 // Token revocation list (logout): { jti → expiry_timestamp }
 const revokedTokens = new Map();
 
+// Password reset tokens: { token → { userId, expiresAt } }
+const resetTokens = new Map();
+const RESET_TOKEN_TTL = 30 * 60 * 1000; // 30 minutes
+
 // Rate limiter: { ip → { count, resetAt } }
 const loginAttempts = new Map();
 const RATE_LIMIT_MAX   = 10;
@@ -153,12 +159,16 @@ function checkRateLimit(ip) {
   return { allowed: true };
 }
 
-// Purge expired revoked tokens periodically.
+// Purge expired revoked tokens and reset tokens periodically.
 // .unref() so this timer doesn't keep the process alive (e.g. during tests).
 const _purgeInterval = setInterval(() => {
   const now = Date.now() / 1000;
   for (const [jti, exp] of revokedTokens) {
     if (exp < now) revokedTokens.delete(jti);
+  }
+  const nowMs = Date.now();
+  for (const [tok, entry] of resetTokens) {
+    if (entry.expiresAt < nowMs) resetTokens.delete(tok);
   }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
@@ -364,6 +374,118 @@ router.get("/me", requireAuth, (req, res) => {
   const user = (db.users || {})[req.authUser.sub];
   if (!user) return res.status(404).json({ error: "User not found." });
   return res.json({ id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null, createdAt: user.createdAt });
+});
+
+// ─── Password Reset ──────────────────────────────────────────────────────────
+
+/**
+ * Request a password reset. Generates a time-limited token.
+ * In production this would send an email; in dev the token is returned
+ * in the response and logged to console for convenience.
+ *
+ * Always returns 200 regardless of whether the email exists to prevent
+ * user enumeration.
+ *
+ * @route POST /api/auth/forgot-password
+ * @param {Object} req.body
+ * @param {string} req.body.email - Email address of the account.
+ * @returns {200} `{ message, ...(dev: resetToken, resetUrl) }`.
+ */
+router.post("/forgot-password", async (req, res) => {
+  const email = sanitiseString(req.body.email, 254).toLowerCase();
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "A valid email address is required." });
+  }
+
+  const db   = getDb();
+  const user = Object.values(db.users || {}).find(u => u.email === email);
+
+  // Always return success to prevent user enumeration
+  const genericMsg = "If an account with that email exists, a password reset link has been generated.";
+
+  if (!user || !user.passwordHash) {
+    // No account or OAuth-only account — silently succeed
+    return res.json({ message: genericMsg });
+  }
+
+  // Generate a cryptographically random reset token
+  const resetToken = crypto.randomBytes(32).toString("base64url");
+  resetTokens.set(resetToken, {
+    userId: user.id,
+    expiresAt: Date.now() + RESET_TOKEN_TTL,
+  });
+
+  // In production: send email with resetUrl. For now, log + return in dev.
+  const appUrl = process.env.APP_URL || "http://localhost:3000";
+  const baseUrl = (process.env.APP_BASE_PATH || "/").replace(/\/$/, "");
+  const resetUrl = `${appUrl}${baseUrl}/forgot-password?token=${resetToken}`;
+
+  console.log(`[auth/forgot-password] Reset token for ${email}: ${resetToken}`);
+  console.log(`[auth/forgot-password] Reset URL: ${resetUrl}`);
+
+  const response = { message: genericMsg };
+  // In non-production, include the token in the response for testing
+  if (process.env.NODE_ENV !== "production") {
+    response.resetToken = resetToken;
+    response.resetUrl = resetUrl;
+  }
+
+  return res.json(response);
+});
+
+/**
+ * Reset password using a valid reset token.
+ *
+ * @route POST /api/auth/reset-password
+ * @param {Object} req.body
+ * @param {string} req.body.token       - The reset token from the email/URL.
+ * @param {string} req.body.newPassword - New password (8–128 chars).
+ * @returns {200} `{ message }` on success.
+ * @returns {400} Invalid token, expired, or validation error.
+ */
+router.post("/reset-password", async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  if (!token || typeof token !== "string") {
+    return res.status(400).json({ error: "Reset token is required." });
+  }
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({ error: "New password must be at least 8 characters." });
+  }
+  if (newPassword.length > 128) {
+    return res.status(400).json({ error: "Password is too long." });
+  }
+
+  const entry = resetTokens.get(token);
+  if (!entry || entry.expiresAt < Date.now()) {
+    // Clean up expired token
+    if (entry) resetTokens.delete(token);
+    return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
+  }
+
+  const db   = getDb();
+  const user = (db.users || {})[entry.userId];
+  if (!user) {
+    resetTokens.delete(token);
+    return res.status(400).json({ error: "Account not found." });
+  }
+
+  // Update password
+  user.passwordHash = await hashPassword(newPassword);
+  user.updatedAt = new Date().toISOString();
+  saveDb();
+
+  // Invalidate the used token (one-time use)
+  resetTokens.delete(token);
+
+  // Also invalidate all other reset tokens for this user
+  for (const [tok, e] of resetTokens) {
+    if (e.userId === user.id) resetTokens.delete(tok);
+  }
+
+  console.log(`[auth/reset-password] Password reset for ${user.email}`);
+
+  return res.json({ message: "Password has been reset successfully. You can now sign in." });
 });
 
 // ─── GitHub OAuth ─────────────────────────────────────────────────────────────

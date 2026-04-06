@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/api.js";
@@ -332,7 +332,7 @@ export default function Login() {
               <div className="lp-field">
                 <div className="lp-lrow">
                   <label className="lp-lbl" htmlFor="login-pw">Password</label>
-                  {/* TODO: implement password reset flow */}
+                  {mode==="login" && <Link to="/forgot-password" className="lp-forgot">Forgot password?</Link>}
                 </div>
                 <div className="lp-iw">
                   <input id="login-pw" type={showPassword?"text":"password"} className={`lp-in pi`} placeholder={mode==="register"?"Min. 8 characters":"••••••••"} value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode==="login"?"current-password":"new-password"} required disabled={loading} minLength={mode==="register"?8:undefined}/>

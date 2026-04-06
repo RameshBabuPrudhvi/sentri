@@ -15,6 +15,7 @@ import Projects from "./pages/Applications.jsx";
 import Reports from "./pages/Reports.jsx";
 import Runs from "./pages/Runs.jsx";
 import Context from "./pages/Context.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -58,6 +59,7 @@ export default function App() {
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
 
             {/* Protected — wrapped in Layout */}
             <Route element={
