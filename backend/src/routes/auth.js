@@ -167,9 +167,9 @@ _purgeInterval.unref();
  * On success, attaches the decoded payload to `req.authUser`.
  * On failure, responds with `401 Unauthorized`.
  *
- * @param {import('express').Request}  req  - Express request (reads `Authorization` header).
- * @param {import('express').Response} res  - Express response.
- * @param {import('express').NextFunction} next - Express next middleware.
+ * @param {Object}   req  - Express request (reads `Authorization` header).
+ * @param {Object}   res  - Express response.
+ * @param {Function} next - Express next middleware.
  * @returns {void}
  *
  * @example

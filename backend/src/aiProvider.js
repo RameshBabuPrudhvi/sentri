@@ -168,7 +168,7 @@ function maskKey(key) {
 /**
  * Check Ollama server connectivity and verify the configured model is available.
  *
- * @returns {Promise<{ok: boolean, model?: string, baseUrl?: string, availableModels?: string[], error?: string}>}
+ * @returns {Promise<Object>} Resolves to `{ok: boolean, model?: string, baseUrl?: string, availableModels?: string[], error?: string}`.
  */
 export async function checkOllamaConnection() {
   const base = getOllamaBaseUrl();
@@ -493,7 +493,7 @@ export function parseJSON(text) {
  * the entire response as one synthetic "token".
  *
  * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
- * @param {(token: string) => void} onToken - Callback invoked for each token.
+ * @param {function(string): void} onToken - Callback invoked for each token.
  * @param {Object}      [options]
  * @param {number}      [options.maxTokens] - Max output tokens.
  * @param {AbortSignal} [options.signal]    - Abort signal for cancellation.

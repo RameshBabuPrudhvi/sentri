@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** @type {import('express').Express} The Express application instance. */
+/** @type {Object} The Express application instance. */
 export const app = express();
 
 // ─── Global middleware ────────────────────────────────────────────────────────
