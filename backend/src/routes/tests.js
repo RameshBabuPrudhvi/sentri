@@ -17,8 +17,7 @@
  * | `PATCH`  | `/api/projects/:id/tests/:testId/reject`      | Reject                              |
  * | `PATCH`  | `/api/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
  * | `POST`   | `/api/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
- * | `GET`    | `/api/projects/:id/tests/export/junit`        | JUnit XML export                    |
- * | `GET`    | `/api/projects/:id/tests/export/xray`         | Xray JSON export                    |
+ * | `GET`    | `/api/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
  * | `GET`    | `/api/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
  * | `GET`    | `/api/projects/:id/tests/traceability`        | Traceability matrix                 |
  */
@@ -33,7 +32,7 @@ import { hasProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateSingleTest } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
-import { buildJUnitXml, buildXrayJson, buildTestRailCsv } from "../utils/exportFormats.js";
+import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 
 const router = Router();
 
@@ -479,25 +478,8 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
 
 // ─── Export endpoints — enterprise test management integration ────────────────
 
-// GET /api/projects/:id/tests/export/junit — JUnit XML for CI pipelines
-router.get("/projects/:id/tests/export/junit", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
-  if (!project) return res.status(404).json({ error: "project not found" });
-
-  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
-  // Optional filter: ?status=approved to export only approved tests
-  const status = req.query.status;
-  const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
-
-  const xml = buildJUnitXml(filtered, { suiteName: project.name, projectUrl: project.url });
-  res.setHeader("Content-Type", "application/xml");
-  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-tests.xml"`);
-  res.send(xml);
-});
-
-// GET /api/projects/:id/tests/export/xray — Xray JSON for Jira import
-router.get("/projects/:id/tests/export/xray", (req, res) => {
+// GET /api/projects/:id/tests/export/zephyr — Zephyr Scale CSV for test management import
+router.get("/projects/:id/tests/export/zephyr", (req, res) => {
   const db = getDb();
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "project not found" });
@@ -506,12 +488,10 @@ router.get("/projects/:id/tests/export/xray", (req, res) => {
   const status = req.query.status;
   const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
 
-  // Extract project key from linked issues or use project name as fallback
-  const projectKey = filtered.find(t => t.linkedIssueKey)?.linkedIssueKey?.split("-")[0] || "PROJ";
-  const json = buildXrayJson(filtered, { projectKey });
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-xray.json"`);
-  res.send(json);
+  const csv = buildZephyrCsv(filtered);
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-zephyr.csv"`);
+  res.send(csv);
 });
 
 // GET /api/projects/:id/tests/export/testrail — TestRail CSV for bulk import

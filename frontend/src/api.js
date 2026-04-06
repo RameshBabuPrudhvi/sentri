@@ -169,9 +169,7 @@ export const api = {
 
   // ── Export (returns download URLs, not JSON) ────────────────────────────────
   /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportJUnitUrl:    (projectId, status) => `${BASE}/projects/${projectId}/tests/export/junit${status ? `?status=${status}` : ""}`,
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportXrayUrl:     (projectId, status) => `${BASE}/projects/${projectId}/tests/export/xray${status ? `?status=${status}` : ""}`,
+  exportZephyrUrl:   (projectId, status) => `${BASE}/projects/${projectId}/tests/export/zephyr${status ? `?status=${status}` : ""}`,
   /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
   exportTestRailUrl: (projectId, status) => `${BASE}/projects/${projectId}/tests/export/testrail${status ? `?status=${status}` : ""}`,
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */

@@ -349,9 +349,8 @@ export default function ProjectDetail() {
                           Export all {tests.length} tests
                         </div>
                         {[
-                          { label: "JUnit XML",     desc: "CI pipelines (Jenkins, GitHub Actions)", url: api.exportJUnitUrl(id) },
-                          { label: "Xray JSON",     desc: "Jira Xray test management",              url: api.exportXrayUrl(id) },
-                          { label: "TestRail CSV",   desc: "TestRail bulk import",                   url: api.exportTestRailUrl(id) },
+                          { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import",    url: api.exportZephyrUrl(id) },
+                          { label: "TestRail CSV",     desc: "TestRail bulk import",                   url: api.exportTestRailUrl(id) },
                         ].map(fmt => (
                           <a
                             key={fmt.label}
@@ -376,9 +375,8 @@ export default function ProjectDetail() {
                               Approved only ({approvedTests.length})
                             </div>
                             {[
-                              { label: "JUnit XML (approved)",   url: api.exportJUnitUrl(id, "approved") },
-                              { label: "Xray JSON (approved)",   url: api.exportXrayUrl(id, "approved") },
-                              { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(id, "approved") },
+                              { label: "Zephyr Scale CSV (approved)", url: api.exportZephyrUrl(id, "approved") },
+                              { label: "TestRail CSV (approved)",     url: api.exportTestRailUrl(id, "approved") },
                             ].map(fmt => (
                               <a
                                 key={fmt.label}
