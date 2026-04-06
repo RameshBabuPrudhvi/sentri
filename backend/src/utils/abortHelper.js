@@ -1,11 +1,14 @@
 /**
- * abortHelper.js — Shared abort-signal utilities
+ * @module utils/abortHelper
+ * @description Shared abort-signal utilities for the pipeline and runner.
  *
- * Centralises the abort-check pattern used across pipeline functions so
- * every call-site doesn't repeat the DOMException construction.
+ * Centralises the abort-check pattern so every call-site doesn't repeat
+ * the `DOMException` construction.
  *
- * Moved from src/abortHelper.js → src/utils/abortHelper.js to live
- * alongside other shared utilities (idGenerator.js, runLogger.js).
+ * ### Exports
+ * - {@link throwIfAborted} — Throw if signal is already aborted.
+ * - {@link isRunAborted} — Check if a run has been aborted.
+ * - {@link finalizeRunIfNotAborted} — Mark run as completed (unless aborted).
  */
 
 /**

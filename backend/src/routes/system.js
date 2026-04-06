@@ -1,7 +1,16 @@
 /**
- * system.js — Health, system info, activities, data management, test-connection
+ * @module routes/system
+ * @description System info, activities, data management, and URL reachability. Mounted at `/api`.
  *
- * Mounted at /api in index.js (except /health which is mounted at root)
+ * ### Endpoints
+ * | Method   | Path                     | Description                                |
+ * |----------|--------------------------|--------------------------------------------|
+ * | `GET`    | `/api/activities`        | Activity log (filterable by type, project)  |
+ * | `POST`   | `/api/test-connection`   | Verify a URL is reachable (SSRF-protected)  |
+ * | `GET`    | `/api/system`            | Uptime, Node/Playwright versions, DB counts |
+ * | `DELETE` | `/api/data/runs`         | Clear all run history                       |
+ * | `DELETE` | `/api/data/activities`   | Clear activity log                          |
+ * | `DELETE` | `/api/data/healing`      | Clear self-healing history                  |
  */
 
 import { Router } from "express";

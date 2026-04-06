@@ -1,7 +1,26 @@
 /**
- * tests.js — Test CRUD, AI generation, single-test run, review, and bulk routes
+ * @module routes/tests
+ * @description Test CRUD, AI generation, single-test run, review, bulk actions, and export. Mounted at `/api`.
  *
- * Mounted at /api in index.js
+ * ### Endpoints
+ * | Method   | Path                                          | Description                         |
+ * |----------|-----------------------------------------------|-------------------------------------|
+ * | `GET`    | `/api/projects/:id/tests`                     | List tests for a project            |
+ * | `GET`    | `/api/tests`                                  | List all tests                      |
+ * | `GET`    | `/api/tests/:testId`                          | Get a single test                   |
+ * | `PATCH`  | `/api/tests/:testId`                          | Edit test (steps, name, code, etc.) |
+ * | `POST`   | `/api/projects/:id/tests`                     | Create a manual test (Draft)        |
+ * | `DELETE` | `/api/projects/:id/tests/:testId`             | Delete a test                       |
+ * | `POST`   | `/api/projects/:id/tests/generate`            | AI-generate test from description   |
+ * | `POST`   | `/api/tests/:testId/run`                      | Run a single test                   |
+ * | `PATCH`  | `/api/projects/:id/tests/:testId/approve`     | Approve (Draft → Approved)          |
+ * | `PATCH`  | `/api/projects/:id/tests/:testId/reject`      | Reject                              |
+ * | `PATCH`  | `/api/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
+ * | `POST`   | `/api/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
+ * | `GET`    | `/api/projects/:id/tests/export/junit`        | JUnit XML export                    |
+ * | `GET`    | `/api/projects/:id/tests/export/xray`         | Xray JSON export                    |
+ * | `GET`    | `/api/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
+ * | `GET`    | `/api/projects/:id/tests/traceability`        | Traceability matrix                 |
  */
 
 import { Router } from "express";

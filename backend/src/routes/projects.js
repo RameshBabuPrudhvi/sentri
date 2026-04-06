@@ -1,7 +1,14 @@
 /**
- * projects.js — Project CRUD routes
+ * @module routes/projects
+ * @description Project CRUD routes. Mounted at `/api/projects`.
  *
- * Mounted at /api/projects in index.js
+ * ### Endpoints
+ * | Method   | Path                | Description                                     |
+ * |----------|---------------------|-------------------------------------------------|
+ * | `POST`   | `/api/projects`     | Create a project                                |
+ * | `GET`    | `/api/projects`     | List all projects                               |
+ * | `GET`    | `/api/projects/:id` | Get a single project                            |
+ * | `DELETE` | `/api/projects/:id` | Delete project + all tests, runs, and history   |
  */
 
 import { Router } from "express";

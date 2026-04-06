@@ -1,7 +1,15 @@
 /**
- * runs.js — Run routes: crawl, test execution, abort, listing
+ * @module routes/runs
+ * @description Run routes — crawl, test execution, abort, and listing. Mounted at `/api`.
  *
- * Mounted at /api in index.js
+ * ### Endpoints
+ * | Method | Path                         | Description                        |
+ * |--------|------------------------------|------------------------------------|
+ * | `POST` | `/api/projects/:id/crawl`    | Start crawl + AI test generation   |
+ * | `POST` | `/api/projects/:id/run`      | Execute all approved tests         |
+ * | `GET`  | `/api/projects/:id/runs`     | List runs for a project            |
+ * | `GET`  | `/api/runs/:runId`           | Get run detail                     |
+ * | `POST` | `/api/runs/:runId/abort`     | Abort a running crawl or test run  |
  */
 
 import { Router } from "express";

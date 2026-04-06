@@ -1,8 +1,14 @@
 /**
- * elementFilter.js — Layer 1: Filter page elements to only keep meaningful ones
+ * @module pipeline/elementFilter
+ * @description Pipeline stage 2 — filter page elements to keep only meaningful ones.
  *
- * Removes: footer links, social icons, ads, hidden elements, duplicates
- * Keeps:   forms, meaningful buttons, nav, inputs, interactive components
+ * Removes footer links, social icons, ads, hidden elements, and duplicates.
+ * Keeps forms, meaningful buttons, navigation, inputs, and interactive components.
+ *
+ * ### Exports
+ * - {@link filterElements} — Score, deduplicate, and cap elements.
+ * - {@link hasHighValueElements} — Check if filtered set is worth testing.
+ * - {@link filterStats} — Summary string for logging.
  */
 
 // ── Keywords that signal meaningful intent ────────────────────────────────────

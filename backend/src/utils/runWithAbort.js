@@ -1,16 +1,13 @@
 /**
- * runWithAbort.js — Abortable run helper + abort controller registry
+ * @module utils/runWithAbort
+ * @description Abortable run helper and abort controller registry.
  *
- * Encapsulates the AbortController lifecycle, success/failure logging, and error
- * handling that every async pipeline route (crawl, run, generate) repeats.
+ * Encapsulates the `AbortController` lifecycle, success/failure logging, and
+ * error handling that every async pipeline route (crawl, run, generate) repeats.
  *
- *   runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
- *
- * - Creates & registers an AbortController so POST /api/runs/:id/abort works.
- * - Calls asyncFn(signal) and attaches .then/.catch handlers.
- * - On success: cleans up controller, calls onSuccess(result) unless aborted.
- * - On failure: cleans up controller, marks run as failed, logs activity, emits SSE.
- * - AbortErrors are silently swallowed (already handled by the abort endpoint).
+ * ### Exports
+ * - {@link runWithAbort} — Execute an async function with abort support.
+ * - {@link runAbortControllers} — `Map<runId, AbortController>` registry.
  */
 
 import { emitRunEvent } from "../routes/sse.js";

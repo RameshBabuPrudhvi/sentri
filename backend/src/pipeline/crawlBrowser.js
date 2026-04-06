@@ -1,11 +1,10 @@
 /**
- * crawlBrowser.js — Playwright browser crawl loop
+ * @module pipeline/crawlBrowser
+ * @description Playwright browser crawl loop. Launches Chromium, optionally
+ * logs in, crawls same-origin pages via SmartCrawlQueue, and captures DOM snapshots.
  *
- * Launches a browser, optionally logs in, crawls same-origin pages using
- * SmartCrawlQueue, captures DOM snapshots, and returns the results.
- *
- * Exports:
- *   crawlPages(project, run, { signal }) → { snapshots, snapshotsByUrl }
+ * ### Exports
+ * - {@link crawlPages} — `(project, run, { signal }) → { snapshots, snapshotsByUrl }`
  */
 
 import { chromium } from "playwright";

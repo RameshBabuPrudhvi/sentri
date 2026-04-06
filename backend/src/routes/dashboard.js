@@ -1,7 +1,11 @@
 /**
- * dashboard.js — Dashboard analytics endpoint
+ * @module routes/dashboard
+ * @description Dashboard analytics endpoint. Mounted at `/api`.
  *
- * Mounted at /api in index.js
+ * ### Endpoints
+ * | Method | Path              | Description                                                |
+ * |--------|-------------------|------------------------------------------------------------|
+ * | `GET`  | `/api/dashboard`  | Pass rate, defects, flaky tests, MTTR, growth, and more    |
  */
 
 import { Router } from "express";

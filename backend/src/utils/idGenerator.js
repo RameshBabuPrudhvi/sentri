@@ -1,16 +1,18 @@
 /**
- * idGenerator.js — Short, human-readable ID generators
+ * @module utils/idGenerator
+ * @description Short, human-readable ID generators.
  *
  * Produces IDs similar to major test management tools:
- *   Tests:    TC-1, TC-2, TC-3  (like TestRail's C1234 or Zephyr's ZEP-TC-001)
- *   Runs:     RUN-1, RUN-2      (like TestRail's R123)
- *   Projects: PRJ-1, PRJ-2
+ * - Tests: `TC-1`, `TC-2` (like TestRail's C1234)
+ * - Runs: `RUN-1`, `RUN-2` (like TestRail's R123)
+ * - Projects: `PRJ-1`, `PRJ-2`
+ * - Activities: `ACT-1`, `ACT-2`
  *
- * IDs are globally sequential (not per-project) so they're unique across the
- * entire system without needing a project prefix.
+ * IDs are globally sequential and persisted in `db._counters`.
  *
- * Counters are persisted in the DB object under `_counters` so they survive
- * restarts (the DB is periodically flushed to disk by db.js).
+ * ### Exports
+ * - {@link generateTestId}, {@link generateRunId}, {@link generateProjectId}, {@link generateActivityId}
+ * - {@link initCountersFromExistingData} — Seed counters from restored DB at startup.
  */
 
 /**

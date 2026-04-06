@@ -1,14 +1,20 @@
 /**
- * logFormatter.js — Centralised log formatting with .env-driven configuration
+ * @module utils/logFormatter
+ * @description Centralised log formatting with `.env`-driven configuration.
  *
- * Environment variables:
- *   LOG_LEVEL          — minimum severity to print: "debug" | "info" | "warn" | "error" (default: "info")
- *   LOG_DATE_FORMAT    — "iso" (default) | "utc" | "local" | "epoch"
- *   LOG_TIMEZONE       — IANA timezone for "local" format, e.g. "America/New_York" (default: system)
- *   LOG_JSON           — "true" to emit structured JSON lines on stdout (default: "false")
+ * ### Environment variables
+ * | Variable          | Default  | Description                                    |
+ * |-------------------|----------|------------------------------------------------|
+ * | `LOG_LEVEL`       | `"info"` | Minimum severity: `debug` / `info` / `warn` / `error` |
+ * | `LOG_DATE_FORMAT` | `"iso"`  | Timestamp format: `iso` / `utc` / `local` / `epoch`   |
+ * | `LOG_TIMEZONE`    | system   | IANA timezone for `local` format               |
+ * | `LOG_JSON`        | `"false"`| `"true"` to emit structured JSON lines         |
  *
- * Usage:
- *   import { formatTimestamp, formatLogLine, LOG_LEVEL, shouldLog } from "./logFormatter.js";
+ * ### Exports
+ * - {@link formatTimestamp} — Produce a formatted timestamp string.
+ * - {@link formatLogLine} — Format a complete log line for stdout.
+ * - {@link shouldLog} — Check if a level should be printed.
+ * - {@link LOG_LEVEL} — Configured minimum log level (numeric).
  */
 
 // ─── Log levels ───────────────────────────────────────────────────────────────

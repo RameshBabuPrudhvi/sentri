@@ -1,25 +1,22 @@
 /**
- * runLogger.js — Shared logging & SSE helpers for pipeline modules
+ * @module utils/runLogger
+ * @description Shared logging and SSE helpers for pipeline modules.
  *
- * Extracts the duplicated lazy-import emitRunEvent wrapper and log()
- * function that were copy-pasted across crawler.js and testRunner.js.
+ * Appends timestamped entries to `run.logs`, prints to stdout, and broadcasts
+ * via SSE for real-time frontend updates.
  *
- * Timestamp format, log level, and output mode (human / JSON) are
- * controlled via .env — see logFormatter.js for details:
- *   LOG_LEVEL, LOG_DATE_FORMAT, LOG_TIMEZONE, LOG_JSON
+ * ### Level-specific helpers
+ * | Function        | Level   | Icon | UI colour |
+ * |-----------------|---------|------|-----------|
+ * | `log(run, msg)` | `info`  | —    | gray      |
+ * | `logWarn`        | `warn`  | ⚠️   | amber     |
+ * | `logError`       | `error` | ❌   | red       |
+ * | `logSuccess`     | `info`  | ✅   | green     |
  *
- * ── Level-specific helpers ────────────────────────────────────────────────
- *
- * Instead of passing raw emoji + level strings at every call-site, use the
- * dedicated helpers so icon conventions are centralised here:
- *
- *   log(run, msg)           — INFO  (no prefix, gray in UI)
- *   logWarn(run, msg)       — WARN  (⚠️  prefix, amber in UI)
- *   logError(run, msg)      — ERROR (❌ prefix, red in UI)
- *   logSuccess(run, msg)    — INFO  (✅ prefix, green in UI)
- *
- * If an icon change is needed in future (e.g. swap ❌ → 🔴), update the
- * single constant below — every caller benefits automatically.
+ * ### Exports
+ * - {@link log}, {@link logWarn}, {@link logError}, {@link logSuccess}
+ * - {@link emitRunEvent} — Lazy-loaded SSE emitter (avoids circular imports).
+ * - {@link ICON} — Centralised icon prefix constants.
  */
 
 import { formatTimestamp, formatLogLine, shouldLog } from "./logFormatter.js";

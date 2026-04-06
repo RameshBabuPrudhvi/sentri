@@ -1,12 +1,17 @@
+/**
+ * @module hooks/useLogBuffer
+ * @description Accumulates log lines from a run object so fast-running pipeline
+ * steps that complete between SSE polls are never silently dropped.
+ */
+
 import { useRef, useState, useEffect } from "react";
 
 /**
- * useLogBuffer(run)
+ * Hook that buffers run log lines and returns the current accumulated array.
+ * Resets automatically when the run ID changes (e.g. navigating between runs).
  *
- * Accumulates log lines from a run object so fast-running pipeline steps
- * that complete between SSE polls are never silently dropped.
- *
- * Returns the current log buffer array.
+ * @param {Object|null} run - The run object (must have `.id` and `.logs[]`).
+ * @returns {string[]} The current log buffer.
  */
 export default function useLogBuffer(run) {
   const bufferRef = useRef([]);

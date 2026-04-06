@@ -1,10 +1,15 @@
 /**
- * sse.js — SSE (Server-Sent Events) infrastructure for real-time run updates.
+ * @module routes/sse
+ * @description SSE (Server-Sent Events) infrastructure for real-time run updates.
  *
- * Exports:
- *   emitRunEvent(runId, type, payload)  — broadcast to all listeners on a run
- *   runListeners                        — Map<runId, Set<res>>
- *   default                             — Express Router with GET /runs/:runId/events
+ * ### Endpoints
+ * | Method | Path                         | Description                 |
+ * |--------|------------------------------|-----------------------------|
+ * | `GET`  | `/api/runs/:runId/events`    | SSE stream for a single run |
+ *
+ * ### Exports
+ * - {@link emitRunEvent} — Broadcast an event to all listeners on a run.
+ * - {@link runListeners} — `Map<runId, Set<res>>` — active SSE connections.
  */
 
 import { Router } from "express";

@@ -1,16 +1,21 @@
 /**
- * exportFormats.js — Enterprise test export format builders
+ * @module utils/exportFormats
+ * @description Enterprise test export format builders.
  *
- * Converts Sentri test objects into industry-standard formats for import
- * into external test management and CI tools.
+ * Converts test objects into industry-standard formats for import into
+ * external test management and CI tools.
  *
- * Supported formats:
- *   - JUnit XML     — CI integration (Jenkins, GitHub Actions, GitLab CI)
- *   - Xray JSON     — Jira Xray test management import
- *   - TestRail CSV  — TestRail bulk import format
+ * ### Supported formats
+ * | Format       | Use case                                          |
+ * |--------------|---------------------------------------------------|
+ * | JUnit XML    | CI integration (Jenkins, GitHub Actions, GitLab)  |
+ * | Xray JSON    | Jira Xray test management import                  |
+ * | TestRail CSV | TestRail bulk import                              |
  *
- * Each builder accepts an array of test objects (from db.tests) and returns
- * a string in the target format.
+ * ### Exports
+ * - {@link buildJUnitXml} — Generate JUnit XML from test array.
+ * - {@link buildXrayJson} — Generate Xray JSON from test array.
+ * - {@link buildTestRailCsv} — Generate TestRail CSV from test array.
  */
 
 // ── XML helpers ──────────────────────────────────────────────────────────────

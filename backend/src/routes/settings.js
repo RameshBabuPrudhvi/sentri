@@ -1,7 +1,15 @@
 /**
- * settings.js — Config & Settings routes
+ * @module routes/settings
+ * @description Config and Settings routes — AI provider management. Mounted at `/api`.
  *
- * Mounted at /api in index.js
+ * ### Endpoints
+ * | Method   | Path                       | Description                              |
+ * |----------|----------------------------|------------------------------------------|
+ * | `GET`    | `/api/config`              | Active AI provider info for the UI badge |
+ * | `GET`    | `/api/settings`            | Masked API key status per provider       |
+ * | `POST`   | `/api/settings`            | Save an API key or activate Ollama       |
+ * | `DELETE` | `/api/settings/:provider`  | Remove a key or deactivate Ollama        |
+ * | `GET`    | `/api/ollama/status`       | Check Ollama connectivity + list models  |
  */
 
 import { Router } from "express";
