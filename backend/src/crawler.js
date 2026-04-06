@@ -132,7 +132,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   log(run, `🤖 AI provider: ${getProviderName()}`);
   setStep(run, 1);
 
-  let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl;
+  let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
 
   if (mode === "state") {
     // ── State-based exploration (new engine) ─────────────────────────────
@@ -145,7 +145,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     // ── Step 2: Element filtering ─────────────────────────────────────────
     setStep(run, 2);
     log(run, `🔍 Filtering elements (removing noise)...`);
-    const filteredSnapshots = snapshots.map(snap => {
+    filteredSnapshots = snapshots.map(snap => {
       const filtered = filterElements(snap.elements);
       log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
       return { ...snap, elements: filtered };
@@ -202,7 +202,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     // ── Step 2: Element filtering ─────────────────────────────────────────
     setStep(run, 2);
     log(run, `🔍 Filtering elements (removing noise)...`);
-    const filteredSnapshots = snapshots.map(snap => {
+    filteredSnapshots = snapshots.map(snap => {
       const filtered = filterElements(snap.elements);
       log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
       return { ...snap, elements: filtered };
@@ -258,8 +258,8 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // ── Step 8: Store & Done ────────────────────────────────────────────────
   persistGeneratedTests(validatedTests, project, db, run);
 
-  run.snapshots = snapshots;
-  run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
+  run.snapshots = filteredSnapshots;
+  run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   run.testsGenerated = run.tests.length;
   run.pipelineStats = buildPipelineStats({
     pagesFound: snapshots.length, rawTests, removed, enhancedCount, rejected, journeys, dedupStats,
