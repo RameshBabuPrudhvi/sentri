@@ -245,7 +245,7 @@ export default function Login() {
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand" style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <AppLogo size={36} variant="full" color="#f1f5f9" />
+            <AppLogo size={28} variant="full" color="#f1f5f9" />
             <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{fontSize:"0.78rem",color:"#64748b",textDecoration:"none",display:"flex",alignItems:"center",gap:5,transition:"color 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.color="#a5b4fc"}} onMouseLeave={e=>{e.currentTarget.style.color="#64748b"}}>
               Docs
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
