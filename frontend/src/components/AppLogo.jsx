@@ -26,84 +26,79 @@ import React, { useId } from "react";
 function IconMark({ size = 40 }) {
   const uid = useId();
   const gradId = `sentri-snake-${uid}`;
+  // Artwork bounds: x 34–166, y 64–146 → padded to 30 62 140 80
+  // Use width-based sizing so the wide aspect ratio fills the space
+  const vw = 140, vh = 80;
+  const w = size;
+  const h = Math.round(size * (vh / vw));
   return (
     <svg
-      width={size}
-      height={size}
-      viewBox="0 0 200 200"
+      width={w}
+      height={h}
+      viewBox="30 62 140 80"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-label="Sentri logo mark"
       role="img"
     >
       <defs>
-          <linearGradient id={gradId} gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#4285F4"/>
-            <stop offset="25%" stopColor="#EA4335"/>
-            <stop offset="50%" stopColor="#FBBC05"/>
-            <stop offset="75%" stopColor="#34A853"/>
-            <stop offset="100%" stopColor="#4285F4"/>
+        <linearGradient id={gradId} gradientUnits="userSpaceOnUse"
+          x1="40" y1="105" x2="160" y2="105">
+          <stop offset="0%" stopColor="#4285F4"/>
+          <stop offset="25%" stopColor="#EA4335"/>
+          <stop offset="50%" stopColor="#FBBC05"/>
+          <stop offset="75%" stopColor="#34A853"/>
+          <stop offset="100%" stopColor="#4285F4"/>
+          <animateTransform attributeName="gradientTransform"
+            type="rotate" from="0 100 105" to="360 100 105" dur="2s"
+            repeatCount="indefinite"/>
+        </linearGradient>
+      </defs>
 
-            <animateTransform attributeName="gradientTransform"
-              type="rotate" from="0 100 100" to="360 100 100" dur="2s"
-              repeatCount="indefinite"/>
-          </linearGradient>
-        </defs>
+      <rect x="40" y="70" width="120" height="70" rx="35" fill="#020817"/>
+      <rect x="40" y="70" width="120" height="70" rx="35"
+            fill="none" stroke={`url(#${gradId})`} strokeWidth="6"
+            strokeLinecap="round"/>
 
-        <rect x="40" y="70" width="120" height="70" rx="35" fill="#020817"/>
-
-        <rect x="40" y="70" width="120" height="70" rx="35"
-              fill="none" stroke={`url(#${gradId})`} strokeWidth="6"
-              strokeLinecap="round"/>
+      {/* Left eye */}
+      <g>
+        <ellipse cx="80" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
         <g>
-          <ellipse cx="80" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
-
-          <g>
-            <animateTransform
-              attributeName="transform"
-              type="translate"
-              values="-4 0; 0 0; 4 0; 0 0; -4 0"
-              keyTimes="0;0.25;0.5;0.75;1"
-              dur="2.4s"
-              repeatCount="indefinite"/>
-
-            <ellipse cx="80" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
-            <circle cx="76" cy="99" r="3" fill="#fff"/>
-          </g>
-
-          <rect x="58" y="90" width="44" height="30" fill="#020817">
-            <animate attributeName="height"
-                     values="0;0;30;0;0"
-                     keyTimes="0;0.45;0.5;0.55;1"
-                     dur="2.4s"
-                     repeatCount="indefinite"/>
-          </rect>
+          <animateTransform
+            attributeName="transform" type="translate"
+            values="-4 0; 0 0; 4 0; 0 0; -4 0"
+            keyTimes="0;0.25;0.5;0.75;1"
+            dur="2.4s" repeatCount="indefinite"/>
+          <ellipse cx="80" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+          <circle cx="76" cy="99" r="3" fill="#fff"/>
         </g>
+        <rect x="58" y="90" width="44" height="30" fill="#020817">
+          <animate attributeName="height"
+                   values="0;0;30;0;0"
+                   keyTimes="0;0.45;0.5;0.55;1"
+                   dur="2.4s" repeatCount="indefinite"/>
+        </rect>
+      </g>
+
+      {/* Right eye */}
+      <g>
+        <ellipse cx="120" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
         <g>
-          <ellipse cx="120" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
-
-          <g>
-            <animateTransform
-              attributeName="transform"
-              type="translate"
-              values="-4 0; 0 0; 4 0; 0 0; -4 0"
-              keyTimes="0;0.25;0.5;0.75;1"
-              dur="2.4s"
-              repeatCount="indefinite"/>
-
-            <ellipse cx="120" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
-            <circle cx="116" cy="99" r="3" fill="#fff"/>
-          </g>
-
-          <rect x="98" y="90" width="44" height="30" fill="#020817">
-            <animate attributeName="height"
-                     values="0;0;30;0;0"
-                     keyTimes="0;0.45;0.5;0.55;1"
-                     dur="2.4s"
-                     repeatCount="indefinite"/>
-          </rect>
+          <animateTransform
+            attributeName="transform" type="translate"
+            values="-4 0; 0 0; 4 0; 0 0; -4 0"
+            keyTimes="0;0.25;0.5;0.75;1"
+            dur="2.4s" repeatCount="indefinite"/>
+          <ellipse cx="120" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+          <circle cx="116" cy="99" r="3" fill="#fff"/>
         </g>
-
+        <rect x="98" y="90" width="44" height="30" fill="#020817">
+          <animate attributeName="height"
+                   values="0;0;30;0;0"
+                   keyTimes="0;0.45;0.5;0.55;1"
+                   dur="2.4s" repeatCount="indefinite"/>
+        </rect>
+      </g>
     </svg>
   );
 }
