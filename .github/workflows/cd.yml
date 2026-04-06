@@ -78,36 +78,3 @@ jobs:
           echo "  docker pull ${{ env.BACKEND_IMAGE }}:latest"
           echo "  docker pull ${{ env.FRONTEND_IMAGE }}:latest"
 
-  # ── Optional: deploy via SSH ──────────────────────────────────────────────
-  # Uncomment this job once you have a server.
-  # Add these secrets in repo Settings → Secrets → Actions:
-  #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, ANTHROPIC_API_KEY
-  #
-  # deploy:
-  #   name: Deploy to Server
-  #   runs-on: ubuntu-latest
-  #   needs: build-and-push
-  #   environment: production
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Copy compose file
-  #       uses: appleboy/scp-action@v0.1.7
-  #       with:
-  #         host: ${{ secrets.DEPLOY_HOST }}
-  #         username: ${{ secrets.DEPLOY_USER }}
-  #         key: ${{ secrets.DEPLOY_SSH_KEY }}
-  #         source: "docker-compose.prod.yml"
-  #         target: "/opt/sentri"
-  #     - name: SSH deploy
-  #       uses: appleboy/ssh-action@v1.0.3
-  #       with:
-  #         host: ${{ secrets.DEPLOY_HOST }}
-  #         username: ${{ secrets.DEPLOY_USER }}
-  #         key: ${{ secrets.DEPLOY_SSH_KEY }}
-  #         script: |
-  #           cd /opt/sentri
-  #           echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" > .env
-  #           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-  #           docker compose -f docker-compose.prod.yml pull
-  #           docker compose -f docker-compose.prod.yml up -d --remove-orphans
-  #           docker image prune -f
