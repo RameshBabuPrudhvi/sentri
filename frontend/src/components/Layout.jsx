@@ -1,6 +1,6 @@
 import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown, BookOpen, ExternalLink } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "./AppLogo.jsx";
@@ -65,7 +65,7 @@ function Sidebar() {
         ))}
       </nav>
 
-      {/* Settings at bottom */}
+      {/* Settings + Docs at bottom */}
       <div style={{ padding: "10px 8px", borderTop: "1px solid var(--border)" }}>
         <NavLink to="/settings" className="nav-link" style={({ isActive }) => ({
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
@@ -76,6 +76,17 @@ function Sidebar() {
         })}>
           <Settings size={16} />Settings
         </NavLink>
+        <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{
+          display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
+          borderRadius: "var(--radius)", fontSize: "0.875rem", color: "var(--text2)",
+          textDecoration: "none", transition: "all 0.12s", marginTop: 1,
+        }}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        >
+          <BookOpen size={16} />Docs
+          <ExternalLink size={11} style={{ marginLeft: "auto", opacity: 0.4 }} />
+        </a>
       </div>
     </aside>
   );
@@ -175,7 +186,25 @@ function TopBar() {
               <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{user?.name || "User"}</div>
               <div style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{user?.email}</div>
             </div>
-            {/* Logout */}
+            {/* Docs */}
+            <a
+              href={`${import.meta.env.BASE_URL}docs/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex", alignItems: "center", gap: 9,
+                width: "100%", padding: "10px 14px",
+                fontSize: "0.83rem", color: "var(--text2)", textDecoration: "none",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+            >
+              <BookOpen size={14} />
+              Documentation
+              <ExternalLink size={10} style={{ marginLeft: "auto", opacity: 0.4 }} />
+            </a>
+            {/* Sign out */}
             <button
               onClick={handleLogout}
               style={{
