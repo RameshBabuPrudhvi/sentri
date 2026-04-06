@@ -320,7 +320,7 @@ export default function Login() {
               )}
               <div className="lp-field">
                 <div className="lp-lrow"><label className="lp-lbl" htmlFor="login-email">Email address</label></div>
-                <input id="login-email" type="email" className="lp-in" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)} autoComplete={mode==="login"?"username":"email"} required disabled={loading}/>
+                <input id="login-email" type="email" className="lp-in" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required disabled={loading}/>
               </div>
               <div className="lp-field">
                 <div className="lp-lrow">
