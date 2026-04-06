@@ -5,6 +5,8 @@
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org)
 [![Playwright](https://img.shields.io/badge/Playwright-1.58+-blue.svg)](https://playwright.dev)
 
+📖 **[Documentation](https://rameshbabuprudhvi.github.io/sentri/docs/)** · 🔧 **[API Reference](https://rameshbabuprudhvi.github.io/sentri/docs/api/)** · 📘 **[Code Docs (JSDoc)](https://rameshbabuprudhvi.github.io/sentri/docs/jsdoc/)**
+
 ---
 
 ## Why Sentri?
@@ -103,8 +105,10 @@ After failures, an AI **feedback loop** classifies each failure (SELECTOR_ISSUE,
 | 🔀 **Code Diff View** | Built-in Myers line diff shows what changed when Playwright code is regenerated |
 | 📦 **Smart Data Fetching** | `useProjectData` hook with 30s TTL cache + batch `/api/tests` endpoint eliminates N+1 fetches |
 | 🦙 **Ollama Support** | Completely free, private, local inference. NDJSON response fallback, `OLLAMA_MAX_PREDICT` token cap, HTTP 500 retry |
+| 🔐 **Built-in Auth** | Email/password + GitHub/Google OAuth. Scrypt hashing, JWT with HS256, rate limiting, CSRF protection |
+| 📖 **Full Documentation** | VitePress guide, REST API reference, and auto-generated JSDoc — all deployed to GitHub Pages |
 | 🌙 **Dark Mode** | Automatic via `prefers-color-scheme` — all UI components adapt |
-| 🐳 **Docker Ready** | `docker compose up --build` and you're running |
+| 🐳 **Docker Ready** | `docker compose up --build` and you're running. GitHub Pages + Render deployment supported |
 
 ---
 
@@ -177,7 +181,21 @@ Sentri auto-detects your provider from whichever key is set. You can switch at a
 
 ---
 
+## Authentication
+
+Sentri includes built-in authentication with email/password sign-in and OAuth (GitHub, Google).
+
+- **Passwords** hashed with scrypt (64-byte key, 16-byte random salt)
+- **JWTs** signed with HS256, 8-hour expiry
+- **Rate limiting** — 10 sign-in attempts per IP per 15 minutes
+- **OAuth CSRF** — state parameter validated on the frontend
+- **Production** — server refuses to start without `JWT_SECRET` when `NODE_ENV=production`
+
+---
+
 ## Environment Variables
+
+### Backend
 
 | Variable | Default | Description |
 |---|---|---|
@@ -187,13 +205,34 @@ Sentri auto-detects your provider from whichever key is set. You can switch at a
 | `GOOGLE_API_KEY` | — | [aistudio.google.com](https://aistudio.google.com/apikey) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Model name for local inference |
-| `OLLAMA_MAX_PREDICT` | `4096` | Max token output cap for Ollama — prevents context overflow on small models |
-| `OLLAMA_TIMEOUT_MS` | `120000` | Timeout (ms) for Ollama calls — increase for slow machines |
+| `OLLAMA_MAX_PREDICT` | `4096` | Max token output cap for Ollama |
+| `OLLAMA_TIMEOUT_MS` | `120000` | Timeout (ms) for Ollama calls |
+| `JWT_SECRET` | random (dev) | **Required in production.** 32+ char secret for signing JWTs |
+| `NODE_ENV` | — | Set to `production` for production deployments |
 | `PORT` | `3001` | Backend server port |
 | `LOG_LEVEL` | `info` | Minimum severity: `debug`, `info`, `warn`, or `error` |
 | `LOG_DATE_FORMAT` | `iso` | Timestamp format: `iso`, `utc`, `local`, or `epoch` |
 | `LOG_TIMEZONE` | system | IANA timezone for `local` format (e.g. `America/New_York`) |
-| `LOG_JSON` | `false` | Emit structured JSON lines on stdout instead of human-readable text |
+| `LOG_JSON` | `false` | Emit structured JSON lines on stdout |
+
+### Frontend (build-time)
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_API_URL` | `""` (same origin) | Backend URL for cross-origin deploys (e.g. GitHub Pages → Render) |
+| `GITHUB_PAGES` | — | Set to `true` to use `/sentri/` base path |
+| `VITE_GITHUB_CLIENT_ID` | — | GitHub OAuth client ID |
+| `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
+
+### OAuth (backend)
+
+| Variable | Description |
+|---|---|
+| `GITHUB_CLIENT_ID` | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth app client secret |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | Override Google OAuth redirect URI |
 
 See [`backend/.env.example`](backend/.env.example) for the full template.
 
@@ -288,6 +327,17 @@ Any test can be restored to Draft at any time via the Restore button or bulk act
 | `GET` | `/api/system` | System info: uptime, Node/Playwright versions, memory, DB counts |
 | `GET` | `/health` | Health check |
 
+### Authentication
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register with email/password |
+| `POST` | `/api/auth/login` | Sign in — returns JWT + user profile |
+| `POST` | `/api/auth/logout` | Revoke token server-side |
+| `GET` | `/api/auth/me` | Get current user profile |
+| `GET` | `/api/auth/github/callback` | GitHub OAuth token exchange |
+| `GET` | `/api/auth/google/callback` | Google OAuth token exchange |
+
 ### Data Management
 
 | Method | Endpoint | Description |
@@ -296,22 +346,78 @@ Any test can be restored to Draft at any time via the Restore button or bulk act
 | `DELETE` | `/api/data/activities` | Clear activity log |
 | `DELETE` | `/api/data/healing` | Clear self-healing history |
 
+> 📖 Full API documentation with request/response examples: **[API Reference](https://rameshbabuprudhvi.github.io/sentri/docs/api/)**
+
 ---
 
-## Production Upgrades
+## Documentation
 
-Sentri is designed to grow. Recommended enhancements for production scale:
+Sentri ships with three layers of documentation:
 
-| Area | Recommendation |
+| Layer | URL | Source |
+|---|---|---|
+| **Guide & API Reference** | [/sentri/docs/](https://rameshbabuprudhvi.github.io/sentri/docs/) | VitePress — `docs/` directory |
+| **Code Docs (JSDoc)** | [/sentri/docs/jsdoc/](https://rameshbabuprudhvi.github.io/sentri/docs/jsdoc/) | Auto-generated from source code |
+| **README** | This file | `README.md` |
+
+### Running docs locally
+
+```bash
+# VitePress guide
+cd docs && npm install && npm run dev
+
+# JSDoc code docs
+cd backend && npm run docs && open docs-api/index.html
+```
+
+### Adding JSDoc to remaining files
+
+A script is included to add `@module` headers to any files that don't have one yet:
+
+```bash
+bash scripts/add-jsdoc-modules.sh
+```
+
+The CI pipeline auto-generates JSDoc and deploys it alongside the VitePress site on every push to `main`.
+
+---
+
+## Deployment
+
+### GitHub Pages + Render
+
+Deploy the frontend to GitHub Pages (free) and the backend to Render (free tier available):
+
+```bash
+# Frontend build for GitHub Pages
+cd frontend
+GITHUB_PAGES=true VITE_API_URL=https://your-app.onrender.com npm run build
+```
+
+Set on Render: `NODE_ENV=production`, `JWT_SECRET=<openssl rand -base64 48>`, plus your AI provider key.
+
+See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/guide/github-pages-render.html) for details.
+
+---
+
+## Production Checklist
+
+| Area | Status |
 |---|---|
-| **Database** | Replace in-memory `db.js` with PostgreSQL + Prisma ORM |
-| **Job Queue** | Add BullMQ + Redis for background crawl/run jobs with retries |
-| **Auth** | Add user authentication (NextAuth, Clerk, or JWT middleware) |
-| **File Storage** | Store videos and screenshots to S3/R2 instead of local disk |
-| **Scheduling** | Add cron-based auto-runs via `node-cron` or a job scheduler |
-| **Notifications** | Send Slack/email alerts on test failures |
-| **Multi-tenancy** | Add workspace/organisation scoping to projects and tests |
-| **CI/CD Integration** | Expose a run trigger webhook for GitHub Actions / GitLab CI |
+| **Authentication** | ✅ Built-in (email/password + GitHub/Google OAuth) |
+| **JWT Security** | ✅ Throws in production without `JWT_SECRET` |
+| **Rate Limiting** | ✅ 10 sign-in attempts per IP per 15 min |
+| **OAuth CSRF** | ✅ State parameter validated |
+| **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
+| **Database** | ⬜ Replace in-memory `db.js` with PostgreSQL + Prisma ORM |
+| **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
+| **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |
+| **CORS** | ⬜ Restrict origins in `backend/src/middleware/appSetup.js` |
+| **Token Storage** | ⬜ Move JWT from localStorage to HttpOnly cookies |
+| **Scheduling** | ⬜ Add cron-based auto-runs via `node-cron` |
+| **Notifications** | ⬜ Send Slack/email alerts on test failures |
+| **Multi-tenancy** | ⬜ Add workspace/organisation scoping |
+| **CI/CD Integration** | ⬜ Expose a run trigger webhook for GitHub Actions / GitLab CI |
 
 ---
 
