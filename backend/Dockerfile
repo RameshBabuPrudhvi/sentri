@@ -23,17 +23,12 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
-
-COPY src/ ./src/
-
+COPY backend/package.json backend/package-lock.json* ./
+RUN npm install --omit=dev
+COPY backend/src/ ./src/
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
-
 EXPOSE 3001
-
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:3001/api/dashboard').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
 CMD ["node", "src/index.js"]
