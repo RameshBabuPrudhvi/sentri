@@ -105,7 +105,7 @@ function verifyJwt(token, secret) {
   } catch { return null; }
 }
 
-/** Auto-generated fallback for local development only — never used in production. */
+/** Cached dev-mode fallback secret — derived once, reused for the process lifetime. */
 let _devFallbackSecret = null;
 
 function getJwtSecret() {
@@ -116,11 +116,14 @@ function getJwtSecret() {
     throw new Error("[auth] FATAL: JWT_SECRET is missing or too short. Set a 32+ char secret in .env for production.");
   }
 
-  // Dev-only: generate a random secret per process so tokens are never forgeable
-  // from source code alone. Tokens won't survive server restarts — acceptable in dev.
+  // Dev-only: derive a deterministic secret from the project directory so tokens
+  // survive server restarts (nodemon, Docker recreate) without requiring .env setup.
+  // The secret is unique per machine/checkout path but not random — acceptable for
+  // local development where the threat model is convenience, not security.
   if (!_devFallbackSecret) {
-    _devFallbackSecret = crypto.randomBytes(48).toString("base64url");
-    console.warn("[auth] WARNING: JWT_SECRET not set — using random per-process secret (dev only). Tokens will not survive restarts.");
+    const seed = `dev-jwt-secret:${process.cwd()}`;
+    _devFallbackSecret = crypto.createHash("sha256").update(seed).digest("base64url");
+    console.warn("[auth] WARNING: JWT_SECRET not set — using deterministic dev secret. Sessions survive restarts but set JWT_SECRET for production.");
   }
   return _devFallbackSecret;
 }
