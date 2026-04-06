@@ -28,7 +28,7 @@ jobs:
         run: npm install
 
       - name: Syntax check all source files
-        run: node --check src/index.js src/crawler.js src/testRunner.js src/db.js
+        run: find src -name '*.js' -exec node --check {} +
 
       - name: Smoke test — server starts and responds
         run: |
@@ -128,10 +128,35 @@ jobs:
           context: .
           file: backend/Dockerfile
           push: false
+          load: true
           tags: sentri-backend:ci
           # GitHub Actions cache — speeds up repeat builds significantly
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke-test backend container (mirrors Render)
+        run: |
+          docker run -d --name sentri-ci \
+            -e ANTHROPIC_API_KEY=sk-ant-placeholder-for-ci \
+            -e PORT=3001 \
+            -p 3001:3001 \
+            sentri-backend:ci
+
+          # Wait for the container to become healthy (up to 30s)
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:3001/api/dashboard > /dev/null 2>&1; then
+              echo "✅ Backend container is healthy"
+              break
+            fi
+            echo "Waiting ($i/15)..."
+            sleep 2
+          done
+
+          curl -sf http://localhost:3001/api/dashboard | grep -q "totalProjects" \
+            && echo "✅ /api/dashboard OK" \
+            || (docker logs sentri-ci && exit 1)
+
+          docker stop sentri-ci
 
       - name: Build frontend Docker image
         uses: docker/build-push-action@v5
