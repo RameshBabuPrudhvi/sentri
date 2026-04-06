@@ -84,7 +84,7 @@ export default function RunDetail() {
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
   // for already-completed/failed runs (avoids spurious "Run complete" notifications).
-  const { sseDown } = useRunSSE(runId, useCallback((event) => {
+  const { sseDown, retryIn } = useRunSSE(runId, useCallback((event) => {
     if (event.type === "snapshot") {
       setRun(event.run);
     } else if (event.type === "result") {
@@ -349,7 +349,18 @@ export default function RunDetail() {
         </div>
       )}
 
-      {/* ── SSE fallback banner — shown when polling instead of streaming ── */}
+      {/* ── SSE reconnection / fallback banner ── */}
+      {isRunning && retryIn != null && !sseDown && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", marginBottom: 12,
+          background: "var(--blue-bg)", border: "1px solid #bfdbfe",
+          borderRadius: 8, fontSize: "0.76rem", color: "var(--blue)",
+        }}>
+          <RefreshCw size={12} style={{ flexShrink: 0 }} />
+          Connection lost — reconnecting in {retryIn}s…
+        </div>
+      )}
       {sseDown && isRunning && (
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
@@ -358,7 +369,7 @@ export default function RunDetail() {
           borderRadius: 8, fontSize: "0.76rem", color: "var(--amber)",
         }}>
           <RefreshCw size={12} style={{ animation: "spin 2s linear infinite", flexShrink: 0 }} />
-          Live updates unavailable — refreshing every 5 s
+          Live updates unavailable — refreshing every 5s. <button onClick={fetchRun} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--amber)", fontWeight: 600, textDecoration: "underline", padding: 0, fontSize: "0.76rem" }}>Refresh now</button>
         </div>
       )}
 

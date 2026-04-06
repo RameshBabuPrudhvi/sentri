@@ -92,6 +92,8 @@ export function useRunSSE(runId, onEvent, initialStatus) {
   const pollTimer     = useRef(null);
   const retryCount    = useRef(0);
   const [sseDown, setSseDown] = useState(false);
+  const [retryIn, setRetryIn] = useState(null);  // seconds until next reconnect attempt
+  const countdownRef  = useRef(null);
 
   useEffect(() => { onEventRef.current = onEvent; }, [onEvent]);
 
@@ -132,6 +134,8 @@ export function useRunSSE(runId, onEvent, initialStatus) {
 
       retryCount.current = 0;
       setSseDown(false);
+      setRetryIn(null);
+      clearInterval(countdownRef.current);
 
       onEventRef.current?.(parsed);
 
@@ -164,6 +168,15 @@ export function useRunSSE(runId, onEvent, initialStatus) {
 
       // Exponential backoff: 1.5 s, 3 s, 6 s, 12 s … capped at 30 s
       const delay = Math.min(1500 * Math.pow(2, retryCount.current - 1), MAX_BACKOFF_MS);
+      // Start a visible countdown so the user knows when reconnection will be attempted
+      let remaining = Math.ceil(delay / 1000);
+      setRetryIn(remaining);
+      clearInterval(countdownRef.current);
+      countdownRef.current = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) { clearInterval(countdownRef.current); setRetryIn(null); }
+        else setRetryIn(remaining);
+      }, 1000);
       retryTimer.current = setTimeout(connect, delay);
     };
   }, [runId, startPolling]);
@@ -198,10 +211,11 @@ export function useRunSSE(runId, onEvent, initialStatus) {
       doneRef.current = true;
       clearTimeout(retryTimer.current);
       clearTimeout(pollTimer.current);
+      clearInterval(countdownRef.current);
       esRef.current?.close();
       resetFavicon();
     };
   }, [connect, runId, initialStatus]);
 
-  return { sseDown };
+  return { sseDown, retryIn };
 }
