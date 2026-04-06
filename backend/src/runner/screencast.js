@@ -20,7 +20,7 @@ import { emitRunEvent } from "../utils/runLogger.js";
  *
  * @param {Object} page - Playwright Page instance.
  * @param {string} runId
- * @returns {Promise<(function(): Promise<void>)|null>}
+ * @returns {Promise<?function(): Promise<void>>} Resolves to a cleanup function, or `null` if no SSE clients.
  */
 export async function startScreencast(page, runId) {
   // Only start if there are active SSE listeners
