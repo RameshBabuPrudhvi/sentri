@@ -283,6 +283,11 @@ export default function TestDetail() {
   }
 
   function handleTabKey(e) {
+    if (e.key === "Escape") {
+      // Release keyboard focus so Tab resumes normal navigation
+      e.target.blur();
+      return;
+    }
     if (e.key === "Tab") {
       e.preventDefault();
       const ta = e.target;
@@ -1134,6 +1139,7 @@ export default function TestDetail() {
                     onKeyDown={handleTabKey}
                     onScroll={handleEditorScroll}
                     spellCheck={false}
+                    aria-label="Code editor — Tab inserts spaces, press Escape to exit"
                     style={{
                       position: "absolute", inset: 0,
                       width: "100%", height: "100%",
