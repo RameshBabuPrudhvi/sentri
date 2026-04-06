@@ -77,8 +77,9 @@ export default function Login() {
     if (code && provider && ["github", "google"].includes(provider)) handleOAuthCallback(provider, code);
   }, []);
 
+  const [testiPaused, setTestiPaused] = useState(false);
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
-  useEffect(() => { const t = setInterval(() => setTIdx(i => (i+1) % TESTIMONIALS.length), 4000); return () => clearInterval(t); }, []);
+  useEffect(() => { if (testiPaused) return; const t = setInterval(() => setTIdx(i => (i+1) % TESTIMONIALS.length), 4000); return () => clearInterval(t); }, [testiPaused]);
 
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
@@ -269,7 +270,13 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="lp-testi">
+          <div className="lp-testi"
+            onMouseEnter={() => setTestiPaused(true)}
+            onMouseLeave={() => setTestiPaused(false)}
+            role="region"
+            aria-label="Testimonials"
+            aria-live="polite"
+          >
             <p className="lp-tquote">"{TESTIMONIALS[tIdx].quote}"</p>
             <div className="lp-tauthor">
               <div className="lp-tavatar">{TESTIMONIALS[tIdx].name.charAt(0)}</div>
