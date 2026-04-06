@@ -26,11 +26,11 @@ import React, { useId } from "react";
 function IconMark({ size = 40 }) {
   const uid = useId();
   const gradId = `sentri-snake-${uid}`;
-  // Artwork bounds: x 34–166, y 64–146 → padded to 30 62 140 80
-  // Use width-based sizing so the wide aspect ratio fills the space
-  const vw = 140, vh = 80;
-  const w = size;
-  const h = Math.round(size * (vh / vw));
+  // Cropped viewBox tightly around artwork (eyes visor).
+  // size controls height (matches old shield where size = height = width).
+  // Width scales from the 1.75:1 aspect ratio.
+  const h = size;
+  const w = Math.round(size * 1.75);
   return (
     <svg
       width={w}
