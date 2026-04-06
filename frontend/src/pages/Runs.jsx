@@ -9,6 +9,7 @@ import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/StatusBadge";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 // ── Filter definitions (mirrors Tests.jsx icon-pill pattern) ──────────────────
 
@@ -69,6 +70,7 @@ function ProgressBar({ passed, failed, total }) {
 // ── Work Page ─────────────────────────────────────────────────────────────────
 
 export default function Work() {
+  usePageTitle("Runs");
   const { allRuns: runs, projects: allProjects, loading } = useProjectData({ fetchTests: false });
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter]     = useState("all");

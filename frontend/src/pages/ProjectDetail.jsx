@@ -13,6 +13,7 @@ import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -79,6 +80,7 @@ export default function ProjectDetail() {
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);
+  usePageTitle(project?.name ? `${project.name} — Project` : "Project");
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [traceability, setTraceability]     = useState(null);
   const [traceLoading, setTraceLoading]     = useState(false);

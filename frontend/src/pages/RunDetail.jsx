@@ -17,6 +17,7 @@ import CrawlView from "../components/CrawlView";
 import GenerateView from "../components/GenerateView";
 import TestRunView from "../components/TestRunView";
 import AgentTag from "../components/AgentTag.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ export default function RunDetail() {
   const [initialStatus, setInitialStatus] = useState(undefined);
   const [frames, setFrames] = useState([]);
   const [llmTokens, setLlmTokens] = useState("");
+  usePageTitle(run ? `Run ${runId.slice(0, 6).toUpperCase()}` : "Run Detail");
   const [aborting, setAborting] = useState(false);
 
   // Cap the streamed token buffer so long-running generation jobs don't

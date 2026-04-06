@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/api.js";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || "";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -53,6 +54,7 @@ export default function Login() {
   const { login, user } = useAuth();
 
   const [mode, setMode] = useState("login");
+  usePageTitle(mode === "login" ? "Sign in" : "Create account");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");

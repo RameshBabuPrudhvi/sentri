@@ -11,6 +11,7 @@ import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import PassFailChart from "../components/PassFailChart";
 import PassRateBar from "../components/PassRateBar";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function downloadCSV(runs, projectNames) {
   const header = ["Run ID","Project","Type","Status","Passed","Failed","Total","Started","Duration"];
@@ -32,6 +33,7 @@ function downloadCSV(runs, projectNames) {
 }
 
 export default function Reports() {
+  usePageTitle("Reports");
   const { projects, allTests, testRuns, projMap, loading } = useProjectData();
   const [selectedProject, setSelectedProject] = useState("all");
   const navigate = useNavigate();

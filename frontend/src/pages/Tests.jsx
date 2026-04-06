@@ -16,6 +16,7 @@ import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
 import { StatusBadge, ScenarioBadges } from "../components/TestBadges.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -201,6 +202,7 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
 // ── Tests Page ─────────────────────────────────────────────────────────────────
 
 export default function Tests() {
+  usePageTitle("Tests");
   const [projects, setProjects] = useState([]);
   const [tests, setTests] = useState([]);
   const [searchParams, setSearchParams] = useSearchParams();

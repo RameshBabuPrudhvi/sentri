@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 const PROVIDERS = [
   {
@@ -538,6 +539,7 @@ function fmtUptime(seconds) {
 }
 
 export default function Settings() {
+  usePageTitle("Settings");
   const navigate = useNavigate();
   const [settings, setSettings] = useState(null);
   const [config, setConfig]     = useState(null);

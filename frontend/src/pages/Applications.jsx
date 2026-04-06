@@ -9,6 +9,7 @@ import { fmtRelativeDate } from "../utils/formatters";
 import PassRateBar from "../components/PassRateBar";
 import DeleteProjectModal from "../components/DeleteProjectModal.jsx";
 import { api } from "../api.js";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function StatusDot({ status }) {
   const colors = {
@@ -26,6 +27,7 @@ function StatusDot({ status }) {
 }
 
 export default function Projects() {
+  usePageTitle("Projects");
   const { projects, allTests, allRuns, loading, refresh } = useProjectData();
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null); // project to confirm-delete

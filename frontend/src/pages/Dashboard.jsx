@@ -12,6 +12,7 @@ import PassFailChart from "../components/PassFailChart.jsx";
 import SparklineChart from "../components/SparklineChart.jsx";
 import StackedBar from "../components/StackedBar.jsx";
 import AppLogo from "../components/AppLogo.jsx";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function greeting() {
   const h = new Date().getHours();
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const navigate = useNavigate();
+  usePageTitle("Dashboard");
 
   useEffect(() => {
     api.getDashboard()

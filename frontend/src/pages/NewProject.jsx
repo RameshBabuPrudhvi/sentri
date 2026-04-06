@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Globe, Lock, Plus, CheckCircle2, Loader2 } from "lucide-react";
 import { api } from "../api.js";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 // Robust URL validation + required auth field enforcement
 function validateForm(form) {
@@ -30,6 +31,7 @@ function validateForm(form) {
 }
 
 export default function NewProject() {
+  usePageTitle("New Project");
   const navigate = useNavigate();
   const [form, setForm] = useState({
     name: "", url: "", hasAuth: false,

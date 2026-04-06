@@ -8,6 +8,7 @@ import {
 import { api } from "../api";
 import { fmtRelativeDate } from "../utils/formatters";
 import useProjectData from "../hooks/useProjectData";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function SectionHeader({ icon, title, sub }) {
   return (
@@ -36,6 +37,7 @@ function InfoRow({ label, children }) {
 }
 
 export default function Context() {
+  usePageTitle("System");
   // FIX #10: useProjectData batches all project/run/test fetches in one pass (no N+1)
   const { projects, allTests, allRuns, loading } = useProjectData();
   const [config, setConfig] = React.useState(null);

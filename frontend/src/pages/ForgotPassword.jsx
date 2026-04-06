@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AppLogo from "../components/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/api.js";
+import usePageTitle from "../hooks/usePageTitle.js";
 
 function Spinner() {
   return (
@@ -42,6 +43,7 @@ export default function ForgotPassword() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
   const mode = token ? "reset" : "request";
+  usePageTitle(mode === "reset" ? "Set new password" : "Reset password");
 
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
