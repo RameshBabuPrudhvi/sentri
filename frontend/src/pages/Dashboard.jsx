@@ -63,7 +63,7 @@ export default function Dashboard() {
   const dfb = data?.defectBreakdown || {};
 
   if (loading) return (
-    <div style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div className="page-container">
       {[120, 200, 300].map((h, i) => <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 16 }} />)}
     </div>
   );
@@ -71,7 +71,7 @@ export default function Dashboard() {
   const isEmpty = !loadError && !data?.totalProjects && !data?.totalTests && !data?.totalRuns;
 
   return (
-    <div className="fade-in" style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div className="fade-in page-container">
 
       {/* Logo Hero Banner */}
       <div style={{
@@ -129,10 +129,10 @@ export default function Dashboard() {
 
       {/* Fix #8: first-time onboarding banner instead of zeros */}
       {isEmpty ? (
-        <div className="card" style={{ padding: "48px 40px", textAlign: "center", marginBottom: 16 }}>
-          <div style={{ fontSize: "2.5rem", marginBottom: 14 }}>🚀</div>
-          <div style={{ fontWeight: 700, fontSize: "1.15rem", marginBottom: 8 }}>Welcome to Sentri!</div>
-          <div style={{ color: "var(--text2)", fontSize: "0.9rem", marginBottom: 24, maxWidth: 420, margin: "0 auto 24px" }}>
+        <div className="card empty-state mb-md">
+          <div className="empty-state-icon">🚀</div>
+          <div className="empty-state-title">Welcome to Sentri!</div>
+          <div className="empty-state-desc">
             Create your first project to start crawling your web app and AI-generating tests automatically.
           </div>
           <button className="btn btn-primary" onClick={() => navigate("/projects/new")}>
@@ -142,7 +142,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* ── Row 1: Core Health KPIs ─────────────────────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
+          <div className="stat-grid">
             <StatCard label="Pass Rate" value={data?.passRate != null ? `${data.passRate}%` : "—"} sub={data?.passRate >= 80 ? "Healthy" : data?.passRate != null ? "Needs attention" : "No runs yet"} color={data?.passRate >= 80 ? "var(--green)" : data?.passRate != null ? "var(--amber)" : "var(--text3)"} icon={<TrendingUp size={16} />} />
             <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<FlaskConical size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
@@ -150,7 +150,7 @@ export default function Dashboard() {
           </div>
 
           {/* ── Row 2: Tests Created / Fixed / Healing ─────────────── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
+          <div className="stat-grid">
             <StatCard label="Created Today" value={data?.testsCreatedToday ?? 0} sub={`${data?.testsCreatedThisWeek ?? 0} this week`} color="var(--accent)" icon={<Plus size={16} />} />
             <StatCard label="AI Generated" value={data?.testsGeneratedTotal ?? 0} sub="All time" color="var(--blue)" icon={<FlaskConical size={16} />} />
             <StatCard label="Auto-Fixed" value={data?.testsAutoFixed ?? 0} sub="By feedback loop" color="var(--green)" icon={<Wrench size={16} />} />
@@ -176,11 +176,11 @@ export default function Dashboard() {
                   color={data?.flakyTestCount > 0 ? "var(--amber)" : "var(--green)"}
                   icon={<AlertTriangle size={16} />}
                 />
-                <div className="card" style={{ padding: "20px 24px" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div className="card card-padded">
+                  <div className="flex-between" style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Crosshair size={14} color="var(--text3)" />
-                      <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Defect Categories</span>
+                      <span className="section-title" style={{ marginBottom: 0 }}>Defect Categories</span>
                     </div>
                     {totalDefects > 0 && (
                       <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{totalDefects} total failures</span>
@@ -219,8 +219,8 @@ export default function Dashboard() {
               { label: "Running",   count: rbs.running || 0,   color: "var(--blue)",  icon: <Clock size={12} /> },
             ];
             return (
-              <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
-                <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 14 }}>Run Status Distribution</div>
+              <div className="card card-padded mb-md">
+                <div className="section-title">Run Status Distribution</div>
                 <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
                   {segs.map((s) => (
                     <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -243,8 +243,8 @@ export default function Dashboard() {
               { label: "Rejected", count: tbr.rejected || 0, color: "var(--red)" },
             ];
             return (
-              <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
-                <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 14 }}>Test Review Pipeline</div>
+              <div className="card card-padded mb-md">
+                <div className="section-title">Test Review Pipeline</div>
                 <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
                   {segs.map((s) => (
                     <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -261,11 +261,11 @@ export default function Dashboard() {
 
           {/* ── Row 6: Test Suite Growth ─────────────────────────── */}
           {(data?.testGrowth?.length ?? 0) >= 2 && (
-            <div className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div className="card card-padded mb-md">
+              <div className="flex-between" style={{ marginBottom: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <Activity size={14} color="var(--accent)" />
-                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Test Suite Growth</span>
+                  <span className="section-title" style={{ marginBottom: 0 }}>Test Suite Growth</span>
                 </div>
                 <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>Last 8 weeks</span>
               </div>
@@ -283,8 +283,8 @@ export default function Dashboard() {
 
           {/* ── Row 8: Recent Activity ────────────────────────────── */}
           {runs.length > 0 && (
-            <div className="card" style={{ padding: 24 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+            <div className="card card-padded">
+              <div className="flex-between" style={{ marginBottom: 18 }}>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: "1rem" }}>Recent Activity</div>
                   <div style={{ fontSize: "0.8rem", color: "var(--text3)", marginTop: 2 }}>
@@ -295,15 +295,11 @@ export default function Dashboard() {
                 </div>
                 <button className="btn btn-ghost btn-sm" onClick={() => navigate("/runs")}>View all</button>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="flex-col gap-sm">
                 {runs.map((r) => {
                   const meta = RUN_TYPE_META[r.type] || RUN_TYPE_META["run"];
                   return (
-                    <div key={r.id} style={{
-                      display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-                      border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg2)",
-                      cursor: "pointer", transition: "background 0.12s",
-                    }} onClick={() => navigate(`/runs/${r.id}`)}>
+                    <div key={r.id} className="list-row" onClick={() => navigate(`/runs/${r.id}`)}>
                       <AgentTag type={(RUN_TYPE_META[r.type] || RUN_TYPE_META["run"]).avatar} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: 1 }}>{meta.label}</div>

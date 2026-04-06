@@ -281,3 +281,143 @@ label {
 .step-dot-fail  { background: var(--red-bg);   color: var(--red); }
 .step-dot-run   { background: var(--blue-bg);  color: var(--blue); }
 .step-dot-wait  { background: var(--bg3);      color: var(--text3); }
+
+/* ── Reusable page layout utilities ─────────────────────────────────────────
+ * These replace the most duplicated inline style={{}} patterns across pages.
+ * Use className="page-container" instead of style={{ maxWidth: 860, margin: "0 auto" }}.
+ * Incrementally adopt — existing inline styles still work alongside these.
+ */
+
+/* Page containers — constrain content width and center */
+.page-container     { max-width: 860px; margin: 0 auto; }
+.page-container-sm  { max-width: 640px; margin: 0 auto; }
+.page-container-md  { max-width: 760px; margin: 0 auto; }
+.page-container-lg  { max-width: 980px; margin: 0 auto; }
+.page-container-xl  { max-width: 1200px; margin: 0 auto; }
+
+/* Page header — title + subtitle pattern used on every page */
+.page-title {
+  font-size: 1.4rem; font-weight: 700; margin-bottom: 3px;
+}
+.page-subtitle {
+  font-size: 0.82rem; color: var(--text2); margin: 0;
+}
+.page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+/* Card padding variants */
+.card-padded     { padding: 24px; }
+.card-padded-sm  { padding: 18px 22px; }
+.card-padded-lg  { padding: 28px 32px; }
+
+/* Section title inside cards */
+.section-title {
+  font-weight: 600; font-size: 0.9rem; margin-bottom: 14px;
+}
+.section-label {
+  font-size: 0.73rem; color: var(--text3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+}
+
+/* Stat grid — 4-column KPI row */
+.stat-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 12px; margin-bottom: 16px;
+}
+.stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+
+/* Empty state — centered placeholder with emoji, title, subtitle, CTA */
+.empty-state {
+  padding: 52px 40px; text-align: center;
+}
+.empty-state-icon {
+  font-size: 2rem; margin-bottom: 14px;
+}
+.empty-state-title {
+  font-weight: 700; font-size: 1.05rem; margin-bottom: 8px; color: var(--text);
+}
+.empty-state-desc {
+  font-size: 0.875rem; color: var(--text2); margin-bottom: 20px;
+  line-height: 1.7; max-width: 420px; margin-left: auto; margin-right: auto;
+}
+
+/* Legend item — color dot + label + value (used in charts, breakdowns) */
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+}
+.legend-dot {
+  width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0;
+}
+.legend-label {
+  font-size: 0.82rem; color: var(--text2);
+}
+.legend-value {
+  font-size: 0.92rem; font-weight: 700;
+}
+
+/* Activity / list row — clickable row with border, used in recent runs, project cards */
+.list-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg2); cursor: pointer;
+  transition: background 0.12s, box-shadow 0.15s;
+}
+.list-row:hover { box-shadow: var(--shadow); }
+
+/* Flex utilities — replace the most common inline flex patterns */
+.flex-between {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.flex-center {
+  display: flex; align-items: center; justify-content: center;
+}
+.flex-col {
+  display: flex; flex-direction: column;
+}
+.flex-wrap {
+  display: flex; flex-wrap: wrap;
+}
+.gap-sm  { gap: 6px; }
+.gap-md  { gap: 12px; }
+.gap-lg  { gap: 16px; }
+
+/* Spacing utilities */
+.mb-sm { margin-bottom: 8px; }
+.mb-md { margin-bottom: 16px; }
+.mb-lg { margin-bottom: 24px; }
+.mb-xl { margin-bottom: 32px; }
+
+/* Icon container — used for section icons, project icons, feature icons */
+.icon-box {
+  width: 42px; height: 42px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.icon-box-sm {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.icon-box-accent {
+  background: var(--accent-bg); border: 1px solid rgba(91,110,245,0.2);
+}
+
+/* Mono ID display — truncated ID in monospace */
+.mono-id {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--text3);
+}
+
+/* Info banner — contextual banners (running, warning, success) */
+.banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-radius: 10px; margin-bottom: 16px;
+  font-size: 0.82rem;
+}
+.banner-info    { background: var(--blue-bg);  border: 1px solid #bfdbfe; color: var(--blue); }
+.banner-warning { background: var(--amber-bg); border: 1px solid #fcd34d; color: #92400e; }
+.banner-success { background: var(--green-bg); border: 1px solid #86efac; color: #14532d; }
+.banner-error   { background: var(--red-bg);   border: 1px solid #fca5a5; color: var(--red); }
