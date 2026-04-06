@@ -225,43 +225,6 @@ export default function TestDials({ onChange }) {
             </div>
           </label>
         ))}
-
-        {/* Tuning sliders — only shown when state exploration is selected */}
-        {cfg.exploreMode === "state" && (
-          <div style={{
-            marginTop: 10, paddingTop: 10,
-            borderTop: "1px solid var(--border)",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            <div style={{ fontSize: "0.72rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Explorer tuning
-            </div>
-            {EXPLORER_TUNING.map(t => (
-              <div key={t.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                  <label style={{ fontSize: "0.8rem", color: "var(--text)", fontWeight: 500 }}>
-                    {t.label}
-                  </label>
-                  <span style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "var(--accent)", fontWeight: 600 }}>
-                    {cfg[t.id] ?? t.defaultVal}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={t.min}
-                  max={t.max}
-                  step={t.step}
-                  value={cfg[t.id] ?? t.defaultVal}
-                  onChange={e => update({ [t.id]: parseInt(e.target.value, 10), profile: "" })}
-                  style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
-                />
-                <div style={{ fontSize: "0.68rem", color: "var(--text3)", marginTop: 1 }}>
-                  {t.desc}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </Section>
 
       {/* ③ Coverage approach */}
@@ -480,6 +443,43 @@ export default function TestDials({ onChange }) {
             </div>
           </label>
         ))}
+
+        {/* Explorer tuning — only shown when state exploration is active */}
+        {cfg.exploreMode === "state" && (
+          <div style={{
+            marginTop: 10, paddingTop: 10,
+            borderTop: "1px solid var(--border)",
+            display: "flex", flexDirection: "column", gap: 10,
+          }}>
+            <div style={{ fontSize: "0.72rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Explorer tuning
+            </div>
+            {EXPLORER_TUNING.map(t => (
+              <div key={t.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                  <label style={{ fontSize: "0.8rem", color: "var(--text)", fontWeight: 500 }}>
+                    {t.label}
+                  </label>
+                  <span style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "var(--accent)", fontWeight: 600 }}>
+                    {cfg[t.id] ?? t.defaultVal}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={t.min}
+                  max={t.max}
+                  step={t.step}
+                  value={cfg[t.id] ?? t.defaultVal}
+                  onChange={e => update({ [t.id]: parseInt(e.target.value, 10), profile: "" })}
+                  style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
+                />
+                <div style={{ fontSize: "0.68rem", color: "var(--text3)", marginTop: 1 }}>
+                  {t.desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
 
       {/* ⑧ Output language */}
