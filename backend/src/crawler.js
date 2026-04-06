@@ -4,20 +4,26 @@
  * test generation pipeline.
  *
  * ### Pipeline stages
- * | # | Stage                | Module                              |
- * |---|----------------------|-------------------------------------|
- * | 1 | Smart crawl          | `pipeline/crawlBrowser.js`          |
- * | 2 | Element filtering    | `pipeline/elementFilter.js`         |
- * | 3 | Intent classification| `pipeline/intentClassifier.js`      |
- * | 4 | Journey generation   | `pipeline/journeyGenerator.js`      |
- * | 5 | Deduplication        | `pipeline/pipelineOrchestrator.js`  |
- * | 6 | Assertion enhancement| `pipeline/pipelineOrchestrator.js`  |
- * | 7 | Validate tests       | `pipeline/pipelineOrchestrator.js`  |
- * | 8 | Feedback loop        | `pipeline/feedbackLoop.js`          |
+ * | # | Stage                | Module                                              |
+ * |---|----------------------|-----------------------------------------------------|
+ * | 1 | Smart crawl / Explore| `pipeline/crawlBrowser.js` or `pipeline/stateExplorer.js` |
+ * | 2 | Element filtering    | `pipeline/elementFilter.js`                         |
+ * | 3 | Intent classification| `pipeline/intentClassifier.js`                      |
+ * | 4 | Journey generation   | `pipeline/journeyGenerator.js`                      |
+ * | 5 | Deduplication        | `pipeline/pipelineOrchestrator.js`                  |
+ * | 6 | Assertion enhancement| `pipeline/pipelineOrchestrator.js`                  |
+ * | 7 | Validate tests       | `pipeline/pipelineOrchestrator.js`                  |
+ * | 8 | Feedback loop        | `pipeline/feedbackLoop.js`                          |
+ *
+ * ### Explorer modes (env: `EXPLORER_MODE`)
+ * - `crawl` (default) — link-only BFS crawl via `crawlBrowser.js`
+ * - `state` — state-based exploration via `stateExplorer.js` that executes
+ *   real UI actions (click, fill, submit) and tracks state transitions to
+ *   discover multi-step user flows
  *
  * ### Exports
  * - {@link generateSingleTest} — Generate ONE test from a user description (skips crawl).
- * - {@link crawlAndGenerateTests} — Full 8-stage pipeline from URL crawl.
+ * - {@link crawlAndGenerateTests} — Full 8-stage pipeline from URL crawl or state exploration.
  */
 
 import { getProviderName } from "./aiProvider.js";
