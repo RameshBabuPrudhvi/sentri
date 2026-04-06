@@ -15,7 +15,7 @@
  * | 7 | Validate tests       | `pipeline/pipelineOrchestrator.js`                  |
  * | 8 | Feedback loop        | `pipeline/feedbackLoop.js`                          |
  *
- * ### Explorer modes (env: `EXPLORER_MODE`)
+ * ### Explorer modes (Test Dials `exploreMode`)
  * - `crawl` (default) — link-only BFS crawl via `crawlBrowser.js`
  * - `state` — state-based exploration via `stateExplorer.js` that executes
  *   real UI actions (click, fill, submit) and tracks state transitions to
@@ -36,8 +36,6 @@ import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
-
-const EXPLORER_MODE = (process.env.EXPLORER_MODE || "crawl").toLowerCase();
 
 function setStep(run, step) {
   run.currentStep = step;
@@ -118,24 +116,27 @@ export async function generateSingleTest(project, run, db, { name, description, 
  * @param {Object} run                    - The run record (mutated in place with results).
  * @param {Object} db                     - The database object from {@link module:db.getDb}.
  * @param {Object} [options]
- * @param {string} [options.dialsPrompt]  - Pre-built prompt fragment from Test Dials config.
- * @param {string} [options.testCount]    - Test count hint (`"one"` | `"small"` | `"medium"` | `"large"` | `"ai_decides"`).
- * @param {AbortSignal} [options.signal]  - Abort signal for cancellation.
+ * @param {string} [options.dialsPrompt]   - Pre-built prompt fragment from Test Dials config.
+ * @param {string} [options.testCount]     - Test count hint (`"one"` | `"small"` | `"medium"` | `"large"` | `"ai_decides"`).
+ * @param {string} [options.explorerMode]   - `"crawl"` (default) or `"state"` — from Test Dials.
+ * @param {Object} [options.explorerTuning] - Numeric tuning for state explorer `{ maxStates, maxDepth, maxActions, actionTimeout }`.
+ * @param {AbortSignal} [options.signal]   - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
+export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", explorerMode, explorerTuning, signal } = {}) {
   const runStart = Date.now();
+  const mode = (explorerMode || "crawl").toLowerCase();
 
   // ── Step 1: Smart crawl or state exploration ─────────────────────────────
-  log(run, `🕷️  Starting ${EXPLORER_MODE === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
+  log(run, `🕷️  Starting ${mode === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   setStep(run, 1);
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl;
 
-  if (EXPLORER_MODE === "state") {
+  if (mode === "state") {
     // ── State-based exploration (new engine) ─────────────────────────────
-    const exploration = await exploreStates(project, run, { signal });
+    const exploration = await exploreStates(project, run, { signal, tuning: explorerTuning });
     snapshots = exploration.snapshots;
     snapshotsByUrl = exploration.snapshotsByUrl;
 

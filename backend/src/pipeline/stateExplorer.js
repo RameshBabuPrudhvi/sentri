@@ -25,14 +25,13 @@ import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPattern } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 
-const MAX_STATES = parseInt(process.env.EXPLORE_MAX_STATES, 10)
-  || parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
-const MAX_DEPTH = parseInt(process.env.EXPLORE_MAX_DEPTH, 10)
-  || parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
-const MAX_ACTIONS_PER_STATE = parseInt(process.env.EXPLORE_MAX_ACTIONS, 10) || 8;
-const ACTION_TIMEOUT = parseInt(process.env.EXPLORE_ACTION_TIMEOUT, 10) || 5000;
+// Defaults — overridden per-run by tuning values from Test Dials
+const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
+const DEFAULT_MAX_DEPTH  = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
+const DEFAULT_MAX_ACTIONS = 8;
+const DEFAULT_ACTION_TIMEOUT = 5000;
 
-async function resolveElement(page, selectors, timeout = ACTION_TIMEOUT) {
+async function resolveElement(page, selectors, timeout) {
   for (const sel of selectors) {
     try {
       const locator = page.locator(sel).first();
@@ -43,20 +42,20 @@ async function resolveElement(page, selectors, timeout = ACTION_TIMEOUT) {
   return null;
 }
 
-async function executeAction(page, action) {
-  const el = await resolveElement(page, action.selectors);
+async function executeAction(page, action, actionTimeout) {
+  const el = await resolveElement(page, action.selectors, actionTimeout);
   if (!el) return false;
   try {
     switch (action.type) {
       case "click": case "submit":
-        await el.click({ timeout: ACTION_TIMEOUT }); break;
+        await el.click({ timeout: actionTimeout }); break;
       case "fill":
         if (action.value) { await el.fill(""); await el.fill(action.value); } break;
       case "select":
         await el.selectOption({ index: 1 }).catch(() => {}); break;
       case "check":
-        await el.check({ timeout: ACTION_TIMEOUT }).catch(() =>
-          el.click({ timeout: ACTION_TIMEOUT })
+        await el.check({ timeout: actionTimeout }).catch(() =>
+          el.click({ timeout: actionTimeout })
         ); break;
       default: return false;
     }
@@ -64,8 +63,8 @@ async function executeAction(page, action) {
   } catch { return false; }
 }
 
-async function waitForSettle(page) {
-  await page.waitForLoadState("domcontentloaded", { timeout: ACTION_TIMEOUT }).catch(() => {});
+async function waitForSettle(page, actionTimeout) {
+  await page.waitForLoadState("domcontentloaded", { timeout: actionTimeout }).catch(() => {});
   await page.waitForTimeout(300);
 }
 
@@ -83,12 +82,12 @@ function groupActionsByForm(actions) {
   return { formGroups, standalone };
 }
 
-async function executeFormGroup(page, formActions) {
+async function executeFormGroup(page, formActions, actionTimeout) {
   const executed = [];
   const typeOrder = { fill: 0, check: 1, select: 1, submit: 2, click: 2 };
   const sorted = [...formActions].sort((a, b) => (typeOrder[a.type] || 3) - (typeOrder[b.type] || 3));
   for (const action of sorted) {
-    if (await executeAction(page, action)) executed.push(action);
+    if (await executeAction(page, action, actionTimeout)) executed.push(action);
   }
   return executed;
 }
@@ -111,10 +110,10 @@ function syncRunPages(run, snapshots) {
   run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
 }
 
-async function restorePage(page, beforeUrl, fallbackUrl) {
+async function restorePage(page, beforeUrl, fallbackUrl, actionTimeout) {
   try {
     await page.goto(beforeUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
-    await waitForSettle(page);
+    await waitForSettle(page, actionTimeout);
   } catch {
     await page.goto(fallbackUrl, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
   }
@@ -128,12 +127,12 @@ function enqueueIfNew(ctx, fp, url, depth) {
 }
 
 async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal) {
-  if (depth >= MAX_DEPTH || ctx.states.size >= MAX_STATES) return;
+  if (depth >= ctx.limits.maxDepth || ctx.states.size >= ctx.limits.maxStates) return;
   let links;
   try { links = await page.$$eval("a[href]", els => els.map(e => e.href)); } catch { return; }
   for (const href of links) {
     throwIfAborted(signal);
-    if (ctx.states.size >= MAX_STATES) break;
+    if (ctx.states.size >= ctx.limits.maxStates) break;
     try {
       const u = new URL(href, currentUrl);
       u.hash = ""; u.search = "";
@@ -142,7 +141,7 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
       const pathPattern = extractPathPattern(normalized);
       if (ctx.pathPatternsSeen.has(pathPattern)) continue;
       await page.goto(normalized, { waitUntil: "domcontentloaded", timeout: 15000 });
-      await waitForSettle(page);
+      await waitForSettle(page, ctx.limits.actionTimeout);
       const { fp: linkFp, isNovel } = await captureState(page, ctx);
       if (isNovel && !statesEqual(linkFp, currentFp)) {
         ctx.pathPatternsSeen.add(pathPattern);
@@ -152,18 +151,26 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
         log(run, `   🔗 Link: ${normalized} [${linkFp.slice(0, 8)}]`);
       }
       await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
-      await waitForSettle(page);
+      await waitForSettle(page, ctx.limits.actionTimeout);
     } catch { /* skip broken links */ }
   }
 }
 
-export async function exploreStates(project, run, { signal } = {}) {
+export async function exploreStates(project, run, { signal, tuning } = {}) {
+  // Resolve per-run limits from Test Dials tuning, falling back to defaults
+  const limits = {
+    maxStates:     tuning?.maxStates     || DEFAULT_MAX_STATES,
+    maxDepth:      tuning?.maxDepth      || DEFAULT_MAX_DEPTH,
+    maxActions:    tuning?.maxActions     || DEFAULT_MAX_ACTIONS,
+    actionTimeout: tuning?.actionTimeout || DEFAULT_ACTION_TIMEOUT,
+  };
+
   const browser = await chromium.launch({
     headless: process.env.BROWSER_HEADLESS !== "false",
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
-  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [] };
+  const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits };
   let startState = null;
 
   try {
@@ -190,12 +197,12 @@ export async function exploreStates(project, run, { signal } = {}) {
     syncRunPages(run, ctx.snapshots);
     log(run, `🔍 Initial state: ${project.url} [${initialFp.slice(0, 8)}]`);
 
-    while (ctx.queue.length > 0 && ctx.states.size < MAX_STATES) {
+    while (ctx.queue.length > 0 && ctx.states.size < limits.maxStates) {
       throwIfAborted(signal);
       const { fp: currentFp, url: currentUrl, depth } = ctx.queue.shift();
-      if (depth > MAX_DEPTH) continue;
+      if (depth > limits.maxDepth) continue;
       try {
-        if (page.url() !== currentUrl) { await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15000 }); await waitForSettle(page); }
+        if (page.url() !== currentUrl) { await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15000 }); await waitForSettle(page, limits.actionTimeout); }
       } catch (err) { logWarn(run, `Failed to navigate to ${currentUrl}: ${err.message}`); continue; }
 
       const actions = discoverActions(ctx.snapshotsByFp.get(currentFp));
@@ -204,11 +211,11 @@ export async function exploreStates(project, run, { signal } = {}) {
 
       for (const [formId, formActions] of formGroups) {
         throwIfAborted(signal);
-        if (ctx.states.size >= MAX_STATES) break;
+        if (ctx.states.size >= limits.maxStates) break;
         const beforeUrl = page.url();
         log(run, `   📝 Form "${formId}" (${formActions.length} fields)...`);
-        const executed = await executeFormGroup(page, formActions);
-        await waitForSettle(page);
+        const executed = await executeFormGroup(page, formActions, limits.actionTimeout);
+        await waitForSettle(page, limits.actionTimeout);
         if (executed.length > 0) {
           try {
             const { fp: resultFp, isNovel } = await captureState(page, ctx);
@@ -218,18 +225,18 @@ export async function exploreStates(project, run, { signal } = {}) {
             }
           } catch (err) { logWarn(run, `   Snapshot failed after form: ${err.message}`); }
         }
-        await restorePage(page, beforeUrl, currentUrl);
+        await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
       }
 
       let explored = 0;
       for (const action of standalone) {
         throwIfAborted(signal);
-        if (ctx.states.size >= MAX_STATES || explored >= MAX_ACTIONS_PER_STATE) break;
+        if (ctx.states.size >= limits.maxStates || explored >= limits.maxActions) break;
         if (action.isDestructive) { log(run, `   ⏭️  Skip destructive: "${action.element.text}"`); continue; }
         const beforeUrl = page.url();
-        if (!await executeAction(page, action)) continue;
+        if (!await executeAction(page, action, limits.actionTimeout)) continue;
         explored++;
-        await waitForSettle(page);
+        await waitForSettle(page, limits.actionTimeout);
         try {
           const { fp: resultFp, isNovel } = await captureState(page, ctx);
           if (!statesEqual(resultFp, currentFp)) {
@@ -237,7 +244,7 @@ export async function exploreStates(project, run, { signal } = {}) {
             if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
           }
         } catch (err) { logWarn(run, `   Snapshot failed after action: ${err.message}`); }
-        await restorePage(page, beforeUrl, currentUrl);
+        await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
       }
 
       await crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal);

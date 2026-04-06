@@ -35,6 +35,13 @@ router.post("/projects/:id/crawl", async (req, res) => {
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedDials = resolveDialsConfig(dialsConfig);
   const testCount = validatedDials?.testCount || "ai_decides";
+  const explorerMode = validatedDials?.exploreMode || "crawl";
+  const explorerTuning = {
+    maxStates:     validatedDials?.exploreMaxStates     ?? 30,
+    maxDepth:      validatedDials?.exploreMaxDepth      ?? 3,
+    maxActions:    validatedDials?.exploreMaxActions     ?? 8,
+    actionTimeout: validatedDials?.exploreActionTimeout  ?? 5000,
+  };
 
   const runId = generateRunId(db);
   const run = {
@@ -56,7 +63,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   });
 
   runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, testCount, signal }),
+    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
     {
       onSuccess: () => logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Settings2, ChevronDown, Save, RotateCcw,
   Target, Users, ShieldCheck, FileText, Globe, Info,
-  Hash, SlidersHorizontal,
+  Hash, SlidersHorizontal, Compass,
 } from "lucide-react";
 import {
   APPROACH_OPTIONS,
@@ -11,6 +11,8 @@ import {
   FORMAT_OPTIONS,
   LANGUAGES,
   TEST_COUNT_OPTIONS,
+  EXPLORE_MODE_OPTIONS,
+  EXPLORER_TUNING,
   OPTION_TOGGLES,
   PROFILE_OPTIONS,
   DEFAULT_CONFIG,
@@ -117,6 +119,11 @@ export default function TestDials({ onChange }) {
       quality:            [...profile.quality],
       format:             profile.format,
       testCount:          profile.testCount,
+      exploreMode:          profile.exploreMode || "crawl",
+      exploreMaxStates:     DEFAULT_CONFIG.exploreMaxStates,
+      exploreMaxDepth:      DEFAULT_CONFIG.exploreMaxDepth,
+      exploreMaxActions:    DEFAULT_CONFIG.exploreMaxActions,
+      exploreActionTimeout: DEFAULT_CONFIG.exploreActionTimeout,
       options:            { ...DEFAULT_CONFIG.options },
       customInstructions: "",
     }));
@@ -185,7 +192,79 @@ export default function TestDials({ onChange }) {
         <ProfileDropdown value={cfg.profile} onChange={applyProfile} />
       </div>
 
-      {/* ② Coverage approach */}
+      {/* ② Explore mode */}
+      <Section
+        icon={<Compass size={15} />}
+        label="Explore mode"
+        subtitle={EXPLORE_MODE_OPTIONS.find(o => o.id === cfg.exploreMode)?.label || "Link crawl"}
+        defaultOpen={false}
+      >
+        <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginBottom: 6,
+          display: "flex", alignItems: "center", gap: 6 }}>
+          <Info size={11} /> How should Sentri discover your app before generating tests?
+        </div>
+        {EXPLORE_MODE_OPTIONS.map(opt => (
+          <label key={opt.id} style={{ display: "flex", alignItems: "flex-start",
+            gap: 10, cursor: "pointer", padding: "3px 0" }}>
+            <input
+              type="radio"
+              name="exploreMode"
+              value={opt.id}
+              checked={cfg.exploreMode === opt.id}
+              onChange={() => update({ exploreMode: opt.id, profile: "" })}
+              style={{ marginTop: 3, accentColor: "var(--accent)", cursor: "pointer" }}
+            />
+            <div>
+              <div style={{ fontSize: "0.85rem", color: "var(--text)",
+                fontWeight: cfg.exploreMode === opt.id ? 500 : 400 }}>
+                {opt.label}
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 1 }}>
+                {opt.desc}
+              </div>
+            </div>
+          </label>
+        ))}
+
+        {/* Tuning sliders — only shown when state exploration is selected */}
+        {cfg.exploreMode === "state" && (
+          <div style={{
+            marginTop: 10, paddingTop: 10,
+            borderTop: "1px solid var(--border)",
+            display: "flex", flexDirection: "column", gap: 10,
+          }}>
+            <div style={{ fontSize: "0.72rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Explorer tuning
+            </div>
+            {EXPLORER_TUNING.map(t => (
+              <div key={t.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                  <label style={{ fontSize: "0.8rem", color: "var(--text)", fontWeight: 500 }}>
+                    {t.label}
+                  </label>
+                  <span style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "var(--accent)", fontWeight: 600 }}>
+                    {cfg[t.id] ?? t.defaultVal}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={t.min}
+                  max={t.max}
+                  step={t.step}
+                  value={cfg[t.id] ?? t.defaultVal}
+                  onChange={e => update({ [t.id]: parseInt(e.target.value, 10), profile: "" })}
+                  style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
+                />
+                <div style={{ fontSize: "0.68rem", color: "var(--text3)", marginTop: 1 }}>
+                  {t.desc}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* ③ Coverage approach */}
       <Section
         icon={<Target size={15} />}
         label="Coverage approach"

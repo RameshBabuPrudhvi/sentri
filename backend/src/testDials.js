@@ -160,19 +160,35 @@ export const TEST_COUNT_OPTIONS = [
   { id: "ai_decides",label: "AI decides" },
 ];
 
+// ── Explore mode ────────────────────────────────────────────────────────────────
+// Controls Step 1 of the pipeline: link-only crawl vs state-based exploration.
+// Not injected into the AI prompt — this controls the crawler engine, not the LLM.
+export const EXPLORE_MODE_OPTIONS = [
+  { id: "crawl", label: "Link crawl" },
+  { id: "state", label: "State exploration" },
+];
+
 // ─── Validation sets ────────────────────────────────────────────────────────────
 
-const VALID_APPROACHES   = new Set(APPROACH_OPTIONS.map(a => a.id));
-const VALID_PERSPECTIVES = new Set(PERSPECTIVE_OPTIONS.map(p => p.id));
-const VALID_QUALITIES    = new Set(QUALITY_OPTIONS.map(q => q.id));
-const VALID_FORMATS      = new Set(FORMAT_OPTIONS.map(f => f.id));
-const VALID_LANGUAGES    = new Set(LANGUAGES.map(l => l.code));
-const VALID_TEST_COUNTS  = new Set(TEST_COUNT_OPTIONS.map(t => t.id));
+const VALID_APPROACHES    = new Set(APPROACH_OPTIONS.map(a => a.id));
+const VALID_PERSPECTIVES  = new Set(PERSPECTIVE_OPTIONS.map(p => p.id));
+const VALID_QUALITIES     = new Set(QUALITY_OPTIONS.map(q => q.id));
+const VALID_FORMATS       = new Set(FORMAT_OPTIONS.map(f => f.id));
+const VALID_LANGUAGES     = new Set(LANGUAGES.map(l => l.code));
+const VALID_TEST_COUNTS   = new Set(TEST_COUNT_OPTIONS.map(t => t.id));
+const VALID_EXPLORE_MODES = new Set(EXPLORE_MODE_OPTIONS.map(e => e.id));
 
 // Keep in sync with OPTION_TOGGLES in frontend/src/config/testDialsConfig.js
 const VALID_OPTION_KEYS  = new Set(["selectorHints", "preconditions", "testDataExamples", "markPriority"]);
 
 const CUSTOM_MAX_LENGTH  = 500;
+
+/** Clamp a numeric value to [min, max], falling back to `def` if not a finite number. */
+function clampInt(val, min, max, def) {
+  const n = parseInt(val, 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+}
 
 // ─── Validate & sanitise ────────────────────────────────────────────────────────
 
@@ -190,6 +206,11 @@ const CUSTOM_MAX_LENGTH  = 500;
  * @property {string}   format             - Format ID (e.g. `"step_by_step"`).
  * @property {string}   language           - Language code (e.g. `"en-US"`).
  * @property {string}   testCount          - Test count ID (e.g. `"ai_decides"`).
+ * @property {string}   exploreMode        - Explore mode ID (`"crawl"` or `"state"`).
+ * @property {number}   exploreMaxStates     - Max states to discover (5–100, default 30).
+ * @property {number}   exploreMaxDepth      - Max exploration depth (1–10, default 3).
+ * @property {number}   exploreMaxActions    - Max actions per state (1–20, default 8).
+ * @property {number}   exploreActionTimeout - Action timeout in ms (1000–15000, default 5000).
  * @property {Object}   options            - Boolean option flags.
  * @property {string}   customInstructions - Free-text instructions (sanitised, max 500 chars).
  */
@@ -212,6 +233,14 @@ export function validateDialsConfig(raw) {
 
   const testCount = VALID_TEST_COUNTS.has(raw.testCount) ? raw.testCount : "ai_decides";
 
+  const exploreMode = VALID_EXPLORE_MODES.has(raw.exploreMode) ? raw.exploreMode : "crawl";
+
+  // Validate explorer tuning — clamp to safe ranges
+  const exploreMaxStates     = clampInt(raw.exploreMaxStates,     5, 100,   30);
+  const exploreMaxDepth      = clampInt(raw.exploreMaxDepth,      1, 10,    3);
+  const exploreMaxActions    = clampInt(raw.exploreMaxActions,     1, 20,    8);
+  const exploreActionTimeout = clampInt(raw.exploreActionTimeout,  1000, 15000, 5000);
+
   // Validate options object — only known boolean keys accepted
   const rawOpts = raw.options && typeof raw.options === "object" ? raw.options : {};
   const options = {};
@@ -228,7 +257,11 @@ export function validateDialsConfig(raw) {
     .replace(/```/g, "")
     .trim();
 
-  return { approach, perspectives, quality, format, language, testCount, options, customInstructions };
+  return {
+    approach, perspectives, quality, format, language, testCount,
+    exploreMode, exploreMaxStates, exploreMaxDepth, exploreMaxActions, exploreActionTimeout,
+    options, customInstructions,
+  };
 }
 
 // ─── Build the prompt fragment ──────────────────────────────────────────────────
