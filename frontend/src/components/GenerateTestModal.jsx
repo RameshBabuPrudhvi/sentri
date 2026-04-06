@@ -169,18 +169,50 @@ export default function GenerateTestModal({ projects = [], onClose }) {
     setTimeout(() => nameRef.current?.focus(), 60);
   }, []);
 
+  // MIME types that are safe to read as text — anything else is rejected.
+  const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml", "application/x-yaml", "application/yaml"];
+  const TEXT_MIME_EXACT = new Set([
+    "text/plain", "text/csv", "text/html", "text/markdown", "text/xml", "text/yaml",
+    "application/json", "application/xml", "application/x-yaml", "application/yaml",
+  ]);
+
+  function isTextMime(file) {
+    const mime = (file.type || "").toLowerCase();
+    // Files with no MIME (e.g. .feature, .gherkin) — allow if extension is in the accept list
+    if (!mime) return true;
+    if (TEXT_MIME_EXACT.has(mime)) return true;
+    if (TEXT_MIME_PREFIXES.some(p => mime.startsWith(p))) return true;
+    return false;
+  }
+
   function handleFileSelect(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = ""; // reset so the same file can be re-selected
     for (const file of files) {
+      if (!isTextMime(file)) {
+        setError(`"${file.name}" appears to be a binary file (${file.type || "unknown type"}). Only text-based files are supported.`);
+        continue;
+      }
       if (file.size > MAX_ATTACHMENT_SIZE) {
         setError(`"${file.name}" is too large (${Math.round(file.size / 1000)} KB). Max is 40 KB per file.`);
         continue;
       }
       const reader = new FileReader();
       reader.onload = () => {
+        const raw = reader.result;
+        // Detect binary content that slipped through MIME check — if more than 5%
+        // of the first 1 KB is non-printable, reject it.
+        const sample = raw.slice(0, 1024);
+        const nonPrintable = [...sample].filter(c => {
+          const code = c.charCodeAt(0);
+          return code < 32 && code !== 9 && code !== 10 && code !== 13; // allow tab, LF, CR
+        }).length;
+        if (sample.length > 0 && nonPrintable / sample.length > 0.05) {
+          setError(`"${file.name}" contains binary data and cannot be used as a text attachment.`);
+          return;
+        }
         // Strip common prompt-injection markers (mirrors backend testDials.js sanitisation)
-        const content = reader.result
+        const content = raw
           .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
           .replace(/```/g, "");
         setAttachments(prev => {
