@@ -20,7 +20,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** @type {Object} The Express application instance. */
+/**
+ * The Express application instance.
+ * @type {Object}
+ */
 export const app = express();
 
 // ─── Global middleware ────────────────────────────────────────────────────────
@@ -28,7 +31,10 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
-/** @type {string} Absolute path to the Playwright artifacts directory (screenshots, videos, traces). */
+/**
+ * Absolute path to the Playwright artifacts directory (screenshots, videos, traces).
+ * @type {string}
+ */
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
 app.use("/artifacts", express.static(ARTIFACTS_DIR, {
   setHeaders(res, fp) {
