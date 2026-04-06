@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# Generated API docs (JSDoc)
+backend/docs-api/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Data persistence
+backend/data/
+
+# Playwright artifacts
+backend/artifacts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

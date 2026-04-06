@@ -1,7 +1,18 @@
-// Simple in-memory store with periodic JSON persistence.
-// Data is written to disk every 30s and on process exit so a crash
-// during test execution doesn't wipe everything.
-// Swap for Postgres/SQLite in production.
+/**
+ * @module db
+ * @description Simple in-memory store with periodic JSON persistence.
+ *
+ * Data is written to disk every 30 seconds and on process exit so a crash
+ * during test execution doesn't wipe everything.
+ * Swap for PostgreSQL/SQLite in production.
+ *
+ * @example
+ * import { getDb, saveDb } from "./db.js";
+ *
+ * const db = getDb();
+ * db.projects["PRJ-1"] = { id: "PRJ-1", name: "My App", url: "https://example.com" };
+ * saveDb(); // flush to disk immediately
+ */
 
 import fs from "fs";
 import path from "path";
@@ -41,12 +52,33 @@ function saveToDisk(db) {
   }
 }
 
-/** Immediately flush the current DB state to disk. Call after any write that
- *  must survive a crash or nodemon restart (e.g. creating a new run). */
+/**
+ * Immediately flush the current DB state to disk.
+ * Call after any write that must survive a crash or nodemon restart
+ * (e.g. creating a new run, registering a user).
+ *
+ * @returns {void}
+ */
 export function saveDb() {
   if (_db) saveToDisk(_db);
 }
 
+/**
+ * Returns the singleton in-memory database object.
+ * On first call, loads from disk (if available), initialises missing keys,
+ * recovers orphaned runs, and starts periodic persistence.
+ *
+ * @returns {DatabaseSchema} The database object with all collections.
+ *
+ * @typedef {Object} DatabaseSchema
+ * @property {Object<string, User>}           users          - Registered users keyed by ID
+ * @property {Object<string, string>}         oauthIds       - OAuth provider links: `"github:12345"` → userId
+ * @property {Object<string, Project>}        projects       - Projects keyed by ID (e.g. `"PRJ-1"`)
+ * @property {Object<string, Test>}           tests          - Tests keyed by ID (e.g. `"TC-1"`)
+ * @property {Object<string, Run>}            runs           - Runs keyed by ID (e.g. `"RUN-1"`)
+ * @property {Object<string, Activity>}       activities     - Activity log entries keyed by ID
+ * @property {Object<string, HealingEntry>}   healingHistory - Self-healing history keyed by `"<testId>::<action>::<label>"`
+ */
 export function getDb() {
   if (!_db) {
     const restored = loadFromDisk();

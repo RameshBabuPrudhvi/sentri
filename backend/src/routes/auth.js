@@ -1,22 +1,25 @@
 /**
- * routes/auth.js
+ * @module routes/auth
+ * @description Authentication routes for email/password and OAuth (GitHub, Google).
  *
- * Authentication routes:
- *   POST /api/auth/register        — email/password registration
- *   POST /api/auth/login           — email/password login
- *   POST /api/auth/logout          — token revocation (server-side blocklist)
- *   GET  /api/auth/me              — return current user from token
- *   GET  /api/auth/github/callback — GitHub OAuth token exchange
- *   GET  /api/auth/google/callback — Google OAuth token exchange
+ * ### Endpoints
+ * | Method | Path                          | Description                          |
+ * |--------|-------------------------------|--------------------------------------|
+ * | POST   | `/api/auth/register`          | Email/password registration          |
+ * | POST   | `/api/auth/login`             | Email/password sign-in               |
+ * | POST   | `/api/auth/logout`            | Token revocation (server-side)       |
+ * | GET    | `/api/auth/me`                | Return current user from token       |
+ * | GET    | `/api/auth/github/callback`   | GitHub OAuth token exchange          |
+ * | GET    | `/api/auth/google/callback`   | Google OAuth token exchange          |
  *
- * Security measures:
- *   • Passwords hashed with scrypt (64-byte key, 16-byte random salt)
- *   • JWT signed with HS256, 8-hour expiry
- *   • Rate limiting: 10 login attempts per IP per 15 minutes
- *   • Revoked tokens kept in an in-memory Map (production: use Redis)
- *   • Input validation and sanitisation on every endpoint
- *   • OAuth state parameter validated on the frontend to prevent CSRF
- *   • No sensitive data (passwords, raw OAuth tokens) returned to client
+ * ### Security measures
+ * - Passwords hashed with scrypt (64-byte key, 16-byte random salt)
+ * - JWT signed with HS256, 8-hour expiry
+ * - Rate limiting: 10 sign-in attempts per IP per 15 minutes
+ * - Revoked tokens kept in an in-memory Map (production: use Redis)
+ * - Input validation and sanitisation on every endpoint
+ * - OAuth state parameter validated on the frontend to prevent CSRF
+ * - No sensitive data (passwords, raw OAuth tokens) returned to client
  */
 
 import express from "express";
@@ -27,7 +30,14 @@ const router = express.Router();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** bcrypt-compatible pure-JS password hashing using scrypt (no native addon needed) */
+/**
+ * Hash a password using Node.js scrypt (no native addon needed).
+ * Generates a 16-byte random salt and derives a 64-byte key.
+ *
+ * @param   {string} password - The plaintext password to hash.
+ * @returns {Promise<string>}   Format: `"<hex-salt>:<hex-derived-key>"`.
+ * @private
+ */
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const derived = await new Promise((res, rej) =>
@@ -36,6 +46,15 @@ async function hashPassword(password) {
   return `${salt}:${derived.toString("hex")}`;
 }
 
+/**
+ * Verify a plaintext password against a stored hash.
+ * Uses constant-time comparison to prevent timing attacks.
+ *
+ * @param   {string}  password - The plaintext password to verify.
+ * @param   {string}  stored   - The stored hash in `"<salt>:<key>"` format.
+ * @returns {Promise<boolean>}   `true` if the password matches.
+ * @private
+ */
 async function verifyPassword(password, stored) {
   const [salt, hash] = stored.split(":");
   const derived = await new Promise((res, rej) =>
@@ -45,7 +64,15 @@ async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), derived);
 }
 
-/** Sign a JWT with HS256 (no external library needed) */
+/**
+ * Sign a JWT with HS256 using only Node.js `crypto` (no external library).
+ *
+ * @param   {Object} payload      - Claims to include (e.g. `{ sub, email, role, jti }`).
+ * @param   {string} secret       - HMAC secret (32+ chars recommended).
+ * @param   {number} [expiresInSec=28800] - Token lifetime in seconds (default 8 hours).
+ * @returns {string}                The signed JWT string (`header.payload.signature`).
+ * @private
+ */
 function signJwt(payload, secret, expiresInSec = 8 * 60 * 60) {
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const body   = Buffer.from(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + expiresInSec })).toString("base64url");
@@ -53,6 +80,16 @@ function signJwt(payload, secret, expiresInSec = 8 * 60 * 60) {
   return `${header}.${body}.${sig}`;
 }
 
+/**
+ * Verify and decode a JWT signed with HS256.
+ * Returns the decoded payload if valid, or `null` if invalid/expired/malformed.
+ * Uses constant-time signature comparison and explicit buffer length check.
+ *
+ * @param   {string}       token  - The JWT string to verify.
+ * @param   {string}       secret - The HMAC secret used for signing.
+ * @returns {Object|null}           Decoded payload, or `null` on failure.
+ * @private
+ */
 function verifyJwt(token, secret) {
   try {
     const parts = token?.split(".");
@@ -125,7 +162,22 @@ _purgeInterval.unref();
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
-/** Validates Bearer token and attaches req.authUser */
+/**
+ * Express middleware that validates a Bearer JWT token.
+ * On success, attaches the decoded payload to `req.authUser`.
+ * On failure, responds with `401 Unauthorized`.
+ *
+ * @param {import('express').Request}  req  - Express request (reads `Authorization` header).
+ * @param {import('express').Response} res  - Express response.
+ * @param {import('express').NextFunction} next - Express next middleware.
+ * @returns {void}
+ *
+ * @example
+ * import { requireAuth } from "./routes/auth.js";
+ * router.get("/protected", requireAuth, (req, res) => {
+ *   res.json({ userId: req.authUser.sub });
+ * });
+ */
 export function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -143,9 +195,24 @@ export function requireAuth(req, res, next) {
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
 
+/**
+ * Validate an email address format.
+ * @param   {string}  email - The email to validate.
+ * @returns {boolean}         `true` if the format is valid.
+ * @private
+ */
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
 }
+/**
+ * Trim and truncate a string to prevent oversized input.
+ * Returns empty string for non-string values.
+ *
+ * @param   {*}      str           - The value to sanitise.
+ * @param   {number} [maxLen=200]  - Maximum allowed length.
+ * @returns {string}                 The sanitised string.
+ * @private
+ */
 function sanitiseString(str, maxLen = 200) {
   return typeof str === "string" ? str.trim().slice(0, maxLen) : "";
 }
@@ -153,8 +220,16 @@ function sanitiseString(str, maxLen = 200) {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 /**
- * POST /api/auth/register
- * Body: { name, email, password }
+ * Register a new user with email and password.
+ *
+ * @route POST /api/auth/register
+ * @param {Object} req.body
+ * @param {string} req.body.name     - Full name (max 100 chars).
+ * @param {string} req.body.email    - Email address (max 254 chars).
+ * @param {string} req.body.password - Password (8–128 chars).
+ * @returns {201} `{ message }` on success.
+ * @returns {400} Validation error.
+ * @returns {409} Email already exists.
  */
 router.post("/register", async (req, res) => {
   try {
@@ -192,8 +267,17 @@ router.post("/register", async (req, res) => {
 });
 
 /**
- * POST /api/auth/login
- * Body: { email, password }
+ * Sign in with email and password. Returns a JWT token and user profile.
+ * Rate-limited to 10 attempts per IP per 15 minutes.
+ *
+ * @route POST /api/auth/login
+ * @param {Object} req.body
+ * @param {string} req.body.email    - Email address.
+ * @param {string} req.body.password - Password.
+ * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {400} Invalid input.
+ * @returns {401} Wrong credentials.
+ * @returns {429} Rate limit exceeded (`Retry-After` header set).
  */
 router.post("/login", async (req, res) => {
   const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
@@ -236,9 +320,12 @@ router.post("/login", async (req, res) => {
 });
 
 /**
- * POST /api/auth/logout
- * Requires Authorization: Bearer <token>
- * Revokes the token server-side.
+ * Sign out — revokes the JWT server-side so it can't be reused.
+ * Requires `Authorization: Bearer <token>`.
+ *
+ * @route POST /api/auth/logout
+ * @returns {200} `{ message: "Signed out successfully." }`.
+ * @returns {401} Missing or invalid token.
  */
 router.post("/logout", requireAuth, (req, res) => {
   const { jti, exp } = req.authUser;
@@ -247,8 +334,13 @@ router.post("/logout", requireAuth, (req, res) => {
 });
 
 /**
- * GET /api/auth/me
- * Returns the authenticated user's profile.
+ * Get the currently authenticated user's profile.
+ * Requires `Authorization: Bearer <token>`.
+ *
+ * @route GET /api/auth/me
+ * @returns {200} `{ id, name, email, role, avatar, createdAt }`.
+ * @returns {401} Missing or invalid token.
+ * @returns {404} User not found in database.
  */
 router.get("/me", requireAuth, (req, res) => {
   const db   = getDb();
@@ -260,8 +352,15 @@ router.get("/me", requireAuth, (req, res) => {
 // ─── GitHub OAuth ─────────────────────────────────────────────────────────────
 
 /**
- * GET /api/auth/github/callback?code=...
- * Exchanges GitHub code for a user profile and issues a Sentri JWT.
+ * GitHub OAuth callback. Exchanges an authorization code for an access token,
+ * fetches the user profile, and issues a signed JWT.
+ *
+ * @route GET /api/auth/github/callback
+ * @param {string} req.query.code - The OAuth authorization code from GitHub.
+ * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {400} Missing code parameter.
+ * @returns {401} Token exchange or profile fetch failed.
+ * @returns {503} GitHub OAuth not configured on this server.
  */
 router.get("/github/callback", async (req, res) => {
   const code  = req.query.code;
@@ -326,8 +425,15 @@ router.get("/github/callback", async (req, res) => {
 // ─── Google OAuth ─────────────────────────────────────────────────────────────
 
 /**
- * GET /api/auth/google/callback?code=...
- * Exchanges Google code for an ID token, verifies it, and issues a Sentri JWT.
+ * Google OAuth callback. Exchanges an authorization code for an access token,
+ * fetches the user profile, and issues a signed JWT.
+ *
+ * @route GET /api/auth/google/callback
+ * @param {string} req.query.code - The OAuth authorization code from Google.
+ * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {400} Missing code parameter.
+ * @returns {401} Token exchange or profile fetch failed.
+ * @returns {503} Google OAuth not configured on this server.
  */
 router.get("/google/callback", async (req, res) => {
   const code = req.query.code;
@@ -384,6 +490,20 @@ router.get("/google/callback", async (req, res) => {
 
 // ─── Shared OAuth helper ──────────────────────────────────────────────────────
 
+/**
+ * Find an existing user by OAuth provider ID or email, or create a new one.
+ * If a user with the same email exists (registered via a different provider),
+ * the accounts are linked automatically.
+ *
+ * @param {Object} opts
+ * @param {string} opts.provider   - OAuth provider name (e.g. `"github"`, `"google"`).
+ * @param {string} opts.providerId - Provider-specific user ID.
+ * @param {string} opts.email      - User's email (lowercased).
+ * @param {string} opts.name       - Display name.
+ * @param {string|null} opts.avatar - Avatar URL, or `null`.
+ * @returns {Promise<User>}          The found or newly created user object.
+ * @private
+ */
 async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar }) {
   const db    = getDb();
   db.users    = db.users || {};

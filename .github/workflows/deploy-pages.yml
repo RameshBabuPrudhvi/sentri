@@ -27,13 +27,10 @@ env:
   IMAGE_PREFIX: ${{ github.repository }}
 
 jobs:
-  # ── 1. Build & deploy frontend to GitHub Pages ─────────────────────────────
+  # ── 1. Build & deploy frontend + docs + JSDoc to GitHub Pages ───────────────
   pages:
-    name: GitHub Pages — Frontend
+    name: GitHub Pages — Frontend + Docs
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -46,22 +43,56 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
+      # ── Build frontend SPA ──────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
         run: npm install
 
-      - name: Build with GitHub Pages base path
+      - name: Build frontend with GitHub Pages base path
+        working-directory: frontend
         run: npm run build
         env:
           GITHUB_PAGES: "true"
           VITE_API_URL: ${{ vars.VITE_API_URL || '' }}
 
-      - name: Create 404.html for SPA routing
-        run: cp dist/index.html dist/404.html
+      # ── Generate JSDoc (backend API docs) ───────────────────────────────────
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Generate JSDoc
+        working-directory: backend
+        run: npx jsdoc -c jsdoc.json
+
+      # ── Build VitePress docs ────────────────────────────────────────────────
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm install
+
+      - name: Copy JSDoc output into VitePress public folder
+        run: |
+          mkdir -p docs/public/jsdoc
+          cp -r backend/docs-api/* docs/public/jsdoc/
+
+      - name: Build VitePress
+        working-directory: docs
+        run: npm run build
+
+      # ── Merge all outputs into a single deploy folder ───────────────────────
+      #   /sentri/          → frontend SPA
+      #   /sentri/docs/     → VitePress guide + API reference
+      #   /sentri/docs/jsdoc/ → JSDoc auto-generated code docs
+      - name: Assemble Pages output
+        run: |
+          mkdir -p _site
+          cp -r frontend/dist/* _site/
+          mkdir -p _site/docs
+          cp -r docs/.vitepress/dist/* _site/docs/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend/dist
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
@@ -97,7 +128,8 @@ jobs:
       - name: Build & push backend image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: .
+          file: backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -133,7 +165,8 @@ jobs:
       - name: Build & push frontend image
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: .
+          file: frontend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,16 +1,20 @@
 /**
- * AuthContext.jsx
+ * @module context/AuthContext
+ * @description Provides authentication state (user, token) across the app via React Context.
  *
- * Provides authentication state (user, token) across the app.
- * Token is stored in localStorage with a short-lived accessToken pattern.
+ * Token is stored in `localStorage` with a short-lived accessToken pattern.
  * Sensitive data is never stored — only the JWT string and safe user fields.
  *
- * Security notes:
- *   • Passwords are NEVER handled here — they go straight to the API.
- *   • Tokens are validated on every protected API call via Authorization header.
- *   • On 401 responses, the user is automatically logged out (token revoked or expired).
- *   • The token expiry is decoded client-side only for UX (redirect before it expires).
- *     The server always validates independently.
+ * ### Security notes
+ * - Passwords are NEVER handled here — they go straight to the API.
+ * - Tokens are validated on every protected API call via `Authorization` header.
+ * - On 401 responses, the user is automatically signed out (token revoked or expired).
+ * - Token expiry is decoded client-side only for UX (redirect before it expires).
+ *   The server always validates independently.
+ *
+ * ### Exports
+ * - {@link AuthProvider} — React context provider component.
+ * - {@link useAuth} — Hook to access `{ user, token, login, logout, authFetch, loading }`.
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
@@ -22,7 +26,15 @@ const AuthContext = createContext(null);
 const TOKEN_KEY = "app_auth_token";
 const USER_KEY  = "app_auth_user";
 
-/** Decode JWT payload without verifying (verification happens server-side) */
+/**
+ * Decode a JWT payload without verifying the signature.
+ * Verification always happens server-side — this is only for client-side UX
+ * (e.g. checking expiry before making a request).
+ *
+ * @param   {string}      token - The JWT string.
+ * @returns {Object|null}         Decoded payload, or `null` on failure.
+ * @private
+ */
 function decodeJwt(token) {
   try {
     let payload = token.split(".")[1];
@@ -35,13 +47,35 @@ function decodeJwt(token) {
   }
 }
 
-/** Check if a decoded JWT payload is still valid */
+/**
+ * Check if a decoded JWT payload is still valid (not expired).
+ * Includes a 30-second buffer so the client redirects before the server rejects.
+ *
+ * @param   {Object|null} decoded - Decoded JWT payload (from {@link decodeJwt}).
+ * @returns {boolean}               `true` if the token has not expired.
+ * @private
+ */
 function isTokenValid(decoded) {
   if (!decoded?.exp) return false;
   // Give a 30-second buffer so we refresh before the server rejects it
   return decoded.exp * 1000 > Date.now() + 30_000;
 }
 
+/**
+ * React context provider that manages authentication state.
+ * Wrap your app's root with this to enable `useAuth()` in child components.
+ *
+ * Provides: `{ user, token, login, logout, authFetch, loading }`.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.children - Child components.
+ * @returns {React.ReactElement}
+ *
+ * @example
+ * <AuthProvider>
+ *   <App />
+ * </AuthProvider>
+ */
 export function AuthProvider({ children }) {
   const [token, setToken]   = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser]     = useState(() => {
@@ -82,7 +116,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
-  /** Called after successful login or OAuth callback */
+  /**
+   * Store a new token and user profile after successful sign-in or OAuth callback.
+   * Validates the token before storing. Only safe fields are persisted.
+   *
+   * @param {string} newToken - The JWT string from the backend.
+   * @param {Object} userData - User profile `{ id, name, email, avatar?, role? }`.
+   * @throws {Error} If the token is invalid or expired.
+   */
   async function login(newToken, userData) {
     const decoded = decodeJwt(newToken);
     if (!decoded || !isTokenValid(decoded)) {
@@ -102,8 +143,12 @@ export function AuthProvider({ children }) {
     setUser(safeUser);
   }
 
+  /**
+   * Sign out the current user. Revokes the token server-side (fire-and-forget)
+   * and clears localStorage immediately.
+   */
   function logout() {
-    // Optionally call /api/auth/logout to invalidate server-side session
+    // Call /api/auth/logout to invalidate server-side session
     fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
@@ -113,7 +158,13 @@ export function AuthProvider({ children }) {
 
   /**
    * Authenticated fetch wrapper.
-   * Automatically injects the Bearer token and handles 401 (session expired).
+   * Automatically injects the `Authorization: Bearer` header and handles
+   * 401 responses by clearing the session and throwing.
+   *
+   * @param {string} url     - API path (e.g. `"/api/projects"`) or full URL.
+   * @param {Object} [options] - Standard `fetch` options (method, headers, body, etc.).
+   * @returns {Promise<Response>} The raw Fetch API response (caller must parse).
+   * @throws {Error} If the server responds with 401 (session expired).
    */
   const authFetch = useCallback(async (url, options = {}) => {
     const headers = {
@@ -137,6 +188,24 @@ export function AuthProvider({ children }) {
   );
 }
 
+/**
+ * Hook to access authentication state and actions.
+ * Must be called inside an `<AuthProvider>`.
+ *
+ * @returns {AuthContextValue}
+ *
+ * @typedef {Object} AuthContextValue
+ * @property {Object|null}  user      - Current user `{ id, name, email, avatar, role }`, or `null`.
+ * @property {string|null}  token     - JWT string, or `null` if not signed in.
+ * @property {Function}     login     - `(token, userData) => Promise<void>` — store credentials.
+ * @property {Function}     logout    - `() => void` — clear session and revoke token.
+ * @property {Function}     authFetch - `(url, options?) => Promise<Response>` — fetch with auth header.
+ * @property {boolean}      loading   - `true` while initial token validation is in progress.
+ *
+ * @example
+ * const { user, logout } = useAuth();
+ * if (user) console.log(`Signed in as ${user.name}`);
+ */
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");

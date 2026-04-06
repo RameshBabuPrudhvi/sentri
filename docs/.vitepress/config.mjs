@@ -20,6 +20,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API Reference', link: '/api/' },
+      { text: 'Code Docs', link: '/jsdoc/index.html', target: '_blank' },
       { text: 'Changelog', link: '/changelog' },
       {
         text: 'Links',
@@ -78,6 +79,13 @@ export default defineConfig({
             { text: 'Runs', link: '/api/runs' },
             { text: 'Settings', link: '/api/settings' },
             { text: 'Authentication', link: '/api/auth' },
+          ],
+        },
+        {
+          text: 'Code Documentation',
+          items: [
+            { text: 'Overview', link: '/api/code-docs' },
+            { text: 'JSDoc (auto-generated)', link: '/jsdoc/index.html', target: '_blank' },
           ],
         },
       ],
