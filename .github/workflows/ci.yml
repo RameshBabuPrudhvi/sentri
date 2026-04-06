@@ -89,6 +89,28 @@ jobs:
           path: frontend/dist/
           retention-days: 3
 
+  # ── JSDoc validation ────────────────────────────────────────────────────
+  jsdoc:
+    name: Backend — JSDoc Generation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate JSDoc (validates all doc comments)
+        run: npm run docs
+
   # ── Docker build ──────────────────────────────────────────────────────────
   docker:
     name: Docker — Build Both Images
