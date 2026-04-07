@@ -23,6 +23,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | Vendor lock-in on AI providers | Swap between Anthropic, OpenAI, Google, or **Ollama (free, local, private)** with one setting — no code changes |
 | Crawlers only see links, not flows | State Exploration mode clicks, fills, and submits — discovers auth flows, checkout funnels, and multi-step wizards that link crawlers miss |
 | Generated tests are shallow | 8-stage pipeline: classify page intent → plan → generate → deduplicate → enhance assertions → validate — not just "write a test for this HTML" |
+| Large test suites are slow | **Parallel execution** — run 1–10 tests simultaneously in isolated browser contexts. Select ⚡ 4x from the UI and a 40-test suite finishes in ¼ the time |
 
 ---
 
@@ -32,7 +33,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 2. **Generate** — 8-stage AI pipeline: discover → filter → classify → plan → generate → deduplicate → enhance → validate
 3. **Describe** — or skip discovery — write a plain-English scenario and AI generates the test
 4. **Review** — every test lands in Draft. Approve/reject with keyboard shortcuts before anything runs
-5. **Execute** — one-click regression with live browser view, SSE log stream, and per-step screenshots
+5. **Execute** — one-click regression with live browser view, SSE log stream, and per-step screenshots. Run up to 10 tests in parallel for 5–10x faster suites
 6. **Self-heal** — multi-strategy selector waterfall that remembers what worked per element
 7. **Monitor** — dashboard with pass rate, defect breakdown, flaky detection, MTTR, and growth trends
 
@@ -44,6 +45,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 
 | Feature | What it actually does |
 |---|---|
+| ⚡ **Parallel Execution** | Run 1–10 tests simultaneously in isolated browser contexts within a single Chromium instance. Select parallelism from the UI or set `PARALLEL_WORKERS` env var. Each worker gets its own video, screenshots, and network logs — full isolation, no shared state |
 | 🧬 **Adaptive Self-Healing** | Not just "retry with a different selector" — records which strategy won per element and tries it first next run. Tests get more resilient over time |
 | 🎛️ **Test Dials** | 6 strategies × 5 workflows × 8 quality checks × 3 formats × 8 languages × 2 explore modes. Presets auto-fill. Config validated server-side to block prompt injection |
 | 🧭 **State Exploration** | Goes beyond link crawling — clicks buttons, fills forms, submits, and tracks state transitions to discover real multi-step user flows. Tunable per-run: max states, depth, actions per state, action timeout |
@@ -139,6 +141,9 @@ ANTHROPIC_API_KEY=sk-ant-...       # or OPENAI_API_KEY, GOOGLE_API_KEY, AI_PROVI
 JWT_SECRET=<openssl rand -base64 48>
 NODE_ENV=production
 
+# Parallel test execution (1 = sequential, max 10)
+PARALLEL_WORKERS=4
+
 # Frontend (build-time, for cross-origin deploys)
 VITE_API_URL=https://your-backend.onrender.com
 ```
@@ -224,6 +229,7 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Rate Limiting** | ✅ 10 sign-in attempts per IP per 15 min |
 | **OAuth CSRF** | ✅ State parameter validated |
 | **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
+| **Parallel Execution** | ✅ 1–10 concurrent browser contexts per run (`PARALLEL_WORKERS` env or UI selector) |
 | **Database** | ⬜ Replace in-memory `db.js` with PostgreSQL + Prisma ORM |
 | **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |

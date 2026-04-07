@@ -25,7 +25,7 @@ Each page goes through an 8-stage AI pipeline: crawl → filter → classify →
 Approve or reject tests one by one or in bulk. Only approved tests execute in regression.
 
 ### 4. Execute
-One-click regression with live browser view (CDP screencast), SSE log stream, execution timeline, and per-step screenshots with bounding-box overlays.
+One-click regression with live browser view (CDP screencast), SSE log stream, execution timeline, and per-step screenshots with bounding-box overlays. Run up to **10 tests in parallel** — each in its own isolated browser context with independent video, screenshots, and network logs. Select ⚡ 4x from the project action bar or set `PARALLEL_WORKERS=4` in your `.env`.
 
 ### 5. Self-Heal
 When a selector fails, the self-healing layer tries fallback strategies in a waterfall. When a fallback wins, it records which strategy succeeded — and tries it first next time.

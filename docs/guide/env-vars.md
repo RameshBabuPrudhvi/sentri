@@ -18,6 +18,32 @@
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `LOG_JSON` | `false` | Emit structured JSON logs |
 
+## Test Execution
+
+| Variable | Default | Description |
+|---|---|---|
+| `BROWSER_HEADLESS` | `true` | Set `false` to see the browser window during test runs |
+| `VIEWPORT_WIDTH` | `1280` | Browser viewport width (px) |
+| `VIEWPORT_HEIGHT` | `720` | Browser viewport height (px) |
+| `NAVIGATION_TIMEOUT` | `30000` | Timeout for `page.goto()` calls (ms) |
+| `PARALLEL_WORKERS` | `1` | Default number of tests to run concurrently (1–10). Override per-run from the ⚡ selector in the UI or via `parallelWorkers` in the API `dialsConfig`. Each worker uses an isolated `BrowserContext` within a shared Chromium process |
+
+## Crawler
+
+| Variable | Default | Description |
+|---|---|---|
+| `CRAWL_MAX_PAGES` | `30` | Maximum pages to visit per crawl |
+| `CRAWL_MAX_DEPTH` | `3` | Maximum link-follow depth from the start URL |
+| `CRAWL_NETWORKIDLE_TIMEOUT` | `5000` | Timeout (ms) for networkidle wait after page load |
+
+## Self-Healing
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy in the waterfall (ms) |
+| `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
+| `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
+
 ## Frontend (build-time)
 
 | Variable | Default | Description |

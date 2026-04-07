@@ -51,5 +51,6 @@ Run events are streamed via Server-Sent Events at `GET /api/runs/:runId/events`.
 |---|---|
 | `log` | Real-time log message |
 | `result` | Per-test pass/fail result |
+| `snapshot` | Full run state — emitted after each result for real-time progress during parallel execution |
 | `frame` | CDP screencast frame (base64 JPEG) |
 | `done` | Run completed — includes final status |

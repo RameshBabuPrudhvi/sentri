@@ -1,5 +1,38 @@
 # Runs API
 
+## Start a Crawl + Generate Run
+
+```
+POST /api/projects/:id/crawl
+```
+
+**Body (optional):**
+```json
+{ "dialsConfig": { "exploreMode": "state", "parallelWorkers": 4, ... } }
+```
+
+Starts the 8-stage AI pipeline: crawl → filter → classify → plan → generate → deduplicate → enhance → validate. Returns immediately with a `runId` — track progress via SSE.
+
+## Execute All Approved Tests
+
+```
+POST /api/projects/:id/run
+```
+
+**Body (optional):**
+```json
+{ "dialsConfig": { "parallelWorkers": 4 } }
+```
+
+Runs all approved tests for the project. When `parallelWorkers > 1`, tests execute concurrently in isolated browser contexts within a single Chromium instance (1–10, default 1).
+
+**Response:**
+```json
+{ "runId": "RUN-42" }
+```
+
+The run record includes `parallelWorkers` so the frontend and logs can show which concurrency level was used.
+
 ## List Runs for a Project
 
 ```
@@ -28,6 +61,7 @@ Server-Sent Events stream. Stays open while the run is in progress. Event types:
 |---|---|
 | `log` | `{ message, level, timestamp }` |
 | `result` | `{ testId, testName, status, duration, error?, screenshot? }` |
+| `snapshot` | `{ run }` — full run state (emitted after each test result for real-time progress, especially during parallel execution) |
 | `frame` | `{ data }` — base64 JPEG from CDP screencast |
 | `done` | `{ status, passed, failed, total, duration }` |
 
