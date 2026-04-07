@@ -39,8 +39,8 @@ export const BROWSER_ARGS = [
  * All modules that need a browser should call this instead of `chromium.launch()`
  * directly, so launch args and env overrides stay in one place.
  *
- * @param {import("playwright").LaunchOptions} [overrides] — extra options merged on top
- * @returns {Promise<import("playwright").Browser>}
+ * @param {Object} [overrides] — Playwright LaunchOptions merged on top
+ * @returns {Promise<Object>} Playwright Browser instance
  */
 export async function launchBrowser(overrides = {}) {
   return chromium.launch({
