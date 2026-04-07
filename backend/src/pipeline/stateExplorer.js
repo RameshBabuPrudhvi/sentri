@@ -72,7 +72,7 @@ function isSameEffectiveOrigin(urlA, urlB) {
   try {
     const a = new URL(urlA);
     const b = new URL(urlB);
-    return a.protocol === b.protocol && normaliseHost(a.hostname) === normaliseHost(b.hostname);
+    return a.protocol === b.protocol && normaliseHost(a.hostname) === normaliseHost(b.hostname) && a.port === b.port;
   } catch { return false; }
 }
 
