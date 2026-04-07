@@ -90,15 +90,16 @@ function buildScenarioHints(testCountInstr) {
 
 export function buildIntentPrompt(classifiedPage, snapshot, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
-  // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500).
+  // For local models (Ollama ≤8B) keep element data very compact to avoid
+  // context overflow (HTTP 500). 6 elements × compact fields ≈ 600 tokens.
   // Cloud models get the full element data for richer test generation.
   const elements = classifiedPage.classifiedElements
     .filter(({ confidence }) => confidence > 20)
-    .slice(0, local ? 12 : 20)
+    .slice(0, local ? 6 : 20)
     .map(({ element, intent, confidence }) => {
       if (local) {
         return {
-          tag: element.tag, text: (element.text || "").slice(0, 40),
+          tag: element.tag, text: (element.text || "").slice(0, 30),
           type: element.type, role: element.role,
           name: element.name, id: element.id,
           label: element.label, placeholder: element.placeholder,

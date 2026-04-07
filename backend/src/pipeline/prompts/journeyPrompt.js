@@ -61,11 +61,13 @@ export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_deci
     // at the same URL). Falls back to URL lookup for legacy crawl journeys.
     const snapshot = (page._stateFingerprint && allSnapshots[page._stateFingerprint])
       || allSnapshots[page.url];
-    // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500)
-    const rawElems = (snapshot?.elements || []).slice(0, local ? 8 : 10);
+    // For local models (Ollama ≤8B) keep element data very compact to avoid
+    // context overflow (HTTP 500). 5 pages × 4 elements is ~2K tokens — safe
+    // for 8K-context models. Cloud models get the full 10 elements.
+    const rawElems = (snapshot?.elements || []).slice(0, local ? 4 : 10);
     const elems = local
       ? rawElems.map(e => ({
-          tag: e.tag, text: (e.text || "").slice(0, 40), type: e.type,
+          tag: e.tag, text: (e.text || "").slice(0, 30), type: e.type,
           role: e.role, name: e.name, testId: e.testId,
         }))
       : rawElems;
