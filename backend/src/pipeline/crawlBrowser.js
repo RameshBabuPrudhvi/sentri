@@ -19,6 +19,22 @@ const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 
 /**
+ * Check if two URLs share the same effective origin (protocol + host + port).
+ * Treats www.example.com and example.com as equivalent — matches stateExplorer.js.
+ * @param {string} urlA
+ * @param {string} urlB
+ * @returns {boolean}
+ */
+function isSameEffectiveOrigin(urlA, urlB) {
+  try {
+    const a = new URL(urlA);
+    const b = new URL(urlB);
+    const normHost = h => h.replace(/^www\./i, "").toLowerCase();
+    return a.protocol === b.protocol && normHost(a.hostname) === normHost(b.hostname) && a.port === b.port;
+  } catch { return false; }
+}
+
+/**
  * Crawl same-origin pages starting from project.url.
  *
  * @param {object} project        — project record (url, credentials)
@@ -126,7 +142,7 @@ export async function crawlPages(project, run, { signal } = {}) {
               u.hash = "";
               u.search = "";
               const normalized = u.toString();
-              if (new URL(normalized).origin === new URL(project.url).origin) {
+              if (isSameEffectiveOrigin(normalized, resolvedOrigin)) {
                 crawlQueue.enqueue(normalized, depth + 1);
               }
             } catch {}
