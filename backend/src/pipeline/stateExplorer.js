@@ -223,8 +223,10 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
       await page.goto(normalized, { waitUntil: "domcontentloaded", timeout: 15000 });
       await waitForSettle(page, ctx.limits.actionTimeout);
       const { fp: linkFp, isNovel } = await captureState(page, ctx);
+      // Always mark the path pattern as seen to avoid redundant page loads
+      // on subsequent crawlLinks calls, regardless of whether the state is novel.
+      ctx.pathPatternsSeen.add(pathPattern);
       if (isNovel && !statesEqual(linkFp, currentFp)) {
-        ctx.pathPatternsSeen.add(pathPattern);
         ctx.edges.push({ fromFp: currentFp, action: { type: "click", element: { tag: "a", text: normalized }, selectors: [] }, toFp: linkFp });
         ctx.queue.push({ fp: linkFp, url: normalized, depth: depth + 1 });
         syncRunPages(run, ctx.snapshots);

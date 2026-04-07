@@ -137,7 +137,7 @@ export function createHarCapture(context, appOrigin) {
         if (frame) entry.pageUrl = frame.url();
       } catch { /* frame may be detached */ }
 
-      const key = `${method}:${url}`;
+      const key = `${method}:${url}:${entry.startTime}`;
       pending.set(key, entry);
       entries.push(entry);
     } catch { /* swallow — never break the crawl */ }
@@ -147,10 +147,19 @@ export function createHarCapture(context, appOrigin) {
     try {
       const url = response.url();
       const method = response.request().method();
-      const key = `${method}:${url}`;
-      const entry = pending.get(key);
+      // Find the matching pending entry — iterate to find the earliest
+      // request with the same method+url (matches the timestamped key).
+      let matchKey = null;
+      let entry = null;
+      for (const [k, e] of pending) {
+        if (k.startsWith(`${method}:${url}:`)) {
+          matchKey = k;
+          entry = e;
+          break;
+        }
+      }
       if (!entry) return;
-      pending.delete(key);
+      pending.delete(matchKey);
 
       entry.status = response.status();
       entry.durationMs = Date.now() - entry.startTime;

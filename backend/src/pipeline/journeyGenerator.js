@@ -25,10 +25,15 @@ import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
 function isRateLimitLike(err) {
   const msg = (err?.message || "").toLowerCase();
   const status = err?.status || err?.statusCode || 0;
-  return status === 429
-    || msg.includes("rate limit") || msg.includes("rate_limit")
-    || msg.includes("quota") || msg.includes("429")
-    || msg.includes("too many requests") || msg.includes("resource_exhausted");
+  if (status === 429) return true;
+  // Use word-boundary-aware patterns to avoid false positives on port
+  // numbers (e.g. "localhost:4290"), disk quota errors, etc.
+  return /\brate.?limit/i.test(msg)
+    || /\brate_limit/i.test(msg)
+    || /\b429\b/.test(msg)
+    || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
+    || /\btoo many requests\b/i.test(msg)
+    || /\bresource.?exhausted\b/i.test(msg);
 }
 
 /**

@@ -174,13 +174,15 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
         const result = await executeTest(test, browser, runId, i, runStart, db);
         processResult(test, result);
       } catch (err) {
-        run.failed++;
-        run.results.push({
+        // Build a synthetic result and route through processResult so SSE
+        // `result` and `snapshot` events are emitted — otherwise the
+        // frontend progress bar stalls during parallel execution.
+        const errorResult = {
           testId: test.id, testName: test.name,
           status: "failed", error: err.message,
           durationMs: 0, network: [], consoleLogs: [],
-        });
-        logError(run, `FAILED (exception): ${err.message}`);
+        };
+        processResult(test, errorResult);
       }
     }, signal);
   } finally {
