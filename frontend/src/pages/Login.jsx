@@ -75,7 +75,17 @@ export default function Login() {
     const code = params.get("code");
     const provider = params.get("provider");
     const err = params.get("error");
-    if (err) { setError(decodeURIComponent(err)); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); return; }
+    if (err) {
+      const decoded = decodeURIComponent(err);
+      const friendlyErrors = {
+        access_denied: "Access denied — check that the redirect URI in Google/GitHub Cloud Console matches exactly: " + window.location.origin + "/login?provider=" + (provider || "google"),
+        invalid_client: "Invalid OAuth client ID — verify VITE_GOOGLE_CLIENT_ID in frontend/.env matches the Client ID in Google Cloud Console",
+        redirect_uri_mismatch: "Redirect URI mismatch — add this exact URI to your OAuth app: " + window.location.origin + "/login?provider=" + (provider || "google"),
+      };
+      setError(friendlyErrors[decoded] || decoded);
+      window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
+      return;
+    }
     if (code && provider && ["github", "google"].includes(provider)) handleOAuthCallback(provider, code);
   }, []);
 
@@ -102,14 +112,14 @@ export default function Login() {
   }
 
   function handleGitHubLogin() {
-    if (!GITHUB_CLIENT_ID) { setError("GitHub OAuth not configured. Add VITE_GITHUB_CLIENT_ID to .env"); return; }
+    if (!GITHUB_CLIENT_ID) { setError("GitHub OAuth not configured. Add VITE_GITHUB_CLIENT_ID to frontend/.env AND GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET to backend/.env"); return; }
     const state = crypto.randomUUID(); sessionStorage.setItem("oauth_state", state);
     const ru = encodeURIComponent(`${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/login?provider=github`);
     window.location.href = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${ru}&scope=user:email&state=${state}`;
   }
 
   function handleGoogleLogin() {
-    if (!GOOGLE_CLIENT_ID) { setError("Google OAuth not configured. Add VITE_GOOGLE_CLIENT_ID to .env"); return; }
+    if (!GOOGLE_CLIENT_ID) { setError("Google OAuth not configured. Add VITE_GOOGLE_CLIENT_ID to frontend/.env AND GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET to backend/.env"); return; }
     const state = crypto.randomUUID(); sessionStorage.setItem("oauth_state", state);
     const ru = encodeURIComponent(`${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/login?provider=google`);
     const sc = encodeURIComponent("openid email profile");
