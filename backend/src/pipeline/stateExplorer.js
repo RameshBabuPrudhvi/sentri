@@ -33,6 +33,7 @@ import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPattern } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
+import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -190,6 +191,9 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
+    // ── HAR capture: record API traffic for API test generation ────────────
+    const harCapture = createHarCapture(context, project.url);
+
     const creds = decryptCredentials(project.credentials);
     if (creds?.usernameSelector) {
       const loginPage = await context.newPage();
@@ -267,10 +271,17 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
     await page.close().catch(() => {});
   } finally { await browser.close().catch(() => {}); }
 
+  // ── Summarise captured API traffic ────────────────────────────────────────
+  harCapture.detach();
+  const apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
+  if (apiEndpoints.length > 0) {
+    log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+  }
+
   const stateGraph = { states: ctx.states, edges: ctx.edges, startState, snapshotsByFp: ctx.snapshotsByFp };
   const flows = extractFlows(stateGraph);
   const journeys = flows.map(f => flowToJourney(f, ctx.snapshotsByFp));
   logSuccess(run, `State exploration done. ${ctx.states.size} states, ${ctx.edges.length} transitions, ${flows.length} flows.`);
 
-  return { snapshots: ctx.snapshots, snapshotsByUrl: ctx.snapshotsByUrl, stateGraph, flows, journeys };
+  return { snapshots: ctx.snapshots, snapshotsByUrl: ctx.snapshotsByUrl, stateGraph, flows, journeys, apiEndpoints };
 }

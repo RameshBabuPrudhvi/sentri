@@ -16,10 +16,12 @@ Sentri is an **autonomous QA platform** that crawls your web app, generates Play
 ## How It Works
 
 ### 1. Crawl
-Sentri launches a real Chromium browser and explores your app — following links, mapping forms, buttons, and interactive elements. A D3 force-directed Site Graph shows discovered pages in real time.
+Sentri launches a real Chromium browser and explores your app — following links, mapping forms, buttons, and interactive elements. A D3 force-directed Site Graph shows discovered pages in real time. While crawling, Sentri **captures every API call** (fetch/XHR) your app makes — building a map of backend endpoints automatically.
 
 ### 2. Generate
 Each page goes through an 8-stage AI pipeline: crawl → filter → classify → plan → generate → deduplicate → enhance → validate. All tests land in a Draft queue.
+
+In addition to UI tests, Sentri generates **API contract tests** from the captured network traffic. These use Playwright's `request` API context to call endpoints directly and verify status codes, JSON response shapes, and error handling — no browser needed.
 
 ### 3. Review
 Approve or reject tests one by one or in bulk. Only approved tests execute in regression.
@@ -45,6 +47,7 @@ Dashboard with pass rate, defect categories, flaky test detection, test growth s
 │  Backend (Express + Node.js)                │
 │  ├── Routes: /api/projects, /tests, /runs   │
 │  ├── Crawler: Playwright + SmartCrawlQueue  │
+│  ├── HAR Capture: API traffic → endpoints   │
 │  ├── AI Pipeline: 8-stage generation        │
 │  ├── Self-Healing: multi-strategy waterfall │
 │  └── DB: in-memory JSON (swap for Postgres) │

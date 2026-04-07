@@ -4,16 +4,18 @@
  * test generation pipeline.
  *
  * ### Pipeline stages
- * | # | Stage                | Module                                              |
- * |---|----------------------|-----------------------------------------------------|
- * | 1 | Smart crawl / Explore| `pipeline/crawlBrowser.js` or `pipeline/stateExplorer.js` |
- * | 2 | Element filtering    | `pipeline/elementFilter.js`                         |
- * | 3 | Intent classification| `pipeline/intentClassifier.js`                      |
- * | 4 | Journey generation   | `pipeline/journeyGenerator.js`                      |
- * | 5 | Deduplication        | `pipeline/pipelineOrchestrator.js`                  |
- * | 6 | Assertion enhancement| `pipeline/pipelineOrchestrator.js`                  |
- * | 7 | Validate tests       | `pipeline/pipelineOrchestrator.js`                  |
- * | 8 | Feedback loop        | `pipeline/feedbackLoop.js`                          |
+ * | #  | Stage                | Module                                              |
+ * |----|----------------------|-----------------------------------------------------|
+ * | 1  | Smart crawl / Explore| `pipeline/crawlBrowser.js` or `pipeline/stateExplorer.js` |
+ * |    | ↳ HAR capture        | `pipeline/harCapture.js` (attached to BrowserContext)|
+ * | 2  | Element filtering    | `pipeline/elementFilter.js`                         |
+ * | 3  | Intent classification| `pipeline/intentClassifier.js`                      |
+ * | 4  | Journey generation   | `pipeline/journeyGenerator.js`                      |
+ * | 4b | API test generation  | `pipeline/journeyGenerator.js` + `prompts/apiTestPrompt.js` |
+ * | 5  | Deduplication        | `pipeline/pipelineOrchestrator.js`                  |
+ * | 6  | Assertion enhancement| `pipeline/pipelineOrchestrator.js`                  |
+ * | 7  | Validate tests       | `pipeline/pipelineOrchestrator.js`                  |
+ * | 8  | Feedback loop        | `pipeline/feedbackLoop.js`                          |
  *
  * ### Explorer modes (Test Dials `exploreMode`)
  * - `crawl` (default) — link-only BFS crawl via `crawlBrowser.js`
@@ -30,7 +32,7 @@ import { getProviderName } from "./aiProvider.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
 import { filterElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
-import { generateAllTests, generateUserRequestedTest } from "./pipeline/journeyGenerator.js";
+import { generateAllTests, generateUserRequestedTest, generateApiTests } from "./pipeline/journeyGenerator.js";
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
@@ -133,12 +135,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   setStep(run, 1);
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
+  let apiEndpoints = [];
 
   if (mode === "state") {
     // ── State-based exploration (new engine) ─────────────────────────────
     const exploration = await exploreStates(project, run, { signal, tuning: explorerTuning });
     snapshots = exploration.snapshots;
     snapshotsByUrl = exploration.snapshotsByUrl;
+    apiEndpoints = exploration.apiEndpoints || [];
 
     throwIfAborted(signal);
 
@@ -206,6 +210,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     const crawlResult = await crawlPages(project, run, { signal });
     snapshots = crawlResult.snapshots;
     snapshotsByUrl = crawlResult.snapshotsByUrl;
+    apiEndpoints = crawlResult.apiEndpoints || [];
 
     throwIfAborted(signal);
 
@@ -257,7 +262,20 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   setStep(run, 4);
   log(run, `🤖 Generating intent-driven tests...`);
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
-  log(run, `📝 Raw tests: ${rawTests.length}`);
+  log(run, `📝 Raw UI tests: ${rawTests.length}`);
+
+  // ── Step 4b: API test generation from captured HAR traffic ──────────────
+  if (apiEndpoints.length > 0) {
+    throwIfAborted(signal);
+    log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
+    const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal });
+    if (apiTests.length > 0) {
+      for (const t of apiTests) rawTests.push(t);
+      log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);
+    } else {
+      log(run, `   No API tests generated (AI returned empty)`);
+    }
+  }
 
   throwIfAborted(signal);
 
@@ -273,6 +291,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   run.testsGenerated = run.tests.length;
   run.pipelineStats = buildPipelineStats({
     pagesFound: snapshots.length, rawTests, removed, enhancedCount, rejected, journeys, dedupStats,
+    apiEndpointsDiscovered: apiEndpoints.length,
   });
 
   finalizeRunIfNotAborted(run, () => {
@@ -281,7 +300,10 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
-    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
+    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | API tests: ${validatedTests.filter(t => t._generatedFrom === "api_har_capture").length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
+    if (apiEndpoints.length > 0) {
+      log(run, `   API endpoints discovered: ${apiEndpoints.length}`);
+    }
     logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });

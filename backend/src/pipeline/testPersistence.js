@@ -67,7 +67,8 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
  * @param {object} params
  * @returns {object}
  */
-export function buildPipelineStats({ pagesFound = 0, rawTests = [], removed = 0, enhancedCount = 0, rejected = 0, journeys = [], dedupStats = {} }) {
+export function buildPipelineStats({ pagesFound = 0, rawTests = [], removed = 0, enhancedCount = 0, rejected = 0, journeys = [], dedupStats = {}, apiEndpointsDiscovered = 0 }) {
+  const apiTestCount = rawTests.filter(t => t._generatedFrom === "api_har_capture").length;
   return {
     pagesFound,
     rawTestsGenerated: rawTests.length,
@@ -76,5 +77,7 @@ export function buildPipelineStats({ pagesFound = 0, rawTests = [], removed = 0,
     validationRejected: rejected,
     journeysDetected: journeys.length,
     averageQuality: dedupStats.averageQuality || 0,
+    apiEndpointsDiscovered,
+    apiTestsGenerated: apiTestCount,
   };
 }

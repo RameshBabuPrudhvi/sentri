@@ -13,6 +13,7 @@ import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./sma
 import { takeSnapshot } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
+import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -38,6 +39,9 @@ export async function crawlPages(project, run, { signal } = {}) {
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
+
+    // ── HAR capture: record API traffic for API test generation ────────────
+    const harCapture = createHarCapture(context, project.url);
 
     const crawlQueue = new SmartCrawlQueue(project.url);
     crawlQueue.enqueue(project.url, 0);
@@ -125,7 +129,14 @@ export async function crawlPages(project, run, { signal } = {}) {
     await browser.close().catch(() => {});
   }
 
+  // ── Summarise captured API traffic ────────────────────────────────────────
+  harCapture.detach();
+  const apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
+  if (apiEndpoints.length > 0) {
+    log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+  }
+
   logSuccess(run, `Smart crawl done. ${snapshots.length} unique pages found.`);
 
-  return { snapshots, snapshotsByUrl };
+  return { snapshots, snapshotsByUrl, apiEndpoints };
 }

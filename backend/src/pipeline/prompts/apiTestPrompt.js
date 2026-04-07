@@ -1,0 +1,120 @@
+/**
+ * @module pipeline/prompts/apiTestPrompt
+ * @description Builds the AI prompt for generating Playwright API tests from
+ * captured HAR endpoint summaries.
+ *
+ * Unlike UI tests (which use `page.click()`, `page.fill()`), API tests use
+ * Playwright's `request` API context (`apiRequestContext`) to make HTTP calls
+ * directly and assert on status codes, response shapes, and headers.
+ *
+ * ### Exports
+ * - {@link buildApiTestPrompt} — `(endpoints, appUrl) → { system, user }`
+ */
+
+import { isLocalProvider } from "../../aiProvider.js";
+import { resolveTestCountInstruction } from "../promptHelpers.js";
+import { PROMPT_VERSION } from "./outputSchema.js";
+
+/**
+ * Build the system + user prompt for API test generation.
+ *
+ * @param {ApiEndpoint[]} endpoints — from summariseApiEndpoints()
+ * @param {string}        appUrl    — project base URL
+ * @param {object}        [opts]
+ * @param {string}        [opts.testCount] — dial value
+ * @returns {{ system: string, user: string }}
+ */
+export function buildApiTestPrompt(endpoints, appUrl, { testCount = "ai_decides" } = {}) {
+  const local = isLocalProvider();
+  const testCountInstr = resolveTestCountInstruction(testCount, local);
+
+  // Group endpoints by category for the prompt
+  const gets    = endpoints.filter(e => e.method === "GET");
+  const mutates = endpoints.filter(e => ["POST", "PUT", "PATCH", "DELETE"].includes(e.method));
+
+  const system = `You are a senior API test automation engineer generating Playwright API tests.
+
+PERSONA RULES:
+- Generate tests that call HTTP endpoints directly using Playwright's request API context.
+- Tests verify status codes, response JSON shapes, content-type headers, and error handling.
+- Tests must be independent — no shared state between tests.
+- Use REAL endpoint URLs and request bodies from the captured traffic below.
+- For NEGATIVE tests: send malformed payloads, missing required fields, or wrong HTTP methods and assert the error response.
+
+CODE REQUIREMENTS:
+- Use \`request.newContext()\` for API calls, NOT \`page.goto()\`.
+- Pattern: \`const api = await request.newContext({ baseURL: '${appUrl}' });\`
+- For GET: \`const res = await api.get('/path');\`
+- For POST: \`const res = await api.post('/path', { data: { ... } });\`
+- Always assert: \`expect(res.status()).toBe(200);\`
+- For JSON responses: \`const body = await res.json(); expect(body).toHaveProperty('key');\`
+- playwrightCode must be fully self-contained and executable.
+- Import pattern: \`import { test, expect } from '@playwright/test';\`
+
+PROMPT VERSION: ${PROMPT_VERSION}`;
+
+  // Build endpoint descriptions for the user message
+  const endpointBlocks = endpoints.slice(0, local ? 10 : 20).map(ep => {
+    const lines = [
+      `  ${ep.method} ${ep.pathPattern}`,
+      `    Observed ${ep.callCount}x | Status codes: ${ep.statuses.join(", ")} | Avg: ${ep.avgDurationMs}ms`,
+      `    Example URL: ${ep.exampleUrls[0] || "N/A"}`,
+    ];
+    if (ep.requestBodyExample) {
+      lines.push(`    Request body: ${ep.requestBodyExample.slice(0, 500)}`);
+    }
+    if (ep.responseBodyExample) {
+      lines.push(`    Response body: ${ep.responseBodyExample.slice(0, 500)}`);
+    }
+    if (ep.pageUrls.length > 0) {
+      lines.push(`    Triggered from: ${ep.pageUrls.join(", ")}`);
+    }
+    return lines.join("\n");
+  }).join("\n\n");
+
+  const user = `APPLICATION: ${appUrl}
+
+DISCOVERED API ENDPOINTS (captured during live crawl):
+${endpointBlocks || "  No API endpoints discovered."}
+
+SUMMARY:
+- ${gets.length} GET endpoints (data fetching)
+- ${mutates.length} mutation endpoints (POST/PUT/PATCH/DELETE)
+- ${endpoints.length} total unique endpoint patterns
+
+REQUIRED TEST COVERAGE:
+${testCountInstr} covering:
+- POSITIVE: Each GET endpoint returns expected status (200) and valid JSON shape
+- POSITIVE: POST/PUT endpoints accept valid payloads and return success
+- NEGATIVE: Endpoints return appropriate error codes (400/401/404) for invalid requests
+- CONTRACT: Response bodies match the observed JSON structure (required fields present)
+- EDGE: Empty request bodies, missing content-type headers, wrong HTTP methods
+
+STRICT RULES:
+1. ${testCountInstr}
+2. Use Playwright request API context — NOT page.goto() or browser navigation
+3. Base URL: '${appUrl}' — use REAL paths from the discovered endpoints above
+4. Every test must have at least 2 assertions (status code + response body/shape)
+5. For POST/PUT tests, use the observed request body as a template
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "tests": [
+    {
+      "name": "API: descriptive name including endpoint and scenario",
+      "description": "what this API test validates",
+      "priority": "high|medium",
+      "type": "integration",
+      "scenario": "positive|negative|edge_case",
+      "steps": [
+        "Send GET request to /api/endpoint",
+        "Verify response status is 200",
+        "Verify response body contains expected fields"
+      ],
+      "playwrightCode": "import { test, expect } from '@playwright/test';\\n\\ntest('API: ...', async ({ request }) => {\\n  const api = await request.newContext({ baseURL: '${appUrl}' });\\n  const res = await api.get('/path');\\n  expect(res.status()).toBe(200);\\n  const body = await res.json();\\n  expect(body).toHaveProperty('key');\\n  await api.dispose();\\n});"
+    }
+  ]
+}`;
+
+  return { system, user };
+}

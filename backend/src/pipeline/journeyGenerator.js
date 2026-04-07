@@ -16,6 +16,7 @@ import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
 import { buildIntentPrompt } from "./prompts/intentPrompt.js";
 import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
+import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
 
 /**
  * generateUserRequestedTest(name, description, appUrl) → Array of test objects
@@ -138,4 +139,50 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
   }
 
   return allTests;
+}
+
+// ── API test generation ───────────────────────────────────────────────────────
+
+/**
+ * generateApiTests(apiEndpoints, appUrl, opts) → Array of test objects
+ *
+ * Generates Playwright `request` API tests from HAR-captured endpoint summaries.
+ * Returns an empty array if no endpoints were captured or the AI call fails.
+ *
+ * @param {ApiEndpoint[]} apiEndpoints — from summariseApiEndpoints()
+ * @param {string}        appUrl       — project base URL
+ * @param {object}        [opts]
+ * @param {string}        [opts.dialsPrompt]
+ * @param {string}        [opts.testCount]
+ * @param {AbortSignal}   [opts.signal]
+ * @returns {Promise<object[]>}
+ */
+export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
+  if (!apiEndpoints || apiEndpoints.length === 0) return [];
+
+  try {
+    throwIfAborted(signal);
+    const prompt = withDials(buildApiTestPrompt(apiEndpoints, appUrl, { testCount }), dialsPrompt);
+    const text = await generateText(prompt, { signal });
+    const parsed = parseJSON(text);
+    const tests = extractTestsArray(parsed);
+    if (tests.length === 0) return [];
+
+    // Mark all API tests with the correct type and source
+    for (const t of tests) {
+      t.type = t.type || "integration";
+      t.sourceUrl = appUrl;
+      t._generatedFrom = "api_har_capture";
+      // Prefix name with "API:" if not already
+      if (t.name && !t.name.startsWith("API:") && !t.name.startsWith("API ")) {
+        t.name = `API: ${t.name}`;
+      }
+    }
+
+    sanitiseSteps(tests);
+    return tests;
+  } catch (err) {
+    if (err.name === "AbortError" || signal?.aborted) throw err;
+    return [];
+  }
 }
