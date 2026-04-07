@@ -253,6 +253,17 @@ export function discoverActions(snapshot) {
     const actionType = resolveActionType(el);
     if (!actionType) continue;
 
+    // Pre-filter cross-origin links — avoids the expensive click → wait →
+    // reject → restore cycle in the state explorer. The href is already
+    // available from pageSnapshot, so we can check origin without clicking.
+    if (actionType === "click" && (el.tag || "").toLowerCase() === "a" && el.href) {
+      try {
+        const linkHost = new URL(el.href, snapshot.url).hostname.replace(/^www\./i, "").toLowerCase();
+        const pageHost = new URL(snapshot.url).hostname.replace(/^www\./i, "").toLowerCase();
+        if (linkHost !== pageHost) continue; // skip — will always be rejected by origin guard
+      } catch { /* keep action if URL parsing fails */ }
+    }
+
     // Deduplicate — same pattern as elementFilter.js
     const key = `${el.tag}:${el.type}:${(el.text || "").toLowerCase().trim()}`;
     if (seen.has(key)) continue;

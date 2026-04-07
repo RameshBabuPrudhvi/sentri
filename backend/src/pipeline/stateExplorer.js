@@ -335,7 +335,6 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         if (action.isDestructive) { log(run, `   ⏭️  Skip destructive: "${action.element.text}"`); continue; }
         const beforeUrl = page.url();
         if (!await executeAction(page, action, limits.actionTimeout)) continue;
-        explored++;
         await waitForSettle(page, limits.actionTimeout);
         // Guard: reject cross-origin navigation or bot detection pages
         if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
@@ -343,6 +342,7 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
           continue;
         }
+        explored++;
         try {
           const { fp: resultFp, isNovel } = await captureState(page, ctx);
           if (!statesEqual(resultFp, currentFp)) {
