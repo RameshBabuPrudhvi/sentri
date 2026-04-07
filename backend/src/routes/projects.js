@@ -43,7 +43,7 @@ router.post("/", (req, res) => {
     detail: `Project created — "${name}" (${url})`,
   });
 
-  res.status(201).json(project);
+  res.status(201).json(sanitiseProjectForClient(project));
 });
 
 /**
