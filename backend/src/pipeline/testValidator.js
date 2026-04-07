@@ -59,8 +59,10 @@ export function validateTest(test, projectUrl) {
         test.playwrightCode.includes("http://example.com")) {
       issues.push("playwrightCode uses placeholder example.com URL");
     }
-    // Must reference the actual project URL (or at least page.goto)
-    if (!test.playwrightCode.includes("page.goto")) {
+    // Must reference navigation — page.goto for UI tests, or request.newContext / api.get/post for API tests
+    const isApiTest = test._generatedFrom === "api_har_capture" || test._generatedFrom === "api_user_described"
+      || test.playwrightCode.includes("request.newContext") || test.playwrightCode.includes("api.get") || test.playwrightCode.includes("api.post");
+    if (!isApiTest && !test.playwrightCode.includes("page.goto")) {
       issues.push("playwrightCode missing page.goto navigation");
     }
   }
