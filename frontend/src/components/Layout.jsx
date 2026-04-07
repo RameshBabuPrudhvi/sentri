@@ -138,6 +138,9 @@ function TopBar() {
         <Search size={14} color="var(--text3)" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
         <input
           className="input"
+          type="search"
+          name="test-search"
+          autoComplete="off"
           value={q}
           onChange={e => setQ(e.target.value)}
           onKeyDown={handleSearch}
