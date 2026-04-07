@@ -9,7 +9,7 @@
 | `OPENAI_API_KEY` | — | [platform.openai.com](https://platform.openai.com/api-keys) |
 | `GOOGLE_API_KEY` | — | [aistudio.google.com](https://aistudio.google.com/apikey) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `llama3.2` | Model name for local inference |
+| `OLLAMA_MODEL` | `mistral:7b` | Model name for local inference |
 | `OLLAMA_MAX_PREDICT` | `4096` | Max token output cap |
 | `OLLAMA_TIMEOUT_MS` | `120000` | Timeout for Ollama calls |
 | `JWT_SECRET` | random (dev) | **Required in production.** 32+ char secret for signing JWTs |

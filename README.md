@@ -124,7 +124,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | Anthropic Claude | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o-mini |
 | Google Gemini | `GOOGLE_API_KEY` | gemini-2.5-flash |
-| Ollama (local, free) | `AI_PROVIDER=local` | llama3.2 (configurable) |
+| Ollama (local, free) | `AI_PROVIDER=local` | mistral:7b (configurable) |
 
 Auto-detects in order: Anthropic → OpenAI → Google → Ollama. Switch at any time from the Settings page.
 

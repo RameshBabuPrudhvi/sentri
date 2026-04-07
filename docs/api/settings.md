@@ -32,7 +32,7 @@ Returns masked keys and active provider (never returns full keys):
   "openai": null,
   "google": null,
   "ollamaBaseUrl": "http://localhost:11434",
-  "ollamaModel": "llama3.2"
+  "ollamaModel": "mistral:7b"
 }
 ```
 
@@ -49,7 +49,7 @@ POST /api/settings
 
 **Ollama (local):**
 ```json
-{ "provider": "local", "baseUrl": "http://localhost:11434", "model": "llama3.2" }
+{ "provider": "local", "baseUrl": "http://localhost:11434", "model": "mistral:7b" }
 ```
 
 ## Remove a Provider Key
@@ -69,8 +69,8 @@ Returns connectivity status and available models:
 ```json
 {
   "ok": true,
-  "model": "llama3.2:latest",
-  "availableModels": ["llama3.2:latest", "mistral:latest"]
+  "model": "mistral:7b:latest",
+  "availableModels": ["mistral:7b:latest", "mistral:latest"]
 }
 ```
 

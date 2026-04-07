@@ -57,7 +57,7 @@ const PROVIDERS = [
     id: "local",
     name: "Ollama",
     company: "Local / Self-hosted",
-    model: "llama3.2",            // shown as default; overridden by live config
+    model: "mistral:7b",            // shown as default; overridden by live config
     placeholder: null,            // no API key
     docsUrl: "https://ollama.ai",
     color: "#7c3aed",
@@ -88,8 +88,8 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
       setStatus(s);
       // Sync model state to the exact option value returned by Ollama so the
       // controlled <select> stays in sync. Ollama tags include a suffix like
-      // ":latest" that the saved config may omit (e.g. "llama3.2" vs
-      // "llama3.2:latest"), causing a value mismatch → flicker loop.
+      // ":latest" that the saved config may omit (e.g. "mistral:7b" vs
+      // "mistral:7b:latest"), causing a value mismatch → flicker loop.
       const cur = modelRef.current;
       if (s.availableModels?.length && !s.availableModels.includes(cur)) {
         const match = s.availableModels.find(m => m.split(":")[0] === cur.split(":")[0]);
@@ -177,7 +177,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
             className="input"
             value={model}
             onChange={e => onModelChange(e.target.value)}
-            placeholder="llama3.2"
+            placeholder="mistral:7b"
             style={{ fontFamily: "var(--font-mono)" }}
           />
         </div>
@@ -210,7 +210,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
 curl -fsSL https://ollama.ai/install.sh | sh
 
 # 2. Pull a model (one-time download)
-ollama pull llama3.2          # ~2 GB, good quality
+ollama pull mistral:7b          # ~2 GB, good quality
 ollama pull qwen2.5-coder:7b  # great for code generation
 ollama pull mistral           # lighter alternative
 
@@ -223,7 +223,7 @@ ollama serve                  # default: http://localhost:11434`
         <Info size={11} style={{ flexShrink: 0, marginTop: 2 }} />
         <span>
           For best results use a model with strong JSON output and code generation.
-          Recommended: <strong>llama3.2</strong>, <strong>qwen2.5-coder:7b</strong>, <strong>mistral</strong>.
+          Recommended: <strong>mistral:7b</strong>, <strong>qwen2.5-coder:7b</strong>, <strong>mistral</strong>.
           Small models (≤3B) may struggle to produce valid Playwright code.
         </span>
       </div>
@@ -261,13 +261,13 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
   // Ollama-specific local state — sync with props when parent reloads settings.
   // Always sync (not just when truthy) so deactivation resets to defaults.
   const [ollamaUrl, setOllamaUrl]   = useState(ollamaBaseUrl || "http://localhost:11434");
-  const [ollamaMdl, setOllamaMdl]   = useState(ollamaModel   || "llama3.2");
+  const [ollamaMdl, setOllamaMdl]   = useState(ollamaModel   || "mistral:7b");
 
   useEffect(() => {
     setOllamaUrl(ollamaBaseUrl || "http://localhost:11434");
   }, [ollamaBaseUrl]);
   useEffect(() => {
-    setOllamaMdl(ollamaModel || "llama3.2");
+    setOllamaMdl(ollamaModel || "mistral:7b");
   }, [ollamaModel]);
 
   const isActive = activeProvider === provider.id;
@@ -682,7 +682,7 @@ GOOGLE_API_KEY=AIza...
 # Local / Ollama (no key needed)
 AI_PROVIDER=local
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2`}</pre>
+OLLAMA_MODEL=mistral:7b`}</pre>
       </div>
       </>}
 

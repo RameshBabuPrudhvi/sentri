@@ -9,7 +9,7 @@ Sentri supports four AI providers. Switch at any time from the Settings page —
 | Anthropic Claude | claude-sonnet-4-20250514 | Pay-as-you-go ($5 min) | Best quality output |
 | OpenAI | gpt-4o-mini | Pay-as-you-go | Fast, high-volume crawls |
 | Google Gemini | gemini-2.5-flash | Free tier (20 req/day) | Testing / evaluation |
-| Ollama | llama3.2 (configurable) | Free, local | Privacy, no API key needed |
+| Ollama | mistral:7b (configurable) | Free, local | Privacy, no API key needed |
 
 **Auto-detection order:** Anthropic → OpenAI → Google → Ollama
 
@@ -32,7 +32,7 @@ GOOGLE_API_KEY=AIza...
 # Local / Ollama (no key needed)
 AI_PROVIDER=local
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+OLLAMA_MODEL=mistral:7b
 ```
 
 ## Using Ollama (Free Local AI)
@@ -40,7 +40,7 @@ OLLAMA_MODEL=llama3.2
 1. Install from [ollama.com](https://ollama.com)
 2. Pull a model:
    ```bash
-   ollama pull llama3.2          # ~2 GB, good quality
+   ollama pull mistral:7b          # ~2 GB, good quality
    ollama pull qwen2.5-coder:7b  # great for code generation
    ollama pull mistral           # lighter alternative
    ```
@@ -48,5 +48,5 @@ OLLAMA_MODEL=llama3.2
 4. In Sentri Settings, select Ollama — or set `AI_PROVIDER=local` in `.env`
 
 ::: tip Recommended Models
-For best results use a model with strong JSON output and code generation: **llama3.2**, **qwen2.5-coder:7b**, or **mistral**. Small models (≤3B) may struggle to produce valid Playwright code.
+For best results use a model with strong JSON output and code generation: **mistral:7b**, **qwen2.5-coder:7b**, or **mistral**. Small models (≤3B) may struggle to produce valid Playwright code.
 :::

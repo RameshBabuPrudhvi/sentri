@@ -31,7 +31,7 @@ router.get("/config", (req, res) => {
       { id: "anthropic", name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", docsUrl: "https://console.anthropic.com/settings/keys" },
       { id: "openai",    name: "GPT-4o-mini",      model: "gpt-4o-mini",              docsUrl: "https://platform.openai.com/api-keys" },
       { id: "google",    name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         docsUrl: "https://aistudio.google.com/apikey" },
-      { id: "local",     name: "Ollama (local)",   model: "llama3.2",                 docsUrl: "https://ollama.ai" },
+      { id: "local",     name: "Ollama (local)",   model: "mistral:7b",                 docsUrl: "https://ollama.ai" },
     ],
   });
 });
