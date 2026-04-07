@@ -19,8 +19,8 @@ import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import fs from "fs";
 import { getHealingHistoryForTest } from "../selfHealing.js";
-import { extractTestBody } from "./codeParsing.js";
-import { runGeneratedCode, getExpect } from "./codeExecutor.js";
+import { extractTestBody, isApiTest } from "./codeParsing.js";
+import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
 import { captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
@@ -112,6 +112,12 @@ function formatTestError(err) {
  * result object suitable for pushing into run.results.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, db) {
+  // ── API-only test path: no browser context needed ──────────────────────
+  if (test.playwrightCode && isApiTest(test.playwrightCode)) {
+    return executeApiTest(test, runId, stepIndex, runStart);
+  }
+
+  // ── Browser-based test path (original behaviour) ───────────────────────
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
@@ -240,6 +246,50 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
     } catch (videoErr) {
       console.warn(`[executeTest] Video move failed for step ${stepIndex}:`, videoErr.message);
     }
+  }
+
+  return result;
+}
+
+/**
+ * executeApiTest(test, runId, stepIndex, runStart) → result object
+ *
+ * Runs an API-only test (one that uses `request.newContext()`) without
+ * spinning up a browser page. Skips screenshots, video, DOM snapshots,
+ * and screencast — none of which apply to API tests.
+ */
+async function executeApiTest(test, runId, stepIndex, runStart) {
+  const result = {
+    testId: test.id,
+    testName: test.name,
+    steps: test.steps || [],
+    status: "passed",
+    durationMs: 0,
+    error: null,
+    screenshot: null,
+    screenshotPath: null,
+    videoPath: null,
+    runTimestamp: 0,
+    network: [],
+    consoleLogs: [],
+    domSnapshot: null,
+    boundingBoxes: [],
+    url: test.sourceUrl || "",
+    isApiTest: true,
+  };
+
+  const start = Date.now();
+  result.startedAt = start;
+
+  try {
+    const expect = await getExpect();
+    await runApiTestCode(test.playwrightCode, expect);
+  } catch (err) {
+    result.status = "failed";
+    result.error = formatTestError(err);
+  } finally {
+    result.durationMs = Date.now() - start;
+    result.runTimestamp = start - runStart;
   }
 
   return result;

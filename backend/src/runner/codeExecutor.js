@@ -6,14 +6,17 @@
  *   2. Inject self-healing runtime helpers (via selfHealing.js)
  *   3. Wrap the code in a new Function() and execute it against a live page
  *   4. Lazy-load Playwright's `expect` at runtime
+ *   5. Provide a real Playwright `request` fixture for API tests
  *
  * Exports:
  *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
+ *   runApiTestCode(playwrightCode, expect)
  *   getExpect()
  */
 
 import { extractTestBody, patchNetworkIdle, stripPlaywrightImports } from "./codeParsing.js";
 import { getSelfHealingHelperCode, applyHealingTransforms } from "../selfHealing.js";
+import playwright from "playwright";
 
 /**
  * runGeneratedCode(page, context, playwrightCode, expect, healingHints)
@@ -66,6 +69,59 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
     throw err;
+  }
+}
+
+/**
+ * runApiTestCode(playwrightCode, expect)
+ *
+ * Executes an API-only test that uses Playwright's `request.newContext()`
+ * instead of a browser page. Creates a real APIRequestContext, runs the
+ * generated code, and cleans up afterwards.
+ *
+ * Returns { passed: true } or throws with the error.
+ */
+export async function runApiTestCode(playwrightCode, expect) {
+  const body = extractTestBody(playwrightCode);
+  if (!body) {
+    throw new Error("Could not parse test body from generated code");
+  }
+
+  const cleaned = patchNetworkIdle(stripPlaywrightImports(body));
+
+  // Create a real Playwright APIRequestContext as the `request` fixture
+  const request = await playwright.request.newContext({
+    ignoreHTTPSErrors: true,
+  });
+
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("request", "expect", `
+    return (async () => {
+      // API tests don't use page/context — provide stubs to prevent ReferenceError
+      const page = undefined;
+      const context = undefined;
+      const run = undefined;
+      const browser = undefined;
+      let __testError = null;
+      try {
+        ${cleaned}
+      } catch (e) {
+        __testError = e;
+      }
+      if (__testError) {
+        throw __testError;
+      }
+      return { passed: true };
+    })();
+  `);
+
+  try {
+    const result = await fn(request, expect);
+    return { passed: true };
+  } catch (err) {
+    throw err;
+  } finally {
+    await request.dispose().catch(() => {});
   }
 }
 

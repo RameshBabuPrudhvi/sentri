@@ -8,6 +8,7 @@
  *   extractTestBody(code)        — pull the async arrow-fn body from a test()
  *   patchNetworkIdle(code)       — rewrite networkidle → domcontentloaded
  *   stripPlaywrightImports(code) — remove import/require of @playwright/test
+ *   isApiTest(code)              — detect API-only tests (request.newContext)
  */
 
 /**
@@ -84,4 +85,28 @@ export function stripPlaywrightImports(code) {
     .filter(line => !line.match(/import\s*\{.*\}\s*from\s*['"]@playwright\/test['"]/))
     .filter(line => !line.match(/require\s*\(\s*['"]@playwright\/test['"]\s*\)/))
     .join("\n");
+}
+
+/**
+ * isApiTest(playwrightCode)
+ *
+ * Returns true when the generated code is an API-only test that uses
+ * `request.newContext()` (Playwright's APIRequestContext) rather than
+ * browser-based page interactions.
+ *
+ * API tests:
+ *   - Do NOT need a browser page or page.goto()
+ *   - Need a real Playwright `request` fixture instead of the undefined stub
+ *   - Should skip browser-specific artifacts (screenshots, DOM snapshots, video)
+ */
+export function isApiTest(playwrightCode) {
+  if (!playwrightCode) return false;
+  const body = extractTestBody(playwrightCode);
+  if (!body) return false;
+  // Detect request.newContext() or destructured { request } fixture usage
+  // without any page.goto / page.click / page.locator interactions
+  const usesRequestContext = /request\s*\.\s*newContext\s*\(/.test(body)
+    || /request\s*\.\s*(get|post|put|patch|delete|head|fetch)\s*\(/.test(body);
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(body);
+  return usesRequestContext && !usesPage;
 }
