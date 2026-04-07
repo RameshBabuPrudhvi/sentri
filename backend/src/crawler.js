@@ -172,6 +172,16 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
     }
 
+    // Enrich snapshotsByUrl with fingerprint-keyed entries so that downstream
+    // code (journeyPrompt.js) can look up per-state snapshots when a journey
+    // page carries _stateFingerprint. Without this, multiple states at the
+    // same URL (e.g. login form blank vs with errors) would all resolve to
+    // the last-captured snapshot for that URL.
+    const fpMap = exploration.stateGraph.snapshotsByFp;
+    for (const [fp, snap] of fpMap) {
+      snapshotsByUrl[fp] = snap;
+    }
+
     // Use observed flows from the state explorer as journeys
     journeys = exploration.journeys;
     if (journeys.length > 0) {

@@ -57,7 +57,10 @@ For NEGATIVE tests, vary the inputs (empty fields, wrong values) but use the sam
 export function buildJourneyPrompt(journey, allSnapshots, { testCount = "ai_decides" } = {}) {
   const local = isLocalProvider();
   const pageContexts = journey.pages.map(page => {
-    const snapshot = allSnapshots[page.url];
+    // Prefer fingerprint lookup for state-explorer journeys (multiple states
+    // at the same URL). Falls back to URL lookup for legacy crawl journeys.
+    const snapshot = (page._stateFingerprint && allSnapshots[page._stateFingerprint])
+      || allSnapshots[page.url];
     // For local models (Ollama) keep element data compact to avoid context overflow (HTTP 500)
     const rawElems = (snapshot?.elements || []).slice(0, local ? 8 : 10);
     const elems = local
