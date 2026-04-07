@@ -187,8 +187,8 @@ async function generateExecutivePDF() {
     const tRuns  = todayComp.filter(r => r.projectId === p.id);
     const wRuns  = weekComp.filter(r => r.projectId === p.id);
     const pTests = allTests.filter(t => t.projectId === p.id);
-    const approved = pTests.filter(t => t.status === "approved").length;
-    const draft    = pTests.filter(t => t.status === "draft").length;
+    const approved = pTests.filter(t => t.reviewStatus === "approved").length;
+    const draft    = pTests.filter(t => t.reviewStatus === "draft").length;
     const lastRun  = testRuns.find(r => r.projectId === p.id);
     return {
       name: p.name || p.id, url: p.url,

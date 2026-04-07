@@ -25,7 +25,9 @@ router.post("/", (req, res) => {
   if (validationErr) return res.status(400).json({ error: validationErr });
 
   const db = getDb();
-  const { name, url, credentials } = req.body;
+  const name = sanitise(req.body.name, 200);
+  const url = req.body.url?.trim() || "";
+  const credentials = req.body.credentials;
 
   const id = generateProjectId(db);
   const project = {

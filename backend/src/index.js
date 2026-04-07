@@ -59,7 +59,7 @@ initCountersFromExistingData(db);
 
 // ─── Seed helper (dev / testing only) ─────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
-  app.patch("/api/_seed/runs/:id", (req, res) => {
+  app.patch("/api/_seed/runs/:id", requireAuth, (req, res) => {
     db.runs[req.params.id] = { ...req.body, id: req.params.id };
     res.json({ ok: true, id: req.params.id });
   });

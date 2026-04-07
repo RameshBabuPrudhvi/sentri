@@ -109,7 +109,12 @@ async function captureState(page, ctx) {
     ctx.states.add(fp);
     ctx.snapshotsByFp.set(fp, snapshot);
     ctx.snapshots.push(snapshot);
-    ctx.snapshotsByUrl[snapshot.url] = snapshot;
+    // Only store the first snapshot per URL — later states at the same URL
+    // (e.g. form blank vs form with errors) are preserved in snapshotsByFp
+    // and looked up via _stateFingerprint in journeyPrompt.js.
+    if (!ctx.snapshotsByUrl[snapshot.url]) {
+      ctx.snapshotsByUrl[snapshot.url] = snapshot;
+    }
   }
   return { snapshot, fp, isNovel };
 }
