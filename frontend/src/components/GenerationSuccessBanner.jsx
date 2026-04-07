@@ -16,32 +16,10 @@ export default function GenerationSuccessBanner({ run, isRunning }) {
 
   const testCount = run?.tests?.length || run?.testsGenerated || 0;
 
-  if (isRunning || run?.status !== "completed" || !run?.projectId) {
+  // Rate limit warnings are shown by RunDetail.jsx at the page level —
+  // don't duplicate them here inside the pipeline view.
+  if (isRunning || run?.status !== "completed" || !run?.projectId || run.rateLimitError) {
     return null;
-  }
-
-  // Rate limit warning — show even when some tests were generated
-  if (run.rateLimitError) {
-    return (
-      <OutcomeBanner
-        variant="warning"
-        title={`⚠️ AI rate limit reached — ${testCount} test${testCount === 1 ? "" : "s"} generated before limit`}
-        subtitle={`${run.rateLimitError}. Switch to a different AI provider in Settings, or wait and retry.`}
-      >
-        {testCount > 0 && (
-          <button
-            className="btn btn-sm"
-            style={{
-              background: "var(--amber)", color: "#fff", border: "none",
-              fontWeight: 700, whiteSpace: "nowrap", gap: 6, flexShrink: 0,
-            }}
-            onClick={() => navigate(`/projects/${run.projectId}`)}
-          >
-            View {testCount} Test{testCount !== 1 ? "s" : ""} <ArrowRight size={13} />
-          </button>
-        )}
-      </OutcomeBanner>
-    );
   }
 
   if (testCount === 0) return null;
