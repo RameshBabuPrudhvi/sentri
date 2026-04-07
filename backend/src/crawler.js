@@ -111,13 +111,13 @@ export async function generateFromUserDescription(project, run, db, { name, desc
   const runStart = Date.now();
   log(run, `✦ Starting test generation from description for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
-  log(run, `⚙️  Run config:`);
-  log(run, `   Generation mode: 📝 From description (no crawl)`);
-  log(run, `   Explorer mode  : ⏭️  None (crawl skipped — generating from description)`);
-  log(run, `   Test count     : ${testCount}`);
-  log(run, `   HAR capture    : ❌ disabled (no crawl)`);
-  log(run, `   API tests      : ✅ auto-detected from description (mention endpoints, HTTP methods, /api/ paths)`);
-  log(run, `   Target URL     : ${project.url}`);
+  log(run, `⚙️ Run config:`);
+  log(run, `Generation mode: 📝 From description (no crawl)`);
+  log(run, `Explorer mode: ⏭️ None (crawl skipped — generating from description)`);
+  log(run, `Test count: ${testCount}`);
+  log(run, `HAR capture: ❌ disabled (no crawl)`);
+  log(run, `API tests: ✅ auto-detected from description (mention endpoints, HTTP methods, /api/ paths)`);
+  log(run, `Target URL: ${project.url}`);
 
   // Skip steps 1-3 — user provides the intent directly via name + description
   setStep(run, 1);
@@ -134,8 +134,8 @@ export async function generateFromUserDescription(project, run, db, { name, desc
   const apiKeywords = /\bAPI\b|\bREST\b|\bGraphQL\b|\bendpoint|\b(GET|POST|PUT|PATCH|DELETE)\s+\/|\bstatus\s*code|\brequest\s*body|\bresponse\s*(body|shape|schema)|\bjson\s*(response|payload|body)|\bcontract\s*test|\/api\//i;
   const detectedApiIntent = apiKeywords.test(`${name} ${description}`);
   log(run, `🤖 Generating test${detectedApiIntent ? "s (🌐 API intent detected → using API test prompt)" : " from user description"}...`);
-  log(run, `   Name: "${name}"`);
-  if (description) log(run, `   Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
+  log(run, `Name: "${name}"`);
+  if (description) log(run, `Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
   const rawTests = await generateFromDescription(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
@@ -159,7 +159,7 @@ export async function generateFromUserDescription(project, run, db, { name, desc
     run.duration = Date.now() - runStart;
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
-    log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
+    log(run, `Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
     logSuccess(run, `Done! ${run.tests.length} test(s) generated from description for "${name}".`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });
@@ -189,17 +189,17 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // ── Step 1: Smart crawl or state exploration ─────────────────────────────
   log(run, `🕷️  Starting ${mode === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
-  log(run, `⚙️  Run config:`);
-  log(run, `   Explorer mode : ${mode === "state" ? "🔍 State exploration (click/fill/submit)" : "🔗 Link crawl (follow <a> tags)"}`);
+  log(run, `⚙️ Run config:`);
+  log(run, `Explorer mode: ${mode === "state" ? "🔍 State exploration (click/fill/submit)" : "🔗 Link crawl (follow <a> tags)"}`);
   if (mode === "state" && explorerTuning) {
-    log(run, `   Max states    : ${explorerTuning.maxStates ?? 30}`);
-    log(run, `   Max depth     : ${explorerTuning.maxDepth ?? 3}`);
-    log(run, `   Max actions   : ${explorerTuning.maxActions ?? 8}`);
-    log(run, `   Action timeout: ${explorerTuning.actionTimeout ?? 5000}ms`);
+    log(run, `Max states: ${explorerTuning.maxStates ?? 30}`);
+    log(run, `Max depth: ${explorerTuning.maxDepth ?? 3}`);
+    log(run, `Max actions: ${explorerTuning.maxActions ?? 8}`);
+    log(run, `Action timeout: ${explorerTuning.actionTimeout ?? 5000}ms`);
   }
-  log(run, `   Test count    : ${testCount}`);
-  log(run, `   HAR capture   : ✅ enabled (API traffic → API test generation)`);
-  log(run, `   Target URL    : ${project.url}`);
+  log(run, `Test count: ${testCount}`);
+  log(run, `HAR capture: ✅ enabled (API traffic → API test generation)`);
+  log(run, `Target URL: ${project.url}`);
   setStep(run, 1);
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
@@ -285,14 +285,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   if (genResult.rateLimitHit) {
     const errMsg = genResult.rateLimitError || "AI provider rate limit exceeded";
     logWarn(run, `⚠️  AI RATE LIMIT: ${errMsg}`);
-    logWarn(run, `   Tests generated before limit: ${rawTests.length}. Switch to a different AI provider in Settings, or wait and retry.`);
+    logWarn(run, `Tests generated before limit: ${rawTests.length}. Switch to a different AI provider in Settings, or wait and retry.`);
     run.rateLimitError = errMsg;
   }
 
   // ── Step 4b: API test generation from captured HAR traffic ──────────────
   if (apiEndpoints.length === 0) {
     log(run, `🌐 No API endpoints captured — site made no fetch/XHR calls during ${mode === "state" ? "exploration" : "crawl"}. API test generation skipped.`);
-    log(run, `   💡 Tip: Use "State exploration" mode to trigger API calls via button clicks and form submissions.`);
+    log(run, `💡 Tip: Use "State exploration" mode to trigger API calls via button clicks and form submissions.`);
   }
   if (apiEndpoints.length > 0 && !genResult.rateLimitHit) {
     throwIfAborted(signal);
@@ -303,7 +303,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
         for (const t of apiTests) rawTests.push(t);
         log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);
       } else {
-        log(run, `   No API tests generated (AI returned empty)`);
+        log(run, `No API tests generated (AI returned empty)`);
       }
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
@@ -333,10 +333,10 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     run.duration = Date.now() - runStart;
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
-    log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
-    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | API tests: ${validatedTests.filter(t => t._generatedFrom === "api_har_capture" || t._generatedFrom === "api_user_described").length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
+    log(run, `Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
+    log(run, `Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | API tests: ${validatedTests.filter(t => t._generatedFrom === "api_har_capture" || t._generatedFrom === "api_user_described").length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
     if (apiEndpoints.length > 0) {
-      log(run, `   API endpoints discovered: ${apiEndpoints.length}`);
+      log(run, `API endpoints discovered: ${apiEndpoints.length}`);
     }
     if (run.rateLimitError) {
       logWarn(run, `⚠️  Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);

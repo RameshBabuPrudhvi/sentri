@@ -113,11 +113,11 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
 
   const modeLabel = workers > 1 ? `${workers} parallel workers` : "sequential";
   log(run, `🚀 Starting test run: ${tests.length} tests (${modeLabel})`);
-  log(run, `⚙️  Run config:`);
-  log(run, `   Execution mode: ${workers > 1 ? `⚡ Parallel (${workers} workers)` : "▶ Sequential (1 worker)"}`);
-  log(run, `   Tests queued  : ${tests.length}`);
-  log(run, `   Project URL   : ${project.url}`);
-  log(run, `   Browser       : Chromium (headless)`);
+  log(run, `⚙️ Run config:`);
+  log(run, `Execution mode: ${workers > 1 ? `⚡ Parallel (${workers} workers)` : "▶ Sequential (1 worker)"}`);
+  log(run, `Tests queued: ${tests.length}`);
+  log(run, `Project URL: ${project.url}`);
+  log(run, `Browser: Chromium (headless)`);
 
   const runStart = Date.now();
   const allVideoSegments = [];
