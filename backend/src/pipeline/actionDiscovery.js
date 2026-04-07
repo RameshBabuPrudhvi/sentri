@@ -54,7 +54,7 @@ const TEST_DATA = {
  */
 export function generateTestData(field) {
   const type = (field.type || "").toLowerCase();
-  const hints = `${field.name} ${field.label} ${field.placeholder} ${field.ariaLabel}`.toLowerCase();
+  const hints = `${field.name || ""} ${field.label || ""} ${field.placeholder || ""} ${field.ariaLabel || ""}`.toLowerCase();
 
   // Type-based matching first (strongest signal)
   if (type === "email" || hints.includes("email")) return TEST_DATA.email;
