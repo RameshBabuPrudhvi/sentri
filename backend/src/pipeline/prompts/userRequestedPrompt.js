@@ -1,10 +1,11 @@
 /**
- * userRequestedPrompt.js — User-requested single test prompt template
+ * userRequestedPrompt.js — User-described test prompt template
  *
- * Used by generateSingleTest (POST /api/projects/:id/tests/generate) when a
- * user provides a specific name + description. Unlike buildIntentPrompt which
- * generates 5-8 generic tests from crawled page data, this prompt generates
- * exactly ONE focused test that matches the user's stated intent.
+ * Used by generateFromDescription (POST /api/projects/:id/tests/generate) when
+ * a user provides a specific name + description. Unlike buildIntentPrompt which
+ * generates tests from crawled page data, this prompt generates tests focused
+ * on the user's stated intent. The number of tests is controlled by the
+ * `testCount` dial (1–20, default "one").
  *
  * Returns { system, user } for structured message support.
  */

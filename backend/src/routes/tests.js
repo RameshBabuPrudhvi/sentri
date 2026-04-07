@@ -11,7 +11,7 @@
  * | `PATCH`  | `/api/tests/:testId`                          | Edit test (steps, name, code, etc.) |
  * | `POST`   | `/api/projects/:id/tests`                     | Create a manual test (Draft)        |
  * | `DELETE` | `/api/projects/:id/tests/:testId`             | Delete a test                       |
- * | `POST`   | `/api/projects/:id/tests/generate`            | AI-generate test from description   |
+ * | `POST`   | `/api/projects/:id/tests/generate`            | AI-generate test(s) from description|
  * | `POST`   | `/api/tests/:testId/run`                      | Run a single test                   |
  * | `PATCH`  | `/api/projects/:id/tests/:testId/approve`     | Approve (Draft → Approved)          |
  * | `PATCH`  | `/api/projects/:id/tests/:testId/reject`      | Reject                              |
@@ -30,7 +30,7 @@ import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
 import { hasProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
-import { generateSingleTest } from "../crawler.js";
+import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
@@ -263,9 +263,10 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     .trim();
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedGenDials = resolveDialsConfig(dialsConfig);
-  // Default to "one" for the generate endpoint (user-requested tests)
-  // to preserve the original contract of generating exactly 1 test.
-  // The crawl endpoint defaults to "ai_decides" which generates 5-8 tests per page.
+  // Default to "one" for the description-based generate endpoint so users
+  // who don't touch Test Dials get 1 focused test (original behaviour).
+  // When the user explicitly selects a testCount dial, that value is used instead.
+  // The crawl endpoint defaults to "ai_decides" which generates multiple tests per page.
   // Use strict equality — "ai_decides" is truthy so `|| "one"` would never trigger.
   const rawTestCount = validatedGenDials?.testCount;
   const testCount = (rawTestCount && rawTestCount !== "ai_decides") ? rawTestCount : "one";
@@ -311,7 +312,7 @@ saveDb();
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
-    (signal) => generateSingleTest(project, run, db, {
+    (signal) => generateFromUserDescription(project, run, db, {
       name: cleanName,
       description: cleanDescription,
       dialsPrompt,

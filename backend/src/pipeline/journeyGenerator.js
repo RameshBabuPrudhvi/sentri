@@ -4,7 +4,7 @@
  * Thin orchestration layer that delegates to:
  *   - prompts/journeyPrompt.js      — multi-page journey prompt
  *   - prompts/intentPrompt.js       — single-page intent prompt
- *   - prompts/userRequestedPrompt.js — user-requested test prompt
+ *   - prompts/userRequestedPrompt.js — user-described test prompt
  *   - promptHelpers.js              — resolveTestCountInstruction, withDials
  *   - stepSanitiser.js              — sanitiseSteps, extractTestsArray
  */
@@ -19,13 +19,14 @@ import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
 import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
 
 /**
- * generateUserRequestedTest(name, description, appUrl) → Array of test objects
+ * generateFromDescription(name, description, appUrl) → Array of test objects
  *
- * Generates exactly ONE test focused on the user's provided name + description.
+ * Generates test(s) focused on the user's provided name + description.
+ * The number of tests is controlled by the `testCount` dial (1–20).
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
- * generic generateIntentTests which produces 5-8 crawl-oriented tests.
+ * generic generateIntentTests which produces crawl-oriented tests.
  */
-export async function generateUserRequestedTest(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
+export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
   const text = onToken
     ? await streamText(prompt, onToken, { signal })

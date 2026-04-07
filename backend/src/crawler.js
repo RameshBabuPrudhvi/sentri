@@ -24,7 +24,7 @@
  *   discover multi-step user flows
  *
  * ### Exports
- * - {@link generateSingleTest} — Generate ONE test from a user description (skips crawl).
+ * - {@link generateFromUserDescription} — Generate test(s) from a user description (skips crawl).
  * - {@link crawlAndGenerateTests} — Full 8-stage pipeline from URL crawl or state exploration.
  */
 
@@ -32,7 +32,7 @@ import { getProviderName } from "./aiProvider.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
 import { filterElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
-import { generateAllTests, generateUserRequestedTest, generateApiTests } from "./pipeline/journeyGenerator.js";
+import { generateAllTests, generateFromDescription, generateApiTests } from "./pipeline/journeyGenerator.js";
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
@@ -90,27 +90,29 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
 }
 
 /**
- * generateSingleTest — Generates ONE focused test from a user-provided
+ * generateFromUserDescription — Generates test(s) from a user-provided
  * name + description (no crawl needed).
  *
- * Uses a dedicated AI prompt (generateUserRequestedTest) that produces
- * exactly 1 test matching the user's intent, instead of the crawl
- * pipeline's generic 5-8 tests per page.
+ * Uses a dedicated AI prompt that produces tests matching the user's
+ * stated intent. The number of tests is controlled by the `testCount`
+ * dial (1–20, default "one"). Unlike the crawl pipeline which discovers
+ * pages automatically, this skips Steps 1-3 and goes straight to AI
+ * generation.
  *
  * Pipeline:
  *   Step 1-3: SKIPPED (Crawl, Filter, Classify — user provides intent directly)
- *   Step 4: Generate     — AI generates 1 focused test from name + description
+ *   Step 4: Generate     — AI generates test(s) from name + description
  *   Step 5: Deduplicate  — Check against existing project tests
  *   Step 6: Enhance      — Strengthen assertions
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateSingleTest(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
+export async function generateFromUserDescription(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
-  log(run, `✦ Starting single-test generation pipeline for "${name}"`);
+  log(run, `✦ Starting test generation from description for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️  Run config:`);
-  log(run, `   Generation mode: 📝 Single test (user-described scenario)`);
+  log(run, `   Generation mode: 📝 From description (no crawl)`);
   log(run, `   Explorer mode  : ⏭️  None (crawl skipped — generating from description)`);
   log(run, `   Test count     : ${testCount}`);
   log(run, `   HAR capture    : ❌ disabled (no crawl — API tests require "Crawl & Generate")`);
@@ -131,7 +133,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `   Name: "${name}"`);
   if (description) log(run, `   Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
-  const rawTests = await generateUserRequestedTest(name, description, project.url, (token) => {
+  const rawTests = await generateFromDescription(name, description, project.url, (token) => {
     emitRunEvent(run.id, "llm_token", { token });
   }, { dialsPrompt, testCount, signal });
   log(run, `📝 Raw tests generated: ${rawTests.length}`);
@@ -154,7 +156,7 @@ export async function generateSingleTest(project, run, db, { name, description, 
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
-    logSuccess(run, `Done! ${run.tests.length} test(s) generated for "${name}".`);
+    logSuccess(run, `Done! ${run.tests.length} test(s) generated from description for "${name}".`);
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 
