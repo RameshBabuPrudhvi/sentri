@@ -216,10 +216,28 @@ export const api = {
   testConnection: (url) => req("POST", "/test-connection", { url }),
 
   // ── Export (returns download URLs, not JSON) ────────────────────────────────
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportZephyrUrl:   (projectId, status) => `${BASE}/projects/${projectId}/tests/export/zephyr${status ? `?status=${status}` : ""}`,
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportTestRailUrl: (projectId, status) => `${BASE}/projects/${projectId}/tests/export/testrail${status ? `?status=${status}` : ""}`,
+  // These return plain URL strings used as <a href> downloads. Since the browser
+  // can't send Authorization headers on <a> clicks, we append ?token= as a query
+  // param — the backend requireAuth middleware accepts this as a fallback (same
+  // pattern as SSE EventSource in useRunSSE.js).
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL with auth token. */
+  exportZephyrUrl:   (projectId, status) => {
+    const tk = getToken();
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (tk) params.set("token", tk);
+    const qs = params.toString();
+    return `${BASE}/projects/${projectId}/tests/export/zephyr${qs ? `?${qs}` : ""}`;
+  },
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL with auth token. */
+  exportTestRailUrl: (projectId, status) => {
+    const tk = getToken();
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (tk) params.set("token", tk);
+    const qs = params.toString();
+    return `${BASE}/projects/${projectId}/tests/export/testrail${qs ? `?${qs}` : ""}`;
+  },
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 
