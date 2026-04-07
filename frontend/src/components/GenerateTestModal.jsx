@@ -694,7 +694,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 16px" }} />
 
               {/* Toggle row */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
                   <Toggle value={splitByAC} onChange={setSplitByAC} />
                   Split by Acceptance Criteria
