@@ -205,10 +205,14 @@ label {
 }
 .modal-panel {
   position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
+  /* Pin 16px from top and bottom so the panel never overflows the viewport.
+     Left/right centering is unchanged. */
+  top: 16px;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
-  max-height: min(92vh, calc(100vh - 32px));
+  max-height: calc(100vh - 32px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
