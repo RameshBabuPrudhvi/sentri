@@ -282,6 +282,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       if (err.name === "AbortError" || signal?.aborted) throw err;
       logWarn(run, `⚠️  API test generation failed: ${err.message?.slice(0, 200)}`);
     }
+  }
 
   throwIfAborted(signal);
 
