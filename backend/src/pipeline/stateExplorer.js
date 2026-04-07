@@ -187,12 +187,13 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   });
   const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits };
   let startState = null;
+  let harCapture = null;
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
     // ── HAR capture: record API traffic for API test generation ────────────
-    const harCapture = createHarCapture(context, project.url);
+    harCapture = createHarCapture(context, project.url);
 
     const creds = decryptCredentials(project.credentials);
     if (creds?.usernameSelector) {
@@ -272,10 +273,13 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   } finally { await browser.close().catch(() => {}); }
 
   // ── Summarise captured API traffic ────────────────────────────────────────
-  harCapture.detach();
-  const apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
-  if (apiEndpoints.length > 0) {
-    log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+  let apiEndpoints = [];
+  if (harCapture) {
+    harCapture.detach();
+    apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
+    if (apiEndpoints.length > 0) {
+      log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+    }
   }
 
   const stateGraph = { states: ctx.states, edges: ctx.edges, startState, snapshotsByFp: ctx.snapshotsByFp };

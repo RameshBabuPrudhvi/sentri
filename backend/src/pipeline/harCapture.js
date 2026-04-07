@@ -84,9 +84,9 @@ function normalisePathPattern(pathname) {
  * Call `capture.detach()` when done to stop listening. Then call
  * `capture.getEntries()` to retrieve all captured API calls.
  *
- * @param {import('playwright').BrowserContext} context
+ * @param {Object} context — Playwright BrowserContext instance
  * @param {string} appOrigin — the project URL origin (only same-origin calls captured)
- * @returns {{ detach: () => void, getEntries: () => HarEntry[] }}
+ * @returns {Object} `{ detach(), getEntries() }` — collector handle
  */
 export function createHarCapture(context, appOrigin) {
   const entries = [];

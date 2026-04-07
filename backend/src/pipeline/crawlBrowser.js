@@ -36,12 +36,13 @@ export async function crawlPages(project, run, { signal } = {}) {
 
   const snapshots = [];
   const snapshotsByUrl = {};
+  let harCapture = null;
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
     // ── HAR capture: record API traffic for API test generation ────────────
-    const harCapture = createHarCapture(context, project.url);
+    harCapture = createHarCapture(context, project.url);
 
     const crawlQueue = new SmartCrawlQueue(project.url);
     crawlQueue.enqueue(project.url, 0);
@@ -130,10 +131,13 @@ export async function crawlPages(project, run, { signal } = {}) {
   }
 
   // ── Summarise captured API traffic ────────────────────────────────────────
-  harCapture.detach();
-  const apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
-  if (apiEndpoints.length > 0) {
-    log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+  let apiEndpoints = [];
+  if (harCapture) {
+    harCapture.detach();
+    apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
+    if (apiEndpoints.length > 0) {
+      log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);
+    }
   }
 
   logSuccess(run, `Smart crawl done. ${snapshots.length} unique pages found.`);
