@@ -433,6 +433,14 @@ router.get("/me", requireAuth, (req, res) => {
  * @returns {200} `{ message, ...(dev: resetToken, resetUrl) }`.
  */
 router.post("/forgot-password", async (req, res) => {
+  // Rate-limit to prevent token-flooding DoS (fills memory with reset tokens)
+  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const rate = checkRateLimit(ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
   const email = sanitiseString(req.body.email, 254).toLowerCase();
   if (!isValidEmail(email)) {
     return res.status(400).json({ error: "A valid email address is required." });
@@ -485,6 +493,14 @@ router.post("/forgot-password", async (req, res) => {
  * @returns {400} Invalid token, expired, or validation error.
  */
 router.post("/reset-password", async (req, res) => {
+  // Rate-limit to prevent brute-force token guessing
+  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const rate = checkRateLimit(ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
   const { token, newPassword } = req.body;
 
   if (!token || typeof token !== "string") {
