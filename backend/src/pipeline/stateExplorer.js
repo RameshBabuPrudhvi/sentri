@@ -59,7 +59,7 @@ async function executeAction(page, action, actionTimeout) {
       case "click": case "submit":
         await el.click({ timeout: actionTimeout }); break;
       case "fill":
-        if (action.value) { await el.fill(""); await el.fill(action.value); } break;
+        if (action.value) { await el.fill(""); await el.fill(action.value); } else { return false; } break;
       case "select":
         await el.selectOption({ index: 1 }).catch(() => {}); break;
       case "check":
