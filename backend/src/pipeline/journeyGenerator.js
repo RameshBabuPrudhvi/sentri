@@ -24,9 +24,11 @@ import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
  */
 function isRateLimitLike(err) {
   const msg = (err?.message || "").toLowerCase();
-  return msg.includes("rate") || msg.includes("quota") || msg.includes("429")
-    || msg.includes("too many") || msg.includes("resource_exhausted")
-    || msg.includes("limit") || (err?.status === 429);
+  const status = err?.status || err?.statusCode || 0;
+  return status === 429
+    || msg.includes("rate limit") || msg.includes("rate_limit")
+    || msg.includes("quota") || msg.includes("429")
+    || msg.includes("too many requests") || msg.includes("resource_exhausted");
 }
 
 /**
