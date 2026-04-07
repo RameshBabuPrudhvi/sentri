@@ -7,7 +7,8 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
-import { loadSavedConfig } from "../utils/testDialsStorage.js";
+import { loadSavedConfig, countActiveDials } from "../utils/testDialsStorage.js";
+import { EXPLORE_MODE_OPTIONS } from "../config/testDialsConfig.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
@@ -71,6 +72,7 @@ export default function ProjectDetail() {
   const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [crawlDialsCfg, setCrawlDialsCfg] = useState(() => loadSavedConfig());
+  const [showDialsPopover, setShowDialsPopover] = useState(false);
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [search, setSearch]               = useState("");
@@ -317,26 +319,91 @@ export default function ProjectDetail() {
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {/* ── Row 1: Mode selector + Crawl button + Run button ── */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Explore mode segmented control — always visible */}
+              <div style={{
+                display: "flex", borderRadius: "var(--radius)", overflow: "hidden",
+                border: "1px solid var(--border)", flexShrink: 0,
+              }}>
+                {EXPLORE_MODE_OPTIONS.map(opt => {
+                  const active = (crawlDialsCfg?.exploreMode || "crawl") === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setCrawlDialsCfg(prev => ({ ...prev, exploreMode: opt.id }))}
+                      style={{
+                        padding: "5px 12px", border: "none", cursor: "pointer",
+                        fontSize: "0.78rem", fontWeight: active ? 600 : 400,
+                        background: active ? "var(--accent-bg)" : "var(--surface)",
+                        color: active ? "var(--accent)" : "var(--text2)",
+                        transition: "all 0.12s",
+                        borderRight: opt.id === "crawl" ? "1px solid var(--border)" : "none",
+                      }}
+                      title={opt.desc}
+                    >
+                      {opt.id === "crawl" ? "🔗" : "⚡"} {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
               <button className="btn btn-ghost btn-sm" onClick={doCrawl} disabled={!!actionLoading}>
                 {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
-                {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate Tests"}
+                {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate"}
               </button>
               <button className="btn btn-primary btn-sm" onClick={doRun}
                 disabled={!!actionLoading || approvedTests.length === 0}
                 title={approvedTests.length === 0 ? "Approve tests first to run regression" : undefined}>
                 {actionLoading === "run" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-                Run Regression ({approvedTests.length})
+                Run ({approvedTests.length})
               </button>
+            </div>
+
+            {/* ── Row 2: Dials popover + Export dropdown ── */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {/* Test Dials popover trigger */}
+              <div style={{ position: "relative" }}>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => setShowDialsPopover(v => !v)}
+                  style={{
+                    gap: 5,
+                    background: showDialsPopover ? "var(--accent-bg)" : undefined,
+                    borderColor: showDialsPopover ? "var(--accent)" : undefined,
+                  }}
+                >
+                  ⚙ Dials
+                  <span className="active-count-pill" style={{ fontSize: "0.65rem", padding: "1px 6px" }}>
+                    {countActiveDials(crawlDialsCfg)}
+                  </span>
+                  <ChevronDown size={10} style={{ transform: showDialsPopover ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                </button>
+                {showDialsPopover && (
+                  <>
+                    <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowDialsPopover(false)} />
+                    <div style={{
+                      position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 100,
+                      width: 420, maxHeight: "70vh", overflowY: "auto",
+                      background: "var(--surface)", border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-lg)", boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+                      padding: 16,
+                    }}>
+                      <CrawlDialsPanel value={crawlDialsCfg} onChange={setCrawlDialsCfg} />
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* Export dropdown */}
               {tests.length > 0 && (
                 <div style={{ position: "relative" }}>
                   <button
-                    className="btn btn-ghost btn-sm"
+                    className="btn btn-ghost btn-xs"
                     onClick={() => setShowExportMenu(v => !v)}
                     style={{ gap: 4 }}
                   >
-                    <Download size={13} /> Export <ChevronDown size={11} />
+                    <Download size={11} /> Export <ChevronDown size={10} />
                   </button>
                   {showExportMenu && (
                     <>
@@ -354,18 +421,10 @@ export default function ProjectDetail() {
                           { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import",    url: api.exportZephyrUrl(id) },
                           { label: "TestRail CSV",     desc: "TestRail bulk import",                   url: api.exportTestRailUrl(id) },
                         ].map(fmt => (
-                          <a
-                            key={fmt.label}
-                            href={fmt.url}
-                            download
-                            onClick={() => setShowExportMenu(false)}
-                            style={{
-                              display: "block", padding: "8px 12px", borderRadius: 6,
-                              textDecoration: "none", color: "var(--text)",
-                            }}
+                          <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)}
+                            style={{ display: "block", padding: "8px 12px", borderRadius: 6, textDecoration: "none", color: "var(--text)" }}
                             onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                            onMouseLeave={e => e.currentTarget.style.background = "none"}
-                          >
+                            onMouseLeave={e => e.currentTarget.style.background = "none"}>
                             <div style={{ fontSize: "0.84rem", fontWeight: 500 }}>{fmt.label}</div>
                             <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 1 }}>{fmt.desc}</div>
                           </a>
@@ -377,21 +436,13 @@ export default function ProjectDetail() {
                               Approved only ({approvedTests.length})
                             </div>
                             {[
-                              { label: "Zephyr Scale CSV (approved)", url: api.exportZephyrUrl(id, "approved") },
-                              { label: "TestRail CSV (approved)",     url: api.exportTestRailUrl(id, "approved") },
+                              { label: "Zephyr CSV (approved)", url: api.exportZephyrUrl(id, "approved") },
+                              { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(id, "approved") },
                             ].map(fmt => (
-                              <a
-                                key={fmt.label}
-                                href={fmt.url}
-                                download
-                                onClick={() => setShowExportMenu(false)}
-                                style={{
-                                  display: "block", padding: "7px 12px", borderRadius: 6,
-                                  textDecoration: "none", color: "var(--text)", fontSize: "0.82rem",
-                                }}
+                              <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)}
+                                style={{ display: "block", padding: "7px 12px", borderRadius: 6, textDecoration: "none", color: "var(--text)", fontSize: "0.82rem" }}
                                 onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                                onMouseLeave={e => e.currentTarget.style.background = "none"}
-                              >
+                                onMouseLeave={e => e.currentTarget.style.background = "none"}>
                                 {fmt.label}
                               </a>
                             ))}
@@ -402,9 +453,6 @@ export default function ProjectDetail() {
                   )}
                 </div>
               )}
-            </div>
-            <div style={{ width: "100%", minWidth: 300, maxWidth: 440 }}>
-              <CrawlDialsPanel value={crawlDialsCfg} onChange={setCrawlDialsCfg} />
             </div>
           </div>
         </div>
