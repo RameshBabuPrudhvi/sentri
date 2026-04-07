@@ -52,6 +52,11 @@ function handleUnauthorized() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
   } catch { /* localStorage unavailable */ }
+  // Skip redirect if already on the login or forgot-password page to avoid
+  // an infinite redirect loop (e.g. login returns 401 for wrong credentials,
+  // or a token expires while on the forgot-password page).
+  const path = window.location.pathname;
+  if (path.endsWith("/login") || path.endsWith("/forgot-password")) return;
   // Redirect to login — use the Vite BASE_URL so subpath deploys work
   const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
   window.location.href = `${base}/login`;
