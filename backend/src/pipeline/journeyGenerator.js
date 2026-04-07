@@ -18,6 +18,103 @@ import { buildIntentPrompt } from "./prompts/intentPrompt.js";
 import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
 import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
 
+// ── API intent detection ──────────────────────────────────────────────────────
+// Heuristic: if the user's name + description mention API-specific keywords,
+// route to the API test prompt instead of the UI test prompt. This lets users
+// generate Playwright `request` API tests from the "Generate Test" modal
+// without needing a crawl + HAR capture.
+
+const API_INTENT_PATTERNS = [
+  /\bAPI\b/,                          // explicit "API"
+  /\bREST\b/i,                        // REST API
+  /\bGraphQL\b/i,                     // GraphQL
+  /\bendpoint/i,                      // "endpoint", "endpoints"
+  /\b(GET|POST|PUT|PATCH|DELETE)\s+\//,// "GET /api/users", "POST /login"
+  /\bstatus\s*code/i,                 // "status code 200"
+  /\brequest\s*body/i,                // "request body"
+  /\bresponse\s*(body|shape|schema)/i,// "response body", "response shape"
+  /\bjson\s*(response|payload|body)/i,// "JSON response"
+  /\bcontract\s*test/i,              // "contract test"
+  /\/api\//i,                         // URL path like "/api/users"
+];
+
+/**
+ * Detect whether the user's test name + description indicate API test intent.
+ * @param {string} name
+ * @param {string} description
+ * @returns {boolean}
+ */
+function isApiIntent(name, description) {
+  const combined = `${name} ${description}`;
+  return API_INTENT_PATTERNS.some(re => re.test(combined));
+}
+
+/**
+ * Parse lightweight endpoint hints from the user's description.
+ * Extracts patterns like "GET /api/users", "POST /login" and builds
+ * minimal ApiEndpoint-shaped objects for buildApiTestPrompt.
+ *
+ * @param {string} description
+ * @param {string} appUrl
+ * @returns {ApiEndpoint[]}
+ */
+function parseEndpointHints(description, appUrl) {
+  const endpoints = [];
+  const seen = new Set();
+
+  function addEndpoint(method, pathPattern) {
+    const key = `${method} ${pathPattern}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    endpoints.push({
+      method,
+      pathPattern,
+      exampleUrls: [`${appUrl.replace(/\/$/, "")}${pathPattern}`],
+      statuses: method === "GET" ? [200] : [200, 201],
+      contentType: "application/json",
+      requestBodyExample: null,
+      responseBodyExample: null,
+      callCount: 1,
+      avgDurationMs: 0,
+      pageUrls: [],
+    });
+  }
+
+  // 1. Match "METHOD /path" patterns (e.g. "GET /api/users", "POST /api/auth/login")
+  const methodPathRe = /\b(GET|POST|PUT|PATCH|DELETE)\s+(\/\S+)/gi;
+  let match;
+  while ((match = methodPathRe.exec(description)) !== null) {
+    const method = match[1].toUpperCase();
+    const path = match[2].replace(/[.,;:!?)]+$/, "");
+    addEndpoint(method, path);
+  }
+
+  // 2. Match full URLs containing /api/ (e.g. "https://reqres.in/api/register")
+  //    When no METHOD is specified, default to POST for mutation-like paths
+  //    (register, login, create, update, delete) and GET for everything else.
+  const urlRe = /https?:\/\/[^\s,]+\/api\/[^\s,]*/gi;
+  while ((match = urlRe.exec(description)) !== null) {
+    try {
+      const url = new URL(match[0].replace(/[.,;:!?)]+$/, ""));
+      const path = url.pathname;
+      const lastSeg = path.split("/").filter(Boolean).pop() || "";
+      const isMutation = /register|login|signin|signup|create|update|delete|reset|send|submit/i.test(lastSeg);
+      addEndpoint(isMutation ? "POST" : "GET", path);
+    } catch { /* invalid URL — skip */ }
+  }
+
+  // 3. Match bare /api/ paths not preceded by a METHOD (e.g. "/api/users/:id")
+  const barePathRe = /(?<!\w)(\/api\/\S+)/gi;
+  while ((match = barePathRe.exec(description)) !== null) {
+    const path = match[1].replace(/[.,;:!?)]+$/, "");
+    if (!seen.has(`GET ${path}`) && !seen.has(`POST ${path}`)) {
+      addEndpoint("GET", path);
+    }
+  }
+
+  return endpoints;
+}
+
 /**
  * generateFromDescription(name, description, appUrl) → Array of test objects
  *
@@ -25,9 +122,30 @@ import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
  * The number of tests is controlled by the `testCount` dial (1–20).
  * Used by the POST /api/projects/:id/tests/generate endpoint instead of the
  * generic generateIntentTests which produces crawl-oriented tests.
+ *
+ * When the description indicates API test intent (mentions endpoints, HTTP
+ * methods, status codes, etc.), automatically routes to the API test prompt
+ * which generates Playwright `request` API tests instead of UI tests.
  */
 export async function generateFromDescription(name, description, appUrl, onToken, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
-  const prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
+  const apiIntent = isApiIntent(name, description);
+
+  let prompt;
+  if (apiIntent) {
+    // Build API test prompt — use parsed endpoint hints from description,
+    // or an empty array (the prompt still works, it just uses the name/description
+    // as context instead of captured HAR data).
+    const endpointHints = parseEndpointHints(description, appUrl);
+    const apiPrompt = buildApiTestPrompt(endpointHints, appUrl, { testCount });
+    // Inject the user's original name + description so the AI has full context
+    // beyond just the parsed endpoint hints (e.g. "write API tests for register
+    // endpoint with valid and invalid payloads" gives intent the parser can't capture).
+    apiPrompt.user = `USER REQUEST: ${name}\n${description ? `USER DESCRIPTION: ${description}\n\n` : "\n"}${apiPrompt.user}`;
+    prompt = withDials(apiPrompt, dialsPrompt);
+  } else {
+    prompt = withDials(buildUserRequestedPrompt(name, description, appUrl, { testCount }), dialsPrompt);
+  }
+
   const text = onToken
     ? await streamText(prompt, onToken, { signal })
     : await generateText(prompt, { signal });
@@ -38,6 +156,13 @@ export async function generateFromDescription(name, description, appUrl, onToken
   for (const t of tests) {
     t.sourceUrl = appUrl;
     if (!t.name || t.name === "descriptive name") t.name = name;
+    if (apiIntent) {
+      t.type = t.type || "integration";
+      t._generatedFrom = "api_user_described";
+      if (t.name && !t.name.startsWith("API:") && !t.name.startsWith("API ")) {
+        t.name = `API: ${t.name}`;
+      }
+    }
   }
 
   // Convert Playwright code steps to human-readable descriptions (Mistral/small LLMs)

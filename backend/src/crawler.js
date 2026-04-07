@@ -115,7 +115,8 @@ export async function generateFromUserDescription(project, run, db, { name, desc
   log(run, `   Generation mode: 📝 From description (no crawl)`);
   log(run, `   Explorer mode  : ⏭️  None (crawl skipped — generating from description)`);
   log(run, `   Test count     : ${testCount}`);
-  log(run, `   HAR capture    : ❌ disabled (no crawl — API tests require "Crawl & Generate")`);
+  log(run, `   HAR capture    : ❌ disabled (no crawl)`);
+  log(run, `   API tests      : ✅ auto-detected from description (mention endpoints, HTTP methods, /api/ paths)`);
   log(run, `   Target URL     : ${project.url}`);
 
   // Skip steps 1-3 — user provides the intent directly via name + description
@@ -129,7 +130,10 @@ export async function generateFromUserDescription(project, run, db, { name, desc
   // ── Step 4: Generate focused test(s) via AI ─────────────────────────────
   throwIfAborted(signal);
   setStep(run, 4);
-  log(run, `🤖 Generating test from user description...`);
+  // Detect API intent so the log reflects which prompt path will be used
+  const apiKeywords = /\bAPI\b|\bREST\b|\bGraphQL\b|\bendpoint|\b(GET|POST|PUT|PATCH|DELETE)\s+\/|\bstatus\s*code|\brequest\s*body|\bresponse\s*(body|shape|schema)|\bjson\s*(response|payload|body)|\bcontract\s*test|\/api\//i;
+  const detectedApiIntent = apiKeywords.test(`${name} ${description}`);
+  log(run, `🤖 Generating test${detectedApiIntent ? "s (🌐 API intent detected → using API test prompt)" : " from user description"}...`);
   log(run, `   Name: "${name}"`);
   if (description) log(run, `   Description: "${description.slice(0, 100)}${description.length > 100 ? "…" : ""}"`);
 
