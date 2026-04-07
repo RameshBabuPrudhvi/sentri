@@ -55,17 +55,27 @@ function extractRoute(url) {
 
 /**
  * Hash the visible text content from a snapshot's elements.
- * Uses only the first 40 chars of each element's text to keep the fingerprint
- * stable across minor content changes (timestamps, counters).
+ *
+ * Only uses STRUCTURAL text signals (headings, button labels, link text) — not
+ * dynamic content like timestamps, counters, or personalised greetings. This
+ * prevents trivially different snapshots of the same page (e.g. google.com
+ * with different doodle text) from being treated as distinct states.
  *
  * @param {Array} elements
  * @returns {string}
  */
 function hashVisibleContent(elements) {
   const text = (elements || [])
-    .filter(el => el.visible !== false)
-    .map(el => (el.text || "").slice(0, 40).toLowerCase().trim())
-    .filter(Boolean)
+    .filter(el => {
+      if (el.visible === false) return false;
+      // Only include structural text: headings, buttons, links, labels
+      const tag = (el.tag || "").toLowerCase();
+      const role = (el.role || "").toLowerCase();
+      return ["button", "a", "h1", "h2", "h3", "label"].includes(tag)
+        || ["button", "link", "tab", "menuitem"].includes(role);
+    })
+    .map(el => (el.text || "").slice(0, 30).toLowerCase().trim())
+    .filter(t => t.length > 2) // skip tiny fragments like "×" or "OK"
     .join("|");
   return simpleHash(text);
 }

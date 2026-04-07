@@ -41,6 +41,32 @@ const DEFAULT_MAX_DEPTH  = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
 const DEFAULT_MAX_ACTIONS = 8;
 const DEFAULT_ACTION_TIMEOUT = 5000;
 
+// URLs that indicate bot detection, CAPTCHA, or error pages — never valid states
+const BOT_DETECTION_PATTERNS = [
+  /\/sorry\//i, /\/captcha/i, /\/challenge/i, /\/blocked/i,
+  /recaptcha/i, /accounts\.google\.com\/v3\/signin/i,
+  /\/error\/?$/i, /\/403\/?$/i, /\/429\/?$/i,
+];
+
+/**
+ * Check if the current page URL is still on the same origin as the project.
+ * Returns false if the action navigated to a third-party domain, a bot
+ * detection page, or an error page.
+ *
+ * @param {string} currentUrl — page.url() after the action
+ * @param {string} projectUrl — the project's base URL
+ * @returns {boolean}
+ */
+function isSameOriginAndValid(currentUrl, projectUrl) {
+  try {
+    const current = new URL(currentUrl);
+    const project = new URL(projectUrl);
+    if (current.origin !== project.origin) return false;
+    if (BOT_DETECTION_PATTERNS.some(re => re.test(currentUrl))) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function resolveElement(page, selectors, timeout) {
   for (const sel of selectors) {
     try {
@@ -102,11 +128,22 @@ async function executeFormGroup(page, formActions, actionTimeout) {
   return executed;
 }
 
+// Max states allowed per URL — prevents the same page with trivial dynamic
+// differences from consuming the entire state budget.
+const MAX_STATES_PER_URL = 3;
+
 async function captureState(page, ctx) {
   const snapshot = await takeSnapshot(page);
   const fp = fingerprintState(snapshot);
   const isNovel = !ctx.states.has(fp);
   if (isNovel) {
+    // Per-URL cap: if we already have MAX_STATES_PER_URL states for this URL,
+    // treat this as a duplicate to avoid budget waste on trivially different
+    // snapshots of the same page (timestamps, personalisation, A/B tests).
+    const urlStateCount = ctx.snapshots.filter(s => s.url === snapshot.url).length;
+    if (urlStateCount >= MAX_STATES_PER_URL) {
+      return { snapshot, fp, isNovel: false };
+    }
     ctx.states.add(fp);
     ctx.snapshotsByFp.set(fp, snapshot);
     ctx.snapshots.push(snapshot);
@@ -237,6 +274,12 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         const executed = await executeFormGroup(page, formActions, limits.actionTimeout);
         await waitForSettle(page, limits.actionTimeout);
         if (executed.length > 0) {
+          // Guard: reject cross-origin navigation or bot detection pages
+          if (!isSameOriginAndValid(page.url(), project.url)) {
+            log(run, `   ⏭️  Form navigated off-origin → ${page.url()} — restoring`);
+            await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+            continue;
+          }
           try {
             const { fp: resultFp, isNovel } = await captureState(page, ctx);
             if (!statesEqual(resultFp, currentFp)) {
@@ -257,6 +300,12 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         if (!await executeAction(page, action, limits.actionTimeout)) continue;
         explored++;
         await waitForSettle(page, limits.actionTimeout);
+        // Guard: reject cross-origin navigation or bot detection pages
+        if (!isSameOriginAndValid(page.url(), project.url)) {
+          log(run, `   ⏭️  Action navigated off-origin → ${page.url()} — restoring`);
+          await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
+          continue;
+        }
         try {
           const { fp: resultFp, isNovel } = await captureState(page, ctx);
           if (!statesEqual(resultFp, currentFp)) {

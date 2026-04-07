@@ -152,8 +152,30 @@ export function extractFlows(stateGraph) {
   // Sort by length descending — longer flows are more valuable
   uniquePaths.sort((a, b) => b.length - a.length);
 
-  // Cap at 10 flows to keep LLM calls bounded
-  const cappedPaths = uniquePaths.slice(0, 10);
+  // ── Diversity cap: max 2 flows per type ─────────────────────────────────
+  // Without this, a site with a prominent sign-in button generates 10 nearly
+  // identical AUTH flows because most paths cross the sign-in page. Capping
+  // per type ensures the LLM sees a mix of AUTH, SEARCH, NAVIGATION, etc.
+  const MAX_PER_TYPE = 2;
+  const MAX_TOTAL = 10;
+  const typeCounts = {};
+  const diversePaths = [];
+  for (const path of uniquePaths) {
+    if (diversePaths.length >= MAX_TOTAL) break;
+    const type = classifyFlow(path);
+    typeCounts[type] = (typeCounts[type] || 0) + 1;
+    if (typeCounts[type] <= MAX_PER_TYPE) {
+      diversePaths.push(path);
+    }
+  }
+  // If we have room left after the diversity cap, backfill with remaining paths
+  if (diversePaths.length < MAX_TOTAL) {
+    for (const path of uniquePaths) {
+      if (diversePaths.length >= MAX_TOTAL) break;
+      if (!diversePaths.includes(path)) diversePaths.push(path);
+    }
+  }
+  const cappedPaths = diversePaths;
 
   return cappedPaths.map((path, idx) => {
     const type = classifyFlow(path);
