@@ -120,7 +120,7 @@ function highlightCode(code) {
 function isApiTestCode(code) {
   if (!code) return false;
   const usesRequest = /(?:request|apiContext|apiRequestContext)\s*\.\s*(newContext|get|post|put|patch|delete|head|fetch)\s*\(/.test(code);
-  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|fill)\s*\(/.test(code);
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(code);
   return usesRequest && !usesPage;
 }
 

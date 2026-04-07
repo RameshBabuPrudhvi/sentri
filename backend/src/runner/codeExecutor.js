@@ -120,33 +120,45 @@ export async function runApiTestCode(playwrightCode, expect) {
     ignoreHTTPSErrors: true,
   });
 
-  // Intercept dispose to capture response metadata from the context.
-  // Playwright's APIRequestContext doesn't expose event hooks, so we wrap
-  // the HTTP methods to log request/response pairs.
-  const originalMethods = {};
-  for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
-    if (typeof request[method] === "function") {
-      originalMethods[method] = request[method].bind(request);
-      request[method] = async (...args) => {
-        const start = Date.now();
-        const url = typeof args[0] === "string" ? args[0] : String(args[0]);
-        const entry = { method: method.toUpperCase(), url, startTime: start, status: null, duration: null, size: null };
-        try {
-          const resp = await originalMethods[method](...args);
-          entry.status = resp.status();
-          entry.duration = Date.now() - start;
-          try { entry.size = (await resp.body()).length; } catch { entry.size = 0; }
-          apiLogs.push(entry);
-          return resp;
-        } catch (err) {
-          entry.duration = Date.now() - start;
-          entry.status = 0;
-          apiLogs.push(entry);
-          throw err;
-        }
-      };
+  // Helper: wrap HTTP methods on an APIRequestContext to capture logs.
+  function instrumentContext(ctx) {
+    for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
+      if (typeof ctx[method] === "function") {
+        const original = ctx[method].bind(ctx);
+        ctx[method] = async (...args) => {
+          const start = Date.now();
+          const url = typeof args[0] === "string" ? args[0] : String(args[0]);
+          const entry = { method: method.toUpperCase(), url, startTime: start, status: null, duration: null, size: null };
+          try {
+            const resp = await original(...args);
+            entry.status = resp.status();
+            entry.duration = Date.now() - start;
+            try { entry.size = (await resp.body()).length; } catch { entry.size = 0; }
+            apiLogs.push(entry);
+            return resp;
+          } catch (err) {
+            entry.duration = Date.now() - start;
+            entry.status = 0;
+            apiLogs.push(entry);
+            throw err;
+          }
+        };
+      }
     }
   }
+
+  instrumentContext(request);
+
+  // AI-generated code may call request.newContext({ baseURL: '...' }) which
+  // requires the APIRequest factory (playwright.request), not the
+  // APIRequestContext we created above. Add a shim so both patterns work.
+  const subContexts = [];
+  request.newContext = async (options) => {
+    const ctx = await playwright.request.newContext({ ignoreHTTPSErrors: true, ...options });
+    subContexts.push(ctx);
+    instrumentContext(ctx);
+    return ctx;
+  };
 
   try {
     await fn(request, expect, apiLogs);
@@ -155,6 +167,9 @@ export async function runApiTestCode(playwrightCode, expect) {
     err.__apiLogs = apiLogs;
     throw err;
   } finally {
+    for (const ctx of subContexts) {
+      await ctx.dispose().catch(() => {});
+    }
     await request.dispose().catch(() => {});
   }
 }
