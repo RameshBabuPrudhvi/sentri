@@ -109,6 +109,10 @@ export async function generateSingleTest(project, run, db, { name, description, 
   const runStart = Date.now();
   log(run, `✦ Starting single-test generation pipeline for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
+  log(run, `⚙️  Run config:`);
+  log(run, `   Generation mode: 📝 Single test (user-described scenario)`);
+  log(run, `   Test count     : ${testCount}`);
+  log(run, `   Target URL     : ${project.url}`);
 
   // Skip steps 1-3 — user provides the intent directly via name + description
   setStep(run, 1);
@@ -177,6 +181,17 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // ── Step 1: Smart crawl or state exploration ─────────────────────────────
   log(run, `🕷️  Starting ${mode === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
+  log(run, `⚙️  Run config:`);
+  log(run, `   Explorer mode : ${mode === "state" ? "🔍 State exploration (click/fill/submit)" : "🔗 Link crawl (follow <a> tags)"}`);
+  if (mode === "state" && explorerTuning) {
+    log(run, `   Max states    : ${explorerTuning.maxStates ?? 30}`);
+    log(run, `   Max depth     : ${explorerTuning.maxDepth ?? 3}`);
+    log(run, `   Max actions   : ${explorerTuning.maxActions ?? 8}`);
+    log(run, `   Action timeout: ${explorerTuning.actionTimeout ?? 5000}ms`);
+  }
+  log(run, `   Test count    : ${testCount}`);
+  log(run, `   HAR capture   : ✅ enabled (API traffic → API test generation)`);
+  log(run, `   Target URL    : ${project.url}`);
   setStep(run, 1);
 
   let snapshots, snapshotsByUrl, journeys, classifiedPages, classifiedPagesByUrl, filteredSnapshots;
@@ -267,6 +282,10 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   }
 
   // ── Step 4b: API test generation from captured HAR traffic ──────────────
+  if (apiEndpoints.length === 0) {
+    log(run, `🌐 No API endpoints captured — site made no fetch/XHR calls during ${mode === "state" ? "exploration" : "crawl"}. API test generation skipped.`);
+    log(run, `   💡 Tip: Use "State exploration" mode to trigger API calls via button clicks and form submissions.`);
+  }
   if (apiEndpoints.length > 0 && !genResult.rateLimitHit) {
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
