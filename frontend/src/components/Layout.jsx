@@ -139,7 +139,7 @@ function TopBar() {
         <input
           className="input"
           type="search"
-          name="test-search"
+          name="global-search"
           autoComplete="off"
           value={q}
           onChange={e => setQ(e.target.value)}
