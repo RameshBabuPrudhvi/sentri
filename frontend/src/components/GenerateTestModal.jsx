@@ -611,7 +611,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           {/* ── Test Dials tab ── */}
           {tab === "dials" && (
             <div>
-              <TestDials onChange={setDialsConfig} />
+              <TestDials value={dialsConfig} onChange={setDialsConfig} />
 
               {/* Generate CTA also on dials tab */}
               <div style={{ marginTop: 20, borderTop: "1px solid var(--border)", paddingTop: 16 }}>

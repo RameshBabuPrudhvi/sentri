@@ -17,13 +17,23 @@ import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
 import TestDials from "./TestDials.jsx";
 import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
 
-export default function CrawlDialsPanel({ onChange }) {
+export default function CrawlDialsPanel({ value, onChange }) {
+  // Controlled mode: parent owns the config via value/onChange.
+  // Uncontrolled fallback: if no value prop, use internal state from localStorage.
+  const isControlled = value !== undefined;
+  const [internalCfg, setInternalCfg] = useState(() => loadSavedConfig());
   const [open, setOpen] = useState(false);
-  const [activeCount, setActiveCount] = useState(() => countActiveDials(loadSavedConfig()));
 
-  function handleChange(cfg) {
-    setActiveCount(countActiveDials(cfg));
-    onChange?.(cfg);
+  const cfg = isControlled ? value : internalCfg;
+  const activeCount = countActiveDials(cfg);
+
+  function handleChange(nextCfg) {
+    if (isControlled) {
+      onChange?.(nextCfg);
+    } else {
+      setInternalCfg(nextCfg);
+      onChange?.(nextCfg);
+    }
   }
 
   return (
@@ -54,7 +64,7 @@ export default function CrawlDialsPanel({ onChange }) {
 
       {open && (
         <div style={{ borderTop: "1px solid var(--border)", padding: 16 }}>
-          <TestDials onChange={handleChange} />
+          <TestDials value={cfg} onChange={handleChange} />
         </div>
       )}
     </div>

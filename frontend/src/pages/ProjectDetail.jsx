@@ -404,7 +404,7 @@ export default function ProjectDetail() {
               )}
             </div>
             <div style={{ width: "100%", minWidth: 300, maxWidth: 440 }}>
-              <CrawlDialsPanel onChange={setCrawlDialsCfg} />
+              <CrawlDialsPanel value={crawlDialsCfg} onChange={setCrawlDialsCfg} />
             </div>
           </div>
         </div>

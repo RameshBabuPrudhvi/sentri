@@ -97,20 +97,31 @@ function ProfileDropdown({ value, onChange }) {
 
 // ─── Main TestDials component ──────────────────────────────────────────────────
 
-export default function TestDials({ onChange }) {
-  const [cfg, setCfg] = useState(loadSavedConfig);
+export default function TestDials({ value, onChange }) {
+  // Controlled mode: parent owns the state via value/onChange.
+  // Uncontrolled fallback: if no value prop, use internal state from localStorage.
+  const isControlled = value !== undefined;
+  const [internalCfg, setInternalCfg] = useState(loadSavedConfig);
   const [saved, setSaved] = useState(false);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps — onChange identity is stable
-  useEffect(() => { onChange?.(cfg); }, [cfg, onChange]);
+  const cfg = isControlled ? value : internalCfg;
 
   function update(patch) {
-    setCfg(prev => ({ ...prev, ...patch }));
+    const next = { ...cfg, ...patch };
+    if (isControlled) {
+      onChange?.(next);
+    } else {
+      setInternalCfg(next);
+      onChange?.(next);
+    }
   }
 
+  // For uncontrolled mode only: sync initial config to parent on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!isControlled) onChange?.(cfg); }, []);
+
   function applyProfile(profile) {
-    setCfg(prev => ({
-      ...prev,
+    update({
       profile:            profile.id,
       approach:           profile.approach,
       perspectives:       [...profile.perspectives],
@@ -124,7 +135,7 @@ export default function TestDials({ onChange }) {
       exploreActionTimeout: DEFAULT_CONFIG.exploreActionTimeout,
       options:            { ...DEFAULT_CONFIG.options },
       customInstructions: "",
-    }));
+    });
   }
 
   function togglePerspective(id) {
@@ -155,7 +166,13 @@ export default function TestDials({ onChange }) {
   }
 
   function handleReset() {
-    setCfg({ ...DEFAULT_CONFIG });
+    const next = { ...DEFAULT_CONFIG };
+    if (isControlled) {
+      onChange?.(next);
+    } else {
+      setInternalCfg(next);
+      onChange?.(next);
+    }
   }
 
   const activeCount = countActiveDials(cfg);
