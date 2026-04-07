@@ -62,13 +62,16 @@ function findPaths(stateGraph, maxDepth = 6) {
     }
 
     let hasUnvisited = false;
+    let loopCount = 0;
     for (const edge of neighbors) {
       if (visited.has(edge.toFp)) {
-        // Loop detected — record the path up to here if meaningful
+        // Loop detected — record the path including the back-edge.
+        // Each back-edge may target a different state (e.g. form→error
+        // vs form→start), so we record all of them — deduplicateFlows()
+        // will collapse any that traverse the same state sequence.
         if (path.length >= 2) {
-          const loopPath = [...path, edge];
-          // Only record if we haven't already recorded this exact sequence
-          paths.push(loopPath);
+          paths.push([...path, edge]);
+          loopCount++;
         }
         continue;
       }
@@ -83,8 +86,10 @@ function findPaths(stateGraph, maxDepth = 6) {
       });
     }
 
-    // Dead end with some path accumulated
-    if (!hasUnvisited && path.length >= 2) {
+    // Dead end — only record the base path if NO loop paths were recorded.
+    // When loops exist, they already contain this path as a prefix, so
+    // recording it again just creates a near-duplicate that wastes LLM tokens.
+    if (!hasUnvisited && loopCount === 0 && path.length >= 2) {
       paths.push([...path]);
     }
   }
