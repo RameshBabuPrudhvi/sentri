@@ -194,7 +194,7 @@ const rateBuckets = {
  * Check rate limit for a specific bucket.
  * @param {string} bucket — key in rateBuckets (e.g. "login", "forgotPassword")
  * @param {string} ip
- * @returns {{ allowed: boolean, retryAfterSec?: number }}
+ * @returns {{ allowed: boolean, retryAfterSec: number }}
  */
 function checkRateLimit(bucket, ip) {
   const { map, max } = rateBuckets[bucket];
