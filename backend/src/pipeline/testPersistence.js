@@ -70,7 +70,7 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
  * @returns {object}
  */
 export function buildPipelineStats({ pagesFound = 0, rawTests = [], removed = 0, enhancedCount = 0, rejected = 0, journeys = [], dedupStats = {}, apiEndpointsDiscovered = 0 }) {
-  const apiTestCount = rawTests.filter(t => t._generatedFrom === "api_har_capture").length;
+  const apiTestCount = rawTests.filter(t => t._generatedFrom === "api_har_capture" || t._generatedFrom === "api_user_described").length;
   return {
     pagesFound,
     rawTestsGenerated: rawTests.length,

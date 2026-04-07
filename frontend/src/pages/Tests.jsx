@@ -275,11 +275,12 @@ export default function Tests() {
     Draft:       tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length,
   }), [tests]);
 
+  const isApiTest = useCallback(t => t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described", []);
   const categoryCounts = useMemo(() => ({
     All: tests.length,
-    API: tests.filter(t => t.generatedFrom === "api_har_capture").length,
-    UI:  tests.filter(t => t.generatedFrom !== "api_har_capture").length,
-  }), [tests]);
+    API: tests.filter(isApiTest).length,
+    UI:  tests.filter(t => !isApiTest(t)).length,
+  }), [tests, isApiTest]);
 
   const projMap = useMemo(
     () => Object.fromEntries(projects.map(p => [p.id, p])),
@@ -302,8 +303,8 @@ export default function Tests() {
         filter === "Not Run" ? !t.lastResult : true;
       const matchCategory =
         categoryFilter === "All" ? true :
-        categoryFilter === "API" ? t.generatedFrom === "api_har_capture" :
-        categoryFilter === "UI" ? t.generatedFrom !== "api_har_capture" : true;
+        categoryFilter === "API" ? isApiTest(t) :
+        categoryFilter === "UI" ? !isApiTest(t) : true;
       return matchReview && matchSearch && matchFilter && matchCategory;
     });
     // Sorting
@@ -528,7 +529,7 @@ export default function Tests() {
             stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
             stepIdx === 0 ? (t.priority || "medium") : "",
             stepIdx === 0 ? (t.type || "") : "",
-            stepIdx === 0 ? (t.generatedFrom === "api_har_capture" ? "API" : "UI") : "",
+            stepIdx === 0 ? ((t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described") ? "API" : "UI") : "",
             stepIdx === 0 ? (t.reviewStatus || "draft") : "",
             stepIdx === 0 ? (t.lastResult || "") : "",
             stepIdx === 0 ? (t.lastRunAt || "") : "",

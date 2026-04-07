@@ -266,8 +266,9 @@ export default function ProjectDetail() {
   const draftTests    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft");
   const approvedTests = tests.filter(t => t.reviewStatus === "approved");
   const rejectedTests = tests.filter(t => t.reviewStatus === "rejected");
-  const apiTests      = tests.filter(t => t.generatedFrom === "api_har_capture");
-  const uiTests       = tests.filter(t => t.generatedFrom !== "api_har_capture");
+  const isApiTest     = t => t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described";
+  const apiTests      = tests.filter(isApiTest);
+  const uiTests       = tests.filter(t => !isApiTest(t));
 
   const filteredByReview = tests.filter(t => {
     const statusOk =
@@ -276,8 +277,8 @@ export default function ProjectDetail() {
                                   t.reviewStatus === reviewFilter;
     const categoryOk =
       categoryFilter === "all" ? true :
-      categoryFilter === "api" ? t.generatedFrom === "api_har_capture" :
-      categoryFilter === "ui"  ? t.generatedFrom !== "api_har_capture" : true;
+      categoryFilter === "api" ? isApiTest(t) :
+      categoryFilter === "ui"  ? !isApiTest(t) : true;
     const searchOk = !search ||
       t.name?.toLowerCase().includes(search.toLowerCase()) ||
       t.sourceUrl?.toLowerCase().includes(search.toLowerCase());

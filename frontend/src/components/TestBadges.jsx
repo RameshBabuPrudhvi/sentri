@@ -33,7 +33,7 @@ export function ReviewBadge({ status }) {
 export function ScenarioBadges({ test, isBddTest }) {
   return (
     <>
-      {test.generatedFrom === "api_har_capture" && <span className="badge badge-blue" style={{ fontSize: "0.65rem" }}>🌐 API</span>}
+      {(test.generatedFrom === "api_har_capture" || test.generatedFrom === "api_user_described") && <span className="badge badge-blue" style={{ fontSize: "0.65rem" }}>🌐 API</span>}
       {test.isJourneyTest && <span className="badge badge-purple">Journey</span>}
       {isBddTest?.(test.steps) && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>BDD</span>}
       {test.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}

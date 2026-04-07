@@ -334,7 +334,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `   Pages: ${snapshots.length} | Raw tests: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length}`);
-    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | API tests: ${validatedTests.filter(t => t._generatedFrom === "api_har_capture").length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
+    log(run, `   Journey tests: ${validatedTests.filter(t => t.isJourneyTest).length} | API tests: ${validatedTests.filter(t => t._generatedFrom === "api_har_capture" || t._generatedFrom === "api_user_described").length} | Rejected: ${rejected} | Avg quality: ${dedupStats.averageQuality}/100`);
     if (apiEndpoints.length > 0) {
       log(run, `   API endpoints discovered: ${apiEndpoints.length}`);
     }
