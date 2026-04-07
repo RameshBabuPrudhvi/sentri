@@ -228,9 +228,14 @@ export default function RunDetail() {
             {isCrawl ? "Crawl & Generate" : isGenerate ? "AI Generate" : "Test Run"}
           </h1>
 
-          {run.status === "completed" && (
+          {run.status === "completed" && !run.rateLimitError && (
             <span className="badge badge-green">
               <CheckCircle2 size={10} /> Completed
+            </span>
+          )}
+          {run.status === "completed" && run.rateLimitError && (
+            <span className="badge badge-amber" style={{ background: "var(--amber-bg)", color: "#92400e", border: "1px solid #fcd34d" }}>
+              ⚠ Rate Limited
             </span>
           )}
           {isRunning && (
@@ -370,6 +375,39 @@ export default function RunDetail() {
         }}>
           <RefreshCw size={12} style={{ animation: "spin 2s linear infinite", flexShrink: 0 }} />
           Live updates unavailable — refreshing every 5s. <button onClick={fetchRun} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--amber)", fontWeight: 600, textDecoration: "underline", padding: 0, fontSize: "0.76rem" }}>Refresh now</button>
+        </div>
+      )}
+
+      {/* ── Run-level error / warning banners ─────────────────────────── */}
+      {!isRunning && run.rateLimitError && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 10,
+          padding: "12px 16px", marginBottom: 16,
+          background: "var(--amber-bg)", border: "1px solid #fcd34d",
+          borderRadius: 10, fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
+        }}>
+          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>⚠️</span>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>AI Rate Limit Reached</div>
+            <div>{run.rateLimitError}</div>
+            <div style={{ marginTop: 4, fontSize: "0.78rem", color: "#78350f" }}>
+              Switch to a different AI provider in Settings, or wait for the rate limit to reset and retry.
+            </div>
+          </div>
+        </div>
+      )}
+      {!isRunning && run.status === "failed" && run.error && !run.rateLimitError && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 10,
+          padding: "12px 16px", marginBottom: 16,
+          background: "var(--red-bg)", border: "1px solid #fca5a5",
+          borderRadius: 10, fontSize: "0.82rem", color: "var(--red)", lineHeight: 1.5,
+        }}>
+          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>❌</span>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>Run Failed</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", wordBreak: "break-word" }}>{run.error}</div>
+          </div>
         </div>
       )}
 

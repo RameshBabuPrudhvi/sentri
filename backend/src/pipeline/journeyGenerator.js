@@ -19,6 +19,17 @@ import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
 import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
 
 /**
+ * Detect whether an error is a rate limit / quota exhaustion from any provider.
+ * Used to propagate these errors instead of silently returning [].
+ */
+function isRateLimitLike(err) {
+  const msg = (err?.message || "").toLowerCase();
+  return msg.includes("rate") || msg.includes("quota") || msg.includes("429")
+    || msg.includes("too many") || msg.includes("resource_exhausted")
+    || msg.includes("limit") || (err?.status === 429);
+}
+
+/**
  * generateUserRequestedTest(name, description, appUrl) → Array of test objects
  *
  * Generates exactly ONE test focused on the user's provided name + description.
@@ -62,6 +73,8 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
+    // Propagate rate limit errors so the caller can short-circuit
+    if (isRateLimitLike(err)) throw err;
     return [];
   }
 }
@@ -81,6 +94,8 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
     return tests;
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
+    // Propagate rate limit errors so the caller can short-circuit
+    if (isRateLimitLike(err)) throw err;
     return [];
   }
 }
@@ -93,12 +108,35 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
  */
 export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const allTests = [];
+  let rateLimitHit = false;
+  let rateLimitError = null;
+
+  // Helper: call a generator and handle rate limit short-circuit
+  async function safeGenerate(label, fn) {
+    if (rateLimitHit) return []; // skip remaining calls after rate limit
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      if (isRateLimitLike(err)) {
+        rateLimitHit = true;
+        rateLimitError = err;
+        onProgress?.(`⚠️  AI rate limit reached: ${err.message.slice(0, 120)}`);
+        onProgress?.(`⏭️  Skipping remaining AI calls — ${allTests.length} tests generated so far`);
+        return [];
+      }
+      onProgress?.(`⚠️  ${label} failed: ${err.message.slice(0, 100)}`);
+      return [];
+    }
+  }
 
   // 1. Generate journey tests (highest value — multi-page flows)
   for (const journey of journeys) {
     throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
-    const journeyTests = await generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal });
+    const journeyTests = await safeGenerate(`Journey "${journey.name}"`, () =>
+      generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt, testCount, signal })
+    );
     for (const jt of journeyTests) {
       allTests.push({ ...jt, sourceUrl: journey.pages[0]?.url, pageTitle: journey.name });
     }
@@ -117,14 +155,15 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
 
-    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal });
+    const tests = await safeGenerate(`Intent tests for ${classifiedPage.url}`, () =>
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal })
+    );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }
   }
 
   // 3. Comprehensive tests for ALL remaining pages (NAVIGATION, CONTENT, etc.)
-  //    Previously these only got 1 basic test — now they get full 5-8 test coverage
   for (const classifiedPage of classifiedPages) {
     throwIfAborted(signal);
     if (classifiedPage.isHighPriority || coveredUrls.has(classifiedPage.url)) continue;
@@ -132,10 +171,18 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     if (!snapshot) continue;
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
-    const tests = await generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal });
+    const tests = await safeGenerate(`Tests for ${classifiedPage.url}`, () =>
+      generateIntentTests(classifiedPage, snapshot, { dialsPrompt, testCount, signal })
+    );
     for (const t of tests) {
       allTests.push({ ...t, sourceUrl: classifiedPage.url, pageTitle: snapshot.title });
     }
+  }
+
+  // Attach rate limit info so the caller can surface it in the run record
+  if (rateLimitHit) {
+    allTests._rateLimitHit = true;
+    allTests._rateLimitError = rateLimitError?.message || "AI provider rate limit exceeded";
   }
 
   return allTests;

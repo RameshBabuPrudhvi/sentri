@@ -264,6 +264,14 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
 
+  // Surface rate limit errors so the frontend shows a clear warning
+  if (rawTests._rateLimitHit) {
+    const errMsg = rawTests._rateLimitError || "AI provider rate limit exceeded";
+    logWarn(run, `⚠️  AI RATE LIMIT: ${errMsg}`);
+    logWarn(run, `   Tests generated before limit: ${rawTests.length}. Switch to a different AI provider in Settings, or wait and retry.`);
+    run.rateLimitError = errMsg;
+  }
+
   // ── Step 4b: API test generation from captured HAR traffic ──────────────
   if (apiEndpoints.length > 0) {
     throwIfAborted(signal);
@@ -304,7 +312,11 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     if (apiEndpoints.length > 0) {
       log(run, `   API endpoints discovered: ${apiEndpoints.length}`);
     }
-    logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
+    if (run.rateLimitError) {
+      logWarn(run, `⚠️  Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
+    } else {
+      logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
+    }
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 }

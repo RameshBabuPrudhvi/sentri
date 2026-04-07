@@ -6,7 +6,7 @@ import React from "react";
  * Used by CompletionCTA (generate/crawl success) and TestRunView (post-run footer).
  *
  * Props:
- *   variant   — "success" | "error" (controls background / border color)
+ *   variant   — "success" | "warning" | "error" (controls background / border color)
  *   title     — bold heading text
  *   subtitle  — secondary description text
  *   style     — extra inline styles merged onto the outer div
@@ -14,6 +14,7 @@ import React from "react";
  */
 const VARIANTS = {
   success: { bg: "var(--green-bg)", border: "#86efac", color: "var(--green)" },
+  warning: { bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e" },
   error:   { bg: "var(--red-bg)",   border: "#fca5a5", color: "var(--red)" },
 };
 
