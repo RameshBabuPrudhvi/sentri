@@ -29,6 +29,10 @@ const REVIEW_FILTERS = [
   { key: "Approved", tooltip: "Approved", activeColor: "#16a34a", activeBg: "rgba(34,197,94,0.12)",  icon: <ThumbsUp    size={14} /> },
   { key: "Draft",    tooltip: "Draft",    activeColor: "#d97706", activeBg: "rgba(217,119,6,0.12)",  icon: <AlertCircle size={14} /> },
 ];
+const CATEGORY_FILTERS = [
+  { key: "UI",  tooltip: "UI tests",  activeColor: "#7c3aed", activeBg: "rgba(124,58,237,0.12)", label: "UI"  },
+  { key: "API", tooltip: "API tests", activeColor: "#2563eb", activeBg: "rgba(37,99,235,0.12)",  label: "🌐 API" },
+];
 
 const PAGE_SIZE = 50;
 
@@ -206,13 +210,15 @@ export default function Tests() {
   const [projects, setProjects] = useState([]);
   const [tests, setTests] = useState([]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const search      = searchParams.get("q")      || "";
-  const filter      = searchParams.get("status") || "All";
-  const reviewFilter= searchParams.get("review") || "All Tests";
+  const search        = searchParams.get("q")        || "";
+  const filter        = searchParams.get("status")   || "All";
+  const reviewFilter  = searchParams.get("review")   || "All Tests";
+  const categoryFilter= searchParams.get("category") || "All";
 
-  const setSearch      = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("q", v) : n.delete("q"); return n; }, { replace: true }), [setSearchParams]);
-  const setFilter      = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("status", v) : n.delete("status"); return n; }, { replace: true }), [setSearchParams]);
-  const setReviewFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All Tests" ? n.set("review", v) : n.delete("review"); return n; }, { replace: true }), [setSearchParams]);
+  const setSearch        = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("q", v) : n.delete("q"); return n; }, { replace: true }), [setSearchParams]);
+  const setFilter        = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("status", v) : n.delete("status"); return n; }, { replace: true }), [setSearchParams]);
+  const setReviewFilter  = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All Tests" ? n.set("review", v) : n.delete("review"); return n; }, { replace: true }), [setSearchParams]);
+  const setCategoryFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("category", v) : n.delete("category"); return n; }, { replace: true }), [setSearchParams]);
 
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -269,6 +275,12 @@ export default function Tests() {
     Draft:       tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length,
   }), [tests]);
 
+  const categoryCounts = useMemo(() => ({
+    All: tests.length,
+    API: tests.filter(t => t.generatedFrom === "api_har_capture").length,
+    UI:  tests.filter(t => t.generatedFrom !== "api_har_capture").length,
+  }), [tests]);
+
   const projMap = useMemo(
     () => Object.fromEntries(projects.map(p => [p.id, p])),
     [projects]
@@ -288,7 +300,11 @@ export default function Tests() {
         filter === "Passing" ? t.lastResult === "passed" :
         filter === "Failing" ? t.lastResult === "failed" :
         filter === "Not Run" ? !t.lastResult : true;
-      return matchReview && matchSearch && matchFilter;
+      const matchCategory =
+        categoryFilter === "All" ? true :
+        categoryFilter === "API" ? t.generatedFrom === "api_har_capture" :
+        categoryFilter === "UI" ? t.generatedFrom !== "api_har_capture" : true;
+      return matchReview && matchSearch && matchFilter && matchCategory;
     });
     // Sorting
     if (sortCol) {
@@ -306,14 +322,14 @@ export default function Tests() {
       });
     }
     return list;
-  }, [tests, reviewFilter, search, filter, sortCol, sortDir, projMap]);
+  }, [tests, reviewFilter, search, filter, categoryFilter, sortCol, sortDir, projMap]);
 
   // ── Pagination ─────────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [search, filter, reviewFilter]);
+  useEffect(() => { setPage(1); }, [search, filter, reviewFilter, categoryFilter]);
 
   // ── Sorting ────────────────────────────────────────────────────────────────
   function toggleSort(col) {
@@ -494,7 +510,7 @@ export default function Tests() {
 
       const headers = [
         "Test ID", "Name", "Description", "Step #", "Step",
-        "Project", "Priority", "Type", "Review Status",
+        "Project", "Priority", "Type", "Category", "Review Status",
         "Status", "Last Run At", "Created At", "Source URL", "Journey",
       ];
 
@@ -512,6 +528,7 @@ export default function Tests() {
             stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
             stepIdx === 0 ? (t.priority || "medium") : "",
             stepIdx === 0 ? (t.type || "") : "",
+            stepIdx === 0 ? (t.generatedFrom === "api_har_capture" ? "API" : "UI") : "",
             stepIdx === 0 ? (t.reviewStatus || "draft") : "",
             stepIdx === 0 ? (t.lastResult || "") : "",
             stepIdx === 0 ? (t.lastRunAt || "") : "",
@@ -613,7 +630,7 @@ export default function Tests() {
           display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
         }}>
           <div style={{ fontWeight: 600, fontSize: "0.9rem", flex: "0 0 auto" }}>
-            {reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
+            {categoryFilter !== "All" ? `${categoryFilter} Tests` : reviewFilter === "Draft" ? "Draft Tests" : reviewFilter === "All Tests" ? "All Tests" : "Regression Tests"} ({filtered.length})
           </div>
           {/* Search — constrained width so it doesn't dominate the bar */}
           <div style={{ width: 220, flexShrink: 0, position: "relative" }}>
@@ -722,13 +739,53 @@ export default function Tests() {
               );
             })}
 
+            {/* Divider */}
+            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+
+            {/* Category filter buttons (UI / API) */}
+            {CATEGORY_FILTERS.map(f => {
+              const active = categoryFilter === f.key;
+              const count  = categoryCounts[f.key] ?? 0;
+              return (
+                <button
+                  key={f.key}
+                  title={`${f.tooltip} · ${count} test${count !== 1 ? "s" : ""} · click again to clear`}
+                  onClick={() => setCategoryFilter(active ? "All" : f.key)}
+                  style={{
+                    position: "relative",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: "0 8px", height: 28, borderRadius: 6, border: "none",
+                    cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                    fontSize: "0.68rem", fontWeight: 600, whiteSpace: "nowrap",
+                    background: active ? f.activeBg      : "transparent",
+                    color:      active ? f.activeColor   : "var(--text3)",
+                    boxShadow:  active ? `0 0 0 1.5px ${f.activeColor}55` : "none",
+                  }}
+                >
+                  {f.label}
+                  {active && (
+                    <span style={{
+                      marginLeft: 4,
+                      minWidth: 14, height: 14, borderRadius: 7,
+                      background: f.activeColor, color: "#fff",
+                      fontSize: "0.55rem", fontWeight: 700,
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      lineHeight: 1, padding: "0 2px",
+                    }}>
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
             {/* Clear-all button — only visible when any filter is active */}
-            {(filter !== "All" || reviewFilter !== "All Tests") && (
+            {(filter !== "All" || reviewFilter !== "All Tests" || categoryFilter !== "All") && (
               <>
                 <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
                 <button
                   title="Clear all filters"
-                  onClick={() => { setFilter("All"); setReviewFilter("All Tests"); }}
+                  onClick={() => { setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); }}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 28, height: 28, borderRadius: 6, border: "none",
@@ -757,7 +814,7 @@ export default function Tests() {
             reviewFilter={reviewFilter}
             onCreateTest={() => setShowCreateModal(true)}
             onClearSearch={() => setSearch("")}
-            onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); }}
+            onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); }}
             navigate={navigate}
           />
         ) : (

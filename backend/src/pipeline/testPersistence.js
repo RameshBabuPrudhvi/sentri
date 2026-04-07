@@ -54,6 +54,8 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
       linkedIssueKey: t.linkedIssueKey || null,
       // Tags for filtering and traceability matrix grouping
       tags: Array.isArray(t.tags) ? t.tags : [],
+      // API test marker — "api_har_capture" when generated from captured network traffic
+      generatedFrom: t._generatedFrom || null,
     };
     run.tests.push(testId);
     createdTestIds.push(testId);
