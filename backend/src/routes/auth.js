@@ -17,7 +17,7 @@
  * ### Security measures
  * - Passwords hashed with scrypt (64-byte key, 16-byte random salt)
  * - JWT signed with HS256, 8-hour expiry
- * - Rate limiting: 10 sign-in attempts per IP per 15 minutes
+ * - Rate limiting: separate per-endpoint buckets (login: 10, forgot/reset: 5 per IP per 15 min)
  * - Revoked tokens kept in an in-memory Map (production: use Redis)
  * - Input validation and sanitisation on every endpoint
  * - OAuth state parameter validated on the frontend to prevent CSRF
@@ -180,19 +180,31 @@ const revokedTokens = new Map();
 const resetTokens = new Map();
 const RESET_TOKEN_TTL = 30 * 60 * 1000; // 30 minutes
 
-// Rate limiter: { ip → { count, resetAt } }
-const loginAttempts = new Map();
-const RATE_LIMIT_MAX   = 10;
+// Rate limiters — separate buckets per endpoint category so flooding
+// one endpoint (e.g. forgot-password) doesn't lock out login.
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 
-function checkRateLimit(ip) {
+const rateBuckets = {
+  login:         { map: new Map(), max: 10 },  // 10 login attempts per IP per 15 min
+  forgotPassword:{ map: new Map(), max: 5 },   // 5 reset requests per IP per 15 min
+  resetPassword: { map: new Map(), max: 5 },   // 5 reset attempts per IP per 15 min
+};
+
+/**
+ * Check rate limit for a specific bucket.
+ * @param {string} bucket — key in rateBuckets (e.g. "login", "forgotPassword")
+ * @param {string} ip
+ * @returns {{ allowed: boolean, retryAfterSec?: number }}
+ */
+function checkRateLimit(bucket, ip) {
+  const { map, max } = rateBuckets[bucket];
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
+  const entry = map.get(ip);
   if (!entry || entry.resetAt < now) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
+    map.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
     return { allowed: true };
   }
-  if (entry.count >= RATE_LIMIT_MAX) {
+  if (entry.count >= max) {
     const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
     return { allowed: false, retryAfterSec };
   }
@@ -349,7 +361,7 @@ router.post("/register", async (req, res) => {
  */
 router.post("/login", async (req, res) => {
   const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-  const rate = checkRateLimit(ip);
+  const rate = checkRateLimit("login", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
     return res.status(429).json({ error: `Too many sign-in attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
@@ -435,7 +447,7 @@ router.get("/me", requireAuth, (req, res) => {
 router.post("/forgot-password", async (req, res) => {
   // Rate-limit to prevent token-flooding DoS (fills memory with reset tokens)
   const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-  const rate = checkRateLimit(ip);
+  const rate = checkRateLimit("forgotPassword", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
     return res.status(429).json({ error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
@@ -495,7 +507,7 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
   // Rate-limit to prevent brute-force token guessing
   const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-  const rate = checkRateLimit(ip);
+  const rate = checkRateLimit("resetPassword", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
     return res.status(429).json({ error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
