@@ -28,46 +28,66 @@ import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, VIDEOS_DIR } from 
 
 /**
  * Attach network & console listeners to a page.
- * Returns { networkLogs, consoleLogs } arrays that are mutated in-place
- * as events arrive.
+ * Returns { networkLogs, consoleLogs, dispose } — the arrays are mutated
+ * in-place as events arrive. Call `dispose()` before closing the page to
+ * prevent async response handlers from accessing a closed page (which
+ * throws unhandled rejections that crash Node.js).
  */
 function attachPageListeners(page) {
   const networkLogs = [];
   const consoleLogs = [];
+  let closed = false;
 
   page.on("request", (req) => {
-    networkLogs.push({
-      id: uuidv4(),
-      method: req.method(),
-      url: req.url(),
-      startTime: Date.now(),
-      status: null,
-      size: null,
-      duration: null,
-    });
+    if (closed) return;
+    try {
+      networkLogs.push({
+        id: uuidv4(),
+        method: req.method(),
+        url: req.url(),
+        startTime: Date.now(),
+        status: null,
+        size: null,
+        duration: null,
+      });
+    } catch { /* page may be closing */ }
   });
 
   page.on("response", async (res) => {
-    const entry = networkLogs.find((n) => n.url === res.url() && n.status === null);
-    if (entry) {
-      entry.status = res.status();
-      entry.duration = Date.now() - entry.startTime;
-      try {
-        const body = await res.body().catch(() => Buffer.alloc(0));
-        entry.size = body.length;
-      } catch { entry.size = 0; }
-    }
+    if (closed) return;
+    try {
+      const entry = networkLogs.find((n) => n.url === res.url() && n.status === null);
+      if (entry) {
+        entry.status = res.status();
+        entry.duration = Date.now() - entry.startTime;
+        try {
+          const body = await res.body().catch(() => Buffer.alloc(0));
+          entry.size = body.length;
+        } catch { entry.size = 0; }
+      }
+    } catch { /* page closed mid-handler — safe to ignore */ }
   });
 
   page.on("console", (msg) => {
-    consoleLogs.push({ time: new Date().toISOString(), level: msg.type(), text: msg.text() });
+    if (closed) return;
+    try {
+      consoleLogs.push({ time: new Date().toISOString(), level: msg.type(), text: msg.text() });
+    } catch { /* page may be closing */ }
   });
 
   page.on("pageerror", (err) => {
-    consoleLogs.push({ time: new Date().toISOString(), level: "error", text: err.message });
+    if (closed) return;
+    try {
+      consoleLogs.push({ time: new Date().toISOString(), level: "error", text: err.message });
+    } catch { /* page may be closing */ }
   });
 
-  return { networkLogs, consoleLogs };
+  return {
+    networkLogs,
+    consoleLogs,
+    /** Call before page.close() to stop handlers from accessing the closed page. */
+    dispose() { closed = true; },
+  };
 }
 
 /**
@@ -108,8 +128,9 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
   // Start CDP screencast (returns cleanup fn or null)
   const stopScreencast = await startScreencast(page, runId);
 
-  // Attach network / console listeners
-  const { networkLogs, consoleLogs } = attachPageListeners(page);
+  // Attach network / console listeners — dispose() must be called before
+  // page.close() to prevent async response handlers from crashing Node.
+  const { networkLogs, consoleLogs, dispose: disposeListeners } = attachPageListeners(page);
 
   const result = {
     testId: test.id,
@@ -195,6 +216,11 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
 
     // Stop CDP screencast before closing the page
     if (stopScreencast) await stopScreencast();
+
+    // Signal listeners to stop before closing — prevents async response
+    // handlers from calling res.url()/res.status() on a closed page,
+    // which would throw an unhandled rejection and crash Node.js.
+    disposeListeners();
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
