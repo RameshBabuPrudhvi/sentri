@@ -38,7 +38,7 @@ function InfoRow({ label, children }) {
 
 export default function Context() {
   usePageTitle("System");
-  // FIX #10: useProjectData batches all project/run/test fetches in one pass (no N+1)
+  //  useProjectData batches all project/run/test fetches in one pass (no N+1)
   const { projects, allTests, allRuns, loading } = useProjectData();
   const [config, setConfig] = React.useState(null);
   const navigate = useNavigate();
