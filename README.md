@@ -47,7 +47,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | Feature | What it actually does |
 |---|---|
 | ⚡ **Parallel Execution** | Run 1–10 tests simultaneously in isolated browser contexts within a single Chromium instance. Select parallelism from the UI or set `PARALLEL_WORKERS` env var. Each worker gets its own video, screenshots, and network logs — full isolation, no shared state |
-| 🌐 **API Test Generation** | During crawl, captures every same-origin fetch/XHR call, deduplicates by endpoint pattern (e.g. `/api/users/:id`), and generates Playwright `request` API tests that verify status codes, JSON response shapes, and error handling. Zero config — works automatically alongside UI test generation |
+| 🌐 **API Test Generation** | **Two paths:** (1) During crawl, captures every same-origin fetch/XHR call and auto-generates API tests. (2) From the Generate Test modal — describe endpoints in plain English, paste `METHOD /path` patterns, or attach an OpenAPI spec. Sentri auto-detects API intent and generates Playwright `request` tests that verify status codes, JSON shapes, error payloads, and contract compliance |
 | 🧬 **Adaptive Self-Healing** | Not just "retry with a different selector" — records which strategy won per element and tries it first next run. Tests get more resilient over time |
 | 🎛️ **Test Dials** | 6 strategies × 5 workflows × 8 quality checks × 3 formats × 8 languages × 2 explore modes. Presets auto-fill. Config validated server-side to block prompt injection |
 | 🧭 **State Exploration** | Goes beyond link crawling — clicks buttons, fills forms, submits, and tracks state transitions to discover real multi-step user flows. Tunable per-run: max states, depth, actions per state, action timeout |

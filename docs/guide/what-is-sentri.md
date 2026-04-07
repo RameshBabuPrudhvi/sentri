@@ -21,7 +21,11 @@ Sentri launches a real Chromium browser and explores your app — following link
 ### 2. Generate
 Each page goes through an 8-stage AI pipeline: crawl → filter → classify → plan → generate → deduplicate → enhance → validate. All tests land in a Draft queue.
 
-In addition to UI tests, Sentri generates **API contract tests** from the captured network traffic. These use Playwright's `request` API context to call endpoints directly and verify status codes, JSON response shapes, and error handling — no browser needed.
+In addition to UI tests, Sentri generates **API contract tests** in two ways:
+- **Automatic:** During crawl, HAR capture records every fetch/XHR call and feeds endpoints to the AI
+- **From description:** In the Generate Test modal, describe your API endpoints in plain English (e.g. `write API tests for https://reqres.in/api/register`), paste `GET /api/users` patterns with request/response examples, or attach an OpenAPI spec as a `.json` file
+
+API tests use Playwright's `request` API context to call endpoints directly — no browser needed. See the [API Testing guide](/guide/api-testing) for example prompts and OpenAPI spec support.
 
 ### 3. Review
 Approve or reject tests one by one or in bulk. Only approved tests execute in regression.

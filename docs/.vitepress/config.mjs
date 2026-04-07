@@ -51,6 +51,7 @@ export default defineConfig({
           items: [
             { text: 'Crawling', link: '/guide/crawling' },
             { text: 'Test Generation', link: '/guide/test-generation' },
+            { text: 'API Testing', link: '/guide/api-testing' },
             { text: 'Test Dials', link: '/guide/test-dials' },
             { text: 'Review Workflow', link: '/guide/review-workflow' },
             { text: 'Self-Healing', link: '/guide/self-healing' },
