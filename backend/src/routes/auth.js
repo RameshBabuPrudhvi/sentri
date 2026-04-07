@@ -481,8 +481,10 @@ router.post("/forgot-password", async (req, res) => {
   const baseUrl = (process.env.APP_BASE_PATH || "/").replace(/\/$/, "");
   const resetUrl = `${appUrl}${baseUrl}/forgot-password?token=${resetToken}`;
 
-  console.log(`[auth/forgot-password] Reset token for ${email}: ${resetToken}`);
-  console.log(`[auth/forgot-password] Reset URL: ${resetUrl}`);
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[auth/forgot-password] Reset token for ${email}: ${resetToken}`);
+    console.log(`[auth/forgot-password] Reset URL: ${resetUrl}`);
+  }
 
   const response = { message: genericMsg };
   // In non-production, include the token in the response for testing

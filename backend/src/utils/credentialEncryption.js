@@ -18,18 +18,31 @@
 import crypto from "crypto";
 
 /**
+ * Cached encryption key — derived once per process to avoid repeated
+ * synchronous scryptSync calls on the event loop.
+ * @type {Buffer|null}
+ * @private
+ */
+let _cachedKey = null;
+
+/**
  * Derive a 32-byte AES key from the configured secret.
+ * Result is cached for the process lifetime.
  * @returns {Buffer}
  * @private
  */
 function getEncryptionKey() {
+  if (_cachedKey) return _cachedKey;
+
   const secret = process.env.CREDENTIAL_SECRET || process.env.JWT_SECRET;
   if (secret && secret.length >= 16) {
-    return crypto.scryptSync(secret, "sentri-credentials-salt", 32);
+    _cachedKey = crypto.scryptSync(secret, "sentri-credentials-salt", 32);
+    return _cachedKey;
   }
   // Dev fallback — deterministic but not secure for production
   const seed = `dev-credential-key:${process.cwd()}`;
-  return crypto.createHash("sha256").update(seed).digest();
+  _cachedKey = crypto.createHash("sha256").update(seed).digest();
+  return _cachedKey;
 }
 
 /**

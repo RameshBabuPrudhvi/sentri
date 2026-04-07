@@ -173,10 +173,10 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
 export async function exploreStates(project, run, { signal, tuning } = {}) {
   // Resolve per-run limits from Test Dials tuning, falling back to defaults
   const limits = {
-    maxStates:     tuning?.maxStates     || DEFAULT_MAX_STATES,
-    maxDepth:      tuning?.maxDepth      || DEFAULT_MAX_DEPTH,
-    maxActions:    tuning?.maxActions     || DEFAULT_MAX_ACTIONS,
-    actionTimeout: tuning?.actionTimeout || DEFAULT_ACTION_TIMEOUT,
+    maxStates:     tuning?.maxStates     ?? DEFAULT_MAX_STATES,
+    maxDepth:      tuning?.maxDepth      ?? DEFAULT_MAX_DEPTH,
+    maxActions:    tuning?.maxActions     ?? DEFAULT_MAX_ACTIONS,
+    actionTimeout: tuning?.actionTimeout ?? DEFAULT_ACTION_TIMEOUT,
   };
 
   const browser = await chromium.launch({

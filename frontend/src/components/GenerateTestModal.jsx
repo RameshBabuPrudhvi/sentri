@@ -22,6 +22,13 @@ const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,
 const MAX_ATTACHMENT_SIZE  = 40_000;    // 40 KB per file
 const MAX_TOTAL_ATTACHMENT = 45_000;    // 45 KB cumulative — backend caps description at 50 KB
 
+// MIME types that are safe to read as text — anything else is rejected.
+const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml", "application/x-yaml", "application/yaml"];
+const TEXT_MIME_EXACT = new Set([
+  "text/plain", "text/csv", "text/html", "text/markdown", "text/xml", "text/yaml",
+  "application/json", "application/xml", "application/x-yaml", "application/yaml",
+]);
+
 // ── Sample prompts for the Examples popover ─────────────────────────────────────
 
 const EXAMPLE_PROMPTS = [
@@ -163,13 +170,6 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   useEffect(() => {
     setTimeout(() => nameRef.current?.focus(), 60);
   }, []);
-
-  // MIME types that are safe to read as text — anything else is rejected.
-  const TEXT_MIME_PREFIXES = ["text/", "application/json", "application/xml", "application/x-yaml", "application/yaml"];
-  const TEXT_MIME_EXACT = new Set([
-    "text/plain", "text/csv", "text/html", "text/markdown", "text/xml", "text/yaml",
-    "application/json", "application/xml", "application/x-yaml", "application/yaml",
-  ]);
 
   function isTextMime(file) {
     const mime = (file.type || "").toLowerCase();
