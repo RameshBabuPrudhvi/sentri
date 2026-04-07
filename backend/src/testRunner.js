@@ -1,9 +1,11 @@
 /**
  * @module testRunner
- * @description Thin orchestrator for Playwright test execution.
+ * @description Thin orchestrator for Playwright test execution with parallel
+ * worker support.
  *
- * Owns the browser lifecycle, per-test loop, trace management, and final
- * status transition. Delegates heavy sub-tasks to focused modules:
+ * Owns the browser lifecycle, per-test loop (sequential or parallel), trace
+ * management, and final status transition. Delegates heavy sub-tasks to
+ * focused modules:
  *
  * | Module                          | Responsibility                        |
  * |---------------------------------|---------------------------------------|
@@ -11,6 +13,16 @@
  * | `runner/codeParsing.js`         | `extractTestBody` (hasCode check)     |
  * | `runner/executeTest.js`         | Single-test execution                 |
  * | `runner/feedbackIntegration.js` | Post-run AI feedback loop             |
+ *
+ * ### Parallel execution
+ * When `parallelWorkers > 1`, tests run in concurrent browser contexts within
+ * a single Chromium instance. Each worker picks the next queued test, executes
+ * it in its own isolated `BrowserContext`, and reports back. The shared browser
+ * process keeps memory usage lower than launching N separate browsers.
+ *
+ * Concurrency is controlled by:
+ * 1. `PARALLEL_WORKERS` env var (default for all runs)
+ * 2. Per-run override via `options.parallelWorkers` (from Test Dials / API)
  *
  * ### Exports
  * - {@link runTests} — Execute an array of approved tests against a project.
@@ -20,31 +32,57 @@ import { chromium } from "playwright";
 import { extractTestBody } from "./runner/codeParsing.js";
 import { executeTest } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
-import { BROWSER_HEADLESS, TRACES_DIR } from "./runner/config.js";
+import { BROWSER_HEADLESS, TRACES_DIR, DEFAULT_PARALLEL_WORKERS } from "./runner/config.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 
-// NOTE: extractTestBody, patchNetworkIdle, stripPlaywrightImports,
-// runGeneratedCode, getExpect, and executeTest are now in runner/ modules.
-// This file only re-uses extractTestBody (imported above) for the "hasCode"
-// log message inside the test loop.
+// ── Concurrency helper ────────────────────────────────────────────────────────
+// Lightweight promise pool — no external dependencies. Runs `fn` for each item
+// in `items` with at most `concurrency` in-flight at once. Results are returned
+// in the original item order.
+
+async function poolMap(items, concurrency, fn, signal) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      if (signal?.aborted) break;
+      const idx = nextIndex++;
+      if (idx >= items.length) break;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+
+  const workers = [];
+  for (let w = 0; w < Math.min(concurrency, items.length); w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * Execute an array of approved tests against a project using Playwright.
- * Launches Chromium, runs each test with self-healing, collects results,
- * saves traces/videos, runs the AI feedback loop, and finalises the run.
+ * Launches Chromium, runs each test with self-healing (optionally in parallel),
+ * collects results, saves traces/videos, runs the AI feedback loop, and
+ * finalises the run.
  *
- * @param {Object}      project          - The project `{ id, name, url }`.
- * @param {Object[]}    tests            - Array of test objects to execute.
- * @param {Object}      run              - The run record (mutated in place).
- * @param {Object}      db               - The database object from {@link module:db.getDb}.
+ * @param {Object}      project                   - The project `{ id, name, url }`.
+ * @param {Object[]}    tests                     - Array of test objects to execute.
+ * @param {Object}      run                       - The run record (mutated in place).
+ * @param {Object}      db                        - The database object from {@link module:db.getDb}.
  * @param {Object}      [options]
- * @param {AbortSignal} [options.signal] - Abort signal for cancellation.
+ * @param {number}      [options.parallelWorkers]  - Concurrent browser contexts (1–10). Overrides env default.
+ * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, db, { signal } = {}) {
+export async function runTests(project, tests, run, db, { parallelWorkers, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
+
+  // Resolve concurrency: per-run override → env default → 1 (sequential)
+  const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
 
   let browser;
   try {
@@ -78,54 +116,63 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
     throw ctxErr;
   }
 
-  log(run, `🚀 Starting test run: ${tests.length} tests`);
+  const modeLabel = workers > 1 ? `${workers} parallel workers` : "sequential";
+  log(run, `🚀 Starting test run: ${tests.length} tests (${modeLabel})`);
 
   const runStart = Date.now();
   const allVideoSegments = [];
 
-  try {
-    for (let i = 0; i < tests.length; i++) {
-      // Check abort signal between tests so the run stops promptly
-      if (signal?.aborted) {
-        logWarn(run, `Abort signal received — skipping remaining ${tests.length - i} test(s)`);
-        break;
-      }
+  // ── Process a single test result — shared by the pool worker callback ────
+  function processResult(test, result) {
+    run.results.push(result);
 
-      const test = tests[i];
+    if (result.videoPath) allVideoSegments.push(result.videoPath);
+
+    if (result.status === "passed") {
+      run.passed++;
+      logSuccess(run, `PASSED (${result.durationMs}ms)`);
+    } else if (result.status === "warning") {
+      run.passed++;
+      logWarn(run, `WARNING: ${result.error}`);
+    } else {
+      run.failed++;
+      logError(run, `FAILED: ${result.error}`);
+    }
+
+    // Emit result event (without the heavy base64 screenshot)
+    const { screenshot: _ss, ...resultLean } = result;
+    emitRunEvent(run.id, "result", { result: resultLean });
+    if (result.screenshotPath) {
+      emitRunEvent(run.id, "screenshot", {
+        testId: test.id,
+        screenshotPath: result.screenshotPath,
+      });
+    }
+
+    if (db.tests[test.id]) {
+      db.tests[test.id].lastResult = result.status;
+      db.tests[test.id].lastRunAt = new Date().toISOString();
+    }
+
+    // Broadcast a snapshot after each result so the frontend progress bar
+    // updates in real time (especially important during parallel execution
+    // where multiple results arrive in quick succession).
+    if (!isRunAborted(run, signal)) {
+      emitRunEvent(run.id, "snapshot", { run });
+    }
+  }
+
+  try {
+    await poolMap(tests, workers, async (test, i) => {
+      if (signal?.aborted) return;
+
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
-      log(run, `▶ [${i + 1}/${tests.length}] ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
+      const workerTag = workers > 1 ? ` [w${(i % workers) + 1}]` : "";
+      log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} ${hasCode ? "(executing generated code)" : "(fallback smoke test)"}`);
 
       try {
         const result = await executeTest(test, browser, runId, i, runStart, db);
-        run.results.push(result);
-
-        if (result.videoPath) allVideoSegments.push(result.videoPath);
-
-        if (result.status === "passed") {
-          run.passed++;
-          logSuccess(run, `PASSED (${result.durationMs}ms)`);
-        } else if (result.status === "warning") {
-          run.passed++;
-          logWarn(run, `WARNING: ${result.error}`);
-        } else {
-          run.failed++;
-          logError(run, `FAILED: ${result.error}`);
-        }
-
-        // Emit result event (without the heavy base64 screenshot)
-        const { screenshot: _ss, ...resultLean } = result;
-        emitRunEvent(run.id, "result", { result: resultLean });
-        if (result.screenshotPath) {
-          emitRunEvent(run.id, "screenshot", {
-            testId: test.id,
-            screenshotPath: result.screenshotPath,
-          });
-        }
-
-        if (db.tests[test.id]) {
-          db.tests[test.id].lastResult = result.status;
-          db.tests[test.id].lastRunAt = new Date().toISOString();
-        }
+        processResult(test, result);
       } catch (err) {
         run.failed++;
         run.results.push({
@@ -135,7 +182,7 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
         });
         logError(run, `FAILED (exception): ${err.message}`);
       }
-    }
+    }, signal);
   } finally {
     // Always clean up browser resources — even if the loop threw unexpectedly
     try {
@@ -164,10 +211,13 @@ export async function runTests(project, tests, run, db, { signal } = {}) {
   //      an immediate "done" + res.end() when run.status !== "running", which
   //      would cut off the client while the feedback loop is still active.
   // The status is set to "completed" only after the feedback loop finishes.
-  log(run, `📋 Test execution done: ${run.passed} passed, ${run.failed} failed out of ${run.total} — starting post-run analysis…`);
+  const elapsed = ((Date.now() - runStart) / 1000).toFixed(1);
+  log(run, `📋 Test execution done: ${run.passed} passed, ${run.failed} failed out of ${run.total} in ${elapsed}s${workers > 1 ? ` (${workers}x parallel)` : ""} — starting post-run analysis…`);
 
-  // Broadcast a snapshot so the frontend sees updated pass/fail counts while
-  // the feedback loop performs long-running AI calls below.
+  // Broadcast a final snapshot so the frontend sees the complete pass/fail
+  // counts before the feedback loop starts its long-running AI calls.
+  // (processResult already emits per-result snapshots, but this ensures the
+  // frontend has the final state even if the last result's snapshot was lost.)
   if (!isRunAborted(run, signal)) {
     emitRunEvent(run.id, "snapshot", { run });
   }

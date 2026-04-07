@@ -42,6 +42,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
     maxActions:    validatedDials?.exploreMaxActions     ?? 8,
     actionTimeout: validatedDials?.exploreActionTimeout  ?? 5000,
   };
+  const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
 
   const runId = generateRunId(db);
   const run = {
@@ -91,6 +92,11 @@ router.post("/projects/:id/run", async (req, res) => {
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
+  // Extract parallel workers from dials config (if provided)
+  const { dialsConfig } = req.body || {};
+  const validatedRunDials = resolveDialsConfig(dialsConfig);
+  const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
+
   const runId = generateRunId(db);
   const run = {
     id: runId,
@@ -103,6 +109,7 @@ router.post("/projects/:id/run", async (req, res) => {
     passed: 0,
     failed: 0,
     total: tests.length,
+    parallelWorkers,
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   db.runs[runId] = run;
@@ -110,11 +117,11 @@ router.post("/projects/:id/run", async (req, res) => {
 
   logActivity({
     type: "test_run.start", projectId: project.id, projectName: project.name,
-    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`, status: "running",
+    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
 
   runWithAbort(runId, run,
-    (signal) => runTests(project, tests, run, db, { signal }),
+    (signal) => runTests(project, tests, run, db, { parallelWorkers, signal }),
     {
       onSuccess: () => logActivity({
         type: "test_run.complete", projectId: project.id, projectName: project.name,

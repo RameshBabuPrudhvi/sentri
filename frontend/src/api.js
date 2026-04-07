@@ -136,8 +136,12 @@ export const api = {
    * @returns {Promise<{runId: string}>}
    */
   crawl:         (id, body) => req("POST", `/projects/${id}/crawl`, body || undefined, TIMEOUT_LONG),
-  /** @param {string} id - Execute all approved tests for a project. */
-  runTests:      (id)    => req("POST", `/projects/${id}/run`,   undefined, TIMEOUT_LONG),
+  /**
+   * Execute all approved tests for a project.
+   * @param {string} id   - Project ID.
+   * @param {Object} [body] - Optional `{ dialsConfig }` for parallel workers etc.
+   */
+  runTests:      (id, body) => req("POST", `/projects/${id}/run`, body || undefined, TIMEOUT_LONG),
   /** @param {string} testId - Execute a single test. */
   runSingleTest: (testId)=> req("POST", `/tests/${testId}/run`,  undefined, TIMEOUT_LONG),
 

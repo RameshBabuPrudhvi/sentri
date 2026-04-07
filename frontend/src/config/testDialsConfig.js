@@ -198,6 +198,17 @@ export const EXPLORER_TUNING = [
   },
 ];
 
+// ─── Parallel execution ────────────────────────────────────────────────────────
+// Controls how many tests run concurrently during a test run.
+// 1 = sequential (legacy), up to 10 parallel browser contexts.
+
+export const PARALLEL_WORKERS_TUNING = {
+  id: "parallelWorkers",
+  label: "Parallel workers",
+  desc: "Number of tests to run simultaneously — higher values speed up large suites",
+  min: 1, max: 10, step: 1, defaultVal: 1,
+};
+
 // ─── Extra options ─────────────────────────────────────────────────────────────
 // Replaces single automationHooks boolean. Expanded into named toggles.
 
@@ -318,6 +329,7 @@ export const DEFAULT_CONFIG = {
   exploreMaxDepth:      3,
   exploreMaxActions:    8,
   exploreActionTimeout: 5000,
+  parallelWorkers:      1,
   options: {
     selectorHints:    false,
     preconditions:    false,

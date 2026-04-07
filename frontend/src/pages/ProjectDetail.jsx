@@ -8,7 +8,7 @@ import {
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
 import { loadSavedConfig, countActiveDials } from "../utils/testDialsStorage.js";
-import { EXPLORE_MODE_OPTIONS } from "../config/testDialsConfig.js";
+import { EXPLORE_MODE_OPTIONS, PARALLEL_WORKERS_TUNING } from "../config/testDialsConfig.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
@@ -181,10 +181,13 @@ export default function ProjectDetail() {
   async function doRun() {
     setActionLoading("run");
     try {
-      const { runId } = await api.runTests(id);
+      // Pass dials config so parallelWorkers reaches the backend
+      const { runId } = await api.runTests(id, crawlDialsCfg ? { dialsConfig: crawlDialsCfg } : undefined);
       setActiveRun(runId);
       setActiveRunId(runId);
-      showToast("Regression run started", "info", runId);
+      const pw = crawlDialsCfg?.parallelWorkers;
+      const modeHint = pw > 1 ? ` (${pw}x parallel)` : "";
+      showToast(`Regression run started${modeHint}`, "info", runId);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -352,6 +355,28 @@ export default function ProjectDetail() {
                 {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
                 {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate"}
               </button>
+              {/* Parallel workers compact selector */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+                padding: "3px 8px", borderRadius: "var(--radius)",
+                border: "1px solid var(--border)", background: "var(--surface)",
+                fontSize: "0.72rem", color: "var(--text2)",
+              }} title={PARALLEL_WORKERS_TUNING.desc}>
+                <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>⚡</span>
+                <select
+                  value={crawlDialsCfg?.parallelWorkers ?? PARALLEL_WORKERS_TUNING.defaultVal}
+                  onChange={e => setCrawlDialsCfg(prev => ({ ...prev, parallelWorkers: parseInt(e.target.value, 10) }))}
+                  style={{
+                    background: "transparent", border: "none", color: "var(--accent)",
+                    fontWeight: 700, fontSize: "0.78rem", cursor: "pointer",
+                    fontFamily: "var(--font-mono)", padding: 0, outline: "none",
+                  }}
+                >
+                  {Array.from({ length: PARALLEL_WORKERS_TUNING.max }, (_, i) => i + 1).map(n => (
+                    <option key={n} value={n}>{n}x</option>
+                  ))}
+                </select>
+              </div>
               <button className="btn btn-primary btn-sm" onClick={doRun}
                 disabled={!!actionLoading || approvedTests.length === 0}
                 title={approvedTests.length === 0 ? "Approve tests first to run regression" : undefined}>

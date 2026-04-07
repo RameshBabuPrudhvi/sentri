@@ -242,6 +242,9 @@ export function validateDialsConfig(raw) {
   const exploreMaxActions    = clampInt(raw.exploreMaxActions,     1, 20,    8);
   const exploreActionTimeout = clampInt(raw.exploreActionTimeout,  1000, 15000, 5000);
 
+  // Validate parallel execution — clamp to safe range (1 = sequential)
+  const parallelWorkers      = clampInt(raw.parallelWorkers,      1, 10,    1);
+
   // Validate options object — only known boolean keys accepted
   const rawOpts = raw.options && typeof raw.options === "object" ? raw.options : {};
   const options = {};
@@ -261,6 +264,7 @@ export function validateDialsConfig(raw) {
   return {
     approach, perspectives, quality, format, language, testCount,
     exploreMode, exploreMaxStates, exploreMaxDepth, exploreMaxActions, exploreActionTimeout,
+    parallelWorkers,
     options, customInstructions,
   };
 }

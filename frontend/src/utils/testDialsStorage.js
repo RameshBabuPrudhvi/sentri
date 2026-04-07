@@ -63,6 +63,7 @@ export function countActiveDials(cfg) {
   if (cfg.format)                n++;   // format always set
   if (cfg.testCount && cfg.testCount !== "ai_decides") n++;
   if (cfg.exploreMode && cfg.exploreMode !== "crawl") n++;
+  if (cfg.parallelWorkers && cfg.parallelWorkers > 1) n++;
   if (cfg.options) {
     n += Object.values(cfg.options).filter(Boolean).length;
   }

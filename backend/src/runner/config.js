@@ -19,6 +19,14 @@ export const VIEWPORT_WIDTH     = parseInt(process.env.VIEWPORT_WIDTH, 10) || 12
 export const VIEWPORT_HEIGHT    = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
 export const NAVIGATION_TIMEOUT = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
 
+// ── Parallel execution ────────────────────────────────────────────────────────
+// Default number of concurrent browser contexts for test execution.
+// Overridden per-run by Test Dials `parallelWorkers` setting.
+// 1 = sequential (legacy behaviour), max 10.
+export const DEFAULT_PARALLEL_WORKERS = Math.max(1, Math.min(10,
+  parseInt(process.env.PARALLEL_WORKERS, 10) || 1
+));
+
 // ── Artifact paths ────────────────────────────────────────────────────────────
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
 export const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");
