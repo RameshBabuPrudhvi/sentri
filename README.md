@@ -109,6 +109,7 @@ npm run dev                 # Starts on :3001
 ```bash
 cd frontend
 npm install
+cp .env.example .env        # Optional — defaults work for local dev
 npm run dev                 # Starts on :3000, proxies /api to :3001
 ```
 
@@ -133,7 +134,7 @@ Auto-detects in order: Anthropic → OpenAI → Google → Ollama. Switch at any
 
 ## Configuration
 
-Key environment variables (see [`backend/.env.example`](backend/.env.example) for the full list):
+Key environment variables (see [`backend/.env.example`](backend/.env.example) and [`frontend/.env.example`](frontend/.env.example) for the full lists):
 
 ```bash
 # AI provider (pick one)
