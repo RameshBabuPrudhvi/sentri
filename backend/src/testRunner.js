@@ -28,11 +28,10 @@
  * - {@link runTests} — Execute an array of approved tests against a project.
  */
 
-import { chromium } from "playwright";
 import { extractTestBody } from "./runner/codeParsing.js";
 import { executeTest } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
-import { BROWSER_HEADLESS, TRACES_DIR, DEFAULT_PARALLEL_WORKERS } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser } from "./runner/config.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 
@@ -86,11 +85,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
 
   let browser;
   try {
-    browser = await chromium.launch({
-      headless: BROWSER_HEADLESS,
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    });
+    browser = await launchBrowser();
   } catch (launchErr) {
     run.status = "failed";
     run.error = `Browser launch failed: ${launchErr.message}`;

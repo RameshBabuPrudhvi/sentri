@@ -90,7 +90,10 @@ function normalisePathPattern(pathname) {
  */
 export function createHarCapture(context, appOrigin) {
   const entries = [];
-  const pending = new Map(); // url+method → entry (for matching responses)
+  // Map Playwright request object → entry for reliable 1:1 request–response
+  // correlation. The previous key-based approach (`method:url:timestamp`)
+  // caused mispairing when multiple concurrent requests hit the same endpoint.
+  const pendingByRequest = new WeakMap();
 
   let origin;
   try { origin = new URL(appOrigin).origin; } catch { origin = appOrigin; }
@@ -137,29 +140,17 @@ export function createHarCapture(context, appOrigin) {
         if (frame) entry.pageUrl = frame.url();
       } catch { /* frame may be detached */ }
 
-      const key = `${method}:${url}:${entry.startTime}`;
-      pending.set(key, entry);
+      pendingByRequest.set(request, entry);
       entries.push(entry);
     } catch { /* swallow — never break the crawl */ }
   }
 
   async function onResponse(response) {
     try {
-      const url = response.url();
-      const method = response.request().method();
-      // Find the matching pending entry — iterate to find the earliest
-      // request with the same method+url (matches the timestamped key).
-      let matchKey = null;
-      let entry = null;
-      for (const [k, e] of pending) {
-        if (k.startsWith(`${method}:${url}:`)) {
-          matchKey = k;
-          entry = e;
-          break;
-        }
-      }
+      const request = response.request();
+      const entry = pendingByRequest.get(request);
       if (!entry) return;
-      pending.delete(matchKey);
+      pendingByRequest.delete(request);
 
       entry.status = response.status();
       entry.durationMs = Date.now() - entry.startTime;

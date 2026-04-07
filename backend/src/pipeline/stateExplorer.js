@@ -24,7 +24,6 @@
  * - {@link exploreStates} — full state exploration from a project URL
  */
 
-import { chromium } from "playwright";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { takeSnapshot } from "./pageSnapshot.js";
 import { fingerprintState, statesEqual } from "./stateFingerprint.js";
@@ -34,6 +33,7 @@ import { extractPathPattern } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
+import { launchBrowser } from "../runner/config.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -239,22 +239,33 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
 }
 
 export async function exploreStates(project, run, { signal, tuning } = {}) {
-  // Resolve per-run limits from Test Dials tuning, falling back to defaults
+  // Resolve per-run limits from Test Dials tuning, falling back to defaults.
+  // Defensive clamping ensures safety even if a caller bypasses route-level
+  // validation (testDials.js clampInt). Uses ?? so explicit 0 falls through
+  // to the default (0 is never a valid limit).
+  function clamp(val, min, max, def) {
+    const n = val ?? def;
+    return Math.max(min, Math.min(max, Number.isFinite(n) ? n : def));
+  }
   const limits = {
-    maxStates:     tuning?.maxStates     ?? DEFAULT_MAX_STATES,
-    maxDepth:      tuning?.maxDepth      ?? DEFAULT_MAX_DEPTH,
-    maxActions:    tuning?.maxActions     ?? DEFAULT_MAX_ACTIONS,
-    actionTimeout: tuning?.actionTimeout ?? DEFAULT_ACTION_TIMEOUT,
+    maxStates:     clamp(tuning?.maxStates,     5,   100, DEFAULT_MAX_STATES),
+    maxDepth:      clamp(tuning?.maxDepth,       1,   10,  DEFAULT_MAX_DEPTH),
+    maxActions:    clamp(tuning?.maxActions,      1,   20,  DEFAULT_MAX_ACTIONS),
+    actionTimeout: clamp(tuning?.actionTimeout,  1000, 15000, DEFAULT_ACTION_TIMEOUT),
   };
 
-  const browser = await chromium.launch({
-    headless: process.env.BROWSER_HEADLESS !== "false",
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  const browser = await launchBrowser();
   const ctx = { states: new Set(), edges: [], snapshotsByFp: new Map(), snapshots: [], snapshotsByUrl: {}, pathPatternsSeen: new Set(), queue: [], limits };
   let startState = null;
   let harCapture = null;
+
+  // Global exploration timeout — prevents runaway exploration if the site
+  // triggers infinite loops, slow pages, or Playwright hangs. The budget is
+  // generous (2× worst-case sequential execution) so it only fires as a
+  // circuit breaker, not during normal operation.
+  const GLOBAL_TIMEOUT_MS = limits.maxStates * limits.actionTimeout * 2;
+  const explorationStart = Date.now();
+  function isTimedOut() { return Date.now() - explorationStart > GLOBAL_TIMEOUT_MS; }
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
@@ -295,6 +306,10 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
 
     while (ctx.queue.length > 0 && ctx.states.size < limits.maxStates) {
       throwIfAborted(signal);
+      if (isTimedOut()) {
+        logWarn(run, `⏱️  Global exploration timeout reached (${Math.round(GLOBAL_TIMEOUT_MS / 1000)}s) — stopping`);
+        break;
+      }
       const { fp: currentFp, url: currentUrl, depth } = ctx.queue.shift();
       if (depth > limits.maxDepth) continue;
       try {
@@ -358,12 +373,14 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
       await crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal);
     }
     await page.close().catch(() => {});
+
+    // Detach HAR capture before browser.close() so listeners complete cleanly
+    if (harCapture) harCapture.detach();
   } finally { await browser.close().catch(() => {}); }
 
   // ── Summarise captured API traffic ────────────────────────────────────────
   let apiEndpoints = [];
   if (harCapture) {
-    harCapture.detach();
     apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
     if (apiEndpoints.length > 0) {
       log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);

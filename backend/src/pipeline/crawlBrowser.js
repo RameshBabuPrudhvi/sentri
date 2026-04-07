@@ -7,13 +7,13 @@
  * - {@link crawlPages} — `(project, run, { signal }) → { snapshots, snapshotsByUrl }`
  */
 
-import { chromium } from "playwright";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./smartCrawl.js";
 import { takeSnapshot } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
+import { launchBrowser } from "../runner/config.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -28,11 +28,7 @@ const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
  * @returns {Promise<{ snapshots: object[], snapshotsByUrl: Record<string, object> }>}
  */
 export async function crawlPages(project, run, { signal } = {}) {
-  const browser = await chromium.launch({
-    headless: process.env.BROWSER_HEADLESS !== "false",
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  const browser = await launchBrowser();
 
   const snapshots = [];
   const snapshotsByUrl = {};
@@ -40,9 +36,6 @@ export async function crawlPages(project, run, { signal } = {}) {
 
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
-
-    // ── HAR capture: record API traffic for API test generation ────────────
-    harCapture = createHarCapture(context, project.url);
 
     const crawlQueue = new SmartCrawlQueue(project.url);
     crawlQueue.enqueue(project.url, 0);
@@ -66,6 +59,25 @@ export async function crawlPages(project, run, { signal } = {}) {
         await loginPage.close().catch(() => {});
       }
     }
+
+    // ── Resolve actual origin after redirects ────────────────────────────────
+    // Navigate once to discover the real origin (e.g. http → https, www →
+    // non-www) BEFORE attaching HAR capture. Without this, createHarCapture
+    // filters by the user-entered origin which may differ from the resolved
+    // one, causing all API traffic to be silently dropped.
+    const probePage = await context.newPage();
+    let resolvedOrigin = project.url;
+    try {
+      await probePage.goto(project.url, { waitUntil: "domcontentloaded", timeout: 15000 });
+      resolvedOrigin = probePage.url();
+      if (resolvedOrigin !== project.url) {
+        log(run, `🔀 Redirected: ${project.url} → ${resolvedOrigin}`);
+      }
+    } catch { /* fall back to user-entered URL */ }
+    finally { await probePage.close().catch(() => {}); }
+
+    // ── HAR capture: attach AFTER redirect so it uses the resolved origin ──
+    harCapture = createHarCapture(context, resolvedOrigin);
 
     // ── Crawl loop ──────────────────────────────────────────────────────────
     while (crawlQueue.hasMore() && crawlQueue.visitedCount < MAX_PAGES) {
@@ -126,14 +138,17 @@ export async function crawlPages(project, run, { signal } = {}) {
         await page.close();
       }
     }
+
+    // ── Summarise captured API traffic (before browser.close) ──────────────
+    if (harCapture) {
+      harCapture.detach();
+    }
   } finally {
     await browser.close().catch(() => {});
   }
 
-  // ── Summarise captured API traffic ────────────────────────────────────────
   let apiEndpoints = [];
   if (harCapture) {
-    harCapture.detach();
     apiEndpoints = summariseApiEndpoints(harCapture.getEntries());
     if (apiEndpoints.length > 0) {
       log(run, `🌐 Captured ${harCapture.getEntries().length} API calls → ${apiEndpoints.length} unique endpoint patterns`);

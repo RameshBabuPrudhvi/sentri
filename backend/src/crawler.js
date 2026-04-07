@@ -45,6 +45,51 @@ function setStep(run, step) {
 }
 
 /**
+ * Shared Steps 2 & 3: Element filtering + intent classification.
+ * Extracted to avoid duplication between the "state" and "crawl" branches.
+ *
+ * @param {object[]} snapshots       — raw page snapshots from crawl or explore
+ * @param {Record<string,object>} snapshotsByUrl — URL → snapshot map (mutated in place)
+ * @param {object}  project          — project record (url used for log trimming)
+ * @param {object}  run              — mutable run record
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ filteredSnapshots: object[], classifiedPages: object[], classifiedPagesByUrl: Record<string,object> }>}
+ */
+async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal) {
+  // ── Step 2: Element filtering ───────────────────────────────────────────
+  setStep(run, 2);
+  log(run, `🔍 Filtering elements (removing noise)...`);
+  const filteredSnapshots = snapshots.map(snap => {
+    const filtered = filterElements(snap.elements);
+    log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
+    return { ...snap, elements: filtered };
+  });
+  for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
+
+  throwIfAborted(signal);
+
+  // ── Step 3: Intent classification ───────────────────────────────────────
+  setStep(run, 3);
+  log(run, `🧠 Classifying page intents...`);
+  const classifiedPages = [];
+  for (const snap of filteredSnapshots) {
+    throwIfAborted(signal);
+    const classified = await classifyPageWithAI(snap, snap.elements, { signal });
+    if (classified._aiAssisted) {
+      log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
+    }
+    classifiedPages.push(classified);
+  }
+  const classifiedPagesByUrl = {};
+  for (const cp of classifiedPages) {
+    classifiedPagesByUrl[cp.url] = cp;
+    log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
+  }
+
+  return { filteredSnapshots, classifiedPages, classifiedPagesByUrl };
+}
+
+/**
  * generateSingleTest — Generates ONE focused test from a user-provided
  * name + description (no crawl needed).
  *
@@ -146,35 +191,9 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
     throwIfAborted(signal);
 
-    // ── Step 2: Element filtering ─────────────────────────────────────────
-    setStep(run, 2);
-    log(run, `🔍 Filtering elements (removing noise)...`);
-    filteredSnapshots = snapshots.map(snap => {
-      const filtered = filterElements(snap.elements);
-      log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
-      return { ...snap, elements: filtered };
-    });
-    for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
-
-    throwIfAborted(signal);
-
-    // ── Step 3: Intent classification ─────────────────────────────────────
-    setStep(run, 3);
-    log(run, `🧠 Classifying page intents...`);
-    classifiedPages = [];
-    for (const snap of filteredSnapshots) {
-      throwIfAborted(signal);
-      const classified = await classifyPageWithAI(snap, snap.elements, { signal });
-      if (classified._aiAssisted) {
-        log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
-      }
-      classifiedPages.push(classified);
-    }
-    classifiedPagesByUrl = {};
-    for (const cp of classifiedPages) {
-      classifiedPagesByUrl[cp.url] = cp;
-      log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
-    }
+    // ── Steps 2 & 3: shared filter + classify ─────────────────────────────
+    ({ filteredSnapshots, classifiedPages, classifiedPagesByUrl } =
+      await filterAndClassify(snapshots, snapshotsByUrl, project, run, signal));
 
     // Enrich snapshotsByUrl with fingerprint-keyed entries so that downstream
     // code (journeyPrompt.js) can look up per-state snapshots when a journey
@@ -214,35 +233,9 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
     throwIfAborted(signal);
 
-    // ── Step 2: Element filtering ─────────────────────────────────────────
-    setStep(run, 2);
-    log(run, `🔍 Filtering elements (removing noise)...`);
-    filteredSnapshots = snapshots.map(snap => {
-      const filtered = filterElements(snap.elements);
-      log(run, `   ${snap.url.replace(project.url, "")}: ${filterStats(snap.elements, filtered)}`);
-      return { ...snap, elements: filtered };
-    });
-    for (const snap of filteredSnapshots) snapshotsByUrl[snap.url] = snap;
-
-    throwIfAborted(signal);
-
-    // ── Step 3: Intent classification ─────────────────────────────────────
-    setStep(run, 3);
-    log(run, `🧠 Classifying page intents...`);
-    classifiedPages = [];
-    for (const snap of filteredSnapshots) {
-      throwIfAborted(signal);
-      const classified = await classifyPageWithAI(snap, snap.elements, { signal });
-      if (classified._aiAssisted) {
-        log(run, `   🤖 AI classified ${snap.url.replace(project.url, "") || "/"} as ${classified.dominantIntent}`);
-      }
-      classifiedPages.push(classified);
-    }
-    classifiedPagesByUrl = {};
-    for (const cp of classifiedPages) {
-      classifiedPagesByUrl[cp.url] = cp;
-      log(run, `   ${cp.dominantIntent.padEnd(16)} ${cp.url.replace(project.url, "") || "/"}`);
-    }
+    // ── Steps 2 & 3: shared filter + classify ─────────────────────────────
+    ({ filteredSnapshots, classifiedPages, classifiedPagesByUrl } =
+      await filterAndClassify(snapshots, snapshotsByUrl, project, run, signal));
 
     // Journey detection — pass snapshotsByUrl so link-graph analysis can discover
     // cross-intent journeys (e.g. pricing → signup → dashboard)
@@ -261,12 +254,13 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // ── Step 4: AI test generation ──────────────────────────────────────────
   setStep(run, 4);
   log(run, `🤖 Generating intent-driven tests...`);
-  const rawTests = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
+  const genResult = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
+  const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
 
   // Surface rate limit errors so the frontend shows a clear warning
-  if (rawTests._rateLimitHit) {
-    const errMsg = rawTests._rateLimitError || "AI provider rate limit exceeded";
+  if (genResult.rateLimitHit) {
+    const errMsg = genResult.rateLimitError || "AI provider rate limit exceeded";
     logWarn(run, `⚠️  AI RATE LIMIT: ${errMsg}`);
     logWarn(run, `   Tests generated before limit: ${rawTests.length}. Switch to a different AI provider in Settings, or wait and retry.`);
     run.rateLimitError = errMsg;

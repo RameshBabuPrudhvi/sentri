@@ -108,10 +108,12 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
 }
 
 /**
- * generateAllTests(classifiedPages, journeys, snapshotsByUrl) → Array of test objects
+ * generateAllTests(classifiedPages, journeys, snapshotsByUrl) → { tests, rateLimitHit, rateLimitError }
  *
  * Orchestrates full test generation: journeys first, then per-page intent tests.
  * ALL pages get comprehensive tests — not just high-priority ones.
+ *
+ * @returns {{ tests: object[], rateLimitHit: boolean, rateLimitError: string|null }}
  */
 export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl, onProgress, { dialsPrompt = "", testCount = "ai_decides", signal } = {}) {
   const allTests = [];
@@ -186,13 +188,11 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     }
   }
 
-  // Attach rate limit info so the caller can surface it in the run record
-  if (rateLimitHit) {
-    allTests._rateLimitHit = true;
-    allTests._rateLimitError = rateLimitError?.message || "AI provider rate limit exceeded";
-  }
-
-  return allTests;
+  return {
+    tests: allTests,
+    rateLimitHit,
+    rateLimitError: rateLimitHit ? (rateLimitError?.message || "AI provider rate limit exceeded") : null,
+  };
 }
 
 // ── API test generation ───────────────────────────────────────────────────────

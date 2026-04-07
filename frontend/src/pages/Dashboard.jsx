@@ -32,14 +32,8 @@ function fmtMs(ms) {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-function fmtDur(startedAt, finishedAt) {
-  if (!startedAt || !finishedAt) return null;
-  return new Date(finishedAt) - new Date(startedAt);
-}
-
 function pctColor(p) {
   if (p === null) return "#9ca3af";
-  if (p >= 90) return "#16a34a";
   if (p >= 75) return "#16a34a";
   if (p >= 50) return "#d97706";
   return "#dc2626";
@@ -71,6 +65,10 @@ function RunningBadge() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PDF Generator — pulls all live data, renders full executive report
+// TODO: Extract to `frontend/src/utils/pdfReportGenerator.js` with separate
+//       fetchReportData(), aggregateMetrics(), renderReportHtml(), and
+//       openPrintWindow() functions. This 470-line function mixes data fetching,
+//       aggregation, and HTML templating — it's untestable in its current form.
 // ─────────────────────────────────────────────────────────────────────────────
 async function generateExecutivePDF() {
   // Fetch all data in parallel

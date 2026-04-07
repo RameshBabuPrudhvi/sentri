@@ -171,7 +171,12 @@ function getJwtSecret() {
   return _cachedSecret;
 }
 
-// ─── In-memory stores (replace with DB/Redis in production) ─────────────────
+// ─── In-memory stores ────────────────────────────────────────────────────────
+// TODO: Extract to `backend/src/utils/tokenStore.js` behind an interface:
+//   { revoke(jti, exp), isRevoked(jti), setResetToken(tok, data), getResetToken(tok) }
+// Default implementation: in-memory Map (current). Production: swap to Redis
+// via REDIS_URL env var. This enables horizontal scaling (multiple instances)
+// and survives server restarts without losing revoked tokens or reset tokens.
 
 // Token revocation list (logout): { jti → expiry_timestamp }
 const revokedTokens = new Map();
