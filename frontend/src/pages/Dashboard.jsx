@@ -211,9 +211,9 @@ async function generateExecutivePDF() {
   const totalDefects = defects.reduce((s, d) => s + d.count, 0);
 
   // ── Test inventory ──
-  const approvedTests = allTests.filter(t => t.status === "approved").length;
-  const draftTests    = allTests.filter(t => t.status === "draft").length;
-  const rejectedTests = allTests.filter(t => t.status === "rejected").length;
+  const approvedTests = allTests.filter(t => t.reviewStatus === "approved").length;
+  const draftTests    = allTests.filter(t => t.reviewStatus === "draft").length;
+  const rejectedTests = allTests.filter(t => t.reviewStatus === "rejected").length;
 
   // ── Run status breakdown ──
   const rbs = {
