@@ -227,7 +227,8 @@ export function isRateLimitError(err) {
     || /\b429\b/.test(msg)
     || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
     || /\btoo many requests\b/i.test(msg)
-    || /\bresource.?exhausted\b/i.test(msg);
+    || /\bresource.?exhausted\b/i.test(msg)
+    || /\boverloaded/i.test(msg);
 }
 
 function extractRetryAfter(err) {
