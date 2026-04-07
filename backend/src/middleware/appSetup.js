@@ -53,6 +53,12 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
+// NOTE: /artifacts is intentionally NOT behind requireAuth. Screenshots, videos,
+// and traces are referenced via <img>, <video>, and <a download> tags which
+// cannot send Authorization headers. To add auth, implement ?token= query param
+// validation here (same pattern as SSE/export endpoints) and update all frontend
+// artifact URLs to append the token. For now, artifact filenames contain random
+// run IDs which provide obscurity (not security).
 /**
  * Absolute path to the Playwright artifacts directory (screenshots, videos, traces).
  * @type {string}

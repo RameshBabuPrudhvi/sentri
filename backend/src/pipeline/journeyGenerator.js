@@ -9,7 +9,7 @@
  *   - stepSanitiser.js              — sanitiseSteps, extractTestsArray
  */
 
-import { generateText, streamText, parseJSON } from "../aiProvider.js";
+import { generateText, streamText, parseJSON, isRateLimitError } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
@@ -17,24 +17,6 @@ import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
 import { buildIntentPrompt } from "./prompts/intentPrompt.js";
 import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
 import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
-
-/**
- * Detect whether an error is a rate limit / quota exhaustion from any provider.
- * Used to propagate these errors instead of silently returning [].
- */
-function isRateLimitLike(err) {
-  const msg = (err?.message || "").toLowerCase();
-  const status = err?.status || err?.statusCode || 0;
-  if (status === 429) return true;
-  // Use word-boundary-aware patterns to avoid false positives on port
-  // numbers (e.g. "localhost:4290"), disk quota errors, etc.
-  return /\brate.?limit/i.test(msg)
-    || /\brate_limit/i.test(msg)
-    || /\b429\b/.test(msg)
-    || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
-    || /\btoo many requests\b/i.test(msg)
-    || /\bresource.?exhausted\b/i.test(msg);
-}
 
 /**
  * generateUserRequestedTest(name, description, appUrl) → Array of test objects
@@ -81,7 +63,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
     // Propagate rate limit errors so the caller can short-circuit
-    if (isRateLimitLike(err)) throw err;
+    if (isRateLimitError(err)) throw err;
     return [];
   }
 }
@@ -102,7 +84,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
   } catch (err) {
     if (err.name === "AbortError" || signal?.aborted) throw err;
     // Propagate rate limit errors so the caller can short-circuit
-    if (isRateLimitLike(err)) throw err;
+    if (isRateLimitError(err)) throw err;
     return [];
   }
 }
@@ -127,7 +109,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
       return await fn();
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
-      if (isRateLimitLike(err)) {
+      if (isRateLimitError(err)) {
         rateLimitHit = true;
         rateLimitError = err;
         onProgress?.(`⚠️  AI rate limit reached: ${err.message.slice(0, 120)}`);

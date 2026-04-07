@@ -559,7 +559,9 @@ router.post("/reset-password", async (req, res) => {
     if (e.userId === user.id) resetTokens.delete(tok);
   }
 
-  console.log(`[auth/reset-password] Password reset for ${user.email}`);
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[auth/reset-password] Password reset for ${user.email}`);
+  }
 
   return res.json({ message: "Password has been reset successfully. You can now sign in." });
 });

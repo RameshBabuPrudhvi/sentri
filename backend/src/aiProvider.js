@@ -208,13 +208,26 @@ async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function isRateLimitError(err) {
-  const msg = err?.message || "";
+/**
+ * Detect whether an error is a rate limit / quota exhaustion from any AI provider.
+ * Used internally for retry decisions and exported for the pipeline to detect
+ * rate limits that survived all retries.
+ *
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isRateLimitError(err) {
+  const msg = (err?.message || "").toLowerCase();
   const status = err?.status || err?.statusCode || 0;
-  return RATE_LIMIT_CODES.includes(status)
-    || RETRY_ERRORS.some(e => msg.includes(e))
-    || msg.includes("quota")
-    || msg.includes("429");
+  if (RATE_LIMIT_CODES.includes(status)) return true;
+  // Use word-boundary-aware patterns to avoid false positives on port
+  // numbers (e.g. "localhost:4290"), disk quota errors, etc.
+  return /\brate.?limit/i.test(msg)
+    || /\brate_limit/i.test(msg)
+    || /\b429\b/.test(msg)
+    || /\bquota\s*(exceeded|exhausted|limit)/i.test(msg)
+    || /\btoo many requests\b/i.test(msg)
+    || /\bresource.?exhausted\b/i.test(msg);
 }
 
 function extractRetryAfter(err) {
