@@ -136,11 +136,15 @@ function TopBar() {
       {/* Search */}
       <div style={{ flex: 1, maxWidth: 420, position: "relative" }}>
         <Search size={14} color="var(--text3)" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+        {/* Hidden dummy field prevents Chrome from autofilling the visible search input with saved credentials */}
+        <input type="text" name="prevent-autofill" autoComplete="username" style={{ position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none" }} tabIndex={-1} aria-hidden="true" />
         <input
           className="input"
           type="search"
           name="global-search"
           autoComplete="off"
+          data-form-type="other"
+          data-lpignore="true"
           value={q}
           onChange={e => setQ(e.target.value)}
           onKeyDown={handleSearch}
