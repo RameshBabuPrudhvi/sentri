@@ -111,7 +111,9 @@ export async function generateSingleTest(project, run, db, { name, description, 
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️  Run config:`);
   log(run, `   Generation mode: 📝 Single test (user-described scenario)`);
+  log(run, `   Explorer mode  : ⏭️  None (crawl skipped — generating from description)`);
   log(run, `   Test count     : ${testCount}`);
+  log(run, `   HAR capture    : ❌ disabled (no crawl — API tests require "Crawl & Generate")`);
   log(run, `   Target URL     : ${project.url}`);
 
   // Skip steps 1-3 — user provides the intent directly via name + description
