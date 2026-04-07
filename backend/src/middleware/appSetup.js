@@ -13,11 +13,17 @@
  * import { app, ARTIFACTS_DIR } from "./middleware/appSetup.js";
  */
 
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import path from "path";
 import { fileURLToPath } from "url";
+
+// Load .env before reading any env vars below (CORS_ORIGIN, etc.).
+// ESM imports execute before module-level code in index.js, so the
+// dotenv.config() call there runs too late for this file.
+dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
