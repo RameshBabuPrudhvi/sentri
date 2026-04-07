@@ -267,17 +267,21 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   }
 
   // ── Step 4b: API test generation from captured HAR traffic ──────────────
-  if (apiEndpoints.length > 0) {
+  if (apiEndpoints.length > 0 && !genResult.rateLimitHit) {
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
-    const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal });
-    if (apiTests.length > 0) {
-      for (const t of apiTests) rawTests.push(t);
-      log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);
-    } else {
-      log(run, `   No API tests generated (AI returned empty)`);
+    try {
+      const apiTests = await generateApiTests(apiEndpoints, project.url, { dialsPrompt, testCount: "small", signal });
+      if (apiTests.length > 0) {
+        for (const t of apiTests) rawTests.push(t);
+        log(run, `📝 API tests generated: ${apiTests.length} (total raw: ${rawTests.length})`);
+      } else {
+        log(run, `   No API tests generated (AI returned empty)`);
+      }
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      logWarn(run, `⚠️  API test generation failed: ${err.message?.slice(0, 200)}`);
     }
-  }
 
   throwIfAborted(signal);
 
