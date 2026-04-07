@@ -75,6 +75,7 @@ export default function ProjectDetail() {
   const [showDialsPopover, setShowDialsPopover] = useState(false);
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
+  const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "ui" | "api"
   const [search, setSearch]               = useState("");
   const [selected, setSelected]           = useState(new Set());
   const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
@@ -265,16 +266,22 @@ export default function ProjectDetail() {
   const draftTests    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft");
   const approvedTests = tests.filter(t => t.reviewStatus === "approved");
   const rejectedTests = tests.filter(t => t.reviewStatus === "rejected");
+  const apiTests      = tests.filter(t => t.generatedFrom === "api_har_capture");
+  const uiTests       = tests.filter(t => t.generatedFrom !== "api_har_capture");
 
   const filteredByReview = tests.filter(t => {
     const statusOk =
       reviewFilter === "all"   ? true :
       reviewFilter === "draft" ? (!t.reviewStatus || t.reviewStatus === "draft") :
                                   t.reviewStatus === reviewFilter;
+    const categoryOk =
+      categoryFilter === "all" ? true :
+      categoryFilter === "api" ? t.generatedFrom === "api_har_capture" :
+      categoryFilter === "ui"  ? t.generatedFrom !== "api_har_capture" : true;
     const searchOk = !search ||
       t.name?.toLowerCase().includes(search.toLowerCase()) ||
       t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
-    return statusOk && searchOk;
+    return statusOk && categoryOk && searchOk;
   }).sort((a, b) => {
     // Newest first — so tests from the latest generation run appear at the top
     const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -490,6 +497,10 @@ export default function ProjectDetail() {
               { label: "Rejected", val: rejectedTests.length, color: "var(--red)"   },
               { label: "Passing",  val: passed,               color: "var(--green)" },
               { label: "Failing",  val: failed,               color: "var(--red)"   },
+              ...(apiTests.length > 0 ? [
+                { label: "UI Tests",  val: uiTests.length,  color: "#7c3aed" },
+                { label: "API Tests", val: apiTests.length,  color: "#2563eb" },
+              ] : []),
             ].map((s, i) => (
               <div key={i}>
                 <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val}</div>
@@ -625,6 +636,25 @@ export default function ProjectDetail() {
                     cursor: "pointer", transition: "all 0.12s",
                   }}>{label}</button>
                 ))}
+
+                {/* Category filter (UI / API) — only show when API tests exist */}
+                {apiTests.length > 0 && (
+                  <>
+                    <div style={{ width: 1, height: 18, background: "var(--border)", margin: "0 4px", flexShrink: 0 }} />
+                    {[
+                      ["ui",  `UI (${uiTests.length})`,   "#7c3aed"],
+                      ["api", `🌐 API (${apiTests.length})`, "#2563eb"],
+                    ].map(([key, label, color]) => (
+                      <button key={key} onClick={() => { setCategoryFilter(categoryFilter === key ? "all" : key); setSelected(new Set()); setReviewPage(1); }} style={{
+                        padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
+                        border: `1px solid ${categoryFilter === key ? color : "var(--border)"}`,
+                        background: categoryFilter === key ? `${color}14` : "transparent",
+                        color: categoryFilter === key ? color : "var(--text2)",
+                        cursor: "pointer", transition: "all 0.12s",
+                      }}>{label}</button>
+                    ))}
+                  </>
+                )}
                 <div style={{ flex: 1 }} />
                 <div style={{ position: "relative" }}>
                   <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
