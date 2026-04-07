@@ -403,14 +403,17 @@ export default function StepResultsView({ result, run, onBack }) {
 
   const isRunning = run?.status === "running";
   const hasVideo = !!(result?.videoPath);
+  const isApi = !!result?.isApiTest;
 
-  const tabs = [
-    ...(hasVideo ? [{ id: "video", label: "🎬 Recording" }] : []),
-    { id: "screenshot", label: "📸 Screenshot" },
-    { id: "network",    label: "🌐 Network" },
-    { id: "console",    label: "📜 Console" },
-    { id: "dom",        label: "🧩 DOM" },
-  ];
+  const tabs = isApi
+    ? [{ id: "screenshot", label: "🔌 Result" }]
+    : [
+        ...(hasVideo ? [{ id: "video", label: "🎬 Recording" }] : []),
+        { id: "screenshot", label: "📸 Screenshot" },
+        { id: "network",    label: "🌐 Network" },
+        { id: "console",    label: "📜 Console" },
+        { id: "dom",        label: "🧩 DOM" },
+      ];
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -809,10 +812,12 @@ export default function StepResultsView({ result, run, onBack }) {
                   justifyContent: "center",
                 }}
               >
-                <Globe size={11} color="var(--text3)" />
+                {isApi
+                  ? <span style={{ fontSize: 11 }}>🔌</span>
+                  : <Globe size={11} color="var(--text3)" />}
               </div>
               <span style={{ fontWeight: 700, fontSize: "0.82rem" }}>
-                Browser View
+                {isApi ? "API Response" : "Browser View"}
               </span>
             </div>
 
@@ -882,43 +887,77 @@ export default function StepResultsView({ result, run, onBack }) {
               </BrowserChrome>
             )}
 
-            {/* 📸 SCREENSHOT — shown in browser chrome */}
+            {/* 📸 SCREENSHOT / 🔌 API RESULT */}
             {activeTab === "screenshot" && (
-              <BrowserChrome
-                url={currentUrl}
-                isLoading={
-                  stepStatuses[activeStepIdx] === "running"
-                }
-              >
-                {result?.screenshot ? (
-                  <OverlayCanvas
-                    base64={result.screenshot}
-                    boxes={result.boundingBoxes || []}
-                    status={result.status}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      padding: "60px 40px",
-                      textAlign: "center",
-                      background: "#fafafa",
-                      color: "#94a3b8",
-                    }}
-                  >
-                    <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>
-                      📸
+              isApi ? (
+                <div style={{
+                  borderRadius: 10, overflow: "hidden",
+                  border: "1px solid var(--border)",
+                }}>
+                  <div style={{
+                    padding: "10px 14px", background: "var(--bg2)",
+                    borderBottom: "1px solid var(--border)",
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <span style={{ fontSize: 14 }}>🔌</span>
+                    <span style={{ fontWeight: 700, fontSize: "0.78rem", color: "var(--text)" }}>API Test Result</span>
+                  </div>
+                  <div style={{
+                    padding: "48px 40px", textAlign: "center",
+                    background: result?.status === "passed" ? "var(--green-bg)" : result?.status === "failed" ? "var(--red-bg)" : "var(--bg2)",
+                  }}>
+                    <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.6 }}>
+                      {result?.status === "passed" ? "✓" : result?.status === "failed" ? "✗" : "⏳"}
                     </div>
-                    <div style={{ fontWeight: 600, marginBottom: 6, color: "#64748b" }}>
-                      No screenshot captured
+                    <div style={{
+                      fontWeight: 700, fontSize: "0.92rem", marginBottom: 6,
+                      color: result?.status === "passed" ? "var(--green)" : result?.status === "failed" ? "var(--red)" : "var(--text2)",
+                    }}>
+                      {result?.status === "passed" ? "API Test Passed" : result?.status === "failed" ? "API Test Failed" : "Pending"}
                     </div>
-                    <div style={{ fontSize: "0.76rem", lineHeight: 1.6 }}>
-                      {isRunning
-                        ? "Screenshot will appear when this step completes."
-                        : "Screenshot was not recorded for this test case."}
+                    <div style={{ fontSize: "0.78rem", color: "var(--text3)", lineHeight: 1.6 }}>
+                      This test uses Playwright's API request context.<br />
+                      No browser screenshots, video, or DOM snapshots are captured.
                     </div>
                   </div>
-                )}
-              </BrowserChrome>
+                </div>
+              ) : (
+                <BrowserChrome
+                  url={currentUrl}
+                  isLoading={
+                    stepStatuses[activeStepIdx] === "running"
+                  }
+                >
+                  {result?.screenshot ? (
+                    <OverlayCanvas
+                      base64={result.screenshot}
+                      boxes={result.boundingBoxes || []}
+                      status={result.status}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        padding: "60px 40px",
+                        textAlign: "center",
+                        background: "#fafafa",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>
+                        📸
+                      </div>
+                      <div style={{ fontWeight: 600, marginBottom: 6, color: "#64748b" }}>
+                        No screenshot captured
+                      </div>
+                      <div style={{ fontSize: "0.76rem", lineHeight: 1.6 }}>
+                        {isRunning
+                          ? "Screenshot will appear when this step completes."
+                          : "Screenshot was not recorded for this test case."}
+                      </div>
+                    </div>
+                  )}
+                </BrowserChrome>
+              )
             )}
 
             {/* 🌐 NETWORK */}

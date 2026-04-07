@@ -5,7 +5,7 @@ import {
   CheckCircle2, XCircle, Clock,
   ChevronRight, Calendar, User, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, Code2, GitMerge,
-  Link2, Tag,
+  Link2, Tag, Clipboard,
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
@@ -116,6 +116,67 @@ function highlightCode(code) {
   }).join("");
 }
 
+// ── Detect API test on the frontend (mirrors backend isApiTest) ───────────────
+function isApiTestCode(code) {
+  if (!code) return false;
+  const usesRequest = /(?:request|apiContext|apiRequestContext)\s*\.\s*(newContext|get|post|put|patch|delete|head|fetch)\s*\(/.test(code);
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|fill)\s*\(/.test(code);
+  return usesRequest && !usesPage;
+}
+
+// ── Playwright API code → cURL converter ──────────────────────────────────────
+// Scans the full Playwright test code for API calls and converts each one into
+// a cURL command. Returns all commands joined by blank lines, or null if none.
+// Designed for one-click copy into Postman / Insomnia / terminal.
+function playwrightToCurl(fullCode) {
+  if (!fullCode) return null;
+
+  // Find every API call: (request|context|…).METHOD('URL', optionalOptions)
+  // We capture the method, URL, and the rest of the line + next few lines for options.
+  const callRe = /(?:request|context|apiContext|apiRequestContext|response\s*=\s*await\s+\w+)\s*\.\s*(get|post|put|patch|delete|head)\s*\(\s*(['"`])([^'"`]+)\2(?:\s*,\s*(\{[\s\S]*?\})\s*)?\)/gi;
+
+  const commands = [];
+  let match;
+  while ((match = callRe.exec(fullCode)) !== null) {
+    const method = match[1].toUpperCase();
+    const url = match[3];
+    const optionsBlock = match[4] || "";
+
+    const parts = ["curl"];
+    if (method !== "GET") parts.push(`-X ${method}`);
+    parts.push(`'${url}'`);
+
+    // Extract headers from options: { headers: { 'Key': 'Value' } }
+    const headersBlock = optionsBlock.match(/headers\s*:\s*\{([^}]*)\}/);
+    if (headersBlock) {
+      const headerPairs = headersBlock[1].matchAll(/['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g);
+      for (const hp of headerPairs) {
+        parts.push(`-H '${hp[1]}: ${hp[2]}'`);
+      }
+    }
+
+    // Extract JSON body: { data: { ... } }
+    const dataObjMatch = optionsBlock.match(/data\s*:\s*(\{[\s\S]*?\})\s*[,}]/);
+    if (dataObjMatch) {
+      const body = dataObjMatch[1].replace(/\s+/g, " ").trim();
+      parts.push(`-d '${body}'`);
+      if (!headersBlock || !/content-type/i.test(headersBlock[0])) {
+        parts.push("-H 'Content-Type: application/json'");
+      }
+    } else {
+      // Try string body: data: '...' or data: "..."
+      const strDataMatch = optionsBlock.match(/data\s*:\s*(['"])([\s\S]*?)\1/);
+      if (strDataMatch) {
+        parts.push(`-d '${strDataMatch[2]}'`);
+      }
+    }
+
+    commands.push(parts.join(" \\\n  "));
+  }
+
+  return commands.length > 0 ? commands.join("\n\n") : null;
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 // ── Split Playwright code into per-step chunks ────────────────────────────────
@@ -187,6 +248,7 @@ export default function TestDetail() {
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
   const [showDiff,  setShowDiff]  = useState(false);   // show code diff when playwrightCodePrev exists
+  const [curlCopied, setCurlCopied] = useState(null);  // index of step whose cURL was just copied
 
   // ── Code editor modal state ──────────────────────────────────────────────
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
@@ -619,6 +681,34 @@ export default function TestDetail() {
                     {"</>"} Source
                   </button>
                 </div>
+              )}
+
+              {/* Copy as cURL — only shown for API tests in view mode */}
+              {test.playwrightCode && !editing && isApiTestCode(test.playwrightCode) && (
+                <button
+                  onClick={async () => {
+                    const curl = playwrightToCurl(test.playwrightCode);
+                    if (!curl) return;
+                    try {
+                      await navigator.clipboard.writeText(curl);
+                      setCurlCopied(true);
+                      setTimeout(() => setCurlCopied(false), 2000);
+                    } catch { /* ignore */ }
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "5px 10px", borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: curlCopied ? "var(--green-bg)" : "var(--bg2)",
+                    color: curlCopied ? "var(--green)" : "var(--text3)",
+                    fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                  title="Copy all API calls as cURL commands (paste into Postman, Insomnia, or terminal)"
+                >
+                  {curlCopied ? <CheckCircle2 size={11} /> : <Clipboard size={11} />}
+                  {curlCopied ? "Copied!" : "Copy as cURL"}
+                </button>
               )}
 
               {/* Show changes — only when a regenerated previous version exists */}
