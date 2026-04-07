@@ -318,7 +318,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
   const canSubmit = name.trim() && projectId && phase !== "submitting";
 
   return (
-    <ModalShell onClose={onClose} width="min(560px, 96vw)" style={{ maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <ModalShell onClose={onClose} width="min(560px, 96vw)">
       {/* Header */}
       <div style={{
           display: "flex", alignItems: "center", gap: 10,
@@ -351,8 +351,8 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           </div>
         )}
 
-        {/* Body */}
-        <div style={{ overflowY: "auto", flex: 1, padding: "20px 22px" }}>
+        {/* Body — minHeight:0 required for flex child to shrink below content size */}
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "20px 22px" }}>
 
           {/* ── Story tab ── */}
           {tab === "story" && (
