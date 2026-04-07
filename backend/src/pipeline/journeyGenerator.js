@@ -17,6 +17,7 @@ import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
 import { buildIntentPrompt } from "./prompts/intentPrompt.js";
 import { buildUserRequestedPrompt } from "./prompts/userRequestedPrompt.js";
 import { buildApiTestPrompt } from "./prompts/apiTestPrompt.js";
+import { parseOpenApiSpec } from "./openApiParser.js";
 
 // ── API intent detection ──────────────────────────────────────────────────────
 // Heuristic: if the user's name + description mention API-specific keywords,
@@ -112,6 +113,25 @@ function parseEndpointHints(description, appUrl) {
     }
   }
 
+  // 4. Extract inline JSON examples that follow endpoint mentions
+  //    Patterns: "Request: { ... }" or "Response: { ... }" after a METHOD /path line
+  //    Attaches them to the most recently added endpoint.
+  const jsonLabelRe = /\b(request|response)\s*(?:body)?:\s*(\{[\s\S]*?\})\s*(?:\n|$)/gi;
+  while ((match = jsonLabelRe.exec(description)) !== null) {
+    const label = match[1].toLowerCase();
+    const jsonStr = match[2].trim();
+    // Validate it's actually JSON
+    try { JSON.parse(jsonStr); } catch { continue; }
+    // Attach to the last endpoint added (most likely the one this example belongs to)
+    const target = endpoints[endpoints.length - 1];
+    if (!target) continue;
+    if (label === "request" && !target.requestBodyExample) {
+      target.requestBodyExample = jsonStr;
+    } else if (label === "response" && !target.responseBodyExample) {
+      target.responseBodyExample = jsonStr;
+    }
+  }
+
   return endpoints;
 }
 
@@ -132,10 +152,12 @@ export async function generateFromDescription(name, description, appUrl, onToken
 
   let prompt;
   if (apiIntent) {
-    // Build API test prompt — use parsed endpoint hints from description,
-    // or an empty array (the prompt still works, it just uses the name/description
-    // as context instead of captured HAR data).
-    const endpointHints = parseEndpointHints(description, appUrl);
+    // Try OpenAPI spec parsing first (user may have pasted/attached a spec).
+    // Falls back to text-based endpoint hint extraction if not a valid spec.
+    let endpointHints = parseOpenApiSpec(description);
+    if (endpointHints.length === 0) {
+      endpointHints = parseEndpointHints(description, appUrl);
+    }
     const apiPrompt = buildApiTestPrompt(endpointHints, appUrl, { testCount });
     // Inject the user's original name + description so the AI has full context
     // beyond just the parsed endpoint hints (e.g. "write API tests for register

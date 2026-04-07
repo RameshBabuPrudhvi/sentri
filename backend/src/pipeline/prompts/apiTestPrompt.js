@@ -87,6 +87,7 @@ ${testCountInstr} covering:
 - POSITIVE: Each GET endpoint returns expected status (200) and valid JSON shape
 - POSITIVE: POST/PUT endpoints accept valid payloads and return success
 - NEGATIVE: Endpoints return appropriate error codes (400/401/404) for invalid requests
+- ERROR PAYLOADS: Some APIs return HTTP 200 with error bodies instead of proper status codes — for POSITIVE tests assert the response body does NOT contain "error" or "message" failure indicators; for NEGATIVE tests assert the error payload structure (error field present, message is a non-empty string)
 - CONTRACT: Response bodies match the observed JSON structure (required fields present)
 - EDGE: Empty request bodies, missing content-type headers, wrong HTTP methods
 
@@ -96,6 +97,8 @@ STRICT RULES:
 3. Base URL: '${appUrl}' — use REAL paths from the discovered endpoints above
 4. Every test must have at least 2 assertions (status code + response body/shape)
 5. For POST/PUT tests, use the observed request body as a template
+6. For POSITIVE tests, always verify the response body has NO error indicators: expect(body.error).toBeUndefined()
+7. When example response bodies are provided, assert the EXACT structure — verify all top-level keys exist using toHaveProperty()
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
