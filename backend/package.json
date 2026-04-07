@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "dev": "node --watch-path=src src/index.js",
     "test": "node tests/pipeline.test.js",
     "docs": "jsdoc -c jsdoc.json",
     "docs:watch": "nodemon --watch src -e js --exec 'npm run docs'"
