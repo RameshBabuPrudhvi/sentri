@@ -54,7 +54,7 @@ export default function ActivityLogCard({ logs = [], isRunning, emptyLabel = "No
       </button>
 
       {open && (
-        <div ref={logRef} style={{ background: "#0d1117", padding: "10px 14px", maxHeight: 340, overflowY: "auto" }}>
+        <div ref={logRef} style={{ background: "#0d1117", padding: "10px 14px", maxHeight: 340, overflowY: "auto", overflowX: "hidden" }}>
           {logs.length === 0 ? (
             <div style={{ padding: 20, textAlign: "center", color: "#475569", fontSize: "0.78rem" }}>
               {isRunning ? emptyLabel : "No log entries."}
@@ -75,6 +75,7 @@ export default function ActivityLogCard({ logs = [], isRunning, emptyLabel = "No
                   fontFamily: "var(--font-mono)", fontSize: "0.71rem",
                   color, lineHeight: 1.95,
                   borderBottom: "1px solid rgba(255,255,255,0.025)",
+                  wordBreak: "break-word", overflowWrap: "anywhere",
                 }}>
                   <span style={{ color: "#1e293b", marginRight: 10, userSelect: "none", fontVariantNumeric: "tabular-nums" }}>
                     {String(i + 1).padStart(3, "0")}

@@ -181,7 +181,7 @@ export default function RunDetail() {
   return (
     <div
       className="fade-in"
-      style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px 40px" }}
+      style={{ maxWidth: 1200, margin: "0 auto", padding: "0 16px 40px", overflowX: "hidden" }}
     >
       {/* ── Breadcrumb ─────────────────────────────────────────────────── */}
       <div

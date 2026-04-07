@@ -91,13 +91,13 @@ export default function CrawlView({ run, isRunning }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 300px",
+        gridTemplateColumns: "minmax(0, 1fr) 300px",
         gap: 16,
         alignItems: "start",
       }}
     >
       {/* ── LEFT: Pipeline + Logs ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
         <PipelineCard
           stages={PIPELINE_STAGES}
@@ -109,7 +109,7 @@ export default function CrawlView({ run, isRunning }) {
         <GenerationSuccessBanner run={run} isRunning={isRunning} />
 
         {/* Site map card */}
-        <div className="card" style={{ overflow: "hidden" }}>
+        <div className="card" style={{ overflow: "hidden", minWidth: 0 }}>
           {/* Header with graph/list toggle */}
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontWeight: 700, fontSize: "0.875rem", flex: 1 }}>Site Map</span>
