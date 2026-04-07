@@ -49,19 +49,47 @@ const BOT_DETECTION_PATTERNS = [
 ];
 
 /**
+ * Normalise a hostname for origin comparison by stripping the `www.` prefix.
+ * This treats `google.com` and `www.google.com` as the same origin, which is
+ * correct for virtually all real-world sites (they redirect between the two).
+ *
+ * @param {string} hostname
+ * @returns {string}
+ */
+function normaliseHost(hostname) {
+  return hostname.replace(/^www\./i, "").toLowerCase();
+}
+
+/**
+ * Check if two URLs share the same effective origin (protocol + normalised host).
+ * Treats `www.example.com` and `example.com` as equivalent.
+ *
+ * @param {string} urlA
+ * @param {string} urlB
+ * @returns {boolean}
+ */
+function isSameEffectiveOrigin(urlA, urlB) {
+  try {
+    const a = new URL(urlA);
+    const b = new URL(urlB);
+    return a.protocol === b.protocol && normaliseHost(a.hostname) === normaliseHost(b.hostname);
+  } catch { return false; }
+}
+
+/**
  * Check if the current page URL is still on the same origin as the project.
  * Returns false if the action navigated to a third-party domain, a bot
  * detection page, or an error page.
  *
+ * Treats www/non-www as equivalent (e.g. google.com ≡ www.google.com).
+ *
  * @param {string} currentUrl — page.url() after the action
- * @param {string} projectUrl — the project's base URL
+ * @param {string} projectOrigin — the resolved project origin (after redirect)
  * @returns {boolean}
  */
-function isSameOriginAndValid(currentUrl, projectUrl) {
+function isSameOriginAndValid(currentUrl, projectOrigin) {
   try {
-    const current = new URL(currentUrl);
-    const project = new URL(projectUrl);
-    if (current.origin !== project.origin) return false;
+    if (!isSameEffectiveOrigin(currentUrl, projectOrigin)) return false;
     if (BOT_DETECTION_PATTERNS.some(re => re.test(currentUrl))) return false;
     return true;
   } catch { return false; }
@@ -189,7 +217,7 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
       const u = new URL(href, currentUrl);
       u.hash = ""; u.search = "";
       const normalized = u.toString();
-      if (new URL(normalized).origin !== new URL(project.url).origin) continue;
+      if (!isSameEffectiveOrigin(normalized, ctx.resolvedOrigin || project.url)) continue;
       const pathPattern = extractPathPattern(normalized);
       if (ctx.pathPatternsSeen.has(pathPattern)) continue;
       await page.goto(normalized, { waitUntil: "domcontentloaded", timeout: 15000 });
@@ -229,9 +257,6 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
-    // ── HAR capture: record API traffic for API test generation ────────────
-    harCapture = createHarCapture(context, project.url);
-
     const creds = decryptCredentials(project.credentials);
     if (creds?.usernameSelector) {
       const loginPage = await context.newPage();
@@ -248,11 +273,23 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
 
     const page = await context.newPage();
     await page.goto(project.url, { waitUntil: "domcontentloaded", timeout: 15000 });
+
+    // Resolve the actual landing URL after redirects (e.g. google.com → www.google.com).
+    // All subsequent origin checks use this resolved URL instead of the user-entered one.
+    const resolvedUrl = page.url();
+    ctx.resolvedOrigin = resolvedUrl;
+    if (resolvedUrl !== project.url) {
+      log(run, `🔀 Redirected: ${project.url} → ${resolvedUrl}`);
+    }
+
+    // ── HAR capture: attach after redirect so it uses the resolved origin ──
+    harCapture = createHarCapture(context, resolvedUrl);
+
     const { fp: initialFp } = await captureState(page, ctx);
     startState = initialFp;
-    ctx.queue.push({ fp: initialFp, url: project.url, depth: 0 });
+    ctx.queue.push({ fp: initialFp, url: resolvedUrl, depth: 0 });
     syncRunPages(run, ctx.snapshots);
-    log(run, `🔍 Initial state: ${project.url} [${initialFp.slice(0, 8)}]`);
+    log(run, `🔍 Initial state: ${resolvedUrl} [${initialFp.slice(0, 8)}]`);
 
     while (ctx.queue.length > 0 && ctx.states.size < limits.maxStates) {
       throwIfAborted(signal);
@@ -275,7 +312,7 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         await waitForSettle(page, limits.actionTimeout);
         if (executed.length > 0) {
           // Guard: reject cross-origin navigation or bot detection pages
-          if (!isSameOriginAndValid(page.url(), project.url)) {
+          if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
             log(run, `   ⏭️  Form navigated off-origin → ${page.url()} — restoring`);
             await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
             continue;
@@ -301,7 +338,7 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         explored++;
         await waitForSettle(page, limits.actionTimeout);
         // Guard: reject cross-origin navigation or bot detection pages
-        if (!isSameOriginAndValid(page.url(), project.url)) {
+        if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
           log(run, `   ⏭️  Action navigated off-origin → ${page.url()} — restoring`);
           await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
           continue;
