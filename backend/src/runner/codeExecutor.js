@@ -89,13 +89,12 @@ export async function runApiTestCode(playwrightCode, expect) {
 
   const cleaned = patchNetworkIdle(stripPlaywrightImports(body));
 
-  // Create a real Playwright APIRequestContext as the `request` fixture
-  const request = await playwright.request.newContext({
-    ignoreHTTPSErrors: true,
-  });
-
+  // Compile the function BEFORE creating the request context so that a
+  // SyntaxError in the AI-generated code doesn't leak the HTTP context.
+  // new Function() only parses — it doesn't execute — so it doesn't need
+  // the request object yet.
   // eslint-disable-next-line no-new-func
-  const fn = new Function("request", "expect", `
+  const fn = new Function("request", "expect", "__apiLogs", `
     return (async () => {
       // API tests don't use page/context — provide stubs to prevent ReferenceError
       const page = undefined;
@@ -115,10 +114,45 @@ export async function runApiTestCode(playwrightCode, expect) {
     })();
   `);
 
+  // Now that we know the code is syntactically valid, create the context.
+  const apiLogs = [];
+  const request = await playwright.request.newContext({
+    ignoreHTTPSErrors: true,
+  });
+
+  // Intercept dispose to capture response metadata from the context.
+  // Playwright's APIRequestContext doesn't expose event hooks, so we wrap
+  // the HTTP methods to log request/response pairs.
+  const originalMethods = {};
+  for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
+    if (typeof request[method] === "function") {
+      originalMethods[method] = request[method].bind(request);
+      request[method] = async (...args) => {
+        const start = Date.now();
+        const url = typeof args[0] === "string" ? args[0] : String(args[0]);
+        const entry = { method: method.toUpperCase(), url, startTime: start, status: null, duration: null, size: null };
+        try {
+          const resp = await originalMethods[method](...args);
+          entry.status = resp.status();
+          entry.duration = Date.now() - start;
+          try { entry.size = (await resp.body()).length; } catch { entry.size = 0; }
+          apiLogs.push(entry);
+          return resp;
+        } catch (err) {
+          entry.duration = Date.now() - start;
+          entry.status = 0;
+          apiLogs.push(entry);
+          throw err;
+        }
+      };
+    }
+  }
+
   try {
-    const result = await fn(request, expect);
-    return { passed: true };
+    await fn(request, expect, apiLogs);
+    return { passed: true, apiLogs };
   } catch (err) {
+    err.__apiLogs = apiLogs;
     throw err;
   } finally {
     await request.dispose().catch(() => {});

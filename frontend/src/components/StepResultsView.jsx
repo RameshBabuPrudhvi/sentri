@@ -406,7 +406,10 @@ export default function StepResultsView({ result, run, onBack }) {
   const isApi = !!result?.isApiTest;
 
   const tabs = isApi
-    ? [{ id: "screenshot", label: "🔌 Result" }]
+    ? [
+        { id: "screenshot", label: "🔌 Result" },
+        { id: "network",    label: "🌐 Network" },
+      ]
     : [
         ...(hasVideo ? [{ id: "video", label: "🎬 Recording" }] : []),
         { id: "screenshot", label: "📸 Screenshot" },

@@ -283,10 +283,14 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
 
   try {
     const expect = await getExpect();
-    await runApiTestCode(test.playwrightCode, expect);
+    const apiResult = await runApiTestCode(test.playwrightCode, expect);
+    // Populate network logs from the instrumented API request context
+    result.network = apiResult.apiLogs || [];
   } catch (err) {
     result.status = "failed";
     result.error = formatTestError(err);
+    // Capture any API logs collected before the failure
+    result.network = err.__apiLogs || [];
   } finally {
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
