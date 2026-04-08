@@ -1,3 +1,34 @@
+/**
+ * index.css — CSS manifest (ITCSS order)
+ *
+ * This file is the single entry point imported by main.jsx.
+ * It composes all partials in the correct cascade order:
+ *
+ *   1. Settings  — design tokens (CSS variables, fonts)
+ *   2. Generic   — resets, element defaults
+ *   3. Components — reusable UI blocks (buttons, cards, badges, …)
+ *   4. Features  — feature-scoped styles (onboarding tour, …)
+ *   5. Pages     — page-specific overrides (dashboard hero, …)
+ *   6. Utilities — single-purpose helpers (flex, spacing, animations)
+ *
+ * New styles go into the appropriate partial — not here.
+ */
+
+@import "./styles/tokens.css";
+@import "./styles/reset.css";
+@import "./styles/components.css";
+@import "./styles/features/onboarding.css";
+@import "./styles/pages/dashboard.css";
+@import "./styles/utilities.css";
+
+/* ──────────────────────────────────────────────────────────────────────────────
+ * LEGACY — everything below is the original monolithic index.css.
+ * It is kept temporarily so existing pages continue to work while partials
+ * are verified. Once confirmed, delete everything below this banner.
+ *
+ * DO NOT ADD NEW STYLES HERE — use the partials above instead.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
