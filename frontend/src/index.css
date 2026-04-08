@@ -19,4 +19,5 @@
 @import "./styles/components.css";
 @import "./styles/features/onboarding.css";
 @import "./styles/pages/dashboard.css";
+@import "./styles/pages/settings.css";
 @import "./styles/utilities.css";

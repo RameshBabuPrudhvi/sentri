@@ -94,56 +94,6 @@
   border: none; margin: 0;
 }
 
-/* Tab bar — used in Settings, could be reused in other tabbed views */
-.tab-bar {
-  display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px;
-}
-.tab-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 10px 18px; font-size: 0.875rem;
-  display: flex; align-items: center; gap: 6px;
-  margin-bottom: -1px; transition: color 0.12s;
-  border-bottom: 2px solid transparent;
-  color: var(--text2); font-weight: 400;
-}
-.tab-btn:hover { color: var(--text); }
-.tab-btn--active {
-  font-weight: 600; color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-/* Key-value row — used in Settings execution/system tabs */
-.kv-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.kv-row:last-child { border-bottom: none; }
-.kv-label { font-weight: 600; font-size: 0.85rem; }
-.kv-desc  { font-size: 0.73rem; color: var(--text3); margin-top: 2px; }
-.kv-value {
-  font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600;
-  background: var(--bg3); padding: 3px 10px; border-radius: 6px;
-  color: var(--text); white-space: nowrap;
-}
-
-/* Info row with icon — used in Settings system tab, TestDetail sidebar */
-.info-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.info-row:last-child { border-bottom: none; }
-
-/* Code block — dark terminal-style pre */
-.code-block {
-  margin: 0; padding: 12px 16px;
-  background: #040608; border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-family: var(--font-mono); font-size: 0.78rem;
-  color: #6ab4a0; overflow-x: auto; line-height: 2;
-}
-
 /* Hint text — small muted helper text below inputs/sections */
 .hint {
   font-size: 0.72rem; color: var(--text3); margin-top: 4px;
