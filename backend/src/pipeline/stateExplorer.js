@@ -307,7 +307,7 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
     while (ctx.queue.length > 0 && ctx.states.size < limits.maxStates) {
       throwIfAborted(signal);
       if (isTimedOut()) {
-        logWarn(run, `⏱️  Global exploration timeout reached (${Math.round(GLOBAL_TIMEOUT_MS / 1000)}s) — stopping`);
+        log(run, `⏱️ Global exploration timeout reached (${Math.round(GLOBAL_TIMEOUT_MS / 1000)}s) — stopping`);
         break;
       }
       const { fp: currentFp, url: currentUrl, depth } = ctx.queue.shift();

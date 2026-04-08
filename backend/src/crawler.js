@@ -284,7 +284,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   // Surface rate limit errors so the frontend shows a clear warning
   if (genResult.rateLimitHit) {
     const errMsg = genResult.rateLimitError || "AI provider rate limit exceeded";
-    logWarn(run, `⚠️  AI RATE LIMIT: ${errMsg}`);
+    logWarn(run, `AI RATE LIMIT: ${errMsg}`);
     logWarn(run, `Tests generated before limit: ${rawTests.length}. Switch to a different AI provider in Settings, or wait and retry.`);
     run.rateLimitError = errMsg;
   }
@@ -307,7 +307,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       }
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
-      logWarn(run, `⚠️  API test generation failed: ${err.message?.slice(0, 200)}`);
+      logWarn(run, `API test generation failed: ${err.message?.slice(0, 200)}`);
     }
   }
 
@@ -339,7 +339,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       log(run, `API endpoints discovered: ${apiEndpoints.length}`);
     }
     if (run.rateLimitError) {
-      logWarn(run, `⚠️  Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
+      logWarn(run, `Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
     } else {
       logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
     }
