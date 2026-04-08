@@ -113,24 +113,28 @@ export default function OnboardingTour({ tour }) {
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
 
+    // Estimate tooltip height (~300px) and clamp so it never overflows viewport
+    const TOOLTIP_HEIGHT_EST = 320;
+    const maxTop = window.innerHeight - TOOLTIP_HEIGHT_EST - 16;
+
     if (placement === "right") {
       tooltipStyle = {
-        top: Math.max(16, cy - 80),
+        top: Math.min(Math.max(16, cy - 80), maxTop),
         left: Math.min(rect.left + rect.width + TOOLTIP_GAP, window.innerWidth - TOOLTIP_WIDTH - 16),
       };
     } else if (placement === "left") {
       tooltipStyle = {
-        top: Math.max(16, cy - 80),
+        top: Math.min(Math.max(16, cy - 80), maxTop),
         left: Math.max(16, rect.left - TOOLTIP_WIDTH - TOOLTIP_GAP),
       };
     } else if (placement === "top") {
       tooltipStyle = {
-        top: Math.max(16, rect.top - 220),
+        top: Math.max(16, rect.top - TOOLTIP_HEIGHT_EST),
         left: Math.max(16, Math.min(cx - TOOLTIP_WIDTH / 2, window.innerWidth - TOOLTIP_WIDTH - 16)),
       };
     } else {
       tooltipStyle = {
-        top: rect.top + rect.height + TOOLTIP_GAP,
+        top: Math.min(rect.top + rect.height + TOOLTIP_GAP, maxTop),
         left: Math.max(16, Math.min(cx - TOOLTIP_WIDTH / 2, window.innerWidth - TOOLTIP_WIDTH - 16)),
       };
     }
