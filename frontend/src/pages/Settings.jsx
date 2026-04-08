@@ -108,7 +108,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
 
   return (
     <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
-      <div style={{ height: 1, background: "var(--border)" }} />
+      <hr className="divider" />
 
       {/* Connection status */}
       <div style={{
@@ -163,7 +163,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
-          <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4 }}>
+          <div className="hint">
             Only models you have pulled with <code style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>ollama pull &lt;model&gt;</code> appear here.
           </div>
         </div>
@@ -197,7 +197,7 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
           placeholder="http://localhost:11434"
           style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}
         />
-        <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4 }}>
+        <div className="hint">
           Change this if Ollama is running on a remote host or a different port.
         </div>
       </div>
@@ -476,12 +476,12 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
 function SectionTitle({ icon, title, sub }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="icon-box-sm" style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10 }}>
         {icon}
       </div>
       <div>
-        <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>{title}</div>
-        {sub && <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+        <div className="font-bold" style={{ fontSize: "1.05rem" }}>{title}</div>
+        {sub && <div className="hint" style={{ marginTop: 1 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -508,14 +508,14 @@ function DataAction({ icon, label, sub, count, btnLabel, onAction }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)" }}>
-      <div style={{ color: "var(--text3)" }}>{icon}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>
+    <div className="card" style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px" }}>
+      <div className="text-muted">{icon}</div>
+      <div className="flex-1">
+        <div className="font-semi" style={{ fontSize: "0.88rem" }}>
           {label}
-          {count != null && <span style={{ fontWeight: 400, color: "var(--text3)", marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
+          {count != null && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
         </div>
-        <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>{sub}</div>
+        <div className="kv-desc">{sub}</div>
       </div>
       {result ? (
         <span style={{ fontSize: "0.78rem", color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
@@ -596,17 +596,13 @@ export default function Settings() {
       </div>
 
       {/* ── Tab bar ── */}
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
+      <div className="tab-bar">
         {SETTINGS_TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} style={{
-            background: "none", border: "none", cursor: "pointer",
-            padding: "10px 18px", fontSize: "0.875rem",
-            fontWeight: tab === t.key ? 600 : 400,
-            color: tab === t.key ? "var(--accent)" : "var(--text2)",
-            borderBottom: tab === t.key ? "2px solid var(--accent)" : "2px solid transparent",
-            marginBottom: -1, display: "flex", alignItems: "center", gap: 6,
-            transition: "color 0.12s",
-          }}>
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`tab-btn${tab === t.key ? " tab-btn--active" : ""}`}
+          >
             {t.icon} {t.label}
           </button>
         ))}
@@ -672,12 +668,7 @@ export default function Settings() {
         <div style={{ fontSize: "0.8rem", color: "var(--text2)", lineHeight: 1.8 }}>
           Add to <span className="mono" style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>backend/.env</span> for persistence across restarts:
         </div>
-        <pre style={{
-          marginTop: 10, padding: "12px 16px", background: "#040608",
-          border: "1px solid var(--border)", borderRadius: "var(--radius)",
-          fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "#6ab4a0",
-          overflowX: "auto", lineHeight: 2,
-        }}>{`# Cloud providers
+        <pre className="code-block" style={{ marginTop: 10 }}>{`# Cloud providers
 ANTHROPIC_API_KEY=sk-ant-api03-...
 OPENAI_API_KEY=sk-proj-...
 GOOGLE_API_KEY=AIza...
@@ -692,7 +683,7 @@ OLLAMA_MODEL=mistral:7b`}</pre>
       {/* ── Tab: Execution ── */}
       {tab === "execution" && <>
       <SectionTitle icon={<Cpu size={16} color="var(--accent)" />} title="Test Execution" sub="Self-healing runtime defaults — applied to every test run" />
-      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
+      <div className="card" style={{ overflow: "hidden" }}>
         {[
           { label: "Element Timeout", value: "5 000 ms", desc: "Max wait for each element strategy in the self-healing waterfall" },
           { label: "Retry Count",     value: "3",        desc: "Number of retries per interaction (safeClick / safeFill)" },
@@ -700,25 +691,21 @@ OLLAMA_MODEL=mistral:7b`}</pre>
           { label: "Browser Mode",    value: "Headless", desc: "Chromium runs without a visible window for faster execution" },
           { label: "Viewport",        value: "1280 × 720", desc: "Default browser viewport size used during test runs" },
           { label: "Self-Healing",    value: "Enabled",  desc: "Multi-strategy element finding with adaptive healing history" },
-        ].map((item, i, arr) => (
-          <div key={item.label} style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "13px 20px",
-            borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none",
-          }}>
+        ].map((item) => (
+          <div key={item.label} className="kv-row">
             <div>
-              <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{item.label}</div>
-              <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{item.desc}</div>
+              <div className="kv-label">{item.label}</div>
+              <div className="kv-desc">{item.desc}</div>
             </div>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600, color: item.value === "Enabled" ? "var(--green)" : "var(--text)", background: "var(--bg3)", padding: "3px 10px", borderRadius: 6 }}>
+            <span className="kv-value" style={{ color: item.value === "Enabled" ? "var(--green)" : undefined }}>
               {item.value}
             </span>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: "0.75rem", color: "var(--text3)", marginTop: 8, paddingLeft: 2 }}>
+      <div className="hint" style={{ marginTop: 8, paddingLeft: 2 }}>
         <Info size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
-        These values are compiled into the self-healing runtime. To customise, edit <span style={{ fontFamily: "var(--font-mono)", background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>backend/src/selfHealing.js</span>
+        These values are compiled into the self-healing runtime. To customise, edit <span className="text-mono" style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>backend/src/selfHealing.js</span>
       </div>
       </>}
 
@@ -736,7 +723,7 @@ OLLAMA_MODEL=mistral:7b`}</pre>
       {tab === "system" && <>
       <SectionTitle icon={<Server size={16} color="var(--green)" />} title="System" sub="Server runtime and resource information" />
       {sysInfo ? (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", overflow: "hidden" }}>
+        <div className="card" style={{ overflow: "hidden" }}>
           {[
             { label: "Uptime",          value: fmtUptime(sysInfo.uptime),                               icon: <Clock size={13} /> },
             { label: "Node.js",         value: sysInfo.nodeVersion,                                      icon: <Server size={13} /> },
@@ -746,11 +733,11 @@ OLLAMA_MODEL=mistral:7b`}</pre>
             { label: "Tests",           value: `${sysInfo.tests} (${sysInfo.approvedTests} approved, ${sysInfo.draftTests} draft)`, icon: <Activity size={13} /> },
             { label: "Runs",            value: sysInfo.runs,                                             icon: <RefreshCw size={13} /> },
             { label: "Healing Entries", value: sysInfo.healingEntries,                                   icon: <Shield size={13} /> },
-          ].map((item, i, arr) => (
-            <div key={item.label} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 20px", borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none" }}>
-              <span style={{ color: "var(--text3)" }}>{item.icon}</span>
-              <span style={{ fontSize: "0.82rem", color: "var(--text2)", minWidth: 130 }}>{item.label}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>{item.value}</span>
+          ].map((item) => (
+            <div key={item.label} className="info-row">
+              <span className="text-muted">{item.icon}</span>
+              <span className="text-sm text-sub" style={{ minWidth: 130 }}>{item.label}</span>
+              <span className="text-sm text-mono font-semi" style={{ color: "var(--text)" }}>{item.value}</span>
             </div>
           ))}
         </div>
