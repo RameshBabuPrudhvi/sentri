@@ -36,7 +36,7 @@ const RUN_TYPE_META = {
 function RunningBadge() {
   return (
     <span className="badge badge-blue" style={{ gap: 5 }}>
-      <span className="spin" style={{ width: 8, height: 8, border: "1.5px solid #2563eb", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block" }} />
+      <span className="spin dash-spinner" />
       Running
     </span>
   );
@@ -65,13 +65,8 @@ function ExportPDFButton() {
     <button
       onClick={handleClick}
       disabled={loading}
-      className="btn btn-ghost btn-sm"
+      className="btn btn-ghost btn-sm dash-export-btn"
       style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        color: "var(--accent)",
-        fontWeight: 600,
-        boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
         opacity: loading ? 0.7 : 1,
         cursor: loading ? "not-allowed" : "pointer",
       }}
@@ -229,7 +224,7 @@ export default function Dashboard() {
             ];
             const totalDefects = defectSegs.reduce((s, x) => s + x.count, 0);
             return (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 16 }}>
+              <div className="dash-defect-row">
                 <StatCard label="Flaky Tests" value={data?.flakyTestCount ?? 0} sub={data?.flakyTestCount > 0 ? "Inconsistent results" : "None detected"} color={data?.flakyTestCount > 0 ? "var(--amber)" : "var(--green)"} icon={<AlertTriangle size={16} />} />
                 <div className="card card-padded">
                   <div className="flex-between" style={{ marginBottom: 14 }}>
@@ -237,10 +232,10 @@ export default function Dashboard() {
                       <Crosshair size={14} color="var(--text3)" />
                       <span className="section-title" style={{ marginBottom: 0 }}>Defect Categories</span>
                     </div>
-                    {totalDefects > 0 && <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{totalDefects} total failures</span>}
+                    {totalDefects > 0 && <span className="text-xs text-muted">{totalDefects} total failures</span>}
                   </div>
                   {totalDefects === 0 ? (
-                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>
+                    <div className="text-sm text-muted">
                       <CheckCircle2 size={13} color="var(--green)" style={{ marginRight: 6, verticalAlign: "middle" }} />No failures recorded
                     </div>
                   ) : (
@@ -319,7 +314,7 @@ export default function Dashboard() {
                   <Activity size={14} color="var(--accent)" />
                   <span className="section-title" style={{ marginBottom: 0 }}>Test Suite Growth</span>
                 </div>
-                <span style={{ fontSize: "0.75rem", color: "var(--text3)" }}>Last 8 weeks</span>
+                <span className="text-xs text-muted">Last 8 weeks</span>
               </div>
               <SparklineChart data={data.testGrowth.map(d => ({ name: d.week, value: d.count }))} height={64} color="var(--accent)" tooltipFn={d => `${d.name}: ${d.value} tests`} />
             </div>
@@ -348,13 +343,13 @@ export default function Dashboard() {
                   return (
                     <div key={r.id} className="list-row" onClick={() => navigate(`/runs/${r.id}`)}>
                       <AgentTag type={(RUN_TYPE_META[r.type] || RUN_TYPE_META["run"]).avatar} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="flex-1">
                         <div style={{ fontWeight: 500, fontSize: "0.875rem", marginBottom: 1 }}>{meta.label}</div>
                         <div className="page-subtitle truncate" style={{ fontSize: "0.78rem" }}>
                           {r.projectName || `Project ${r.projectId?.slice(0, 8)}`}
                         </div>
                       </div>
-                      <div className="flex-center gap-sm" style={{ flexShrink: 0 }}>
+                      <div className="flex-center gap-sm shrink-0">
                         {r.status === "running" ? <RunningBadge />
                           : r.status === "completed" ? <span className="badge badge-green">✓ Completed</span>
                           : r.status === "aborted"   ? <span className="badge badge-gray">⊘ Aborted</span>

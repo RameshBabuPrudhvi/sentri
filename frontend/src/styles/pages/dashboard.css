@@ -37,3 +37,25 @@
 .dash-hero-date {
   font-size: 0.72rem; color: var(--text3);
 }
+
+/* Defect breakdown row — 1:2 split grid */
+.dash-defect-row {
+  display: grid; grid-template-columns: 1fr 2fr;
+  gap: 12px; margin-bottom: 16px;
+}
+
+/* Spinner inside RunningBadge */
+.dash-spinner {
+  width: 8px; height: 8px;
+  border: 1.5px solid #2563eb; border-top-color: transparent;
+  border-radius: 50%; display: inline-block;
+}
+
+/* Export PDF button override */
+.dash-export-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}

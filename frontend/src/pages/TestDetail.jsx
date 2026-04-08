@@ -46,7 +46,7 @@ function RunIcon({ status }) {
 function InfoRow({ icon, label, children }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: "0.73rem", color: "var(--text3)", fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      <div className="td-info-label">
         {label}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -596,7 +596,7 @@ export default function TestDetail() {
       )}
 
       {/* ── Two-column layout ────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
+      <div className="td-layout">
 
         {/* LEFT COLUMN */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1011,38 +1011,16 @@ export default function TestDetail() {
         {/* ── Code Editor Modal ───────────────────────────────────────────── */}
         {codeEditorOpen && (
           <div
+            className="td-editor-backdrop"
             onClick={e => { if (e.target === e.currentTarget) setCodeEditorOpen(false); }}
             onKeyDown={e => { if (e.key === "Escape") setCodeEditorOpen(false); }}
-            style={{
-              position: "fixed", inset: 0, zIndex: 1000,
-              background: "rgba(0,0,0,0.55)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: 24,
-            }}
           >
-            <div style={{
-              width: "100%", maxWidth: 880, maxHeight: "90vh",
-              display: "flex", flexDirection: "column",
-              borderRadius: 12, overflow: "hidden",
-              border: "1px solid #2a2d3e",
-              boxShadow: "0 32px 80px rgba(0,0,0,0.6)",
-            }}>
+            <div className="td-editor-panel">
 
               {/* ── Header ── */}
-              <div style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "13px 18px",
-                background: "var(--bg)",
-                borderBottom: "1px solid var(--border)",
-              }}>
+              <div className="td-editor-header">
                 {/* Language pill */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  background: "rgba(124,106,245,0.12)", border: "1px solid rgba(124,106,245,0.3)",
-                  borderRadius: 6, padding: "4px 10px",
-                  fontFamily: "var(--font-mono)", fontSize: "0.72rem",
-                  fontWeight: 600, color: "#a89cf7",
-                }}>
+                <div className="td-editor-lang-pill">
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#7c6af5", flexShrink: 0, display: "inline-block" }} />
                   TypeScript
                 </div>
@@ -1125,20 +1103,8 @@ export default function TestDetail() {
               </div>
 
               {/* ── Tab bar ── */}
-              <div style={{
-                display: "flex", alignItems: "center",
-                padding: "0 16px",
-                background: "#0d0f17",
-                borderBottom: "1px solid #1e2130",
-              }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 7,
-                  padding: "8px 14px",
-                  fontSize: "0.72rem", fontFamily: "var(--font-mono)",
-                  color: "#cdd5f0",
-                  borderBottom: "2px solid #7c6af5",
-                  userSelect: "none",
-                }}>
+              <div className="td-editor-tab-bar">
+                <div className="td-editor-tab">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <rect x="2" y="2" width="12" height="12" rx="2" stroke="#7c6af5" strokeWidth="1.2"/>
                     <path d="M5 8h6M8 5v6" stroke="#7c6af5" strokeWidth="1.2" strokeLinecap="round"/>
@@ -1149,16 +1115,8 @@ export default function TestDetail() {
               </div>
 
               {/* ── Info bar ── */}
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "6px 16px",
-                background: "#10121a",
-                borderBottom: "1px solid #1e2130",
-              }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  fontSize: "0.68rem", color: "#4a5070",
-                }}>
+              <div className="td-editor-info-bar">
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ fontFamily: "var(--font-mono)" }}>{editedCode.split("\n").length} lines</span>
                   <span>·</span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>UTF-8</span>
@@ -1166,32 +1124,15 @@ export default function TestDetail() {
                   <span>Tab inserts 2 spaces</span>
                 </div>
                 <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
-                  <kbd style={{
-                    fontSize: "0.62rem", padding: "1px 5px", borderRadius: 3,
-                    background: "#1e2130", border: "1px solid #2a2d3e", color: "#6b7394",
-                    fontFamily: "var(--font-mono)",
-                  }}>Esc</kbd>
+                  <kbd className="td-kbd">Esc</kbd>
                   <span style={{ fontSize: "0.65rem", color: "#4a5070" }}>to close</span>
                 </div>
               </div>
 
               {/* ── Editor: line numbers + highlighted overlay ── */}
-              <div style={{ display: "flex", background: "#13151c", flex: 1, overflow: "hidden", minHeight: 360 }}>
+              <div className="td-editor-body">
                 {/* Line numbers */}
-                <div
-                  ref={lineNumRef}
-                  style={{
-                    padding: "14px 0",
-                    minWidth: 48, flexShrink: 0,
-                    textAlign: "right",
-                    fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-                    fontSize: "0.78rem", lineHeight: "1.75",
-                    color: "#3a3f5c",
-                    borderRight: "1px solid #1e2130",
-                    userSelect: "none",
-                    overflow: "hidden",
-                  }}
-                >
+                <div ref={lineNumRef} className="td-editor-line-nums">
                   {editedCode.split("\n").map((_, i) => (
                     <div key={i} style={{
                       padding: "0 10px",
@@ -1206,22 +1147,12 @@ export default function TestDetail() {
                   <pre
                     ref={editorScrollRef}
                     aria-hidden="true"
-                    style={{
-                      position: "absolute", inset: 0,
-                      margin: 0, padding: "14px 18px",
-                      fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                      fontSize: "0.78rem", lineHeight: "1.75",
-                      color: "#cdd5f0",
-                      whiteSpace: "pre", overflowX: "auto",
-                      pointerEvents: "none",
-                      background: "transparent",
-                      border: "none", outline: "none",
-                      overflow: "auto",
-                    }}
+                    className="td-editor-highlight"
                     dangerouslySetInnerHTML={{ __html: highlightCode(editedCode) + "\n" }}
                   />
                   {/* Transparent editable textarea on top */}
                   <textarea
+                    className="td-editor-textarea"
                     value={editedCode}
                     onChange={e => setEditedCode(e.target.value)}
                     onClick={handleCursorMove}
@@ -1230,30 +1161,12 @@ export default function TestDetail() {
                     onScroll={handleEditorScroll}
                     spellCheck={false}
                     aria-label="Code editor — Tab inserts spaces, press Escape to exit"
-                    style={{
-                      position: "absolute", inset: 0,
-                      width: "100%", height: "100%",
-                      background: "transparent", color: "transparent",
-                      fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                      fontSize: "0.78rem", lineHeight: "1.75",
-                      padding: "14px 18px", border: "none", outline: "none",
-                      resize: "none", boxSizing: "border-box",
-                      caretColor: "#7c6af5",
-                      tabSize: 2,
-                      whiteSpace: "pre", overflowX: "auto",
-                      overflow: "auto",
-                    }}
                   />
                 </div>
               </div>
 
               {/* ── Footer ── */}
-              <div style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 16px",
-                background: "var(--bg)",
-                borderTop: "1px solid var(--border)",
-              }}>
+              <div className="td-editor-footer">
                 {/* Status messages */}
                 <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.7rem", color: "var(--text3)" }}>
@@ -1274,38 +1187,17 @@ export default function TestDetail() {
                 </div>
 
                 {/* Actions */}
-                <button
-                  onClick={() => { setEditedCode(test.playwrightCode || ""); }}
-                  style={{
-                    background: "none", border: "1px solid var(--border)",
-                    borderRadius: 6, cursor: "pointer", color: "var(--text2)",
-                    padding: "6px 13px", fontSize: "0.78rem",
-                    display: "flex", alignItems: "center", gap: 6,
-                  }}
-                >
+                <button className="td-editor-footer-btn" onClick={() => { setEditedCode(test.playwrightCode || ""); }}>
                   <RotateCcw size={12} /> Discard
                 </button>
-                <button
-                  onClick={() => setCodeEditorOpen(false)}
-                  style={{
-                    background: "none", border: "1px solid var(--border)",
-                    borderRadius: 6, cursor: "pointer", color: "var(--text2)",
-                    padding: "6px 13px", fontSize: "0.78rem",
-                    display: "flex", alignItems: "center", gap: 6,
-                  }}
-                >
+                <button className="td-editor-footer-btn" onClick={() => setCodeEditorOpen(false)}>
                   <X size={12} /> Close
                 </button>
                 <button
+                  className="td-editor-save-btn"
                   onClick={handleSaveCode}
                   disabled={codeSaving}
-                  style={{
-                    background: "#5b4bdd", border: "none",
-                    borderRadius: 6, cursor: "pointer", color: "#fff",
-                    padding: "6px 16px", fontSize: "0.78rem", fontWeight: 600,
-                    display: "flex", alignItems: "center", gap: 6,
-                    opacity: codeSaving ? 0.7 : 1,
-                  }}
+                  style={{ opacity: codeSaving ? 0.7 : 1 }}
                 >
                   {codeSaving ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
                   {codeSaving ? "Saving…" : "Save code"}
@@ -1351,24 +1243,18 @@ export default function TestDetail() {
 
           {/* Created */}
           <InfoRow label="Created" icon={<Calendar size={14} />}>
-            <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-              {fmtDate(test.createdAt)}
-            </span>
+            <span className="text-sm text-sub">{fmtDate(test.createdAt)}</span>
           </InfoRow>
 
           {/* Last modified */}
           <InfoRow label="Last modified" icon={<Calendar size={14} />}>
-            <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-              {fmtDate(test.reviewedAt || test.createdAt)}
-            </span>
+            <span className="text-sm text-sub">{fmtDate(test.reviewedAt || test.createdAt)}</span>
           </InfoRow>
 
           {/* Last run */}
           {test.lastRunAt && (
             <InfoRow label="Last run" icon={<Clock size={14} />}>
-              <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-                {fmtDateTime(test.lastRunAt)}
-              </span>
+              <span className="text-sm text-sub">{fmtDateTime(test.lastRunAt)}</span>
             </InfoRow>
           )}
 
