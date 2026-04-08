@@ -770,8 +770,10 @@ OLLAMA_MODEL=mistral:7b`}</pre>
           className="btn btn-ghost btn-sm"
           onClick={() => {
             resetOnboarding();
-            navigate("/dashboard");
-            window.location.reload();
+            // Navigate away first (avoids beforeunload prompt from unsaved
+            // API key inputs), then reload so useOnboarding picks up the
+            // force flag from localStorage on fresh mount.
+            window.location.href = import.meta.env.BASE_URL + "dashboard";
           }}
           style={{ flexShrink: 0 }}
         >

@@ -23,9 +23,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
 
-const STORAGE_KEY = "sentri_onboarding_completed";
-const DISMISSED_KEY = "sentri_onboarding_dismissed";
-const TOUR_EVENT = "sentri:tour";
+const STORAGE_KEY = "app_onboarding_completed";
+const DISMISSED_KEY = "app_onboarding_dismissed";
+const FORCE_KEY = "app_onboarding_force";
+const TOUR_EVENT = "app:tour";
 
 // ── Public helper: dispatch a tour event from any component ─────────────────
 /**
@@ -131,6 +132,14 @@ export default function useOnboarding() {
     let alive = true;
 
     async function check() {
+      // Force restart — set by resetOnboarding(), bypasses all checks
+      const forceRestart = localStorage.getItem(FORCE_KEY);
+      if (forceRestart) {
+        localStorage.removeItem(FORCE_KEY);
+        if (alive) { setActive(true); setStepIndex(0); setLoading(false); }
+        return;
+      }
+
       // Already completed or dismissed?
       const completed = localStorage.getItem(STORAGE_KEY);
       const dismissed = localStorage.getItem(DISMISSED_KEY);
@@ -236,4 +245,5 @@ export default function useOnboarding() {
 export function resetOnboarding() {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(DISMISSED_KEY);
+  localStorage.setItem(FORCE_KEY, "true");
 }
