@@ -15,6 +15,7 @@ import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
+import useProjectRunMonitor from "../hooks/useProjectRunMonitor.js";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -145,19 +146,11 @@ export default function ProjectDetail() {
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
-  useEffect(() => {
-    if (!activeRun) return;
-    const timer = setInterval(async () => {
-      const run = await api.getRun(activeRun).catch(() => null);
-      api.getRuns(id).then(r => { if (r) setRuns(r); }).catch(() => {});
-      if (!run || run.status !== "running") {
-        setActiveRun(null);
-        refresh();
-        clearInterval(timer);
-      }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [activeRun, refresh, id]);
+  const handleRunSettled = useCallback(() => {
+    setActiveRun(null);
+    refresh();
+  }, [refresh]);
+  const { sseDown, retryIn } = useProjectRunMonitor(activeRun, handleRunSettled);
 
   // FIX #5: No longer auto-switching tab. Run starts in background; toast has opt-in "View run" link.
   async function doCrawl() {
@@ -527,10 +520,15 @@ export default function ProjectDetail() {
 
       {/* Active run banner — now the primary CTA to view run, tab stays put */}
       {activeRun && (
-        <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--blue-bg)", border: "1px solid #bfdbfe", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <RefreshCw size={14} color="var(--blue)" className="spin" />
-            <span style={{ fontWeight: 500, fontSize: "0.875rem", color: "var(--blue)" }}>Run in progress…</span>
+        <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--blue-bg)", border: "1px solid #bfdbfe", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <RefreshCw size={14} color="var(--blue)" className="spin" />
+              <span style={{ fontWeight: 500, fontSize: "0.875rem", color: "var(--blue)" }}>Run in progress…</span>
+            </div>
+            <div style={{ fontSize: "0.74rem", color: "var(--text3)", marginTop: 4 }}>
+              {sseDown ? `Live updates via polling${retryIn ? ` (SSE retry in ${retryIn}s)` : ""}` : "Live updates via SSE"}
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button

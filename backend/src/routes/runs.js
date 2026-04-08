@@ -30,6 +30,14 @@ router.post("/projects/:id/crawl", async (req, res) => {
   const db = getDb();
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
+  const existingRun = Object.values(db.runs).find(
+    (r) => r.projectId === project.id && r.status === "running" && (r.type === "crawl" || r.type === "test_run" || r.type === "generate")
+  );
+  if (existingRun) {
+    return res.status(409).json({
+      error: `A run is already in progress (${existingRun.id}). Please wait for it to finish or abort it first.`,
+    });
+  }
 
   const { dialsConfig } = req.body || {};
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
@@ -86,6 +94,14 @@ router.post("/projects/:id/run", async (req, res) => {
   const db = getDb();
   const project = db.projects[req.params.id];
   if (!project) return res.status(404).json({ error: "not found" });
+  const existingRun = Object.values(db.runs).find(
+    (r) => r.projectId === project.id && r.status === "running" && (r.type === "crawl" || r.type === "test_run" || r.type === "generate")
+  );
+  if (existingRun) {
+    return res.status(409).json({
+      error: `A run is already in progress (${existingRun.id}). Please wait for it to finish or abort it first.`,
+    });
+  }
 
   const allTests = Object.values(db.tests).filter((t) => t.projectId === project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");

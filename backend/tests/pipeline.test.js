@@ -301,6 +301,16 @@ test("classifies assertion failure correctly", () => {
   assert.equal(category, "ASSERTION_FAIL");
 });
 
+test("classifies explicit URL mismatch wording as URL_MISMATCH", () => {
+  const category = classifyFailure("URL mismatch: redirected to unexpected URL after login");
+  assert.equal(category, "URL_MISMATCH");
+});
+
+test("classifies page.url mismatch errors as URL_MISMATCH", () => {
+  const category = classifyFailure("page.url() did not match expected host");
+  assert.equal(category, "URL_MISMATCH");
+});
+
 test("detects flaky test (passes and fails)", () => {
   const history = ["passed", "failed", "passed", "passed", "failed"];
   assert.equal(detectFlakiness(history), true);
