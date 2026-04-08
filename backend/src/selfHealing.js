@@ -39,9 +39,15 @@
  */
 export function recordHealing(db, testId, action, label, strategyIndex) {
   if (!db?.healingHistory) return;
+  if (!testId || !action || typeof label !== "string") return;
+  // Guard against corrupt strategy indices — only store valid non-negative integers.
+  // A negative or non-integer value would poison the hint map and cause future runs
+  // to try a nonexistent strategy index in findElement.
+  const idx = Number.isInteger(strategyIndex) && strategyIndex >= 0 ? strategyIndex : -1;
+  if (idx < 0) return; // Nothing useful to record — don't overwrite a good entry with garbage
   const key = `${testId}::${action}::${label}`;
   db.healingHistory[key] = {
-    strategyIndex,
+    strategyIndex: idx,
     succeededAt: new Date().toISOString(),
     failCount: (db.healingHistory[key]?.failCount || 0),
   };
@@ -57,6 +63,7 @@ export function recordHealing(db, testId, action, label, strategyIndex) {
  */
 export function recordHealingFailure(db, testId, action, label) {
   if (!db?.healingHistory) return;
+  if (!testId || !action || typeof label !== "string") return;
   const key = `${testId}::${action}::${label}`;
   const existing = db.healingHistory[key] || { strategyIndex: -1, succeededAt: null, failCount: 0 };
   existing.failCount++;
@@ -91,7 +98,14 @@ export function getHealingHistoryForTest(db, testId) {
   const result = {};
   for (const [key, val] of Object.entries(db.healingHistory)) {
     if (key.startsWith(prefix)) {
-      result[key.slice(prefix.length)] = val.strategyIndex;
+      // Skip entries with strategyIndex -1 (failed attempts written by
+      // recordHealingFailure). Emitting them into the runtime hints map
+      // causes findElement to evaluate `hintIdx >= 0` as false, which is
+      // harmless but wasteful. More importantly, a corrupt non-integer
+      // value would cause unpredictable behaviour in the strategy lookup.
+      const idx = val.strategyIndex;
+      if (!Number.isInteger(idx) || idx < 0) continue;
+      result[key.slice(prefix.length)] = idx;
     }
   }
   return result;
@@ -114,8 +128,13 @@ const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) ||
  * @returns {string} JavaScript code string to be prepended to test execution.
  */
 export function getSelfHealingHelperCode(healingHints) {
-  // healingHints is an optional map of "<action>::<label>" → strategyIndex
-  const hintsJSON = JSON.stringify(healingHints || {});
+  // healingHints is an optional map of "<action>::<label>" → strategyIndex.
+  // Guard: if the caller passes null, a number, or an array, coerce to {}
+  // so the injected `const __healingHints = ...` is always a valid object literal.
+  const safeHints = (healingHints && typeof healingHints === "object" && !Array.isArray(healingHints))
+    ? healingHints
+    : {};
+  const hintsJSON = JSON.stringify(safeHints);
   return `
     const DEFAULT_TIMEOUT = ${HEALING_ELEMENT_TIMEOUT};
     const RETRY_COUNT = ${HEALING_RETRY_COUNT};
@@ -159,6 +178,12 @@ export function getSelfHealingHelperCode(healingHints) {
     // "not visible" error instead of silently picking a hidden duplicate
     // (e.g. a button inside a collapsed mobile menu).
     async function firstVisible(baseLocator, timeout) {
+      // Guard: if a strategy factory returned null/undefined instead of a
+      // Locator, fail fast with a clear message rather than a cryptic
+      // "Cannot read properties of undefined (reading 'count')" deep inside Playwright.
+      if (!baseLocator) {
+        throw new Error('Strategy returned a null/undefined locator');
+      }
       const count = await baseLocator.count().catch(() => 0);
       for (let n = 0; n < count; n++) {
         const candidate = baseLocator.nth(n);
@@ -179,10 +204,20 @@ export function getSelfHealingHelperCode(healingHints) {
       let lastError;
       let winningIndex = -1;
 
+      // Helper: invoke a strategy factory and feed the result to firstVisible.
+      // The factory call (e.g. p => p.locator(badXPath)) can throw synchronously
+      // if Playwright rejects the selector at construction time. Wrapping it here
+      // ensures a synchronous throw is caught just like an async timeout, so the
+      // waterfall continues to the next strategy instead of aborting entirely.
+      async function tryStrategy(strategyFn, page, timeout) {
+        const locator = strategyFn(page);  // may throw synchronously
+        return await firstVisible(locator, timeout);
+      }
+
       // If we have a hint from a previous run, try that strategy first
       if (hintIdx >= 0 && hintIdx < strategies.length) {
         try {
-          const locator = await firstVisible(strategies[hintIdx](page), timeout);
+          const locator = await tryStrategy(strategies[hintIdx], page, timeout);
           winningIndex = hintIdx;
           if (hintKey) {
             __healingEvents.push({ key: hintKey, strategyIndex: hintIdx, healed: false });
@@ -197,7 +232,7 @@ export function getSelfHealingHelperCode(healingHints) {
       for (let i = 0; i < strategies.length; i++) {
         if (i === hintIdx) continue; // already tried above
         try {
-          const locator = await firstVisible(strategies[i](page), timeout);
+          const locator = await tryStrategy(strategies[i], page, timeout);
           winningIndex = i;
           if (hintKey) {
             // Record that we healed: a different strategy won than the hint (or no hint existed)
@@ -241,6 +276,12 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function safeClick(page, text) {
+      // Guard: undefined/null text would silently pass looksLikeSelector (returns false),
+      // then every strategy gets getByRole('button', { name: undefined }) — matching
+      // random elements instead of failing fast.
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeClick: text argument is required (got ' + typeof text + ')');
+      }
       // When the text is a CSS/XPath selector, only use page.locator() —
       // text-based strategies (getByRole, getByText, aria-label) will never
       // match a selector string and just waste time + produce confusing errors.
@@ -251,6 +292,10 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.getByRole('link',   { name: text }),
           p => p.getByRole('menuitem', { name: text }),
           p => p.getByRole('tab',    { name: text }),
+          p => p.getByRole('checkbox', { name: text }),
+          p => p.getByRole('radio',    { name: text }),
+          p => p.getByRole('switch',   { name: text }),
+          p => p.getByRole('option',   { name: text }),
           p => p.getByText(text, { exact: true }),
           p => p.getByText(text),
           p => p.locator(\`[aria-label*="\${text}"]\`),
@@ -282,6 +327,15 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function safeFill(page, labelOrPlaceholder, value) {
+      // Guard: same rationale as safeClick — undefined label matches random elements.
+      if (labelOrPlaceholder == null || typeof labelOrPlaceholder !== 'string' || !labelOrPlaceholder.trim()) {
+        throw new Error('safeFill: labelOrPlaceholder argument is required (got ' + typeof labelOrPlaceholder + ')');
+      }
+      // Playwright's .fill() requires a string argument. AI-generated code
+      // sometimes passes a number (e.g. safeFill(page, 'Age', 25)), which
+      // causes a runtime TypeError. Coerce to string to be safe.
+      const strValue = (value == null) ? '' : String(value);
+
       const strategies = looksLikeSelector(labelOrPlaceholder)
         ? [p => onlyFillable(p.locator(labelOrPlaceholder))]
         : [
@@ -301,7 +355,7 @@ export function getSelfHealingHelperCode(healingHints) {
       await retry(async () => {
         await ensureReady(el);
         await el.fill('');
-        await el.fill(value);
+        await el.fill(strValue);
       });
     }
 
@@ -309,6 +363,10 @@ export function getSelfHealingHelperCode(healingHints) {
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
+      // Guard: same rationale as safeClick — undefined text matches random elements.
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeExpect: text argument is required (got ' + typeof text + ')');
+      }
       // When the text is a CSS/XPath selector, only use page.locator() —
       // role/text/aria-label strategies will never match a raw selector string.
       const strategies = looksLikeSelector(text)
@@ -390,8 +448,22 @@ function looksLikeCssSelector(arg) {
     || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
 }
 
-// Escape single quotes in captured text so injecting into '...' strings is safe.
-function esc(s) { return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+// Escape special characters in captured text so injecting into generated code
+// strings is safe. Handles:
+//   - backslashes  (must be first to avoid double-escaping)
+//   - single quotes (the generated code uses '...' strings)
+//   - backticks     (the runtime helpers use `...` template literals for
+//                    aria-label/title selectors — an unescaped backtick would
+//                    prematurely close the template)
+//   - ${            (inside template literals, ${...} triggers interpolation;
+//                    text like "Price: ${total}" would execute as code)
+function esc(s) {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
 
 /**
  * Rewrite raw Playwright code to use self-healing helpers (`safeClick`, `safeFill`, `safeExpect`).
@@ -401,6 +473,10 @@ function esc(s) { return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
  * @returns {string} Transformed code with self-healing helper calls.
  */
 export function applyHealingTransforms(code) {
+  // Guard: passing undefined/null crashes with "TypeError: undefined is not iterable"
+  // at the first .replace() call. Return empty string instead of throwing so
+  // callers that chain transforms don't need individual null checks.
+  if (!code || typeof code !== "string") return code || "";
   return code
     // ── Interaction transforms ──────────────────────────────────────────────
     // page.click / page.fill — only transform human-readable text, NOT CSS selectors.
