@@ -296,8 +296,13 @@ test("classifies timeout correctly", () => {
   assert.equal(category, "TIMEOUT");
 });
 
-test("classifies assertion failure correctly", () => {
+test("classifies toHaveURL assertion as URL_MISMATCH (high-priority auto-fix)", () => {
   const category = classifyFailure("expect(received).toHaveURL(expected) received: '/login' expected: '/dashboard'");
+  assert.equal(category, "URL_MISMATCH");
+});
+
+test("classifies generic assertion failure as ASSERTION_FAIL", () => {
+  const category = classifyFailure("expect(received).toContainText(expected) received: 'Hello' expected: 'World'");
   assert.equal(category, "ASSERTION_FAIL");
 });
 
