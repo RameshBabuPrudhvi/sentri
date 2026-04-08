@@ -4,6 +4,7 @@
  * Displays live transport mode (SSE/polling fallback) and run actions.
  */
 
+import React from "react";
 import { ArrowRight, RefreshCw, StopCircle } from "lucide-react";
 
 /**

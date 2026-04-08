@@ -3,6 +3,7 @@
  * @description Floating toast for run lifecycle feedback on Project Detail.
  */
 
+import React from "react";
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -11,7 +12,7 @@ import { useNavigate } from "react-router-dom";
  * @param {string} props.msg
  * @param {"success"|"error"|"info"} props.type
  * @param {boolean} props.visible
- * @param {boolean} props.onViewRun
+ * @param {boolean} props.showViewRun - Whether to show the "View run" navigation button.
  * @param {string|null} props.runId
  * @returns {React.ReactElement}
  */
