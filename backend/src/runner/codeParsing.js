@@ -107,7 +107,28 @@ export function isApiTest(playwrightCode) {
   // without any page.goto / page.click / page.locator interactions
   const usesRequestContext = /request\s*\.\s*newContext\s*\(/.test(body)
     || /request\s*\.\s*(get|post|put|patch|delete|head|fetch)\s*\(/.test(body);
-  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(body)
-    || /expect\s*\(\s*page\s*\)/.test(body);
+  // Real page interactions — page.goto(), page.click(), page.fill(), etc.
+  // These definitively indicate a browser test.
+  // Note: expect(page).toHaveURL() is a common AI hallucination in API tests
+  // and is NOT counted here. Instead, those lines are stripped by
+  // stripHallucinatedPageAssertions() before execution.
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(body);
   return usesRequestContext && !usesPage;
+}
+
+/**
+ * stripHallucinatedPageAssertions(code)
+ *
+ * Removes `expect(page).toHaveURL(...)` and similar page assertions that the
+ * AI sometimes hallucinates at the end of API-only tests. These lines would
+ * crash at runtime because `page` is undefined in the API execution context.
+ *
+ * Only called for code that has already been classified as an API test by
+ * isApiTest(), so we know there are no real page interactions.
+ */
+export function stripHallucinatedPageAssertions(code) {
+  return code
+    .split("\n")
+    .filter(line => !/^\s*await\s+expect\s*\(\s*page\s*\)/.test(line))
+    .join("\n");
 }

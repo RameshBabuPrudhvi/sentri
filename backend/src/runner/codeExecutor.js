@@ -14,7 +14,7 @@
  *   getExpect()
  */
 
-import { extractTestBody, patchNetworkIdle, stripPlaywrightImports } from "./codeParsing.js";
+import { extractTestBody, patchNetworkIdle, stripPlaywrightImports, stripHallucinatedPageAssertions } from "./codeParsing.js";
 import { getSelfHealingHelperCode, applyHealingTransforms } from "../selfHealing.js";
 import playwright from "playwright";
 
@@ -87,7 +87,7 @@ export async function runApiTestCode(playwrightCode, expect) {
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = patchNetworkIdle(stripPlaywrightImports(body));
+  const cleaned = stripHallucinatedPageAssertions(patchNetworkIdle(stripPlaywrightImports(body)));
 
   // Compile the function BEFORE creating the request context so that a
   // SyntaxError in the AI-generated code doesn't leak the HTTP context.
