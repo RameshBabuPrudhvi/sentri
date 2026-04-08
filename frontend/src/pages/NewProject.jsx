@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Globe, Lock, Plus, CheckCircle2, Loader2 } from "lucide-react";
 import { api } from "../api.js";
+import { emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // Robust URL validation + required auth field enforcement
@@ -115,6 +116,7 @@ export default function NewProject() {
         } : null,
       };
       const project = await api.createProject(payload);
+      emitTourEvent("project-created");
       navigate(`/projects/${project.id}`);
     } catch (err) {
       setError(err.message);

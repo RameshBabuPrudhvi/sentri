@@ -1,25 +1,42 @@
 /**
  * @module hooks/useOnboarding
  * @description Manages onboarding tour state: step progression, completion
- * persistence, and skip/dismiss logic.
+ * persistence, skip/dismiss logic, and **contextual auto-advance**.
  *
  * Tour is shown when ALL of these are true:
  *   1. User has never completed or dismissed the tour (localStorage flag)
  *   2. No AI provider is configured yet (config.hasProvider === false)
  *   3. No projects exist yet (totalProjects === 0)
  *
- * The tour can be re-triggered from Settings by clearing the localStorage flag.
+ * Auto-advance: pages dispatch `sentri:tour` CustomEvents when the user
+ * completes a key action (saves an API key, creates a project). The hook
+ * listens for these and jumps to the next relevant step automatically.
  *
  * @example
  * const tour = useOnboarding();
  * if (tour.active) renderTooltipAt(tour.currentStep);
+ *
+ * // From any page — fire-and-forget, no prop drilling:
+ * emitTourEvent("provider-saved");
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../api.js";
 
 const STORAGE_KEY = "sentri_onboarding_completed";
 const DISMISSED_KEY = "sentri_onboarding_dismissed";
+const TOUR_EVENT = "sentri:tour";
+
+// ── Public helper: dispatch a tour event from any component ─────────────────
+/**
+ * Notify the onboarding tour that the user completed an action.
+ * Safe to call even when the tour is inactive — it's a no-op.
+ *
+ * @param {"provider-saved"|"project-created"} action
+ */
+export function emitTourEvent(action) {
+  window.dispatchEvent(new CustomEvent(TOUR_EVENT, { detail: { action } }));
+}
 
 /**
  * Ordered tour steps. Each step targets a DOM element via `data-tour` attribute
@@ -32,6 +49,7 @@ const DISMISSED_KEY = "sentri_onboarding_dismissed";
  * @property {string}  description - Tooltip body text.
  * @property {string}  cta         - Call-to-action button label.
  * @property {string}  [route]     - If set, navigate here before showing the step.
+ * @property {string}  [advanceOn] - Action string (from emitTourEvent) that auto-advances past this step.
  * @property {"top"|"bottom"|"left"|"right"} [placement] - Tooltip placement relative to target.
  */
 export const TOUR_STEPS = [
@@ -51,6 +69,7 @@ export const TOUR_STEPS = [
     cta: "Go to Settings",
     route: "/settings",
     placement: "right",
+    advanceOn: "provider-saved",
   },
   {
     id: "create-project",
@@ -60,6 +79,7 @@ export const TOUR_STEPS = [
     cta: "Go to Projects",
     route: "/projects",
     placement: "right",
+    advanceOn: "project-created",
   },
   {
     id: "crawl-or-test",
@@ -99,8 +119,14 @@ export default function useOnboarding() {
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const activeRef = useRef(false);
+  const stepRef = useRef(0);
 
-  // Check eligibility on mount
+  // Keep refs in sync so the event handler always sees latest values
+  useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => { stepRef.current = stepIndex; }, [stepIndex]);
+
+  // ── Check eligibility on mount ────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
 
@@ -135,6 +161,35 @@ export default function useOnboarding() {
 
     check();
     return () => { alive = false; };
+  }, []);
+
+  // ── Listen for contextual auto-advance events ─────────────────────────────
+  useEffect(() => {
+    function handleTourEvent(e) {
+      if (!activeRef.current) return;
+      const action = e.detail?.action;
+      if (!action) return;
+
+      // Find the step whose advanceOn matches this action.
+      // If the user is on that step or earlier, jump past it.
+      const targetIdx = TOUR_STEPS.findIndex(s => s.advanceOn === action);
+      if (targetIdx === -1) return;
+
+      const current = stepRef.current;
+      if (current <= targetIdx) {
+        // Jump to the step AFTER the one that was just completed
+        const nextIdx = targetIdx + 1;
+        if (nextIdx < TOUR_STEPS.length) {
+          setStepIndex(nextIdx);
+        } else {
+          localStorage.setItem(STORAGE_KEY, new Date().toISOString());
+          setActive(false);
+        }
+      }
+    }
+
+    window.addEventListener(TOUR_EVENT, handleTourEvent);
+    return () => window.removeEventListener(TOUR_EVENT, handleTourEvent);
   }, []);
 
   const next = useCallback(() => {

@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
-import { resetOnboarding } from "../hooks/useOnboarding.js";
+import { resetOnboarding, emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 const PROVIDERS = [
@@ -573,6 +573,7 @@ export default function Settings() {
     await api.saveApiKey(provider, apiKey, ollamaOpts);
     invalidateConfigCache();
     await reload();
+    emitTourEvent("provider-saved");
   }
 
   async function handleDelete(provider) {
