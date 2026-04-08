@@ -1,6 +1,20 @@
+/**
+ * @module components/project/RunToast
+ * @description Floating toast for run lifecycle feedback on Project Detail.
+ */
+
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+/**
+ * @param {Object} props
+ * @param {string} props.msg
+ * @param {"success"|"error"|"info"} props.type
+ * @param {boolean} props.visible
+ * @param {boolean} props.onViewRun
+ * @param {string|null} props.runId
+ * @returns {React.ReactElement}
+ */
 export default function RunToast({ msg, type, visible, onViewRun, runId }) {
   const colors = { success: "var(--green)", error: "var(--red)", info: "var(--accent)" };
   const navigate = useNavigate();

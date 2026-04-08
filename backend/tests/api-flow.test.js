@@ -1,4 +1,7 @@
 /**
+ * @module tests/api-flow
+ * @description End-to-end API lifecycle smoke test without external framework.
+ *
  * API flow integration smoke tests (no external framework).
  *
  * Covers: auth -> project create -> test create -> approve -> run guard -> abort lifecycle.

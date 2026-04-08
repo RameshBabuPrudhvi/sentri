@@ -1,5 +1,20 @@
+/**
+ * @module components/project/ActiveRunBanner
+ * @description Inline banner shown on Project Detail while a run is active.
+ * Displays live transport mode (SSE/polling fallback) and run actions.
+ */
+
 import { ArrowRight, RefreshCw, StopCircle } from "lucide-react";
 
+/**
+ * @param {Object} props
+ * @param {string|null} props.activeRun
+ * @param {boolean} props.sseDown
+ * @param {number|null} props.retryIn
+ * @param {Function} props.onAbort
+ * @param {Function} props.onViewLive
+ * @returns {React.ReactElement|null}
+ */
 export default function ActiveRunBanner({ activeRun, sseDown, retryIn, onAbort, onViewLive }) {
   if (!activeRun) return null;
 
