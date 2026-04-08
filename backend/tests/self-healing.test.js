@@ -21,18 +21,22 @@ console.log("\n🩹 self-healing runtime checks");
 
 const helpers = getSelfHealingHelperCode({});
 
-test("safeExpect handles selector-like text via page.locator", () => {
-  assert.match(helpers, /\.\.\.\(looksLikeSelector\(text\) \? \[p => p\.locator\(text\)\] : \[\]\)/);
-  assert.doesNotMatch(helpers, /if \(looksLikeSelector\(text\)\)\s*\{/);
+test("safeExpect uses exclusive locator-only path for selector-like text", () => {
+  // When looksLikeSelector is true, strategies should be [p => p.locator(text)] only
+  assert.match(helpers, /looksLikeSelector\(text\)\s*\n\s*\? \[p => p\.locator\(text\)\]/);
+  // Should NOT use the spread pattern (which appends to the text-based waterfall)
+  assert.doesNotMatch(helpers, /\.\.\.\(looksLikeSelector\(text\) \? \[p => p\.locator\(text\)\] : \[\]\)/);
 });
 
-test("safeFill prioritizes selector-like locator strategy", () => {
+test("safeFill uses exclusive locator-only path for selector-like text", () => {
   assert.match(helpers, /looksLikeSelector\(labelOrPlaceholder\)/);
   assert.match(helpers, /onlyFillable\(p\.locator\(labelOrPlaceholder\)\)/);
+  // Should be exclusive branch, not spread into the text-based waterfall
+  assert.match(helpers, /looksLikeSelector\(labelOrPlaceholder\)\s*\n\s*\? \[p => onlyFillable/);
 });
 
-test("safeClick prioritizes selector-like locator strategy", () => {
-  assert.match(helpers, /looksLikeSelector\(text\) \? \[p => p\.locator\(text\)\] : \[\]/);
+test("safeClick uses exclusive locator-only path for selector-like text", () => {
+  assert.match(helpers, /looksLikeSelector\(text\)\s*\n\s*\? \[p => p\.locator\(text\)\]\s*\n\s*:/);
 });
 
 test("selector heuristic does not use broad combinator match", () => {

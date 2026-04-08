@@ -241,17 +241,21 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function safeClick(page, text) {
-      const strategies = [
-        ...(looksLikeSelector(text) ? [p => p.locator(text)] : []),
-        p => p.getByRole('button', { name: text }),
-        p => p.getByRole('link',   { name: text }),
-        p => p.getByRole('menuitem', { name: text }),
-        p => p.getByRole('tab',    { name: text }),
-        p => p.getByText(text, { exact: true }),
-        p => p.getByText(text),
-        p => p.locator(\`[aria-label*="\${text}"]\`),
-        p => p.locator(\`[title*="\${text}"]\`),
-      ];
+      // When the text is a CSS/XPath selector, only use page.locator() —
+      // text-based strategies (getByRole, getByText, aria-label) will never
+      // match a selector string and just waste time + produce confusing errors.
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByRole('button', { name: text }),
+          p => p.getByRole('link',   { name: text }),
+          p => p.getByRole('menuitem', { name: text }),
+          p => p.getByRole('tab',    { name: text }),
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+          p => p.locator(\`[title*="\${text}"]\`),
+        ];
 
       const el = await findElement(page, strategies, { healingKey: 'click::' + text });
 
@@ -278,18 +282,19 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function safeFill(page, labelOrPlaceholder, value) {
-      const strategies = [
-        ...(looksLikeSelector(labelOrPlaceholder) ? [p => onlyFillable(p.locator(labelOrPlaceholder))] : []),
-        p => onlyFillable(p.getByLabel(labelOrPlaceholder)),
-        p => p.getByPlaceholder(labelOrPlaceholder),
-        p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
-        p => p.getByRole('combobox',  { name: labelOrPlaceholder }),
-        p => p.getByRole('textbox',   { name: labelOrPlaceholder }),
-        p => p.getByRole('spinbutton', { name: labelOrPlaceholder }),
-        p => p.locator(\`input[aria-label*="\${labelOrPlaceholder}"]\`),
-        p => p.locator(\`textarea[aria-label*="\${labelOrPlaceholder}"]\`),
-        p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
-      ];
+      const strategies = looksLikeSelector(labelOrPlaceholder)
+        ? [p => onlyFillable(p.locator(labelOrPlaceholder))]
+        : [
+          p => onlyFillable(p.getByLabel(labelOrPlaceholder)),
+          p => p.getByPlaceholder(labelOrPlaceholder),
+          p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
+          p => p.getByRole('combobox',  { name: labelOrPlaceholder }),
+          p => p.getByRole('textbox',   { name: labelOrPlaceholder }),
+          p => p.getByRole('spinbutton', { name: labelOrPlaceholder }),
+          p => p.locator(\`input[aria-label*="\${labelOrPlaceholder}"]\`),
+          p => p.locator(\`textarea[aria-label*="\${labelOrPlaceholder}"]\`),
+          p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
+        ];
 
       const el = await findElement(page, strategies, { healingKey: 'fill::' + labelOrPlaceholder });
 
@@ -304,50 +309,53 @@ export function getSelfHealingHelperCode(healingHints) {
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
-      const strategies = [
-        ...(looksLikeSelector(text) ? [p => p.locator(text)] : []),
-        ...(role
-          ? [
-            p => p.getByRole(role, { name: text }),
-            p => p.getByText(text, { exact: true }),
-            p => p.getByText(text),
-            p => p.getByLabel(text),
-            p => p.locator(\`[aria-label*="\${text}"]\`),
-          ]
-          : [
-            // Input / field visibility
-            p => p.getByRole('searchbox', { name: text }),
-            p => p.getByRole('combobox',  { name: text }),
-            p => p.getByRole('textbox',   { name: text }),
-            p => p.getByRole('spinbutton', { name: text }),
-            p => p.getByLabel(text),
-            p => p.getByPlaceholder(text),
-            p => p.locator(\`input[aria-label*="\${text}"]\`),
-            p => p.locator(\`input[title*="\${text}"]\`),
-            // Clickable / structural element visibility
-            p => p.getByRole('button',     { name: text }),
-            p => p.getByRole('link',       { name: text }),
-            p => p.getByRole('menuitem',   { name: text }),
-            p => p.getByRole('tab',        { name: text }),
-            p => p.getByRole('heading',    { name: text }),
-            p => p.getByRole('img',        { name: text }),
-            p => p.getByRole('navigation', { name: text }),
-            p => p.getByRole('listitem',   { name: text }),
-            p => p.getByRole('cell',       { name: text }),
-            p => p.getByRole('row',        { name: text }),
-            p => p.getByRole('dialog',     { name: text }),
-            p => p.getByRole('alert',      { name: text }),
-            p => p.getByRole('checkbox',   { name: text }),
-            p => p.getByRole('radio',      { name: text }),
-            p => p.getByRole('switch',     { name: text }),
-            p => p.getByRole('slider',     { name: text }),
-            p => p.getByRole('progressbar', { name: text }),
-            p => p.getByRole('option',     { name: text }),
-            p => p.getByText(text, { exact: true }),
-            p => p.getByText(text),
-            p => p.locator(\`[aria-label*="\${text}"]\`),
-          ]),
-      ];
+      // When the text is a CSS/XPath selector, only use page.locator() —
+      // role/text/aria-label strategies will never match a raw selector string.
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          ...(role
+            ? [
+              p => p.getByRole(role, { name: text }),
+              p => p.getByText(text, { exact: true }),
+              p => p.getByText(text),
+              p => p.getByLabel(text),
+              p => p.locator(\`[aria-label*="\${text}"]\`),
+            ]
+            : [
+              // Input / field visibility
+              p => p.getByRole('searchbox', { name: text }),
+              p => p.getByRole('combobox',  { name: text }),
+              p => p.getByRole('textbox',   { name: text }),
+              p => p.getByRole('spinbutton', { name: text }),
+              p => p.getByLabel(text),
+              p => p.getByPlaceholder(text),
+              p => p.locator(\`input[aria-label*="\${text}"]\`),
+              p => p.locator(\`input[title*="\${text}"]\`),
+              // Clickable / structural element visibility
+              p => p.getByRole('button',     { name: text }),
+              p => p.getByRole('link',       { name: text }),
+              p => p.getByRole('menuitem',   { name: text }),
+              p => p.getByRole('tab',        { name: text }),
+              p => p.getByRole('heading',    { name: text }),
+              p => p.getByRole('img',        { name: text }),
+              p => p.getByRole('navigation', { name: text }),
+              p => p.getByRole('listitem',   { name: text }),
+              p => p.getByRole('cell',       { name: text }),
+              p => p.getByRole('row',        { name: text }),
+              p => p.getByRole('dialog',     { name: text }),
+              p => p.getByRole('alert',      { name: text }),
+              p => p.getByRole('checkbox',   { name: text }),
+              p => p.getByRole('radio',      { name: text }),
+              p => p.getByRole('switch',     { name: text }),
+              p => p.getByRole('slider',     { name: text }),
+              p => p.getByRole('progressbar', { name: text }),
+              p => p.getByRole('option',     { name: text }),
+              p => p.getByText(text, { exact: true }),
+              p => p.getByText(text),
+              p => p.locator(\`[aria-label*="\${text}"]\`),
+            ]),
+        ];
 
       const el = await findElement(page, strategies, { healingKey: 'expect::' + text });
       // Wait for the element to stabilise before asserting — prevents flaky
@@ -363,23 +371,23 @@ export function getSelfHealingHelperCode(healingHints) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Detect CSS/XPath selectors that should NOT be rewritten to text-based helpers.
-// Matches arguments starting with #, ., [, //, or containing CSS combinators
-// (whitespace-delimited >, ~, +) or pseudo-selectors (`:hover`, `:nth-child`).
-// Human-readable text like "Email:", "Price: $10", or "Add + Continue" is NOT
-// matched — we only flag combinators surrounded by selector-like context and
-// pseudo-selectors that follow a word boundary (e.g. `div:hover`, `a:nth-child`).
-// The pseudo-selector pattern requires a tag-like word followed by : and another
-// word-char (e.g. `div:hover`, `input:focus`) — a trailing colon like "Email:"
-// won't match because the colon is followed by a space or end-of-string.
-// The combinator pattern requires selector-like context on BOTH sides:
-// a word-char or closing-bracket before the combinator, and a word-char,
-// dot, hash, or bracket after it. This avoids matching human-readable
-// text like "Add + Continue" or "Terms + Conditions" where both sides
-// are just words separated by spaces.
-const CSS_SELECTOR_RE = /^[#.\[/]|^\/\/|(?:[\w\])])\s[>~+]\s(?:[\w#.\[:])|(?:\w):(?::|(?=[a-zA-Z-]\w))|\w\[/;
-
+// This is the server-side counterpart of the runtime `looksLikeSelector` injected
+// by getSelfHealingHelperCode(). Both must agree on what constitutes a selector.
+//
+// Matches:
+//   - Starts with #, ., [, //           (ID, class, attribute, XPath)
+//   - CSS combinators (>, ~, +)          with selector-like context on both sides
+//   - Attribute selectors (tag[attr])    e.g. input[name=q]
+//   - Pseudo-selectors (:nth-child, …)  e.g. div:hover, a:nth-child(2)
+//
+// Does NOT match human-readable text like "Email:", "Price: $10", "Add + Continue".
 function looksLikeCssSelector(arg) {
-  return CSS_SELECTOR_RE.test(arg.trim());
+  if (!arg || typeof arg !== 'string') return false;
+  const s = arg.trim();
+  return /^[#.\[/]|^\/\//.test(s)
+    || /(?:[\w\])])\s[>~+]\s(?:[\w#.\[:])/.test(s)
+    || /\w\[[^\]]+\]/.test(s)
+    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
 }
 
 // Escape single quotes in captured text so injecting into '...' strings is safe.
