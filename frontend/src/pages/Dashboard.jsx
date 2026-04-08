@@ -150,7 +150,7 @@ export default function Dashboard() {
     <div className="fade-in page-container">
 
       {/* ── Hero Banner ─────────────────────────────────────────────── */}
-      <div className="dash-hero">
+      <div className="dash-hero" data-tour="tour-welcome">
         <div className="dash-hero-glow" />
         <svg className="dash-hero-shield" width="180" height="180" viewBox="0 0 40 40" fill="none">
           <path d="M20 1L3 8v11c0 9.5 7.2 18.2 17 20 9.8-1.8 17-10.5 17-20V8L20 1z" fill="#6366f1" />

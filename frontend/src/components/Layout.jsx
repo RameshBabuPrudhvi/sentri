@@ -2,19 +2,23 @@ import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown, BookOpen, ExternalLink } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
+import OnboardingTour from "./OnboardingTour.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import useOnboarding from "../hooks/useOnboarding.js";
 import AppLogo from "./AppLogo.jsx";
 
 const NAV = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/projects",  icon: FolderOpen,      label: "Projects"  },
-  { to: "/tests",     icon: FlaskConical,    label: "Tests"     },
+  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },
+  { to: "/projects",  icon: FolderOpen,      label: "Projects",  tour: "tour-projects"  },
+  { to: "/tests",     icon: FlaskConical,    label: "Tests",     tour: "tour-tests"     },
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
   { to: "/runs",      icon: Briefcase,       label: "Runs"      },
   { to: "/context",   icon: Layers,          label: "System"    },
 ];
 
 export default function Layout() {
+  const tour = useOnboarding();
+
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg2)" }}>
       <Sidebar />
@@ -24,6 +28,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <OnboardingTour tour={tour} />
     </div>
   );
 }
@@ -50,8 +55,8 @@ function Sidebar() {
 
       {/* Nav */}
       <nav style={{ padding: "10px 8px", flex: 1 }}>
-        {NAV.map(({ to, icon: Icon, label }) => (
-          <NavLink key={to} to={to} className="nav-link" style={({ isActive }) => ({
+        {NAV.map(({ to, icon: Icon, label, tour }) => (
+          <NavLink key={to} to={to} className="nav-link" data-tour={tour || undefined} style={({ isActive }) => ({
             display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
             borderRadius: "var(--radius)", marginBottom: 1,
             fontWeight: isActive ? 600 : 400, fontSize: "0.875rem",
@@ -67,7 +72,7 @@ function Sidebar() {
 
       {/* Settings + Docs at bottom */}
       <div style={{ padding: "10px 8px", borderTop: "1px solid var(--border)" }}>
-        <NavLink to="/settings" className="nav-link" style={({ isActive }) => ({
+        <NavLink to="/settings" className="nav-link" data-tour="tour-settings" style={({ isActive }) => ({
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
           borderRadius: "var(--radius)", fontWeight: isActive ? 600 : 400,
           fontSize: "0.875rem", color: isActive ? "var(--accent)" : "var(--text2)",

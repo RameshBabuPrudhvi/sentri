@@ -4,9 +4,11 @@ import {
   ArrowLeft, Check, Eye, EyeOff, ExternalLink, AlertTriangle,
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
+  Compass,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
+import { resetOnboarding } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 const PROVIDERS = [
@@ -755,6 +757,39 @@ OLLAMA_MODEL=mistral:7b`}</pre>
         <div style={{ padding: "20px 0", color: "var(--text3)", fontSize: "0.85rem" }}>Could not load system info.</div>
       )}
       </>}
+
+      {/* ── Restart onboarding tour ── */}
+      <div style={{
+        marginTop: 28, padding: "16px 20px",
+        background: "var(--surface)", border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)",
+        display: "flex", alignItems: "center", gap: 14,
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 10,
+          background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)",
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        }}>
+          <Compass size={16} color="var(--accent)" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "0.88rem" }}>Getting Started Tour</div>
+          <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>
+            Re-run the onboarding walkthrough that guides you through setup.
+          </div>
+        </div>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            resetOnboarding();
+            navigate("/dashboard");
+            window.location.reload();
+          }}
+          style={{ flexShrink: 0 }}
+        >
+          <RefreshCw size={13} /> Restart Tour
+        </button>
+      </div>
 
       <div style={{ height: 40 }} />
     </div>
