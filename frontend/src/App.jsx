@@ -1,21 +1,28 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Layout from "./components/Layout.jsx";
-import Login from "./pages/Login.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
-import Tests from "./pages/Tests.jsx";
-import ProjectDetail from "./pages/ProjectDetail.jsx";
-import NewProject from "./pages/NewProject.jsx";
-import RunDetail from "./pages/RunDetail.jsx";
-import TestDetail from "./pages/TestDetail.jsx";
-import Settings from "./pages/Settings.jsx";
-import Projects from "./pages/Applications.jsx";
-import Reports from "./pages/Reports.jsx";
-import Runs from "./pages/Runs.jsx";
-import Context from "./pages/Context.jsx";
-import ForgotPassword from "./pages/ForgotPassword.jsx";
+
+const Login = lazy(() => import("./pages/Login.jsx"));
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const Tests = lazy(() => import("./pages/Tests.jsx"));
+const ProjectDetail = lazy(() => import("./pages/ProjectDetail.jsx"));
+const NewProject = lazy(() => import("./pages/NewProject.jsx"));
+const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
+const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx"));
+const Projects = lazy(() => import("./pages/Applications.jsx"));
+const Reports = lazy(() => import("./pages/Reports.jsx"));
+const Runs = lazy(() => import("./pages/Runs.jsx"));
+const Context = lazy(() => import("./pages/Context.jsx"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
+
+const RouteLoading = () => (
+  <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
+    Loading…
+  </div>
+);
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -56,33 +63,35 @@ export default function App() {
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AuthProvider>
         <ErrorBoundary>
-          <Routes>
-            {/* Public */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              {/* Public */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
 
-            {/* Protected — wrapped in Layout */}
-            <Route element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/tests" element={<Tests />} />
-              <Route path="/projects/new" element={<NewProject />} />
-              <Route path="/projects/:id" element={<ProjectDetail />} />
-              <Route path="/runs/:runId" element={<RunDetail />} />
-              <Route path="/tests/:testId" element={<TestDetail />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/runs" element={<Runs />} />
-              <Route path="/context" element={<Context />} />
-              <Route path="/applications" element={<Navigate to="/projects" replace />} />
-              <Route path="*" element={<NotFound />} />
-            </Route>
-          </Routes>
+              {/* Protected — wrapped in Layout */}
+              <Route element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/tests" element={<Tests />} />
+                <Route path="/projects/new" element={<NewProject />} />
+                <Route path="/projects/:id" element={<ProjectDetail />} />
+                <Route path="/runs/:runId" element={<RunDetail />} />
+                <Route path="/tests/:testId" element={<TestDetail />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/runs" element={<Runs />} />
+                <Route path="/context" element={<Context />} />
+                <Route path="/applications" element={<Navigate to="/projects" replace />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Routes>
+          </Suspense>
         </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
