@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, Ban,
-  AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
-  RotateCcw, Info, StopCircle, Download, ChevronDown, Link2,
+  AlertTriangle, Globe, ThumbsUp, ThumbsDown,
+  RotateCcw, Info, Download, ChevronDown, Link2,
 } from "lucide-react";
 import { api } from "../api.js";
 import CrawlDialsPanel from "../components/CrawlDialsPanel.jsx";
@@ -16,6 +16,8 @@ import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeL
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import useProjectRunMonitor from "../hooks/useProjectRunMonitor.js";
+import ActiveRunBanner from "../components/project/ActiveRunBanner.jsx";
+import RunToast from "../components/project/RunToast.jsx";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -26,34 +28,6 @@ function ConfBar({ score }) {
         <div style={{ width: `${score}%`, height: "100%", background: color, borderRadius: 2 }} />
       </div>
       <span style={{ fontSize: "0.73rem", color: "var(--text2)", fontWeight: 500 }}>{score}%</span>
-    </div>
-  );
-}
-
-function Toast({ msg, type, visible, onViewRun, runId }) {
-  const colors = { success: "var(--green)", error: "var(--red)", info: "var(--accent)" };
-  const navigate = useNavigate();
-  return (
-    <div style={{
-      position: "fixed", bottom: 24, right: 28, zIndex: 9999,
-      background: "var(--surface)", border: "1px solid var(--border)",
-      borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8,
-      fontSize: "0.83rem", fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-      transition: "all 0.25s", opacity: visible ? 1 : 0,
-      transform: visible ? "translateY(0)" : "translateY(12px)", pointerEvents: visible ? "auto" : "none",
-    }}>
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colors[type] || colors.info, flexShrink: 0 }} />
-      {msg}
-      {/* Opt-in navigation to run — don't auto-switch tabs */}
-      {onViewRun && runId && (
-        <button
-          className="btn btn-ghost btn-xs"
-          style={{ marginLeft: 8, pointerEvents: "auto" }}
-          onClick={() => navigate(`/runs/${runId}`)}
-        >
-          View run <ArrowRight size={11} />
-        </button>
-      )}
     </div>
   );
 }
@@ -519,38 +493,20 @@ export default function ProjectDetail() {
       </div>
 
       {/* Active run banner — now the primary CTA to view run, tab stays put */}
-      {activeRun && (
-        <div style={{ marginBottom: 16, padding: "12px 16px", background: "var(--blue-bg)", border: "1px solid #bfdbfe", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <RefreshCw size={14} color="var(--blue)" className="spin" />
-              <span style={{ fontWeight: 500, fontSize: "0.875rem", color: "var(--blue)" }}>Run in progress…</span>
-            </div>
-            <div style={{ fontSize: "0.74rem", color: "var(--text3)", marginTop: 4 }}>
-              {sseDown ? `Live updates via polling${retryIn ? ` (SSE retry in ${retryIn}s)` : ""}` : "Live updates via SSE"}
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button
-              className="btn btn-xs"
-              style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
-              onClick={async () => {
-                try {
-                  await api.abortRun(activeRun);
-                  setActiveRun(null);
-                  showToast("Run aborted", "info");
-                  refresh();
-                } catch (err) { showToast(err.message, "error"); }
-              }}
-            >
-              <StopCircle size={11} /> Stop
-            </button>
-            <button className="btn btn-ghost btn-xs" onClick={() => navigate(`/runs/${activeRun}`)}>
-              View live <ArrowRight size={12} />
-            </button>
-          </div>
-        </div>
-      )}
+      <ActiveRunBanner
+        activeRun={activeRun}
+        sseDown={sseDown}
+        retryIn={retryIn}
+        onAbort={async () => {
+          try {
+            await api.abortRun(activeRun);
+            setActiveRun(null);
+            showToast("Run aborted", "info");
+            refresh();
+          } catch (err) { showToast(err.message, "error"); }
+        }}
+        onViewLive={() => navigate(`/runs/${activeRun}`)}
+      />
 
       {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
       {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
@@ -1040,7 +996,7 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      <Toast msg={toast.msg} type={toast.type} visible={toast.visible} onViewRun={toast.showLink} runId={toast.runId} />
+      <RunToast msg={toast.msg} type={toast.type} visible={toast.visible} onViewRun={toast.showLink} runId={toast.runId} />
 
       {/* Bulk action confirmation modal */}
       {bulkConfirm && (
