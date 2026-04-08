@@ -89,6 +89,11 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   // executeTest reads test._isApi instead of re-calling isApiTest().
   for (const t of tests) {
     t._isApi = !!(t.playwrightCode && isApiTest(t.playwrightCode));
+    // Persist the classification on the test object so the frontend can read
+    // test.isApiTest directly without reimplementing the detection heuristic.
+    if (db.tests[t.id]) {
+      db.tests[t.id].isApiTest = t._isApi;
+    }
   }
 
   // If every test is API-only, skip the entire browser launch + trace context

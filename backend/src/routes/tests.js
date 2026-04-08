@@ -34,6 +34,7 @@ import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
+import { isApiTest } from "../runner/codeParsing.js";
 
 const router = Router();
 
@@ -88,6 +89,12 @@ router.patch("/tests/:testId", async (req, res) => {
 
   test.updatedAt = new Date().toISOString();
 
+  // Recompute isApiTest when playwrightCode changes so the frontend can
+  // read test.isApiTest directly without reimplementing the heuristic.
+  if (typeof playwrightCode === "string") {
+    test.isApiTest = !!(playwrightCode && isApiTest(playwrightCode));
+  }
+
   let codeRegeneratedNow = false;
 
   if (regenerateCode && hasProvider() && Array.isArray(test.steps) && test.steps.length > 0) {
@@ -130,6 +137,7 @@ Return ONLY valid JSON with no markdown fences:
           test.playwrightCodePrev = test.playwrightCode;
         }
         test.playwrightCode = pwCode;
+        test.isApiTest = !!(pwCode && isApiTest(pwCode));
         test.codeRegeneratedAt = new Date().toISOString();
         codeRegeneratedNow = true;
       }

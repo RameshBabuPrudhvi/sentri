@@ -16,7 +16,6 @@ import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadg
 import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
-import isApiTestCode from "../utils/isApiTestCode.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
 import CodeEditorModal from "../components/test/CodeEditorModal.jsx";
 
@@ -446,7 +445,7 @@ export default function TestDetail() {
               )}
 
               {/* Copy as cURL — only shown for API tests in view mode */}
-              {test.playwrightCode && !editing && isApiTestCode(test.playwrightCode) && (
+              {test.playwrightCode && !editing && test.isApiTest && (
                 <button
                   onClick={async () => {
                     const curl = playwrightToCurl(test.playwrightCode);
