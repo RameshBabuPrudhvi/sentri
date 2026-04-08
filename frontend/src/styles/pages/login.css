@@ -1,0 +1,50 @@
+/**
+ * Login — standalone page styles
+ *
+ * Renders outside <Layout> with its own dark visual language.
+ * Scoped by `.lp-*` prefix. Extracted from inline <style> in Login.jsx.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
+
+@keyframes spinAnim  { to { transform: rotate(360deg); } }
+@keyframes slideUp   { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+@keyframes orbFloat  { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-20px) scale(1.04); } }
+@keyframes gridShift { from { background-position: 0 0; } to { background-position: 48px 48px; } }
+@keyframes dotPulse  { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+
+.lp-root { display: flex; min-height: 100vh; background: #060810; font-family: 'DM Sans', sans-serif; opacity: 0; transition: opacity 0.5s ease; }
+.lp-root.on { opacity: 1; }
+.lp-left { flex: 1; display: flex; flex-direction: column; justify-content: space-between; padding: 48px 56px; position: relative; overflow: hidden; background: #060810; }
+.lp-left::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 20% 10%, rgba(99,102,241,0.18) 0%, transparent 60%), radial-gradient(ellipse 50% 50% at 80% 80%, rgba(139,92,246,0.12) 0%, transparent 55%); pointer-events: none; }
+.lp-grid { position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(99,102,241,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.07) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse 80% 90% at 30% 40%, black 0%, transparent 75%); animation: gridShift 20s linear infinite; }
+.lp-orb { position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; animation: orbFloat 8s ease-in-out infinite; }
+.lp-orb-1 { width: 300px; height: 300px; top: -60px; left: -60px; background: rgba(99,102,241,0.15); }
+.lp-orb-2 { width: 200px; height: 200px; bottom: 80px; right: 40px; background: rgba(139,92,246,0.12); animation-delay: 3s; }
+.lp-orb-3 { width: 150px; height: 150px; top: 50%; left: 60%; background: rgba(59,130,246,0.1); animation-delay: 5s; }
+.lp-brand { position: relative; z-index: 1; animation: slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both; flex-shrink: 0; }
+.lp-hero { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.lp-eyebrow { display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); border-radius: 999px; padding: 4px 14px; margin-bottom: 28px; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.1s both; }
+.lp-eyebrow-dot { width: 6px; height: 6px; border-radius: 50%; background: #6366f1; animation: dotPulse 2s ease infinite; }
+.lp-eyebrow span { font-size: 0.72rem; font-weight: 500; color: #a5b4fc; letter-spacing: 0.5px; text-transform: uppercase; }
+.lp-headline { font-family: 'Syne', sans-serif; font-size: clamp(2rem, 3vw, 2.75rem); font-weight: 800; line-height: 1.1; letter-spacing: -1.5px; color: #fff; margin: 0 0 20px; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.2s both; }
+.lp-accent { background: linear-gradient(135deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.lp-subline { font-size: 1rem; line-height: 1.65; color: #94a3b8; max-width: 400px; margin: 0 0 40px; font-weight: 300; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.3s both; }
+.lp-features { display: flex; flex-direction: column; gap: 14px; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.4s both; }
+.lp-feature { display: flex; align-items: flex-start; gap: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 14px; padding: 16px 18px; transition: background 0.2s, border-color 0.2s, transform 0.2s; cursor: default; }
+.lp-feature:hover { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.25); transform: translateX(4px); }
+.lp-ficon { width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; background: rgba(99,102,241,0.15); display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.lp-ftitle { font-size: 0.875rem; font-weight: 500; color: #e2e8f0; margin: 0 0 3px; }
+.lp-fdesc { font-size: 0.78rem; color: #64748b; line-height: 1.4; margin: 0; }
+.lp-testi { position: relative; z-index: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 20px 24px; animation: slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.5s both; }
+.lp-tquote { font-size: 0.9rem; color: #cbd5e1; line-height: 1.6; margin: 0 0 14px; font-style: italic; font-weight: 300; }
+.lp-tauthor { display: flex; align-items: center; gap: 10px; }
+.lp-tavatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; color: #fff; flex-shrink: 0; }
+.lp-tname { font-size: 0.8rem; font-weight: 500; color: #94a3b8; }
+.lp-trole { font-size: 0.72rem; color: #475569; }
+.lp-tdots { display: flex; gap: 5px; margin-top: 16px; }
+.lp-tdot { width: 20px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); transition: background 0.3s, width 0.3s; }
+.lp-tdot.on { background: #6366f1; width: 28px; }
+@media (max-width: 900px) { .lp-left { display: none; } }
+/* PART2_MARKER */
