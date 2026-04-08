@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Play, Trash2, ArrowRight, Ban,
-  AlertTriangle, Globe, ThumbsUp, ThumbsDown,
+  AlertTriangle, RefreshCw, Globe, ThumbsUp, ThumbsDown,
   RotateCcw, Info, Download, ChevronDown, Link2,
 } from "lucide-react";
 import { api } from "../api.js";
