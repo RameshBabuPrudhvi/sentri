@@ -82,7 +82,7 @@ export default function OnboardingTour({ tour }) {
       window.removeEventListener("resize", updateRect);
       window.removeEventListener("scroll", updateRect, true);
     };
-  }, [active, stepIndex, updateRect]);
+  }, [active, stepIndex, transitioning, updateRect]);
 
   // ── Keyboard navigation ───────────────────────────────────────────────────
   useEffect(() => {
