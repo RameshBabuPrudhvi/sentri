@@ -129,12 +129,28 @@ export async function runApiTestCode(playwrightCode, expect) {
           const start = Date.now();
           const url = typeof args[0] === "string" ? args[0] : String(args[0]);
           const httpMethod = method === "fetch" ? ((args[1]?.method || "GET").toUpperCase()) : method.toUpperCase();
-          const entry = { method: httpMethod, url, startTime: start, status: null, duration: null, size: null };
+          const reqHeaders = args[1]?.headers || null;
+          const reqData = args[1]?.data != null ? (typeof args[1].data === "string" ? args[1].data : JSON.stringify(args[1].data)) : null;
+          const entry = {
+            method: httpMethod, url, startTime: start,
+            status: null, duration: null, size: null,
+            requestHeaders: reqHeaders,
+            requestBody: reqData,
+            responseHeaders: null,
+            responseBody: null,
+          };
           try {
             const resp = await original(...args);
             entry.status = resp.status();
             entry.duration = Date.now() - start;
-            try { entry.size = (await resp.body()).length; } catch { entry.size = 0; }
+            try {
+              const bodyBuf = await resp.body();
+              entry.size = bodyBuf.length;
+              // Capture response body (text) — cap at 32KB to avoid bloating run results
+              const bodyText = bodyBuf.toString("utf-8");
+              entry.responseBody = bodyText.length > 32768 ? bodyText.slice(0, 32768) + "\n…(truncated)" : bodyText;
+            } catch { entry.size = 0; }
+            try { entry.responseHeaders = resp.headers(); } catch { /* ignore */ }
             apiLogs.push(entry);
             return resp;
           } catch (err) {
