@@ -122,6 +122,14 @@ export function getSelfHealingHelperCode(healingHints) {
     const RETRY_DELAY = ${HEALING_RETRY_DELAY};
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const looksLikeSelector = (value) => {
+      if (!value || typeof value !== 'string') return false;
+      const s = value.trim();
+      return /^(#|\\.|\\[|\\/\\/)/.test(s)
+        || /(?:[\\w\\])])\\s[>~+]\\s(?:[\\w#.\\[:])/.test(s)
+        || /\\w\\[[^\\]]+\\]/.test(s)
+        || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\\(/.test(s);
+    };
 
     // ── Healing history from previous runs ──────────────────────────────────
     // Maps "action::label" → winning strategy index so we try it first.
@@ -217,6 +225,7 @@ export function getSelfHealingHelperCode(healingHints) {
 
     async function safeClick(page, text) {
       const strategies = [
+        ...(looksLikeSelector(text) ? [p => p.locator(text)] : []),
         p => p.getByRole('button', { name: text }),
         p => p.getByRole('link',   { name: text }),
         p => p.getByRole('menuitem', { name: text }),
@@ -253,6 +262,7 @@ export function getSelfHealingHelperCode(healingHints) {
 
     async function safeFill(page, labelOrPlaceholder, value) {
       const strategies = [
+        ...(looksLikeSelector(labelOrPlaceholder) ? [p => onlyFillable(p.locator(labelOrPlaceholder))] : []),
         p => onlyFillable(p.getByLabel(labelOrPlaceholder)),
         p => p.getByPlaceholder(labelOrPlaceholder),
         p => p.getByRole('searchbox', { name: labelOrPlaceholder }),
@@ -277,15 +287,17 @@ export function getSelfHealingHelperCode(healingHints) {
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
-      const strategies = role
-        ? [
+      const strategies = [
+        ...(looksLikeSelector(text) ? [p => p.locator(text)] : []),
+        ...(role
+          ? [
             p => p.getByRole(role, { name: text }),
             p => p.getByText(text, { exact: true }),
             p => p.getByText(text),
             p => p.getByLabel(text),
             p => p.locator(\`[aria-label*="\${text}"]\`),
           ]
-        : [
+          : [
             // Input / field visibility
             p => p.getByRole('searchbox', { name: text }),
             p => p.getByRole('combobox',  { name: text }),
@@ -317,7 +329,8 @@ export function getSelfHealingHelperCode(healingHints) {
             p => p.getByText(text, { exact: true }),
             p => p.getByText(text),
             p => p.locator(\`[aria-label*="\${text}"]\`),
-          ];
+          ]),
+      ];
 
       const el = await findElement(page, strategies, { healingKey: 'expect::' + text });
       // Wait for the element to stabilise before asserting — prevents flaky

@@ -8,6 +8,7 @@
  *   extractTestBody(code)        — pull the async arrow-fn body from a test()
  *   patchNetworkIdle(code)       — rewrite networkidle → domcontentloaded
  *   stripPlaywrightImports(code) — remove import/require of @playwright/test
+ *   repairBrokenStringLiterals(code) — collapse accidental newlines inside quoted strings
  *   isApiTest(code)              — detect API-only tests (request.newContext)
  */
 
@@ -85,6 +86,99 @@ export function stripPlaywrightImports(code) {
     .filter(line => !line.match(/import\s*\{.*\}\s*from\s*['"]@playwright\/test['"]/))
     .filter(line => !line.match(/require\s*\(\s*['"]@playwright\/test['"]\s*\)/))
     .join("\n");
+}
+
+/**
+ * repairBrokenStringLiterals(code)
+ *
+ * AI output occasionally breaks CSS/XPath selectors across lines inside
+ * single/double-quoted literals, creating invalid JavaScript:
+ *   page.$('button[name=btnI]
+ *     [type=submit]')
+ *
+ * JavaScript does not allow raw newlines in single/double quotes, so parsing
+ * fails with "Invalid or unexpected token". This repair pass replaces newline
+ * characters that occur while inside a single/double-quoted string with a
+ * space, preserving content while restoring valid syntax.
+ */
+export function repairBrokenStringLiterals(code) {
+  if (!code || typeof code !== "string") return code;
+  let out = "";
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let escaped = false;
+
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    const next = code[i + 1];
+
+    // ── Comment tracking (only when not inside string literals) ────────────
+    if (!inSingle && !inDouble && !inTemplate) {
+      if (!inLineComment && !inBlockComment && ch === "/" && next === "/") {
+        inLineComment = true;
+        out += ch;
+        continue;
+      }
+      if (!inLineComment && !inBlockComment && ch === "/" && next === "*") {
+        inBlockComment = true;
+        out += ch;
+        continue;
+      }
+    }
+
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += "/";
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+
+    if (!inDouble && !inTemplate && ch === "'") {
+      inSingle = !inSingle;
+      out += ch;
+      continue;
+    }
+    if (!inSingle && !inTemplate && ch === "\"") {
+      inDouble = !inDouble;
+      out += ch;
+      continue;
+    }
+    if (!inSingle && !inDouble && ch === "`") {
+      inTemplate = !inTemplate;
+      out += ch;
+      continue;
+    }
+
+    if ((ch === "\n" || ch === "\r") && (inSingle || inDouble)) {
+      out += " ";
+      continue;
+    }
+
+    out += ch;
+  }
+  return out;
 }
 
 /**
