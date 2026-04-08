@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import "../styles/pages/login.css";
 
 const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID || "";
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -163,93 +164,7 @@ export default function Login() {
 
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap');
-        @keyframes spinAnim{to{transform:rotate(360deg)}}
-        @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
-        @keyframes slideDown{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
-        @keyframes orbFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-20px) scale(1.04)}}
-        @keyframes gridShift{from{background-position:0 0}to{background-position:48px 48px}}
-        @keyframes dotPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.8)}}
-        .lp-root{display:flex;min-height:100vh;background:#060810;font-family:'DM Sans',sans-serif;opacity:0;transition:opacity 0.5s ease}
-        .lp-root.on{opacity:1}
-        .lp-left{flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:48px 56px;position:relative;overflow:hidden;background:#060810}
-        .lp-left::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 20% 10%,rgba(99,102,241,0.18) 0%,transparent 60%),radial-gradient(ellipse 50% 50% at 80% 80%,rgba(139,92,246,0.12) 0%,transparent 55%);pointer-events:none}
-        .lp-grid{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(99,102,241,0.07) 1px,transparent 1px),linear-gradient(90deg,rgba(99,102,241,0.07) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse 80% 90% at 30% 40%,black 0%,transparent 75%);animation:gridShift 20s linear infinite}
-        .lp-orb{position:absolute;border-radius:50%;filter:blur(60px);pointer-events:none;animation:orbFloat 8s ease-in-out infinite}
-        .lp-orb-1{width:300px;height:300px;top:-60px;left:-60px;background:rgba(99,102,241,0.15);animation-delay:0s}
-        .lp-orb-2{width:200px;height:200px;bottom:80px;right:40px;background:rgba(139,92,246,0.12);animation-delay:3s}
-        .lp-orb-3{width:150px;height:150px;top:50%;left:60%;background:rgba(59,130,246,0.1);animation-delay:5s}
-        .lp-brand{position:relative;z-index:1;animation:slideDown 0.6s cubic-bezier(0.16,1,0.3,1) both;flex-shrink:0}
-        .lp-hero{position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:center}
-        .lp-eyebrow{display:inline-flex;align-items:center;gap:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:999px;padding:4px 14px;margin-bottom:28px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.1s both}
-        .lp-eyebrow-dot{width:6px;height:6px;border-radius:50%;background:#6366f1;animation:dotPulse 2s ease infinite}
-        .lp-eyebrow span{font-size:0.72rem;font-weight:500;color:#a5b4fc;letter-spacing:0.5px;text-transform:uppercase}
-        .lp-headline{font-family:'Syne',sans-serif;font-size:clamp(2rem,3vw,2.75rem);font-weight:800;line-height:1.1;letter-spacing:-1.5px;color:#fff;margin:0 0 20px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.2s both}
-        .lp-accent{background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-        .lp-subline{font-size:1rem;line-height:1.65;color:#94a3b8;max-width:400px;margin:0 0 40px;font-weight:300;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.3s both}
-        .lp-features{display:flex;flex-direction:column;gap:14px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.4s both}
-        .lp-feature{display:flex;align-items:flex-start;gap:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:14px;padding:16px 18px;transition:background 0.2s,border-color 0.2s,transform 0.2s;cursor:default}
-        .lp-feature:hover{background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.25);transform:translateX(4px)}
-        .lp-ficon{width:36px;height:36px;border-radius:10px;flex-shrink:0;background:rgba(99,102,241,0.15);display:flex;align-items:center;justify-content:center;font-size:1rem}
-        .lp-ftitle{font-size:0.875rem;font-weight:500;color:#e2e8f0;margin:0 0 3px}
-        .lp-fdesc{font-size:0.78rem;color:#64748b;line-height:1.4;margin:0}
-        .lp-testi{position:relative;z-index:1;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px 24px;animation:slideUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.5s both}
-        .lp-tquote{font-size:0.9rem;color:#cbd5e1;line-height:1.6;margin:0 0 14px;font-style:italic;font-weight:300}
-        .lp-tauthor{display:flex;align-items:center;gap:10px}
-        .lp-tavatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:#fff;flex-shrink:0}
-        .lp-tname{font-size:0.8rem;font-weight:500;color:#94a3b8}
-        .lp-trole{font-size:0.72rem;color:#475569}
-        .lp-tdots{display:flex;gap:5px;margin-top:16px}
-        .lp-tdot{width:20px;height:3px;border-radius:2px;background:rgba(255,255,255,0.1);transition:background 0.3s,width 0.3s}
-        .lp-tdot.on{background:#6366f1;width:28px}
-        @media(max-width:900px){.lp-left{display:none}}
-        .lp-right{width:480px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#0d1117;border-left:1px solid rgba(255,255,255,0.06);padding:48px 40px}
-        @media(max-width:900px){.lp-right{width:100%;border-left:none}}
-        .lp-fw{width:100%;max-width:360px;animation:slideUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.1s both}
-        .lp-fh{margin-bottom:28px}
-        .lp-ftit{font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:700;color:#f1f5f9;margin:0 0 6px;letter-spacing:-0.5px}
-        .lp-fsub{font-size:0.875rem;color:#64748b;margin:0}
-        .lp-oauth{display:flex;gap:10px;margin-bottom:20px}
-        .lp-ob{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 8px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#cbd5e1;font-size:0.82rem;font-weight:500;cursor:pointer;transition:all 0.2s;font-family:'DM Sans',sans-serif}
-        .lp-ob:hover:not(:disabled){background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.18);color:#f1f5f9;transform:translateY(-1px)}
-        .lp-ob:active:not(:disabled){transform:translateY(0)}
-        .lp-ob:disabled{opacity:0.45;cursor:not-allowed}
-        .lp-div{display:flex;align-items:center;gap:12px;margin-bottom:20px}
-        .lp-dline{flex:1;height:1px;background:rgba(255,255,255,0.07)}
-        .lp-div span{font-size:0.72rem;color:#334155;white-space:nowrap;letter-spacing:0.3px}
-        .lp-field{margin-bottom:16px}
-        .lp-lrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
-        .lp-lbl{font-size:0.78rem;font-weight:500;color:#64748b;letter-spacing:0.3px}
-        .lp-forgot{font-size:0.75rem;color:#6366f1;text-decoration:none;font-weight:500}
-        .lp-forgot:hover{color:#818cf8}
-        .lp-iw{position:relative}
-        .lp-in{width:100%;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#f1f5f9;font-size:0.875rem;font-family:'DM Sans',sans-serif;outline:none;transition:border-color 0.2s,background 0.2s,box-shadow 0.2s;box-sizing:border-box}
-        .lp-in::placeholder{color:#334155}
-        .lp-in:focus{border-color:#6366f1;background:rgba(99,102,241,0.06);box-shadow:0 0 0 3px rgba(99,102,241,0.15)}
-        .lp-in:disabled{opacity:0.5;cursor:not-allowed}
-        .lp-in.pi{padding-right:42px}
-        .lp-eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#334155;display:flex;align-items:center;padding:2px;transition:color 0.15s}
-        .lp-eye:hover{color:#94a3b8}
-        .lp-str{display:flex;align-items:center;gap:10px;margin-top:8px}
-        .lp-strtrack{flex:1;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
-        .lp-strfill{height:100%;border-radius:2px;transition:width 0.4s,background 0.4s}
-        .lp-strlbl{font-size:0.7rem;font-weight:600;min-width:38px;text-align:right}
-        .lp-alert{display:flex;align-items:flex-start;gap:9px;border-radius:10px;padding:11px 13px;font-size:0.82rem;line-height:1.5;margin-bottom:16px}
-        .lp-aerr{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#fca5a5}
-        .lp-aok{background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);color:#86efac}
-        .lp-sub{width:100%;padding:11px 16px;border-radius:10px;border:none;background:linear-gradient(135deg,#6366f1,#7c3aed);color:#fff;font-size:0.9rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:'DM Sans',sans-serif;transition:opacity 0.2s,transform 0.15s,box-shadow 0.2s;box-shadow:0 4px 20px rgba(99,102,241,0.35);margin-bottom:6px;margin-top:4px}
-        .lp-sub:hover:not(:disabled){opacity:0.92;transform:translateY(-1px);box-shadow:0 6px 28px rgba(99,102,241,0.45)}
-        .lp-sub:active:not(:disabled){transform:translateY(0)}
-        .lp-sub:disabled{opacity:0.5;cursor:not-allowed}
-        .lp-sw{text-align:center;font-size:0.82rem;color:#475569;margin-top:18px}
-        .lp-swb{background:none;border:none;color:#818cf8;font-weight:600;cursor:pointer;font-size:0.82rem;font-family:'DM Sans',sans-serif;padding:0}
-        .lp-swb:hover{color:#a5b4fc}
-        .lp-tos{text-align:center;font-size:0.7rem;color:#1e293b;margin-top:14px;line-height:1.5}
-        .lp-tos a{color:#334155;text-decoration:underline}
-        .lp-tos a:hover{color:#64748b}
-        .fe{animation:slideUp 0.3s ease both}
-      `}</style>
+      {/* Styles loaded from styles/pages/login.css */}
 
       <div className={`lp-root${mounted?" on":""}`}>
 

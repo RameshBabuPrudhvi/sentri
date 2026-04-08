@@ -47,4 +47,64 @@
 .lp-tdot { width: 20px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); transition: background 0.3s, width 0.3s; }
 .lp-tdot.on { background: #6366f1; width: 28px; }
 @media (max-width: 900px) { .lp-left { display: none; } }
-/* PART2_MARKER */
+
+/* ── Right panel (form) ─────────────────────────────────────────────────────── */
+.lp-right { width: 480px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #0d1117; border-left: 1px solid rgba(255,255,255,0.06); padding: 48px 40px; }
+@media (max-width: 900px) { .lp-right { width: 100%; border-left: none; } }
+.lp-fw { width: 100%; max-width: 360px; animation: slideUp 0.6s cubic-bezier(0.16,1,0.3,1) 0.1s both; }
+.lp-fh { margin-bottom: 28px; }
+.lp-ftit { font-family: 'Syne', sans-serif; font-size: 1.6rem; font-weight: 700; color: #f1f5f9; margin: 0 0 6px; letter-spacing: -0.5px; }
+.lp-fsub { font-size: 0.875rem; color: #64748b; margin: 0; }
+
+/* ── OAuth buttons ──────────────────────────────────────────────────────────── */
+.lp-oauth { display: flex; gap: 10px; margin-bottom: 20px; }
+.lp-ob { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 8px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.2s; font-family: 'DM Sans', sans-serif; }
+.lp-ob:hover:not(:disabled) { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #f1f5f9; transform: translateY(-1px); }
+.lp-ob:active:not(:disabled) { transform: translateY(0); }
+.lp-ob:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Divider ────────────────────────────────────────────────────────────────── */
+.lp-div { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.lp-dline { flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
+.lp-div span { font-size: 0.72rem; color: #334155; white-space: nowrap; letter-spacing: 0.3px; }
+
+/* ── Form fields ────────────────────────────────────────────────────────────── */
+.lp-field { margin-bottom: 16px; }
+.lp-lrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+.lp-lbl { font-size: 0.78rem; font-weight: 500; color: #64748b; letter-spacing: 0.3px; }
+.lp-forgot { font-size: 0.75rem; color: #6366f1; text-decoration: none; font-weight: 500; }
+.lp-forgot:hover { color: #818cf8; }
+.lp-iw { position: relative; }
+.lp-in { width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); color: #f1f5f9; font-size: 0.875rem; font-family: 'DM Sans', sans-serif; outline: none; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; box-sizing: border-box; }
+.lp-in::placeholder { color: #334155; }
+.lp-in:focus { border-color: #6366f1; background: rgba(99,102,241,0.06); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+.lp-in:disabled { opacity: 0.5; cursor: not-allowed; }
+.lp-in.pi { padding-right: 42px; }
+.lp-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #334155; display: flex; align-items: center; padding: 2px; transition: color 0.15s; }
+.lp-eye:hover { color: #94a3b8; }
+
+/* ── Password strength ──────────────────────────────────────────────────────── */
+.lp-str { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.lp-strtrack { flex: 1; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.lp-strfill { height: 100%; border-radius: 2px; transition: width 0.4s, background 0.4s; }
+.lp-strlbl { font-size: 0.7rem; font-weight: 600; min-width: 38px; text-align: right; }
+
+/* ── Alerts ─────────────────────────────────────────────────────────────────── */
+.lp-alert { display: flex; align-items: flex-start; gap: 9px; border-radius: 10px; padding: 11px 13px; font-size: 0.82rem; line-height: 1.5; margin-bottom: 16px; }
+.lp-aerr { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
+.lp-aok { background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.2); color: #86efac; }
+
+/* ── Submit button ──────────────────────────────────────────────────────────── */
+.lp-sub { width: 100%; padding: 11px 16px; border-radius: 10px; border: none; background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff; font-size: 0.9rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: 'DM Sans', sans-serif; transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s; box-shadow: 0 4px 20px rgba(99,102,241,0.35); margin-bottom: 6px; margin-top: 4px; }
+.lp-sub:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); box-shadow: 0 6px 28px rgba(99,102,241,0.45); }
+.lp-sub:active:not(:disabled) { transform: translateY(0); }
+.lp-sub:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Footer links ───────────────────────────────────────────────────────────── */
+.lp-sw { text-align: center; font-size: 0.82rem; color: #475569; margin-top: 18px; }
+.lp-swb { background: none; border: none; color: #818cf8; font-weight: 600; cursor: pointer; font-size: 0.82rem; font-family: 'DM Sans', sans-serif; padding: 0; }
+.lp-swb:hover { color: #a5b4fc; }
+.lp-tos { text-align: center; font-size: 0.7rem; color: #1e293b; margin-top: 14px; line-height: 1.5; }
+.lp-tos a { color: #334155; text-decoration: underline; }
+.lp-tos a:hover { color: #64748b; }
+.fe { animation: slideUp 0.3s ease both; }
