@@ -132,11 +132,21 @@ function isApiTestCode(code) {
 function playwrightToCurl(fullCode) {
   if (!fullCode) return null;
 
-  // Find every API call: (variable).METHOD('URL', optionalOptions)
-  // Match common variable names the AI assigns from request.newContext() —
-  // request, context, api, apiContext, apiRequestContext, res, client, http —
-  // as well as the `response = await X.method(...)` pattern.
-  const callRe = /(?:request|context|api|apiContext|apiRequestContext|res|client|http|response\s*=\s*await\s+\w+)\s*\.\s*(get|post|put|patch|delete|head)\s*\(\s*(['"`])([^'"`]+)\2(?:\s*,\s*(\{[\s\S]*?\})\s*)?\)/gi;
+  // Dynamically discover variable names assigned from request.newContext().
+  // e.g. "const ctx = await request.newContext(...)" → adds "ctx" to the match list.
+  const ctxNames = new Set(["request", "context", "api", "apiContext", "apiRequestContext", "res", "client", "http"]);
+  const ctxAssignRe = /(?:const|let|var)\s+(\w+)\s*=\s*await\s+\w+\.newContext\s*\(/g;
+  let ctxMatch;
+  while ((ctxMatch = ctxAssignRe.exec(fullCode)) !== null) {
+    ctxNames.add(ctxMatch[1]);
+  }
+
+  // Build the regex with all discovered variable names.
+  const namesAlt = [...ctxNames].join("|");
+  const callRe = new RegExp(
+    `(?:${namesAlt}|response\\s*=\\s*await\\s+\\w+)\\s*\\.\\s*(get|post|put|patch|delete|head)\\s*\\(\\s*(['\"\`])([^'\"\`]+)\\2(?:\\s*,\\s*(\\{[\\s\\S]*?\\})\\s*)?\\)`,
+    "gi"
+  );
 
   const commands = [];
   let match;
