@@ -83,9 +83,17 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   // Resolve concurrency: per-run override → env default → 1 (sequential)
   const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
 
-  // Check if every test in the batch is API-only — if so, skip the entire
-  // browser launch + trace context to save ~100-200MB of RAM.
-  const allApiOnly = tests.every(t => t.playwrightCode && isApiTest(t.playwrightCode));
+  // Classify each test once upfront and cache the result on the test object.
+  // This avoids re-parsing the code body via isApiTest() multiple times per
+  // test (previously called 4× each: allApiOnly, apiCount, logging, executeTest).
+  // executeTest reads test._isApi instead of re-calling isApiTest().
+  for (const t of tests) {
+    t._isApi = !!(t.playwrightCode && isApiTest(t.playwrightCode));
+  }
+
+  // If every test is API-only, skip the entire browser launch + trace context
+  // to save ~100-200MB of RAM.
+  const allApiOnly = tests.every(t => t._isApi);
 
   let browser = null;
   let traceContext = null;
@@ -118,7 +126,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     }
   }
 
-  const apiCount = tests.filter(t => t.playwrightCode && isApiTest(t.playwrightCode)).length;
+  const apiCount = tests.filter(t => t._isApi).length;
   const modeLabel = workers > 1 ? `${workers} parallel workers` : "sequential";
   log(run, `🚀 Starting test run: ${tests.length} tests (${modeLabel})`);
   log(run, `⚙️ Run config:`);
@@ -175,9 +183,8 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       if (signal?.aborted) return;
 
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
-      const isApi = !!(test.playwrightCode && isApiTest(test.playwrightCode));
       const workerTag = workers > 1 ? ` [w${(i % workers) + 1}]` : "";
-      const typeTag = isApi ? "🌐 API" : hasCode ? "executing generated code" : "fallback smoke test";
+      const typeTag = test._isApi ? "🌐 API" : hasCode ? "executing generated code" : "fallback smoke test";
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {

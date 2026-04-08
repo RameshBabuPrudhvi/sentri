@@ -113,11 +113,21 @@ function formatTestError(err) {
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, db) {
   // ── API-only test path: no browser context needed ──────────────────────
-  if (test.playwrightCode && isApiTest(test.playwrightCode)) {
+  // Use the cached _isApi flag set by testRunner.js (avoids re-parsing).
+  // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
+  const isApi = test._isApi ?? (test.playwrightCode && isApiTest(test.playwrightCode));
+  if (isApi) {
     return executeApiTest(test, runId, stepIndex, runStart);
   }
 
-  // ── Browser-based test path (original behaviour) ───────────────────────
+  // ── Browser-based test path — browser must be available ────────────────
+  if (!browser) {
+    throw new Error(
+      `Browser test "${test.name}" requires a browser instance but none was launched. ` +
+      `This can happen if the test was misclassified as API-only during batch setup.`
+    );
+  }
+
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
