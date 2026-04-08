@@ -55,3 +55,110 @@
   font-family: var(--font-mono); font-size: 0.78rem;
   color: #6ab4a0; overflow-x: auto; line-height: 2;
 }
+
+/* ── Provider card ──────────────────────────────────────────────────────────── */
+.st-provider-card {
+  border-radius: var(--radius-lg); padding: 24px;
+  transition: all 0.2s; position: relative;
+}
+.st-provider-active-pill {
+  position: absolute; top: 16px; right: 16px;
+  display: flex; align-items: center; gap: 5;
+  border-radius: 99px; padding: 3px 10px;
+}
+.st-provider-header {
+  display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;
+}
+.st-provider-icon {
+  width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+}
+.st-provider-badge {
+  font-size: 0.65rem; font-weight: 700;
+  padding: 2px 7px; border-radius: 99px;
+}
+.st-provider-desc {
+  font-size: 0.82rem; color: var(--text2); margin-bottom: 16px; line-height: 1.6;
+}
+.st-provider-warning {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px;
+  padding: 10px 12px; border-radius: var(--radius);
+  background: rgba(255,165,2,0.07); border: 1px solid rgba(255,165,2,0.2);
+}
+.st-provider-warning-text {
+  font-size: 0.76rem; color: var(--amber); line-height: 1.5;
+}
+
+/* ── Key status row (saved API key) ─────────────────────────────────────────── */
+.st-key-status {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: var(--bg3); border-radius: var(--radius);
+  margin-bottom: 12px; border: 1px solid var(--border);
+}
+
+/* ── Key input row ──────────────────────────────────────────────────────────── */
+.st-key-input-row { display: flex; gap: 8px; }
+.st-key-input-wrap { flex: 1; position: relative; }
+.st-key-toggle {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--text3); padding: 0;
+}
+
+/* ── Status feedback (saved / error) ────────────────────────────────────────── */
+.st-status-ok {
+  margin-top: 8px; display: flex; align-items: center; gap: 6;
+  color: var(--green); font-size: 0.78rem;
+}
+.st-status-err {
+  margin-top: 8px; font-size: 0.78rem; color: var(--red);
+}
+
+/* ── Docs link ──────────────────────────────────────────────────────────────── */
+.st-docs-link {
+  display: inline-flex; align-items: center; gap: 5;
+  margin-top: 12px; font-size: 0.76rem;
+}
+
+/* ── Section title ──────────────────────────────────────────────────────────── */
+.st-section-title {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+}
+.st-section-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--bg3); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ── Data action row ────────────────────────────────────────────────────────── */
+.st-data-action {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── Provider banner (active / missing) ─────────────────────────────────────── */
+.st-provider-banner {
+  margin-bottom: 28px; padding: 14px 20px; border-radius: var(--radius-lg);
+  display: flex; align-items: center; gap: 12px;
+}
+.st-active-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 8px var(--green);
+}
+
+/* ── Env tip card ───────────────────────────────────────────────────────────── */
+.st-env-tip {
+  margin-top: 28px; padding: 16px 20px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── Restart tour card ──────────────────────────────────────────────────────── */
+.st-tour-card {
+  margin-top: 28px; padding: 16px 20px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex; align-items: center; gap: 14px;
+}

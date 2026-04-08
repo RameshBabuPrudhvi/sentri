@@ -122,27 +122,27 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
           : "#fca5a5"}`,
       }}>
         {checking
-          ? <RefreshCw size={14} color="var(--text3)" className="spin" style={{ flexShrink: 0, marginTop: 1 }} />
+          ? <RefreshCw size={14} color="var(--text3)" className="spin shrink-0" style={{ marginTop: 1 }} />
           : status?.ok
-          ? <Wifi size={14} color="var(--green)" style={{ flexShrink: 0, marginTop: 1 }} />
-          : <WifiOff size={14} color="var(--red)" style={{ flexShrink: 0, marginTop: 1 }} />}
-        <div style={{ flex: 1, minWidth: 0 }}>
+          ? <Wifi size={14} color="var(--green)" className="shrink-0" style={{ marginTop: 1 }} />
+          : <WifiOff size={14} color="var(--red)" className="shrink-0" style={{ marginTop: 1 }} />}
+        <div className="flex-1" style={{ minWidth: 0 }}>
           {status == null || checking
-            ? <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>Checking Ollama…</span>
+            ? <span className="text-sm text-sub">Checking Ollama…</span>
             : status.ok
-            ? <span style={{ fontSize: "0.82rem", color: "var(--green)", fontWeight: 500 }}>
-                Connected · <span style={{ fontFamily: "var(--font-mono)" }}>{status.model}</span>
+            ? <span className="text-sm font-semi" style={{ color: "var(--green)" }}>
+                Connected · <span className="text-mono">{status.model}</span>
               </span>
-            : <span style={{ fontSize: "0.78rem", color: "var(--red)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            : <span className="text-xs" style={{ color: "var(--red)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                 {status.error}
               </span>}
         </div>
-        <button className="btn btn-ghost btn-xs" onClick={check} disabled={checking} style={{ flexShrink: 0 }}>
+        <button className="btn btn-ghost btn-xs shrink-0" onClick={check} disabled={checking}>
           <RefreshCw size={11} className={checking ? "spin" : undefined} /> Check
         </button>
       </div>
       {!status?.ok && status != null && !checking && (
-        <div style={{ fontSize: "0.7rem", color: "var(--text3)", fontStyle: "italic" }}>
+        <div className="hint" style={{ fontStyle: "italic" }}>
           Status reflects the last saved config. Click "Activate Ollama" first if you changed the URL or model above.
         </div>
       )}
@@ -203,11 +203,11 @@ function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
       </div>
 
       {/* Quick-start instructions */}
-      <div style={{ padding: "12px 14px", background: "var(--bg3)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-        <div style={{ fontSize: "0.78rem", fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="card-padded-sm" style={{ background: "var(--bg3)" }}>
+        <div className="font-semi text-xs" style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
           <Terminal size={13} color="var(--text2)" /> Quick start
         </div>
-        <pre style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{
+        <pre className="text-mono text-sub" style={{ margin: 0, fontSize: "0.75rem", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{
 `# 1. Install Ollama
 curl -fsSL https://ollama.ai/install.sh | sh
 
@@ -221,8 +221,8 @@ ollama serve                  # default: http://localhost:11434`
         }</pre>
       </div>
 
-      <div style={{ fontSize: "0.73rem", color: "var(--text3)", display: "flex", alignItems: "flex-start", gap: 6 }}>
-        <Info size={11} style={{ flexShrink: 0, marginTop: 2 }} />
+      <div className="hint" style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+        <Info size={11} className="shrink-0" style={{ marginTop: 2 }} />
         <span>
           For best results use a model with strong JSON output and code generation.
           Recommended: <strong>mistral:7b</strong>, <strong>qwen2.5-coder:7b</strong>, <strong>mistral</strong>.
@@ -304,44 +304,34 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
   }
 
   return (
-    <div style={{
+    <div className="st-provider-card" style={{
       background: isActive ? provider.bg : "var(--surface)",
       border: `1px solid ${isActive ? provider.borderColor : "var(--border)"}`,
-      borderRadius: "var(--radius-lg)", padding: 24,
-      transition: "all 0.2s", position: "relative",
     }}>
       {/* Active indicator */}
       {isActive && (
-        <div style={{
-          position: "absolute", top: 16, right: 16,
-          display: "flex", alignItems: "center", gap: 5,
-          background: provider.bg, border: `1px solid ${provider.borderColor}`,
-          borderRadius: 99, padding: "3px 10px",
-        }}>
+        <div className="st-provider-active-pill" style={{ background: provider.bg, border: `1px solid ${provider.borderColor}` }}>
           <Zap size={11} color={provider.color} />
           <span style={{ fontSize: "0.7rem", fontWeight: 700, color: provider.color }}>Active</span>
         </div>
       )}
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 16 }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+      <div className="st-provider-header">
+        <div className="st-provider-icon" style={{
           background: isActive ? provider.bg : "var(--bg3)",
           border: `1px solid ${isActive ? provider.borderColor : "var(--border)"}`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 20,
         }}>
           {provider.id === "anthropic" ? "🔶" : provider.id === "openai" ? "🟢" : provider.id === "local" ? "🦙" : "🔷"}
         </div>
-        <div style={{ flex: 1 }}>
+        <div className="flex-1">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-            <span style={{ fontWeight: 700, fontSize: "1rem" }}>{provider.name}</span>
-            <span style={{ fontSize: "0.65rem", fontWeight: 700, color: provider.badgeColor, background: `${provider.badgeColor}18`, padding: "2px 7px", borderRadius: 99 }}>
+            <span className="font-bold">{provider.name}</span>
+            <span className="st-provider-badge" style={{ color: provider.badgeColor, background: `${provider.badgeColor}18` }}>
               {provider.badge}
             </span>
           </div>
-          <div style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+          <div className="text-xs text-sub">
             {provider.company}
             {!isLocal && ` · ${provider.model}`}
             {isLocal && isActive && ` · ${ollamaMdl}`}
@@ -349,19 +339,15 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
         </div>
       </div>
 
-      <div style={{ fontSize: "0.82rem", color: "var(--text2)", marginBottom: 16, lineHeight: 1.6 }}>
+      <div className="st-provider-desc">
         {provider.description}
       </div>
 
       {/* Rate limit warning */}
       {provider.warning && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 16,
-          padding: "10px 12px", borderRadius: "var(--radius)",
-          background: "rgba(255,165,2,0.07)", border: "1px solid rgba(255,165,2,0.2)",
-        }}>
-          <AlertTriangle size={13} color="var(--amber)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <span style={{ fontSize: "0.76rem", color: "var(--amber)", lineHeight: 1.5 }}>{provider.warning}</span>
+        <div className="st-provider-warning">
+          <AlertTriangle size={13} color="var(--amber)" className="shrink-0" style={{ marginTop: 2 }} />
+          <span className="st-provider-warning-text">{provider.warning}</span>
         </div>
       )}
 
@@ -394,15 +380,15 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
             )}
           </div>
           {status === "saved" && (
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
+            <div className="st-status-ok">
               <Check size={12} /> Ollama activated — using {ollamaMdl}
             </div>
           )}
           {status === "error" && (
-            <div style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--red)" }}>{error}</div>
+            <div className="st-status-err">{error}</div>
           )}
           <a href={provider.docsUrl} target="_blank" rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 12, fontSize: "0.76rem", color: provider.color }}>
+            className="st-docs-link" style={{ color: provider.color }}>
             ollama.ai <ExternalLink size={11} />
           </a>
         </>
@@ -411,14 +397,10 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
         <>
           {/* Current key status */}
           {hasKey && (
-            <div style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "8px 12px", background: "var(--bg3)", borderRadius: "var(--radius)",
-              marginBottom: 12, border: "1px solid var(--border)",
-            }}>
+            <div className="st-key-status">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Check size={13} color="var(--green)" />
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text2)" }}>{maskedKey}</span>
+                <span className="text-mono text-sm text-sub">{maskedKey}</span>
               </div>
               <button
                 className={`btn btn-sm ${confirmingDelete ? "btn-danger" : "btn-ghost"}`}
@@ -432,8 +414,8 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
           )}
 
           {/* Key input */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1, position: "relative" }}>
+          <div className="st-key-input-row">
+            <div className="st-key-input-wrap">
               <input
                 className="input"
                 type={show ? "text" : "password"}
@@ -443,8 +425,7 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
                 placeholder={hasKey ? "Enter new key to replace..." : provider.placeholder}
                 style={{ paddingRight: 40 }}
               />
-              <button onClick={() => setShow(s => !s)}
-                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0 }}>
+              <button onClick={() => setShow(s => !s)} className="st-key-toggle">
                 {show ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
@@ -456,15 +437,15 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
           </div>
 
           {status === "saved" && (
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.78rem" }}>
+            <div className="st-status-ok">
               <Check size={12} /> Key saved — provider is now active
             </div>
           )}
           {status === "error" && (
-            <div style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--red)" }}>{error}</div>
+            <div className="st-status-err">{error}</div>
           )}
           <a href={provider.docsUrl} target="_blank" rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 12, fontSize: "0.76rem", color: provider.color }}>
+            className="st-docs-link" style={{ color: provider.color }}>
             Get {provider.company} API key <ExternalLink size={11} />
           </a>
         </>
@@ -475,13 +456,11 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
 
 function SectionTitle({ icon, title, sub }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {icon}
-      </div>
+    <div className="st-section-title">
+      <div className="st-section-icon">{icon}</div>
       <div>
-        <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>{title}</div>
-        {sub && <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
+        <div className="font-bold" style={{ fontSize: "1.05rem" }}>{title}</div>
+        {sub && <div className="text-xs text-muted" style={{ marginTop: 1 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -508,17 +487,17 @@ function DataAction({ icon, label, sub, count, btnLabel, onAction }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)" }}>
-      <div style={{ color: "var(--text3)" }}>{icon}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>
+    <div className="st-data-action">
+      <div className="text-muted">{icon}</div>
+      <div className="flex-1">
+        <div className="font-semi" style={{ fontSize: "0.88rem" }}>
           {label}
-          {count != null && <span style={{ fontWeight: 400, color: "var(--text3)", marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
+          {count != null && <span className="text-xs text-muted" style={{ fontWeight: 400, marginLeft: 6 }}>({count})</span>}
         </div>
-        <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>{sub}</div>
+        <div className="text-xs text-muted" style={{ marginTop: 2 }}>{sub}</div>
       </div>
       {result ? (
-        <span style={{ fontSize: "0.78rem", color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
+        <span className="st-status-ok" style={{ marginTop: 0 }}>
           <Check size={12} /> {result}
         </span>
       ) : (
@@ -612,26 +591,24 @@ export default function Settings() {
       {tab === "providers" && <>
       {/* Active provider banner */}
       {!loading && config && (
-        <div style={{
-          marginBottom: 28, padding: "14px 20px", borderRadius: "var(--radius-lg)",
+        <div className="st-provider-banner" style={{
           background: config.hasProvider ? "rgba(0,229,255,0.05)" : "rgba(255,71,87,0.05)",
           border: `1px solid ${config.hasProvider ? "rgba(0,229,255,0.15)" : "rgba(255,71,87,0.2)"}`,
-          display: "flex", alignItems: "center", gap: 12,
         }}>
           {config.hasProvider ? (
             <>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px var(--green)" }} />
+              <div className="st-active-dot" />
               <div>
-                <div style={{ fontWeight: 700, color: "var(--text)" }}>Active: {config.providerName}</div>
-                <div style={{ fontSize: "0.76rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>{config.model}</div>
+                <div className="font-bold">Active: {config.providerName}</div>
+                <div className="text-xs text-muted text-mono">{config.model}</div>
               </div>
             </>
           ) : (
             <>
               <AlertTriangle size={18} color="var(--red)" />
               <div>
-                <div style={{ fontWeight: 700, color: "var(--red)" }}>No AI provider configured</div>
-                <div style={{ fontSize: "0.76rem", color: "var(--text3)" }}>
+                <div className="font-bold" style={{ color: "var(--red)" }}>No AI provider configured</div>
+                <div className="text-xs text-muted">
                   Add an API key below, or activate Ollama for 100% local inference
                 </div>
               </div>
@@ -642,11 +619,11 @@ export default function Settings() {
 
       {/* Provider cards */}
       {loading ? (
-        <div style={{ display: "grid", gap: 16 }}>
+        <div className="flex-col gap-lg">
           {[0, 1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 200, borderRadius: 16 }} />)}
         </div>
       ) : (
-        <div style={{ display: "grid", gap: 16 }}>
+        <div className="flex-col gap-lg">
           {PROVIDERS.map(p => (
             <ProviderCard
               key={p.id}
@@ -663,9 +640,9 @@ export default function Settings() {
       )}
 
       {/* .env tip */}
-      <div style={{ marginTop: 28, padding: "16px 20px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)" }}>
-        <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: 10 }}>Prefer environment variables?</div>
-        <div style={{ fontSize: "0.8rem", color: "var(--text2)", lineHeight: 1.8 }}>
+      <div className="st-env-tip">
+        <div className="font-bold" style={{ fontSize: "0.85rem", marginBottom: 10 }}>Prefer environment variables?</div>
+        <div className="text-sm text-sub" style={{ lineHeight: 1.8 }}>
           Add to <span className="mono" style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>backend/.env</span> for persistence across restarts:
         </div>
         <pre className="code-block" style={{ marginTop: 10 }}>{`# Cloud providers
@@ -712,7 +689,7 @@ OLLAMA_MODEL=mistral:7b`}</pre>
       {/* ── Tab: Data ── */}
       {tab === "data" && <>
       <SectionTitle icon={<Database size={16} color="var(--amber)" />} title="Data Management" sub="Clear in-memory data — all data is ephemeral and resets on server restart" />
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="flex-col gap-md">
         <DataAction icon={<Activity size={16} />} label="Run History" sub="All crawl and test run records, including logs and results" count={sysInfo?.runs} btnLabel="Clear Runs" onAction={async () => { const r = await api.clearRuns(); await reload(); return r; }} />
         <DataAction icon={<Clock size={16} />} label="Activity Log" sub="Timeline of all user and system actions" count={sysInfo?.activities} btnLabel="Clear Log" onAction={async () => { const r = await api.clearActivities(); await reload(); return r; }} />
         <DataAction icon={<Shield size={16} />} label="Self-Healing History" sub="Learned selector strategies — clearing forces the waterfall to start fresh" count={sysInfo?.healingEntries} btnLabel="Clear History" onAction={async () => { const r = await api.clearHealing(); await reload(); return r; }} />
@@ -742,27 +719,18 @@ OLLAMA_MODEL=mistral:7b`}</pre>
           ))}
         </div>
       ) : (
-        <div style={{ padding: "20px 0", color: "var(--text3)", fontSize: "0.85rem" }}>Could not load system info.</div>
+        <div className="text-sm text-muted" style={{ padding: "20px 0" }}>Could not load system info.</div>
       )}
       </>}
 
       {/* ── Restart onboarding tour ── */}
-      <div style={{
-        marginTop: 28, padding: "16px 20px",
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        display: "flex", alignItems: "center", gap: 14,
-      }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)",
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        }}>
+      <div className="st-tour-card">
+        <div className="st-section-icon icon-box-accent shrink-0">
           <Compass size={16} color="var(--accent)" />
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: "0.88rem" }}>Getting Started Tour</div>
-          <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>
+        <div className="flex-1">
+          <div className="font-bold" style={{ fontSize: "0.88rem" }}>Getting Started Tour</div>
+          <div className="text-xs text-muted" style={{ marginTop: 2 }}>
             Re-run the onboarding walkthrough that guides you through setup.
           </div>
         </div>
