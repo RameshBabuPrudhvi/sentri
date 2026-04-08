@@ -107,10 +107,42 @@ export function repairBrokenStringLiterals(code) {
   let inSingle = false;
   let inDouble = false;
   let inTemplate = false;
+  let inLineComment = false;
+  let inBlockComment = false;
   let escaped = false;
 
   for (let i = 0; i < code.length; i++) {
     const ch = code[i];
+    const next = code[i + 1];
+
+    // ── Comment tracking (only when not inside string literals) ────────────
+    if (!inSingle && !inDouble && !inTemplate) {
+      if (!inLineComment && !inBlockComment && ch === "/" && next === "/") {
+        inLineComment = true;
+        out += ch;
+        continue;
+      }
+      if (!inLineComment && !inBlockComment && ch === "/" && next === "*") {
+        inBlockComment = true;
+        out += ch;
+        continue;
+      }
+    }
+
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += "/";
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
 
     if (escaped) {
       out += ch;

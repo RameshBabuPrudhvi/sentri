@@ -39,6 +39,20 @@ test("does not alter template literals", () => {
   assert.equal(repaired, code);
 });
 
+test("does not treat apostrophes in line comments as string delimiters", () => {
+  const code = "// Don't break here\nconst value = 'ok';";
+  const repaired = repairBrokenStringLiterals(code);
+  assert.equal(repaired, code);
+  assert.equal(repaired.includes("\n"), true);
+});
+
+test("does not treat apostrophes in block comments as string delimiters", () => {
+  const code = "/* user's note: don't touch */\nconst value = 'ok';";
+  const repaired = repairBrokenStringLiterals(code);
+  assert.equal(repaired, code);
+  assert.equal(repaired.includes("\n"), true);
+});
+
 if (process.exitCode) {
   console.log("\n⚠️ codeParsing tests failed");
   process.exit(1);
