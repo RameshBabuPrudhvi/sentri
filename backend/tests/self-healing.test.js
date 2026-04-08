@@ -22,8 +22,8 @@ console.log("\n🩹 self-healing runtime checks");
 const helpers = getSelfHealingHelperCode({});
 
 test("safeExpect handles selector-like text via page.locator", () => {
-  assert.match(helpers, /if \(looksLikeSelector\(text\)\)/);
-  assert.match(helpers, /page\.locator\(text\)\.first\(\)/);
+  assert.match(helpers, /\.\.\.\(looksLikeSelector\(text\) \? \[p => p\.locator\(text\)\] : \[\]\)/);
+  assert.doesNotMatch(helpers, /if \(looksLikeSelector\(text\)\)\s*\{/);
 });
 
 test("safeFill prioritizes selector-like locator strategy", () => {
@@ -33,6 +33,10 @@ test("safeFill prioritizes selector-like locator strategy", () => {
 
 test("safeClick prioritizes selector-like locator strategy", () => {
   assert.match(helpers, /looksLikeSelector\(text\) \? \[p => p\.locator\(text\)\] : \[\]/);
+});
+
+test("selector heuristic does not use broad combinator match", () => {
+  assert.doesNotMatch(helpers, /\|\| \/\\\[>~\+\]\/\.test\(s\)/);
 });
 
 if (process.exitCode) process.exit(1);

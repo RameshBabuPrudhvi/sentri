@@ -126,7 +126,7 @@ export function getSelfHealingHelperCode(healingHints) {
       if (!value || typeof value !== 'string') return false;
       const s = value.trim();
       return /^(#|\\.|\\[|\\/\\/)/.test(s)
-        || /[>~+]/.test(s)
+        || /(?:[\\w\\])])\\s[>~+]\\s(?:[\\w#.\\[:])/.test(s)
         || /\\w\\[[^\\]]+\\]/.test(s)
         || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\\(/.test(s);
     };
@@ -287,21 +287,17 @@ export function getSelfHealingHelperCode(healingHints) {
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
-      if (looksLikeSelector(text)) {
-        const selectorLocator = page.locator(text).first();
-        await selectorLocator.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT });
-        await expect(selectorLocator).toBeVisible();
-        return selectorLocator;
-      }
-      const strategies = role
-        ? [
+      const strategies = [
+        ...(looksLikeSelector(text) ? [p => p.locator(text)] : []),
+        ...(role
+          ? [
             p => p.getByRole(role, { name: text }),
             p => p.getByText(text, { exact: true }),
             p => p.getByText(text),
             p => p.getByLabel(text),
             p => p.locator(\`[aria-label*="\${text}"]\`),
           ]
-        : [
+          : [
             // Input / field visibility
             p => p.getByRole('searchbox', { name: text }),
             p => p.getByRole('combobox',  { name: text }),
@@ -333,7 +329,8 @@ export function getSelfHealingHelperCode(healingHints) {
             p => p.getByText(text, { exact: true }),
             p => p.getByText(text),
             p => p.locator(\`[aria-label*="\${text}"]\`),
-          ];
+          ]),
+      ];
 
       const el = await findElement(page, strategies, { healingKey: 'expect::' + text });
       // Wait for the element to stabilise before asserting — prevents flaky
