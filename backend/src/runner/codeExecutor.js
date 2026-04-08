@@ -128,7 +128,8 @@ export async function runApiTestCode(playwrightCode, expect) {
         ctx[method] = async (...args) => {
           const start = Date.now();
           const url = typeof args[0] === "string" ? args[0] : String(args[0]);
-          const entry = { method: method.toUpperCase(), url, startTime: start, status: null, duration: null, size: null };
+          const httpMethod = method === "fetch" ? ((args[1]?.method || "GET").toUpperCase()) : method.toUpperCase();
+          const entry = { method: httpMethod, url, startTime: start, status: null, duration: null, size: null };
           try {
             const resp = await original(...args);
             entry.status = resp.status();

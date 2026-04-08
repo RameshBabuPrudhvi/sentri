@@ -24,6 +24,7 @@ export const BROWSER_HEADLESS   = process.env.BROWSER_HEADLESS !== "false";
 export const VIEWPORT_WIDTH     = parseInt(process.env.VIEWPORT_WIDTH, 10) || 1280;
 export const VIEWPORT_HEIGHT    = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
 export const NAVIGATION_TIMEOUT = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
+export const API_TEST_TIMEOUT  = parseInt(process.env.API_TEST_TIMEOUT, 10) || 30000;
 
 // ── Shared Chromium launch args ───────────────────────────────────────────────
 // Centralised so crawlBrowser, stateExplorer, and testRunner all use the same

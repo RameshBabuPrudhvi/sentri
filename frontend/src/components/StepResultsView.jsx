@@ -1044,14 +1044,16 @@ export default function StepResultsView({ result, run, onBack }) {
                               padding: "7px 10px",
                               fontWeight: 600,
                               color:
-                                n.status < 300
+                                !n.status || n.status === 0
+                                  ? "var(--red)"
+                                  : n.status < 300
                                   ? "var(--green)"
                                   : n.status < 400
                                   ? "var(--amber)"
                                   : "var(--red)",
                             }}
                           >
-                            {n.status ?? "—"}
+                            {n.status || "—"}
                           </td>
                           <td
                             style={{

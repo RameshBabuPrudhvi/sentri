@@ -24,7 +24,7 @@ import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
 import { captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
-import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, VIDEOS_DIR } from "./config.js";
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
 
 /**
  * Attach network & console listeners to a page.
@@ -293,7 +293,11 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
 
   try {
     const expect = await getExpect();
-    const apiResult = await runApiTestCode(test.playwrightCode, expect);
+    const apiPromise = runApiTestCode(test.playwrightCode, expect);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`API test timed out after ${API_TEST_TIMEOUT}ms`)), API_TEST_TIMEOUT)
+    );
+    const apiResult = await Promise.race([apiPromise, timeoutPromise]);
     // Populate network logs from the instrumented API request context
     result.network = apiResult.apiLogs || [];
   } catch (err) {
