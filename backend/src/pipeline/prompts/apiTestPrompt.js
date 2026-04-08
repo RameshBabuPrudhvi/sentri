@@ -48,8 +48,16 @@ CODE REQUIREMENTS:
 - For POST: \`const res = await api.post('/path', { data: { ... } });\`
 - Always assert: \`expect(res.status()).toBe(200);\`
 - For JSON responses: \`const body = await res.json(); expect(body).toHaveProperty('key');\`
+- When checking field types, use the ACTUAL type the API returns. If the API returns a JSON object for a field, check for \`"object"\`, not \`"string"\`. Only assert \`"string"\` when the API genuinely returns a string value.
+- Always call \`await api.dispose();\` at the end of each test to clean up the API context.
 - playwrightCode must be fully self-contained and executable.
 - Import pattern: \`import { test, expect } from '@playwright/test';\`
+
+FORBIDDEN — NEVER generate any of these in API tests:
+- \`page.goto()\`, \`page.click()\`, or any \`page.*\` method — there is NO browser page in API tests.
+- \`expect(page)\` or \`expect(page).toHaveURL()\` — the \`page\` object does not exist.
+- \`page.waitForLoadState()\` or \`page.waitForSelector()\` — these are browser-only.
+- Any reference to \`page\`, \`context\`, or \`browser\` variables — API tests only use \`request\`.
 
 PROMPT VERSION: ${PROMPT_VERSION}`;
 
@@ -99,6 +107,8 @@ STRICT RULES:
 5. For POST/PUT tests, use the observed request body as a template
 6. For POSITIVE tests, always verify the response body has NO error indicators: expect(body.error).toBeUndefined()
 7. When example response bodies are provided, assert the EXACT structure — verify all top-level keys exist using toHaveProperty()
+8. NEVER use \`page\`, \`expect(page)\`, \`page.goto()\`, or any browser API — this is an API-only test
+9. When asserting typeof on response fields, match the ACTUAL type from the example response (object, string, number, boolean) — do NOT assume string for fields that are objects
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
