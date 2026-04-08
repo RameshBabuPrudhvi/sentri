@@ -14,7 +14,7 @@
  *   getExpect()
  */
 
-import { extractTestBody, patchNetworkIdle, stripPlaywrightImports, stripHallucinatedPageAssertions } from "./codeParsing.js";
+import { extractTestBody, patchNetworkIdle, stripPlaywrightImports, stripHallucinatedPageAssertions, repairBrokenStringLiterals } from "./codeParsing.js";
 import { getSelfHealingHelperCode, applyHealingTransforms } from "../selfHealing.js";
 import playwright from "playwright";
 
@@ -34,7 +34,11 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = applyHealingTransforms(patchNetworkIdle(stripPlaywrightImports(body)));
+  const cleaned = repairBrokenStringLiterals(
+    applyHealingTransforms(
+      patchNetworkIdle(stripPlaywrightImports(body))
+    )
+  );
   const helpers = getSelfHealingHelperCode(healingHints);
 
   // eslint-disable-next-line no-new-func
@@ -87,7 +91,11 @@ export async function runApiTestCode(playwrightCode, expect) {
     throw new Error("Could not parse test body from generated code");
   }
 
-  const cleaned = stripHallucinatedPageAssertions(patchNetworkIdle(stripPlaywrightImports(body)));
+  const cleaned = repairBrokenStringLiterals(
+    stripHallucinatedPageAssertions(
+      patchNetworkIdle(stripPlaywrightImports(body))
+    )
+  );
 
   // Compile the function BEFORE creating the request context so that a
   // SyntaxError in the AI-generated code doesn't leak the HTTP context.

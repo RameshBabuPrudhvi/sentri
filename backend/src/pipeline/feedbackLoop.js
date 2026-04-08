@@ -32,8 +32,8 @@ const FAILURE_PATTERNS = {
     /strict mode violation/i,
   ],
   URL_MISMATCH: [
-    /toHaveURL.*received/i,
-    /expected.*toHaveURL.*received/i,
+    /url mismatch/i,
+    /redirected to unexpected url/i,
     /page\.url\(\).*not.*match/i,
   ],
   NAVIGATION_FAIL: [
@@ -50,6 +50,7 @@ const FAILURE_PATTERNS = {
   ],
   ASSERTION_FAIL: [
     /expect.*received/i,
+    /expect\(received\)\.toHaveURL\(expected\)/i,
     /toHave.*expected/i,
     /toBeVisible.*expected/i,
     /matcher error/i,
