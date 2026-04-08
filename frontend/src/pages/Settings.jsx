@@ -476,12 +476,12 @@ function ProviderCard({ provider, activeProvider, maskedKey, ollamaBaseUrl, olla
 function SectionTitle({ icon, title, sub }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-      <div className="icon-box-sm" style={{ background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 10 }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg3)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {icon}
       </div>
       <div>
-        <div className="font-bold" style={{ fontSize: "1.05rem" }}>{title}</div>
-        {sub && <div className="hint" style={{ marginTop: 1 }}>{sub}</div>}
+        <div style={{ fontWeight: 700, fontSize: "1.05rem" }}>{title}</div>
+        {sub && <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 1 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -508,14 +508,14 @@ function DataAction({ icon, label, sub, count, btnLabel, onAction }) {
   }
 
   return (
-    <div className="card" style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px" }}>
-      <div className="text-muted">{icon}</div>
-      <div className="flex-1">
-        <div className="font-semi" style={{ fontSize: "0.88rem" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)" }}>
+      <div style={{ color: "var(--text3)" }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>
           {label}
-          {count != null && <span className="text-muted" style={{ fontWeight: 400, marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
+          {count != null && <span style={{ fontWeight: 400, color: "var(--text3)", marginLeft: 6, fontSize: "0.78rem" }}>({count})</span>}
         </div>
-        <div className="kv-desc">{sub}</div>
+        <div style={{ fontSize: "0.76rem", color: "var(--text3)", marginTop: 2 }}>{sub}</div>
       </div>
       {result ? (
         <span style={{ fontSize: "0.78rem", color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
