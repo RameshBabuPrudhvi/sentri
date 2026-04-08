@@ -81,6 +81,7 @@ export function recordHealingFailure(db, testId, action, label) {
  */
 export function getHealingHint(db, testId, action, label) {
   if (!db?.healingHistory) return -1;
+  if (!testId || !action || typeof label !== "string") return -1;
   const key = `${testId}::${action}::${label}`;
   return db.healingHistory[key]?.strategyIndex ?? -1;
 }
@@ -202,7 +203,6 @@ export function getSelfHealingHelperCode(healingHints) {
       const hintKey = options.healingKey || null;
       const hintIdx = hintKey ? (__healingHints[hintKey] ?? -1) : -1;
       let lastError;
-      let winningIndex = -1;
 
       // Helper: invoke a strategy factory and feed the result to firstVisible.
       // The factory call (e.g. p => p.locator(badXPath)) can throw synchronously
@@ -218,7 +218,6 @@ export function getSelfHealingHelperCode(healingHints) {
       if (hintIdx >= 0 && hintIdx < strategies.length) {
         try {
           const locator = await tryStrategy(strategies[hintIdx], page, timeout);
-          winningIndex = hintIdx;
           if (hintKey) {
             __healingEvents.push({ key: hintKey, strategyIndex: hintIdx, healed: false });
           }
@@ -233,7 +232,6 @@ export function getSelfHealingHelperCode(healingHints) {
         if (i === hintIdx) continue; // already tried above
         try {
           const locator = await tryStrategy(strategies[i], page, timeout);
-          winningIndex = i;
           if (hintKey) {
             // Record that we healed: a different strategy won than the hint (or no hint existed)
             __healingEvents.push({ key: hintKey, strategyIndex: i, healed: hintIdx !== i });
@@ -269,8 +267,10 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function ensureReady(locator) {
-      await locator.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT });
-
+      // All three steps are best-effort: if the element is momentarily detached
+      // or hidden, we still want to attempt scroll + attach before giving up.
+      // The caller's retry loop will re-attempt the full sequence if needed.
+      try { await locator.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT }); } catch {}
       try { await locator.scrollIntoViewIfNeeded(); } catch {}
       try { await locator.waitFor({ state: 'attached' }); } catch {}
     }
@@ -302,9 +302,12 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.locator(\`[title*="\${text}"]\`),
         ];
 
-      const el = await findElement(page, strategies, { healingKey: 'click::' + text });
+      const healingKey = 'click::' + text;
 
       await retry(async () => {
+        // Re-resolve on every attempt so a DOM re-render (common in SPAs)
+        // doesn't leave us retrying with a stale/detached locator reference.
+        const el = await findElement(page, strategies, { healingKey });
         await ensureReady(el);
         await el.click({ timeout: DEFAULT_TIMEOUT });
       });
@@ -314,6 +317,68 @@ export function getSelfHealingHelperCode(healingHints) {
       // Use domcontentloaded (not networkidle) because SPAs and e-commerce
       // sites fire continuous background requests and never reach networkidle,
       // causing a guaranteed timeout.
+      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+    }
+
+    async function safeHover(page, text) {
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeHover: text argument is required (got ' + typeof text + ')');
+      }
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByRole('button', { name: text }),
+          p => p.getByRole('link',   { name: text }),
+          p => p.getByRole('menuitem', { name: text }),
+          p => p.getByRole('tab',    { name: text }),
+          p => p.getByRole('img',    { name: text }),
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+          p => p.locator(\`[title*="\${text}"]\`),
+        ];
+
+      const healingKey = 'hover::' + text;
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey });
+        await ensureReady(el);
+        await el.hover({ timeout: DEFAULT_TIMEOUT });
+      });
+
+      // Brief pause after hover to let menus/tooltips render
+      await sleep(300);
+    }
+
+    async function safeDblClick(page, text) {
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeDblClick: text argument is required (got ' + typeof text + ')');
+      }
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByRole('button', { name: text }),
+          p => p.getByRole('link',   { name: text }),
+          p => p.getByRole('menuitem', { name: text }),
+          p => p.getByRole('tab',    { name: text }),
+          p => p.getByRole('checkbox', { name: text }),
+          p => p.getByRole('radio',    { name: text }),
+          p => p.getByRole('switch',   { name: text }),
+          p => p.getByRole('option',   { name: text }),
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+          p => p.locator(\`[title*="\${text}"]\`),
+        ];
+
+      const healingKey = 'dblclick::' + text;
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey });
+        await ensureReady(el);
+        await el.dblclick({ timeout: DEFAULT_TIMEOUT });
+      });
+
       await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
     }
 
@@ -350,9 +415,12 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
         ];
 
-      const el = await findElement(page, strategies, { healingKey: 'fill::' + labelOrPlaceholder });
+      const healingKey = 'fill::' + labelOrPlaceholder;
 
       await retry(async () => {
+        // Re-resolve on every attempt so a DOM re-render (common in SPAs)
+        // doesn't leave us retrying with a stale/detached locator reference.
+        const el = await findElement(page, strategies, { healingKey });
         await ensureReady(el);
         await el.fill('');
         await el.fill(strValue);
@@ -411,6 +479,7 @@ export function getSelfHealingHelperCode(healingHints) {
               p => p.getByRole('option',     { name: text }),
               p => p.getByText(text, { exact: true }),
               p => p.getByText(text),
+              p => p.getByLabel(text),
               p => p.locator(\`[aria-label*="\${text}"]\`),
             ]),
         ];
@@ -502,6 +571,69 @@ export function applyHealingTransforms(code) {
       /page\.locator\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
       (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
     )
+    // page.getByLabel(...).click() — label-based clicks on form elements
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByPlaceholder(...).click() — clicking into inputs by placeholder
+    .replace(
+      /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByTestId(...).click() — very common AI pattern
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByAltText(...).click() — image clicks
+    .replace(
+      /page\.getByAltText\(['"`]([^'"`]+)['"`]\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // ── Hover transforms → safeHover ────────────────────────────────────────
+    .replace(
+      /\bpage\.hover\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeHover(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.hover\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeHover(page, '${esc(sel)}')`
+    )
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`]\)\.hover\(\)/g,
+      (match, arg) => `safeHover(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.hover\(\)/g,
+      (match, arg) => `safeHover(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.hover\(\)/g,
+      (match, arg) => `safeHover(page, '${esc(arg)}')`
+    )
+    // ── Double-click transforms → safeDblClick ──────────────────────────────
+    .replace(
+      /\bpage\.dblclick\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeDblClick(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.dblclick\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeDblClick(page, '${esc(sel)}')`
+    )
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`]\)\.dblclick\(\)/g,
+      (match, arg) => `safeDblClick(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.dblclick\(\)/g,
+      (match, arg) => `safeDblClick(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.dblclick\(\)/g,
+      (match, arg) => `safeDblClick(page, '${esc(arg)}')`
+    )
+    // ── Fill transforms ─────────────────────────────────────────────────────
     .replace(
       /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
       (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
@@ -513,6 +645,16 @@ export function applyHealingTransforms(code) {
     .replace(
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.fill\(([^)]+)\)/g,
       (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.getByTestId(...).fill(val) — very common AI pattern
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.locator(...).fill(val) — e.g. page.locator('#email').fill('test@x.com')
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
+      (match, sel, val) => looksLikeCssSelector(sel) ? match : `safeFill(page, '${esc(sel)}', ${val})`
     )
     // ── Assertion transforms ────────────────────────────────────────────────
     // Rewrite ALL role-based visibility assertions into safeExpect.
@@ -558,6 +700,21 @@ export function applyHealingTransforms(code) {
     .replace(
       /(?:await\s+)?expect\(page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
       (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
+    )
+    // expect(page.getByTestId(...)).toBeVisible() — very common AI pattern
+    .replace(
+      /(?:await\s+)?expect\(page\.getByTestId\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
+    )
+    // expect(page.getByAltText(...)).toBeVisible() — image visibility
+    .replace(
+      /(?:await\s+)?expect\(page\.getByAltText\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
+    )
+    // expect(page.locator(...)).toBeVisible() — leave CSS selectors alone
+    .replace(
+      /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
     );
 }
 
@@ -569,6 +726,8 @@ STRICT RULE: Use ONLY self-healing helpers for ALL interactions AND visibility a
 
 INTERACTIONS — use these exclusively:
   ✓ await safeClick(page, text)            — for any click
+  ✓ await safeDblClick(page, text)         — for any double-click
+  ✓ await safeHover(page, text)            — for any hover (menus, tooltips)
   ✓ await safeFill(page, label, value)     — for any input fill
 
 VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
@@ -593,8 +752,6 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.getByPlaceholder(...).click()
   ✗ page.getByTestId(...).click()
   ✗ page.getByAltText(...).click()
-  ✗ page.locator(...).dblclick()
-  ✗ page.dblclick(...)
   ✗ page.tap(...)
 
   Fills / typing (use safeFill instead):
@@ -614,9 +771,21 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.locator(...).uncheck()
   ✗ page.locator(...).selectOption(...)
 
-  Other interactions (no self-healing equivalent — avoid if possible):
-  ✗ page.hover(...)                        ← fragile; prefer safeClick on the revealed element
+  Double-clicks (use safeDblClick instead):
+  ✗ page.dblclick(...)
+  ✗ page.locator(...).dblclick()
+  ✗ page.getByText(...).dblclick()
+  ✗ page.getByRole(...).dblclick()
+  ✗ page.getByTestId(...).dblclick()
+
+  Hovers (use safeHover instead):
+  ✗ page.hover(...)
   ✗ page.locator(...).hover()
+  ✗ page.getByText(...).hover()
+  ✗ page.getByRole(...).hover()
+  ✗ page.getByTestId(...).hover()
+
+  Other interactions (no self-healing equivalent — avoid if possible):
   ✗ page.press(...)                        ← use page.keyboard.press() only when absolutely needed
   ✗ page.focus(...)
   ✗ page.dragTo(...)
