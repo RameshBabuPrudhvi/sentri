@@ -291,12 +291,21 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
   const start = Date.now();
   result.startedAt = start;
 
+  // AbortController lets us forcibly dispose Playwright request contexts
+  // inside runApiTestCode when the timeout fires, preventing lingering
+  // HTTP connections from leaking in the background.
+  const ac = new AbortController();
+  let timeoutHandle;
+
   try {
     const expect = await getExpect();
-    const apiPromise = runApiTestCode(test.playwrightCode, expect);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`API test timed out after ${API_TEST_TIMEOUT}ms`)), API_TEST_TIMEOUT)
-    );
+    const apiPromise = runApiTestCode(test.playwrightCode, expect, { signal: ac.signal });
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        ac.abort(new Error(`API test timed out after ${API_TEST_TIMEOUT}ms`));
+        reject(new Error(`API test timed out after ${API_TEST_TIMEOUT}ms`));
+      }, API_TEST_TIMEOUT);
+    });
     const apiResult = await Promise.race([apiPromise, timeoutPromise]);
     // Populate network logs from the instrumented API request context
     result.network = apiResult.apiLogs || [];
@@ -306,6 +315,7 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
     // Capture any API logs collected before the failure
     result.network = err.__apiLogs || [];
   } finally {
+    clearTimeout(timeoutHandle);
     result.durationMs = Date.now() - start;
     result.runTimestamp = start - runStart;
   }

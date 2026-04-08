@@ -10,7 +10,7 @@
  *
  * Exports:
  *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
- *   runApiTestCode(playwrightCode, expect)
+ *   runApiTestCode(playwrightCode, expect, { signal? })
  *   getExpect()
  */
 
@@ -83,9 +83,16 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
  * instead of a browser page. Creates a real APIRequestContext, runs the
  * generated code, and cleans up afterwards.
  *
- * Returns { passed: true } or throws with the error.
+ * Returns { passed: true, apiLogs } or throws with the error.
+ *
+ * @param {string} playwrightCode - The AI-generated Playwright test code.
+ * @param {Function} expect - Playwright's expect function.
+ * @param {Object} [options]
+ * @param {AbortSignal} [options.signal] - When aborted, all Playwright request
+ *   contexts are forcibly disposed so the caller (e.g. a timeout race) doesn't
+ *   leave HTTP connections lingering in the background.
  */
-export async function runApiTestCode(playwrightCode, expect) {
+export async function runApiTestCode(playwrightCode, expect, { signal } = {}) {
   const body = extractTestBody(playwrightCode);
   if (!body) {
     throw new Error("Could not parse test body from generated code");
@@ -190,6 +197,29 @@ export async function runApiTestCode(playwrightCode, expect) {
     return ctx;
   };
 
+  // Helper to forcibly dispose all request contexts (used by both normal
+  // cleanup and external abort signals).
+  async function disposeAllContexts() {
+    for (const ctx of subContexts) {
+      await ctx.dispose().catch(() => {});
+    }
+    await request.dispose().catch(() => {});
+  }
+
+  // If the caller provides an AbortSignal (e.g. from a timeout race),
+  // dispose all contexts immediately when it fires. This ensures that
+  // even if fn() is still running in the background, the underlying
+  // HTTP connections are torn down promptly.
+  let onAbort;
+  if (signal) {
+    if (signal.aborted) {
+      await disposeAllContexts();
+      throw signal.reason || new Error("Aborted");
+    }
+    onAbort = () => { disposeAllContexts(); };
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
   try {
     await fn(request, expect, apiLogs);
     return { passed: true, apiLogs };
@@ -197,10 +227,10 @@ export async function runApiTestCode(playwrightCode, expect) {
     err.__apiLogs = apiLogs;
     throw err;
   } finally {
-    for (const ctx of subContexts) {
-      await ctx.dispose().catch(() => {});
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
     }
-    await request.dispose().catch(() => {});
+    await disposeAllContexts();
   }
 }
 
