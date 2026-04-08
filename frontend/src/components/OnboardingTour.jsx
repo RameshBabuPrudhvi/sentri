@@ -99,10 +99,17 @@ export default function OnboardingTour({ tour }) {
   if (!active || !step || !visible) return null;
 
   // ── Compute tooltip position ──────────────────────────────────────────────
+  const isMobile = window.innerWidth <= 480;
   const placement = step.placement || "bottom";
   let tooltipStyle = {};
 
-  if (rect) {
+  if (isMobile) {
+    // On mobile the CSS pins left/width via !important; just set vertical pos.
+    // Place tooltip below the target if visible, otherwise near bottom of screen.
+    tooltipStyle = rect
+      ? { top: Math.min(rect.top + rect.height + TOOLTIP_GAP, window.innerHeight - 280) }
+      : { bottom: 16 };
+  } else if (rect) {
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
 
@@ -202,7 +209,7 @@ export default function OnboardingTour({ tour }) {
         />
 
         {/* Header */}
-        <div style={{ padding: "18px 20px 0", display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <div className="tour-header">
           <div className="tour-icon-box">
             <Sparkles size={18} color="#fff" />
           </div>
@@ -233,7 +240,7 @@ export default function OnboardingTour({ tour }) {
         </div>
 
         {/* Actions */}
-        <div style={{ padding: "0 20px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="tour-actions">
           {stepIndex > 0 && (
             <button className="tour-btn-back" onClick={prev}>
               <ChevronLeft size={14} /> Back

@@ -40,6 +40,11 @@
 }
 
 /* ── Tooltip header ─────────────────────────────────────────────────────────── */
+.tour-header {
+  padding: 18px 20px 0;
+  display: flex; align-items: flex-start; gap: 12px;
+}
+
 .tour-icon-box {
   width: 36px; height: 36px; border-radius: 10px;
   background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
@@ -84,6 +89,12 @@
   width: 7px;
 }
 
+/* ── Actions bar ────────────────────────────────────────────────────────────── */
+.tour-actions {
+  padding: 0 20px 18px;
+  display: flex; align-items: center; gap: 8;
+}
+
 /* ── Buttons ────────────────────────────────────────────────────────────────── */
 .tour-btn-next {
   display: inline-flex; align-items: center; gap: 5px;
@@ -122,3 +133,34 @@
   transition: color 0.15s;
 }
 .tour-close:hover { color: var(--text); }
+
+/* ── Mobile responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .tour-tooltip {
+    width: calc(100vw - 24px);
+    left: 12px !important;
+    right: 12px;
+    border-radius: var(--radius);
+  }
+
+  .tour-icon-box {
+    width: 30px; height: 30px; border-radius: 8px;
+  }
+
+  .tour-title { font-size: 0.88rem; }
+  .tour-step-label { font-size: 0.68rem; }
+
+  .tour-body {
+    padding: 10px 16px 14px;
+    font-size: 0.8rem;
+  }
+
+  .tour-dots { padding: 0 16px 12px; }
+
+  .tour-header { padding: 14px 16px 0; gap: 10px; }
+  .tour-actions { padding: 0 16px 14px; gap: 6px; }
+
+  .tour-btn-next { padding: 7px 14px; font-size: 0.78rem; }
+  .tour-btn-back { padding: 7px 12px; font-size: 0.76rem; }
+  .tour-btn-skip { padding: 7px 10px; font-size: 0.74rem; }
+}
