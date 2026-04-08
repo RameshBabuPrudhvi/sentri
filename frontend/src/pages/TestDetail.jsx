@@ -120,7 +120,8 @@ function highlightCode(code) {
 function isApiTestCode(code) {
   if (!code) return false;
   const usesRequest = /(?:request|apiContext|apiRequestContext)\s*\.\s*(newContext|get|post|put|patch|delete|head|fetch)\s*\(/.test(code);
-  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(code);
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(code)
+    || /expect\s*\(\s*page\s*\)/.test(code);
   return usesRequest && !usesPage;
 }
 
@@ -131,9 +132,11 @@ function isApiTestCode(code) {
 function playwrightToCurl(fullCode) {
   if (!fullCode) return null;
 
-  // Find every API call: (request|context|…).METHOD('URL', optionalOptions)
-  // We capture the method, URL, and the rest of the line + next few lines for options.
-  const callRe = /(?:request|context|apiContext|apiRequestContext|response\s*=\s*await\s+\w+)\s*\.\s*(get|post|put|patch|delete|head)\s*\(\s*(['"`])([^'"`]+)\2(?:\s*,\s*(\{[\s\S]*?\})\s*)?\)/gi;
+  // Find every API call: (variable).METHOD('URL', optionalOptions)
+  // Match common variable names the AI assigns from request.newContext() —
+  // request, context, api, apiContext, apiRequestContext, res, client, http —
+  // as well as the `response = await X.method(...)` pattern.
+  const callRe = /(?:request|context|api|apiContext|apiRequestContext|res|client|http|response\s*=\s*await\s+\w+)\s*\.\s*(get|post|put|patch|delete|head)\s*\(\s*(['"`])([^'"`]+)\2(?:\s*,\s*(\{[\s\S]*?\})\s*)?\)/gi;
 
   const commands = [];
   let match;

@@ -107,6 +107,7 @@ export function isApiTest(playwrightCode) {
   // without any page.goto / page.click / page.locator interactions
   const usesRequestContext = /request\s*\.\s*newContext\s*\(/.test(body)
     || /request\s*\.\s*(get|post|put|patch|delete|head|fetch)\s*\(/.test(body);
-  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(body);
+  const usesPage = /page\s*\.\s*(goto|click|locator|getByRole|getByText|getByLabel|getByPlaceholder|fill|type|check|uncheck|selectOption|waitForSelector|waitForLoadState)\s*\(/.test(body)
+    || /expect\s*\(\s*page\s*\)/.test(body);
   return usesRequestContext && !usesPage;
 }
