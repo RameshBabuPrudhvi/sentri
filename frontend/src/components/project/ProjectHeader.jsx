@@ -39,37 +39,33 @@ export default function ProjectHeader({
   const { draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed } = stats;
 
   return (
-    <div className="card" style={{ padding: 24, marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <div style={{ width: 42, height: 42, borderRadius: 10, background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div className="card pd-header">
+      <div className="pd-header-top">
+        <div className="pd-header-identity">
+          <div className="icon-box icon-box-accent">
             <Globe size={20} color="var(--accent)" />
           </div>
           <div>
             <h1 style={{ fontWeight: 700, fontSize: "1.2rem", marginBottom: 2 }}>{project.name}</h1>
-            <a href={project.url} target="_blank" rel="noreferrer" style={{ fontSize: "0.78rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>{project.url}</a>
+            <a href={project.url} target="_blank" rel="noreferrer" className="text-xs text-muted text-mono">{project.url}</a>
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+        <div className="pd-header-actions">
           {/* ── Row 1: Mode selector + Crawl button + Run button ── */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="pd-header-row">
             {/* Explore mode segmented control */}
-            <div style={{
-              display: "flex", borderRadius: "var(--radius)", overflow: "hidden",
-              border: "1px solid var(--border)", flexShrink: 0,
-            }}>
+            <div className="pd-segmented">
               {EXPLORE_MODE_OPTIONS.map(opt => {
                 const active = (crawlDialsCfg?.exploreMode || "crawl") === opt.id;
                 return (
                   <button
                     key={opt.id}
                     onClick={() => onCrawlDialsChange(prev => ({ ...prev, exploreMode: opt.id }))}
+                    className="pd-segmented-btn"
                     style={{
-                      padding: "5px 12px", border: "none", cursor: "pointer",
-                      fontSize: "0.78rem", fontWeight: active ? 600 : 400,
+                      fontWeight: active ? 600 : 400,
                       background: active ? "var(--accent-bg)" : "var(--surface)",
                       color: active ? "var(--accent)" : "var(--text2)",
-                      transition: "all 0.12s",
                       borderRight: opt.id === "crawl" ? "1px solid var(--border)" : "none",
                     }}
                     title={opt.desc}
@@ -85,21 +81,12 @@ export default function ProjectHeader({
               {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate"}
             </button>
             {/* Parallel workers compact selector */}
-            <div style={{
-              display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
-              padding: "3px 8px", borderRadius: "var(--radius)",
-              border: "1px solid var(--border)", background: "var(--surface)",
-              fontSize: "0.72rem", color: "var(--text2)",
-            }} title={PARALLEL_WORKERS_TUNING.desc}>
-              <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>⚡</span>
+            <div className="pd-workers" title={PARALLEL_WORKERS_TUNING.desc}>
+              <span className="font-semi">⚡</span>
               <select
                 value={crawlDialsCfg?.parallelWorkers ?? PARALLEL_WORKERS_TUNING.defaultVal}
                 onChange={e => onCrawlDialsChange(prev => ({ ...prev, parallelWorkers: parseInt(e.target.value, 10) }))}
-                style={{
-                  background: "transparent", border: "none", color: "var(--accent)",
-                  fontWeight: 700, fontSize: "0.78rem", cursor: "pointer",
-                  fontFamily: "var(--font-mono)", padding: 0, outline: "none",
-                }}
+                className="pd-workers-select"
               >
                 {Array.from({ length: PARALLEL_WORKERS_TUNING.max }, (_, i) => i + 1).map(n => (
                   <option key={n} value={n}>{n}x</option>
@@ -115,7 +102,7 @@ export default function ProjectHeader({
           </div>
 
           {/* ── Row 2: Dials popover + Export dropdown ── */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="pd-header-row">
             <div style={{ position: "relative" }}>
               <button
                 className="btn btn-ghost btn-xs"
@@ -134,14 +121,8 @@ export default function ProjectHeader({
               </button>
               {showDialsPopover && (
                 <>
-                  <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowDialsPopover(false)} />
-                  <div style={{
-                    position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 100,
-                    width: 420, maxHeight: "70vh", overflowY: "auto",
-                    background: "var(--surface)", border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-lg)", boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
-                    padding: 16,
-                  }}>
+                  <div className="pd-popover-backdrop" onClick={() => setShowDialsPopover(false)} />
+                  <div className="pd-popover" style={{ top: "calc(100% + 6px)", right: 0, width: 420, maxHeight: "70vh", overflowY: "auto", padding: 16 }}>
                     <CrawlDialsPanel value={crawlDialsCfg} onChange={onCrawlDialsChange} />
                   </div>
                 </>
@@ -159,32 +140,24 @@ export default function ProjectHeader({
                 </button>
                 {showExportMenu && (
                   <>
-                    <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowExportMenu(false)} />
-                    <div style={{
-                      position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 100,
-                      background: "var(--surface)", border: "1px solid var(--border)",
-                      borderRadius: "var(--radius)", boxShadow: "var(--shadow)",
-                      minWidth: 220, padding: 4,
-                    }}>
-                      <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    <div className="pd-popover-backdrop" onClick={() => setShowExportMenu(false)} />
+                    <div className="pd-dropdown" style={{ top: "calc(100% + 4px)", right: 0 }}>
+                      <div className="pd-dropdown-heading">
                         Export all {tests.length} tests
                       </div>
                       {[
                         { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import", url: api.exportZephyrUrl(projectId) },
                         { label: "TestRail CSV", desc: "TestRail bulk import", url: api.exportTestRailUrl(projectId) },
                       ].map(fmt => (
-                        <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)}
-                          style={{ display: "block", padding: "8px 12px", borderRadius: 6, textDecoration: "none", color: "var(--text)" }}
-                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                          onMouseLeave={e => e.currentTarget.style.background = "none"}>
-                          <div style={{ fontSize: "0.84rem", fontWeight: 500 }}>{fmt.label}</div>
-                          <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 1 }}>{fmt.desc}</div>
+                        <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)} className="pd-dropdown-item">
+                          <div className="pd-dropdown-item-title">{fmt.label}</div>
+                          <div className="pd-dropdown-item-desc">{fmt.desc}</div>
                         </a>
                       ))}
                       {approvedTests.length > 0 && (
                         <>
-                          <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-                          <div style={{ padding: "6px 12px", fontSize: "0.7rem", color: "var(--text3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                          <hr className="divider" style={{ margin: "4px 0" }} />
+                          <div className="pd-dropdown-heading">
                             Approved only ({approvedTests.length})
                           </div>
                           {[
@@ -192,9 +165,7 @@ export default function ProjectHeader({
                             { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(projectId, "approved") },
                           ].map(fmt => (
                             <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)}
-                              style={{ display: "block", padding: "7px 12px", borderRadius: 6, textDecoration: "none", color: "var(--text)", fontSize: "0.82rem" }}
-                              onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                              onMouseLeave={e => e.currentTarget.style.background = "none"}>
+                              className="pd-dropdown-item" style={{ padding: "7px 12px", fontSize: "0.82rem" }}>
                               {fmt.label}
                             </a>
                           ))}
@@ -210,7 +181,7 @@ export default function ProjectHeader({
       </div>
 
       {tests.length > 0 && (
-        <div style={{ display: "flex", gap: 24, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+        <div className="pd-stats">
           {[
             { label: "Draft",    val: draftTests.length,    color: "var(--amber)" },
             { label: "Approved", val: approvedTests.length, color: "var(--green)" },
@@ -223,8 +194,8 @@ export default function ProjectHeader({
             ] : []),
           ].map((s, i) => (
             <div key={i}>
-              <div style={{ fontSize: "1.4rem", fontWeight: 700, color: s.color }}>{s.val}</div>
-              <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 2 }}>{s.label}</div>
+              <div className="pd-stat-value" style={{ color: s.color }}>{s.val}</div>
+              <div className="pd-stat-label">{s.label}</div>
             </div>
           ))}
           {approvedTests.length > 0 && (() => {
@@ -234,7 +205,7 @@ export default function ProjectHeader({
                 <div className="progress-bar progress-bar-green" style={{ width: 140 }}>
                   <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
                 </div>
-                <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 4, textAlign: "right" }}>
+                <div className="pd-stat-label" style={{ marginTop: 4, textAlign: "right" }}>
                   {pct}% passing
                 </div>
               </div>

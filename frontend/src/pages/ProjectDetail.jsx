@@ -314,34 +314,27 @@ export default function ProjectDetail() {
 
       {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
       {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
-        <div style={{ marginBottom: 16, padding: "10px 16px", background: "var(--amber-bg)", border: "1px solid #fcd34d", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
-          <Info size={14} color="var(--amber)" style={{ flexShrink: 0 }} />
-          <span style={{ fontSize: "0.82rem", color: "#92400e" }}>
+        <div className="pd-banner pd-banner--amber">
+          <Info size={14} color="var(--amber)" className="shrink-0" />
+          <span className="pd-banner-text-amber">
             <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
           </span>
-          <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto", flexShrink: 0 }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
+          <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
             Review drafts <ArrowRight size={11} />
           </button>
         </div>
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 14 }}>
+      <div className="pd-tab-bar">
         {[
           ["review", `Tests (${tests.length})`],
           ["runs",   `Runs (${runs.length})`],
           ["traceability", "Traceability"],
         ].map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)} style={{
-            background: "none", border: "none", cursor: "pointer",
-            padding: "10px 18px", fontSize: "0.875rem",
-            fontWeight: tab === key ? 600 : 400,
-            color: tab === key ? "var(--accent)" : "var(--text2)",
-            borderBottom: tab === key ? "2px solid var(--accent)" : "2px solid transparent",
-            marginBottom: -1, display: "flex", alignItems: "center", gap: 6,
-          }}>
+          <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
             {key === "review" && draftTests.length > 0 && (
-              <span style={{ background: "var(--amber)", color: "#fff", borderRadius: "99px", fontSize: "0.65rem", fontWeight: 700, padding: "1px 6px" }}>{draftTests.length}</span>
+              <span className="pd-tab-badge">{draftTests.length}</span>
             )}
             {label}
           </button>
@@ -353,13 +346,9 @@ export default function ProjectDetail() {
         <div>
           {/* New tests banner — only show on draft or all filter (new tests are always drafts) */}
           {newTestIds.size > 0 && (reviewFilter === "draft" || reviewFilter === "all") && (
-            <div style={{
-              marginBottom: 14, padding: "10px 16px",
-              background: "var(--green-bg)", border: "1px solid #86efac",
-              borderRadius: 10, display: "flex", alignItems: "center", gap: 10,
-            }}>
+            <div className="pd-banner pd-banner--green">
               <span style={{ fontSize: "1rem" }}>✨</span>
-              <span style={{ fontSize: "0.82rem", color: "#14532d" }}>
+              <span className="pd-banner-text-green">
                 <strong>{newTestIds.size} new test{newTestIds.size !== 1 ? "s" : ""}</strong> generated — review and approve to add to regression.
               </span>
               <button
@@ -373,7 +362,7 @@ export default function ProjectDetail() {
           )}
 
           {tests.length === 0 ? (
-            <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+            <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
               <div style={{ fontSize: "0.875rem" }}>Click "Crawl & Generate Tests" — all generated tests will appear here as Draft for your review.</div>
@@ -381,51 +370,50 @@ export default function ProjectDetail() {
           ) : (
             <>
               {/* Filter + search row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <div className="pd-filter-row">
                 {[
                   ["draft",    `Draft (${draftTests.length})`,       "var(--amber)"],
                   ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
                   ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
                   ["all",      `All (${tests.length})`,              "var(--text2)"],
                 ].map(([key, label, color]) => (
-                  <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }} style={{
-                    padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
-                    border: `1px solid ${reviewFilter === key ? color : "var(--border)"}`,
-                    background: "transparent", color: reviewFilter === key ? color : "var(--text2)",
-                    cursor: "pointer", transition: "all 0.12s",
-                  }}>{label}</button>
+                  <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }}
+                    className="pd-filter-pill"
+                    style={{
+                      borderColor: reviewFilter === key ? color : undefined,
+                      color: reviewFilter === key ? color : undefined,
+                    }}>{label}</button>
                 ))}
 
-                {/* Category filter (UI / API) — only show when API tests exist */}
                 {apiTests.length > 0 && (
                   <>
-                    <div style={{ width: 1, height: 18, background: "var(--border)", margin: "0 4px", flexShrink: 0 }} />
+                    <div className="pd-filter-divider" />
                     {[
                       ["ui",  `UI (${uiTests.length})`,   "#7c3aed"],
                       ["api", `🌐 API (${apiTests.length})`, "#2563eb"],
                     ].map(([key, label, color]) => (
-                      <button key={key} onClick={() => { setCategoryFilter(categoryFilter === key ? "all" : key); setSelected(new Set()); setReviewPage(1); }} style={{
-                        padding: "5px 12px", borderRadius: "99px", fontSize: "0.78rem", fontWeight: 600,
-                        border: `1px solid ${categoryFilter === key ? color : "var(--border)"}`,
-                        background: categoryFilter === key ? `${color}14` : "transparent",
-                        color: categoryFilter === key ? color : "var(--text2)",
-                        cursor: "pointer", transition: "all 0.12s",
-                      }}>{label}</button>
+                      <button key={key} onClick={() => { setCategoryFilter(categoryFilter === key ? "all" : key); setSelected(new Set()); setReviewPage(1); }}
+                        className="pd-filter-pill"
+                        style={{
+                          borderColor: categoryFilter === key ? color : undefined,
+                          background: categoryFilter === key ? `${color}14` : undefined,
+                          color: categoryFilter === key ? color : undefined,
+                        }}>{label}</button>
                     ))}
                   </>
                 )}
-                <div style={{ flex: 1 }} />
-                <div style={{ position: "relative" }}>
-                  <Search size={12} color="var(--text3)" style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)" }} />
-                  <input className="input" value={search} onChange={e => { setSearch(e.target.value); setReviewPage(1); }}
-                    placeholder="Search tests..." style={{ paddingLeft: 26, height: 32, fontSize: "0.82rem", width: 200 }} />
+                <div className="flex-1" />
+                <div className="pd-search-wrap">
+                  <Search size={12} color="var(--text3)" className="pd-search-icon" />
+                  <input className="input pd-search-input" value={search} onChange={e => { setSearch(e.target.value); setReviewPage(1); }}
+                    placeholder="Search tests..." />
                 </div>
               </div>
 
               {/* Bulk action bar — dynamic labels show exact scope */}
               {(reviewFilter === "draft" || selected.size > 0) && filteredByReview.length > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.2)", borderRadius: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
+                <div className="pd-bulk-bar">
+                  <span className="pd-bulk-label">
                     {selected.size > 0 ? `${selected.size} selected` : `${filteredByReview.length} draft tests visible`}
                   </span>
                   <button className="btn btn-sm" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
@@ -448,7 +436,7 @@ export default function ProjectDetail() {
 
               <div className="card">
                 {filteredByReview.length === 0 ? (
-                  <div style={{ padding: "48px 24px", textAlign: "center", color: "var(--text2)", fontSize: "0.875rem" }}>
+                  <div className="pd-empty-sm">
                     No {reviewFilter !== "all" ? reviewFilter : ""} tests
                   </div>
                 ) : (
@@ -459,7 +447,7 @@ export default function ProjectDetail() {
                           <input type="checkbox"
                             checked={pagedReview.length > 0 && pagedReview.every(t => selected.has(t.id))}
                             onChange={e => toggleAll(e.target.checked, pagedReview.map(t => t.id))}
-                            style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                            className="pd-checkbox" />
                         </th>
                         <th>Test ID</th>
                         <th>Test Name</th>
@@ -482,10 +470,10 @@ export default function ProjectDetail() {
                           }}>
                             <td style={{ paddingRight: 0 }}>
                               <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(t.id)}
-                                style={{ accentColor: "var(--accent)", cursor: "pointer" }} />
+                                className="pd-checkbox" />
                             </td>
                             <td>
-                              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--text3)" }}>
+                              <span className="mono-id">
                                 {t.id.length > 8 ? t.id.slice(0, 8) + "…" : t.id}
                               </span>
                             </td>
@@ -496,11 +484,7 @@ export default function ProjectDetail() {
                                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                     <span style={{ fontWeight: 500, fontSize: "0.875rem" }}>{cleanTestName(t.name)}</span>
                                     {isNew && (
-                                      <span style={{
-                                        fontSize: "0.6rem", fontWeight: 700, padding: "1px 5px",
-                                        borderRadius: 4, background: "var(--green)", color: "#fff",
-                                        letterSpacing: "0.03em", lineHeight: 1.5,
-                                      }}>NEW</span>
+                                      <span className="pd-new-badge">NEW</span>
                                     )}
                                   </div>
                                   {t.description && <div style={{ fontSize: "0.73rem", color: "var(--text3)", marginTop: 1 }}>{t.description?.slice(0, 64)}</div>}
@@ -557,8 +541,8 @@ export default function ProjectDetail() {
 
               {/* Pagination */}
               {reviewTotalPages > 1 && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
+                <div className="pd-pagination">
+                  <span className="text-xs text-muted">
                     {filteredByReview.length} tests · page {reviewPage} of {reviewTotalPages}
                   </span>
                   <div style={{ display: "flex", gap: 6 }}>
@@ -585,8 +569,8 @@ export default function ProjectDetail() {
       {/* Bulk action confirmation modal */}
       {bulkConfirm && (
         <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
-          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 10 }}>Confirm bulk action</div>
-          <div style={{ fontSize: "0.875rem", color: "var(--text2)", marginBottom: 20, lineHeight: 1.6 }}>
+          <div className="pd-confirm-title">Confirm bulk action</div>
+          <div className="pd-confirm-body">
             You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

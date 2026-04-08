@@ -1,0 +1,176 @@
+/**
+ * ProjectDetail + ProjectHeader — page-specific styles
+ *
+ * Replaces the most duplicated inline style={{}} patterns.
+ * Scoped by `.pd-*` prefix (project-detail).
+ */
+
+/* ── Filter pill button (draft/approved/rejected/all + ui/api) ──────────────── */
+.pd-filter-pill {
+  padding: 5px 12px; border-radius: 99px; font-size: 0.78rem; font-weight: 600;
+  background: transparent; cursor: pointer; transition: all 0.12s;
+  border: 1px solid var(--border); color: var(--text2);
+}
+
+/* ── Bulk action bar ────────────────────────────────────────────────────────── */
+.pd-bulk-bar {
+  display: flex; align-items: center; gap: 8;
+  padding: 10px 14px;
+  background: var(--accent-bg); border: 1px solid rgba(91,110,245,0.2);
+  border-radius: 8px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.pd-bulk-label {
+  font-size: 0.82rem; color: var(--accent); font-weight: 500;
+}
+
+/* ── "NEW" badge on test rows ───────────────────────────────────────────────── */
+.pd-new-badge {
+  font-size: 0.6rem; font-weight: 700; padding: 1px 5px;
+  border-radius: 4px; background: var(--green); color: #fff;
+  letter-spacing: 0.03em; line-height: 1.5;
+}
+
+/* ── Pagination bar ─────────────────────────────────────────────────────────── */
+.pd-pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+
+/* ── Confirm modal body text ────────────────────────────────────────────────── */
+.pd-confirm-title { font-weight: 700; font-size: 1rem; margin-bottom: 10px; }
+.pd-confirm-body  { font-size: 0.875rem; color: var(--text2); margin-bottom: 20px; line-height: 1.6; }
+
+/* ── Tab bar (project detail) ───────────────────────────────────────────────── */
+.pd-tab-bar {
+  display: flex; border-bottom: 1px solid var(--border); margin-bottom: 14px;
+}
+.pd-tab {
+  background: none; border: none; cursor: pointer;
+  padding: 10px 18px; font-size: 0.875rem;
+  display: flex; align-items: center; gap: 6;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text2); font-weight: 400;
+}
+.pd-tab--active {
+  font-weight: 600; color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.pd-tab-badge {
+  background: var(--amber); color: #fff; border-radius: 99px;
+  font-size: 0.65rem; font-weight: 700; padding: 1px 6px;
+}
+
+/* ── Search input with icon ─────────────────────────────────────────────────── */
+.pd-search-wrap { position: relative; }
+.pd-search-icon {
+  position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  pointer-events: none;
+}
+.pd-search-input {
+  padding-left: 26px; height: 32px; font-size: 0.82rem; width: 200px;
+}
+
+/* ── Filter row ─────────────────────────────────────────────────────────────── */
+.pd-filter-row {
+  display: flex; align-items: center; gap: 8;
+  margin-bottom: 12px; flex-wrap: wrap;
+}
+.pd-filter-divider {
+  width: 1px; height: 18px; background: var(--border);
+  margin: 0 4px; flex-shrink: 0;
+}
+
+/* ── Banner (amber/green) ───────────────────────────────────────────────────── */
+.pd-banner {
+  margin-bottom: 14px; padding: 10px 16px;
+  border-radius: 10px; display: flex; align-items: center; gap: 10;
+}
+.pd-banner--amber {
+  background: var(--amber-bg); border: 1px solid #fcd34d;
+  margin-bottom: 16px;
+}
+.pd-banner--green {
+  background: var(--green-bg); border: 1px solid #86efac;
+}
+.pd-banner-text-amber { font-size: 0.82rem; color: #92400e; }
+.pd-banner-text-green { font-size: 0.82rem; color: #14532d; }
+
+/* ── Project header card ────────────────────────────────────────────────────── */
+.pd-header { padding: 24px; margin-bottom: 16px; }
+.pd-header-top {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; gap: 16px;
+}
+.pd-header-identity { display: flex; gap: 14px; align-items: center; }
+.pd-header-actions {
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
+}
+.pd-header-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── Stat row (below header) ────────────────────────────────────────────────── */
+.pd-stats {
+  display: flex; gap: 24px; margin-top: 20px; padding-top: 16px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.pd-stat-value { font-size: 1.4rem; font-weight: 700; }
+.pd-stat-label { font-size: 0.73rem; color: var(--text3); margin-top: 2px; }
+
+/* ── Segmented control (crawl/explore mode) ─────────────────────────────────── */
+.pd-segmented {
+  display: flex; border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--border); flex-shrink: 0;
+}
+.pd-segmented-btn {
+  padding: 5px 12px; border: none; cursor: pointer;
+  font-size: 0.78rem; transition: all 0.12s;
+}
+
+/* ── Popover / dropdown overlay ─────────────────────────────────────────────── */
+.pd-popover-backdrop { position: fixed; inset: 0; z-index: 99; }
+.pd-popover {
+  position: absolute; z-index: 100;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+}
+.pd-dropdown {
+  position: absolute; z-index: 100;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  min-width: 220px; padding: 4px;
+}
+.pd-dropdown-heading {
+  padding: 6px 12px; font-size: 0.7rem; color: var(--text3);
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.pd-dropdown-item {
+  display: block; padding: 8px 12px; border-radius: 6px;
+  text-decoration: none; color: var(--text);
+}
+.pd-dropdown-item:hover { background: var(--bg2); text-decoration: none; }
+.pd-dropdown-item-title { font-size: 0.84rem; font-weight: 500; }
+.pd-dropdown-item-desc  { font-size: 0.72rem; color: var(--text3); margin-top: 1px; }
+
+/* ── Workers selector ───────────────────────────────────────────────────────── */
+.pd-workers {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  padding: 3px 8px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 0.72rem; color: var(--text2);
+}
+.pd-workers-select {
+  background: transparent; border: none; color: var(--accent);
+  font-weight: 700; font-size: 0.78rem; cursor: pointer;
+  font-family: var(--font-mono); padding: 0; outline: none;
+}
+
+/* ── Checkbox accent ────────────────────────────────────────────────────────── */
+.pd-checkbox { accent-color: var(--accent); cursor: pointer; }
+
+/* ── Empty state (centered) ─────────────────────────────────────────────────── */
+.pd-empty {
+  padding: 60px 24px; text-align: center; color: var(--text2);
+}
+.pd-empty-sm {
+  padding: 48px 24px; text-align: center; color: var(--text2); font-size: 0.875rem;
+}
