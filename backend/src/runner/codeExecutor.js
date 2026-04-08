@@ -121,14 +121,19 @@ export async function runApiTestCode(playwrightCode, expect) {
   });
 
   // Helper: wrap HTTP methods on an APIRequestContext to capture logs.
+  // NOTE: We intentionally exclude "fetch" from instrumentation. Playwright's
+  // named methods (get, post, put, …) internally delegate to fetch(), so
+  // instrumenting both would double-log every request. If the AI code calls
+  // fetch() directly, it still works — it just won't appear in the API logs
+  // (the named method wrappers cover 99% of AI-generated patterns).
   function instrumentContext(ctx) {
-    for (const method of ["get", "post", "put", "patch", "delete", "head", "fetch"]) {
+    for (const method of ["get", "post", "put", "patch", "delete", "head"]) {
       if (typeof ctx[method] === "function") {
         const original = ctx[method].bind(ctx);
         ctx[method] = async (...args) => {
           const start = Date.now();
           const url = typeof args[0] === "string" ? args[0] : String(args[0]);
-          const httpMethod = method === "fetch" ? ((args[1]?.method || "GET").toUpperCase()) : method.toUpperCase();
+          const httpMethod = method.toUpperCase();
           const reqHeaders = args[1]?.headers || null;
           const reqData = args[1]?.data != null ? (typeof args[1].data === "string" ? args[1].data : JSON.stringify(args[1].data)) : null;
           const entry = {
