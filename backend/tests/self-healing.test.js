@@ -39,14 +39,20 @@ test("safeClick uses exclusive locator-only path for selector-like text", () => 
   assert.match(helpers, /looksLikeSelector\(text\)\s*\n\s*\? \[p => p\.locator\(text\)\]\s*\n\s*:/);
 });
 
+test("findElement uses tryStrategy wrapper to catch synchronous throws", () => {
+  assert.match(helpers, /async function tryStrategy\(strategyFn, page, timeout\)/);
+  assert.match(helpers, /await tryStrategy\(strategies\[hintIdx\], page, timeout\)/);
+  assert.match(helpers, /await tryStrategy\(strategies\[i\], page, timeout\)/);
+});
+
 test("selector heuristic does not use broad combinator match", () => {
   assert.doesNotMatch(helpers, /\|\| \/\\\[>~\+\]\/\.test\(s\)/);
 });
 
-test("findElement uses firstVisible instead of .first() to skip hidden elements", () => {
+test("findElement uses firstVisible inside tryStrategy to skip hidden elements", () => {
   assert.match(helpers, /async function firstVisible\(baseLocator, timeout\)/);
-  assert.match(helpers, /await firstVisible\(strategies\[hintIdx\]\(page\), timeout\)/);
-  assert.match(helpers, /await firstVisible\(strategies\[i\]\(page\), timeout\)/);
+  // firstVisible is called inside tryStrategy, not directly in findElement
+  assert.match(helpers, /return await firstVisible\(locator, timeout\)/);
   // .first() should only appear inside firstVisible's fallback, not in findElement directly
   assert.doesNotMatch(helpers, /strategies\[(?:hintIdx|i)\]\(page\)\.first\(\)/);
 });

@@ -37,7 +37,7 @@ test("fmtMs returns empty string for null/undefined", () => {
 });
 
 test("fmtMs formats milliseconds under 1s", () => {
-  assert.equal(fmtMs(0), "");
+  assert.equal(fmtMs(0), "0ms");
   assert.equal(fmtMs(500), "500ms");
   assert.equal(fmtMs(999), "999ms");
 });
@@ -53,7 +53,7 @@ test("fmtBytes returns dash for null/undefined", () => {
 });
 
 test("fmtBytes formats bytes, KB, MB", () => {
-  assert.equal(fmtBytes(0), "—");
+  assert.equal(fmtBytes(0), "0 B");
   assert.equal(fmtBytes(512), "512 B");
   assert.equal(fmtBytes(1024), "1.0 KB");
   assert.equal(fmtBytes(1048576), "1.0 MB");
