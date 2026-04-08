@@ -506,13 +506,52 @@ OTHER ASSERTIONS — these are fine as-is (do not wrap them):
   ✓ await expect(locator).toHaveValue(...)
   ✓ await expect(locator).toBeEnabled()
 
-FORBIDDEN — never use these:
+FORBIDDEN — never use these (they bypass self-healing and will break on selector changes):
+
+  Clicks (use safeClick instead):
   ✗ page.click(...)
-  ✗ page.fill(...)
   ✗ page.locator(...).click()
   ✗ page.getByRole(...).click()
   ✗ page.getByText(...).click()
-  ✗ page.getByLabel(...).fill()
-  ✗ expect(page.getByRole(...)).toBeVisible()   ← use safeExpect instead
-  ✗ expect(page.getByText(...)).toBeVisible()   ← use safeExpect instead
+  ✗ page.getByLabel(...).click()
+  ✗ page.getByPlaceholder(...).click()
+  ✗ page.getByTestId(...).click()
+  ✗ page.getByAltText(...).click()
+  ✗ page.locator(...).dblclick()
+  ✗ page.dblclick(...)
+  ✗ page.tap(...)
+
+  Fills / typing (use safeFill instead):
+  ✗ page.fill(...)
+  ✗ page.type(...)
+  ✗ page.locator(...).fill(...)
+  ✗ page.locator(...).type(...)
+  ✗ page.getByLabel(...).fill(...)
+  ✗ page.getByPlaceholder(...).fill(...)   ← already handled by safeFill
+  ✗ page.getByTestId(...).fill(...)
+
+  Form controls (use safeFill or safeClick instead):
+  ✗ page.check(...)
+  ✗ page.uncheck(...)
+  ✗ page.selectOption(...)
+  ✗ page.locator(...).check()
+  ✗ page.locator(...).uncheck()
+  ✗ page.locator(...).selectOption(...)
+
+  Other interactions (no self-healing equivalent — avoid if possible):
+  ✗ page.hover(...)                        ← fragile; prefer safeClick on the revealed element
+  ✗ page.locator(...).hover()
+  ✗ page.press(...)                        ← use page.keyboard.press() only when absolutely needed
+  ✗ page.focus(...)
+  ✗ page.dragTo(...)
+  ✗ page.setInputFiles(...)
+
+  Visibility assertions (use safeExpect instead):
+  ✗ expect(page.getByRole(...)).toBeVisible()
+  ✗ expect(page.getByText(...)).toBeVisible()
+  ✗ expect(page.getByLabel(...)).toBeVisible()
+  ✗ expect(page.getByPlaceholder(...)).toBeVisible()
+  ✗ expect(page.getByTestId(...)).toBeVisible()
+  ✗ expect(page.getByAltText(...)).toBeVisible()
+  ✗ expect(page.locator(...)).toBeVisible()  ← use safeExpect with the text/label instead
 `.trim();
