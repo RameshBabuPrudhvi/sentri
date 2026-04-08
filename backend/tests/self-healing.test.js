@@ -39,5 +39,13 @@ test("selector heuristic does not use broad combinator match", () => {
   assert.doesNotMatch(helpers, /\|\| \/\\\[>~\+\]\/\.test\(s\)/);
 });
 
+test("findElement uses firstVisible instead of .first() to skip hidden elements", () => {
+  assert.match(helpers, /async function firstVisible\(baseLocator, timeout\)/);
+  assert.match(helpers, /await firstVisible\(strategies\[hintIdx\]\(page\), timeout\)/);
+  assert.match(helpers, /await firstVisible\(strategies\[i\]\(page\), timeout\)/);
+  // .first() should only appear inside firstVisible's fallback, not in findElement directly
+  assert.doesNotMatch(helpers, /strategies\[(?:hintIdx|i)\]\(page\)\.first\(\)/);
+});
+
 if (process.exitCode) process.exit(1);
 console.log("\n🎉 self-healing tests passed");

@@ -153,6 +153,25 @@ export function getSelfHealingHelperCode(healingHints) {
     // History-aware findElement: if a previous run recorded a winning strategy
     // for this action+label, try it first before falling through to the full
     // waterfall. This avoids wasting time on strategies that previously failed.
+    // Given a base locator (which may match multiple DOM elements), return
+    // the first element that is actually visible.  Falls back to .first()
+    // only when no visible element is found — so the caller gets a clear
+    // "not visible" error instead of silently picking a hidden duplicate
+    // (e.g. a button inside a collapsed mobile menu).
+    async function firstVisible(baseLocator, timeout) {
+      const count = await baseLocator.count().catch(() => 0);
+      for (let n = 0; n < count; n++) {
+        const candidate = baseLocator.nth(n);
+        const visible = await candidate.isVisible().catch(() => false);
+        if (visible) return candidate;
+      }
+      // No element is visible yet — wait for the first one to appear.
+      // This preserves the original timeout-based retry behaviour.
+      const first = baseLocator.first();
+      await first.waitFor({ state: 'visible', timeout });
+      return first;
+    }
+
     async function findElement(page, strategies, options = {}) {
       const timeout = options.timeout || DEFAULT_TIMEOUT;
       const hintKey = options.healingKey || null;
@@ -163,8 +182,7 @@ export function getSelfHealingHelperCode(healingHints) {
       // If we have a hint from a previous run, try that strategy first
       if (hintIdx >= 0 && hintIdx < strategies.length) {
         try {
-          const locator = strategies[hintIdx](page).first();
-          await locator.waitFor({ state: 'visible', timeout });
+          const locator = await firstVisible(strategies[hintIdx](page), timeout);
           winningIndex = hintIdx;
           if (hintKey) {
             __healingEvents.push({ key: hintKey, strategyIndex: hintIdx, healed: false });
@@ -179,8 +197,7 @@ export function getSelfHealingHelperCode(healingHints) {
       for (let i = 0; i < strategies.length; i++) {
         if (i === hintIdx) continue; // already tried above
         try {
-          const locator = strategies[i](page).first();
-          await locator.waitFor({ state: 'visible', timeout });
+          const locator = await firstVisible(strategies[i](page), timeout);
           winningIndex = i;
           if (hintKey) {
             // Record that we healed: a different strategy won than the hint (or no hint existed)
