@@ -41,6 +41,16 @@ Executed pipeline tests, API integration smoke tests, and frontend production bu
 3. `git diff --check`
    - Result: **passes**.
 
+### Coverage confirmation matrix
+
+| Area | Coverage type | Status | Evidence |
+|---|---|---|---|
+| Pipeline classification + generation quality layers | Unit-style executable spec (`pipeline.test.js`) | ✅ Covered | Includes classifier ambiguity, dedup, enhancer, smart crawl, feedback loop |
+| API lifecycle (auth → project → test → approve → duplicate-run guard → abort) | Integration smoke (`api-flow.test.js`) | ✅ Covered | Validates `409` run guard and abort transition to `aborted` |
+| Frontend compile/regression safety for refactor | Production build (`vite build`) | ✅ Covered | Build passes after ProjectDetail extraction |
+| Duplicate-run backend guard logic | Route behavior assertion (integration test) | ✅ Covered | Explicit assertion on `POST /projects/:id/run` returning `409` |
+| SSE monitor + UI behavior | Build + manual runtime path (no headless browser test yet) | ⚠️ Partially covered | Hook/component wiring validated; no browser E2E automation in repo yet |
+
 ---
 
 ## Implementation Status for Requested Improvements
