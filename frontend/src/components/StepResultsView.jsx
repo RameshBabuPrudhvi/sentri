@@ -18,21 +18,7 @@ import {
 import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtMs(ms) {
-  if (!ms && ms !== 0) return "";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function fmtBytes(b) {
-  if (!b && b !== 0) return "—";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { fmtMs, fmtBytes } from "../utils/formatters.js";
 
 // ─── Infer per-step status from the overall test result ──────────────────────
 //

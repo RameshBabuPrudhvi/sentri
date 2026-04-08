@@ -4,6 +4,59 @@
  */
 
 /**
+ * Format milliseconds into a compact duration string.
+ * Used by StepResultsView, TestDetail, and network tables.
+ *
+ * @param {number|null|undefined} ms
+ * @returns {string}
+ */
+export function fmtMs(ms) {
+  if (!ms && ms !== 0) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Format bytes into a human-readable size string.
+ *
+ * @param {number|null|undefined} b
+ * @returns {string}
+ */
+export function fmtBytes(b) {
+  if (!b && b !== 0) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Format an ISO date string as a long date (e.g. "April 8, 2026").
+ *
+ * @param {string|null|undefined} iso
+ * @returns {string}
+ */
+export function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
+}
+
+/**
+ * Format an ISO date string as a relative/short datetime.
+ *
+ * @param {string|null|undefined} iso
+ * @returns {string}
+ */
+export function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  if (diff < 60000) return "less than a minute ago";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
  * Relative date — `"3m ago"`, `"5h ago"`, or `"Jan 12"`.
  *
  * @param {string|null} iso       - ISO 8601 timestamp.

@@ -306,6 +306,11 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
         reject(new Error(`API test timed out after ${API_TEST_TIMEOUT}ms`));
       }, API_TEST_TIMEOUT);
     });
+    // Swallow the losing promise's rejection to prevent unhandled rejection
+    // crashes in Node.js v15+. When the timeout wins, apiPromise continues
+    // running until the abort signal disposes its contexts — its eventual
+    // rejection must be caught here so it doesn't crash the process.
+    apiPromise.catch(() => {});
     const apiResult = await Promise.race([apiPromise, timeoutPromise]);
     // Populate network logs from the instrumented API request context
     result.network = apiResult.apiLogs || [];
