@@ -24,8 +24,12 @@ const INTENT_PATTERNS = {
     keywords: ["login", "log in", "sign in", "signin", "register", "sign up", "signup",
                "create account", "forgot password", "reset password", "logout", "log out",
                "sign out", "password", "username", "authenticate"],
-    // "email" removed — too generic, causes false positives on contact/content pages
+    // "email" as a keyword was too generic (false positives on contact/content pages).
+    // Instead, input[type=email] is a weak input signal — it boosts AUTH when
+    // combined with other signals (password field, login keywords) but is not
+    // strong enough alone to override FORM_SUBMISSION on a contact page.
     inputTypes: ["password"],
+    weakInputTypes: ["email"],
     weight: 100,
   },
   CHECKOUT: {
@@ -95,6 +99,10 @@ export function classifyElement(element) {
     // Check input types — strongest signal (e.g. input[type=password] → AUTH)
     for (const t of config.inputTypes || []) {
       if (type === t) score += config.weight * 2.0;
+    }
+    // Weak input types — moderate signal (e.g. input[type=email] → AUTH hint)
+    for (const t of config.weakInputTypes || []) {
+      if (type === t) score += config.weight * 0.8;
     }
 
     if (score > bestScore) {

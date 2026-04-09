@@ -312,9 +312,28 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
       }
       const { fp: currentFp, url: currentUrl, depth } = ctx.queue.shift();
       if (depth > limits.maxDepth) continue;
-      try {
-        if (page.url() !== currentUrl) { await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15000 }); await waitForSettle(page, limits.actionTimeout); }
-      } catch (err) { logWarn(run, `Failed to navigate to ${currentUrl}: ${err.message}`); continue; }
+      // Retry transient navigation errors (DNS hiccups, temporary network
+      // blips) once before giving up on this state. Without this, a single
+      // transient failure would skip the entire state and all its actions.
+      let navOk = false;
+      for (let navAttempt = 0; navAttempt < 2; navAttempt++) {
+        try {
+          if (page.url() !== currentUrl) {
+            await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+            await waitForSettle(page, limits.actionTimeout);
+          }
+          navOk = true;
+          break;
+        } catch (err) {
+          if (navAttempt === 0) {
+            logWarn(run, `Navigation to ${currentUrl} failed (${err.message}), retrying…`);
+            await waitForSettle(page, limits.actionTimeout);
+          } else {
+            logWarn(run, `Failed to navigate to ${currentUrl} after retry: ${err.message}`);
+          }
+        }
+      }
+      if (!navOk) continue;
 
       const actions = discoverActions(ctx.snapshotsByFp.get(currentFp));
       const { formGroups, standalone } = groupActionsByForm(actions);

@@ -151,8 +151,27 @@ export function deduplicateTests(tests) {
  * deduplicateAcrossRuns(newTests, existingTests) → filtered new tests
  *
  * Prevents re-adding tests that already exist for the project.
+ * Uses both structural hash AND normalised name matching so renamed
+ * tests with identical code are still detected as duplicates.
  */
 export function deduplicateAcrossRuns(newTests, existingTests) {
   const existingHashes = new Set(existingTests.map(hashTest));
-  return newTests.filter(t => !existingHashes.has(hashTest(t)));
+  // Also index by normalised name to catch renamed duplicates —
+  // the dashboard flagged that exact name+description matching lets
+  // renamed tests slip through as false-unique.
+  const existingNames = new Set(existingTests.map(t => normalizeText(t.name)));
+  return newTests.filter(t => {
+    if (existingHashes.has(hashTest(t))) return false;
+    // If the name is identical (after normalisation) AND the test targets
+    // the same URL, treat it as a duplicate even if the code differs slightly
+    // (e.g. regenerated with different selector strategies).
+    const normName = normalizeText(t.name);
+    if (normName && existingNames.has(normName)) {
+      const match = existingTests.find(e =>
+        normalizeText(e.name) === normName && e.sourceUrl === t.sourceUrl
+      );
+      if (match) return false;
+    }
+    return true;
+  });
 }
