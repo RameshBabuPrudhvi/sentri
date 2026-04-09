@@ -6,7 +6,6 @@ import {
   RotateCcw, Info,
 } from "lucide-react";
 import { api } from "../api.js";
-import { loadSavedConfig } from "../utils/testDialsStorage.js";
 import AgentTag from "../components/AgentTag.jsx";
 import ModalShell from "../components/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
@@ -47,7 +46,7 @@ export default function ProjectDetail() {
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
   const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
-  const [crawlDialsCfg, setCrawlDialsCfg] = useState(() => loadSavedConfig());
+  const [parallelWorkers, setParallelWorkers] = useState(1);
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "ui" | "api"
@@ -125,35 +124,14 @@ export default function ProjectDetail() {
   }, [refresh]);
   const { sseDown, retryIn } = useProjectRunMonitor(activeRun, handleRunSettled);
 
-  // FIX #5: No longer auto-switching tab. Run starts in background; toast has opt-in "View run" link.
-  async function doCrawl() {
-    setActionLoading("crawl");
-    try {
-      // Pre-flight: check if an AI provider is configured before starting
-      const config = await api.getConfig().catch(() => null);
-      if (!config?.hasProvider) {
-        showToast("No AI provider configured — go to Settings to add an API key or enable Ollama.", "error");
-        setActionLoading(null);
-        return;
-      }
-      // Send structured config to the backend — it validates and builds the prompt server-side
-      const { runId } = await api.crawl(id, crawlDialsCfg ? { dialsConfig: crawlDialsCfg } : undefined);
-      setActiveRun(runId);
-      setActiveRunId(runId);
-      showToast("Crawl started — new tests will appear as Draft", "info", runId);
-    } catch (err) { showToast(err.message, "error"); }
-    finally { setActionLoading(null); }
-  }
-
   async function doRun() {
     setActionLoading("run");
     try {
-      // Pass dials config so parallelWorkers reaches the backend
-      const { runId } = await api.runTests(id, crawlDialsCfg ? { dialsConfig: crawlDialsCfg } : undefined);
+      const body = parallelWorkers > 1 ? { dialsConfig: { parallelWorkers } } : undefined;
+      const { runId } = await api.runTests(id, body);
       setActiveRun(runId);
       setActiveRunId(runId);
-      const pw = crawlDialsCfg?.parallelWorkers;
-      const modeHint = pw > 1 ? ` (${pw}x parallel)` : "";
+      const modeHint = parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : "";
       showToast(`Regression run started${modeHint}`, "info", runId);
     } catch (err) {
       showToast(err.message, "error");
@@ -288,10 +266,9 @@ export default function ProjectDetail() {
         project={project}
         projectId={id}
         tests={tests}
-        crawlDialsCfg={crawlDialsCfg}
-        onCrawlDialsChange={setCrawlDialsCfg}
+        parallelWorkers={parallelWorkers}
+        onWorkersChange={setParallelWorkers}
         actionLoading={actionLoading}
-        onCrawl={doCrawl}
         onRun={doRun}
         stats={{ draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed }}
       />
@@ -365,7 +342,10 @@ export default function ProjectDetail() {
             <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
-              <div style={{ fontSize: "0.875rem" }}>Click "Crawl & Generate Tests" — all generated tests will appear here as Draft for your review.</div>
+              <div style={{ fontSize: "0.875rem", marginBottom: 14 }}>Go to the Tests page to crawl this project or generate tests from a user story.</div>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate("/tests")}>
+                Go to Tests
+              </button>
             </div>
           ) : (
             <>

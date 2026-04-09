@@ -1,18 +1,20 @@
 /**
  * @module components/project/ProjectHeader
- * @description Project header card with name, URL, stats, mode selector,
- * crawl/run buttons, dials popover, and export dropdown.
+ * @description Project header card with name, URL, stats, run button,
+ * and export dropdown.
+ *
+ * Crawl & test generation live on the Tests page — this component
+ * focuses on project-scoped execution (run regression) and results.
  *
  * Extracted from ProjectDetail.jsx to reduce page-level complexity.
  */
 
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  Search, Play, RefreshCw, Globe, Download, ChevronDown,
+  Play, RefreshCw, Globe, Download, ChevronDown, Sparkles, ArrowRight,
 } from "lucide-react";
-import CrawlDialsPanel from "../CrawlDialsPanel.jsx";
-import { countActiveDials } from "../../utils/testDialsStorage.js";
-import { EXPLORE_MODE_OPTIONS, PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
+import { PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
 import { api } from "../../api.js";
 
 /**
@@ -20,21 +22,20 @@ import { api } from "../../api.js";
  * @param {Object} props.project - { name, url }
  * @param {string} props.projectId
  * @param {Object[]} props.tests - All tests for stat counts.
- * @param {Object} props.crawlDialsCfg
- * @param {Function} props.onCrawlDialsChange
- * @param {string|null} props.actionLoading - "crawl" | "run" | null
- * @param {Function} props.onCrawl
+ * @param {number} props.parallelWorkers - Current parallel worker count.
+ * @param {Function} props.onWorkersChange - Called with new worker count.
+ * @param {string|null} props.actionLoading - "run" | null
  * @param {Function} props.onRun
  * @param {Object} props.stats - { draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed }
  */
 export default function ProjectHeader({
   project, projectId, tests,
-  crawlDialsCfg, onCrawlDialsChange,
-  actionLoading, onCrawl, onRun,
+  parallelWorkers, onWorkersChange,
+  actionLoading, onRun,
   stats,
 }) {
-  const [showDialsPopover, setShowDialsPopover] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const navigate = useNavigate();
 
   const { draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed } = stats;
 
@@ -51,41 +52,23 @@ export default function ProjectHeader({
           </div>
         </div>
         <div className="pd-header-actions">
-          {/* ── Row 1: Mode selector + Crawl button + Run button ── */}
+          {/* ── Row 1: Generate link + workers + Run button ── */}
           <div className="pd-header-row">
-            {/* Explore mode segmented control */}
-            <div className="pd-segmented">
-              {EXPLORE_MODE_OPTIONS.map(opt => {
-                const active = (crawlDialsCfg?.exploreMode || "crawl") === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => onCrawlDialsChange(prev => ({ ...prev, exploreMode: opt.id }))}
-                    className="pd-segmented-btn"
-                    style={{
-                      fontWeight: active ? 600 : 400,
-                      background: active ? "var(--accent-bg)" : "var(--surface)",
-                      color: active ? "var(--accent)" : "var(--text2)",
-                      borderRight: opt.id === "crawl" ? "1px solid var(--border)" : "none",
-                    }}
-                    title={opt.desc}
-                  >
-                    {opt.id === "crawl" ? "🔗" : "⚡"} {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button className="btn btn-ghost btn-sm" onClick={onCrawl} disabled={!!actionLoading}>
-              {actionLoading === "crawl" ? <RefreshCw size={14} className="spin" /> : <Search size={14} />}
-              {tests.length > 0 ? "Re-Crawl" : "Crawl & Generate"}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate("/tests")}
+              style={{ gap: 6 }}
+            >
+              <Sparkles size={13} />
+              Generate more tests
+              <ArrowRight size={11} />
             </button>
             {/* Parallel workers compact selector */}
             <div className="pd-workers" title={PARALLEL_WORKERS_TUNING.desc}>
               <span className="font-semi">⚡</span>
               <select
-                value={crawlDialsCfg?.parallelWorkers ?? PARALLEL_WORKERS_TUNING.defaultVal}
-                onChange={e => onCrawlDialsChange(prev => ({ ...prev, parallelWorkers: parseInt(e.target.value, 10) }))}
+                value={parallelWorkers ?? PARALLEL_WORKERS_TUNING.defaultVal}
+                onChange={e => onWorkersChange(parseInt(e.target.value, 10))}
                 className="pd-workers-select"
               >
                 {Array.from({ length: PARALLEL_WORKERS_TUNING.max }, (_, i) => i + 1).map(n => (
@@ -101,34 +84,8 @@ export default function ProjectHeader({
             </button>
           </div>
 
-          {/* ── Row 2: Dials popover + Export dropdown ── */}
+          {/* ── Row 2: Export dropdown ── */}
           <div className="pd-header-row">
-            <div style={{ position: "relative" }}>
-              <button
-                className="btn btn-ghost btn-xs"
-                onClick={() => setShowDialsPopover(v => !v)}
-                style={{
-                  gap: 5,
-                  background: showDialsPopover ? "var(--accent-bg)" : undefined,
-                  borderColor: showDialsPopover ? "var(--accent)" : undefined,
-                }}
-              >
-                ⚙ Dials
-                <span className="active-count-pill" style={{ fontSize: "0.65rem", padding: "1px 6px" }}>
-                  {countActiveDials(crawlDialsCfg)}
-                </span>
-                <ChevronDown size={10} style={{ transform: showDialsPopover ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-              </button>
-              {showDialsPopover && (
-                <>
-                  <div className="pd-popover-backdrop" onClick={() => setShowDialsPopover(false)} />
-                  <div className="pd-popover" style={{ top: "calc(100% + 6px)", right: 0, width: 420, maxHeight: "70vh", overflowY: "auto", padding: 16 }}>
-                    <CrawlDialsPanel value={crawlDialsCfg} onChange={onCrawlDialsChange} />
-                  </div>
-                </>
-              )}
-            </div>
-
             {tests.length > 0 && (
               <div style={{ position: "relative" }}>
                 <button

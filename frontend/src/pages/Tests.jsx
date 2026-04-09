@@ -9,6 +9,7 @@ import {
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import GenerateTestModal from "../components/GenerateTestModal.jsx";
+import CrawlProjectModal from "../components/CrawlProjectModal.jsx";
 import AgentTag from "../components/AgentTag.jsx";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import ModalShell from "../components/ModalShell.jsx";
@@ -132,13 +133,10 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
           No tests generated yet
         </div>
         <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto 20px" }}>
-          Go to a project and run a <strong>Crawl</strong> to let Sentri discover your app's pages and auto-generate test cases — or create one manually.
+          Use <strong>Crawl</strong> above to auto-discover pages and generate tests, or <strong>Generate</strong> from a user story.
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate("/projects")}>
-            Go to Projects
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={onCreateTest}>
+          <button className="btn btn-ghost btn-sm" onClick={onCreateTest}>
             Generate with AI ✦
           </button>
         </div>
@@ -222,6 +220,7 @@ export default function Tests() {
 
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCrawlModal, setShowCrawlModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [page, setPage] = useState(1);
@@ -548,11 +547,21 @@ export default function Tests() {
     }
   }
 
+  const draftCount = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length;
+
   const quickActions = [
     {
+      icon: <Search size={16} />,
+      title: "Crawl",
+      desc: "Discover pages & auto-generate tests",
+      color: "var(--blue-bg)",
+      iconColor: "var(--blue)",
+      action: () => projects.length === 0 ? navigate("/projects/new") : setShowCrawlModal(true),
+    },
+    {
       icon: <Sparkles size={16} />,
-      title: "Create Tests",
-      desc: "Create a new test case for your application",
+      title: "Generate",
+      desc: "Create tests from a user story",
       color: "var(--accent-bg)",
       iconColor: "var(--accent)",
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),
@@ -560,17 +569,18 @@ export default function Tests() {
     {
       icon: <Play size={16} />,
       title: "Run Tests",
-      desc: "Execute regression tests from your test suite",
+      desc: "Execute approved regression suite",
       color: "var(--green-bg)",
       iconColor: "var(--green)",
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowRunModal(true),
     },
     {
       icon: <Flag size={16} />,
-      title: "Review and Fix Tests",
-      desc: "Refine and manage your draft and failing tests",
+      title: "Review Drafts",
+      desc: draftCount > 0 ? `${draftCount} draft${draftCount !== 1 ? "s" : ""} pending review` : "Approve or reject generated tests",
       color: "var(--amber-bg)",
       iconColor: "var(--amber)",
+      badge: draftCount > 0 ? draftCount : null,
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowReviewModal(true),
     },
   ];
@@ -597,16 +607,28 @@ export default function Tests() {
       </div>
 
       {/* Quick Actions */}
-      <div className="stat-grid-3 mb-lg">
+      <div className="stat-grid mb-lg">
         {quickActions.map((a, i) => (
           <div
             key={i}
             className="card"
-            style={{ padding: 18, cursor: "pointer", transition: "box-shadow 0.15s" }}
+            style={{ padding: 16, cursor: "pointer", transition: "box-shadow 0.15s", position: "relative" }}
             onClick={a.action}
             onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--shadow)"}
             onMouseLeave={e => e.currentTarget.style.boxShadow = ""}
           >
+            {a.badge != null && (
+              <span style={{
+                position: "absolute", top: 10, right: 10,
+                minWidth: 20, height: 20, borderRadius: 10,
+                background: a.iconColor, color: "#fff",
+                fontSize: "0.68rem", fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "0 5px", lineHeight: 1,
+              }}>
+                {a.badge > 99 ? "99+" : a.badge}
+              </span>
+            )}
             <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
               <div style={{
                 width: 34, height: 34, borderRadius: 9,
@@ -616,8 +638,8 @@ export default function Tests() {
                 {a.icon}
               </div>
               <div>
-                <div style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: 3 }}>{a.title}</div>
-                <div style={{ fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.5 }}>{a.desc}</div>
+                <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: 2 }}>{a.title}</div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text2)", lineHeight: 1.5 }}>{a.desc}</div>
               </div>
             </div>
           </div>
@@ -991,6 +1013,13 @@ export default function Tests() {
       )}
 
       {/* Modals */}
+      {showCrawlModal && (
+        <CrawlProjectModal
+          projects={projects}
+          onClose={() => setShowCrawlModal(false)}
+          defaultProjectId={filtered[0]?.projectId || projects[0]?.id || ""}
+        />
+      )}
       {showCreateModal && (
         <GenerateTestModal
           projects={projects}
