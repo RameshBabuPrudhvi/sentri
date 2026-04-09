@@ -53,9 +53,11 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
 
   return (
     <ModalShell onClose={onClose} width="min(480px, 96vw)">
+      {/* Header — pinned */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: "18px 22px 16px", borderBottom: "1px solid var(--border)",
+        flexShrink: 0,
       }}>
         <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
           Crawl & Generate Tests
@@ -65,7 +67,8 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
         </button>
       </div>
 
-      <div style={{ padding: "20px 22px 24px" }}>
+      {/* Scrollable body */}
+      <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "20px 22px 4px" }}>
         <p style={{
           fontSize: "0.82rem", color: "var(--text2)",
           marginTop: 0, marginBottom: 20, lineHeight: 1.6,
@@ -176,26 +179,32 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
                 {error}
               </div>
             )}
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4 }}>
-                <Clock size={11} /> ~1-3 minutes depending on site size
-              </span>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleCrawl}
-                  disabled={running || !projectId}
-                >
-                  {running ? <RefreshCw size={13} className="spin" /> : <Search size={13} />}
-                  {running ? "Starting…" : "Crawl & Generate"}
-                </button>
-              </div>
-            </div>
           </>
         )}
       </div>
+
+      {/* Footer — pinned at bottom */}
+      {projects.length > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 22px 18px", borderTop: "1px solid var(--border)", flexShrink: 0,
+        }}>
+          <span style={{ fontSize: "0.72rem", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4 }}>
+            <Clock size={11} /> ~1-3 minutes depending on site size
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleCrawl}
+              disabled={running || !projectId}
+            >
+              {running ? <RefreshCw size={13} className="spin" /> : <Search size={13} />}
+              {running ? "Starting…" : "Crawl & Generate"}
+            </button>
+          </div>
+        </div>
+      )}
     </ModalShell>
   );
 }
