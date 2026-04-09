@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import useOnboarding from "../hooks/useOnboarding.js";
 import AppLogo from "./AppLogo.jsx";
 import AIChat from "./AIChat.jsx";
+import CommandPalette from "./CommandPalette.jsx";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },
@@ -19,8 +20,13 @@ const NAV = [
 
 export default function Layout() {
   const tour = useOnboarding();
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [chatOpen, setChatOpen] = React.useState(false);
   const [chatQuery, setChatQuery] = React.useState("");
+
+  function openPalette() {
+    setPaletteOpen(true);
+  }
 
   function openChat(query = "") {
     setChatQuery(query);
@@ -31,12 +37,13 @@ export default function Layout() {
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg2)" }}>
       <Sidebar />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <TopBar onOpenChat={openChat} />
+        <TopBar onOpenPalette={openPalette} onOpenChat={openChat} />
         <main style={{ flex: 1, padding: "28px 32px", overflow: "auto" }}>
           <Outlet />
         </main>
       </div>
       <OnboardingTour tour={tour} />
+      <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} onOpenAIChat={openChat} />
       <AIChat isOpen={chatOpen} onClose={() => setChatOpen(false)} initialQuery={chatQuery} />
     </div>
   );
@@ -106,7 +113,7 @@ function Sidebar() {
   );
 }
 
-function TopBar({ onOpenChat }) {
+function TopBar({ onOpenPalette, onOpenChat }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -117,17 +124,17 @@ function TopBar({ onOpenChat }) {
     navigate("/login", { replace: true });
   }
 
-  // Global shortcut: Cmd/Ctrl+K to open AI chat
+  // Global shortcut: Cmd/Ctrl+K to open command palette
   React.useEffect(() => {
     function onKey(e) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        onOpenChat("");
+        onOpenPalette();
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onOpenChat]);
+  }, [onOpenPalette]);
 
   // Close menu when clicking outside
   React.useEffect(() => {
@@ -147,14 +154,14 @@ function TopBar({ onOpenChat }) {
       height: 52, background: "var(--surface)", borderBottom: "1px solid var(--border)",
       display: "flex", alignItems: "center", padding: "0 24px", gap: 12, flexShrink: 0,
     }}>
-      {/* AI Search trigger */}
+      {/* Command palette trigger */}
       <button
-        onClick={() => onOpenChat("")}
+        onClick={() => onOpenPalette()}
         className="chat-trigger"
-        title="Open AI chat (⌘K)"
+        title="Command palette (⌘K)"
       >
         <Search size={13} color="var(--text3)" />
-        <span className="chat-trigger__placeholder">Ask Sentri AI anything…</span>
+        <span className="chat-trigger__placeholder">Search commands or ask AI…</span>
         <span className="chat-trigger__kbd">
           <Sparkles size={9} />⌘K
         </span>
@@ -196,9 +203,9 @@ function TopBar({ onOpenChat }) {
               <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{user?.name || "User"}</div>
               <div style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{user?.email}</div>
             </div>
-            {/* AI Chat shortcut */}
+            {/* Command palette shortcut */}
             <button
-              onClick={() => { setMenuOpen(false); onOpenChat(""); }}
+              onClick={() => { setMenuOpen(false); onOpenPalette(); }}
               style={{
                 display: "flex", alignItems: "center", gap: 9,
                 width: "100%", padding: "10px 14px",
@@ -209,8 +216,8 @@ function TopBar({ onOpenChat }) {
               onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
             >
-              <Sparkles size={14} />
-              Open Sentri AI
+              <Search size={14} />
+              Search / AI
               <span style={{ marginLeft: "auto", fontSize: "0.68rem", color: "var(--text3)", fontFamily: "monospace" }}>⌘K</span>
             </button>
             {/* Docs */}
