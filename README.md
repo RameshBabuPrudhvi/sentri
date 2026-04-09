@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.jpeg" alt="Sentri logo" width="140" />
+  <img src="docs/public/logo.svg" alt="Sentri logo" width="140" />
 </p>
 
 <h1 align="center">Sentri — Your AI QA Engineer</h1>
