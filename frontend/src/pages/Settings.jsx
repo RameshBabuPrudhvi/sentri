@@ -639,21 +639,15 @@ export default function Settings() {
         </div>
       )}
 
-      {/* .env tip */}
+      {/* Persistence note */}
       <div className="st-env-tip">
-        <div className="font-bold" style={{ fontSize: "0.85rem", marginBottom: 10 }}>Prefer environment variables?</div>
-        <div className="text-sm text-sub" style={{ lineHeight: 1.8 }}>
-          Add to <span className="mono" style={{ background: "var(--bg3)", padding: "1px 6px", borderRadius: 4 }}>backend/.env</span> for persistence across restarts:
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <Info size={13} className="shrink-0" style={{ marginTop: 2, color: "var(--text3)" }} />
+          <div className="text-sm text-sub" style={{ lineHeight: 1.6 }}>
+            Keys saved here are stored in memory and will reset when the server restarts.
+            For persistent configuration, see the deployment documentation.
+          </div>
         </div>
-        <pre className="code-block" style={{ marginTop: 10 }}>{`# Cloud providers
-ANTHROPIC_API_KEY=sk-ant-api03-...
-OPENAI_API_KEY=sk-proj-...
-GOOGLE_API_KEY=AIza...
-
-# Local / Ollama (no key needed)
-AI_PROVIDER=local
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=mistral:7b`}</pre>
       </div>
       </>}
 
