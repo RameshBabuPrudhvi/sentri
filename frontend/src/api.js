@@ -278,6 +278,10 @@ export const api = {
       },
       body: JSON.stringify({ messages }),
     });
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired. Please sign in again.");
+    }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Chat request failed (${res.status})`);

@@ -75,6 +75,7 @@ router.post("/chat", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   const signal = req.socket.destroyed
@@ -97,10 +98,11 @@ router.post("/chat", async (req, res) => {
       res.end();
     }
   } catch (err) {
+    console.error(`[chat] streamText failed for user ${req.user?.id}: ${err.message}`);
     if (!res.writableEnded) {
       const message = err.name === "TimeoutError"
         ? "Request timed out. Please try again."
-        : err.message || "An unexpected error occurred.";
+        : "An unexpected error occurred. Please try again.";
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       res.end();
     }
