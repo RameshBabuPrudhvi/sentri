@@ -1,0 +1,26 @@
+<svg width="245" height="80" viewBox="30 62 140 80" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sentri logo">
+  <defs>
+    <linearGradient id="sentri-grad" gradientUnits="userSpaceOnUse" x1="40" y1="105" x2="160" y2="105">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="25%" stop-color="#EA4335"/>
+      <stop offset="50%" stop-color="#FBBC05"/>
+      <stop offset="75%" stop-color="#34A853"/>
+      <stop offset="100%" stop-color="#4285F4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Visor body -->
+  <rect x="40" y="70" width="120" height="70" rx="35" fill="#020817"/>
+  <rect x="40" y="70" width="120" height="70" rx="35" fill="none" stroke="url(#sentri-grad)" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Left eye -->
+  <ellipse cx="80" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
+  <ellipse cx="80" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+  <circle cx="76" cy="99" r="3" fill="#fff"/>
+
+  <!-- Right eye -->
+  <ellipse cx="120" cy="105" rx="22" ry="18" fill="#0b0f1a"/>
+  <ellipse cx="120" cy="105" rx="13" ry="11" fill="#dbe9ff"/>
+  <circle cx="116" cy="99" r="3" fill="#fff"/>
+</svg>
+

@@ -1,14 +1,22 @@
-<h2>
-  <img src="assets/logo.jpeg" width="40" style="vertical-align: middle; margin-right: 10px;"/>
-  Sentri — Your AI QA Engineer
-</h2>
-Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
+<p align="center">
+  <img src="assets/logo.jpeg" alt="Sentri logo" width="140" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org)
-[![Playwright](https://img.shields.io/badge/Playwright-1.58+-blue.svg)](https://playwright.dev)
+<h1 align="center">Sentri — Your AI QA Engineer</h1>
 
-📖 **[Documentation](https://rameshbabuprudhvi.github.io/sentri/docs/)** · 🔧 **[API Reference](https://rameshbabuprudhvi.github.io/sentri/docs/api/)** · 📘 **[Code Docs (JSDoc)](https://rameshbabuprudhvi.github.io/sentri/docs/jsdoc/)**
+<p align="center">
+  Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
+</p>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js" /></a>
+  <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-1.58+-blue.svg" alt="Playwright" /></a>
+</p>
+
+<p align="center">
+  📖 <strong><a href="https://rameshbabuprudhvi.github.io/sentri/docs/">Documentation</a></strong> · 🔧 <strong><a href="https://rameshbabuprudhvi.github.io/sentri/docs/api/">API Reference</a></strong> · 📘 <strong><a href="https://rameshbabuprudhvi.github.io/sentri/docs/jsdoc/">Code Docs (JSDoc)</a></strong>
+</p>
 
 ---
 
