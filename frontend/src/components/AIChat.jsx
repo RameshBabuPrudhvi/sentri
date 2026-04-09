@@ -231,7 +231,7 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
         errorMsg = errorMsg.replace(/^\[\d+\]\s*/, "");
         const lower = errorMsg.toLowerCase();
         if (lower.includes("failed to fetch") || lower.includes("fetch failed") || lower.includes("networkerror") || lower.includes("network error")) {
-          errorMsg = "Cannot connect to the server. Check that the backend is running and Ollama is reachable (ollama serve).";
+          errorMsg = "Connection to the server was lost. This usually means the AI provider is taking too long to respond. Try again, or switch to a faster model in Settings.";
         } else if (lower.includes("session expired")) {
           errorMsg = "Your session has expired. Please sign in again.";
         }

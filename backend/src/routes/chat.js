@@ -20,7 +20,7 @@
  */
 
 import { Router } from "express";
-import { streamText, hasProvider } from "../aiProvider.js";
+import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { getDb } from "../db.js";
 import { classifyError } from "../utils/errorClassifier.js";
 
@@ -145,12 +145,24 @@ function buildWorkspaceContext(db) {
  * Scan the user's message for entity references (TC-*, RUN-*, PRJ-*) and
  * fetch detailed context for each.
  *
- * @param {Object} db - The database object (from getDb()).
- * @param {string} userMessage - The latest user message text.
+ * @param {Object}  db - The database object (from getDb()).
+ * @param {string}  userMessage - The latest user message text.
+ * @param {Object}  [opts]
+ * @param {boolean} [opts.compact=false] - When true, trim heavy fields (code,
+ *   errors) to fit local models with small context windows.
  * @returns {string} Detailed entity context block, or empty string.
  */
-function buildEntityContext(db, userMessage) {
+function buildEntityContext(db, userMessage, { compact = false } = {}) {
   const lines = [];
+
+  // Limits — compact mode keeps context small for Ollama 7B (~4K window)
+  const codeCap   = compact ? 500  : 1500;
+  const errorCap  = compact ? 200  : 500;
+  const descCap   = compact ? 150  : 300;
+  const maxTests  = compact ? 2    : 5;
+  const maxRuns   = compact ? 1    : 3;
+  const maxProjects = compact ? 1  : 3;
+  const failCap   = compact ? 150  : 300;
 
   // Match explicit IDs: TC-1, RUN-42, PRJ-3
   const testIds = [...new Set((userMessage.match(/TC-\d+/gi) || []).map(id => id.toUpperCase()))];
@@ -158,7 +170,7 @@ function buildEntityContext(db, userMessage) {
   const projectIds = [...new Set((userMessage.match(/PRJ-\d+/gi) || []).map(id => id.toUpperCase()))];
 
   // Fetch test details
-  for (const id of testIds.slice(0, 5)) {
+  for (const id of testIds.slice(0, maxTests)) {
     const test = db.tests[id];
     if (!test) continue;
     const project = db.projects[test.projectId];
@@ -166,9 +178,9 @@ function buildEntityContext(db, userMessage) {
     lines.push(`Name: ${test.name}`);
     lines.push(`Project: ${project?.name || test.projectId} (${project?.url || ""})`);
     lines.push(`Status: ${test.lastResult || "not run"} | Review: ${test.reviewStatus || "draft"}`);
-    if (test.description) lines.push(`Description: ${test.description.slice(0, 300)}`);
+    if (test.description) lines.push(`Description: ${test.description.slice(0, descCap)}`);
     if (test.steps?.length) lines.push(`Steps (${test.steps.length}):\n${test.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
-    if (test.playwrightCode) lines.push(`Playwright code:\n\`\`\`javascript\n${test.playwrightCode.slice(0, 1500)}\n\`\`\``);
+    if (test.playwrightCode) lines.push(`Playwright code:\n\`\`\`javascript\n${test.playwrightCode.slice(0, codeCap)}\n\`\`\``);
     if (test.qualityScore != null) lines.push(`Quality score: ${test.qualityScore}%`);
     if (test.type) lines.push(`Type: ${test.type}`);
     if (test.priority) lines.push(`Priority: ${test.priority}`);
@@ -178,14 +190,14 @@ function buildEntityContext(db, userMessage) {
     if (latestResult) {
       lines.push(`Last run result (${latestResult.runId}):`);
       lines.push(`  Status: ${latestResult.status}`);
-      if (latestResult.error) lines.push(`  Error: ${latestResult.error.slice(0, 500)}`);
+      if (latestResult.error) lines.push(`  Error: ${latestResult.error.slice(0, errorCap)}`);
       if (latestResult.duration) lines.push(`  Duration: ${latestResult.duration}ms`);
     }
     lines.push("");
   }
 
   // Fetch run details
-  for (const id of runIds.slice(0, 3)) {
+  for (const id of runIds.slice(0, maxRuns)) {
     const run = db.runs[id];
     if (!run) continue;
     const project = db.projects[run.projectId];
@@ -198,12 +210,12 @@ function buildEntityContext(db, userMessage) {
 
     // Include failed test results with error details
     if (run.results?.length) {
-      const failures = run.results.filter(r => r.status === "failed").slice(0, 5);
+      const failures = run.results.filter(r => r.status === "failed").slice(0, compact ? 3 : 5);
       if (failures.length > 0) {
         lines.push(`Failed tests:`);
         for (const f of failures) {
           const test = db.tests[f.testId];
-          lines.push(`  - ${test?.name || f.testId}: ${(f.error || "").slice(0, 300)}`);
+          lines.push(`  - ${test?.name || f.testId}: ${(f.error || "").slice(0, failCap)}`);
         }
       }
     }
@@ -211,7 +223,7 @@ function buildEntityContext(db, userMessage) {
   }
 
   // Fetch project details
-  for (const id of projectIds.slice(0, 3)) {
+  for (const id of projectIds.slice(0, maxProjects)) {
     const project = db.projects[id];
     if (!project) continue;
     const pTests = Object.values(db.tests).filter(t => t.projectId === id);
@@ -302,8 +314,15 @@ router.post("/chat", async (req, res) => {
   // Build system prompt with live workspace context + deep entity details.
   // Single getDb() call shared by both builders to avoid redundant Object.values().
   const db = getDb();
-  const workspaceContext = buildWorkspaceContext(db);
-  const entityContext = buildEntityContext(db, lastMessage.content);
+  const isLocal = isLocalProvider();
+
+  // For local models (Ollama 7B) the combined system+user prompt must fit
+  // within a small context window (~4K tokens). Entity context (TC-*, RUN-*)
+  // is always included so users can ask about specific tests, but:
+  //   - The heavy workspace summary (all projects, runs, pass rate) is skipped
+  //   - Entity details use compact mode (shorter code/error caps)
+  const workspaceContext = isLocal ? "" : buildWorkspaceContext(db);
+  const entityContext = buildEntityContext(db, lastMessage.content, { compact: isLocal });
   const contextParts = [workspaceContext, entityContext].filter(Boolean).join("\n\n");
   const systemPrompt = contextParts
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
@@ -320,6 +339,11 @@ router.post("/chat", async (req, res) => {
     ? AbortSignal.abort()
     : AbortSignal.timeout(120_000);
 
+  // Local models have small context windows — cap output tokens so
+  // prompt + output don't overflow. Cloud providers handle this natively.
+  const streamOpts = { signal, responseFormat: "text" };
+  if (isLocal) streamOpts.maxTokens = 2048;
+
   try {
     await streamText(
       { system: systemPrompt, user: userContent },
@@ -328,7 +352,7 @@ router.post("/chat", async (req, res) => {
           res.write(`data: ${JSON.stringify({ token })}\n\n`);
         }
       },
-      { signal, responseFormat: "text" }
+      streamOpts,
     );
 
     if (!res.writableEnded) {
