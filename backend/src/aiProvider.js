@@ -10,7 +10,7 @@
  * | Google Gemini    | `GOOGLE_API_KEY`    | gemini-2.5-flash           |
  * | Ollama (local)   | `AI_PROVIDER=local` | mistral:7b (configurable)    |
  *
- * **Detection order:** `AI_PROVIDER` env var (explicit) → auto-detect (Anthropic → OpenAI → Google → Ollama).
+ * **Detection order:** Runtime override (header dropdown) → `AI_PROVIDER` env var → auto-detect (Anthropic → OpenAI → Google → Ollama).
  *
  * ### Exports
  * - {@link generateText} — Single-shot text generation.

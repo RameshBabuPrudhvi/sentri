@@ -126,7 +126,7 @@ Open [http://localhost:3000](http://localhost:3000)
 | Google Gemini | `GOOGLE_API_KEY` | gemini-2.5-flash |
 | Ollama (local, free) | `AI_PROVIDER=local` | mistral:7b (configurable) |
 
-Auto-detects in order: Anthropic → OpenAI → Google → Ollama. Switch at any time from the Settings page.
+Auto-detects in order: Anthropic → OpenAI → Google → Ollama. Switch at any time from the **header dropdown** (one click between configured providers) or add new keys on the Settings page.
 
 > 📖 Full provider setup guide including Ollama: **[AI Providers →](https://rameshbabuprudhvi.github.io/sentri/docs/guide/ai-providers.html)**
 
