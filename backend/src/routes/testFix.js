@@ -134,18 +134,18 @@ function computeDiffSummary(before, after) {
 // ── POST /api/tests/:testId/fix — SSE stream of AI-generated fix ─────────────
 
 router.post("/tests/:testId/fix", async (req, res) => {
-  if (!hasProvider()) {
-    return res.status(503).json({
-      error: "No AI provider configured. Go to Settings to add an API key.",
-    });
-  }
-
   const db = getDb();
   const test = db.tests[req.params.testId];
   if (!test) return res.status(404).json({ error: "Test not found" });
 
   if (!test.playwrightCode) {
     return res.status(400).json({ error: "Test has no Playwright code to fix." });
+  }
+
+  if (!hasProvider()) {
+    return res.status(503).json({
+      error: "No AI provider configured. Go to Settings to add an API key.",
+    });
   }
 
   const project = db.projects[test.projectId] || null;
