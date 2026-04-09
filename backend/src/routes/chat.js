@@ -136,6 +136,123 @@ function buildWorkspaceContext() {
 }
 
 /**
+ * Scan the user's message for entity references (TC-*, RUN-*, PRJ-*) and
+ * fetch detailed context for each. Also matches common natural-language
+ * patterns like "test 15", "run 42", "project MyApp".
+ *
+ * @param {string} userMessage - The latest user message text.
+ * @returns {string} Detailed entity context block, or empty string.
+ */
+function buildEntityContext(userMessage) {
+  const db = getDb();
+  const lines = [];
+
+  // Match explicit IDs: TC-1, RUN-42, PRJ-3
+  const testIds = [...new Set((userMessage.match(/TC-\d+/gi) || []).map(id => id.toUpperCase()))];
+  const runIds = [...new Set((userMessage.match(/RUN-\d+/gi) || []).map(id => id.toUpperCase()))];
+  const projectIds = [...new Set((userMessage.match(/PRJ-\d+/gi) || []).map(id => id.toUpperCase()))];
+
+  // Fetch test details
+  for (const id of testIds.slice(0, 5)) {
+    const test = db.tests[id];
+    if (!test) continue;
+    const project = db.projects[test.projectId];
+    lines.push(`--- Test Detail: ${id} ---`);
+    lines.push(`Name: ${test.name}`);
+    lines.push(`Project: ${project?.name || test.projectId} (${project?.url || ""})`);
+    lines.push(`Status: ${test.lastResult || "not run"} | Review: ${test.reviewStatus || "draft"}`);
+    if (test.description) lines.push(`Description: ${test.description.slice(0, 300)}`);
+    if (test.steps?.length) lines.push(`Steps (${test.steps.length}):\n${test.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
+    if (test.playwrightCode) lines.push(`Playwright code:\n\`\`\`javascript\n${test.playwrightCode.slice(0, 1500)}\n\`\`\``);
+    if (test.qualityScore != null) lines.push(`Quality score: ${test.qualityScore}%`);
+    if (test.type) lines.push(`Type: ${test.type}`);
+    if (test.priority) lines.push(`Priority: ${test.priority}`);
+
+    // Find latest run result for this test
+    const latestResult = findLatestTestResult(db, id);
+    if (latestResult) {
+      lines.push(`Last run result (${latestResult.runId}):`);
+      lines.push(`  Status: ${latestResult.status}`);
+      if (latestResult.error) lines.push(`  Error: ${latestResult.error.slice(0, 500)}`);
+      if (latestResult.duration) lines.push(`  Duration: ${latestResult.duration}ms`);
+    }
+    lines.push("");
+  }
+
+  // Fetch run details
+  for (const id of runIds.slice(0, 3)) {
+    const run = db.runs[id];
+    if (!run) continue;
+    const project = db.projects[run.projectId];
+    lines.push(`--- Run Detail: ${id} ---`);
+    lines.push(`Type: ${run.type} | Status: ${run.status}`);
+    lines.push(`Project: ${project?.name || run.projectId}`);
+    if (run.startedAt) lines.push(`Started: ${run.startedAt}`);
+    if (run.passed != null) lines.push(`Results: ${run.passed} passed, ${run.failed || 0} failed, ${run.total || 0} total`);
+    if (run.duration) lines.push(`Duration: ${run.duration}ms`);
+
+    // Include failed test results with error details
+    if (run.results?.length) {
+      const failures = run.results.filter(r => r.status === "failed").slice(0, 5);
+      if (failures.length > 0) {
+        lines.push(`Failed tests:`);
+        for (const f of failures) {
+          const test = db.tests[f.testId];
+          lines.push(`  - ${test?.name || f.testId}: ${(f.error || "").slice(0, 300)}`);
+        }
+      }
+    }
+    lines.push("");
+  }
+
+  // Fetch project details
+  for (const id of projectIds.slice(0, 3)) {
+    const project = db.projects[id];
+    if (!project) continue;
+    const pTests = Object.values(db.tests).filter(t => t.projectId === id);
+    const pRuns = Object.values(db.runs).filter(r => r.projectId === id);
+    lines.push(`--- Project Detail: ${id} ---`);
+    lines.push(`Name: ${project.name}`);
+    lines.push(`URL: ${project.url}`);
+    lines.push(`Tests: ${pTests.length} (${pTests.filter(t => t.reviewStatus === "approved").length} approved, ${pTests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length} draft)`);
+    lines.push(`Runs: ${pRuns.length} total`);
+    const lastRun = pRuns.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0];
+    if (lastRun) {
+      lines.push(`Last run: ${lastRun.id} — ${lastRun.status}${lastRun.passed != null ? ` (${lastRun.passed}/${lastRun.total} passed)` : ""}`);
+    }
+    lines.push("");
+  }
+
+  return lines.length > 0 ? lines.join("\n") : "";
+}
+
+/**
+ * Find the most recent run result for a specific test ID.
+ *
+ * @param {Object} db - The database object.
+ * @param {string} testId - The test ID to search for.
+ * @returns {Object|null} { runId, status, error, duration } or null.
+ */
+function findLatestTestResult(db, testId) {
+  const runs = Object.values(db.runs)
+    .filter(r => r.results?.length)
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+
+  for (const run of runs) {
+    const result = run.results.find(r => r.testId === testId);
+    if (result) {
+      return {
+        runId: run.id,
+        status: result.status,
+        error: result.error || null,
+        duration: result.duration || null,
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * POST /api/chat
  *
  * Accepts a messages array and streams the AI reply token-by-token via SSE.
@@ -174,10 +291,12 @@ router.post("/chat", async (req, res) => {
     ? `Previous conversation:\n${history}\n\nUser: ${lastMessage.content}`
     : lastMessage.content;
 
-  // Build system prompt with live workspace context
+  // Build system prompt with live workspace context + deep entity details
   const workspaceContext = buildWorkspaceContext();
-  const systemPrompt = workspaceContext
-    ? `${BASE_SYSTEM_PROMPT}\n\n${workspaceContext}`
+  const entityContext = buildEntityContext(lastMessage.content);
+  const contextParts = [workspaceContext, entityContext].filter(Boolean).join("\n\n");
+  const systemPrompt = contextParts
+    ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
     : BASE_SYSTEM_PROMPT;
 
   // Set up SSE
