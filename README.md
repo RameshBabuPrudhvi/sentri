@@ -2,7 +2,7 @@
   <img src="assets/logo.jpeg" alt="Project Logo" width="50"/>
   <strong style="font-size: 28px;">Sentri — Your AI QA Engineer</strong>
 </p>
-> Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
+Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org)
