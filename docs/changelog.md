@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **Command Palette** — `Cmd/Ctrl+K` now opens a two-mode command palette instead of jumping straight to AI chat. Mode 1 (default): fuzzy-search over navigation and actions with zero LLM cost. Mode 2 (fallback): type a natural-language question to open the AI chat panel. Prefix `>` to force command mode, `?` to force AI mode.
 - Confirm password field on registration form
 - Email validation on frontend before submission
 - OAuth CSRF protection (state parameter validation)

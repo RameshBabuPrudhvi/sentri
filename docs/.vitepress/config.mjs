@@ -56,6 +56,7 @@ export default defineConfig({
             { text: 'Review Workflow', link: '/guide/review-workflow' },
             { text: 'Self-Healing', link: '/guide/self-healing' },
             { text: 'AI Providers', link: '/guide/ai-providers' },
+            { text: 'Command Palette', link: '/guide/command-palette' },
           ],
         },
         {

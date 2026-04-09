@@ -10,6 +10,7 @@ const files = [
   "tests/more-utils.test.js",
   "tests/api.integration.test.js",
   "tests/test-fix.test.js",
+  "tests/command-palette.test.js",
 ];
 
 let passed = 0;

@@ -75,6 +75,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | 🔐 **Built-in Auth** | Email/password + GitHub/Google OAuth. Scrypt hashing, JWT with HS256, rate limiting, CSRF protection |
 | 📖 **Full Documentation** | VitePress guide, REST API reference, and auto-generated JSDoc — all deployed to GitHub Pages |
 | 🌙 **Dark Mode** | Automatic via `prefers-color-scheme` — all UI components adapt |
+| 🔍 **Command Palette** | `⌘K` / `Ctrl+K` opens a two-mode command palette: fuzzy-search navigation and actions (zero LLM cost), or fall through to AI Chat for natural-language questions. Prefix `>` for commands, `?` for AI |
 | 🐳 **Docker Ready** | `docker compose up --build` and you're running. GitHub Pages + Render deployment supported |
 
 ---
