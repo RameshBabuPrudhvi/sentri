@@ -12,13 +12,20 @@ export function invalidateConfigCache() {
   _settingsCache = null;
 }
 
-// ── Provider display metadata ─────────────────────────────────────────────────
-const PROVIDER_META = {
-  anthropic: { label: "Claude Sonnet",    sublabel: "claude-sonnet-4-20250514", bg: "#fef3e2", border: "#fcd8a8", color: "#b45309", dot: "#d97706", activeBg: "rgba(180,83,9,0.08)" },
-  openai:    { label: "GPT-4o-mini",      sublabel: "gpt-4o-mini",              bg: "#dcfce7", border: "#bbf7d0", color: "#15803d", dot: "#16a34a", activeBg: "rgba(21,128,61,0.08)" },
-  google:    { label: "Gemini 2.5 Flash", sublabel: "gemini-2.5-flash",         bg: "#dbeafe", border: "#bfdbfe", color: "#1d4ed8", dot: "#2563eb", activeBg: "rgba(29,78,216,0.08)" },
-  local:     { label: "Ollama",           sublabel: "local model",              bg: "#f5f3ff", border: "#ddd6fe", color: "#6d28d9", dot: "#7c3aed", activeBg: "rgba(109,40,217,0.08)" },
+// ── Provider visual styles (colors only — labels come from the backend) ───────
+const PROVIDER_STYLES = {
+  anthropic: { bg: "#fef3e2", border: "#fcd8a8", color: "#b45309", dot: "#d97706", activeBg: "rgba(180,83,9,0.08)" },
+  openai:    { bg: "#dcfce7", border: "#bbf7d0", color: "#15803d", dot: "#16a34a", activeBg: "rgba(21,128,61,0.08)" },
+  google:    { bg: "#dbeafe", border: "#bfdbfe", color: "#1d4ed8", dot: "#2563eb", activeBg: "rgba(29,78,216,0.08)" },
+  local:     { bg: "#f5f3ff", border: "#ddd6fe", color: "#6d28d9", dot: "#7c3aed", activeBg: "rgba(109,40,217,0.08)" },
 };
+
+// Look up a provider's name/model from the backend-supplied supportedProviders list.
+// Falls back to the provider id so the UI never shows blank labels.
+function getProviderInfo(config, id) {
+  const sp = config?.supportedProviders?.find(p => p.id === id);
+  return { label: sp?.name || id, sublabel: sp?.model || "" };
+}
 
 const ALL_IDS = ["anthropic", "openai", "google", "local"];
 
@@ -125,7 +132,7 @@ export default function ProviderBadge({ style }) {
     );
   }
 
-  const c      = PROVIDER_META[config.provider] || PROVIDER_META.openai;
+  const c      = PROVIDER_STYLES[config.provider] || PROVIDER_STYLES.openai;
   const saved  = getSavedProviders(settings);
   const unsaved = ALL_IDS.filter(id => !saved.includes(id));
 
@@ -185,7 +192,8 @@ export default function ProviderBadge({ style }) {
           {saved.length > 0 && (
             <div style={{ padding: "4px 0" }}>
               {saved.map(id => {
-                const meta     = PROVIDER_META[id];
+                const sty      = PROVIDER_STYLES[id];
+                const info     = getProviderInfo(config, id);
                 const isActive = config.provider === id;
                 const isBusy   = switching === id;
                 return (
@@ -194,7 +202,7 @@ export default function ProviderBadge({ style }) {
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
                       width: "100%", padding: "8px 13px",
-                      background: isActive ? meta.activeBg : "none",
+                      background: isActive ? sty.activeBg : "none",
                       border: "none",
                       cursor: switching ? (isBusy ? "wait" : "default") : "pointer",
                       textAlign: "left", transition: "background 0.1s",
@@ -203,19 +211,19 @@ export default function ProviderBadge({ style }) {
                     onMouseEnter={e => { if (!isActive && !switching) e.currentTarget.style.background = "var(--bg2)"; }}
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "none"; }}
                   >
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0, opacity: isActive ? 1 : 0.45 }} />
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sty.dot, flexShrink: 0, opacity: isActive ? 1 : 0.45 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "0.82rem", fontWeight: isActive ? 600 : 400, color: isActive ? meta.color : "var(--text)", lineHeight: 1.3 }}>
-                        {meta.label}
+                      <div style={{ fontSize: "0.82rem", fontWeight: isActive ? 600 : 400, color: isActive ? sty.color : "var(--text)", lineHeight: 1.3 }}>
+                        {info.label}
                       </div>
                       <div style={{ fontSize: "0.68rem", color: "var(--text3)", marginTop: 1 }}>
-                        {id === "local" ? (settings?.ollamaModel || meta.sublabel) : meta.sublabel}
+                        {info.sublabel}
                       </div>
                     </div>
                     {isBusy
-                      ? <RefreshCw size={12} color={meta.color} className="spin" style={{ flexShrink: 0 }} />
+                      ? <RefreshCw size={12} color={sty.color} className="spin" style={{ flexShrink: 0 }} />
                       : isActive
-                      ? <Check size={12} color={meta.color} style={{ flexShrink: 0 }} />
+                      ? <Check size={12} color={sty.color} style={{ flexShrink: 0 }} />
                       : <span style={{ fontSize: "0.68rem", color: "var(--text3)", flexShrink: 0 }}>Switch</span>
                     }
                   </button>
@@ -238,15 +246,16 @@ export default function ProviderBadge({ style }) {
                 Add provider
               </div>
               {unsaved.map(id => {
-                const meta = PROVIDER_META[id];
+                const sty  = PROVIDER_STYLES[id];
+                const info = getProviderInfo(config, id);
                 return (
                   <button key={id} onClick={() => { setOpen(false); navigate("/settings"); }}
                     style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "7px 13px", background: "none", border: "none", cursor: "pointer", textAlign: "left", transition: "background 0.1s" }}
                     onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
                     onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
                   >
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0, opacity: 0.25 }} />
-                    <span style={{ fontSize: "0.81rem", color: "var(--text3)", flex: 1 }}>{meta.label}</span>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: sty.dot, flexShrink: 0, opacity: 0.25 }} />
+                    <span style={{ fontSize: "0.81rem", color: "var(--text3)", flex: 1 }}>{info.label}</span>
                     <span style={{ fontSize: "0.67rem", color: "var(--text3)", opacity: 0.6 }}>+ Add key →</span>
                   </button>
                 );

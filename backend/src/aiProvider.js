@@ -19,6 +19,7 @@
  * - {@link getProvider}, {@link hasProvider}, {@link isLocalProvider}, {@link getProviderName}, {@link getProviderMeta} — Provider detection.
  * - {@link setRuntimeKey}, {@link setRuntimeOllama}, {@link setActiveProvider} — Runtime configuration (Settings page).
  * - {@link getConfiguredKeys} — Masked key status for the Settings UI.
+ * - {@link getSupportedProviders} — All provider names/models for the UI (derived from runtime config).
  * - {@link checkOllamaConnection} — Ollama connectivity check.
  */
 
@@ -110,6 +111,29 @@ function buildProviderMeta() {
     google:    { name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         color: "#4285f4" },
     local:     { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" },
   };
+}
+
+const PROVIDER_DOCS = {
+  anthropic: "https://console.anthropic.com/settings/keys",
+  openai:    "https://platform.openai.com/api-keys",
+  google:    "https://aistudio.google.com/apikey",
+  local:     "https://ollama.ai",
+};
+
+/**
+ * Returns the list of all supported providers with current names/models.
+ * Derives from buildProviderMeta() so model names stay in sync with what's
+ * actually used in API calls. Consumed by GET /api/config.
+ * @returns {Array<{id: string, name: string, model: string, docsUrl: string}>}
+ */
+export function getSupportedProviders() {
+  const meta = buildProviderMeta();
+  return Object.entries(meta).map(([id, m]) => ({
+    id,
+    name: m.name,
+    model: m.model,
+    docsUrl: PROVIDER_DOCS[id] || "",
+  }));
 }
 
 // ── Provider detection ────────────────────────────────────────────────────────

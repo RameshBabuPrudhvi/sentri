@@ -14,7 +14,7 @@
 
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
-import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider } from "../aiProvider.js";
+import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
 
 const router = Router();
 
@@ -27,12 +27,7 @@ router.get("/config", (req, res) => {
     model: meta?.model || null,
     color: meta?.color || null,
     hasProvider: hasProvider(),
-    supportedProviders: [
-      { id: "anthropic", name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", docsUrl: "https://console.anthropic.com/settings/keys" },
-      { id: "openai",    name: "GPT-4o-mini",      model: "gpt-4o-mini",              docsUrl: "https://platform.openai.com/api-keys" },
-      { id: "google",    name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         docsUrl: "https://aistudio.google.com/apikey" },
-      { id: "local",     name: "Ollama (local)",   model: "mistral:7b",                 docsUrl: "https://ollama.ai" },
-    ],
+    supportedProviders: getSupportedProviders(),
   });
 });
 
