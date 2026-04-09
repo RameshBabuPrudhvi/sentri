@@ -309,7 +309,6 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
       const classified = classifyError(err, "crawl");
-      console.error(`[crawler] API test generation failed: ${err.message}`);
       logWarn(run, `API test generation failed: ${classified.message}`);
     }
   }

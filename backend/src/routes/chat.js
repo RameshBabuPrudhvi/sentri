@@ -23,6 +23,7 @@ import { Router } from "express";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { getDb } from "../db.js";
 import { classifyError } from "../utils/errorClassifier.js";
+import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 
 const router = Router();
 
@@ -330,7 +331,9 @@ router.post("/chat", async (req, res) => {
 
   // Log prompt size so context-window overflows are diagnosable
   const promptCharCount = systemPrompt.length + userContent.length;
-  console.log(`[chat] provider=${isLocal ? "ollama" : "cloud"} prompt=${promptCharCount} chars (~${Math.round(promptCharCount / 4)} tokens) user="${lastMessage.content.slice(0, 80)}"`);
+  if (shouldLog("debug")) {
+    console.log(formatLogLine("debug", null, `[chat] provider=${isLocal ? "ollama" : "cloud"} prompt=${promptCharCount} chars (~${Math.round(promptCharCount / 4)} tokens) user="${lastMessage.content.slice(0, 80)}"`));
+  }
 
   // Set up SSE
   res.setHeader("Content-Type", "text/event-stream");
@@ -360,13 +363,15 @@ router.post("/chat", async (req, res) => {
       streamOpts,
     );
 
-    console.log(`[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`);
+    if (shouldLog("debug")) {
+      console.log(formatLogLine("debug", null, `[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`));
+    }
     if (!res.writableEnded) {
       res.write("data: [DONE]\n\n");
       res.end();
     }
   } catch (err) {
-    console.error(`[chat] streamText failed for user ${req.user?.id}: ${err.message}`);
+    console.error(formatLogLine("error", null, `[chat] streamText failed for user ${req.user?.id}: ${err.message}`));
     if (!res.writableEnded) {
       const { message } = classifyError(err, "chat");
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);

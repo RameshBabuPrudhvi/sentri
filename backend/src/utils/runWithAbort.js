@@ -14,6 +14,7 @@ import { emitRunEvent } from "../routes/sse.js";
 import { logActivity } from "./activityLogger.js";
 import { saveDb } from "../db.js";
 import { classifyError } from "./errorClassifier.js";
+import { formatLogLine } from "./logFormatter.js";
 
 // ─── Abort registry: runId → AbortController ──────────────────────────────────
 // Allows in-progress crawl / generate / test_run operations to be cancelled.
@@ -39,7 +40,7 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       if (err.name === "AbortError" || run.status === "aborted") return;
       const runType = run.type === "crawl" ? "crawl" : "run";
       const classified = classifyError(err, runType);
-      console.error(`[${runType}] Run ${runId} failed: ${err.message}`);
+      console.error(formatLogLine("error", runId, `[${runType}] ${err.message}`));
       run.status = "failed";
       run.error = classified.message;
       run.errorCategory = classified.category;

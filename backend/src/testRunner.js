@@ -109,7 +109,6 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       browser = await launchBrowser();
     } catch (launchErr) {
       const classified = classifyError(launchErr, "run");
-      console.error(`[testRunner] Browser launch failed: ${launchErr.message}`);
       run.status = "failed";
       run.error = classified.message;
       run.errorCategory = classified.category;
@@ -128,7 +127,6 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     } catch (ctxErr) {
       await browser.close().catch(() => {});
       const classified = classifyError(ctxErr, "run");
-      console.error(`[testRunner] Trace context setup failed: ${ctxErr.message}`);
       run.status = "failed";
       run.error = classified.message;
       run.errorCategory = classified.category;
