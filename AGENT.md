@@ -217,12 +217,17 @@ const result = await doThing(name, {
 - `process.on("uncaughtException")` and `process.on("unhandledRejection")` are registered once in `index.js`. Do not register additional global handlers.
 
 ```js
-// ✅ Classify and log
+// ✅ Classify and log (run context — use logError which formats + emits SSE)
 catch (err) {
   const { message, category } = classifyError(err, "run");
-  console.error(`[myModule] Run ${runId} failed: ${err.message}`);
   run.error = message;           // user-friendly
   run.errorCategory = category;  // for frontend banner styling
+  logError(run, message);        // structured log + SSE broadcast
+}
+
+// ✅ Classify and log (no run context — use formatLogLine directly)
+catch (err) {
+  console.error(formatLogLine("error", null, `[chat] ${err.message}`));
 }
 
 // ✅ Propagate with context (when not storing on run)
@@ -233,24 +238,37 @@ catch (err) {
 // ❌ Silent swallow
 catch (_) {}
 
+// ❌ Bare console.error without formatLogLine
+console.error(`[chat] failed: ${err.message}`);  // inconsistent format
+
 // ❌ Raw error to client
 run.error = err.message;  // leaks SDK internals
 ```
 
 ### Logging
 
-- **Run-level logging**: Use `log(run, message)` / `logWarn(run, message)` from `utils/runLogger.js`. These emit SSE events automatically.
-- **Application-level logging**: Use `console.error` with a `[MODULE]` prefix for errors outside of run context (e.g. auth failures, DB errors, startup issues). Use `console.log` sparingly for informational startup messages only.
+- **Run-level logging**: Use `log(run, message)` / `logWarn(run, message)` / `logError(run, message)` from `utils/runLogger.js`. These format via `logFormatter.js` and emit SSE events automatically.
+- **Application-level logging** (no run context): Use `formatLogLine(level, null, message)` from `utils/logFormatter.js` wrapped in `console.error` / `console.log`. This ensures all output follows the same structured format (`[timestamp] [LEVEL] message` or JSON when `LOG_JSON=true`). Gate debug-level logs behind `shouldLog("debug")`.
+- **Never use bare `console.error` / `console.log`** for application logging. Always route through `formatLogLine` so timestamps, levels, and JSON mode are consistent.
 - **Never log sensitive data**: API keys, passwords, JWT tokens, or user credentials must never appear in logs. Use `maskKey()` if you need to log a key reference.
 - **Structured context**: Always include the relevant ID (runId, projectId, testId) in error messages so logs are traceable.
 
 ```js
-// ✅ Good
-console.error(`[auth] Failed login for user ${email}: invalid password`);
-console.error(`[chat] streamText failed for user ${req.user?.id}: ${err.message}`);
+// ✅ Run context — use runLogger (formats + emits SSE automatically)
+logError(run, `Browser launch failed`);
+logWarn(run, `API test generation failed: ${classified.message}`);
 
-// ❌ Bad — no context, or leaks secrets
+// ✅ No run context — use formatLogLine directly
+console.error(formatLogLine("error", null, `[chat] streamText failed: ${err.message}`));
+if (shouldLog("debug")) {
+  console.log(formatLogLine("debug", null, `[chat] prompt=${charCount} chars`));
+}
+
+// ❌ Bare console without formatLogLine — inconsistent format
+console.error(`[chat] failed: ${err.message}`);
 console.log("error");
+
+// ❌ Leaks secrets
 console.error(`API key: ${apiKey}`);
 ```
 
@@ -701,7 +719,8 @@ The frontend follows a clear separation of concerns between pages:
 - **Do not write to `sentri-db.json` directly** — always go through `db.js`.
 - **Do not skip `throwIfAborted(signal)`** in pipeline or runner stages — it breaks the abort/cancel feature.
 - **Do not use `dangerouslySetInnerHTML`** without escaping all dynamic content first. AI/user-generated text must be sanitised before DOM insertion to prevent XSS.
-- **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages. Log the real error server-side with `console.error`.
+- **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages via `classifyError()`. Log the real error server-side with `formatLogLine()`.
+- **Do not use bare `console.error` / `console.log`** for application logging. Always use `formatLogLine()` from `utils/logFormatter.js` (or `logError(run, …)` / `logWarn(run, …)` when a run object is available) so all output has consistent timestamps, levels, and respects `LOG_JSON` mode.
 - **Do not omit `X-Accel-Buffering: no`** on SSE endpoints — nginx will buffer the stream and break real-time delivery.
 - **Do not add large dependencies** without justification. Check bundle size impact for frontend packages and document the rationale in the PR.
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
