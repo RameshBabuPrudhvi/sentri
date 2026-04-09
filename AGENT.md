@@ -91,6 +91,84 @@ export async function doThing(name, opts) { … }
 - Document `@typedef` for all non-trivial object shapes.
 - Internal helpers that are not exported do not need JSDoc but benefit from a brief inline comment.
 
+### DRY — No Duplication
+
+Before writing new code, check whether a shared utility, component, or CSS class already exists. Duplicating logic that belongs in a shared module is a common agent mistake.
+
+#### Backend shared utilities (`backend/src/utils/`)
+
+| Module | What it provides | When to use |
+|---|---|---|
+| `abortHelper.js` | `throwIfAborted(signal)`, `isRunAborted()`, `finalizeRunIfNotAborted()` | Every pipeline/runner stage with I/O |
+| `runLogger.js` | `log()`, `logWarn()`, `logError()`, `logSuccess()`, `emitRunEvent()` | All run-level logging and SSE |
+| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()` | Creating new domain objects |
+| `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
+| `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
+| `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
+
+Do not reimplement any of these. If you need a variant, extend the existing module.
+
+#### Frontend shared CSS (`frontend/src/styles/`)
+
+The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
+
+```
+1. tokens.css       — design tokens (colours, fonts, spacing, shadows)
+2. reset.css        — browser resets, element defaults
+3. components.css   — reusable UI primitives (see table below)
+4. features/*.css   — feature-scoped styles (onboarding, chat, …)
+5. pages/*.css      — page-specific overrides
+6. utilities.css    — single-purpose helpers (flex, text, spacing, animations)
+```
+
+**Before creating a new CSS class**, check `components.css` and `utilities.css` for an existing one:
+
+| Need | Use existing class | Don't reinvent |
+|---|---|---|
+| Button | `.btn .btn-primary .btn-ghost .btn-danger .btn-sm .btn-xs` | Custom button styles |
+| Card container | `.card .card-padded .card-padded-sm` | `background: var(--surface); border: …` |
+| Badge/pill | `.badge .badge-green .badge-red .badge-amber …` | Inline coloured spans |
+| Input field | `.input` | Custom input styling |
+| Table | `.table` | Custom table markup |
+| Modal overlay | `.modal-backdrop .modal-panel .modal-close` | Custom fixed-position overlays |
+| Banner/alert | `.banner .banner-info .banner-error .banner-warning .banner-success` | Inline error boxes |
+| Empty state | `.empty-state .empty-state-icon .empty-state-title .empty-state-desc` | Custom empty placeholders |
+| Progress bar | `.progress-bar .progress-bar-fill` | Custom progress indicators |
+| Flex layout | `.flex-between .flex-center .flex-col .flex-wrap .flex-1 .shrink-0` | Inline `display: flex` |
+| Spacing | `.mb-sm .mb-md .mb-lg .mb-xl .gap-sm .gap-md .gap-lg` | Inline margins |
+| Text helpers | `.text-sm .text-xs .text-muted .text-sub .text-mono .font-bold .font-semi` | Inline font overrides |
+| Divider line | `.divider` | `style={{ height: 1, background: "var(--border)" }}` |
+| Animations | `.spin .pulse .fade-in .skeleton` | Custom `@keyframes` for common effects |
+
+**When to create a new CSS file**:
+- **Feature-scoped styles** → `frontend/src/styles/features/<feature>.css` — for self-contained features (e.g. chat, onboarding). Scope all classes under a namespace prefix (`.chat-*`, `.onboard-*`).
+- **Page-specific styles** → `frontend/src/styles/pages/<page>.css` — for styles used only on one page.
+- **New reusable component** → Add to `components.css` if it will be used across 2+ pages/features.
+- **Always import** new CSS files from `frontend/src/index.css` in the correct ITCSS layer position.
+
+#### Frontend shared JS
+
+| Module | What it provides | When to use |
+|---|---|---|
+| `src/api.js` | All `api.*` methods, `getToken()`, `handleUnauthorized()` | Every backend call |
+| `src/utils/api.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
+| `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout/register | Auth state in any component |
+| `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
+| `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
+
+**If you need a shared helper** (e.g. `escapeHtml`, `formatDuration`, `debounce`), create it in `frontend/src/utils/<name>.js` and import it. Do not define utility functions locally inside a component file — they will inevitably be needed elsewhere and duplicated.
+
+```js
+// ✅ Shared utility
+// frontend/src/utils/escapeHtml.js
+export function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ❌ Local helper buried inside a component
+function escapeHtml(s) { … } // in AIChat.jsx — not reusable
+```
+
 ### Code Formatting
 
 No linter or formatter (ESLint, Prettier) is configured yet. Match the style of surrounding code exactly:
@@ -552,3 +630,6 @@ The following are **not yet implemented** but should be addressed before product
 - **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages. Log the real error server-side with `console.error`.
 - **Do not omit `X-Accel-Buffering: no`** on SSE endpoints — nginx will buffer the stream and break real-time delivery.
 - **Do not add large dependencies** without justification. Check bundle size impact for frontend packages and document the rationale in the PR.
+- **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
+- **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
+- **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
