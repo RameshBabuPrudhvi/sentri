@@ -6,6 +6,7 @@ import OnboardingTour from "./OnboardingTour.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import useOnboarding from "../hooks/useOnboarding.js";
 import AppLogo from "./AppLogo.jsx";
+import AIChat from "./AIChat.jsx";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },
@@ -29,6 +30,7 @@ export default function Layout() {
         </main>
       </div>
       <OnboardingTour tour={tour} />
+      <AIChat />
     </div>
   );
 }

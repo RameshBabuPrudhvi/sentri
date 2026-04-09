@@ -18,6 +18,7 @@
 @import "./styles/reset.css";
 @import "./styles/components.css";
 @import "./styles/features/onboarding.css";
+@import "./styles/features/chat.css";
 @import "./styles/pages/dashboard.css";
 @import "./styles/pages/settings.css";
 @import "./styles/pages/test-detail.css";

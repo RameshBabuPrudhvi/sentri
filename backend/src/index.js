@@ -13,6 +13,7 @@
  * | `/api` (dashboard) | `routes/dashboard`  |
  * | `/api` (settings)  | `routes/settings`   |
  * | `/api` (system)    | `routes/system`     |
+ * | `/api` (chat)      | `routes/chat`       |
  * | `/api/auth`        | `routes/auth`       |
  * | `/health`          | Health check        |
  */
@@ -32,6 +33,7 @@ import sseRouter from "./routes/sse.js";
 import dashboardRouter from "./routes/dashboard.js";
 import settingsRouter from "./routes/settings.js";
 import systemRouter from "./routes/system.js";
+import chatRouter from "./routes/chat.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./routes/auth.js";
 
@@ -77,6 +79,7 @@ app.use("/api", requireAuth, sseRouter);
 app.use("/api", requireAuth, dashboardRouter);
 app.use("/api", requireAuth, settingsRouter);
 app.use("/api", requireAuth, systemRouter);
+app.use("/api", requireAuth, chatRouter);
 
 // Health check (root-level, not under /api)
 app.get("/health", (req, res) => res.json({ ok: true }));
