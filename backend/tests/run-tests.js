@@ -12,6 +12,7 @@ const files = [
   "tests/api-flow.test.js",
   "tests/integration-routes.test.js",
   "tests/utils.test.js",
+  "tests/test-fix.test.js",
 ];
 
 let passed = 0;
