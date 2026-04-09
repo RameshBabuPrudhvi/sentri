@@ -13,7 +13,6 @@
  * | `/api` (dashboard) | `routes/dashboard`  |
  * | `/api` (settings)  | `routes/settings`   |
  * | `/api` (system)    | `routes/system`     |
- * | `/api` (chat)      | `routes/chat`       |
  * | `/api/auth`        | `routes/auth`       |
  * | `/health`          | Health check        |
  */
@@ -33,9 +32,9 @@ import sseRouter from "./routes/sse.js";
 import dashboardRouter from "./routes/dashboard.js";
 import settingsRouter from "./routes/settings.js";
 import systemRouter from "./routes/system.js";
-import chatRouter from "./routes/chat.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./routes/auth.js";
+import chatRouter from "./routes/chat.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -70,6 +69,7 @@ if (process.env.NODE_ENV !== "production") {
 // ─── Mount route modules ──────────────────────────────────────────────────────
 // Auth routes are public (login, register, OAuth callbacks)
 app.use("/api/auth", authRouter);
+
 
 // All other API routes require a valid JWT token
 app.use("/api/projects", requireAuth, projectsRouter);

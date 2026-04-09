@@ -216,60 +216,6 @@ export const api = {
   /** @param {string} provider - Remove API key or deactivate Ollama. */
   deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
 
-
-
-  // ── AI chat (SSE stream) ───────────────────────────────────────────────────
-  /**
-   * Stream AI assistant tokens from the backend chat route.
-   * The backend chooses the active provider (Anthropic/OpenAI/Gemini/Ollama).
-   * @param {{role: "user"|"assistant", content: string}[]} messages
-   * @param {(token: string) => void} [onToken]
-   */
-  chat: async (messages, onToken) => {
-    const headers = { "Content-Type": "application/json" };
-    const token = getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    const res = await fetch(`${BASE}/chat`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ messages }),
-    });
-
-    if (res.status === 401) {
-      handleUnauthorized();
-      throw new Error("Session expired. Please sign in again.");
-    }
-    if (!res.ok) {
-      const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
-      throw new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
-    }
-    if (!res.body) throw new Error("Streaming is not supported in this browser.");
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() || "";
-
-      for (const event of events) {
-        const lines = event.split("\n").filter((line) => line.startsWith("data:"));
-        for (const line of lines) {
-          const payload = line.replace(/^data:\s*/, "");
-          if (payload === "[DONE]") return;
-          const parsed = JSON.parse(payload);
-          if (parsed.error) throw new Error(parsed.error);
-          if (parsed.token && onToken) onToken(parsed.token);
-        }
-      }
-    }
-  },
   // ── Ollama ──────────────────────────────────────────────────────────────────
   /** @returns {Promise<{ok: boolean, model?: string, availableModels?: string[], error?: string}>} */
   getOllamaStatus: () => req("GET", "/ollama/status"),
@@ -313,4 +259,48 @@ export const api = {
   clearActivities: () => req("DELETE", "/data/activities"),
   /** @returns {Promise<{cleared: number}>} Clear self-healing history. */
   clearHealing:    () => req("DELETE", "/data/healing"),
+
+  /**
+   * Stream a chat message through the configured AI provider via SSE.
+   *
+   * @param   {Array<{role: string, content: string}>} messages - Full conversation history.
+   * @param   {function(string):void}  onToken  - Called with each streamed token.
+   * @param   {function(string):void}  onError  - Called if the stream returns an error event.
+   * @returns {Promise<void>}
+   */
+  chat: async (messages, onToken, onError) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Chat request failed (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop(); // keep incomplete line in buffer
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") return;
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.error) { onError?.(parsed.error); return; }
+          if (parsed.token) onToken(parsed.token);
+        } catch { /* malformed SSE line — skip */ }
+      }
+    }
+  },
 };

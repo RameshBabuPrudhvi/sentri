@@ -1,6 +1,6 @@
 import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown, BookOpen, ExternalLink } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown, BookOpen, ExternalLink, Sparkles } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
 import OnboardingTour from "./OnboardingTour.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -19,18 +19,25 @@ const NAV = [
 
 export default function Layout() {
   const tour = useOnboarding();
+  const [chatOpen, setChatOpen] = React.useState(false);
+  const [chatQuery, setChatQuery] = React.useState("");
+
+  function openChat(query = "") {
+    setChatQuery(query);
+    setChatOpen(true);
+  }
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg2)" }}>
       <Sidebar />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <TopBar />
+        <TopBar onOpenChat={openChat} />
         <main style={{ flex: 1, padding: "28px 32px", overflow: "auto" }}>
           <Outlet />
         </main>
       </div>
       <OnboardingTour tour={tour} />
-      <AIChat />
+      <AIChat isOpen={chatOpen} onClose={() => setChatOpen(false)} initialQuery={chatQuery} />
     </div>
   );
 }
@@ -99,28 +106,28 @@ function Sidebar() {
   );
 }
 
-function TopBar() {
+function TopBar({ onOpenChat }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const [q, setQ] = React.useState("");
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef(null);
-
-  function handleSearch(e) {
-    if (e.key === "Enter" && q.trim()) {
-      navigate(`/tests?q=${encodeURIComponent(q.trim())}`);
-      setQ("");
-    }
-  }
-
-  function clearSearch() {
-    setQ("");
-  }
 
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
   }
+
+  // Global shortcut: Cmd/Ctrl+K to open AI chat
+  React.useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        onOpenChat("");
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onOpenChat]);
 
   // Close menu when clicking outside
   React.useEffect(() => {
@@ -140,30 +147,19 @@ function TopBar() {
       height: 52, background: "var(--surface)", borderBottom: "1px solid var(--border)",
       display: "flex", alignItems: "center", padding: "0 24px", gap: 12, flexShrink: 0,
     }}>
-      {/* Search */}
-      <div style={{ flex: 1, maxWidth: 420, position: "relative" }}>
-        <Search size={14} color="var(--text3)" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-        {/* Hidden dummy field prevents Chrome from autofilling the visible search input with saved credentials */}
-        <input type="text" name="prevent-autofill" autoComplete="username" style={{ position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none" }} tabIndex={-1} aria-hidden="true" />
-        <input
-          className="input"
-          type="search"
-          name="global-search"
-          autoComplete="off"
-          data-form-type="other"
-          data-lpignore="true"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          onKeyDown={handleSearch}
-          placeholder="Search tests… (press Enter)"
-          style={{ paddingLeft: 32, paddingRight: q ? 32 : 12, height: 34, fontSize: "0.83rem", background: "var(--bg2)", border: "1px solid var(--border)" }}
-        />
-        {q && (
-          <button onClick={clearSearch} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, display: "flex" }}>
-            <X size={13} />
-          </button>
-        )}
-      </div>
+      {/* AI Search trigger */}
+      <button
+        onClick={() => onOpenChat("")}
+        className="chat-trigger"
+        title="Open AI chat (⌘K)"
+      >
+        <Search size={13} color="var(--text3)" />
+        <span className="chat-trigger__placeholder">Ask Sentri AI anything…</span>
+        <span className="chat-trigger__kbd">
+          <Sparkles size={9} />⌘K
+        </span>
+      </button>
+
       <div style={{ flex: 1 }} />
       <ProviderBadge />
 
@@ -200,6 +196,23 @@ function TopBar() {
               <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)", marginBottom: 2 }}>{user?.name || "User"}</div>
               <div style={{ fontSize: "0.75rem", color: "var(--text3)" }}>{user?.email}</div>
             </div>
+            {/* AI Chat shortcut */}
+            <button
+              onClick={() => { setMenuOpen(false); onOpenChat(""); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 9,
+                width: "100%", padding: "10px 14px",
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: "0.83rem", color: "var(--text2)", textAlign: "left",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+            >
+              <Sparkles size={14} />
+              Open Sentri AI
+              <span style={{ marginLeft: "auto", fontSize: "0.68rem", color: "var(--text3)", fontFamily: "monospace" }}>⌘K</span>
+            </button>
             {/* Docs */}
             <a
               href={`${import.meta.env.BASE_URL}docs/`}
