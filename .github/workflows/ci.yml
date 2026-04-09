@@ -9,7 +9,7 @@ on:
 jobs:
   # ── Backend ───────────────────────────────────────────────────────────────
   backend:
-    name: Backend — Install & Syntax Check
+    name: Backend — Install, Test & Syntax Check
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,6 +29,9 @@ jobs:
 
       - name: Syntax check all source files
         run: find src -name '*.js' -exec node --check {} +
+
+      - name: Run unit & integration tests
+        run: npm test
 
       - name: Generate JSDoc (validates all doc comments)
         run: npm run docs
