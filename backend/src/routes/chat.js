@@ -51,10 +51,10 @@ IMPORTANT — Response format rules:
  * Build a compact workspace snapshot from the DB for the system prompt.
  * Kept small to avoid wasting tokens — only includes actionable data.
  *
+ * @param {Object} db - The database object (from getDb()).
  * @returns {string} Workspace context block, or empty string if no data.
  */
-function buildWorkspaceContext() {
-  const db = getDb();
+function buildWorkspaceContext(db) {
   const projects = Object.values(db.projects);
   const tests = Object.values(db.tests);
   const runs = Object.values(db.runs);
@@ -142,14 +142,13 @@ function buildWorkspaceContext() {
 
 /**
  * Scan the user's message for entity references (TC-*, RUN-*, PRJ-*) and
- * fetch detailed context for each. Also matches common natural-language
- * patterns like "test 15", "run 42", "project MyApp".
+ * fetch detailed context for each.
  *
+ * @param {Object} db - The database object (from getDb()).
  * @param {string} userMessage - The latest user message text.
  * @returns {string} Detailed entity context block, or empty string.
  */
-function buildEntityContext(userMessage) {
-  const db = getDb();
+function buildEntityContext(db, userMessage) {
   const lines = [];
 
   // Match explicit IDs: TC-1, RUN-42, PRJ-3
@@ -296,9 +295,11 @@ router.post("/chat", async (req, res) => {
     ? `Previous conversation:\n${history}\n\nUser: ${lastMessage.content}`
     : lastMessage.content;
 
-  // Build system prompt with live workspace context + deep entity details
-  const workspaceContext = buildWorkspaceContext();
-  const entityContext = buildEntityContext(lastMessage.content);
+  // Build system prompt with live workspace context + deep entity details.
+  // Single getDb() call shared by both builders to avoid redundant Object.values().
+  const db = getDb();
+  const workspaceContext = buildWorkspaceContext(db);
+  const entityContext = buildEntityContext(db, lastMessage.content);
   const contextParts = [workspaceContext, entityContext].filter(Boolean).join("\n\n");
   const systemPrompt = contextParts
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
