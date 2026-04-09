@@ -37,6 +37,21 @@ let runtimeOllamaModel   = "";
 // Set to true by DELETE /api/settings/local; cleared by POST /api/settings with local provider.
 let runtimeOllamaDisabled = false;
 
+// ── Active provider override ──────────────────────────────────────────────────
+// When set, this provider is used instead of auto-detection order.
+// Allows the header dropdown to switch between already-configured providers
+// without re-entering keys. Cleared when the selected provider loses its key.
+let runtimeActiveProvider = null;
+
+/**
+ * Override the active provider selection (used by the quick-switch dropdown).
+ * The provider must already have a valid key/config — this does not set any key.
+ * @param {string|null} provider - Provider ID to pin, or null to resume auto-detect.
+ */
+export function setActiveProvider(provider) {
+  runtimeActiveProvider = provider || null;
+}
+
 /**
  * Set an AI provider API key at runtime (via Settings page).
  * @param {string} provider - `"anthropic"` | `"openai"` | `"google"`.
@@ -94,14 +109,40 @@ function buildProviderMeta() {
 
 // ── Provider detection ────────────────────────────────────────────────────────
 
+/**
+ * Check if a non-local provider has a usable key, checking both process.env
+ * and the runtime key store. A runtimeKeys entry of "" means the key was
+ * explicitly removed, so we respect that and return false.
+ */
+function hasKeyForProvider(provider) {
+  const envMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+  const envName = envMap[provider];
+  if (!envName) return false;
+  // If the key was explicitly cleared at runtime, honour that removal
+  if (envName in runtimeKeys) return runtimeKeys[envName].length > 0;
+  // Otherwise fall back to the env var
+  return !!(process.env[envName]);
+}
+
 function detectProvider() {
   const forced = process.env.AI_PROVIDER?.toLowerCase();
 
-  if (forced) {
-    if (forced === "local") {
-      // Ollama needs no API key — just check the server is reachable at runtime
-      return "local";
+  // ── Quick-switch override from the header dropdown ────────────────────────
+  // Checked BEFORE the AI_PROVIDER env var so the dropdown can switch away
+  // from a locally-forced provider (e.g. AI_PROVIDER=local in .env).
+  if (runtimeActiveProvider) {
+    if (runtimeActiveProvider === "local") {
+      if (!runtimeOllamaDisabled) return "local";
+    } else if (hasKeyForProvider(runtimeActiveProvider)) {
+      return runtimeActiveProvider;
     }
+    // Key gone — clear the override and fall through
+    runtimeActiveProvider = null;
+  }
+
+  // ── AI_PROVIDER env var (explicit static config) ─────────────────────────
+  if (forced) {
+    if (forced === "local") return "local";
     const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
     if (!keyMap[forced]) throw new Error(`Unknown AI_PROVIDER="${forced}". Valid: anthropic, openai, google, local`);
     if (!getKey(keyMap[forced])) throw new Error(`AI_PROVIDER="${forced}" but ${keyMap[forced]} is not set`);

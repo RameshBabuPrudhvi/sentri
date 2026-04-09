@@ -14,7 +14,7 @@
 
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
-import { hasProvider, setRuntimeKey, setRuntimeOllama, checkOllamaConnection, getProviderMeta, getConfiguredKeys } from "../aiProvider.js";
+import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider } from "../aiProvider.js";
 
 const router = Router();
 
@@ -50,6 +50,24 @@ router.post("/settings", (req, res) => {
     return res.status(400).json({ error: `provider must be one of: ${validProviders.join(", ")}` });
   }
 
+  // ── Quick-switch: frontend sends "__use_existing__" to activate a provider
+  // that already has a saved key without re-entering it. Just set the
+  // active-provider override — no key is written or validated.
+  if (apiKey === "__use_existing__" && provider !== "local") {
+    const configured = getConfiguredKeys();
+    if (!configured[provider]) {
+      return res.status(400).json({ error: `No saved key for "${provider}". Add a key in Settings first.` });
+    }
+    setActiveProvider(provider);
+    logActivity({ type: "settings.update", detail: `Switched active provider to ${getProviderMeta()?.name || provider}` });
+    return res.json({
+      ok: true,
+      provider,
+      providerName: getProviderMeta()?.name || provider,
+      message: `Switched to ${provider}.`,
+    });
+  }
+
   if (provider === "local") {
     if (baseUrl && baseUrl.trim()) {
       let parsedUrl;
@@ -69,6 +87,7 @@ router.post("/settings", (req, res) => {
       }
     }
     setRuntimeOllama({ baseUrl: (baseUrl || "").trim(), model: (model || "").trim(), disabled: false });
+    setActiveProvider("local");
     logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
     return res.json({
       ok: true,
@@ -83,6 +102,8 @@ router.post("/settings", (req, res) => {
   }
 
   setRuntimeKey(provider, apiKey.trim());
+  // Pin this provider as the active one after saving a new key
+  setActiveProvider(provider);
 
   logActivity({
     type: "settings.update",
@@ -110,6 +131,8 @@ router.delete("/settings/:provider", (req, res) => {
   } else {
     setRuntimeKey(provider, "");
   }
+  // Clear the active-provider override if it was pointing to this provider
+  setActiveProvider(null);
 
   logActivity({
     type: "settings.update",
