@@ -20,7 +20,7 @@
  */
 
 import { Router } from "express";
-import { streamText, hasProvider } from "../aiProvider.js";
+import { streamText, hasProvider, isRateLimitError } from "../aiProvider.js";
 import { getDb } from "../db.js";
 
 const router = Router();
@@ -257,6 +257,59 @@ function findLatestTestResult(db, testId) {
 }
 
 /**
+ * Classify a streamText error into a user-friendly message.
+ * Shows actionable hints (rate limit, auth, connectivity) without
+ * leaking internal SDK details (API keys, stack traces).
+ *
+ * @param {Error} err
+ * @returns {string} User-facing error message.
+ */
+function classifyChatError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  const status = err?.status || err?.statusCode || 0;
+
+  // Timeout — backend or provider took too long
+  if (err.name === "TimeoutError" || msg.includes("timed out") || msg.includes("timeout")) {
+    return "Request timed out. The AI provider took too long to respond — try again or switch to a faster model in Settings.";
+  }
+
+  // Rate limit / quota exhausted (after retries)
+  if (isRateLimitError(err)) {
+    return "Rate limit reached — your AI provider quota is exhausted. Wait a few minutes or switch to a different provider in Settings.";
+  }
+
+  // Authentication / invalid API key
+  if (status === 401 || status === 403 || msg.includes("invalid api key") || msg.includes("invalid x-api-key")
+    || msg.includes("incorrect api key") || msg.includes("authentication") || msg.includes("unauthorized")
+    || msg.includes("permission denied") || msg.includes("forbidden")) {
+    return "AI provider authentication failed — your API key may be invalid or expired. Check your key in Settings.";
+  }
+
+  // Ollama not running
+  if (msg.includes("econnrefused") || msg.includes("fetch failed") || msg.includes("cannot reach ollama")) {
+    return "Cannot connect to Ollama — make sure it's running (ollama serve) and the URL in Settings is correct.";
+  }
+
+  // Ollama model not found
+  if (msg.includes("model") && (msg.includes("not found") || msg.includes("pull"))) {
+    return "Ollama model not found. Run 'ollama pull <model>' or change the model in Settings.";
+  }
+
+  // Context too long
+  if (msg.includes("context length") || msg.includes("too many tokens") || msg.includes("maximum context")) {
+    return "Message too long for the AI model's context window. Try a shorter message or clear the conversation.";
+  }
+
+  // Provider overloaded (Anthropic 529, etc.)
+  if (msg.includes("overloaded") || status === 529 || status === 503) {
+    return "AI provider is temporarily overloaded. Wait a moment and try again.";
+  }
+
+  // Fallback — generic but honest
+  return "An unexpected error occurred. Please try again. If this persists, check your AI provider configuration in Settings.";
+}
+
+/**
  * POST /api/chat
  *
  * Accepts a messages array and streams the AI reply token-by-token via SSE.
@@ -334,9 +387,7 @@ router.post("/chat", async (req, res) => {
   } catch (err) {
     console.error(`[chat] streamText failed for user ${req.user?.id}: ${err.message}`);
     if (!res.writableEnded) {
-      const message = err.name === "TimeoutError"
-        ? "Request timed out. Please try again."
-        : "An unexpected error occurred. Please try again.";
+      const message = classifyChatError(err);
       res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       res.end();
     }

@@ -225,9 +225,13 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
     } catch (err) {
       // Don't show error for user-initiated abort
       if (err.name !== "AbortError") {
+        // Clean up the error message for display
+        let errorMsg = err.message || "An unexpected error occurred.";
+        // Strip HTTP status prefix from api.js errors like "[503] No AI provider..."
+        errorMsg = errorMsg.replace(/^\[\d+\]\s*/, "");
         setMessages(prev => prev.map(m =>
           m.id === replyId
-            ? { ...m, role: "error", content: `Something went wrong: ${err.message}. Make sure an AI provider is configured in Settings.` }
+            ? { ...m, role: "error", content: errorMsg }
             : m
         ));
       }
