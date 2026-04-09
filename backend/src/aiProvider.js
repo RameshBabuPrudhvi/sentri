@@ -3,12 +3,12 @@
  * @description Multi-AI provider abstraction layer.
  *
  * ### Supported providers
- * | Provider         | Env Variable        | Default Model              |
- * |------------------|---------------------|----------------------------|
- * | Anthropic Claude | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514   |
- * | OpenAI GPT       | `OPENAI_API_KEY`    | gpt-4o-mini                |
- * | Google Gemini    | `GOOGLE_API_KEY`    | gemini-2.5-flash           |
- * | Ollama (local)   | `AI_PROVIDER=local` | mistral:7b (configurable)    |
+ * | Provider         | Key Env Variable    | Model Env Variable   | Default Model              |
+ * |------------------|---------------------|----------------------|----------------------------|
+ * | Anthropic Claude | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL`    | claude-sonnet-4-20250514   |
+ * | OpenAI GPT       | `OPENAI_API_KEY`    | `OPENAI_MODEL`       | gpt-4o-mini                |
+ * | Google Gemini    | `GOOGLE_API_KEY`    | `GOOGLE_MODEL`       | gemini-2.5-flash           |
+ * | Ollama (local)   | `AI_PROVIDER=local` | `OLLAMA_MODEL`       | mistral:7b                 |
  *
  * **Detection order:** Runtime override (header dropdown) → `AI_PROVIDER` env var → auto-detect (Anthropic → OpenAI → Google → Ollama).
  *
@@ -55,6 +55,27 @@ export function setActiveProvider(provider) {
 
 // Maps cloud provider IDs to their env-var names (single source of truth)
 const CLOUD_KEY_MAP = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+
+// Default models per cloud provider — overridable via env vars
+const CLOUD_DEFAULT_MODELS = {
+  anthropic: { envVar: "ANTHROPIC_MODEL", fallback: "claude-sonnet-4-20250514", name: "Claude Sonnet" },
+  openai:    { envVar: "OPENAI_MODEL",    fallback: "gpt-4o-mini",              name: "GPT-4o-mini" },
+  google:    { envVar: "GOOGLE_MODEL",    fallback: "gemini-2.5-flash",         name: "Gemini 2.5 Flash" },
+};
+
+function getCloudModel(provider) {
+  const cfg = CLOUD_DEFAULT_MODELS[provider];
+  if (!cfg) return "";
+  return process.env[cfg.envVar] || cfg.fallback;
+}
+
+function getCloudName(provider) {
+  const cfg = CLOUD_DEFAULT_MODELS[provider];
+  if (!cfg) return provider;
+  // If user overrode the model, show the model id as the name
+  const model = getCloudModel(provider);
+  return model !== cfg.fallback ? model : cfg.name;
+}
 
 // Auto-detect order for cloud providers
 const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google"];
@@ -106,9 +127,9 @@ function getOllamaModel() {
 
 function buildProviderMeta() {
   return {
-    anthropic: { name: "Claude Sonnet",    model: "claude-sonnet-4-20250514", color: "#cd7f32" },
-    openai:    { name: "GPT-4o-mini",      model: "gpt-4o-mini",              color: "#10a37f" },
-    google:    { name: "Gemini 2.5 Flash", model: "gemini-2.5-flash",         color: "#4285f4" },
+    anthropic: { name: getCloudName("anthropic"), model: getCloudModel("anthropic"), color: "#cd7f32" },
+    openai:    { name: getCloudName("openai"),    model: getCloudModel("openai"),    color: "#10a37f" },
+    google:    { name: getCloudName("google"),    model: getCloudModel("google"),    color: "#4285f4" },
     local:     { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" },
   };
 }
