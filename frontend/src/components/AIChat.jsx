@@ -225,10 +225,16 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
     } catch (err) {
       // Don't show error for user-initiated abort
       if (err.name !== "AbortError") {
-        // Clean up the error message for display
+        // Classify common frontend-side errors into user-friendly messages
         let errorMsg = err.message || "An unexpected error occurred.";
         // Strip HTTP status prefix from api.js errors like "[503] No AI provider..."
         errorMsg = errorMsg.replace(/^\[\d+\]\s*/, "");
+        const lower = errorMsg.toLowerCase();
+        if (lower.includes("failed to fetch") || lower.includes("fetch failed") || lower.includes("networkerror") || lower.includes("network error")) {
+          errorMsg = "Cannot connect to the server. Check that the backend is running and Ollama is reachable (ollama serve).";
+        } else if (lower.includes("session expired")) {
+          errorMsg = "Your session has expired. Please sign in again.";
+        }
         setMessages(prev => prev.map(m =>
           m.id === replyId
             ? { ...m, role: "error", content: errorMsg }
