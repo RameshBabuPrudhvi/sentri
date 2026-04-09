@@ -603,6 +603,21 @@ The following are **not yet implemented** but should be addressed before product
 3. Add a `<NavLink>` to `frontend/src/components/Layout.jsx` if it appears in the sidebar.
 4. Create a corresponding CSS file in `frontend/src/styles/pages/my-page.css` and import it from the component.
 
+### Page Responsibilities (UX Architecture)
+
+The frontend follows a clear separation of concerns between pages:
+
+| Page | Role | Key actions |
+|---|---|---|
+| **Dashboard** | Read-only analytics hub | Pass rate, trends, defects, recent activity |
+| **Tests** (`Tests.jsx`) | **Central command centre** for all test creation | Crawl a project, Generate from story, Run regression, Review drafts |
+| **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
+| **Projects** | Project list & creation | Create/delete projects |
+| **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
+| **Settings** | AI provider & system config | API keys, Ollama, system info |
+
+**Important**: Crawl and test generation are **only** triggered from the Tests page (via `CrawlProjectModal` and `GenerateTestModal`). The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls. This avoids duplicating creation flows across pages.
+
 ---
 
 ## Versioning & Releases
