@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch-path=src src/index.js",
-    "test": "node tests/code-parsing.test.js && node tests/self-healing.test.js && node tests/pipeline.test.js && node tests/api-flow.test.js",
+    "test": "node tests/run-tests.js",
     "docs": "jsdoc -c jsdoc.json",
     "docs:watch": "nodemon --watch src -e js --exec 'npm run docs'"
   },

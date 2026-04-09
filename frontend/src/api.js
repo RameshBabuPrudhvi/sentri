@@ -30,6 +30,7 @@ const TIMEOUT_LONG    = 300_000;
 /** localStorage keys — must match AuthContext.jsx */
 const TOKEN_KEY = "app_auth_token";
 const USER_KEY  = "app_auth_user";
+const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
 /**
  * Read the stored JWT token from localStorage.
@@ -58,7 +59,7 @@ function handleUnauthorized() {
   const path = window.location.pathname;
   if (path.endsWith("/login") || path.endsWith("/forgot-password")) return;
   // Redirect to login — use the Vite BASE_URL so subpath deploys work
-  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  const base = BASE_URL.replace(/\/$/, "");
   window.location.href = `${base}/login`;
 }
 
