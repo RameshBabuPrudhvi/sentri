@@ -346,13 +346,17 @@ router.post("/chat", async (req, res) => {
   // Abort controller: abort on client disconnect OR 120s timeout — whichever
   // comes first. This stops the Ollama call from running after the user closes
   // the chat panel or the browser kills the idle connection.
+  // NOTE: Listen on `res.on("close")`, NOT `req.on("close")`. With fetch()-based
+  // SSE (ReadableStream), Express emits req "close" immediately after flushHeaders,
+  // which would abort the call before Ollama even starts. res "close" fires only
+  // when the underlying socket actually disconnects.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
-  req.on("close", () => {
+  res.on("close", () => {
     if (!res.writableEnded) {
       console.log(formatLogLine("info", null, `[chat] client disconnected mid-stream`));
+      controller.abort();
     }
-    controller.abort();
     clearTimeout(timeout);
   });
 
