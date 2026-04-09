@@ -343,13 +343,34 @@ router.post("/chat", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
-  const signal = req.socket.destroyed
-    ? AbortSignal.abort()
-    : AbortSignal.timeout(120_000);
+  // Abort controller: abort on client disconnect OR 120s timeout — whichever
+  // comes first. This stops the Ollama call from running after the user closes
+  // the chat panel or the browser kills the idle connection.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+  req.on("close", () => {
+    if (!res.writableEnded) {
+      console.log(formatLogLine("info", null, `[chat] client disconnected mid-stream`));
+    }
+    controller.abort();
+    clearTimeout(timeout);
+  });
+
+  // Heartbeat — keeps the SSE connection alive through proxies and browsers
+  // while Ollama processes the request (can take 30-120s for local models).
+  // Without this, the browser or proxy kills the idle connection before
+  // Ollama responds, causing "Failed to fetch" on the frontend.
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) {
+      try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+    } else {
+      clearInterval(heartbeat);
+    }
+  }, 5000);
 
   // Local models have small context windows — cap output tokens so
   // prompt + output don't overflow. Cloud providers handle this natively.
-  const streamOpts = { signal, responseFormat: "text" };
+  const streamOpts = { signal: controller.signal, responseFormat: "text" };
   if (isLocal) streamOpts.maxTokens = 2048;
 
   try {
@@ -370,12 +391,20 @@ router.post("/chat", async (req, res) => {
       res.end();
     }
   } catch (err) {
-    console.error(formatLogLine("error", null, `[chat] streamText failed for user ${req.user?.id}: ${err.message}`));
-    if (!res.writableEnded) {
-      const { message } = classifyError(err, "chat");
-      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-      res.end();
+    if (err.name === "AbortError" && req.socket?.destroyed) {
+      // Client disconnected — nothing to send, just clean up
+      console.log(formatLogLine("info", null, `[chat] aborted (client gone)`));
+    } else {
+      console.error(formatLogLine("error", null, `[chat] streamText failed for user ${req.user?.id}: ${err.message}`));
+      if (!res.writableEnded) {
+        const { message } = classifyError(err, "chat");
+        res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+        res.end();
+      }
     }
+  } finally {
+    clearInterval(heartbeat);
+    clearTimeout(timeout);
   }
 });
 
