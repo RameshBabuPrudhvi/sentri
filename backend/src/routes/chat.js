@@ -318,7 +318,7 @@ router.post("/chat", async (req, res) => {
           res.write(`data: ${JSON.stringify({ token })}\n\n`);
         }
       },
-      { signal }
+      { signal, responseFormat: "text" }
     );
 
     if (!res.writableEnded) {

@@ -261,7 +261,7 @@ const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
 // ── Ollama caller ─────────────────────────────────────────────────────────────
 
-async function callOllama(prompt, maxTokens, externalSignal) {
+async function callOllama(prompt, maxTokens, externalSignal, useJson = true) {
   const base  = getOllamaBaseUrl();
   const model = getOllamaModel();
 
@@ -278,11 +278,12 @@ async function callOllama(prompt, maxTokens, externalSignal) {
     options: {
       // Ollama uses num_predict for max tokens
       num_predict: effectiveTokens,
-      temperature: 0.2,   // Low temp — we want deterministic JSON output
+      temperature: 0.2,
     },
-    // Ask Ollama to return JSON when the model supports it
-    format: "json",
   };
+  // Only ask for JSON format when the caller needs structured output (pipeline).
+  // Chat needs free-form text.
+  if (useJson) body.format = "json";
 
   const controller = new AbortController();
   // Ollama can be slow for large prompts — give it generous time
@@ -384,9 +385,12 @@ function normaliseMessages(promptOrMessages) {
 
 // ── Core API call ─────────────────────────────────────────────────────────────
 
-async function callProvider(provider, promptOrMessages, maxTokens, signal) {
+async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;
   const { system, user, combined } = normaliseMessages(promptOrMessages);
+  // Default to JSON for backward compatibility (pipeline needs structured output).
+  // Chat endpoint passes responseFormat: "text" for free-form conversation.
+  const useJson = responseFormat !== "text";
 
   if (provider === "anthropic") {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
@@ -409,12 +413,13 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal) {
       const messages = [];
       if (system) messages.push({ role: "system", content: system });
       messages.push({ role: "user", content: user });
-      const res = await client.chat.completions.create({
+      const params = {
         model: buildProviderMeta().openai.model,
         max_tokens: tokens,
-        response_format: { type: "json_object" },
         messages,
-      }, { signal });
+      };
+      if (useJson) params.response_format = { type: "json_object" };
+      const res = await client.chat.completions.create(params, { signal });
       return res.choices[0].message.content;
     }, "OpenAI");
   }
@@ -422,9 +427,11 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal) {
   if (provider === "google") {
     const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
     return withRetry(async () => {
+      const generationConfig = { maxOutputTokens: tokens };
+      if (useJson) generationConfig.responseMimeType = "application/json";
       const modelConfig = {
         model: buildProviderMeta().google.model,
-        generationConfig: { responseMimeType: "application/json", maxOutputTokens: tokens },
+        generationConfig,
       };
       // Gemini supports systemInstruction for system-level context
       if (system) modelConfig.systemInstruction = { parts: [{ text: system }] };
@@ -438,7 +445,7 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal) {
     // Ollama doesn't support system messages in /api/generate — use combined prompt
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        return await callOllama(combined, tokens, signal);
+        return await callOllama(combined, tokens, signal, useJson);
       } catch (err) {
         // Don't retry if the user aborted
         if (err.name === "AbortError" || signal?.aborted) throw err;
@@ -480,7 +487,7 @@ export async function generateText(prompt, options) {
       "         Optionally: OLLAMA_MODEL=mistral:7b  OLLAMA_BASE_URL=http://localhost:11434"
     );
   }
-  return callProvider(provider, prompt, options?.maxTokens, options?.signal);
+  return callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
 }
 
 /**
@@ -518,8 +525,9 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   const provider = detectProvider();
   if (!provider) throw new Error("No AI provider configured.");
 
-  const { signal } = options;
+  const { signal, responseFormat } = options;
   const { system, user, combined } = normaliseMessages(promptOrMessages);
+  const useJson = responseFormat !== "text";
 
   if (provider === "anthropic") {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
@@ -544,13 +552,14 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     const messages = [];
     if (system) messages.push({ role: "system", content: system });
     messages.push({ role: "user", content: user });
-    const stream = await client.chat.completions.create({
+    const params = {
       model: buildProviderMeta().openai.model,
       max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
-      response_format: { type: "json_object" },
       messages,
-    }, { signal });
+    };
+    if (useJson) params.response_format = { type: "json_object" };
+    const stream = await client.chat.completions.create(params, { signal });
     let full = "";
     for await (const chunk of stream) {
       throwIfAborted(signal);
@@ -561,7 +570,7 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   }
 
   // Google / Ollama — no streaming SDK; deliver whole response as one token
-  const text = await generateText(promptOrMessages, options);
+  const text = await generateText(promptOrMessages, { ...options, responseFormat });
   onToken(text);
   return text;
 }
