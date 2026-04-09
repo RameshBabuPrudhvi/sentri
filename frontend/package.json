@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/utils.test.js"
+    "test": "node tests/run-tests.js"
   },
   "dependencies": {
     "react": "^18.3.1",
