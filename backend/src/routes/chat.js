@@ -328,6 +328,10 @@ router.post("/chat", async (req, res) => {
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
     : BASE_SYSTEM_PROMPT;
 
+  // Log prompt size so context-window overflows are diagnosable
+  const promptCharCount = systemPrompt.length + userContent.length;
+  console.log(`[chat] provider=${isLocal ? "ollama" : "cloud"} prompt=${promptCharCount} chars (~${Math.round(promptCharCount / 4)} tokens) user="${lastMessage.content.slice(0, 80)}"`);
+
   // Set up SSE
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -345,6 +349,7 @@ router.post("/chat", async (req, res) => {
   if (isLocal) streamOpts.maxTokens = 2048;
 
   try {
+    const startMs = Date.now();
     await streamText(
       { system: systemPrompt, user: userContent },
       (token) => {
@@ -355,6 +360,7 @@ router.post("/chat", async (req, res) => {
       streamOpts,
     );
 
+    console.log(`[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`);
     if (!res.writableEnded) {
       res.write("data: [DONE]\n\n");
       res.end();
