@@ -168,6 +168,36 @@ export const EXPLORE_MODE_OPTIONS = [
   },
 ];
 
+// ─── Explorer intensity presets ─────────────────────────────────────────────
+// Named presets that map to concrete tuning values. Shown as buttons in the
+// ExploreModePicker component. "custom" is a virtual preset — selecting it
+// expands the raw sliders so the user can set their own values.
+
+export const EXPLORER_INTENSITY_PRESETS = [
+  {
+    id: "quick",
+    label: "Quick",
+    icon: "🐇",
+    desc: "~1 min",
+    values: { exploreMaxStates: 10, exploreMaxDepth: 2, exploreMaxActions: 4, exploreActionTimeout: 3000 },
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    icon: "⚖️",
+    desc: "~2-3 min",
+    values: { exploreMaxStates: 30, exploreMaxDepth: 3, exploreMaxActions: 8, exploreActionTimeout: 5000 },
+    default: true,
+  },
+  {
+    id: "deep",
+    label: "Deep",
+    icon: "🔬",
+    desc: "~5+ min",
+    values: { exploreMaxStates: 80, exploreMaxDepth: 6, exploreMaxActions: 15, exploreActionTimeout: 8000 },
+  },
+];
+
 // ─── Explorer tuning (only visible when exploreMode === "state") ────────────
 // Numeric sliders/inputs that control how deep and wide the state explorer goes.
 
