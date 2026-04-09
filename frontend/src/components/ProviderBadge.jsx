@@ -30,14 +30,14 @@ function getProviderInfo(config, id) {
 const ALL_IDS = ["anthropic", "openai", "google", "local"];
 
 // A provider is "saved" if getSettings() returns a non-empty masked key for it,
-// or (for Ollama) if ollamaBaseUrl is set or it was the active provider.
+// or (for Ollama) if the backend reports it as explicitly configured.
 function getSavedProviders(settings) {
   if (!settings) return [];
   const list = [];
   if (settings.anthropic) list.push("anthropic");
   if (settings.openai)    list.push("openai");
   if (settings.google)    list.push("google");
-  if (settings.ollamaBaseUrl || settings.activeProvider === "local") list.push("local");
+  if (settings.ollamaConfigured || settings.activeProvider === "local") list.push("local");
   return list;
 }
 

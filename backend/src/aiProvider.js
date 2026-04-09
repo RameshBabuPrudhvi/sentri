@@ -241,6 +241,9 @@ export function getConfiguredKeys() {
   // Ollama-specific fields (never sensitive, no masking needed)
   result.ollamaBaseUrl = getOllamaBaseUrl();
   result.ollamaModel   = getOllamaModel();
+  // True only when Ollama has explicit config AND is not disabled — prevents
+  // the dropdown from showing Ollama as "saved" when it's just the default URL.
+  result.ollamaConfigured = !runtimeOllamaDisabled && hasOllamaConfig();
   return result;
 }
 
