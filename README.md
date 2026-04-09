@@ -5,7 +5,7 @@
 <h1 align="center">Sentri — Your AI QA Engineer</h1>
 
 <p align="center">
-  Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
+Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
 </p>
 
 <p align="center">
