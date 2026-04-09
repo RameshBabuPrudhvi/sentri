@@ -38,6 +38,7 @@ import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
+import { classifyError } from "./utils/errorClassifier.js";
 
 function setStep(run, step) {
   run.currentStep = step;
@@ -307,7 +308,9 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
       }
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
-      logWarn(run, `API test generation failed: ${err.message?.slice(0, 200)}`);
+      const classified = classifyError(err, "crawl");
+      console.error(`[crawler] API test generation failed: ${err.message}`);
+      logWarn(run, `API test generation failed: ${classified.message}`);
     }
   }
 

@@ -101,6 +101,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 |---|---|---|
 | `abortHelper.js` | `throwIfAborted(signal)`, `isRunAborted()`, `finalizeRunIfNotAborted()` | Every pipeline/runner stage with I/O |
 | `runLogger.js` | `log()`, `logWarn()`, `logError()`, `logSuccess()`, `emitRunEvent()` | All run-level logging and SSE |
+| `errorClassifier.js` | `classifyError(err, context)`, `ERROR_CATEGORY` | Converting raw errors to user-friendly messages (runs, chat, activity logs) |
 | `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()` | Creating new domain objects |
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
@@ -210,18 +211,30 @@ const result = await doThing(name, {
 ### Error Handling
 
 - **Never swallow errors silently.** Either rethrow, log with context, or convert to a user-facing HTTP error.
+- **Classify errors for the frontend.** Use `classifyError(err, context)` from `utils/errorClassifier.js` whenever storing `run.error` or sending error messages to the client. This converts raw SDK/provider errors into user-friendly messages and assigns a `category` for frontend banner styling. Never store `err.message` directly on `run.error`.
 - Use the `throwIfAborted(signal)` helper from `utils/abortHelper.js` before every expensive I/O step in a pipeline or runner.
 - Rate-limit retries use exponential back-off via `withRetry()` in `aiProvider.js`. Do not add ad-hoc `setTimeout` retry loops elsewhere.
 - `process.on("uncaughtException")` and `process.on("unhandledRejection")` are registered once in `index.js`. Do not register additional global handlers.
 
 ```js
-// ✅ Propagate with context
+// ✅ Classify and log
+catch (err) {
+  const { message, category } = classifyError(err, "run");
+  console.error(`[myModule] Run ${runId} failed: ${err.message}`);
+  run.error = message;           // user-friendly
+  run.errorCategory = category;  // for frontend banner styling
+}
+
+// ✅ Propagate with context (when not storing on run)
 catch (err) {
   throw new Error(`[myModule] Failed to do X for run ${runId}: ${err.message}`);
 }
 
 // ❌ Silent swallow
 catch (_) {}
+
+// ❌ Raw error to client
+run.error = err.message;  // leaks SDK internals
 ```
 
 ### Logging

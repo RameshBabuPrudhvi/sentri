@@ -21,6 +21,7 @@ import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
+import { classifyError } from "../utils/errorClassifier.js";
 
 const router = Router();
 
@@ -80,7 +81,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
       }),
       onFailActivity: (err) => ({
         type: "crawl.fail", projectId: project.id, projectName: project.name,
-        detail: `Crawl failed: ${err.message}`,
+        detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
       }),
     },
   );
@@ -145,7 +146,7 @@ router.post("/projects/:id/run", async (req, res) => {
       }),
       onFailActivity: (err) => ({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
-        detail: `Test run failed: ${err.message}`,
+        detail: `Test run failed: ${classifyError(err, "run").message}`,
       }),
     },
   );

@@ -34,6 +34,7 @@ import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser } from "./runner/config.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
+import { classifyError } from "./utils/errorClassifier.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -107,10 +108,13 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     try {
       browser = await launchBrowser();
     } catch (launchErr) {
+      const classified = classifyError(launchErr, "run");
+      console.error(`[testRunner] Browser launch failed: ${launchErr.message}`);
       run.status = "failed";
-      run.error = `Browser launch failed: ${launchErr.message}`;
+      run.error = classified.message;
+      run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-      logError(run, `Browser launch failed: ${launchErr.message}`);
+      logError(run, classified.message);
       throw launchErr;
     }
 
@@ -123,10 +127,13 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       await traceContext.tracing.start({ screenshots: true, snapshots: true, sources: false });
     } catch (ctxErr) {
       await browser.close().catch(() => {});
+      const classified = classifyError(ctxErr, "run");
+      console.error(`[testRunner] Trace context setup failed: ${ctxErr.message}`);
       run.status = "failed";
-      run.error = `Trace context setup failed: ${ctxErr.message}`;
+      run.error = classified.message;
+      run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-      logError(run, `Trace context setup failed: ${ctxErr.message}`);
+      logError(run, classified.message);
       throw ctxErr;
     }
   }

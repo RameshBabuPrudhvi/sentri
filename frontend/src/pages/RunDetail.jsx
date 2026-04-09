@@ -9,6 +9,12 @@ import {
   Download,
   StopCircle,
   Ban,
+  Settings,
+  Globe,
+  Key,
+  AlertTriangle,
+  Wifi,
+  Server,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE, requestNotifPermission } from "../hooks/useRunSSE.js";
@@ -25,6 +31,84 @@ function fmtMs(ms) {
   if (!ms && ms !== 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Map run.errorCategory → banner styling, icon, title, and optional action.
+ * Categories are set by backend/src/utils/errorClassifier.js.
+ */
+function getErrorBannerProps(category, navigate) {
+  const settingsAction = { label: "Go to Settings", onClick: () => navigate("/settings") };
+
+  const map = {
+    rate_limit: {
+      icon: <AlertTriangle size={16} />,
+      title: "AI Rate Limit Reached",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: settingsAction,
+    },
+    auth: {
+      icon: <Key size={16} />,
+      title: "API Key Invalid or Expired",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: settingsAction,
+    },
+    ollama_offline: {
+      icon: <Wifi size={16} />,
+      title: "Ollama Not Reachable",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: settingsAction,
+    },
+    ollama_model: {
+      icon: <Server size={16} />,
+      title: "Ollama Model Not Found",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: settingsAction,
+    },
+    no_provider: {
+      icon: <Settings size={16} />,
+      title: "No AI Provider Configured",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: settingsAction,
+    },
+    timeout: {
+      icon: <Clock size={16} />,
+      title: "Operation Timed Out",
+      bg: "var(--red-bg)", border: "#fca5a5", color: "var(--red)",
+      action: null,
+    },
+    context_length: {
+      icon: <AlertTriangle size={16} />,
+      title: "Content Too Large",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: null,
+    },
+    provider_overload: {
+      icon: <Server size={16} />,
+      title: "AI Provider Overloaded",
+      bg: "var(--amber-bg)", border: "#fcd34d", color: "#92400e",
+      action: null,
+    },
+    browser_launch: {
+      icon: <Globe size={16} />,
+      title: "Browser Launch Failed",
+      bg: "var(--red-bg)", border: "#fca5a5", color: "var(--red)",
+      action: null,
+    },
+    navigation: {
+      icon: <Globe size={16} />,
+      title: "Page Navigation Failed",
+      bg: "var(--red-bg)", border: "#fca5a5", color: "var(--red)",
+      action: null,
+    },
+  };
+
+  return map[category] || {
+    icon: <XCircle size={16} />,
+    title: "Run Failed",
+    bg: "var(--red-bg)", border: "#fca5a5", color: "var(--red)",
+    action: null,
+  };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -396,20 +480,36 @@ export default function RunDetail() {
           </div>
         </div>
       )}
-      {!isRunning && run.status === "failed" && run.error && !run.rateLimitError && (
-        <div style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "12px 16px", marginBottom: 16,
-          background: "var(--red-bg)", border: "1px solid #fca5a5",
-          borderRadius: 10, fontSize: "0.82rem", color: "var(--red)", lineHeight: 1.5,
-        }}>
-          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>❌</span>
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 3 }}>Run Failed</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", wordBreak: "break-word" }}>{run.error}</div>
+      {!isRunning && run.status === "failed" && run.error && !run.rateLimitError && (() => {
+        const bp = getErrorBannerProps(run.errorCategory, navigate);
+        return (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: 10,
+            padding: "12px 16px", marginBottom: 16,
+            background: bp.bg, border: `1px solid ${bp.border}`,
+            borderRadius: 10, fontSize: "0.82rem", color: bp.color, lineHeight: 1.5,
+          }}>
+            <span style={{ flexShrink: 0, marginTop: 1 }}>{bp.icon}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, marginBottom: 3 }}>{bp.title}</div>
+              <div style={{ wordBreak: "break-word" }}>{run.error}</div>
+              {bp.action && (
+                <button
+                  onClick={bp.action.onClick}
+                  style={{
+                    marginTop: 8, padding: "5px 12px", borderRadius: 6,
+                    border: `1px solid ${bp.border}`, background: "rgba(255,255,255,0.5)",
+                    color: bp.color, fontWeight: 600, fontSize: "0.78rem",
+                    cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  <Settings size={11} /> {bp.action.label}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Main content ───────────────────────────────────────────────── */}
       {isCrawl ? (

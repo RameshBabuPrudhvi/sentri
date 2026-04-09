@@ -28,6 +28,7 @@ import { saveDb } from "../db.js";
 import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
+import { classifyError } from "../utils/errorClassifier.js";
 import { hasProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
@@ -334,7 +335,7 @@ saveDb();
       }),
       onFailActivity: (err) => ({
         type: "test.generate", projectId: project.id, projectName: project.name,
-        detail: `Test generation failed for "${cleanName}" — ${err.message}`,
+        detail: `Test generation failed for "${cleanName}" — ${classifyError(err, "crawl").message}`,
       }),
     },
   );
@@ -382,7 +383,7 @@ saveDb();
       onFailActivity: (err) => ({
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
-        detail: `Single test failed: ${err.message}`,
+        detail: `Test run failed for "${test.name}" — ${classifyError(err, "run").message}`,
       }),
     },
   );
