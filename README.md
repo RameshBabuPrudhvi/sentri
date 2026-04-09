@@ -1,4 +1,7 @@
-# <img src="assets/logo.png" alt="Project Logo" width="200"/> Sentri — Your AI QA Engineer
+ <p style="display: flex; align-items: center; gap: 10px;">
+  <img src="assets/logo.jpeg" alt="Project Logo" width="50"/>
+  <strong style="font-size: 28px;">Sentri — Your AI QA Engineer</strong>
+</p>
 > Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
