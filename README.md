@@ -1,4 +1,4 @@
-# 🐻 Sentri — Your AI QA Engineer
+# <img src="assets/logo.png" alt="Project Logo" width="200"/> Sentri — Your AI QA Engineer
 > Give it a URL. Get a working Playwright test suite. Watch it heal itself when your UI changes.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
