@@ -205,7 +205,7 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
 
     try {
       await api.chat(
-        nextMessages.map(({ role, content }) => ({ role, content })),
+        nextMessages.filter(m => m.role !== "error").map(({ role, content }) => ({ role, content })),
         (token) => {
           setMessages(prev => prev.map(m =>
             m.id === replyId ? { ...m, content: m.content + token } : m
