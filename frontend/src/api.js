@@ -216,6 +216,60 @@ export const api = {
   /** @param {string} provider - Remove API key or deactivate Ollama. */
   deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
 
+
+
+  // ── AI chat (SSE stream) ───────────────────────────────────────────────────
+  /**
+   * Stream AI assistant tokens from the backend chat route.
+   * The backend chooses the active provider (Anthropic/OpenAI/Gemini/Ollama).
+   * @param {{role: "user"|"assistant", content: string}[]} messages
+   * @param {(token: string) => void} [onToken]
+   */
+  chat: async (messages, onToken) => {
+    const headers = { "Content-Type": "application/json" };
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(`${BASE}/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages }),
+    });
+
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired. Please sign in again.");
+    }
+    if (!res.ok) {
+      const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
+      throw new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
+    }
+    if (!res.body) throw new Error("Streaming is not supported in this browser.");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const event of events) {
+        const lines = event.split("\n").filter((line) => line.startsWith("data:"));
+        for (const line of lines) {
+          const payload = line.replace(/^data:\s*/, "");
+          if (payload === "[DONE]") return;
+          const parsed = JSON.parse(payload);
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.token && onToken) onToken(parsed.token);
+        }
+      }
+    }
+  },
   // ── Ollama ──────────────────────────────────────────────────────────────────
   /** @returns {Promise<{ok: boolean, model?: string, availableModels?: string[], error?: string}>} */
   getOllamaStatus: () => req("GET", "/ollama/status"),
