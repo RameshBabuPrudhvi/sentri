@@ -1,0 +1,381 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans); }
+  .wrap { padding: 1.5rem 0; }
+  .section-title { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-tertiary); margin: 2rem 0 0.75rem; }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ── TABS ── */
+  .tabs { display: flex; gap: 4px; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 1.5rem; }
+  .tab { padding: 8px 14px; font-size: 13px; cursor: pointer; border: none; background: none; color: var(--color-text-secondary); border-radius: 6px 6px 0 0; transition: color .15s, background .15s; }
+  .tab:hover { color: var(--color-text-primary); background: var(--color-background-secondary); }
+  .tab.active { color: var(--color-text-primary); font-weight: 500; border-bottom: 2px solid var(--color-text-primary); margin-bottom: -1px; background: none; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── CARDS ── */
+  .card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+  .card-header { display: flex; align-items: flex-start; gap: 10px; }
+  .sev { width: 6px; min-width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; }
+  .sev-crit { background: #E24B4A; }
+  .sev-high { background: #EF9F27; }
+  .sev-med  { background: #378ADD; }
+  .sev-low  { background: #1D9E75; }
+  .card-title { font-size: 14px; font-weight: 500; color: var(--color-text-primary); }
+  .card-body { font-size: 13px; color: var(--color-text-secondary); line-height: 1.6; margin-top: 6px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 4px; margin-right: 4px; margin-top: 6px; }
+  .tag-crit { background: var(--color-background-danger); color: var(--color-text-danger); }
+  .tag-high { background: var(--color-background-warning); color: var(--color-text-warning); }
+  .tag-med  { background: var(--color-background-info); color: var(--color-text-info); }
+  .tag-good { background: var(--color-background-success); color: var(--color-text-success); }
+  .tag-neu  { background: var(--color-background-secondary); color: var(--color-text-secondary); }
+
+  /* ── FEATURE ROWS ── */
+  .feat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  @media(max-width:520px){ .feat-grid { grid-template-columns:1fr; } }
+  .feat-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; }
+  .feat-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .feat-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .feat-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+  .feat-body { font-size: 12px; color: var(--color-text-secondary); line-height: 1.55; }
+  .fi-blue  { background: var(--color-background-info); }
+  .fi-green { background: var(--color-background-success); }
+  .fi-amber { background: var(--color-background-warning); }
+  .fi-red   { background: var(--color-background-danger); }
+  .fi-purple{ background: #EEEDFE; }
+
+  /* ── FLOW TABLE ── */
+  .flow-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .flow-table th { text-align: left; font-size: 11px; font-weight: 500; letter-spacing:.05em; color: var(--color-text-tertiary); text-transform:uppercase; padding: 6px 10px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .flow-table td { padding: 8px 10px; border-bottom: 0.5px solid var(--color-border-tertiary); vertical-align: top; color: var(--color-text-secondary); line-height: 1.5; }
+  .flow-table tr:last-child td { border-bottom: none; }
+  .flow-table .stage { font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
+
+  /* ── COMPETITOR TABLE ── */
+  .comp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .comp-table th { text-align: center; padding: 8px 6px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing:.05em; color: var(--color-text-tertiary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .comp-table th:first-child { text-align: left; }
+  .comp-table td { padding: 7px 6px; border-bottom: 0.5px solid var(--color-border-tertiary); color: var(--color-text-secondary); text-align: center; }
+  .comp-table td:first-child { text-align: left; color: var(--color-text-primary); font-weight: 500; }
+  .comp-table tr:last-child td { border-bottom: none; }
+  .yes { color: var(--color-text-success); font-weight:500; }
+  .no  { color: var(--color-text-danger); font-weight:500; }
+  .part{ color: var(--color-text-warning); }
+
+  /* ── PRIORITY ROW ── */
+  .pri-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .pri-row:last-child { border-bottom: none; }
+  .pri-num { font-size: 20px; font-weight: 500; color: var(--color-text-tertiary); min-width: 32px; }
+  .pri-content { flex: 1; }
+  .pri-title { font-size: 14px; font-weight: 500; color: var(--color-text-primary); }
+  .pri-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin-top: 3px; }
+  .pri-tags { margin-top: 4px; }
+</style>
+
+<div class="wrap">
+
+<div class="tabs">
+  <button class="tab active" onclick="show('pipeline')">Pipeline Flow</button>
+  <button class="tab" onclick="show('issues')">Issues & Gaps</button>
+  <button class="tab" onclick="show('newfeatures')">New Features</button>
+  <button class="tab" onclick="show('compete')">vs Competitors</button>
+  <button class="tab" onclick="show('roadmap')">Roadmap</button>
+</div>
+
+<!-- ── PANEL 1: PIPELINE FLOW ── -->
+<div id="panel-pipeline" class="panel active">
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem;line-height:1.6">Sentri's 8-stage AI pipeline takes a URL all the way to executable, approved Playwright tests. Each stage is reviewed below with issues observed in the source.</p>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="flow-table">
+      <thead><tr><th>#</th><th>Stage</th><th>Module(s)</th><th>Issues found</th></tr></thead>
+      <tbody>
+        <tr><td class="stage">1</td><td class="stage">Crawl / State Explore</td><td>crawler.js, stateExplorer.js</td><td>State fingerprint uses URL+title only — SPA route changes with same title are not distinguished. No robots.txt / sitemap awareness. Exploration doesn't retry on transient navigation errors.</td></tr>
+        <tr><td class="stage">2</td><td class="stage">Element Filter</td><td>elementFilter.js</td><td>Filter is purely heuristic; shadow DOM elements and web-component slots are silently dropped.</td></tr>
+        <tr><td class="stage">3</td><td class="stage">Intent Classify</td><td>intentClassifier.js</td><td>Falls back to AI only when confidence &lt; 40 — threshold not configurable. "email" keyword removed, so contact forms can misclassify as NAVIGATION.</td></tr>
+        <tr><td class="stage">4</td><td class="stage">HAR Capture</td><td>harCapture.js</td><td>Deduplication uses pathPattern only — query-param-only differences in API endpoints are merged. GraphQL POSTs to /graphql are treated as one endpoint regardless of operation.</td></tr>
+        <tr><td class="stage">5</td><td class="stage">Journey Generate</td><td>journeyGenerator.js</td><td>PLAN→GENERATE split is good, but plan and generate use separate LLM calls — no continuity token. Rate-limit retry has no maximum back-off cap.</td></tr>
+        <tr><td class="stage">6</td><td class="stage">Deduplication</td><td>deduplicator.js</td><td>Cross-run dedup uses exact name+description string match — renamed tests create duplicates. No semantic similarity check.</td></tr>
+        <tr><td class="stage">7</td><td class="stage">Assertion Enhance</td><td>assertionEnhancer.js</td><td>Enhancement is snapshot-based at crawl time; dynamic values (toasts, counters) aren't re-sampled at run time.</td></tr>
+        <tr><td class="stage">8</td><td class="stage">Validate</td><td>testValidator.js</td><td>Validator checks URL presence + step count, but not Playwright syntax correctness — malformed code passes validation and only fails at run time.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="section-title">Execution & Healing Flow</p>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="flow-table">
+      <thead><tr><th>Stage</th><th>Module(s)</th><th>Issues found</th></tr></thead>
+      <tbody>
+        <tr><td class="stage">Review queue</td><td>routes/tests.js</td><td>Bulk approve/reject has no audit trail — who approved what is not stored per-decision, only in activity log at batch level.</td></tr>
+        <tr><td class="stage">Parallel run</td><td>testRunner.js</td><td>poolMap shares one Chromium instance — a single hanging test blocks the worker slot. No per-test browser-context timeout guard.</td></tr>
+        <tr><td class="stage">Code execution</td><td>codeExecutor.js</td><td>Generated code runs inside eval-like Node.js VM — no sandboxing beyond the browser context itself. A prompt-injection payload could execute arbitrary Node.js.</td></tr>
+        <tr><td class="stage">Self-healing</td><td>selfHealing.js</td><td>Healing strategy waterfall (role→label→text→aria-label→title) — no nth-of-type or XPath fallback. Healing history is in-memory JSON; large suites with many elements will slow lookup.</td></tr>
+        <tr><td class="stage">Feedback loop</td><td>feedbackLoop.js</td><td>AI regenerates only the worst-offending tests — no configurable threshold. Regenerated tests go directly to Approved, bypassing human review.</td></tr>
+        <tr><td class="stage">Persistence</td><td>db.js</td><td>In-memory JSON with 30s flush interval — a crash during a large run can lose up to 30s of results. No WAL / write-ahead log.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── PANEL 2: ISSUES ── -->
+<div id="panel-issues" class="panel">
+
+  <p class="section-title">Critical — Production Blockers</p>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-crit"></div><div class="card-title">In-memory JSON database — no real persistence</div></div>
+    <div class="card-body">db.js is a single JSON file flushed every 30 seconds. Any server crash, OOM kill, or Docker restart mid-test-run loses all un-flushed data. The README openly flags this but it is a blocking issue for any team running overnight regression suites. No transactions, no indexing, O(n) scans on every query.</div>
+    <div><span class="tag tag-crit">Data Loss Risk</span><span class="tag tag-neu">Replace with SQLite/Postgres + Prisma</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-crit"></div><div class="card-title">Generated Playwright code executes in an uncontrolled VM context</div></div>
+    <div class="card-body">codeExecutor.js wraps LLM output in a function and runs it with Node's vm module or equivalent, sharing the same Node.js process. A prompt-injection payload in a tested website's page title could cause the LLM to emit malicious code that then executes with full server privileges. This needs a subprocess sandbox (worker_threads or a child_process with --experimental-vm-modules).</div>
+    <div><span class="tag tag-crit">Security</span><span class="tag tag-high">Prompt Injection Vector</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-crit"></div><div class="card-title">JWT stored in localStorage — XSS-stealable</div></div>
+    <div class="card-body">The README production checklist explicitly marks "Move JWT from localStorage to HttpOnly cookies" as incomplete. Any XSS vulnerability (including inside tested third-party pages rendered in the live browser view) can exfiltrate the token.</div>
+    <div><span class="tag tag-crit">Security</span></div>
+  </div>
+
+  <p class="section-title">High — Functionality Gaps</p>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-high"></div><div class="card-title">No test scheduling / CI webhook trigger</div></div>
+    <div class="card-body">Tests can only be triggered manually from the UI. There is no cron scheduler, no REST webhook for CI/CD pipelines, and no GitHub Actions integration. Teams cannot run nightly regression without keeping a browser tab open.</div>
+    <div><span class="tag tag-high">Missing Core Feature</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-high"></div><div class="card-title">AI feedback loop bypasses human review for regenerated tests</div></div>
+    <div class="card-body">In feedbackLoop.js, regenerated tests are auto-set to Approved status. This breaks the stated principle that "nothing executes until a human approves it" and creates a trust gap — regressions could silently introduce flawed tests.</div>
+    <div><span class="tag tag-high">Trust / Safety</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-high"></div><div class="card-title">Shadow DOM and web components not supported</div></div>
+    <div class="card-body">elementFilter.js has no logic to pierce shadow roots. Modern SPAs (Lit, Stencil, Angular Elements, Salesforce LWC) are largely invisible to Sentri's crawler and element filter, producing empty or thin test suites.</div>
+    <div><span class="tag tag-high">Coverage Gap</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-high"></div><div class="card-title">No multi-tenancy — single shared database</div></div>
+    <div class="card-body">All projects and users share one flat namespace. There is no organisation, workspace, or team scoping. A user can enumerate all tests across all projects via GET /api/tests with no projectId filter enforced at the auth layer.</div>
+    <div><span class="tag tag-high">Security</span><span class="tag tag-high">Missing for SaaS</span></div>
+  </div>
+
+  <p class="section-title">Medium — Quality & UX</p>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-med"></div><div class="card-title">No Playwright syntax validation before saving tests</div></div>
+    <div class="card-body">testValidator.js checks for URL presence and step count but not AST-level Playwright correctness. A test with a syntax error will pass the Draft→Approved flow and only fail when executed, wasting browser compute and user time.</div>
+    <div><span class="tag tag-med">Quality</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-med"></div><div class="card-title">GraphQL API tests are collapsed into one endpoint</div></div>
+    <div class="card-body">harCapture.js deduplicates by URL+method. All GraphQL operations (queries, mutations) share POST /graphql, so they are all merged into a single test. Sentri has no awareness of GraphQL operation names.</div>
+    <div><span class="tag tag-med">API Coverage</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-med"></div><div class="card-title">Rate limit retry has no maximum back-off cap</div></div>
+    <div class="card-body">journeyGenerator.js retries on rate limit errors with isRateLimitError but there is no max retries count or cap on exponential back-off delay. A sustained provider outage can leave a run hanging indefinitely.</div>
+    <div><span class="tag tag-med">Reliability</span></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="sev sev-med"></div><div class="card-title">No Slack/email/webhook failure notifications</div></div>
+    <div class="card-body">When a scheduled or triggered test run completes with failures, there is no outbound notification. Teams have to poll the dashboard. The README lists this as incomplete.</div>
+    <div><span class="tag tag-med">Alerting</span></div>
+  </div>
+</div>
+
+<!-- ── PANEL 3: NEW FEATURES ── -->
+<div id="panel-newfeatures" class="panel">
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem;line-height:1.6">Capabilities needed to compete with enterprise autonomous QA platforms like Mabl, Testim, Katalon, Reflect, and QA Wolf.</p>
+
+  <p class="section-title">Tier 1 — Must-have to compete</p>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-red">⏱</div><div class="feat-title">Scheduled Runs & CI Webhooks</div></div>
+      <div class="feat-body">Cron-based auto-runs (daily/nightly), plus a POST /api/projects/:id/trigger endpoint with a secret token. Emit results back to GitHub Actions, GitLab CI, CircleCI via status callbacks. Every major competitor has this.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-red">🏢</div><div class="feat-title">Organisations & Teams</div></div>
+      <div class="feat-body">Workspace-level scoping of projects, tests, and users. Role-based access: Owner, Admin, Editor, Viewer. This is table-stakes for any B2B SaaS. Needed before any enterprise sale.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-amber">🔔</div><div class="feat-title">Failure Alerts (Slack/Email/PagerDuty)</div></div>
+      <div class="feat-body">Configurable webhooks per-project: on failure, on flake detection, on pass-rate drop below threshold. First-class Slack app with /sentri run and /sentri status slash commands.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-amber">🛡</div><div class="feat-title">Real PostgreSQL + Job Queue</div></div>
+      <div class="feat-body">Replace in-memory JSON with PostgreSQL + Prisma. Add BullMQ + Redis for crawl/run jobs so the API returns immediately and workers process async. Enables horizontal scaling and crash-safe execution.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-blue">🕸</div><div class="feat-title">Shadow DOM & Web Component Support</div></div>
+      <div class="feat-body">Pierce shadow roots during crawl. Detect custom elements and emit Playwright locators that use pierce: shadow selectors. Critical for Angular, LWC, Lit-based enterprise apps.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-blue">🔁</div><div class="feat-title">Regenerated Tests Back to Draft</div></div>
+      <div class="feat-body">AI feedback loop must route regenerated tests through human review like first-generation tests. Add a "re-review" queue tab and notify the approver on Slack/email.</div>
+    </div>
+  </div>
+
+  <p class="section-title">Tier 2 — Competitive differentiators</p>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-purple">🎭</div><div class="feat-title">Visual Regression Testing</div></div>
+      <div class="feat-body">Per-step screenshot diffing using pixelmatch or Playwright's toMatchSnapshot. Auto-generate baseline on first approved run. Flag pixel-level regressions alongside functional failures. Compete directly with Percy/Applitools integrations.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-purple">🗂</div><div class="feat-title">Test Suites & Tags</div></div>
+      <div class="feat-body">Group tests into named suites (Smoke, Regression, Release). Run a specific suite via CI. Tags already exist on the data model — surface them as first-class run filters in the UI and API.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">📊</div><div class="feat-title">Coverage Heatmap</div></div>
+      <div class="feat-body">Overlay a site-graph node with a colour-coded "test density" score: pages with no tests are red, pages with multiple approved tests are green. Helps teams see coverage gaps visually.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">🤝</div><div class="feat-title">Jira / Linear Issue Sync</div></div>
+      <div class="feat-body">Auto-create a bug ticket when a test fails (with screenshot, error, and Playwright trace attached). Sync test status back to linked issue. The traceability data model is already there — just needs the outbound webhook.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-amber">🧩</div><div class="feat-title">GraphQL-Aware API Testing</div></div>
+      <div class="feat-body">Parse operation name from POST body during HAR capture. Generate separate tests per GraphQL operation. Support introspection-based schema-aware test generation when an introspection endpoint is available.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-amber">🔐</div><div class="feat-title">Multi-Auth Profile Support</div></div>
+      <div class="feat-body">Store multiple named authentication profiles per project (admin, user, guest). Run the same test suite under each profile and automatically diff results. Surface RBAC test generation as a first-class dial option.</div>
+    </div>
+  </div>
+
+  <p class="section-title">Tier 3 — Platform moat features</p>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-blue">🤖</div><div class="feat-title">Autonomous Monitoring Mode</div></div>
+      <div class="feat-body">Run approved smoke tests every N minutes against production. On failure, auto-file a Slack alert and trigger a re-run to distinguish flake from real breakage. Position as "always-on QA agent" — the core brand promise made real.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-blue">💬</div><div class="feat-title">Conversational Test Editor</div></div>
+      <div class="feat-body">The /chat route exists but is disconnected from tests. Wire it up: "make this test also verify the error message" → AI diffs the existing code → shows a code diff → one click to apply. Natural-language test editing.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-purple">📦</div><div class="feat-title">Playwright Project Export</div></div>
+      <div class="feat-body">Export all approved tests as a standalone Playwright project (playwright.config.ts + test files) that runs with npx playwright test — zero Sentri dependency. This removes vendor lock-in anxiety, which is the top enterprise objection to AI QA tools.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-purple">🔮</div><div class="feat-title">Flakiness Prediction</div></div>
+      <div class="feat-body">Before running, score each test's flakiness risk based on: selector type (text selectors are high-risk), wait strategy, assertion type, historical heal rate. Show a risk badge in the UI. Flag high-risk tests for pre-emptive strengthening.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PANEL 4: COMPETITORS ── -->
+<div id="panel-compete" class="panel">
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem;line-height:1.6">How Sentri compares to the main autonomous QA platforms today.</p>
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table class="comp-table">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Sentri</th>
+          <th>Mabl</th>
+          <th>Testim</th>
+          <th>QA Wolf</th>
+          <th>Reflect</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>AI test generation from URL</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Self-healing selectors</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Human review queue</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td>Open source / self-host</td><td class="yes">✓ MIT</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+        <tr><td>Local / private LLM (Ollama)</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+        <tr><td>API contract testing</td><td class="yes">✓</td><td class="part">Partial</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+        <tr><td>Live browser screencast</td><td class="yes">✓</td><td class="yes">✓</td><td class="part">Replay</td><td class="yes">✓</td><td class="part">Replay</td></tr>
+        <tr><td>State exploration (beyond links)</td><td class="yes">✓</td><td class="part">Partial</td><td class="no">✗</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td>Scheduled / CI triggers</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Slack/email failure alerts</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Multi-tenant / teams</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Visual regression</td><td class="no">✗</td><td class="yes">✓</td><td class="part">Via plugin</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr><td>Shadow DOM support</td><td class="no">✗</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="part">Partial</td></tr>
+        <tr><td>Jira/Linear issue sync</td><td class="part">Traceability only</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Export as plain Playwright</td><td class="part">Code visible</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td>Conversational test editing</td><td class="part">Chat exists</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:12px;color:var(--color-text-tertiary);margin-top:8px">✓ = fully supported &nbsp;|&nbsp; Partial = limited/beta &nbsp;|&nbsp; ✗ = not available</p>
+
+  <p class="section-title">Sentri's Unique Advantages</p>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">🔓</div><div class="feat-title">Open source + self-hostable</div></div>
+      <div class="feat-body">No competitor is open-source. Sentri can be deployed on-prem for regulated industries (banking, healthcare, govt). This is a genuine moat — lean into it.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">🦙</div><div class="feat-title">Private LLM via Ollama</div></div>
+      <div class="feat-body">No test code or page content leaves the org's network. Zero-data-retention compliance out of the box. No other QA platform offers this.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">👁</div><div class="feat-title">Human-in-the-loop review</div></div>
+      <div class="feat-body">Every generated test requires human approval. Competitors auto-deploy AI tests. Sentri's model builds trust with QA teams who are skeptical of fully autonomous tools.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-head"><div class="feat-icon fi-green">🌐</div><div class="feat-title">Multi-provider LLM flexibility</div></div>
+      <div class="feat-body">Claude, GPT-4o, Gemini, or local Ollama — swap with one setting. Competitors are locked to a single provider. Sentri won't be stranded by provider pricing changes.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PANEL 5: ROADMAP ── -->
+<div id="panel-roadmap" class="panel">
+  <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem;line-height:1.6">Prioritised by competitive impact and engineering effort. Weeks are rough estimates for a 2-engineer team.</p>
+
+  <p class="section-title">Sprint 1 — Security & Stability (Weeks 1–3)</p>
+  <div class="card" style="padding:0.5rem 1.25rem;">
+    <div class="pri-row"><div class="pri-num">1</div><div class="pri-content"><div class="pri-title">Sandbox generated code in worker_threads</div><div class="pri-desc">Move codeExecutor to an isolated Node.js worker with a constrained module allowlist. Eliminates the prompt-injection RCE vector immediately.</div><div class="pri-tags"><span class="tag tag-crit">Security</span><span class="tag tag-neu">~3 days</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">2</div><div class="pri-content"><div class="pri-title">Move JWT to HttpOnly cookies</div><div class="pri-desc">Replace localStorage.getItem('token') with cookie-based auth across the SPA. Add CSRF double-submit cookie.</div><div class="pri-tags"><span class="tag tag-crit">Security</span><span class="tag tag-neu">~2 days</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">3</div><div class="pri-content"><div class="pri-title">Migrate to SQLite (then Postgres)</div><div class="pri-desc">SQLite via better-sqlite3 is a drop-in with zero infra — swap db.js, add Prisma schema, keep Docker setup identical. Add Postgres later for multi-instance.</div><div class="pri-tags"><span class="tag tag-crit">Data Safety</span><span class="tag tag-neu">~1 week</span></div></div></div>
+    <div class="pri-row" style="border-bottom:none"><div class="pri-num">4</div><div class="pri-content"><div class="pri-title">Rate-limit retry with max back-off cap</div><div class="pri-desc">Add MAX_RETRIES=3 and MAX_BACKOFF_MS=30000 constants to journeyGenerator.js. Emit an error event and abort the run gracefully on exhaustion.</div><div class="pri-tags"><span class="tag tag-high">Reliability</span><span class="tag tag-neu">~1 day</span></div></div></div>
+  </div>
+
+  <p class="section-title">Sprint 2 — CI/CD & Alerts (Weeks 4–6)</p>
+  <div class="card" style="padding:0.5rem 1.25rem;">
+    <div class="pri-row"><div class="pri-num">5</div><div class="pri-content"><div class="pri-title">POST /api/projects/:id/trigger webhook + GitHub Action</div><div class="pri-desc">Secret-token-authenticated trigger endpoint. Publish sentri/run-tests GitHub Action to the Marketplace. This single feature unblocks every CI/CD integration request.</div><div class="pri-tags"><span class="tag tag-high">Core Feature</span><span class="tag tag-neu">~4 days</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">6</div><div class="pri-content"><div class="pri-title">Cron scheduler (node-cron)</div><div class="pri-desc">Per-project schedule config in Settings (daily/weekly/custom cron). Runs fire as background BullMQ jobs. Surfaces next-run time in ProjectHeader.</div><div class="pri-tags"><span class="tag tag-high">Core Feature</span><span class="tag tag-neu">~3 days</span></div></div></div>
+    <div class="pri-row" style="border-bottom:none"><div class="pri-num">7</div><div class="pri-content"><div class="pri-title">Slack + email failure notifications</div><div class="pri-desc">Webhook URL per-project in Settings. POST a rich Slack message (pass/fail counts, failing test names, run link) on run completion. Email via Resend / SendGrid.</div><div class="pri-tags"><span class="tag tag-high">Core Feature</span><span class="tag tag-neu">~3 days</span></div></div></div>
+  </div>
+
+  <p class="section-title">Sprint 3 — Quality & Coverage (Weeks 7–10)</p>
+  <div class="card" style="padding:0.5rem 1.25rem;">
+    <div class="pri-row"><div class="pri-num">8</div><div class="pri-content"><div class="pri-title">Playwright AST syntax validation</div><div class="pri-desc">Add @babel/parser or acorn as a dev dependency. Parse generated Playwright code before saving — reject syntactically invalid tests at generation time, not run time.</div><div class="pri-tags"><span class="tag tag-med">Quality</span><span class="tag tag-neu">~2 days</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">9</div><div class="pri-content"><div class="pri-title">Shadow DOM / web component crawling</div><div class="pri-desc">In elementFilter.js, use Playwright's page.$$('css=*') with piercing. Detect custom element registrations and emit pierce: locators for self-healing.</div><div class="pri-tags"><span class="tag tag-high">Coverage</span><span class="tag tag-neu">~1 week</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">10</div><div class="pri-content"><div class="pri-title">GraphQL operation-aware API tests</div><div class="pri-desc">In harCapture.js, read operationName from POST body for application/json requests to paths containing /graphql. Group by operation, not by URL.</div><div class="pri-tags"><span class="tag tag-med">API Coverage</span><span class="tag tag-neu">~2 days</span></div></div></div>
+    <div class="pri-row" style="border-bottom:none"><div class="pri-num">11</div><div class="pri-content"><div class="pri-title">Regenerated tests → Draft (not auto-Approved)</div><div class="pri-desc">In feedbackLoop.js, set status: 'draft' on regenerated tests and emit a notification to the project's approvers. One-line fix with outsized trust impact.</div><div class="pri-tags"><span class="tag tag-high">Trust</span><span class="tag tag-neu">~1 hour</span></div></div></div>
+  </div>
+
+  <p class="section-title">Sprint 4 — Platform Moat (Weeks 11–16)</p>
+  <div class="card" style="padding:0.5rem 1.25rem;">
+    <div class="pri-row"><div class="pri-num">12</div><div class="pri-content"><div class="pri-title">Organisations & team RBAC</div><div class="pri-desc">Add org_id to every entity. JWT claims include org + role. Owner/Admin/Editor/Viewer. Unlock self-serve team sign-up flow. Required for any enterprise deal.</div><div class="pri-tags"><span class="tag tag-high">SaaS Readiness</span><span class="tag tag-neu">~2 weeks</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">13</div><div class="pri-content"><div class="pri-title">Visual regression (pixelmatch)</div><div class="pri-desc">Capture baseline screenshots per step on first run. Diff on subsequent runs. Threshold-configurable per project. Surfaces pixel-level UI regressions alongside functional failures.</div><div class="pri-tags"><span class="tag tag-med">Differentiator</span><span class="tag tag-neu">~1 week</span></div></div></div>
+    <div class="pri-row"><div class="pri-num">14</div><div class="pri-content"><div class="pri-title">Standalone Playwright export</div><div class="pri-desc">Export all approved tests as a zip: playwright.config.ts + one .spec.ts file per test. No Sentri import required. Runs with npx playwright test. Removes lock-in objection.</div><div class="pri-tags"><span class="tag tag-med">Adoption</span><span class="tag tag-neu">~3 days</span></div></div></div>
+    <div class="pri-row" style="border-bottom:none"><div class="pri-num">15</div><div class="pri-content"><div class="pri-title">Conversational test editor (wire up /chat)</div><div class="pri-desc">The chat route and LLM streaming panel already exist. Wire them to a selected test's code. "Add an assertion that the cart total updates" → diff view → one-click apply.</div><div class="pri-tags"><span class="tag tag-med">UX</span><span class="tag tag-neu">~1 week</span></div></div></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
