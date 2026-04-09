@@ -396,7 +396,15 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
     if (signal?.aborted) break; // Respect abort signal between AI calls
     const regenerated = await regenerateFailingTest(improvement, signal);
     if (regenerated) {
-      db.tests[improvement.testId] = { ...db.tests[improvement.testId], ...regenerated };
+      db.tests[improvement.testId] = {
+        ...db.tests[improvement.testId],
+        ...regenerated,
+        // Route regenerated tests back through human review instead of
+        // auto-approving. This preserves the "nothing executes until a
+        // human approves" principle and prevents silently introducing
+        // flawed tests into the approved pool.
+        reviewStatus: "draft",
+      };
       improved++;
     }
   }

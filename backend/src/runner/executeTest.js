@@ -24,7 +24,7 @@ import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
 import { captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
-import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
 
 /**
  * Attach network & console listeners to a page.
@@ -168,43 +168,58 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
   const start = Date.now();
   result.startedAt = start;
 
+  // Per-test timeout guard — prevents a single hanging test from blocking
+  // the worker slot indefinitely during parallel execution.
+  let testTimeoutHandle;
+  const testTimeoutPromise = new Promise((_, reject) => {
+    testTimeoutHandle = setTimeout(() => {
+      reject(new Error(`Browser test timed out after ${BROWSER_TEST_TIMEOUT}ms`));
+    }, BROWSER_TEST_TIMEOUT);
+  });
+
   try {
     const expect = await getExpect();
 
-    if (test.playwrightCode && extractTestBody(test.playwrightCode)) {
-      // ── PRIMARY PATH: Execute the actual AI-generated Playwright code ──
-      const body = extractTestBody(test.playwrightCode);
-      const codeAlreadyNavigates = body.includes("page.goto(");
+    const testExecution = (async () => {
+      if (test.playwrightCode && extractTestBody(test.playwrightCode)) {
+        // ── PRIMARY PATH: Execute the actual AI-generated Playwright code ──
+        const body = extractTestBody(test.playwrightCode);
+        const codeAlreadyNavigates = body.includes("page.goto(");
 
-      if (!codeAlreadyNavigates) {
+        if (!codeAlreadyNavigates) {
+          await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
+          await page.waitForTimeout(800);
+        }
+
+        const healingHints = getHealingHistoryForTest(db, test.id);
+        const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
+        persistHealingEvents(db, test.id, codeResult.healingEvents);
+
+      } else {
+        // ── FALLBACK: No parseable code — run a basic smoke test ───────────
         await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(500);
+
+        const title = await page.title();
+        if (!title) throw new Error("Page has no title — possible load failure");
+
+        const url = page.url();
+        if (!url.startsWith("http")) throw new Error("Invalid URL after navigation");
       }
 
-      const healingHints = getHealingHistoryForTest(db, test.id);
-      const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
-      persistHealingEvents(db, test.id, codeResult.healingEvents);
+      // Capture artifacts on success
+      result.domSnapshot = await captureDomSnapshot(page);
 
-    } else {
-      // ── FALLBACK: No parseable code — run a basic smoke test ───────────
-      await page.goto(test.sourceUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT });
-      await page.waitForTimeout(500);
+      const shot = await captureScreenshot(page, runId, stepIndex);
+      result.screenshot = shot.base64;
+      result.screenshotPath = shot.artifactPath;
 
-      const title = await page.title();
-      if (!title) throw new Error("Page has no title — possible load failure");
+      result.boundingBoxes = await captureBoundingBoxes(page);
+    })();
 
-      const url = page.url();
-      if (!url.startsWith("http")) throw new Error("Invalid URL after navigation");
-    }
-
-    // Capture artifacts on success
-    result.domSnapshot = await captureDomSnapshot(page);
-
-    const shot = await captureScreenshot(page, runId, stepIndex);
-    result.screenshot = shot.base64;
-    result.screenshotPath = shot.artifactPath;
-
-    result.boundingBoxes = await captureBoundingBoxes(page);
+    // Swallow the losing promise to prevent unhandled rejection
+    testExecution.catch(() => {});
+    await Promise.race([testExecution, testTimeoutPromise]);
 
   } catch (err) {
     result.status = "failed";
@@ -221,6 +236,8 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
     } catch { /* page may be closed */ }
 
   } finally {
+    clearTimeout(testTimeoutHandle);
+
     // Capture the final page URL for the frontend BrowserChrome
     try { result.url = page.url(); } catch { /* page already closed */ }
     if (!result.url || result.url === "about:blank") result.url = test.sourceUrl || "";

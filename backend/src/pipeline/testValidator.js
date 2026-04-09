@@ -65,6 +65,16 @@ export function validateTest(test, projectUrl) {
     if (!isApiTest && !test.playwrightCode.includes("page.goto")) {
       issues.push("playwrightCode missing page.goto navigation");
     }
+    // Syntax validation — catch malformed code at generation time rather than
+    // at run time. Uses new Function() to parse without executing. This catches
+    // unbalanced braces, unterminated strings, and other syntax errors that
+    // would otherwise only surface during Playwright execution.
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function(test.playwrightCode);
+    } catch (syntaxErr) {
+      issues.push(`playwrightCode has syntax error: ${syntaxErr.message}`);
+    }
   }
 
   // Reject tests with duplicate/generic names the AI sometimes produces

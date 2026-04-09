@@ -25,6 +25,11 @@ export const VIEWPORT_WIDTH     = parseInt(process.env.VIEWPORT_WIDTH, 10) || 12
 export const VIEWPORT_HEIGHT    = parseInt(process.env.VIEWPORT_HEIGHT, 10) || 720;
 export const NAVIGATION_TIMEOUT = parseInt(process.env.NAVIGATION_TIMEOUT, 10) || 30000;
 export const API_TEST_TIMEOUT  = parseInt(process.env.API_TEST_TIMEOUT, 10) || 30000;
+// Per-test timeout guard — if a single browser test exceeds this, it is
+// forcibly aborted so it doesn't block the worker slot indefinitely.
+// Defaults to 120s (generous enough for complex flows, strict enough to
+// prevent runaway tests from hanging overnight runs).
+export const BROWSER_TEST_TIMEOUT = parseInt(process.env.BROWSER_TEST_TIMEOUT, 10) || 120000;
 
 // ── Shared Chromium launch args ───────────────────────────────────────────────
 // Centralised so crawlBrowser, stateExplorer, and testRunner all use the same

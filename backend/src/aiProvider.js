@@ -293,6 +293,7 @@ const RATE_LIMIT_CODES = [429, 529];
 const RETRY_ERRORS     = ["rate_limit_error", "overloaded_error", "Too Many Requests"];
 const MAX_RETRIES      = parseInt(process.env.LLM_MAX_RETRIES, 10)  || 3;
 const BASE_DELAY_MS    = parseInt(process.env.LLM_BASE_DELAY_MS, 10) || 2000;
+const MAX_BACKOFF_MS   = parseInt(process.env.LLM_MAX_BACKOFF_MS, 10) || 30000;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -338,7 +339,7 @@ async function withRetry(fn, label = "") {
       if (attempt === MAX_RETRIES) throw err;
       if (!isRateLimitError(err)) throw err;
       const retryAfter = extractRetryAfter(err);
-      const delay = retryAfter || BASE_DELAY_MS * Math.pow(2, attempt);
+      const delay = Math.min(retryAfter || BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
       console.warn(`[Sentri] Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
       await sleep(delay);
     }
@@ -544,7 +545,7 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
           err.message.includes("fetch failed") ||
           err.message.includes("Ollama HTTP 500");
         if (attempt === MAX_RETRIES || !isRetryable) throw err;
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
         console.warn(`[Sentri/Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
         await sleep(delay);
       }
