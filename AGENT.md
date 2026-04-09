@@ -22,7 +22,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
     middleware/            Express middleware (appSetup, CORS, Helmet)
-    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system)
+    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
     utils/                 ID generator, logging, abort helpers, encryption, validation
@@ -468,6 +468,52 @@ When adding new selector strategies:
 - Add them to the `strategies` array in the helper code returned by `getSelfHealingHelperCode()`.
 - Keep strategies ordered from most-semantic (ARIA) to least-semantic (CSS), so the adaptive hint system consistently learns the best approach.
 - Do not change the index of existing strategies without running a DB migration that resets all `healingHistory` entries.
+
+---
+
+## AI Chat System
+
+The AI chat assistant (`⌘K` or top bar trigger) streams responses via `POST /api/chat` (SSE). It is **context-aware** — the system prompt is enriched with live workspace data on every request.
+
+### Context Tiers
+
+| Tier | What | How | Token cost |
+|---|---|---|---|
+| **Tier 1 — Workspace summary** | Projects, test counts, recent runs, failing tests, pass rate | `buildWorkspaceContext()` reads `getDb()` on every request | ~200-400 tokens |
+| **Tier 2 — Entity deep-dive** | Full test steps, Playwright code, run errors, project details | `buildEntityContext()` scans the user message for `TC-*`, `RUN-*`, `PRJ-*` IDs and fetches details | ~100-800 tokens per entity |
+
+Both tiers are **read-only** — no DB writes, no mutations, no actions. The AI cannot approve tests, trigger runs, or modify data.
+
+### How entity detection works
+
+When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
+1. Regex-matches `TC-15` and `RUN-42` from the message
+2. Fetches the test's name, steps, Playwright code, quality score, and last error
+3. Fetches the run's status, pass/fail counts, and failed test error messages
+4. Appends both as structured text blocks to the system prompt
+
+### Safety limits
+
+- Max **5 tests**, **3 runs**, **3 projects** per message
+- Playwright code capped at **1500 chars**, errors at **500 chars**, descriptions at **300 chars**
+- No credentials, API keys, or user passwords are ever included
+- If no projects exist, the workspace context is omitted entirely
+
+### Key files
+
+| File | Role |
+|---|---|
+| `backend/src/routes/chat.js` | SSE endpoint, system prompt, `buildWorkspaceContext()`, `buildEntityContext()` |
+| `frontend/src/components/AIChat.jsx` | Chat panel UI, markdown renderer, streaming display |
+| `frontend/src/api.js` → `api.chat()` | SSE stream parser with 401 handling |
+| `frontend/src/styles/features/chat.css` | All chat UI styles (`.chat-*` namespace) |
+
+### When modifying the chat system
+
+- **Adding new context**: Add to `buildWorkspaceContext()` or `buildEntityContext()` in `backend/src/routes/chat.js`. Keep output compact — every token costs money.
+- **Adding new entity types**: Add a regex pattern + DB lookup in `buildEntityContext()`. Follow the existing pattern: match IDs, cap results, truncate long fields.
+- **Changing the system prompt**: Edit `BASE_SYSTEM_PROMPT` in `backend/src/routes/chat.js`. The workspace/entity context is appended automatically — don't hardcode data in the base prompt.
+- **Frontend changes**: All chat styles go in `frontend/src/styles/features/chat.css`. The markdown renderer in `AIChat.jsx` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS.
 
 ---
 
