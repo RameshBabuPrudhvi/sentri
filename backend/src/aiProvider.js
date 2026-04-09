@@ -17,7 +17,7 @@
  * - {@link streamText} — Token-streaming text generation (Anthropic/OpenAI; fallback for others).
  * - {@link parseJSON} — Parse AI response text as JSON (strips markdown fences).
  * - {@link getProvider}, {@link hasProvider}, {@link isLocalProvider}, {@link getProviderName}, {@link getProviderMeta} — Provider detection.
- * - {@link setRuntimeKey}, {@link setRuntimeOllama} — Runtime configuration (Settings page).
+ * - {@link setRuntimeKey}, {@link setRuntimeOllama}, {@link setActiveProvider} — Runtime configuration (Settings page).
  * - {@link getConfiguredKeys} — Masked key status for the Settings UI.
  * - {@link checkOllamaConnection} — Ollama connectivity check.
  */
@@ -52,15 +52,20 @@ export function setActiveProvider(provider) {
   runtimeActiveProvider = provider || null;
 }
 
+// Maps cloud provider IDs to their env-var names (single source of truth)
+const CLOUD_KEY_MAP = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
+
+// Auto-detect order for cloud providers
+const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google"];
+
 /**
  * Set an AI provider API key at runtime (via Settings page).
  * @param {string} provider - `"anthropic"` | `"openai"` | `"google"`.
  * @param {string} key      - The API key string.
  */
 export function setRuntimeKey(provider, key) {
-  if (provider === "anthropic") runtimeKeys.ANTHROPIC_API_KEY = key;
-  if (provider === "openai")    runtimeKeys.OPENAI_API_KEY    = key;
-  if (provider === "google")    runtimeKeys.GOOGLE_API_KEY    = key;
+  const envName = CLOUD_KEY_MAP[provider];
+  if (envName) runtimeKeys[envName] = key;
 }
 
 /**
@@ -110,54 +115,51 @@ function buildProviderMeta() {
 // ── Provider detection ────────────────────────────────────────────────────────
 
 /**
- * Check if a non-local provider has a usable key, checking both process.env
- * and the runtime key store. A runtimeKeys entry of "" means the key was
- * explicitly removed, so we respect that and return false.
+ * Check whether a provider is usable right now (has a key or, for Ollama, is not disabled).
+ * Single source of truth — used by detectProvider, the quick-switch override, and the forced-env path.
+ * @param {string} provider
+ * @returns {boolean}
  */
-function hasKeyForProvider(provider) {
-  const envMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
-  const envName = envMap[provider];
+function isProviderUsable(provider) {
+  if (provider === "local") {
+    return !runtimeOllamaDisabled;
+  }
+  const envName = CLOUD_KEY_MAP[provider];
   if (!envName) return false;
-  // If the key was explicitly cleared at runtime, honour that removal
+  // Runtime key of "" means explicitly cleared — respect that
   if (envName in runtimeKeys) return runtimeKeys[envName].length > 0;
-  // Otherwise fall back to the env var
   return !!(process.env[envName]);
 }
 
-function detectProvider() {
-  const forced = process.env.AI_PROVIDER?.toLowerCase();
+/** True if Ollama has any config (runtime or env) hinting it should be auto-detected. */
+function hasOllamaConfig() {
+  return !!(runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL);
+}
 
+function detectProvider() {
   // ── Quick-switch override from the header dropdown ────────────────────────
   // Checked BEFORE the AI_PROVIDER env var so the dropdown can switch away
   // from a locally-forced provider (e.g. AI_PROVIDER=local in .env).
   if (runtimeActiveProvider) {
-    if (runtimeActiveProvider === "local") {
-      if (!runtimeOllamaDisabled) return "local";
-    } else if (hasKeyForProvider(runtimeActiveProvider)) {
-      return runtimeActiveProvider;
-    }
+    if (isProviderUsable(runtimeActiveProvider)) return runtimeActiveProvider;
     // Key gone — clear the override and fall through
     runtimeActiveProvider = null;
   }
 
   // ── AI_PROVIDER env var (explicit static config) ─────────────────────────
+  const forced = process.env.AI_PROVIDER?.toLowerCase();
   if (forced) {
     if (forced === "local") return "local";
-    const keyMap = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", google: "GOOGLE_API_KEY" };
-    if (!keyMap[forced]) throw new Error(`Unknown AI_PROVIDER="${forced}". Valid: anthropic, openai, google, local`);
-    if (!getKey(keyMap[forced])) throw new Error(`AI_PROVIDER="${forced}" but ${keyMap[forced]} is not set`);
+    if (!CLOUD_KEY_MAP[forced]) throw new Error(`Unknown AI_PROVIDER="${forced}". Valid: anthropic, openai, google, local`);
+    if (!getKey(CLOUD_KEY_MAP[forced])) throw new Error(`AI_PROVIDER="${forced}" but ${CLOUD_KEY_MAP[forced]} is not set`);
     return forced;
   }
 
-  if (getKey("ANTHROPIC_API_KEY")) return "anthropic";
-  if (getKey("OPENAI_API_KEY"))    return "openai";
-  if (getKey("GOOGLE_API_KEY"))    return "google";
+  // ── Auto-detect: first cloud provider with a key, then Ollama as fallback ─
+  const detected = CLOUD_DETECT_ORDER.find(id => isProviderUsable(id));
+  if (detected) return detected;
 
-  // Auto-detect Ollama as last resort if runtime or env model/url has been set
-  // Skip if explicitly deactivated via DELETE /api/settings/local
-  if (!runtimeOllamaDisabled && (runtimeOllamaBaseUrl || runtimeOllamaModel || process.env.OLLAMA_BASE_URL || process.env.OLLAMA_MODEL)) {
-    return "local";
-  }
+  if (isProviderUsable("local") && hasOllamaConfig()) return "local";
 
   return null;
 }
@@ -186,16 +188,15 @@ export function getProviderMeta() {
  * @returns {{anthropic: string, openai: string, google: string, activeProvider: string|null, ollamaBaseUrl: string, ollamaModel: string}}
  */
 export function getConfiguredKeys() {
-  const p = getProvider();
-  return {
-    anthropic: maskKey(getKey("ANTHROPIC_API_KEY")),
-    openai:    maskKey(getKey("OPENAI_API_KEY")),
-    google:    maskKey(getKey("GOOGLE_API_KEY")),
-    activeProvider: p,
-    // Ollama-specific fields (never sensitive, no masking needed)
-    ollamaBaseUrl: getOllamaBaseUrl(),
-    ollamaModel:   getOllamaModel(),
-  };
+  const result = { activeProvider: getProvider() };
+  // Cloud providers — masked keys via the shared map
+  for (const [id, envName] of Object.entries(CLOUD_KEY_MAP)) {
+    result[id] = maskKey(getKey(envName));
+  }
+  // Ollama-specific fields (never sensitive, no masking needed)
+  result.ollamaBaseUrl = getOllamaBaseUrl();
+  result.ollamaModel   = getOllamaModel();
+  return result;
 }
 
 function maskKey(key) {

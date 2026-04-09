@@ -56,7 +56,7 @@ export default function ProviderBadge({ style }) {
       _settingsCache = sett;
       setConfig(cfg);
       setSettings(sett);
-    } catch (_) { /* silent — badge degrades gracefully */ }
+    } catch { /* silent — badge degrades gracefully */ }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -201,7 +201,7 @@ export default function ProviderBadge({ style }) {
                       opacity: (switching && !isBusy) ? 0.45 : 1,
                     }}
                     onMouseEnter={e => { if (!isActive && !switching) e.currentTarget.style.background = "var(--bg2)"; }}
-                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = isActive ? meta.activeBg : "none"; }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "none"; }}
                   >
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta.dot, flexShrink: 0, opacity: isActive ? 1 : 0.45 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>

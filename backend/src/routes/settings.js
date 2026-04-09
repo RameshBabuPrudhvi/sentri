@@ -126,13 +126,17 @@ router.delete("/settings/:provider", (req, res) => {
     return res.status(400).json({ error: `provider must be one of: ${validProviders.join(", ")}` });
   }
 
+  // Capture the active provider BEFORE removing the key/config, because
+  // getProvider() checks the runtimeActiveProvider override first.
+  const wasActive = getProvider();
+
   if (provider === "local") {
     setRuntimeOllama({ baseUrl: "", model: "", disabled: true });
   } else {
     setRuntimeKey(provider, "");
   }
-  // Clear the active-provider override if it was pointing to this provider
-  setActiveProvider(null);
+  // Only clear the active-provider override if it was pointing to the deleted provider
+  if (wasActive === provider) setActiveProvider(null);
 
   logActivity({
     type: "settings.update",
