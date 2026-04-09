@@ -5,7 +5,7 @@ import {
   CheckCircle2, XCircle, Clock,
   ChevronRight, Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
-  Link2, Tag, Clipboard,
+  Link2, Tag, Clipboard, Wand2,
 } from "lucide-react";
 import { api } from "../api.js";
 import DiffView from "../components/DiffView.jsx";
@@ -18,6 +18,7 @@ import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
 import CodeEditorModal from "../components/test/CodeEditorModal.jsx";
+import AiFixPanel from "../components/AiFixPanel.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -98,6 +99,9 @@ export default function TestDetail() {
 
   // ── Code editor modal state ──────────────────────────────────────────────
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+
+  // ── AI fix panel state ──────────────────────────────────────────────────
+  const [showFixPanel, setShowFixPanel] = useState(false);
 
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
@@ -314,6 +318,18 @@ export default function TestDetail() {
               <button className="btn btn-ghost btn-sm" onClick={startEditing}>
                 <Edit2 size={14} /> Edit Test
               </button>
+              {test.lastResult === "failed" && test.playwrightCode && !showFixPanel && (
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    background: "var(--accent-bg)", color: "var(--accent)",
+                    border: "1px solid rgba(91,110,245,0.3)", fontWeight: 600,
+                  }}
+                  onClick={() => setShowFixPanel(true)}
+                >
+                  <Wand2 size={14} /> Fix with AI
+                </button>
+              )}
               <button
                 className="btn btn-primary btn-sm"
                 onClick={handleRunTest}
@@ -680,6 +696,19 @@ export default function TestDetail() {
               </div>
             )}
           </div>
+
+          {/* AI Fix Panel */}
+          {showFixPanel && test.playwrightCode && (
+            <AiFixPanel
+              testId={testId}
+              originalCode={test.playwrightCode}
+              onApplied={(updated) => {
+                setTest(updated);
+                setShowFixPanel(false);
+              }}
+              onClose={() => setShowFixPanel(false)}
+            />
+          )}
 
           {/* Recent Test Runs card */}
           <div className="card" style={{ padding: 24 }}>

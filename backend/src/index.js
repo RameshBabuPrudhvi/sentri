@@ -13,6 +13,7 @@
  * | `/api` (dashboard) | `routes/dashboard`  |
  * | `/api` (settings)  | `routes/settings`   |
  * | `/api` (system)    | `routes/system`     |
+ * | `/api` (testFix)   | `routes/testFix`    |
  * | `/api/auth`        | `routes/auth`       |
  * | `/health`          | Health check        |
  */
@@ -35,6 +36,7 @@ import systemRouter from "./routes/system.js";
 import authRouter from "./routes/auth.js";
 import { requireAuth } from "./routes/auth.js";
 import chatRouter from "./routes/chat.js";
+import testFixRouter from "./routes/testFix.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -80,6 +82,7 @@ app.use("/api", requireAuth, dashboardRouter);
 app.use("/api", requireAuth, settingsRouter);
 app.use("/api", requireAuth, systemRouter);
 app.use("/api", requireAuth, chatRouter);
+app.use("/api", requireAuth, testFixRouter);
 
 // Health check (root-level, not under /api)
 app.get("/health", (req, res) => res.json({ ok: true }));

@@ -261,6 +261,68 @@ export const api = {
   /** @returns {Promise<{cleared: number}>} Clear self-healing history. */
   clearHealing:    () => req("DELETE", "/data/healing"),
 
+  // ── AI Test Fix ──────────────────────────────────────────────────────────────
+
+  /**
+   * Stream an AI-generated fix for a failing test via SSE.
+   *
+   * @param   {string}                testId   - The test ID to fix.
+   * @param   {function(string):void} onToken  - Called with each streamed token.
+   * @param   {function({done: boolean, fixedCode: string, explanation: string, diff: string}):void} onDone - Called when the stream completes.
+   * @param   {function(string):void} onError  - Called if the stream returns an error event.
+   * @param   {AbortSignal}           [signal] - Optional abort signal to cancel the stream.
+   * @returns {Promise<void>}
+   */
+  fixTest: async (testId, onToken, onDone, onError, signal) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}/tests/${testId}/fix`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({}),
+      signal,
+    });
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired. Please sign in again.");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Fix request failed (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") return;
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.error) { onError?.(parsed.error); return; }
+          if (parsed.done) { onDone?.(parsed); return; }
+          if (parsed.token) onToken(parsed.token);
+        } catch { /* malformed SSE line — skip */ }
+      }
+    }
+  },
+
+  /**
+   * Apply an AI-generated fix to a test.
+   * @param {string} testId - The test ID.
+   * @param {string} code   - The fixed Playwright code.
+   * @returns {Promise<Object>} The updated test object.
+   */
+  applyTestFix: (testId, code) => req("POST", `/tests/${testId}/apply-fix`, { code }),
+
   /**
    * Stream a chat message through the configured AI provider via SSE.
    *
