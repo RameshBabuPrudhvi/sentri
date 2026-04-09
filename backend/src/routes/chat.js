@@ -180,7 +180,7 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
     lines.push(`Project: ${project?.name || test.projectId} (${project?.url || ""})`);
     lines.push(`Status: ${test.lastResult || "not run"} | Review: ${test.reviewStatus || "draft"}`);
     if (test.description) lines.push(`Description: ${test.description.slice(0, descCap)}`);
-    if (test.steps?.length) lines.push(`Steps (${test.steps.length}):\n${test.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
+    if (test.steps?.length) lines.push(`Steps (${test.steps.length}):\n${test.steps.map((s, i) => `  ${i + 1}. ${s.replace(/^\d+\.\s*/, "")}`).join("\n")}`);
     if (test.playwrightCode) lines.push(`Playwright code:\n\`\`\`javascript\n${test.playwrightCode.slice(0, codeCap)}\n\`\`\``);
     if (test.qualityScore != null) lines.push(`Quality score: ${test.qualityScore}%`);
     if (test.type) lines.push(`Type: ${test.type}`);
