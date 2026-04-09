@@ -329,10 +329,11 @@ router.post("/chat", async (req, res) => {
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
     : BASE_SYSTEM_PROMPT;
 
-  // Log prompt size so context-window overflows are diagnosable
+  // Log prompt metadata at info level (always visible) and full prompt at debug
   const promptCharCount = systemPrompt.length + userContent.length;
+  console.log(formatLogLine("info", null, `[chat] provider=${isLocal ? "ollama" : "cloud"} system=${systemPrompt.length} chars user=${userContent.length} chars total=${promptCharCount} chars (~${Math.round(promptCharCount / 4)} tokens) msg="${lastMessage.content.slice(0, 80)}"`));
   if (shouldLog("debug")) {
-    console.log(formatLogLine("debug", null, `[chat] provider=${isLocal ? "ollama" : "cloud"} prompt=${promptCharCount} chars (~${Math.round(promptCharCount / 4)} tokens) user="${lastMessage.content.slice(0, 80)}"`));
+    console.log(formatLogLine("debug", null, `[chat] === SYSTEM PROMPT ===\n${systemPrompt}\n=== USER CONTENT ===\n${userContent}\n=== END ===`));
   }
 
   // Set up SSE
@@ -363,9 +364,7 @@ router.post("/chat", async (req, res) => {
       streamOpts,
     );
 
-    if (shouldLog("debug")) {
-      console.log(formatLogLine("debug", null, `[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`));
-    }
+    console.log(formatLogLine("info", null, `[chat] completed in ${((Date.now() - startMs) / 1000).toFixed(1)}s`));
     if (!res.writableEnded) {
       res.write("data: [DONE]\n\n");
       res.end();
