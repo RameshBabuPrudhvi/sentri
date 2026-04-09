@@ -266,9 +266,10 @@ export const api = {
    * @param   {Array<{role: string, content: string}>} messages - Full conversation history.
    * @param   {function(string):void}  onToken  - Called with each streamed token.
    * @param   {function(string):void}  onError  - Called if the stream returns an error event.
+   * @param   {AbortSignal}            [signal] - Optional abort signal to cancel the stream.
    * @returns {Promise<void>}
    */
-  chat: async (messages, onToken, onError) => {
+  chat: async (messages, onToken, onError, signal) => {
     const token = getToken();
     const res = await fetch(`${BASE}/chat`, {
       method: "POST",
@@ -277,6 +278,7 @@ export const api = {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ messages }),
+      signal,
     });
     if (res.status === 401) {
       handleUnauthorized();

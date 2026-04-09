@@ -13,7 +13,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
-  X, Send, Bot, User, Sparkles, Trash2, Copy, Check,
+  X, Send, Square, Bot, User, Sparkles, Trash2, Copy, Check,
   Maximize2, Minimize2, Bug, TestTube, Shield, BarChart2,
   Zap, Terminal,
 } from "lucide-react";
@@ -172,6 +172,7 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
   const [expanded,  setExpanded]  = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
+  const abortRef       = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -203,6 +204,9 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
     const replyId = Date.now() + 1;
     setMessages(prev => [...prev, { role: "assistant", content: "", id: replyId }]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       await api.chat(
         nextMessages.filter(m => m.role !== "error").map(({ role, content }) => ({ role, content })),
@@ -215,19 +219,28 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
           setMessages(prev => prev.map(m =>
             m.id === replyId ? { ...m, role: "error", content: errMsg } : m
           ));
-        }
+        },
+        controller.signal,
       );
     } catch (err) {
-      setMessages(prev => prev.map(m =>
-        m.id === replyId
-          ? { ...m, role: "error", content: `Something went wrong: ${err.message}. Make sure an AI provider is configured in Settings.` }
-          : m
-      ));
+      // Don't show error for user-initiated abort
+      if (err.name !== "AbortError") {
+        setMessages(prev => prev.map(m =>
+          m.id === replyId
+            ? { ...m, role: "error", content: `Something went wrong: ${err.message}. Make sure an AI provider is configured in Settings.` }
+            : m
+        ));
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [input, loading, messages]);
+
+  function stopGeneration() {
+    abortRef.current?.abort();
+  }
 
   function handleKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -316,14 +329,24 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
               disabled={loading}
               rows={1}
             />
-            <button
-              className={`chat-send-btn ${canSend ? "chat-send-btn--active" : "chat-send-btn--inactive"}`}
-              onClick={() => sendMessage()}
-              disabled={!canSend}
-              title="Send (Enter)"
-            >
-              <Send size={14} />
-            </button>
+            {loading ? (
+              <button
+                className="chat-send-btn chat-send-btn--stop"
+                onClick={stopGeneration}
+                title="Stop generating"
+              >
+                <Square size={12} />
+              </button>
+            ) : (
+              <button
+                className={`chat-send-btn ${canSend ? "chat-send-btn--active" : "chat-send-btn--inactive"}`}
+                onClick={() => sendMessage()}
+                disabled={!canSend}
+                title="Send (Enter)"
+              >
+                <Send size={14} />
+              </button>
+            )}
           </div>
           <div className="chat-input-hint">
             Shift+Enter for new line · Enter to send · Esc to close

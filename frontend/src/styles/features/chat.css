@@ -302,6 +302,16 @@
   cursor: default;
 }
 
+.chat-send-btn--stop {
+  background: var(--red);
+  color: #fff;
+}
+
+.chat-send-btn--stop:hover {
+  background: var(--red);
+  opacity: 0.85;
+}
+
 .chat-input-hint {
   font-size: 0.68rem;
   color: var(--text3);
