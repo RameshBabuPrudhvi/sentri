@@ -20,6 +20,7 @@
 import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import * as testRepo from "../database/repositories/testRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -95,9 +96,10 @@ export function detectFlakiness(testHistory) {
  */
 export function detectFlakyTests(db, projectId) {
   const testResults = new Map(); // testId → { passes, fails }
+  const allRuns = runRepo.getByProjectId(projectId);
 
-  for (const run of Object.values(db.runs || {})) {
-    if (run.projectId !== projectId || !run.results) continue;
+  for (const run of allRuns) {
+    if (!run.results) continue;
     for (const result of run.results) {
       if (!testResults.has(result.testId)) {
         testResults.set(result.testId, { passes: 0, fails: 0 });
@@ -111,7 +113,7 @@ export function detectFlakyTests(db, projectId) {
   const flakyTests = new Map();
   for (const [testId, { passes, fails }] of testResults) {
     if (passes > 0 && fails > 0) {
-      const test = db.tests[testId];
+      const test = testRepo.getById(testId);
       const total = passes + fails;
       flakyTests.set(testId, {
         testId,

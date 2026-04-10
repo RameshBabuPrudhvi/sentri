@@ -19,6 +19,7 @@ import {
   generateActivityId,
   initCountersFromExistingData,
 } from "../src/utils/idGenerator.js";
+import * as counterRepo from "../src/database/repositories/counterRepo.js";
 import { throwIfAborted, isRunAborted, finalizeRunIfNotAborted } from "../src/utils/abortHelper.js";
 
 let passed = 0;
@@ -86,26 +87,24 @@ test("validateBulkAction validates ids and action", () => {
 console.log("\n🧪 idGenerator utils");
 
 test("generates sequential IDs for all domains", () => {
-  const db = {};
-  assert.equal(generateTestId(db), "TC-1");
-  assert.equal(generateTestId(db), "TC-2");
-  assert.equal(generateRunId(db), "RUN-1");
-  assert.equal(generateProjectId(db), "PRJ-1");
-  assert.equal(generateActivityId(db), "ACT-1");
+  // Reset counters to known state for deterministic test
+  counterRepo.set("test", 0);
+  counterRepo.set("run", 0);
+  counterRepo.set("project", 0);
+  counterRepo.set("activity", 0);
+  assert.equal(generateTestId(), "TC-1");
+  assert.equal(generateTestId(), "TC-2");
+  assert.equal(generateRunId(), "RUN-1");
+  assert.equal(generateProjectId(), "PRJ-1");
+  assert.equal(generateActivityId(), "ACT-1");
 });
 
-test("initCountersFromExistingData seeds counters from persisted IDs", () => {
-  const db = {
-    tests: { "TC-4": {}, "TC-12": {} },
-    runs: { "RUN-3": {} },
-    projects: { "PRJ-9": {} },
-    activities: { "ACT-2": {} },
-  };
-  initCountersFromExistingData(db);
-  assert.equal(generateTestId(db), "TC-13");
-  assert.equal(generateRunId(db), "RUN-4");
-  assert.equal(generateProjectId(db), "PRJ-10");
-  assert.equal(generateActivityId(db), "ACT-3");
+test("initCountersFromExistingData is a no-op (counters managed by SQLite)", () => {
+  // initCountersFromExistingData is now a no-op — counters are seeded during migration.
+  // Verify it doesn't throw and counters continue from where they left off.
+  initCountersFromExistingData({});
+  const nextTest = generateTestId();
+  assert.ok(nextTest.startsWith("TC-"), `Expected TC-N, got ${nextTest}`);
 });
 
 console.log("\n🧪 abortHelper utils");

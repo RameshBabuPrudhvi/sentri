@@ -14,7 +14,9 @@ import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import runsRouter from "../src/routes/runs.js";
 import sseRouter from "../src/routes/sse.js";
-import { getDb } from "../src/db.js";
+import { getDatabase } from "../src/database/sqlite.js";
+import * as runRepo from "../src/database/repositories/runRepo.js";
+import * as activityRepo from "../src/database/repositories/activityRepo.js";
 
 let mounted = false;
 function mountRoutesOnce() {
@@ -28,15 +30,15 @@ function mountRoutesOnce() {
 }
 
 function resetDb() {
-  const db = getDb();
-  db.users = {};
-  db.oauthIds = {};
-  db.projects = {};
-  db.tests = {};
-  db.runs = {};
-  db.activities = {};
-  db.healingHistory = {};
-  return db;
+  const db = getDatabase();
+  db.exec("DELETE FROM healing_history");
+  db.exec("DELETE FROM activities");
+  db.exec("DELETE FROM runs");
+  db.exec("DELETE FROM tests");
+  db.exec("DELETE FROM oauth_ids");
+  db.exec("DELETE FROM projects");
+  db.exec("DELETE FROM users");
+  db.exec("UPDATE counters SET value = 0");
 }
 
 async function req(base, path, { method = "GET", token, body } = {}) {
@@ -53,14 +55,14 @@ async function req(base, path, { method = "GET", token, body } = {}) {
 
 async function main() {
   mountRoutesOnce();
-  const db = resetDb();
+  resetDb();
 
   const server = app.listen(0);
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    const email = `qa-${Date.now()}@example.com`;
+    const email = `qa-${Date.now()}@test.local`;
 
     let out = await req(base, "/api/auth/register", {
       method: "POST",
@@ -101,14 +103,16 @@ async function main() {
     assert.equal(out.json.reviewStatus, "approved");
 
     // Seed an active run and verify duplicate-run guard (409).
-    db.runs.RUN_ACTIVE = {
+    runRepo.create({
       id: "RUN_ACTIVE",
       projectId,
       type: "test_run",
       status: "running",
       startedAt: new Date().toISOString(),
       logs: [],
-    };
+      tests: [],
+      results: [],
+    });
 
     out = await req(base, `/api/projects/${projectId}/run`, { method: "POST", token });
     assert.equal(out.res.status, 409);
@@ -145,7 +149,7 @@ async function main() {
     assert.equal(out.json.updated, 2, "Should approve 2 tests");
 
     // Verify per-test activity entries were created
-    const activities = Object.values(db.activities || {});
+    const activities = activityRepo.getAll();
     const perTestApprovals = activities.filter(a =>
       a.type === "test.approve" && a.detail?.includes("(bulk)")
     );

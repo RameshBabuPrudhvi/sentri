@@ -24,7 +24,9 @@
 
 import { Router } from "express";
 import { getDb } from "../db.js";
-import { saveDb } from "../db.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
@@ -43,19 +45,15 @@ const router = Router();
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/tests", (req, res) => {
-  const db = getDb();
-  const tests = Object.values(db.tests).filter((t) => t.projectId === req.params.id);
-  res.json(tests);
+  res.json(testRepo.getByProjectId(req.params.id));
 });
 
 router.get("/tests", (req, res) => {
-  const db = getDb();
-  res.json(Object.values(db.tests));
+  res.json(testRepo.getAll());
 });
 
 router.get("/tests/:testId", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
   res.json(test);
 });
@@ -65,52 +63,52 @@ router.patch("/tests/:testId", async (req, res) => {
   const validationErr = validateTestUpdate(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
 
   const { steps, name, description, priority, regenerateCode, playwrightCode, linkedIssueKey, tags } = req.body;
 
-  if (typeof name === "string")        test.name        = name.trim();
-  if (typeof description === "string") test.description = description.trim();
-  if (typeof priority === "string")    test.priority    = priority;
-  // Traceability fields
-  if (typeof linkedIssueKey === "string") test.linkedIssueKey = linkedIssueKey.trim() || null;
-  if (Array.isArray(tags)) test.tags = tags.map(t => String(t).trim()).filter(Boolean);
+  const updates = {};
+
+  if (typeof name === "string")        updates.name        = name.trim();
+  if (typeof description === "string") updates.description = description.trim();
+  if (typeof priority === "string")    updates.priority    = priority;
+  if (typeof linkedIssueKey === "string") updates.linkedIssueKey = linkedIssueKey.trim() || null;
+  if (Array.isArray(tags)) updates.tags = tags.map(t => String(t).trim()).filter(Boolean);
   if (typeof playwrightCode === "string") {
     if (test.playwrightCode && test.playwrightCode !== playwrightCode) {
-      test.playwrightCodePrev = test.playwrightCode;
+      updates.playwrightCodePrev = test.playwrightCode;
     }
-    test.playwrightCode = playwrightCode;
+    updates.playwrightCode = playwrightCode;
   }
 
   const stepsChanged = Array.isArray(steps) &&
     JSON.stringify(steps) !== JSON.stringify(test.steps);
 
-  if (Array.isArray(steps)) test.steps = steps;
+  if (Array.isArray(steps)) updates.steps = steps;
 
-  test.updatedAt = new Date().toISOString();
+  updates.updatedAt = new Date().toISOString();
 
-  // Recompute isApiTest when playwrightCode changes so the frontend can
-  // read test.isApiTest directly without reimplementing the heuristic.
   if (typeof playwrightCode === "string") {
-    test.isApiTest = !!(playwrightCode && isApiTest(playwrightCode));
+    updates.isApiTest = !!(playwrightCode && isApiTest(playwrightCode));
   }
 
   let codeRegeneratedNow = false;
+  const currentSteps = updates.steps || test.steps;
+  const currentName = updates.name || test.name;
 
-  if (regenerateCode && hasProvider() && Array.isArray(test.steps) && test.steps.length > 0) {
+  if (regenerateCode && hasProvider() && Array.isArray(currentSteps) && currentSteps.length > 0) {
     try {
-      const project = db.projects[test.projectId];
+      const project = projectRepo.getById(test.projectId);
       const appUrl = project?.url || test.sourceUrl || "";
       const { generateText, parseJSON } = await import("../aiProvider.js");
 
       const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
 
-Test Name: ${test.name}
+Test Name: ${currentName}
 Application URL: ${appUrl}
 Test Steps:
-${test.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
 Requirements:
 - MUST start with: await page.goto('${appUrl}')
@@ -121,7 +119,7 @@ Requirements:
 
 Return ONLY valid JSON with no markdown fences:
 {
-  "playwrightCode": "test('${test.name}', async ({ page }) => {\\n  // full test implementation\\n});"
+  "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // full test implementation\\n});"
 }`;
 
       const codeRaw = await generateText(codePrompt);
@@ -135,12 +133,13 @@ Return ONLY valid JSON with no markdown fences:
         }
       }
       if (pwCode) {
-        if (test.playwrightCode && test.playwrightCode !== pwCode) {
-          test.playwrightCodePrev = test.playwrightCode;
+        const currentCode = updates.playwrightCode || test.playwrightCode;
+        if (currentCode && currentCode !== pwCode) {
+          updates.playwrightCodePrev = currentCode;
         }
-        test.playwrightCode = pwCode;
-        test.isApiTest = !!(pwCode && isApiTest(pwCode));
-        test.codeRegeneratedAt = new Date().toISOString();
+        updates.playwrightCode = pwCode;
+        updates.isApiTest = !!(pwCode && isApiTest(pwCode));
+        updates.codeRegeneratedAt = new Date().toISOString();
         codeRegeneratedNow = true;
       }
     } catch (err) {
@@ -148,21 +147,24 @@ Return ONLY valid JSON with no markdown fences:
     }
   }
 
-  const project = db.projects[test.projectId];
+  // Persist all updates to SQLite
+  testRepo.update(test.id, updates);
+
+  const project = projectRepo.getById(test.projectId);
   logActivity({
     type: stepsChanged && regenerateCode ? "test.regenerate" : "test.edit",
     projectId: test.projectId,
     projectName: project?.name || null,
     testId: test.id,
-    testName: test.name,
+    testName: updates.name || test.name,
     detail: stepsChanged
-      ? `Steps updated (${test.steps.length} steps)${codeRegeneratedNow ? " — Playwright code regenerated" : ""}`
+      ? `Steps updated (${(updates.steps || test.steps).length} steps)${codeRegeneratedNow ? " — Playwright code regenerated" : ""}`
       : "Test metadata updated",
   });
 
-  saveDb(); // user edits must survive crashes — don't rely on the 30s interval
-
-  const response = { ...test };
+  // Re-read the updated test from SQLite for the response
+  const updatedTest = testRepo.getById(test.id);
+  const response = { ...updatedTest };
   if (regenerateCode && !codeRegeneratedNow) {
     response._codeStale = true;
   }
@@ -175,13 +177,12 @@ router.post("/projects/:id/tests", (req, res) => {
   const validationErr = validateTestPayload(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const { name, description, steps, playwrightCode, priority, type } = req.body;
 
-  const testId = generateTestId(db);
+  const testId = generateTestId();
   const test = {
     id: testId,
     projectId: project.id,
@@ -200,15 +201,13 @@ router.post("/projects/:id/tests", (req, res) => {
     isJourneyTest: false,
     reviewStatus: "draft",
     reviewedAt: null,
-    // Match shape of AI-generated tests so all pipeline stages work uniformly
     promptVersion: null,
     modelUsed: null,
     linkedIssueKey: null,
     tags: [],
   };
 
-  db.tests[testId] = test;
-  saveDb();
+  testRepo.create(test);
 
   logActivity({
     type: "test.create", projectId: project.id, projectName: project.name,
@@ -220,26 +219,23 @@ router.post("/projects/:id/tests", (req, res) => {
 });
 
 router.delete("/projects/:id/tests/:testId", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   logActivity({
     type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
     testId: req.params.testId, testName: test.name,
     detail: `Test deleted — "${test.name}"`,
   });
-  delete db.tests[req.params.testId];
-  saveDb();
+  testRepo.deleteById(req.params.testId);
   res.json({ ok: true });
 });
 
 // ─── AI-powered test generation (pipeline-based) ──────────────────────────────
 
 router.post("/projects/:id/tests/generate", async (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const { name, description, dialsConfig } = req.body;
@@ -287,7 +283,8 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     });
   }
 
-  const runId = generateRunId(db);
+  const db = getDb();
+  const runId = generateRunId();
   const run = {
     id: runId,
     projectId: project.id,
@@ -298,7 +295,6 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     tests: [],
     pagesFound: 0,
     generateInput: { name: cleanName, description: cleanDescription },
-    // Prompt audit trail — stored on every run for compliance, debugging, cost attribution
     promptAudit: {
       descriptionLength: cleanDescription.length,
       dialsConfigSummary: validatedGenDials ? {
@@ -312,8 +308,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
       requestedAt: new Date().toISOString(),
     },
   };
-  db.runs[runId] = run;
-saveDb();
+  runRepo.create(run);
   logActivity({
     type: "test.generate", projectId: project.id, projectName: project.name,
     detail: `Test generation pipeline started for "${cleanName}"`, status: "running",
@@ -344,14 +339,14 @@ saveDb();
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
 router.post("/tests/:testId/run", async (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 
-  const project = db.projects[test.projectId];
+  const project = projectRepo.getById(test.projectId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const runId = generateRunId(db);
+  const db = getDb();
+  const runId = generateRunId();
   const run = {
     id: runId,
     projectId: project.id,
@@ -365,8 +360,7 @@ router.post("/tests/:testId/run", async (req, res) => {
     total: 1,
     testQueue: [{ id: test.id, name: test.name, steps: test.steps || [] }],
   };
-  db.runs[runId] = run;
-saveDb();
+  runRepo.create(run);
   logActivity({
     type: "test_run.start", projectId: project.id, projectName: project.name,
     testId: test.id, testName: test.name,
@@ -395,54 +389,47 @@ saveDb();
 // ─── Test Review: Approve / Reject / Restore / Bulk ──────────────────────────
 
 router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
-  test.reviewStatus = "approved";
-  test.reviewedAt = new Date().toISOString();
-  const project = db.projects[req.params.id];
+  const reviewedAt = new Date().toISOString();
+  testRepo.update(test.id, { reviewStatus: "approved", reviewedAt });
+  const project = projectRepo.getById(req.params.id);
   logActivity({
     type: "test.approve", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
-  saveDb();
-  res.json(test);
+  res.json(testRepo.getById(test.id));
 });
 
 router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
-  test.reviewStatus = "rejected";
-  test.reviewedAt = new Date().toISOString();
-  const project = db.projects[req.params.id];
+  const reviewedAt = new Date().toISOString();
+  testRepo.update(test.id, { reviewStatus: "rejected", reviewedAt });
+  const project = projectRepo.getById(req.params.id);
   logActivity({
     type: "test.reject", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
   });
-  saveDb();
-  res.json(test);
+  res.json(testRepo.getById(test.id));
 });
 
 router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
-  test.reviewStatus = "draft";
-  test.reviewedAt = null;
-  const project = db.projects[req.params.id];
+  testRepo.update(test.id, { reviewStatus: "draft", reviewedAt: null });
+  const project = projectRepo.getById(req.params.id);
   logActivity({
     type: "test.restore", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test restored to draft — "${test.name}"`,
   });
-  saveDb();
-  res.json(test);
+  res.json(testRepo.getById(test.id));
 });
 
 // NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
@@ -450,43 +437,33 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
   const validationErr = validateBulkAction(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
-  const db = getDb();
   const { testIds, action } = req.body;
 
   if (action === "delete") {
     const deleted = [];
     testIds.forEach((tid) => {
-      const test = db.tests[tid];
+      const test = testRepo.getById(tid);
       if (test && test.projectId === req.params.id) {
         deleted.push({ id: test.id, name: test.name });
-        delete db.tests[tid];
+        testRepo.deleteById(tid);
       }
     });
     if (deleted.length) {
-      const project = db.projects[req.params.id];
+      const project = projectRepo.getById(req.params.id);
       logActivity({
         type: "test.bulk_delete", projectId: req.params.id, projectName: project?.name || null,
         detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
       });
     }
-    saveDb();
     return res.json({ deleted: deleted.length, tests: deleted });
   }
 
   const statusMap = { approve: "approved", reject: "rejected", restore: "draft" };
-  const updated = [];
-  testIds.forEach((tid) => {
-    const test = db.tests[tid];
-    if (test && test.projectId === req.params.id) {
-      test.reviewStatus = statusMap[action];
-      test.reviewedAt = action === "restore" ? null : new Date().toISOString();
-      updated.push(test);
-    }
-  });
+  const reviewedAt = action === "restore" ? null : new Date().toISOString();
+  const updated = testRepo.bulkUpdateReviewStatus(testIds, req.params.id, statusMap[action], reviewedAt);
+
   if (updated.length) {
-    const project = db.projects[req.params.id];
-    // Per-test audit trail — log each individual decision so the activity
-    // feed shows exactly which tests were approved/rejected/restored and when.
+    const project = projectRepo.getById(req.params.id);
     for (const test of updated) {
       logActivity({
         type: `test.${action}`, projectId: req.params.id, projectName: project?.name || null,
@@ -494,13 +471,11 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
         detail: `Test ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "restored to draft"} (bulk) — "${test.name}"`,
       });
     }
-    // Also keep the batch-level summary for the timeline overview
     logActivity({
       type: `test.bulk_${action}`, projectId: req.params.id, projectName: project?.name || null,
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
   }
-  saveDb();
   res.json({ updated: updated.length, tests: updated });
 });
 
@@ -508,11 +483,10 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
 
 // GET /api/projects/:id/tests/export/zephyr — Zephyr Scale CSV for test management import
 router.get("/projects/:id/tests/export/zephyr", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  const tests = testRepo.getByProjectId(req.params.id);
   const status = req.query.status;
   const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
 
@@ -524,11 +498,10 @@ router.get("/projects/:id/tests/export/zephyr", (req, res) => {
 
 // GET /api/projects/:id/tests/export/testrail — TestRail CSV for bulk import
 router.get("/projects/:id/tests/export/testrail", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  const tests = testRepo.getByProjectId(req.params.id);
   const status = req.query.status;
   const filtered = status ? tests.filter(t => t.reviewStatus === status) : tests;
 
@@ -540,11 +513,10 @@ router.get("/projects/:id/tests/export/testrail", (req, res) => {
 
 // GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)
 router.get("/projects/:id/tests/traceability", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const tests = Object.values(db.tests).filter(t => t.projectId === req.params.id);
+  const tests = testRepo.getByProjectId(req.params.id);
 
   // Group tests by linked issue key
   const byIssue = {};

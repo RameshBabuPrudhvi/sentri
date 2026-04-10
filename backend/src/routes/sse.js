@@ -13,7 +13,8 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
+import * as runRepo from "../database/repositories/runRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
 
 const router = Router();
 
@@ -52,13 +53,12 @@ export function emitRunEvent(runId, type, payload = {}) {
 // accepts both Authorization header and ?token= query param. The query param
 // fallback exists because EventSource cannot send custom headers.
 router.get("/runs/:runId/events", (req, res) => {
-  const db = getDb();
   const { runId } = req.params;
-  const run = db.runs[runId];
+  const run = runRepo.getById(runId);
   if (!run) return res.status(404).json({ error: "not found" });
 
   // Verify the run's project exists (future: check user ownership here)
-  const project = db.projects[run.projectId];
+  const project = projectRepo.getById(run.projectId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   res.setHeader("Content-Type", "text/event-stream");

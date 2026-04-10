@@ -9,7 +9,10 @@ import authRouter, { requireAuth } from "../src/routes/auth.js";
 import dashboardRouter from "../src/routes/dashboard.js";
 import settingsRouter from "../src/routes/settings.js";
 import systemRouter from "../src/routes/system.js";
-import { getDb } from "../src/db.js";
+import { getDatabase } from "../src/database/sqlite.js";
+import * as projectRepo from "../src/database/repositories/projectRepo.js";
+import * as testRepo from "../src/database/repositories/testRepo.js";
+import * as runRepo from "../src/database/repositories/runRepo.js";
 
 let mounted = false;
 
@@ -23,15 +26,15 @@ function mountRoutesOnce() {
 }
 
 function resetDb() {
-  const db = getDb();
-  db.users = {};
-  db.oauthIds = {};
-  db.projects = {};
-  db.tests = {};
-  db.runs = {};
-  db.activities = {};
-  db.healingHistory = {};
-  return db;
+  const db = getDatabase();
+  db.exec("DELETE FROM healing_history");
+  db.exec("DELETE FROM activities");
+  db.exec("DELETE FROM runs");
+  db.exec("DELETE FROM tests");
+  db.exec("DELETE FROM oauth_ids");
+  db.exec("DELETE FROM projects");
+  db.exec("DELETE FROM users");
+  db.exec("UPDATE counters SET value = 0");
 }
 
 async function req(base, path, { method = "GET", token, body } = {}) {
@@ -50,14 +53,14 @@ async function req(base, path, { method = "GET", token, body } = {}) {
 
 async function main() {
   mountRoutesOnce();
-  const db = resetDb();
+  resetDb();
 
   const server = app.listen(0);
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    const email = `integration-${Date.now()}@example.com`;
+    const email = `integration-${Date.now()}@test.local`;
 
     let out = await req(base, "/api/auth/register", {
       method: "POST",
@@ -76,30 +79,25 @@ async function main() {
     out = await req(base, "/api/dashboard");
     assert.equal(out.res.status, 401);
 
-    db.projects["PRJ-100"] = {
+    projectRepo.create({
       id: "PRJ-100",
       name: "Coverage App",
       url: "https://example.com",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    db.tests["TC-100"] = {
+    });
+    testRepo.create({
       id: "TC-100",
       projectId: "PRJ-100",
       name: "Sample test",
-      status: "active",
+      type: "functional",
       reviewStatus: "approved",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      runCount: 1,
-      passCount: 1,
-      failCount: 0,
-      flaky: false,
       steps: ["Open home page"],
-    };
-    db.runs["RUN-100"] = {
+    });
+    runRepo.create({
       id: "RUN-100",
       projectId: "PRJ-100",
+      type: "test_run",
       status: "completed",
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
@@ -107,14 +105,15 @@ async function main() {
       passed: 1,
       failed: 0,
       logs: [],
-      tests: [
+      tests: ["TC-100"],
+      results: [
         {
           testId: "TC-100",
           status: "passed",
           durationMs: 200,
         },
       ],
-    };
+    });
 
     out = await req(base, "/api/dashboard", { token });
     assert.equal(out.res.status, 200);

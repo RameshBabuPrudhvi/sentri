@@ -11,7 +11,9 @@
  */
 
 import { Router } from "express";
-import { getDb, saveDb } from "../db.js";
+import * as testRepo from "../database/repositories/testRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
@@ -25,8 +27,8 @@ const router = Router();
  * Find the most recent run result for a specific test ID.
  * Returns the result object with runId, or null.
  */
-function findLatestTestResult(db, testId) {
-  const runs = Object.values(db.runs)
+function findLatestTestResult(testId) {
+  const runs = runRepo.getAll()
     .filter(r => r.results?.length)
     .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
 
@@ -134,8 +136,7 @@ function computeDiffSummary(before, after) {
 // ── POST /api/tests/:testId/fix — SSE stream of AI-generated fix ─────────────
 
 router.post("/tests/:testId/fix", async (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "Test not found" });
 
   if (!test.playwrightCode) {
@@ -148,8 +149,8 @@ router.post("/tests/:testId/fix", async (req, res) => {
     });
   }
 
-  const project = db.projects[test.projectId] || null;
-  const failureResult = findLatestTestResult(db, test.id);
+  const project = projectRepo.getById(test.projectId) || null;
+  const failureResult = findLatestTestResult(test.id);
 
   const userPrompt = buildUserPrompt(test, failureResult, project);
 
@@ -233,8 +234,7 @@ router.post("/tests/:testId/fix", async (req, res) => {
 // ── POST /api/tests/:testId/apply-fix — persist the AI-generated fix ─────────
 
 router.post("/tests/:testId/apply-fix", (req, res) => {
-  const db = getDb();
-  const test = db.tests[req.params.testId];
+  const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "Test not found" });
 
   const { code } = req.body;
@@ -242,28 +242,29 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
     return res.status(400).json({ error: "code is required" });
   }
 
-  // Store previous version for diff view
+  const updates = {};
   if (test.playwrightCode && test.playwrightCode !== code.trim()) {
-    test.playwrightCodePrev = test.playwrightCode;
+    updates.playwrightCodePrev = test.playwrightCode;
   }
 
-  test.playwrightCode = code.trim();
-  test.updatedAt = new Date().toISOString();
-  test.aiFixAppliedAt = new Date().toISOString();
-  test.codeVersion = (test.codeVersion || 0) + 1;
+  updates.playwrightCode = code.trim();
+  updates.updatedAt = new Date().toISOString();
+  updates.aiFixAppliedAt = new Date().toISOString();
+  updates.codeVersion = (test.codeVersion || 0) + 1;
 
-  const project = db.projects[test.projectId];
+  testRepo.update(test.id, updates);
+
+  const project = projectRepo.getById(test.projectId);
   logActivity({
     type: "test.ai_fix",
     projectId: test.projectId,
     projectName: project?.name || null,
     testId: test.id,
     testName: test.name,
-    detail: `AI fix applied — code version ${test.codeVersion}`,
+    detail: `AI fix applied — code version ${updates.codeVersion}`,
   });
 
-  saveDb();
-  res.json(test);
+  res.json(testRepo.getById(test.id));
 });
 
 export default router;

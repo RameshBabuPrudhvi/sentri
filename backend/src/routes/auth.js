@@ -29,7 +29,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { getDb, saveDb } from "../db.js";
+import * as userRepo from "../database/repositories/userRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -329,10 +329,8 @@ router.post("/register", async (req, res) => {
                                      return res.status(400).json({ error: "Password must be at least 8 characters." });
     if (password.length > 128)       return res.status(400).json({ error: "Password is too long." });
 
-    const db = getDb();
-    const existing = Object.values(db.users || {}).find(u => u.email === email);
+    const existing = userRepo.getByEmail(email);
     if (existing) {
-      // Generic message to avoid user-enumeration
       return res.status(409).json({ error: "An account with this email already exists." });
     }
 
@@ -341,9 +339,7 @@ router.post("/register", async (req, res) => {
     const now          = new Date().toISOString();
 
     const user = { id, name, email, passwordHash, role: "user", createdAt: now, updatedAt: now };
-    db.users = db.users || {};
-    db.users[id] = user;
-    saveDb();
+    userRepo.create(user);
 
     return res.status(201).json({ message: "Account created successfully." });
   } catch (err) {
@@ -381,8 +377,7 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Invalid email or password." });
     }
 
-    const db   = getDb();
-    const user = Object.values(db.users || {}).find(u => u.email === email);
+    const user = userRepo.getByEmail(email);
 
     // Always run verifyPassword (even on non-existent user) to prevent timing attacks
     const dummyHash = "00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
@@ -429,8 +424,7 @@ router.post("/logout", requireAuth, (req, res) => {
  * @returns {404} User not found in database.
  */
 router.get("/me", requireAuth, (req, res) => {
-  const db   = getDb();
-  const user = (db.users || {})[req.authUser.sub];
+  const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
   return res.json({ id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null, createdAt: user.createdAt });
 });
@@ -464,8 +458,7 @@ router.post("/forgot-password", async (req, res) => {
     return res.status(400).json({ error: "A valid email address is required." });
   }
 
-  const db   = getDb();
-  const user = Object.values(db.users || {}).find(u => u.email === email);
+  const user = userRepo.getByEmail(email);
 
   // Always return success to prevent user enumeration
   const genericMsg = "If an account with that email exists, a password reset link has been generated.";
@@ -540,17 +533,15 @@ router.post("/reset-password", async (req, res) => {
     return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
   }
 
-  const db   = getDb();
-  const user = (db.users || {})[entry.userId];
+  const user = userRepo.getById(entry.userId);
   if (!user) {
     resetTokens.delete(token);
     return res.status(400).json({ error: "Account not found." });
   }
 
   // Update password
-  user.passwordHash = await hashPassword(newPassword);
-  user.updatedAt = new Date().toISOString();
-  saveDb();
+  const newHash = await hashPassword(newPassword);
+  userRepo.update(user.id, { passwordHash: newHash, updatedAt: new Date().toISOString() });
 
   // Invalidate the used token (one-time use)
   resetTokens.delete(token);
@@ -723,17 +714,13 @@ router.get("/google/callback", async (req, res) => {
  * @private
  */
 async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar }) {
-  const db    = getDb();
-  db.users    = db.users || {};
-  db.oauthIds = db.oauthIds || {}; // { "github:12345" → userId }
-
   const key      = `${provider}:${providerId}`;
-  let userId     = db.oauthIds[key];
-  let user       = userId ? db.users[userId] : null;
+  let userId     = userRepo.getOAuthUserId(key);
+  let user       = userId ? userRepo.getById(userId) : null;
 
   if (!user) {
     // Check if an account with this email exists (link providers)
-    user = Object.values(db.users).find(u => u.email === email);
+    user = userRepo.getByEmail(email);
   }
 
   if (!user) {
@@ -741,14 +728,16 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
     const id  = crypto.randomUUID();
     const now = new Date().toISOString();
     user      = { id, name, email, passwordHash: null, role: "user", avatar, createdAt: now, updatedAt: now };
-    db.users[id] = user;
-    saveDb();
+    userRepo.create(user);
   }
 
   // Always keep OAuth provider link up to date
-  db.oauthIds[key] = user.id;
+  userRepo.setOAuthLink(key, user.id);
   // Update avatar if missing
-  if (!user.avatar && avatar) { user.avatar = avatar; user.updatedAt = new Date().toISOString(); }
+  if (!user.avatar && avatar) {
+    userRepo.update(user.id, { avatar, updatedAt: new Date().toISOString() });
+    user.avatar = avatar;
+  }
 
   return user;
 }
