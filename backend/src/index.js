@@ -19,7 +19,6 @@
  */
 
 import dotenv from "dotenv";
-import { getDb } from "./db.js";
 import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
@@ -73,9 +72,6 @@ const orphanCount = runRepo.markOrphansInterrupted();
 if (orphanCount > 0) {
   console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
 }
-// 4. Get a snapshot for the seed helper below
-const db = getDb();
-
 // Graceful shutdown — close SQLite connection
 process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
 process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });

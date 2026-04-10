@@ -13,7 +13,6 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
@@ -53,7 +52,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   };
   const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
 
-  const db = getDb();
+  const db = {}; // legacy token — passed through to selfHealing/feedbackLoop (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -111,7 +110,7 @@ router.post("/projects/:id/run", async (req, res) => {
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
-  const db = getDb();
+  const db = {}; // legacy token — passed through to selfHealing/feedbackLoop (unused)
   const runId = generateRunId();
   const run = {
     id: runId,

@@ -23,7 +23,6 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
@@ -283,7 +282,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     });
   }
 
-  const db = getDb();
+  const db = {}; // legacy token — passed through to pipeline (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -345,7 +344,7 @@ router.post("/tests/:testId/run", async (req, res) => {
   const project = projectRepo.getById(test.projectId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const db = getDb();
+  const db = {}; // legacy token — passed through to pipeline (unused)
   const runId = generateRunId();
   const run = {
     id: runId,

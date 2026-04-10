@@ -21,7 +21,9 @@
 
 import { Router } from "express";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
-import { getDb } from "../db.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 
@@ -50,16 +52,14 @@ IMPORTANT — Response format rules:
 - If the workspace context is empty or not relevant to the question, answer using your general QA expertise.`;
 
 /**
- * Build a compact workspace snapshot from the DB for the system prompt.
+ * Build a compact workspace snapshot for the system prompt.
  * Kept small to avoid wasting tokens — only includes actionable data.
  *
- * @param {Object} db - The database object (from getDb()).
+ * @param {Object} ctx - { projects, tests, runs, projectsById, testsById, runsById }
  * @returns {string} Workspace context block, or empty string if no data.
  */
-function buildWorkspaceContext(db) {
-  const projects = Object.values(db.projects);
-  const tests = Object.values(db.tests);
-  const runs = Object.values(db.runs);
+function buildWorkspaceContext(ctx) {
+  const { projects, tests, runs } = ctx;
 
   if (projects.length === 0) return "";
 
@@ -89,7 +89,7 @@ function buildWorkspaceContext(db) {
   if (recentRuns.length > 0) {
     lines.push(`\nRecent runs:`);
     for (const r of recentRuns) {
-      const proj = db.projects[r.projectId];
+      const proj = ctx.projectsById[r.projectId];
       const pName = proj?.name || r.projectId;
       const status = r.status || "unknown";
       const results = r.passed != null ? ` — ${r.passed} passed, ${r.failed || 0} failed` : "";
@@ -107,7 +107,7 @@ function buildWorkspaceContext(db) {
   for (const r of latestTestRuns) {
     for (const result of r.results) {
       if (result.status === "failed" && failingTests.length < 10) {
-        const test = db.tests[result.testId];
+        const test = ctx.testsById[result.testId];
         failingTests.push({
           name: test?.name || result.testId,
           error: (result.error || "").slice(0, 200),
@@ -146,14 +146,14 @@ function buildWorkspaceContext(db) {
  * Scan the user's message for entity references (TC-*, RUN-*, PRJ-*) and
  * fetch detailed context for each.
  *
- * @param {Object}  db - The database object (from getDb()).
+ * @param {Object}  ctx - { projects, tests, runs, projectsById, testsById, runsById }
  * @param {string}  userMessage - The latest user message text.
  * @param {Object}  [opts]
  * @param {boolean} [opts.compact=false] - When true, trim heavy fields (code,
  *   errors) to fit local models with small context windows.
  * @returns {string} Detailed entity context block, or empty string.
  */
-function buildEntityContext(db, userMessage, { compact = false } = {}) {
+function buildEntityContext(ctx, userMessage, { compact = false } = {}) {
   const lines = [];
 
   // Limits — compact mode keeps context small for Ollama 7B (~4K window)
@@ -172,9 +172,9 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
 
   // Fetch test details
   for (const id of testIds.slice(0, maxTests)) {
-    const test = db.tests[id];
+    const test = ctx.testsById[id];
     if (!test) continue;
-    const project = db.projects[test.projectId];
+    const project = ctx.projectsById[test.projectId];
     lines.push(`--- Test Detail: ${id} ---`);
     lines.push(`Name: ${test.name}`);
     lines.push(`Project: ${project?.name || test.projectId} (${project?.url || ""})`);
@@ -187,7 +187,7 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
     if (test.priority) lines.push(`Priority: ${test.priority}`);
 
     // Find latest run result for this test
-    const latestResult = findLatestTestResult(db, id);
+    const latestResult = findLatestTestResult(ctx, id);
     if (latestResult) {
       lines.push(`Last run result (${latestResult.runId}):`);
       lines.push(`  Status: ${latestResult.status}`);
@@ -199,9 +199,9 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
 
   // Fetch run details
   for (const id of runIds.slice(0, maxRuns)) {
-    const run = db.runs[id];
+    const run = ctx.runsById[id];
     if (!run) continue;
-    const project = db.projects[run.projectId];
+    const project = ctx.projectsById[run.projectId];
     lines.push(`--- Run Detail: ${id} ---`);
     lines.push(`Type: ${run.type} | Status: ${run.status}`);
     lines.push(`Project: ${project?.name || run.projectId}`);
@@ -215,7 +215,7 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
       if (failures.length > 0) {
         lines.push(`Failed tests:`);
         for (const f of failures) {
-          const test = db.tests[f.testId];
+          const test = ctx.testsById[f.testId];
           lines.push(`  - ${test?.name || f.testId}: ${(f.error || "").slice(0, failCap)}`);
         }
       }
@@ -225,10 +225,10 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
 
   // Fetch project details
   for (const id of projectIds.slice(0, maxProjects)) {
-    const project = db.projects[id];
+    const project = ctx.projectsById[id];
     if (!project) continue;
-    const pTests = Object.values(db.tests).filter(t => t.projectId === id);
-    const pRuns = Object.values(db.runs).filter(r => r.projectId === id);
+    const pTests = ctx.tests.filter(t => t.projectId === id);
+    const pRuns = ctx.runs.filter(r => r.projectId === id);
     lines.push(`--- Project Detail: ${id} ---`);
     lines.push(`Name: ${project.name}`);
     lines.push(`URL: ${project.url}`);
@@ -247,12 +247,12 @@ function buildEntityContext(db, userMessage, { compact = false } = {}) {
 /**
  * Find the most recent run result for a specific test ID.
  *
- * @param {Object} db - The database object.
+ * @param {Object} ctx - { runs }
  * @param {string} testId - The test ID to search for.
  * @returns {Object|null} { runId, status, error, duration } or null.
  */
-function findLatestTestResult(db, testId) {
-  const runs = Object.values(db.runs)
+function findLatestTestResult(ctx, testId) {
+  const runs = ctx.runs
     .filter(r => r.results?.length)
     .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
 
@@ -313,17 +313,25 @@ router.post("/chat", async (req, res) => {
     : lastMessage.content;
 
   // Build system prompt with live workspace context + deep entity details.
-  // Single getDb() call shared by both builders to avoid redundant Object.values().
-  const db = getDb();
   const isLocal = isLocalProvider();
+  const projects = projectRepo.getAll();
+  const tests = testRepo.getAll();
+  const runs = runRepo.getAll();
+  const projectsById = {};
+  for (const p of projects) projectsById[p.id] = p;
+  const testsById = {};
+  for (const t of tests) testsById[t.id] = t;
+  const runsById = {};
+  for (const r of runs) runsById[r.id] = r;
+  const ctx = { projects, tests, runs, projectsById, testsById, runsById };
 
   // For local models (Ollama 7B) the combined system+user prompt must fit
   // within a small context window (~4K tokens). Entity context (TC-*, RUN-*)
   // is always included so users can ask about specific tests, but:
   //   - The heavy workspace summary (all projects, runs, pass rate) is skipped
   //   - Entity details use compact mode (shorter code/error caps)
-  const workspaceContext = isLocal ? "" : buildWorkspaceContext(db);
-  const entityContext = buildEntityContext(db, lastMessage.content, { compact: isLocal });
+  const workspaceContext = isLocal ? "" : buildWorkspaceContext(ctx);
+  const entityContext = buildEntityContext(ctx, lastMessage.content, { compact: isLocal });
   const contextParts = [workspaceContext, entityContext].filter(Boolean).join("\n\n");
   const systemPrompt = contextParts
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
