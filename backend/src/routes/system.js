@@ -14,7 +14,8 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
@@ -104,7 +105,6 @@ router.post("/test-connection", async (req, res) => {
 // ─── System Info ──────────────────────────────────────────────────────────────
 
 router.get("/system", async (req, res) => {
-  const db = getDb();
   let playwrightVersion = null;
   try {
     const pwPkg = await import("playwright/package.json", { with: { type: "json" } }).catch(() => null);
@@ -120,11 +120,11 @@ router.get("/system", async (req, res) => {
     } catch { /* ignore */ }
   }
 
-  const projects = Object.values(db.projects);
-  const tests    = Object.values(db.tests);
-  const runs     = Object.values(db.runs);
-  const activities = Object.values(db.activities);
-  const healingEntries = Object.keys(db.healingHistory || {}).length;
+  const projects   = projectRepo.getAll();
+  const tests      = testRepo.getAll();
+  const runs       = runRepo.getAll();
+  const activities = activityRepo.getAll();
+  const healingEntries = healingRepo.count();
 
   res.json({
     projects:     projects.length,

@@ -9,17 +9,22 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
+import * as activityRepo from "../database/repositories/activityRepo.js";
+import * as healingRepo from "../database/repositories/healingRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
 
 const router = Router();
 
 router.get("/dashboard", (req, res) => {
-  const db = getDb();
-  const projects = Object.values(db.projects);
-  const runs = Object.values(db.runs);
-  const tests = Object.values(db.tests);
-  const activities = Object.values(db.activities);
+  const projects = projectRepo.getAll();
+  const runs = runRepo.getAll();
+  const tests = testRepo.getAll();
+  const activities = activityRepo.getAll();
+  const projectsById = {};
+  for (const p of projects) projectsById[p.id] = p;
 
   // ── Pass rate (last 10 completed test runs) ─────────────────────────────
   const completedTestRuns = runs
@@ -48,7 +53,7 @@ router.get("/dashboard", (req, res) => {
     .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
     .slice(0, 8)
     .map((r) => {
-      const p = db.projects[r.projectId];
+      const p = projectsById[r.projectId];
       return { id: r.id, projectId: r.projectId, projectName: p?.name || null, type: r.type, status: r.status, startedAt: r.startedAt, passed: r.passed, failed: r.failed, total: r.total };
     });
 
@@ -80,8 +85,8 @@ router.get("/dashboard", (req, res) => {
   // ── Tests auto-fixed (feedback loop + self-healing) ─────────────────────
   let testsAutoFixed = 0;
   for (const r of runs) { if (r.feedbackLoop?.improved) testsAutoFixed += r.feedbackLoop.improved; }
-  const healingEntries = Object.keys(db.healingHistory || {}).length;
-  const healingSuccesses = Object.values(db.healingHistory || {}).filter((h) => h.strategyIndex >= 0 && h.succeededAt).length;
+  const healingEntries = healingRepo.count();
+  const healingSuccesses = healingRepo.countSuccesses();
 
   // ── Average run duration (completed test runs) ──────────────────────────
   const durations = completedTestRuns.filter((r) => r.duration > 0).map((r) => r.duration);

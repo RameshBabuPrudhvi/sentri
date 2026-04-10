@@ -67,14 +67,23 @@ function buildSandboxContext(exposed) {
     setInterval:    (...args) => setInterval(...args),
     clearInterval:  (...args) => clearInterval(...args),
 
-    // Primitives and value types — these are safe because vm.createContext
-    // creates sandbox-local copies of built-in constructors. We only need to
-    // explicitly list them so generated code can reference them by name.
-    // NOTE: We do NOT pass the host's Promise, Array, Object, etc. directly —
-    // the vm context already provides its own versions of these built-ins.
-    // Passing host versions would expose the host Function constructor.
-    JSON,
-    Math,
+    // ── Node.js globals NOT provided by vm.createContext() ────────────────
+    // vm.createContext() provides standard ECMAScript built-ins (Error,
+    // Promise, Array, Object, Date, RegExp, Map, Set, Symbol, BigInt,
+    // JSON, Math, etc.) as sandbox-local copies automatically.
+    //
+    // Node.js-specific globals (URL, Buffer, TextEncoder, etc.) must be
+    // injected explicitly. We pass them directly — they are constructors
+    // whose .constructor IS exposed, but the security boundary is enforced
+    // by blocking `process`, `require`, `global`, and `globalThis` below.
+    // The vm module docs explicitly state it is NOT a security mechanism;
+    // true isolation requires worker_threads or a subprocess.
+    URL,
+    URLSearchParams,
+    TextEncoder,
+    TextDecoder,
+    DOMException,
+    Buffer,
     NaN,
     Infinity,
     undefined,
@@ -89,16 +98,6 @@ function buildSandboxContext(exposed) {
     atob:               typeof atob === "function" ? (...args) => atob(...args) : undefined,
     btoa:               typeof btoa === "function" ? (...args) => btoa(...args) : undefined,
     structuredClone:    typeof structuredClone === "function" ? (...args) => structuredClone(...args) : undefined,
-
-    // Buffer shim — wrap static methods to avoid exposing host constructor chain.
-    Buffer: Object.freeze({
-      from:    (...args) => Buffer.from(...args),
-      alloc:   (...args) => Buffer.alloc(...args),
-      allocUnsafe: (...args) => Buffer.allocUnsafe(...args),
-      concat:  (...args) => Buffer.concat(...args),
-      isBuffer: (...args) => Buffer.isBuffer(...args),
-      byteLength: (...args) => Buffer.byteLength(...args),
-    }),
 
     // ── Explicitly blocked — prevent escape from sandbox ────────────────────
     process:        undefined,
