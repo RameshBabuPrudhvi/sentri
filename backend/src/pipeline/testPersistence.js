@@ -5,7 +5,7 @@
  * generateSingleTest and crawlAndGenerateTests.
  *
  * Exports:
- *   persistGeneratedTests(validatedTests, project, db, run, defaults) → testIds[]
+ *   persistGeneratedTests(validatedTests, project, run, defaults) → testIds[]
  *   buildPipelineStats({ pagesFound, rawTests, removed, enhancedCount, rejected, journeys, dedupStats }) → object
  */
 
@@ -19,12 +19,11 @@ import * as testRepo from "../database/repositories/testRepo.js";
  *
  * @param {object[]} validatedTests — tests that passed validation
  * @param {object}   project        — project record (id, name, url)
- * @param {object}   db             — legacy database object (unused — kept for backward compat)
  * @param {object}   run            — mutable run record
  * @param {object}   [defaults]     — fallback values for name/description/sourceUrl/pageTitle
  * @returns {string[]} array of created test IDs
  */
-export function persistGeneratedTests(validatedTests, project, db, run, defaults = {}) {
+export function persistGeneratedTests(validatedTests, project, run, defaults = {}) {
   const createdTestIds = [];
   for (const t of validatedTests) {
     const testId = generateTestId();

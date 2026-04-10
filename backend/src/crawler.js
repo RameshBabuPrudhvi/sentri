@@ -181,7 +181,6 @@ export async function generateFromUserDescription(project, run, { name, descript
  *
  * @param {Object} project                - The project `{ id, name, url, credentials? }`.
  * @param {Object} run                    - The run record (mutated in place with results).
- * @param {Object} db                     - The database object from {@link module:db.getDb}.
  * @param {Object} [options]
  * @param {string} [options.dialsPrompt]   - Pre-built prompt fragment from Test Dials config.
  * @param {string} [options.testCount]     - Test count hint (`"one"` | `"small"` | `"medium"` | `"large"` | `"ai_decides"`).
@@ -190,7 +189,7 @@ export async function generateFromUserDescription(project, run, { name, descript
  * @param {AbortSignal} [options.signal]   - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = "", testCount = "ai_decides", explorerMode, explorerTuning, signal } = {}) {
+export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", testCount = "ai_decides", explorerMode, explorerTuning, signal } = {}) {
   const runStart = Date.now();
   const mode = (explorerMode || "crawl").toLowerCase();
 
@@ -326,10 +325,10 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
   const { validatedTests, enhancedTests, rejected, removed, enhancedCount, dedupStats } =
-    await runPostGenerationPipeline(rawTests, project, db, run, { snapshotsByUrl, classifiedPagesByUrl, signal });
+    await runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl, classifiedPagesByUrl, signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  persistGeneratedTests(validatedTests, project, db, run);
+  persistGeneratedTests(validatedTests, project, run);
 
   run.snapshots = filteredSnapshots;
   run.pages = filteredSnapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));

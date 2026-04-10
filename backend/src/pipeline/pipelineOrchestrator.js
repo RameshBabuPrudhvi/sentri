@@ -6,7 +6,7 @@
  * that shared logic so both callers stay thin.
  *
  * Exports:
- *   runPostGenerationPipeline(rawTests, project, db, run, opts) → result
+ *   runPostGenerationPipeline(rawTests, project, run, opts) → result
  */
 
 import { throwIfAborted } from "../utils/abortHelper.js";
@@ -17,6 +17,7 @@ import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 
 /**
  * setStep — update the run's currentStep and broadcast a snapshot to SSE.
@@ -35,7 +36,6 @@ function setStep(run, step) {
  *
  * @param {object[]} rawTests              — AI-generated test objects
  * @param {object}   project               — project record
- * @param {object}   db                    — database snapshot (from getDb shim)
  * @param {object}   run                   — mutable run record
  * @param {object}   opts
  * @param {Record<string,object>} [opts.snapshotsByUrl]        — page snapshots by URL
@@ -43,12 +43,12 @@ function setStep(run, step) {
  * @param {AbortSignal}           [opts.signal]
  * @returns {{ validatedTests: object[], enhancedTests: object[], rejected: number, removed: number, enhancedCount: number, dedupStats: object }}
  */
-export async function runPostGenerationPipeline(rawTests, project, db, run, { snapshotsByUrl = {}, classifiedPagesByUrl = {}, signal } = {}) {
+export async function runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl = {}, classifiedPagesByUrl = {}, signal } = {}) {
   // ── Step 5: Deduplicate ─────────────────────────────────────────────────
   throwIfAborted(signal);
   setStep(run, 5);
   log(run, `🚫 Deduplicating...`);
-  const existingTests = Object.values(db.tests).filter(t => t.projectId === project.id);
+  const existingTests = testRepo.getByProjectId(project.id);
   const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
