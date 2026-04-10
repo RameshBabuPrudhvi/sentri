@@ -244,10 +244,12 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
     .replace(/\n?\s*```\s*$/i, "")
     .trim();
 
-  // Basic structural validation — must look like a Playwright test function
-  if (!sanitizedCode.includes("test(") || !sanitizedCode.includes("async")) {
+  // Basic structural validation — must look like a Playwright test function.
+  // Accept test(), test.only(), test.skip(), test.fixme(), test.describe(), etc.
+  const looksLikeTest = /\btest\s*(\.\s*\w+\s*)?\(/.test(sanitizedCode);
+  if (!looksLikeTest || !sanitizedCode.includes("async")) {
     return res.status(400).json({
-      error: "Code does not appear to be a valid Playwright test. Must contain test() and async.",
+      error: "Code does not appear to be a valid Playwright test. Must contain a test() call and async.",
     });
   }
 
