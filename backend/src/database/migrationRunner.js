@@ -20,6 +20,7 @@
  * - {@link runMigrations} — Apply all pending migrations.
  */
 
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -36,25 +37,42 @@ function ensureMigrationsTable(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version     TEXT PRIMARY KEY,      -- e.g. "001_initial_schema"
-      appliedAt   TEXT NOT NULL,         -- ISO 8601 timestamp
-      durationMs  INTEGER NOT NULL       -- execution time in ms
+      checksum    TEXT NOT NULL,          -- SHA-256 of the migration SQL
+      appliedAt   TEXT NOT NULL,          -- ISO 8601 timestamp
+      durationMs  INTEGER NOT NULL        -- execution time in ms
     )
   `);
+  // Add checksum column if upgrading from an older schema_migrations table
+  const cols = db.prepare("PRAGMA table_info(schema_migrations)").all().map(c => c.name);
+  if (!cols.includes("checksum")) {
+    db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 /**
- * Get the set of already-applied migration versions.
+ * Compute SHA-256 checksum of a migration file's contents.
+ * @param {string} sql
+ * @returns {string}
+ */
+function checksum(sql) {
+  return crypto.createHash("sha256").update(sql).digest("hex").slice(0, 16);
+}
+
+/**
+ * Get already-applied migrations as a Map of version → checksum.
  * @param {Object} db — better-sqlite3 Database instance.
- * @returns {Set<string>}
+ * @returns {Map<string, string>}
  */
 function getAppliedMigrations(db) {
-  const rows = db.prepare("SELECT version FROM schema_migrations").all();
-  return new Set(rows.map(r => r.version));
+  const rows = db.prepare("SELECT version, checksum FROM schema_migrations").all();
+  const map = new Map();
+  for (const r of rows) map.set(r.version, r.checksum || "");
+  return map;
 }
 
 /**
  * Discover all migration files sorted by filename.
- * @returns {{ version: string, filePath: string }[]}
+ * @returns {Array<{version: string, filePath: string}>}
  */
 function discoverMigrations() {
   if (!fs.existsSync(MIGRATIONS_DIR)) return [];
@@ -82,6 +100,26 @@ export function runMigrations(db) {
 
   const applied = getAppliedMigrations(db);
   const all = discoverMigrations();
+
+  // Validate checksums of already-applied migrations — detect tampered files.
+  // A changed migration file means the DB schema may be inconsistent with
+  // what the code expects. Warn loudly but don't crash (the change may be
+  // intentional, e.g. a comment fix).
+  for (const migration of all) {
+    const existingChecksum = applied.get(migration.version);
+    if (existingChecksum && existingChecksum !== "") {
+      const sql = fs.readFileSync(migration.filePath, "utf-8");
+      const currentChecksum = checksum(sql);
+      if (existingChecksum !== currentChecksum) {
+        console.warn(formatLogLine("warn", null,
+          `[migrations] ⚠️  ${migration.version} file changed after it was applied ` +
+          `(expected checksum ${existingChecksum}, got ${currentChecksum}). ` +
+          `This may indicate an inconsistent schema.`
+        ));
+      }
+    }
+  }
+
   const pending = all.filter(m => !applied.has(m.version));
 
   if (pending.length === 0) {
@@ -92,20 +130,21 @@ export function runMigrations(db) {
 
   for (const migration of pending) {
     const sql = fs.readFileSync(migration.filePath, "utf-8");
+    const hash = checksum(sql);
     const start = Date.now();
 
     const applyMigration = db.transaction(() => {
       db.exec(sql);
       db.prepare(
-        "INSERT INTO schema_migrations (version, appliedAt, durationMs) VALUES (?, ?, ?)"
-      ).run(migration.version, new Date().toISOString(), Date.now() - start);
+        "INSERT INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
+      ).run(migration.version, hash, new Date().toISOString(), Date.now() - start);
     });
 
     try {
       applyMigration();
       const ms = Date.now() - start;
       results.push(migration.version);
-      console.log(formatLogLine("info", null, `[migrations] ✅ ${migration.version} (${ms}ms)`));
+      console.log(formatLogLine("info", null, `[migrations] ✅ ${migration.version} (${ms}ms) [${hash}]`));
     } catch (err) {
       console.error(formatLogLine("error", null, `[migrations] ❌ ${migration.version} failed: ${err.message}`));
       throw err;

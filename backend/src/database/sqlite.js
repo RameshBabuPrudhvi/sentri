@@ -69,13 +69,18 @@ export function getDatabase() {
 
 /**
  * Gracefully close the database connection.
+ * Checkpoints the WAL file before closing to ensure clean state
+ * (prevents WAL file growth across restarts).
  * Called from shutdown hooks in index.js.
  */
 export function closeDatabase() {
   if (_db) {
     try {
+      // Checkpoint WAL to main DB file — prevents unbounded WAL growth.
+      // TRUNCATE mode resets the WAL file to zero bytes after checkpoint.
+      _db.pragma("wal_checkpoint(TRUNCATE)");
       _db.close();
-      console.log(formatLogLine("info", null, "[sqlite] Database connection closed"));
+      console.log(formatLogLine("info", null, "[sqlite] Database connection closed (WAL checkpointed)"));
     } catch (err) {
       console.warn(formatLogLine("warn", null, `[sqlite] Close failed: ${err.message}`));
     }
