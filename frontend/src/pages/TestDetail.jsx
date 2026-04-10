@@ -93,8 +93,9 @@ export default function TestDetail() {
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
-  const [showDiff,  setShowDiff]  = useState(false);   // show code diff when playwrightCodePrev exists
+  const [showDiff,  setShowDiff]  = useState(false);   // show diff when previous version exists
   const [curlCopied, setCurlCopied] = useState(null);  // index of step whose cURL was just copied
+  const [prevSteps, setPrevSteps] = useState(null);     // previous steps for diff (captured before save)
 
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
@@ -140,6 +141,8 @@ export default function TestDetail() {
     setEditError(null);
     setEditing(true);
     setStepsView("steps");
+    setPrevSteps(null);
+    setShowDiff(false);
   }
 
   async function handleSaveEdit() {
@@ -148,6 +151,12 @@ export default function TestDetail() {
     setEditError(null);
     try {
       const cleanSteps = editSteps.filter(s => s.trim());
+
+      // Capture previous steps before saving so we can show a diff
+      const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
+      if (stepsChanged && test.steps && test.steps.length > 0) {
+        setPrevSteps(test.steps);
+      }
 
       const payload = {
         name: editName.trim(),
@@ -553,8 +562,8 @@ export default function TestDetail() {
                 </button>
               )}
 
-              {/* Show changes — only when a regenerated previous version exists */}
-              {test.playwrightCodePrev && !editing && (
+              {/* Show changes — when a previous version exists (code or steps) */}
+              {(test.playwrightCodePrev || prevSteps) && !editing && (
                 <button
                   onClick={() => setShowDiff(v => !v)}
                   style={{
@@ -783,6 +792,18 @@ export default function TestDetail() {
                 </div>
               ) : (
                 (() => {
+                  // Steps diff — shown above step list when "Show changes" is active
+                  const stepsDiffPanel = showDiff && prevSteps ? (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Steps changes
+                      </div>
+                      <DiffView
+                        before={prevSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                        after={(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                      />
+                    </div>
+                  ) : null;
                   const bdd = isBddTest(test.steps);
                   const gherkinKw = /^(Given|When|Then|And|But)\b/i;
 
@@ -802,6 +823,7 @@ export default function TestDetail() {
 
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {stepsDiffPanel}
                       {test.steps.map((step, idx) => {
                         const trimmed = (step || "").trim();
                         const kwMatch = bdd ? trimmed.match(gherkinKw) : null;
