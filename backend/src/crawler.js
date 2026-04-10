@@ -39,6 +39,7 @@ import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
+import { structuredLog } from "./utils/logFormatter.js";
 
 function setStep(run, step) {
   run.currentStep = step;
@@ -110,6 +111,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
  */
 export async function generateFromUserDescription(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
+  structuredLog("generate.start", { runId: run.id, projectId: project.id, mode: "description", name });
   log(run, `✦ Starting test generation from description for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️ Run config:`);
@@ -162,6 +164,7 @@ export async function generateFromUserDescription(project, run, db, { name, desc
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
     logSuccess(run, `Done! ${run.tests.length} test(s) generated from description for "${name}".`);
+    structuredLog("generate.complete", { runId: run.id, projectId: project.id, tests: run.tests.length, durationMs: run.duration });
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 
@@ -188,6 +191,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
   const mode = (explorerMode || "crawl").toLowerCase();
 
   // ── Step 1: Smart crawl or state exploration ─────────────────────────────
+  structuredLog("crawl.start", { runId: run.id, projectId: project.id, mode, url: project.url });
   log(run, `🕷️  Starting ${mode === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️ Run config:`);

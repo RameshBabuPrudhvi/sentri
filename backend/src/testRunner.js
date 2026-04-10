@@ -118,6 +118,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
       logError(run, classified.message);
+      structuredLog("browser.launch_failed", { runId, error: classified.message });
       throw launchErr;
     }
 
@@ -203,11 +204,13 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
 
       try {
         const result = await executeTest(test, browser, runId, i, runStart, db);
+        structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
         processResult(test, result);
       } catch (err) {
         // Build a synthetic result and route through processResult so SSE
         // `result` and `snapshot` events are emitted — otherwise the
         // frontend progress bar stalls during parallel execution.
+        structuredLog("test.crash", { runId, testId: test.id, error: err.message?.slice(0, 200) });
         const errorResult = {
           testId: test.id, testName: test.name,
           status: "failed", error: err.message,
