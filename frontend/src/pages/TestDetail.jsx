@@ -573,33 +573,6 @@ export default function TestDetail() {
               )}
             </div>
 
-            {/* ── Failure banner — shown above steps when test has failed ── */}
-            {(() => {
-              if (editing) return null;
-              const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
-              const failError = (test.lastResult === "failed" || latestRunResult?.status === "failed")
-                ? (latestRunResult?.error || null)
-                : null;
-              if (!failError) return null;
-              return (
-                <div style={{
-                  display: "flex", alignItems: "flex-start", gap: 8,
-                  padding: "10px 12px", marginBottom: 14,
-                  background: "var(--red-bg)", borderRadius: 8,
-                  border: "1px solid rgba(239,68,68,0.2)",
-                  fontSize: "0.78rem", color: "var(--red)", lineHeight: 1.5,
-                }}>
-                  <span style={{ flexShrink: 0, marginTop: 1 }}>✗</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 2 }}>Last run failed</div>
-                    <div style={{ color: "var(--red)", opacity: 0.85, wordBreak: "break-word" }}>
-                      {failError.length > 200 ? failError.slice(0, 200) + "…" : failError}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
             {/* ── Edit mode ── */}
             {editing && stepsView === "source" && test.playwrightCode ? (
               /* ── Inline code editor (edit mode + Source tab) ── */
@@ -879,17 +852,7 @@ export default function TestDetail() {
                                   </>
                                 ) : step}
                               </span>
-                              {isFailedStep && failError && (
-                                <div style={{
-                                  marginTop: 6, padding: "6px 8px",
-                                  background: "rgba(239,68,68,0.08)", borderRadius: 4,
-                                  fontSize: "0.72rem", color: "var(--red)", opacity: 0.85,
-                                  fontFamily: "var(--font-mono)", lineHeight: 1.5,
-                                  wordBreak: "break-word",
-                                }}>
-                                  {failError.length > 300 ? failError.slice(0, 300) + "…" : failError}
-                                </div>
-                              )}
+
                             </div>
                           </div>
                         );
