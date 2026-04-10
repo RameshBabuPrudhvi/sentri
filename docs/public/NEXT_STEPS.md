@@ -352,27 +352,14 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-06 — Screenshot only after visual actions — skip non-visual steps 🔵 Medium
+### S3-06 — Screenshot only after visual actions — skip non-visual steps ✅ Done
 
-**Problem:** `backend/src/runner/executeTest.js` captures and emits screenshots after every step. Non-visual steps (snapshot, wait, assert, evaluate) send redundant images to the AI on subsequent turns, wasting context window tokens and slowing execution per run.
+**Problem:** `backend/src/runner/executeTest.js` captures screenshots, DOM snapshots, and bounding boxes on every successful test completion. When a test ends with a non-visual action (assertion, wait, evaluate), these artifacts are redundant — the page hasn't visually changed since the last interaction. Each capture adds ~50-200ms of overhead per test.
 
-**Fix:** Add a `NON_VISUAL_ACTIONS` set. Only capture screenshots after actions that actually change the page visually (navigate, click, fill, select, scroll, press_key).
+**Status:** Implemented in `backend/src/runner/executeTest.js`. Added `endsWithNonVisualAction(playwrightCode)` which walks backwards through the test body to find the last meaningful line and checks it against `NON_VISUAL_PATTERNS` (assertions, waits, console logging). When the test ends non-visually, the success-path artifact capture (screenshot, DOM snapshot, bounding boxes) is skipped entirely. Failure screenshots are always captured regardless of the last action type.
 
-**Pattern from Assrt (`agent.ts`):**
-```javascript
-const NON_VISUAL_ACTIONS = new Set([
-  "snapshot", "wait", "wait_for_stable", "assert",
-  "complete_scenario", "evaluate", "http_request",
-]);
-
-if (!NON_VISUAL_ACTIONS.has(stepAction)) {
-  screenshotData = await captureScreenshot(page).catch(() => null);
-  if (screenshotData) emitRunEvent(run.id, "frame", { base64: screenshotData });
-}
-```
-
-**Files to change:**
-- `backend/src/runner/executeTest.js` — add exclusion set, gate screenshot capture
+**Files changed:**
+- `backend/src/runner/executeTest.js` — added `NON_VISUAL_PATTERNS`, `endsWithNonVisualAction()`, conditional artifact capture gate
 
 **Effort:** XS | **Source:** Assrt
 
@@ -645,11 +632,11 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28 (9 completed)  
-**Completed:** S1-01 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅  
+**Total items:** 28 (10 completed)  
+**Completed:** S1-01 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅  
 **Critical blockers (must ship before team use):** S1-02  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
-**Lowest effort / highest value (remaining quick wins):** S3-06, S3-07
+**Lowest effort / highest value (remaining quick wins):** S3-07
 
 ---
 
