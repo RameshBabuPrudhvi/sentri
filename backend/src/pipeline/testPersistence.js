@@ -1,5 +1,5 @@
 /**
- * testPersistence.js — Persist validated tests to the in-memory DB
+ * testPersistence.js — Persist validated tests to SQLite
  *
  * Extracts the duplicated "Store in db" block that appeared in both
  * generateSingleTest and crawlAndGenerateTests.
@@ -19,7 +19,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
  *
  * @param {object[]} validatedTests — tests that passed validation
  * @param {object}   project        — project record (id, name, url)
- * @param {object}   db             — database object (unused — kept for backward compat)
+ * @param {object}   db             — legacy database object (unused — kept for backward compat)
  * @param {object}   run            — mutable run record
  * @param {object}   [defaults]     — fallback values for name/description/sourceUrl/pageTitle
  * @returns {string[]} array of created test IDs

@@ -21,7 +21,7 @@ import { recordHealing, recordHealingFailure } from "../selfHealing.js";
  * Writes healing events to the DB so future runs benefit from what we
  * learned.  Safe to call with an empty or undefined events array.
  *
- * @param {object}   db      — the in-memory database
+ * @param {object}   db      — legacy database object (unused — kept for backward compat)
  * @param {string}   testId  — the test these events belong to
  * @param {Array}    events  — healing events from runGeneratedCode
  */

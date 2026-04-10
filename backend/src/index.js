@@ -49,7 +49,7 @@ export { runAbortControllers } from "./utils/runWithAbort.js";
 dotenv.config();
 
 // ─── Process-level crash guards ───────────────────────────────────────────────
-// Prevent the server from dying on unhandled errors (which wipes the in-memory DB).
+// Prevent the server from dying on unhandled errors.
 // Playwright can throw unhandled rejections from browser internals, page event
 // handlers, or video flush operations — especially when assertions fail mid-test.
 process.on("uncaughtException", (err) => {

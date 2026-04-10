@@ -33,7 +33,7 @@ function setStep(run, step) {
  *
  * @param {object[]} rawTests              — AI-generated test objects
  * @param {object}   project               — project record
- * @param {object}   db                    — in-memory database
+ * @param {object}   db                    — database snapshot (from getDb shim)
  * @param {object}   run                   — mutable run record
  * @param {object}   opts
  * @param {Record<string,object>} [opts.snapshotsByUrl]        — page snapshots by URL

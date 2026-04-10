@@ -27,7 +27,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
  *
  * @param {object}       run    — mutable run record
  * @param {Array}        tests  — the test objects that were executed
- * @param {object}       db     — in-memory database
+ * @param {object}       db     — database snapshot (from getDb shim)
  * @param {AbortSignal}  [signal]
  */
 export async function runFeedbackLoop(run, tests, db, signal) {
