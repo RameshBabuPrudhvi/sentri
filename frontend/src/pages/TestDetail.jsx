@@ -202,9 +202,16 @@ export default function TestDetail() {
   }
 
   function handleEditPreview() {
-    // Open the code editor pre-filled with the generated code
-    setCodeEditorInitial(codePreview.generatedCode);
-    setCodeEditorOpen(true);
+    // Enter edit mode with the generated code pre-filled in the inline editor
+    setEditName(test.name || "");
+    setEditDesc(test.description || "");
+    setEditSteps([...(test.steps || [])]);
+    setEditPriority(test.priority || "medium");
+    setEditCode(codePreview.generatedCode);
+    setCodeEdited(true);
+    setEditError(null);
+    setEditing(true);
+    setStepsView("source");
     setCodePreview(null);
   }
 
