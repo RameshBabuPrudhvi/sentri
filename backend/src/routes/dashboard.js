@@ -20,9 +20,13 @@ const router = Router();
 
 router.get("/dashboard", (req, res) => {
   const projects = projectRepo.getAll();
-  const runs = runRepo.getAll();
+  // Use lean queries — dashboard only needs scalar fields + results for failure analysis.
+  // Skipping logs, testQueue, generateInput, promptAudit, videoSegments saves ~10-50×
+  // in JSON parse time compared to runRepo.getAll().
+  const runs = runRepo.getAllWithResults();
   const tests = testRepo.getAll();
-  const activities = activityRepo.getAll();
+  // Only fetch activity types needed for dashboard counters (not all activities)
+  const generationActivities = activityRepo.getByTypes(["test.create", "test.generate"]);
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
 
@@ -73,8 +77,7 @@ router.get("/dashboard", (req, res) => {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()).toISOString();
   let testsCreatedToday = 0, testsCreatedThisWeek = 0, testsGeneratedTotal = 0;
-  for (const a of activities) {
-    if (a.type !== "test.create" && a.type !== "test.generate") continue;
+  for (const a of generationActivities) {
     // Skip "running" status entries to avoid double-counting start + completion
     if (a.status === "running") continue;
     testsGeneratedTotal++;
@@ -124,8 +127,7 @@ router.get("/dashboard", (req, res) => {
     const key = d.toISOString().slice(0, 10);
     weekBuckets[key] = 0;
   }
-  for (const a of activities) {
-    if (a.type !== "test.create" && a.type !== "test.generate") continue;
+  for (const a of generationActivities) {
     if (a.status === "running") continue; // skip start entries (same as above)
     if (a.createdAt < growthStart.toISOString()) continue;
     const aTime = new Date(a.createdAt).getTime();
@@ -173,6 +175,7 @@ router.get("/dashboard", (req, res) => {
     totalProjects: projects.length,
     totalTests: tests.length,
     totalRuns: runs.length,
+    totalActivities: activityRepo.count(),
     passRate,
     history,
     recentRuns,

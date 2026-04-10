@@ -53,7 +53,9 @@ const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
   VALUES (${INSERT_COLS.map(c => "@" + c).join(", ")})`;
 
 /**
- * Get all runs.
+ * Get all runs (full deserialization — expensive for large datasets).
+ * Prefer getAllLean() for dashboard/listing endpoints that don't need
+ * heavy JSON columns (logs, results, testQueue, etc.).
  * @returns {Object[]}
  */
 export function getAll() {
@@ -70,6 +72,52 @@ export function getAllAsDict() {
   const dict = {};
   for (const r of all) dict[r.id] = r;
   return dict;
+}
+
+// ─── Lean queries (skip heavy JSON columns) ───────────────────────────────────
+
+const LEAN_COLS = [
+  "id", "projectId", "type", "status", "startedAt", "finishedAt",
+  "duration", "error", "errorCategory", "passed", "failed", "total",
+  "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
+].join(", ");
+
+const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop`;
+
+/**
+ * Get all runs with only lightweight scalar columns.
+ * Skips logs, results, tests, testQueue, generateInput, promptAudit,
+ * pipelineStats, videoSegments, qualityAnalytics — which can be huge.
+ * ~10-50× faster than getAll() for projects with many runs.
+ * @returns {Object[]}
+ */
+export function getAllLean() {
+  const db = getDatabase();
+  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs`).all().map(row => {
+    if (row.feedbackLoop) {
+      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
+    } else {
+      row.feedbackLoop = null;
+    }
+    return row;
+  });
+}
+
+/**
+ * Get all runs with results column only (for failure analysis).
+ * Parses only the results JSON — skips logs, testQueue, etc.
+ * @returns {Object[]}
+ */
+export function getAllWithResults() {
+  const db = getDatabase();
+  return db.prepare(`SELECT ${LEAN_COLS}, results FROM runs`).all().map(row => {
+    if (row.results) {
+      try { row.results = JSON.parse(row.results); } catch { row.results = []; }
+    } else {
+      row.results = [];
+    }
+    return row;
+  });
 }
 
 /**

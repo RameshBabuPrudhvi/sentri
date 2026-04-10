@@ -313,10 +313,13 @@ router.post("/chat", async (req, res) => {
     : lastMessage.content;
 
   // Build system prompt with live workspace context + deep entity details.
+  // Use lean run queries — chat context only needs scalar fields + results
+  // for failure analysis. Skipping logs/testQueue/videoSegments saves ~10-50×
+  // in JSON parse time.
   const isLocal = isLocalProvider();
   const projects = projectRepo.getAll();
   const tests = testRepo.getAll();
-  const runs = runRepo.getAll();
+  const runs = runRepo.getAllWithResults();
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
   const testsById = {};

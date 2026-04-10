@@ -14,8 +14,6 @@
  */
 
 import { Router } from "express";
-import * as projectRepo from "../database/repositories/projectRepo.js";
-import * as testRepo from "../database/repositories/testRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
@@ -120,20 +118,25 @@ router.get("/system", async (req, res) => {
     } catch { /* ignore */ }
   }
 
-  const projects   = projectRepo.getAll();
-  const tests      = testRepo.getAll();
-  const runs       = runRepo.getAll();
-  const activities = activityRepo.getAll();
+  // Use SQL COUNT queries instead of loading all rows — much faster.
+  const { getDatabase } = await import("../database/sqlite.js");
+  const db = getDatabase();
+  const projectCount  = db.prepare("SELECT COUNT(*) as cnt FROM projects").get().cnt;
+  const testCount     = db.prepare("SELECT COUNT(*) as cnt FROM tests").get().cnt;
+  const runCount      = db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
+  const activityCount = activityRepo.count();
   const healingEntries = healingRepo.count();
+  const approvedTests = db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'approved'").get().cnt;
+  const draftTests    = db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'draft'").get().cnt;
 
   res.json({
-    projects:     projects.length,
-    tests:        tests.length,
-    runs:         runs.length,
-    activities:   activities.length,
+    projects:     projectCount,
+    tests:        testCount,
+    runs:         runCount,
+    activities:   activityCount,
     healingEntries,
-    approvedTests: tests.filter(t => t.reviewStatus === "approved").length,
-    draftTests:    tests.filter(t => t.reviewStatus === "draft").length,
+    approvedTests,
+    draftTests,
     uptime:        Math.floor(process.uptime()),
     nodeVersion:   process.version,
     playwrightVersion,

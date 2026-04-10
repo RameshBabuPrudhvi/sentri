@@ -73,6 +73,29 @@ export function getFiltered({ type, projectId, limit } = {}) {
 }
 
 /**
+ * Count total activities.
+ * @returns {number}
+ */
+export function count() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM activities").get().cnt;
+}
+
+/**
+ * Get activities filtered by type for dashboard analytics.
+ * Only returns type, status, createdAt — skips detail, names, etc.
+ * @param {string[]} types — Activity types to include.
+ * @returns {Object[]}
+ */
+export function getByTypes(types) {
+  const db = getDatabase();
+  const placeholders = types.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT type, status, createdAt FROM activities WHERE type IN (${placeholders}) ORDER BY createdAt DESC`
+  ).all(...types);
+}
+
+/**
  * Delete all activities for a project.
  * @param {string} projectId
  * @returns {number} Number of deleted rows.
