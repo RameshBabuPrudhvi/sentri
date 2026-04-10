@@ -75,7 +75,16 @@ router.get("/runs/:runId/events", (req, res) => {
   // arrive after the run finished — including when the connection dropped
   // during the feedback loop (ECONNRESET) and the client reconnects post-completion.
   if (run.status !== "running") {
-    res.write(`data: ${JSON.stringify({ type: "done", status: run.status })}\n\n`);
+    // testsGenerated is not a DB column — derive from the persisted tests array
+    const testsGenerated = run.testsGenerated ?? (Array.isArray(run.tests) ? run.tests.length : undefined);
+    res.write(`data: ${JSON.stringify({
+      type: "done",
+      status: run.status,
+      ...(run.passed != null && { passed: run.passed }),
+      ...(run.failed != null && { failed: run.failed }),
+      ...(run.total != null && { total: run.total }),
+      ...(testsGenerated != null && { testsGenerated }),
+    })}\n\n`);
     return res.end();
   }
 

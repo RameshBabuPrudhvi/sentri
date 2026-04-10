@@ -201,7 +201,13 @@ router.post("/runs/:runId/abort", (req, res) => {
     status: "aborted",
   });
 
-  emitRunEvent(req.params.runId, "done", { status: "aborted" });
+  emitRunEvent(req.params.runId, "done", {
+    status: "aborted",
+    passed: run.passed ?? undefined,
+    failed: run.failed ?? undefined,
+    total: run.total ?? undefined,
+    testsGenerated: run.testsGenerated ?? undefined,
+  });
 
   res.json({ ok: true });
 });

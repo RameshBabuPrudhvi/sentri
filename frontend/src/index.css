@@ -20,6 +20,7 @@
 @import "./styles/features/onboarding.css";
 @import "./styles/features/chat.css";
 @import "./styles/features/command-palette.css";
+@import "./styles/features/notifications.css";
 @import "./styles/pages/dashboard.css";
 @import "./styles/pages/settings.css";
 @import "./styles/pages/test-detail.css";

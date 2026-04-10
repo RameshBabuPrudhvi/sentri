@@ -8,11 +8,9 @@
  *
  * ### Side-effects
  * - Updates the page favicon to ⏳/✅/❌ to reflect run state.
- * - Fires a browser `Notification` on the `"done"` event (if permission granted).
  *
  * ### Exports
  * - {@link useRunSSE} — The hook itself.
- * - {@link requestNotifPermission} — Request browser notification permission.
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
@@ -52,26 +50,6 @@ function resetFavicon() {
   } catch { /* non-fatal */ }
 }
 
-// ── Browser notification ──────────────────────────────────────────────────────
-
-export async function requestNotifPermission() {
-  if (typeof Notification === "undefined") return;
-  if (Notification.permission === "default") {
-    await Notification.requestPermission();
-  }
-}
-
-function sendRunCompleteNotification(passed, failed) {
-  if (typeof Notification === "undefined") return;
-  if (Notification.permission !== "granted") return;
-  try {
-    new Notification("Run complete", {
-      body: `${passed ?? 0} passed · ${failed ?? 0} failed`,
-      icon: "/favicon.ico",
-    });
-  } catch { /* non-fatal */ }
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 5000;
@@ -84,8 +62,8 @@ const MAX_SSE_RETRIES  = 5;
  * Hook that opens an SSE stream for real-time run monitoring.
  *
  * Pass `initialStatus` (e.g. `"completed"` / `"failed"`) to skip SSE entirely
- * for runs that are already finished — prevents spurious "Run complete"
- * browser notifications when reopening a historical run.
+ * for runs that are already finished — prevents spurious "done" events
+ * when reopening a historical run.
  *
  * @param {string|null}    runId         - The run ID to monitor (e.g. `"RUN-1"`).
  * @param {Function}       onEvent       - Callback: `({ type, ...payload }) => void`.
@@ -121,8 +99,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
           if (run.status !== "running") {
             doneRef.current = true;
             setFaviconStatus(run.status);
-            sendRunCompleteNotification(run.passed, run.failed);
-            onEventRef.current?.({ type: "done", status: run.status, passed: run.passed, failed: run.failed });
+            onEventRef.current?.({ type: "done", status: run.status, passed: run.passed, failed: run.failed, testsGenerated: run.testsGenerated });
             return;
           }
         }
@@ -162,7 +139,6 @@ export function useRunSSE(runId, onEvent, initialStatus) {
         doneRef.current = true;
         es.close();
         setFaviconStatus(parsed.status ?? "completed");
-        sendRunCompleteNotification(parsed.passed, parsed.failed);
       }
     };
 
@@ -202,13 +178,12 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     // Wait until the caller has resolved the initial run status before deciding
     // whether to open an SSE connection. When initialStatus is undefined the
     // initial fetch hasn't completed yet — connecting now would bypass the
-    // "already done" guard and fire spurious browser notifications for
-    // historical runs.
+    // "already done" guard and fire spurious "done" events for historical runs.
     if (initialStatus === undefined) return;
 
     // If the run is already finished, skip SSE/polling entirely.
-    // This prevents a spurious "Run complete" browser notification every time
-    // the user navigates back to a historical run detail page.
+    // This prevents spurious "done" events every time the user navigates
+    // back to a historical run detail page.
     const alreadyDone = initialStatus && initialStatus !== "running";
     if (alreadyDone) {
       doneRef.current = true;

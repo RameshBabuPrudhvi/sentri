@@ -1,0 +1,15 @@
+/**
+ * Notifications — bell icon + dropdown styles
+ *
+ * Layer: Features (ITCSS)
+ */
+
+/* Bell button hover */
+.notif-bell-btn:hover {
+  background: var(--bg2) !important;
+  border-color: var(--border) !important;
+}
+
+/* Dropdown scrollbar */
+.notif-dropdown ::-webkit-scrollbar       { width: 5px; }
+.notif-dropdown ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }

@@ -13,6 +13,7 @@ import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeL
 import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import useProjectRunMonitor from "../hooks/useProjectRunMonitor.js";
+import { useNotifications } from "../context/NotificationContext.jsx";
 import ActiveRunBanner from "../components/project/ActiveRunBanner.jsx";
 import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
@@ -60,6 +61,7 @@ export default function ProjectDetail() {
   usePageTitle(project?.name ? `${project.name} — Project` : "Project");
   const [traceability, setTraceability]     = useState(null);
   const [traceLoading, setTraceLoading]     = useState(false);
+  const { addNotification } = useNotifications();
 
   // ── Highlight recently created tests ──────────────────────────────────────
   // Any test created within the last 5 minutes is "new" — works regardless of
@@ -118,10 +120,34 @@ export default function ProjectDetail() {
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
-  const handleRunSettled = useCallback(() => {
+  const handleRunSettled = useCallback((evt) => {
     setActiveRun(null);
     refresh();
-  }, [refresh]);
+
+    // Push in-app notification when a run finishes on the project page.
+    // evt may be a "done" SSE payload ({ status, passed, failed, ... }) or
+    // a full run object from a snapshot ({ status, passed, failed, tests, ... }).
+    if (evt) {
+      const status = evt.status ?? "completed";
+      const passed = evt.passed;
+      const failed = evt.failed;
+      const testsGenerated = evt.testsGenerated ?? (Array.isArray(evt.tests) ? evt.tests.length : undefined);
+      const isTestRun = passed != null || failed != null;
+      const notifType = status === "completed" ? "success"
+                      : status === "aborted"   ? "warning"
+                      : "error";
+      addNotification({
+        type: notifType,
+        title: status === "aborted" ? "Run aborted"
+             : status === "failed"  ? "Run failed"
+             : "Run complete",
+        body: isTestRun
+          ? `${passed ?? 0} passed · ${failed ?? 0} failed`
+          : `${testsGenerated ?? 0} test(s) generated`,
+        link: activeRunId ? `/runs/${activeRunId}` : null,
+      });
+    }
+  }, [refresh, addNotification, activeRunId]);
   const { sseDown, retryIn } = useProjectRunMonitor(activeRun, handleRunSettled);
 
   async function doRun() {

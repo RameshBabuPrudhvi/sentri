@@ -169,7 +169,7 @@ export async function generateFromUserDescription(project, run, { name, descript
     log(run, `Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
     logSuccess(run, `Done! ${run.tests.length} test(s) generated from description for "${name}".`);
     structuredLog("generate.complete", { runId: run.id, projectId: project.id, tests: run.tests.length, durationMs: run.duration });
-    emitRunEvent(run.id, "done", { status: "completed" });
+    emitRunEvent(run.id, "done", { status: "completed", testsGenerated: run.tests.length });
   });
 
   return createdTestIds;
@@ -358,6 +358,6 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       pages: snapshots.length, tests: run.tests.length, durationMs: run.duration,
       apiEndpoints: apiEndpoints.length,
     });
-    emitRunEvent(run.id, "done", { status: "completed" });
+    emitRunEvent(run.id, "done", { status: "completed", testsGenerated: run.tests.length });
   });
 }

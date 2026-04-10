@@ -17,7 +17,8 @@ import {
   Server,
 } from "lucide-react";
 import { api } from "../api.js";
-import { useRunSSE, requestNotifPermission } from "../hooks/useRunSSE.js";
+import { useRunSSE } from "../hooks/useRunSSE.js";
+import { useNotifications } from "../context/NotificationContext.jsx";
 
 import CrawlView from "../components/CrawlView";
 import GenerateView from "../components/GenerateView";
@@ -124,6 +125,7 @@ export default function RunDetail() {
   const [llmTokens, setLlmTokens] = useState("");
   usePageTitle(run ? `Run ${runId.slice(0, 6).toUpperCase()}` : "Run Detail");
   const [aborting, setAborting] = useState(false);
+  const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
   // accumulate hundreds of thousands of characters and cause layout/memory issues.
@@ -156,9 +158,6 @@ export default function RunDetail() {
       if (r) setInitialStatus(r.status);
     }).finally(() => setLoading(false));
   }, [fetchRun]);
-
-  // Request notification permission once when this page is viewed
-  useEffect(() => { requestNotifPermission(); }, []);
 
   // Reset live-stream state when navigating to a different run
   useEffect(() => {
@@ -206,8 +205,25 @@ export default function RunDetail() {
       setFrames([]); // clear live stream on completion
       // Then re-fetch to get the full completed run object (stats, results, etc.)
       fetchRun();
+
+      // ── In-app notification ──────────────────────────────────────────
+      const isTestRun = event.passed != null || event.failed != null;
+      const status = event.status ?? "completed";
+      const notifType = status === "completed" ? "success"
+                      : status === "aborted"   ? "warning"
+                      : "error";
+      addNotification({
+        type: notifType,
+        title: status === "aborted" ? "Run aborted"
+             : status === "failed"  ? "Run failed"
+             : "Run complete",
+        body: isTestRun
+          ? `${event.passed ?? 0} passed · ${event.failed ?? 0} failed`
+          : `${event.testsGenerated ?? 0} test(s) generated`,
+        link: `/runs/${runId}`,
+      });
     }
-  }, [fetchRun]), initialStatus);
+  }, [fetchRun, addNotification, runId]), initialStatus);
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {

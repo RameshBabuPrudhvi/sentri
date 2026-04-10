@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext.jsx";
+import { NotificationProvider } from "./context/NotificationContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Layout from "./components/Layout.jsx";
 
@@ -62,6 +63,7 @@ export default function App() {
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AuthProvider>
+        <NotificationProvider>
         <ErrorBoundary>
           <Suspense fallback={<RouteLoading />}>
             <Routes>
@@ -93,6 +95,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </ErrorBoundary>
+        </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

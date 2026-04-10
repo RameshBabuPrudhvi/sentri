@@ -2,6 +2,7 @@ import React from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, Search, X, LogOut, ChevronDown, BookOpen, ExternalLink, Sparkles } from "lucide-react";
 import ProviderBadge from "./ProviderBadge.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 import OnboardingTour from "./OnboardingTour.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import useOnboarding from "../hooks/useOnboarding.js";
@@ -169,6 +170,7 @@ function TopBar({ onOpenPalette, onOpenChat }) {
 
       <div style={{ flex: 1 }} />
       <ProviderBadge />
+      <NotificationBell />
 
       {/* User menu */}
       <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
