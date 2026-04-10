@@ -121,9 +121,13 @@ router.patch("/tests/:testId", async (req, res) => {
       // instead of generating from scratch. This preserves self-healing helpers,
       // comments, and structure — only the changed/removed steps are affected.
       const existingCode = updates.playwrightCode || test.playwrightCode;
+      const local = isLocalProvider();
 
-      const codePrompt = existingCode
-        ? `You are a Playwright automation expert. The user has edited the test steps. Update the existing Playwright test code to match the new steps.
+      // Local models (7B) struggle with verbose prompts and JSON output.
+      // Use a shorter prompt and request plain code (no JSON wrapper) for Ollama.
+      let codePrompt;
+      if (existingCode && !local) {
+        codePrompt = `You are a Playwright automation expert. The user has edited the test steps. Update the existing Playwright test code to match the new steps.
 
 Test Name: ${currentName}
 Application URL: ${appUrl}
@@ -151,8 +155,20 @@ Requirements:
 Return ONLY valid JSON with no markdown fences:
 {
   "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // updated test implementation\\n});"
-}`
-        : `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
+}`;
+      } else if (existingCode && local) {
+        // Shorter prompt for local models — skip JSON wrapper, request plain code
+        codePrompt = `Update this Playwright test to match the new steps. Only change what's needed.
+
+Steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Current code:
+${existingCode}
+
+Return ONLY the updated test code, no explanation.`;
+      } else if (!local) {
+        codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
 
 Test Name: ${currentName}
 Application URL: ${appUrl}
@@ -170,8 +186,22 @@ Return ONLY valid JSON with no markdown fences:
 {
   "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // full test implementation\\n});"
 }`;
+      } else {
+        // Shorter prompt for local models — skip JSON wrapper
+        codePrompt = `Write a Playwright test for these steps. Start with page.goto('${appUrl}').
 
-      const codeRaw = await generateText(codePrompt, { maxTokens: isLocalProvider() ? 4096 : undefined });
+Test: ${currentName}
+Steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Return ONLY the test code starting with test('${currentName}', async ({ page }) => {
+No imports, no explanation.`;
+      }
+
+      const genOpts = local
+        ? { maxTokens: 4096, responseFormat: "text" }
+        : {};
+      const codeRaw = await generateText(codePrompt, genOpts);
       let pwCode = null;
       try {
         const parsed = parseJSON(codeRaw);
