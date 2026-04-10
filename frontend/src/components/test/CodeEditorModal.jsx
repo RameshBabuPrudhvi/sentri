@@ -18,11 +18,12 @@ import highlightCode from "../../utils/highlightCode.js";
  * @param {Object} props
  * @param {Object} props.test - The test object (needs .name, .playwrightCode, .codeRegeneratedAt).
  * @param {string} props.testId - Test ID for API calls.
+ * @param {string} [props.initialCode] - Optional code to pre-fill (e.g. from code preview). Falls back to test.playwrightCode.
  * @param {Function} props.onClose - Called when the modal should close.
  * @param {Function} props.onSaved - Called with the updated test object after a successful save.
  */
-export default function CodeEditorModal({ test, testId, onClose, onSaved }) {
-  const [editedCode, setEditedCode]         = useState(test.playwrightCode || "");
+export default function CodeEditorModal({ test, testId, initialCode, onClose, onSaved }) {
+  const [editedCode, setEditedCode]         = useState(initialCode || test.playwrightCode || "");
   const [codeSaving, setCodeSaving]         = useState(false);
   const [codeSaveError, setCodeSaveError]   = useState(null);
   const [codeSaveSuccess, setCodeSaveSuccess] = useState(false);
@@ -45,9 +46,15 @@ export default function CodeEditorModal({ test, testId, onClose, onSaved }) {
     if (lineNumRef.current) lineNumRef.current.scrollTop = ta.scrollTop;
   }
 
-  function handleTabKey(e) {
+  function handleEditorKeyDown(e) {
     if (e.key === "Escape") {
       e.target.blur();
+      return;
+    }
+    // Ctrl+S / Cmd+S — save code
+    if (e.key === "s" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (!codeSaving) handleSaveCode();
       return;
     }
     if (e.key === "Tab") {
@@ -192,7 +199,9 @@ export default function CodeEditorModal({ test, testId, onClose, onSaved }) {
               <path d="M5 8h6M8 5v6" stroke="#7c6af5" strokeWidth="1.2" strokeLinecap="round"/>
             </svg>
             {(test.name || "test").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.spec.ts
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7c6af5", display: "inline-block" }} />
+            <span className={editedCode !== (initialCode || test.playwrightCode || "") ? "td-unsaved-dot" : ""}
+              style={{ width: 6, height: 6, borderRadius: "50%", background: editedCode !== (initialCode || test.playwrightCode || "") ? "#f59e0b" : "#7c6af5", display: "inline-block" }}
+              title={editedCode !== (initialCode || test.playwrightCode || "") ? "Unsaved changes" : ""} />
           </div>
         </div>
 
@@ -205,9 +214,12 @@ export default function CodeEditorModal({ test, testId, onClose, onSaved }) {
             <span>·</span>
             <span>Tab inserts 2 spaces</span>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <kbd className="td-kbd">⌘S</kbd>
+            <span style={{ fontSize: "0.65rem", color: "#4a5070" }}>save</span>
+            <span style={{ color: "#2a2d3e" }}>·</span>
             <kbd className="td-kbd">Esc</kbd>
-            <span style={{ fontSize: "0.65rem", color: "#4a5070" }}>to close</span>
+            <span style={{ fontSize: "0.65rem", color: "#4a5070" }}>close</span>
           </div>
         </div>
 
@@ -235,10 +247,10 @@ export default function CodeEditorModal({ test, testId, onClose, onSaved }) {
               onChange={e => setEditedCode(e.target.value)}
               onClick={handleCursorMove}
               onKeyUp={handleCursorMove}
-              onKeyDown={handleTabKey}
+              onKeyDown={handleEditorKeyDown}
               onScroll={handleEditorScroll}
               spellCheck={false}
-              aria-label="Code editor — Tab inserts spaces, press Escape to exit"
+              aria-label="Code editor — Tab inserts spaces, Ctrl+S to save, Escape to exit"
             />
           </div>
         </div>

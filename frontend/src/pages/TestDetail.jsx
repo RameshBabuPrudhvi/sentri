@@ -99,6 +99,7 @@ export default function TestDetail() {
 
   // ── Code editor modal state ──────────────────────────────────────────────
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+  const [codeEditorInitial, setCodeEditorInitial] = useState(null); // pre-fill code for editor
 
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
@@ -185,6 +186,7 @@ export default function TestDetail() {
 
   function handleEditPreview() {
     // Open the code editor pre-filled with the generated code
+    setCodeEditorInitial(codePreview.generatedCode);
     setCodeEditorOpen(true);
     setCodePreview(null);
   }
@@ -890,8 +892,9 @@ export default function TestDetail() {
           <CodeEditorModal
             test={test}
             testId={testId}
-            onClose={() => setCodeEditorOpen(false)}
-            onSaved={setTest}
+            initialCode={codeEditorInitial}
+            onClose={() => { setCodeEditorOpen(false); setCodeEditorInitial(null); }}
+            onSaved={(updated) => { setTest(updated); setCodeEditorInitial(null); }}
           />
         )}
 

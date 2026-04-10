@@ -110,6 +110,12 @@
   white-space: pre; overflow: auto;
 }
 
+/* Unsaved-changes dot on the file tab */
+.td-editor-tab .td-unsaved-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #f59e0b; display: inline-block;
+}
+
 .td-editor-footer {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
