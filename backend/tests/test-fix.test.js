@@ -12,7 +12,11 @@ import assert from "node:assert/strict";
 import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import testFixRouter from "../src/routes/testFix.js";
-import { getDb } from "../src/db.js";
+import { getDatabase } from "../src/database/sqlite.js";
+import * as projectRepo from "../src/database/repositories/projectRepo.js";
+import * as testRepo from "../src/database/repositories/testRepo.js";
+import * as runRepo from "../src/database/repositories/runRepo.js";
+import * as activityRepo from "../src/database/repositories/activityRepo.js";
 
 let mounted = false;
 
@@ -24,15 +28,15 @@ function mountRoutesOnce() {
 }
 
 function resetDb() {
-  const db = getDb();
-  db.users = {};
-  db.oauthIds = {};
-  db.projects = {};
-  db.tests = {};
-  db.runs = {};
-  db.activities = {};
-  db.healingHistory = {};
-  return db;
+  const db = getDatabase();
+  db.exec("DELETE FROM healing_history");
+  db.exec("DELETE FROM activities");
+  db.exec("DELETE FROM runs");
+  db.exec("DELETE FROM tests");
+  db.exec("DELETE FROM oauth_ids");
+  db.exec("DELETE FROM projects");
+  db.exec("DELETE FROM users");
+  db.exec("UPDATE counters SET value = 0");
 }
 
 async function req(base, path, { method = "GET", token, body } = {}) {
@@ -54,7 +58,7 @@ async function reqJson(base, path, opts = {}) {
 
 async function main() {
   mountRoutesOnce();
-  const db = resetDb();
+  resetDb();
 
   const server = app.listen(0);
   const { port } = server.address();
@@ -62,7 +66,7 @@ async function main() {
 
   try {
     // ── Register + login ──────────────────────────────────────────────────
-    const email = `fix-${Date.now()}@example.com`;
+    const email = `fix-${Date.now()}@test.local`;
 
     let out = await reqJson(base, "/api/auth/register", {
       method: "POST",
@@ -79,43 +83,47 @@ async function main() {
     assert.ok(token);
 
     // ── Seed test data ────────────────────────────────────────────────────
-    db.projects["PRJ-FIX"] = {
+    projectRepo.create({
       id: "PRJ-FIX",
       name: "Fix App",
       url: "https://example.com",
       createdAt: new Date().toISOString(),
-    };
+    });
 
-    db.tests["TC-FIX1"] = {
+    testRepo.create({
       id: "TC-FIX1",
       projectId: "PRJ-FIX",
       name: "Failing login test",
+      description: "Tests the login flow",
       steps: ["Open login page", "Enter credentials", "Click submit"],
       playwrightCode: `test('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await page.click('#submit');\n  await expect(page).toHaveURL('/dashboard');\n});`,
       sourceUrl: "https://example.com/login",
       lastResult: "failed",
       reviewStatus: "approved",
       createdAt: new Date().toISOString(),
-    };
+    });
 
-    db.tests["TC-FIX2"] = {
+    testRepo.create({
       id: "TC-FIX2",
       projectId: "PRJ-FIX",
       name: "No code test",
+      description: "",
       steps: ["Step 1"],
       playwrightCode: null,
       lastResult: "failed",
       reviewStatus: "draft",
       createdAt: new Date().toISOString(),
-    };
+    });
 
     // Seed a run with a failed result for TC-FIX1
-    db.runs["RUN-FIX"] = {
+    runRepo.create({
       id: "RUN-FIX",
       projectId: "PRJ-FIX",
       type: "test_run",
       status: "completed",
       startedAt: new Date().toISOString(),
+      logs: [],
+      tests: ["TC-FIX1"],
       results: [
         {
           testId: "TC-FIX1",
@@ -126,7 +134,7 @@ async function main() {
           steps: ["Open login page", "Enter credentials", "Click submit"],
         },
       ],
-    };
+    });
 
     // ── Test: apply-fix with missing test ──────────────────────────────────
     out = await reqJson(base, "/api/tests/TC-NONEXISTENT/apply-fix", {
@@ -153,7 +161,7 @@ async function main() {
     assert.equal(out.res.status, 400, "apply-fix should 400 with whitespace-only code");
 
     // ── Test: apply-fix success ───────────────────────────────────────────
-    const originalCode = db.tests["TC-FIX1"].playwrightCode;
+    const originalCode = testRepo.getById("TC-FIX1").playwrightCode;
     const newCode = `test('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await page.getByRole('button', { name: 'Submit' }).click();\n  await expect(page).toHaveURL('/dashboard');\n});`;
 
     out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
@@ -169,7 +177,7 @@ async function main() {
     assert.ok(out.json.updatedAt, "updatedAt should be set");
 
     // Verify activity was logged
-    const activities = Object.values(db.activities);
+    const activities = activityRepo.getAll();
     const fixActivity = activities.find(a => a.type === "test.ai_fix" && a.testId === "TC-FIX1");
     assert.ok(fixActivity, "AI fix activity should be logged");
     assert.ok(fixActivity.detail.includes("version 1"), "Activity should mention version");

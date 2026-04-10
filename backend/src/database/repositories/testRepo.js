@@ -25,15 +25,18 @@ function rowToTest(row) {
   return obj;
 }
 
-function testToRow(t) {
+function testToRow(t, { fillDefaults = false } = {}) {
   const row = { ...t };
   for (const f of JSON_FIELDS) {
     if (Array.isArray(row[f])) row[f] = JSON.stringify(row[f]);
-    else if (row[f] == null) row[f] = "[]";
+    else if (f in row && row[f] == null) row[f] = fillDefaults ? "[]" : row[f];
+    else if (!(f in row) && fillDefaults) row[f] = "[]";
+    // If field is not in row and not filling defaults, leave it absent
   }
   for (const f of BOOL_FIELDS) {
     if (typeof row[f] === "boolean") row[f] = row[f] ? 1 : 0;
-    else if (row[f] == null) row[f] = null;
+    else if (f in row && row[f] == null) row[f] = null;
+    // If field is not in row, leave it absent
   }
   return row;
 }
@@ -98,12 +101,14 @@ export function getById(id) {
  */
 export function create(test) {
   const db = getDatabase();
-  const row = testToRow(test);
+  const row = testToRow(test, { fillDefaults: true });
   // Fill in defaults for any missing columns
   const params = {};
   for (const col of INSERT_COLS) {
     params[col] = row[col] !== undefined ? row[col] : null;
   }
+  if (params.name == null) params.name = "";
+  if (params.description == null) params.description = "";
   if (params.steps == null) params.steps = "[]";
   if (params.tags == null) params.tags = "[]";
   if (params.isJourneyTest == null) params.isJourneyTest = 0;

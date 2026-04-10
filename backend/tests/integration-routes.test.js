@@ -89,6 +89,7 @@ async function main() {
       id: "TC-100",
       projectId: "PRJ-100",
       name: "Sample test",
+      description: "A sample test for integration coverage",
       type: "functional",
       reviewStatus: "approved",
       createdAt: new Date().toISOString(),
