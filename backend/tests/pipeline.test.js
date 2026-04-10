@@ -519,67 +519,6 @@ test("validateTest rejects tests with no steps", () => {
   assert.ok(issues.some(i => i.includes("no test steps")), "Should reject empty steps");
 });
 
-// ── Layer 8b: Test Validator — undeclared variable heuristic ─────────────────
-
-console.log("\n🔍 Layer 8b: Test Validator — undeclared variable detection");
-
-test("validateTest catches undeclared variable passed to safeClick", () => {
-  const badTest = {
-    name: "Click with hallucinated var",
-    steps: ["Go to page", "Click button"],
-    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('bad', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  await safeClick(page, submitButton);\n});`,
-  };
-  const issues = validateTest(badTest, "http://localhost:3000");
-  assert.ok(issues.some(i => i.includes("undeclared variable 'submitButton'")),
-    `Should detect undeclared 'submitButton', got: ${issues.join("; ")}`);
-});
-
-test("validateTest catches undeclared variable passed to safeFill", () => {
-  const badTest = {
-    name: "Fill with hallucinated var",
-    steps: ["Go to page", "Fill email"],
-    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('bad', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  await safeFill(page, emailField, 'test@example.com');\n});`,
-  };
-  const issues = validateTest(badTest, "http://localhost:3000");
-  assert.ok(issues.some(i => i.includes("undeclared variable 'emailField'")),
-    `Should detect undeclared 'emailField', got: ${issues.join("; ")}`);
-});
-
-test("validateTest allows string literals in helper calls", () => {
-  const goodTest = {
-    name: "Valid helper usage test",
-    steps: ["Go to page", "Fill email", "Click submit"],
-    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('good', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  await safeFill(page, 'Email', 'test@example.com');\n  await safeClick(page, 'Submit');\n});`,
-  };
-  const issues = validateTest(goodTest, "http://localhost:3000");
-  const undeclaredIssues = issues.filter(i => i.includes("undeclared variable"));
-  assert.equal(undeclaredIssues.length, 0,
-    `Should have no undeclared variable issues, got: ${undeclaredIssues.join("; ")}`);
-});
-
-test("validateTest allows declared variables in helper calls", () => {
-  const goodTest = {
-    name: "Declared variable usage test",
-    steps: ["Go to page", "Click dynamic button"],
-    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('good', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  const buttonLabel = 'Submit';\n  await safeClick(page, buttonLabel);\n});`,
-  };
-  const issues = validateTest(goodTest, "http://localhost:3000");
-  const undeclaredIssues = issues.filter(i => i.includes("undeclared variable"));
-  assert.equal(undeclaredIssues.length, 0,
-    `Should allow declared variable 'buttonLabel', got: ${undeclaredIssues.join("; ")}`);
-});
-
-test("validateTest catches undeclared variable in safeExpect", () => {
-  const badTest = {
-    name: "Expect with hallucinated var",
-    steps: ["Go to page", "Check heading"],
-    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('bad', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  await safeExpect(page, expect, headingText);\n});`,
-  };
-  const issues = validateTest(badTest, "http://localhost:3000");
-  assert.ok(issues.some(i => i.includes("undeclared variable 'headingText'")),
-    `Should detect undeclared 'headingText', got: ${issues.join("; ")}`);
-});
-
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

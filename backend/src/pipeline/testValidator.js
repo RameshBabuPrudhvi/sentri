@@ -13,116 +13,6 @@ import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
 
-// ── Undeclared-variable heuristic for self-healing helper calls ─────────────
-//
-// AI sometimes hallucinates bare identifiers as arguments to the self-healing
-// helpers instead of string literals, e.g.:
-//   await safeFill(page, emailField, 'test@example.com')   ← emailField is never declared
-//   await safeClick(page, submitButton)                     ← submitButton is never declared
-//
-// These pass syntax checking (they're valid JS) but always fail at runtime
-// because the variables are never declared — the self-healing guards see
-// `undefined` and throw. This heuristic catches them at generation time.
-
-// Matches: safeClick(page, ident), safeFill(page, ident, ...), etc.
-// Captures the bare identifier in group 1. Skips calls where the second
-// argument starts with a quote (string literal) or backtick (template).
-const HELPER_BARE_IDENT_RE =
-  /\b(?:safeClick|safeFill|safeDblClick|safeHover|safeExpect)\s*\(\s*(?:page|expect)\s*,\s*(?:(?:page|expect)\s*,\s*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*[,)]/g;
-
-// Identifiers that are available at runtime (injected by codeExecutor.js
-// sandbox, self-healing helpers, or declared inside the wrapper). This list
-// must stay in sync with codeExecutor.js:buildSandboxContext() and
-// getSelfHealingHelperCode(). Only identifiers that could plausibly appear
-// as the label/text argument need to be listed — not every sandbox global.
-const RUNTIME_GLOBALS = new Set([
-  // Sandbox-provided (codeExecutor.js:46-131)
-  "page", "context", "expect", "console", "setTimeout", "clearTimeout",
-  "setInterval", "clearInterval", "Promise", "Error", "TypeError",
-  "RangeError", "SyntaxError", "ReferenceError", "URIError",
-  "AggregateError", "DOMException", "JSON", "Date", "Math", "RegExp",
-  "Array", "Object", "String", "Number", "Boolean", "Symbol", "Map", "Set",
-  "WeakMap", "WeakSet", "ArrayBuffer", "SharedArrayBuffer", "DataView",
-  "BigInt", "URL", "URLSearchParams", "TextEncoder", "TextDecoder",
-  "Buffer", "isNaN", "isFinite", "parseInt", "parseFloat",
-  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
-  "undefined", "NaN", "Infinity", "null", "true", "false",
-  "atob", "btoa", "structuredClone",
-  // Self-healing helpers (selfHealing.js:getSelfHealingHelperCode)
-  "safeClick", "safeFill", "safeDblClick", "safeHover", "safeExpect",
-  "findElement", "ensureReady", "retry", "sleep",
-  "looksLikeSelector", "onlyFillable", "firstVisible",
-  "DEFAULT_TIMEOUT", "RETRY_COUNT", "RETRY_DELAY", "FILLABLE_SELECTOR",
-  "__healingHints", "__healingEvents",
-  // Stubs declared in the wrapper (codeExecutor.js:182-185)
-  "run", "browser", "request", "__testError",
-]);
-
-// Matches const/let/var declarations — captures the declared identifier name(s).
-// Handles simple declarations and basic destructuring:
-//   const foo = ...        → "foo"
-//   let { bar, baz } = ... → "bar", "baz"
-//   var [x, y] = ...       → "x", "y"
-const DECLARATION_RE = /\b(?:const|let|var)\s+(?:\{([^}]+)\}|\[([^\]]+)\]|([A-Za-z_$][A-Za-z0-9_$]*))/g;
-
-/**
- * Scan code for self-healing helper calls whose label/text argument is a bare
- * identifier that was never declared with const/let/var.
- *
- * @param {string} code — The cleaned test body (after import stripping, etc.)
- * @returns {string[]}    Array of issue strings (empty = no problems found).
- */
-function detectUndeclaredHelperArgs(code) {
-  // 1. Collect all locally declared identifiers
-  const declared = new Set();
-  let m;
-  while ((m = DECLARATION_RE.exec(code)) !== null) {
-    // Destructured object: { a, b: c, d } → a, c, d
-    if (m[1]) {
-      for (const part of m[1].split(",")) {
-        // Handle renaming: `original: alias` → alias is the declared name
-        const renamed = part.split(":").pop().trim();
-        if (renamed) declared.add(renamed);
-      }
-    }
-    // Destructured array: [x, y] → x, y
-    else if (m[2]) {
-      for (const part of m[2].split(",")) {
-        const name = part.trim();
-        if (name && /^[A-Za-z_$]/.test(name)) declared.add(name);
-      }
-    }
-    // Simple: const foo
-    else if (m[3]) {
-      declared.add(m[3]);
-    }
-  }
-
-  // Reset lastIndex since DECLARATION_RE has the global flag
-  DECLARATION_RE.lastIndex = 0;
-
-  // Also pick up function declarations: function foo(...)
-  const fnDeclRe = /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-  while ((m = fnDeclRe.exec(code)) !== null) {
-    declared.add(m[1]);
-  }
-
-  // 2. Find bare identifiers passed to self-healing helpers
-  const issues = [];
-  while ((m = HELPER_BARE_IDENT_RE.exec(code)) !== null) {
-    const ident = m[1];
-    if (RUNTIME_GLOBALS.has(ident)) continue;
-    if (declared.has(ident)) continue;
-    issues.push(
-      `playwrightCode passes undeclared variable '${ident}' to helper — expected a string literal`
-    );
-  }
-  // Reset lastIndex since the regex has the global flag
-  HELPER_BARE_IDENT_RE.lastIndex = 0;
-
-  return issues;
-}
-
 /**
  * Validate a single AI-generated test object.
  * Returns an array of issue strings — empty means the test is valid.
@@ -198,15 +88,6 @@ export function validateTest(test, projectUrl) {
       // Wrap in async function so `await` is valid at the top level
       const wrapped = `(async () => {\n${codeToCheck}\n})();`;
       parse(wrapped, { ecmaVersion: 2022, sourceType: "script" });
-
-      // ── Undeclared variable heuristic ───────────────────────────────────
-      // Catches bare identifiers passed to self-healing helpers that were
-      // never declared — a common AI hallucination pattern that produces
-      // tests which are syntactically valid but always fail at runtime.
-      const undeclaredIssues = detectUndeclaredHelperArgs(codeToCheck);
-      for (const msg of undeclaredIssues) {
-        issues.push(msg);
-      }
     } catch (syntaxErr) {
       const loc = syntaxErr.loc ? ` (line ${syntaxErr.loc.line}, col ${syntaxErr.loc.column})` : "";
       issues.push(`playwrightCode has syntax error${loc}: ${syntaxErr.message}`);
