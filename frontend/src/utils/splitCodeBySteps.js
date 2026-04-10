@@ -99,8 +99,11 @@ function trySplitByKeywords(lines, stepCount, steps) {
       }
     }
 
-    // Require at least 1 matching word (lowered from 2 to handle short/generic steps)
-    if (bestScore >= 1 && bestLine >= 0) {
+    // Require at least 2 matching words to avoid false positives from common
+    // Playwright keywords (e.g. "page", "click") that appear on many lines.
+    // For steps with only 1 keyword (after filtering ≤3-char words), skip
+    // keyword matching and let the even-distribution fallback handle it.
+    if (bestScore >= 2 && bestLine >= 0) {
       assignments[s] = bestLine;
       usedLines.add(bestLine);
     }
@@ -177,14 +180,15 @@ export default function splitCodeBySteps(code, stepCount, steps) {
     if (byKeywords) return byKeywords;
   }
 
-  // Strategy 3: Even distribution (fallback) — every step gets at least one line
+  // Strategy 3: Even distribution (fallback)
   const baseSize = Math.max(1, Math.floor(lines.length / stepCount));
+  const remainder = lines.length % stepCount;
   const chunks = [];
   let cursor = 0;
   for (let s = 0; s < stepCount; s++) {
     if (cursor >= lines.length) {
-      // No more lines — give remaining steps the last line rather than empty string
-      chunks.push(lines[lines.length - 1] || "");
+      // No more lines — show "No code for this step." in the UI
+      chunks.push("");
       continue;
     }
     const isLast = s === stepCount - 1;
