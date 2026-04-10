@@ -44,7 +44,7 @@ const INSERT_COLS = [
   "duration", "error", "errorCategory", "passed", "failed", "total",
   "pagesFound", "parallelWorkers", "tracePath", "videoPath", "videoSegments",
   "logs", "tests", "results", "testQueue", "generateInput", "promptAudit",
-  "pipelineStats", "feedbackLoop",
+  "pipelineStats", "feedbackLoop", "currentStep",
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

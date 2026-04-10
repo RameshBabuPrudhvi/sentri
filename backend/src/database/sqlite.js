@@ -50,6 +50,13 @@ export function getDatabase() {
   const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
   _db.exec(schema);
 
+  // ── Migrations (idempotent) ──────────────────────────────────────────────
+  // Add columns that were introduced after the initial schema.
+  const runCols = _db.prepare("PRAGMA table_info(runs)").all().map(c => c.name);
+  if (!runCols.includes("currentStep")) {
+    _db.exec("ALTER TABLE runs ADD COLUMN currentStep INTEGER DEFAULT 0");
+  }
+
   console.log(formatLogLine("info", null, `[sqlite] Database opened at ${DB_PATH}`));
 
   return _db;
