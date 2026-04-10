@@ -299,7 +299,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
             // Grace-period retry also hit rate limit — quota is durably exhausted.
             // Stop all remaining calls to avoid hammering the provider.
             rateLimitHit = true;
-            rateLimitError = retryErr;
+            rateLimitError = retryErr.message || String(retryErr);
             onProgress?.(`⏭️  Rate limit persists after grace period — skipping remaining AI calls (${allTests.length} tests saved so far)`);
             return [];
           }
@@ -366,7 +366,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
   return {
     tests: allTests,
     rateLimitHit,
-    rateLimitError: rateLimitHit ? (rateLimitError?.message || "AI provider rate limit exceeded") : null,
+    rateLimitError: rateLimitHit ? (rateLimitError || "AI provider rate limit exceeded") : null,
   };
 }
 
