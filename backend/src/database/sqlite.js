@@ -21,7 +21,7 @@ const DB_DIR = path.join(__dirname, "..", "..", "data");
 const DB_PATH = path.join(DB_DIR, "sentri.db");
 const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
-/** @type {import("better-sqlite3").Database | null} */
+/** @type {Object|null} better-sqlite3 Database instance */
 let _db = null;
 
 /**
@@ -29,7 +29,7 @@ let _db = null;
  * On first call, creates the data directory (if needed), opens the database,
  * applies pragmas, and runs the schema DDL.
  *
- * @returns {import("better-sqlite3").Database}
+ * @returns {Object} better-sqlite3 Database instance
  */
 export function getDatabase() {
   if (_db) return _db;
