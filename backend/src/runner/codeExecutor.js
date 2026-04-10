@@ -9,18 +9,24 @@
  *   5. Provide a real Playwright `request` fixture for API tests
  *
  * ### Security model
- * AI-generated code is executed via `vm.compileFunction()` inside a sandbox
- * context that only exposes the specific objects the test needs (page, context,
- * expect, etc.) plus safe JS built-ins. Dangerous APIs are explicitly blocked:
- *   - `process`     — env vars, exit, spawn
- *   - `require`     — arbitrary module loading
- *   - `import()`    — dynamic ESM imports
- *   - `global` / `globalThis` — escape to the real global scope
- *   - `fs`, `child_process`, `net`, `http`, etc. — not available
+ * AI-generated code runs inside a vm context that strips `process` from the
+ * global scope. However, any injected host object (page, expect, Buffer, etc.)
+ * exposes the host's Function constructor via `.constructor.constructor`, which
+ * can be used to escape the sandbox:
  *
- * This prevents prompt-injection payloads in tested page content from causing
- * the LLM to emit code that reads API keys, accesses the filesystem, or makes
- * outbound network calls from the server process.
+ *   `page.constructor.constructor('return process')()`
+ *
+ * Node.js docs explicitly warn: "The vm module is not a security mechanism.
+ * Do not use it to run untrusted code."
+ *
+ * To mitigate this, we strip `process.env` before executing AI-generated code
+ * and restore it afterward. This ensures that even if sandbox code reaches the
+ * host `process` object, it cannot read API keys or secrets. We also block
+ * `process.exit()`, `process.kill()`, and `process.abort()` so escaped code
+ * cannot crash the server.
+ *
+ * For true isolation (e.g. running untrusted plugins), use worker_threads
+ * with `env: {}` or a subprocess with a stripped environment.
  *
  * Exports:
  *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
@@ -36,17 +42,20 @@ import playwright from "playwright";
 // ─── Sandbox helpers ──────────────────────────────────────────────────────────
 
 /**
- * Build a restricted global context for vm.compileFunction().
- * Only safe JS built-ins and the caller-provided objects are available.
- * Dangerous APIs (process, require, import, fs, etc.) are explicitly undefined.
+ * Build a vm context for executing AI-generated Playwright code.
  *
- * @param {Object} exposed — caller-provided objects to inject (e.g. page, context, expect)
+ * Injects only the objects the test needs (page, context, expect, etc.)
+ * plus Node.js globals that vm.createContext() doesn't provide automatically.
+ * Dangerous globals (process, require, global, etc.) are explicitly blocked.
+ *
+ * NOTE: Any injected host object can be used to reach the host's Function
+ * constructor via `.constructor.constructor`. The env-stripping in
+ * runWithStrippedEnv() is the actual security boundary, not this context.
+ *
+ * @param {Object} exposed — caller-provided objects to inject
  * @returns {Object} A vm context object
  */
 function buildSandboxContext(exposed) {
-  // Wrap host functions in arrow functions to break the constructor chain.
-  // Arrow functions inherit the sandbox's Function constructor, not the host's,
-  // preventing sandbox escape via `setTimeout.constructor('return process')()`.
   const safeConsole = Object.freeze({
     log:   (...args) => console.log(...args),
     warn:  (...args) => console.warn(...args),
@@ -54,13 +63,11 @@ function buildSandboxContext(exposed) {
     info:  (...args) => console.info(...args),
   });
 
-  const ctx = vm.createContext({
+  return vm.createContext({
     // ── Caller-provided objects (Playwright page, context, expect, etc.) ────
     ...exposed,
 
-    // ── Safe JS built-ins required by generated Playwright code ─────────────
-    // Host functions are wrapped in arrow functions to prevent constructor-chain
-    // escape (arrow functions don't expose the host's Function constructor).
+    // ── Wrapped host functions (arrow functions hide host Function ctor) ────
     console:        safeConsole,
     setTimeout:     (...args) => setTimeout(...args),
     clearTimeout:   (...args) => clearTimeout(...args),
@@ -68,16 +75,9 @@ function buildSandboxContext(exposed) {
     clearInterval:  (...args) => clearInterval(...args),
 
     // ── Node.js globals NOT provided by vm.createContext() ────────────────
-    // vm.createContext() provides standard ECMAScript built-ins (Error,
-    // Promise, Array, Object, Date, RegExp, Map, Set, Symbol, BigInt,
-    // JSON, Math, etc.) as sandbox-local copies automatically.
-    //
-    // Node.js-specific globals (URL, Buffer, TextEncoder, etc.) must be
-    // injected explicitly. We pass them directly — they are constructors
-    // whose .constructor IS exposed, but the security boundary is enforced
-    // by blocking `process`, `require`, `global`, and `globalThis` below.
-    // The vm module docs explicitly state it is NOT a security mechanism;
-    // true isolation requires worker_threads or a subprocess.
+    // vm.createContext() provides ECMAScript built-ins (Error, Promise,
+    // Array, Object, Date, RegExp, Map, Set, etc.) as sandbox-local copies.
+    // Node.js-specific globals must be injected explicitly.
     URL,
     URLSearchParams,
     TextEncoder,
@@ -99,7 +99,7 @@ function buildSandboxContext(exposed) {
     btoa:               typeof btoa === "function" ? (...args) => btoa(...args) : undefined,
     structuredClone:    typeof structuredClone === "function" ? (...args) => structuredClone(...args) : undefined,
 
-    // ── Explicitly blocked — prevent escape from sandbox ────────────────────
+    // ── Explicitly blocked ─────────────────────────────────────────────────
     process:        undefined,
     require:        undefined,
     module:         undefined,
@@ -108,18 +108,50 @@ function buildSandboxContext(exposed) {
     __dirname:      undefined,
     global:         undefined,
     globalThis:     undefined,
-    fetch:          undefined,   // block outbound HTTP from generated code
+    fetch:          undefined,
     XMLHttpRequest: undefined,
     WebSocket:      undefined,
     Deno:           undefined,
     Bun:            undefined,
   });
-
-  return ctx;
 }
 
 /**
- * Compile and execute code inside a vm sandbox.
+ * Execute a function with process.env temporarily stripped.
+ *
+ * This is the real security boundary. Even if AI-generated code escapes the
+ * vm sandbox via `.constructor.constructor('return process')()`, it will find
+ * an empty `process.env` — no API keys, no secrets, no database paths.
+ *
+ * Also blocks `process.exit()`, `process.kill()`, and `process.abort()` so
+ * escaped code cannot crash the server.
+ *
+ * @param {Function} fn — async function to execute with stripped env
+ * @returns {Promise<*>} return value of fn
+ */
+async function runWithStrippedEnv(fn) {
+  const savedEnv = process.env;
+  const savedExit = process.exit;
+  const savedKill = process.kill;
+  const savedAbort = process.abort;
+  try {
+    // Replace env with an empty object — API keys become invisible
+    process.env = {};
+    // Block process termination
+    process.exit = () => { throw new Error("process.exit() is blocked"); };
+    process.kill = () => { throw new Error("process.kill() is blocked"); };
+    process.abort = () => { throw new Error("process.abort() is blocked"); };
+    return await fn();
+  } finally {
+    process.env = savedEnv;
+    process.exit = savedExit;
+    process.kill = savedKill;
+    process.abort = savedAbort;
+  }
+}
+
+/**
+ * Compile and execute code inside a vm sandbox with env stripping.
  *
  * @param {string}   code     — The full async IIFE source to execute
  * @param {Object}   exposed  — Objects to inject into the sandbox context
@@ -132,7 +164,7 @@ async function runInSandbox(code, exposed, filename = "generated-test.js") {
     parsingContext: ctx,
     filename,
   });
-  return await fn();
+  return await runWithStrippedEnv(() => fn());
 }
 
 /**
