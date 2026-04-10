@@ -427,16 +427,19 @@ test("deduplicateAcrossRuns catches renamed duplicates with same name+URL", () =
 });
 
 test("deduplicateAcrossRuns allows short names through (no false positives)", () => {
-  const existing = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "v1", steps: ["s"] }];
-  const newTests = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "v2", steps: ["s"] }];
+  // Use genuinely different code structures so the hash check doesn't match —
+  // this isolates the name-based dedup path we're testing.
+  const existing = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "await page.goto('/login');\nawait page.fill('#user', 'a');", steps: ["go", "fill"] }];
+  const newTests = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveTitle('Login');", steps: ["go", "check title"] }];
   const filtered = deduplicateAcrossRuns(newTests, existing);
-  // "login test" normalises to 10 chars — below the 15-char minimum, so it passes through
+  // "login test" normalises to 10 chars — below the 15-char minimum, so name-dedup is skipped
   assert.equal(filtered.length, 1, "Short names should not trigger name-based dedup");
 });
 
 test("deduplicateAcrossRuns allows same name but different URL", () => {
-  const existing = [{ name: "Verify user can login successfully", sourceUrl: "http://ex.com/login", playwrightCode: "v1", steps: ["s"] }];
-  const newTests = [{ name: "Verify user can login successfully", sourceUrl: "http://other.com/login", playwrightCode: "v2", steps: ["s"] }];
+  // Use genuinely different code structures so the hash check doesn't match
+  const existing = [{ name: "Verify user can login successfully", sourceUrl: "http://ex.com/login", playwrightCode: "await page.goto('/login');\nawait page.fill('#user', 'a');", steps: ["go", "fill"] }];
+  const newTests = [{ name: "Verify user can login successfully", sourceUrl: "http://other.com/login", playwrightCode: "await page.goto('/other-login');\nawait expect(page).toHaveTitle('Other');", steps: ["go", "check"] }];
   const filtered = deduplicateAcrossRuns(newTests, existing);
   assert.equal(filtered.length, 1, "Same name but different URL should not be treated as duplicate");
 });

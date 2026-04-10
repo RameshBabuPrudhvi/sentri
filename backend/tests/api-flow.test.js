@@ -121,6 +121,36 @@ async function main() {
     assert.equal(out.res.status, 200);
     assert.equal(out.json.status, "aborted");
 
+    // ── Bulk approve with per-test audit trail (PR #66) ──────────────────
+    // Create a second test so we can bulk-approve both and verify individual
+    // activity log entries are created for each test.
+    out = await req(base, `/api/projects/${projectId}/tests`, {
+      method: "POST",
+      token,
+      body: { name: "Signup test", steps: ["Open app", "Click signup"] },
+    });
+    assert.equal(out.res.status, 201);
+    const testId2 = out.json.id;
+
+    // Restore both tests to draft first (testId was approved above)
+    await req(base, `/api/projects/${projectId}/tests/${testId}/restore`, { method: "PATCH", token });
+
+    // Bulk approve both tests
+    out = await req(base, `/api/projects/${projectId}/tests/bulk`, {
+      method: "POST",
+      token,
+      body: { testIds: [testId, testId2], action: "approve" },
+    });
+    assert.equal(out.res.status, 200);
+    assert.equal(out.json.updated, 2, "Should approve 2 tests");
+
+    // Verify per-test activity entries were created
+    const activities = Object.values(db.activities || {});
+    const perTestApprovals = activities.filter(a =>
+      a.type === "test.approve" && a.detail?.includes("(bulk)")
+    );
+    assert.ok(perTestApprovals.length >= 2, `Should have ≥2 per-test audit entries, got ${perTestApprovals.length}`);
+
     console.log("✅ api-flow: all checks passed");
   } finally {
     await new Promise((resolve) => server.close(resolve));

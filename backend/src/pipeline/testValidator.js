@@ -82,8 +82,10 @@ export function validateTest(test, projectUrl) {
       const codeToCheck = bodyForCheck
         ? stripPlaywrightImports(bodyForCheck)
         : stripPlaywrightImports(test.playwrightCode);
+      // Wrap in async IIFE so `await` expressions are valid — matches the
+      // pattern used by codeExecutor.js when it actually runs the code.
       // eslint-disable-next-line no-new-func
-      new Function(codeToCheck);
+      new Function(`return (async () => {\n${codeToCheck}\n})();`);
     } catch (syntaxErr) {
       issues.push(`playwrightCode has syntax error: ${syntaxErr.message}`);
     }
