@@ -17,6 +17,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { formatLogLine } from "./utils/logFormatter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, "..", "data", "sentri-db.json");
@@ -29,11 +30,11 @@ function loadFromDisk() {
     if (fs.existsSync(DB_PATH)) {
       const raw = fs.readFileSync(DB_PATH, "utf-8");
       const data = JSON.parse(raw);
-      console.log(`[db] Restored from ${DB_PATH} — ${Object.keys(data.projects || {}).length} projects, ${Object.keys(data.tests || {}).length} tests`);
+      console.log(formatLogLine("info", null, `[db] Restored from ${DB_PATH} — ${Object.keys(data.projects || {}).length} projects, ${Object.keys(data.tests || {}).length} tests`));
       return data;
     }
   } catch (err) {
-    console.warn(`[db] Failed to load ${DB_PATH}, starting fresh:`, err.message);
+    console.warn(formatLogLine("warn", null, `[db] Failed to load ${DB_PATH}, starting fresh: ${err.message}`));
   }
   return null;
 }
@@ -48,7 +49,7 @@ function saveToDisk(db) {
     fs.writeFileSync(tmpPath, JSON.stringify(db), "utf-8");
     fs.renameSync(tmpPath, DB_PATH);
   } catch (err) {
-    console.warn("[db] Persist failed:", err.message);
+    console.warn(formatLogLine("warn", null, `[db] Persist failed: ${err.message}`));
   }
 }
 
@@ -132,7 +133,7 @@ export function getDb() {
       }
     }
     if (orphanCount > 0) {
-      console.warn(`[db] Marked ${orphanCount} orphaned run(s) as interrupted`);
+      console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
       saveToDisk(_db); // persist the corrected statuses immediately
     }
 

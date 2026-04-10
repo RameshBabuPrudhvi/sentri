@@ -30,6 +30,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getDb, saveDb } from "../db.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -152,7 +153,7 @@ function getJwtSecret() {
     const existing = fs.readFileSync(secretPath, "utf-8").trim();
     if (existing.length >= 32) {
       _cachedSecret = existing;
-      console.warn("[auth] WARNING: Using auto-generated JWT secret from data/.jwt-secret. Set JWT_SECRET in .env for production.");
+      console.warn(formatLogLine("warn", null, "Using auto-generated JWT secret from data/.jwt-secret. Set JWT_SECRET in .env for production."));
       return _cachedSecret;
     }
   } catch { /* file doesn't exist yet */ }
@@ -163,9 +164,9 @@ function getJwtSecret() {
     const dir = path.dirname(secretPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(secretPath, newSecret, "utf-8");
-    console.warn("[auth] Generated new JWT secret → data/.jwt-secret. Set JWT_SECRET in .env for production.");
+    console.warn(formatLogLine("warn", null, "Generated new JWT secret → data/.jwt-secret. Set JWT_SECRET in .env for production."));
   } catch (err) {
-    console.warn("[auth] Could not persist JWT secret to disk:", err.message);
+    console.warn(formatLogLine("warn", null, `Could not persist JWT secret to disk: ${err.message}`));
   }
   _cachedSecret = newSecret;
   return _cachedSecret;
@@ -346,7 +347,7 @@ router.post("/register", async (req, res) => {
 
     return res.status(201).json({ message: "Account created successfully." });
   } catch (err) {
-    console.error("[auth/register]", err);
+    console.error(formatLogLine("error", null, `[auth/register] ${err.message}`));
     return res.status(500).json({ error: "Registration failed. Please try again." });
   }
 });
@@ -399,7 +400,7 @@ router.post("/login", async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
-    console.error("[auth/login]", err);
+    console.error(formatLogLine("error", null, `[auth/login] ${err.message}`));
     return res.status(500).json({ error: "Sign-in failed. Please try again." });
   }
 });
@@ -634,7 +635,7 @@ router.get("/github/callback", async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
-    console.error("[auth/github]", err);
+    console.error(formatLogLine("error", null, `[auth/github] ${err.message}`));
     return res.status(401).json({ error: err.message || "GitHub authentication failed." });
   }
 });
@@ -700,7 +701,7 @@ router.get("/google/callback", async (req, res) => {
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
-    console.error("[auth/google]", err);
+    console.error(formatLogLine("error", null, `[auth/google] ${err.message}`));
     return res.status(401).json({ error: err.message || "Google authentication failed." });
   }
 });

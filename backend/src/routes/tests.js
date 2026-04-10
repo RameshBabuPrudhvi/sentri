@@ -36,6 +36,7 @@ import { runTests } from "../testRunner.js"; // thin orchestrator — delegates 
 import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
 
@@ -143,7 +144,7 @@ Return ONLY valid JSON with no markdown fences:
         codeRegeneratedNow = true;
       }
     } catch (err) {
-      console.error("[PATCH test] code regeneration failed:", err.message);
+      console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
     }
   }
 

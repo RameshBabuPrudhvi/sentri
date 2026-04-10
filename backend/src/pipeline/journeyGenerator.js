@@ -11,6 +11,7 @@
 
 import { generateText, streamText, parseJSON, isRateLimitError } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 import { withDials } from "./promptHelpers.js";
 import { extractTestsArray, sanitiseSteps } from "./stepSanitiser.js";
 import { buildJourneyPrompt } from "./prompts/journeyPrompt.js";
@@ -212,7 +213,7 @@ export async function generateJourneyTest(journey, snapshotsByUrl, { dialsPrompt
     if (err.name === "AbortError" || signal?.aborted) throw err;
     // Propagate rate limit errors so the caller can short-circuit
     if (isRateLimitError(err)) throw err;
-    console.error(`[journeyGenerator] Journey test generation failed: ${err.message?.slice(0, 300)}`);
+    console.error(formatLogLine("error", null, `[journeyGenerator] Journey test generation failed: ${err.message?.slice(0, 300)}`));
     return [];
   }
 }
@@ -234,7 +235,7 @@ export async function generateIntentTests(classifiedPage, snapshot, { dialsPromp
     if (err.name === "AbortError" || signal?.aborted) throw err;
     // Propagate rate limit errors so the caller can short-circuit
     if (isRateLimitError(err)) throw err;
-    console.error(`[journeyGenerator] Intent test generation failed for ${classifiedPage?.url || "unknown"}: ${err.message?.slice(0, 300)}`);
+    console.error(formatLogLine("error", null, `[journeyGenerator] Intent test generation failed for ${classifiedPage?.url || "unknown"}: ${err.message?.slice(0, 300)}`));
     return [];
   }
 }
@@ -371,7 +372,7 @@ export async function generateApiTests(apiEndpoints, appUrl, { dialsPrompt = "",
     if (err.name === "AbortError" || signal?.aborted) throw err;
     // Propagate rate limit errors so the caller can short-circuit (matches journey/intent generators)
     if (isRateLimitError(err)) throw err;
-    console.error(`[journeyGenerator] API test generation failed: ${err.message?.slice(0, 300)}`);
+    console.error(formatLogLine("error", null, `[journeyGenerator] API test generation failed: ${err.message?.slice(0, 300)}`));
     return [];
   }
 }

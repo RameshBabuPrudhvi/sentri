@@ -27,6 +27,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { throwIfAborted } from "./utils/abortHelper.js";
+import { formatLogLine } from "./utils/logFormatter.js";
 
 // ── Runtime key store (set via /api/settings, survives until process restart) ─
 const runtimeKeys = {};
@@ -344,7 +345,7 @@ async function withRetry(fn, label = "") {
       const delay = retryAfter
         ? Math.min(retryAfter, MAX_BACKOFF_MS * 2)
         : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-      console.warn(`[Sentri] Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      console.warn(formatLogLine("warn", null, `Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
       await sleep(delay);
     }
   }
@@ -550,7 +551,7 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
           err.message.includes("Ollama HTTP 500");
         if (attempt === MAX_RETRIES || !isRetryable) throw err;
         const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-        console.warn(`[Sentri/Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+        console.warn(formatLogLine("warn", null, `[Ollama] ${err.message.slice(0, 80)}. Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
         await sleep(delay);
       }
     }

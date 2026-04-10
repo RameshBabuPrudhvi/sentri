@@ -231,7 +231,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     }
     if (browser) {
       await browser.close().catch((err) => {
-        console.warn("[testRunner] browser.close() failed:", err.message);
+        console.warn(formatLogLine("warn", null, `[testRunner] browser.close() failed: ${err.message}`));
       });
     }
   }
