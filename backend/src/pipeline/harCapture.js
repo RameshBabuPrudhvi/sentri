@@ -145,14 +145,17 @@ export function createHarCapture(context, appOrigin) {
       if (!["fetch", "xhr"].includes(resourceType)) return;
 
       let reqBody = null;
+      let rawPostData = null;
       try {
-        const postData = request.postData();
-        if (postData) reqBody = truncate(postData);
+        rawPostData = request.postData();
+        if (rawPostData) reqBody = truncate(rawPostData);
       } catch { /* no body */ }
 
-      // Detect GraphQL operations so they can be grouped separately
+      // Detect GraphQL operations so they can be grouped separately.
+      // Extract from raw postData (before truncation) since complex GraphQL
+      // bodies often exceed MAX_BODY_CHARS and truncation breaks JSON parsing.
       const graphqlOp = (method === "POST" && isGraphQLPath(parsed.pathname))
-        ? extractGraphQLOperationName(reqBody)
+        ? extractGraphQLOperationName(rawPostData)
         : null;
 
       const entry = {

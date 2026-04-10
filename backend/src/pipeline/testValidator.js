@@ -8,6 +8,7 @@
  */
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
+import { extractTestBody, stripPlaywrightImports } from "../runner/codeParsing.js";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
 
@@ -69,9 +70,20 @@ export function validateTest(test, projectUrl) {
     // at run time. Uses new Function() to parse without executing. This catches
     // unbalanced braces, unterminated strings, and other syntax errors that
     // would otherwise only surface during Playwright execution.
+    //
+    // We must apply the same transforms that codeExecutor.js uses before
+    // execution: extractTestBody() pulls the async arrow-fn body, and
+    // stripPlaywrightImports() removes `import ... from '@playwright/test'`
+    // lines. Without this, the `import` declaration (which is illegal inside
+    // a function body) would cause every AI-generated test to be falsely
+    // rejected as a syntax error.
     try {
+      const bodyForCheck = extractTestBody(test.playwrightCode);
+      const codeToCheck = bodyForCheck
+        ? stripPlaywrightImports(bodyForCheck)
+        : stripPlaywrightImports(test.playwrightCode);
       // eslint-disable-next-line no-new-func
-      new Function(test.playwrightCode);
+      new Function(codeToCheck);
     } catch (syntaxErr) {
       issues.push(`playwrightCode has syntax error: ${syntaxErr.message}`);
     }
