@@ -62,20 +62,43 @@ function inferStepStatuses(steps = [], result = {}) {
       .replace(/https?:\/\/\S+/g, " ")  // strip full URLs
       .replace(/[^a-z0-9 ]/g, " ");     // keep only alphanum + spaces
 
+    // Detect assertion-related keywords in the error — these strongly indicate
+    // which step failed (e.g. "toHaveTitle" → step mentioning "title").
+    const assertionKeywords = [];
+    const assertionPatterns = [
+      { re: /tohave(?:title|url|text|value|count)/i, words: ["title", "verif", "assert", "check", "redirect"] },
+      { re: /tobevisible|tobeenabled|tobedisabled|tobechecked/i, words: ["verif", "visible", "assert", "check"] },
+      { re: /tocontaintext/i, words: ["verif", "contain", "assert", "check", "text"] },
+    ];
+    for (const { re, words } of assertionPatterns) {
+      if (re.test(error)) assertionKeywords.push(...words);
+    }
+
     let failedIdx = -1;
     let bestScore = 0;
 
     for (let i = 0; i < steps.length; i++) {
-      // Only consider words longer than 4 characters to skip stop-words
+      // Only consider words longer than 3 characters to skip stop-words
+      // (lowered from 4 to catch words like "title", "page", "cart")
       const stepWords = steps[i]
         .toLowerCase()
         .replace(/[^a-z0-9 ]/g, "")
         .split(" ")
-        .filter((w) => w.length > 4);
+        .filter((w) => w.length > 3);
 
       if (stepWords.length === 0) continue;
 
-      const matchCount = stepWords.filter((w) => cleanError.includes(w)).length;
+      let matchCount = stepWords.filter((w) => cleanError.includes(w)).length;
+
+      // Boost score when assertion keywords match step words — this helps
+      // attribute "toHaveTitle failed" to the step that says "verifies...title"
+      // rather than an earlier step that incidentally shares a word.
+      if (assertionKeywords.length > 0) {
+        const stepLower = steps[i].toLowerCase();
+        const assertionBoost = assertionKeywords.filter((kw) => stepLower.includes(kw)).length;
+        matchCount += assertionBoost;
+      }
+
       // Require at least 2 matching words, or a majority of the step's words
       const threshold = Math.max(2, Math.ceil(stepWords.length * 0.4));
       if (matchCount >= threshold && matchCount >= bestScore) {
