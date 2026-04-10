@@ -104,17 +104,22 @@ export function getAllLean() {
 }
 
 /**
- * Get all runs with results column only (for failure analysis).
- * Parses only the results JSON — skips logs, testQueue, etc.
+ * Get all runs with results + feedbackLoop columns (for failure/analytics).
+ * Parses only results and feedbackLoop JSON — skips logs, testQueue, etc.
  * @returns {Object[]}
  */
 export function getAllWithResults() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_COLS}, results FROM runs`).all().map(row => {
+  return db.prepare(`SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs`).all().map(row => {
     if (row.results) {
       try { row.results = JSON.parse(row.results); } catch { row.results = []; }
     } else {
       row.results = [];
+    }
+    if (row.feedbackLoop) {
+      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
+    } else {
+      row.feedbackLoop = null;
     }
     return row;
   });
