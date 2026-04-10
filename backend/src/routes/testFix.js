@@ -13,7 +13,7 @@
 import { Router } from "express";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
-import * as runRepo from "../database/repositories/runRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
@@ -26,17 +26,27 @@ const router = Router();
 /**
  * Find the most recent run result for a specific test ID.
  * Returns the result object with runId, or null.
+ *
+ * Uses a targeted SQL query with LIKE pre-filter to avoid loading and
+ * JSON-parsing every run in the database (which would be expensive with
+ * the SQLite backend as the number of runs grows).
  */
 function findLatestTestResult(testId) {
-  const runs = runRepo.getAll()
-    .filter(r => r.results?.length)
-    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+  const db = getDatabase();
+  // Pre-filter with LIKE to narrow down rows that might contain the testId,
+  // then parse and search the JSON results array in JS.
+  const rows = db.prepare(
+    `SELECT id, startedAt, results FROM runs
+     WHERE results LIKE ? AND results != '[]'
+     ORDER BY startedAt DESC LIMIT 20`
+  ).all(`%${testId}%`);
 
-  for (const run of runs) {
-    const result = run.results.find(r => r.testId === testId);
-    if (result) {
-      return { ...result, runId: run.id };
-    }
+  for (const row of rows) {
+    try {
+      const results = JSON.parse(row.results);
+      const match = results.find(r => r.testId === testId);
+      if (match) return { ...match, runId: row.id };
+    } catch { /* skip malformed JSON */ }
   }
   return null;
 }

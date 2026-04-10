@@ -17,8 +17,10 @@ import { fileURLToPath } from "url";
 import { formatLogLine } from "../utils/logFormatter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_DIR = path.join(__dirname, "..", "..", "data");
-const DB_PATH = path.join(DB_DIR, "sentri.db");
+const DB_PATH = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.join(__dirname, "..", "..", "data", "sentri.db");
+const DB_DIR = path.dirname(DB_PATH);
 const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 /** @type {Object|null} better-sqlite3 Database instance */
@@ -55,6 +57,12 @@ export function getDatabase() {
   const runCols = _db.prepare("PRAGMA table_info(runs)").all().map(c => c.name);
   if (!runCols.includes("currentStep")) {
     _db.exec("ALTER TABLE runs ADD COLUMN currentStep INTEGER DEFAULT 0");
+  }
+  if (!runCols.includes("rateLimitError")) {
+    _db.exec("ALTER TABLE runs ADD COLUMN rateLimitError TEXT");
+  }
+  if (!runCols.includes("qualityAnalytics")) {
+    _db.exec("ALTER TABLE runs ADD COLUMN qualityAnalytics TEXT");
   }
 
   console.log(formatLogLine("info", null, `[sqlite] Database opened at ${DB_PATH}`));

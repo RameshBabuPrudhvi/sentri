@@ -44,73 +44,61 @@ import playwright from "playwright";
  * @returns {Object} A vm context object
  */
 function buildSandboxContext(exposed) {
+  // Wrap host functions in arrow functions to break the constructor chain.
+  // Arrow functions inherit the sandbox's Function constructor, not the host's,
+  // preventing sandbox escape via `setTimeout.constructor('return process')()`.
+  const safeConsole = Object.freeze({
+    log:   (...args) => console.log(...args),
+    warn:  (...args) => console.warn(...args),
+    error: (...args) => console.error(...args),
+    info:  (...args) => console.info(...args),
+  });
+
   const ctx = vm.createContext({
     // ── Caller-provided objects (Playwright page, context, expect, etc.) ────
     ...exposed,
 
     // ── Safe JS built-ins required by generated Playwright code ─────────────
-    console:        Object.freeze({ log: console.log, warn: console.warn, error: console.error, info: console.info }),
-    setTimeout,
-    clearTimeout,
-    setInterval,
-    clearInterval,
-    Promise,
-    Error,
-    TypeError,
-    RangeError,
-    SyntaxError,
-    ReferenceError,
-    URIError,
-    AggregateError,
-    DOMException,
+    // Host functions are wrapped in arrow functions to prevent constructor-chain
+    // escape (arrow functions don't expose the host's Function constructor).
+    console:        safeConsole,
+    setTimeout:     (...args) => setTimeout(...args),
+    clearTimeout:   (...args) => clearTimeout(...args),
+    setInterval:    (...args) => setInterval(...args),
+    clearInterval:  (...args) => clearInterval(...args),
+
+    // Primitives and value types — these are safe because vm.createContext
+    // creates sandbox-local copies of built-in constructors. We only need to
+    // explicitly list them so generated code can reference them by name.
+    // NOTE: We do NOT pass the host's Promise, Array, Object, etc. directly —
+    // the vm context already provides its own versions of these built-ins.
+    // Passing host versions would expose the host Function constructor.
     JSON,
-    Date,
     Math,
-    RegExp,
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Symbol,
-    Map,
-    Set,
-    WeakMap,
-    WeakSet,
-    Int8Array,
-    Uint8Array,
-    Uint8ClampedArray,
-    Int16Array,
-    Uint16Array,
-    Int32Array,
-    Uint32Array,
-    Float32Array,
-    Float64Array,
-    BigInt64Array,
-    BigUint64Array,
-    ArrayBuffer,
-    SharedArrayBuffer,
-    DataView,
-    BigInt,
-    URL,
-    URLSearchParams,
-    TextEncoder,
-    TextDecoder,
-    atob:           typeof atob === "function" ? atob : undefined,
-    btoa:           typeof btoa === "function" ? btoa : undefined,
-    structuredClone: typeof structuredClone === "function" ? structuredClone : undefined,
-    Buffer,
-    isNaN,
-    isFinite,
-    parseInt,
-    parseFloat,
-    encodeURIComponent,
-    decodeURIComponent,
-    encodeURI,
-    decodeURI,
-    undefined,
     NaN,
     Infinity,
+    undefined,
+    isNaN:              (...args) => isNaN(...args),
+    isFinite:           (...args) => isFinite(...args),
+    parseInt:           (...args) => parseInt(...args),
+    parseFloat:         (...args) => parseFloat(...args),
+    encodeURIComponent: (...args) => encodeURIComponent(...args),
+    decodeURIComponent: (...args) => decodeURIComponent(...args),
+    encodeURI:          (...args) => encodeURI(...args),
+    decodeURI:          (...args) => decodeURI(...args),
+    atob:               typeof atob === "function" ? (...args) => atob(...args) : undefined,
+    btoa:               typeof btoa === "function" ? (...args) => btoa(...args) : undefined,
+    structuredClone:    typeof structuredClone === "function" ? (...args) => structuredClone(...args) : undefined,
+
+    // Buffer shim — wrap static methods to avoid exposing host constructor chain.
+    Buffer: Object.freeze({
+      from:    (...args) => Buffer.from(...args),
+      alloc:   (...args) => Buffer.alloc(...args),
+      allocUnsafe: (...args) => Buffer.allocUnsafe(...args),
+      concat:  (...args) => Buffer.concat(...args),
+      isBuffer: (...args) => Buffer.isBuffer(...args),
+      byteLength: (...args) => Buffer.byteLength(...args),
+    }),
 
     // ── Explicitly blocked — prevent escape from sandbox ────────────────────
     process:        undefined,

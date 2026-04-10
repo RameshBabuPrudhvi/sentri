@@ -13,6 +13,7 @@ import { getDatabase } from "../sqlite.js";
 const JSON_FIELDS = [
   "logs", "tests", "results", "testQueue", "generateInput",
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
+  "qualityAnalytics",
 ];
 
 function rowToRun(row) {
@@ -45,6 +46,7 @@ const INSERT_COLS = [
   "pagesFound", "parallelWorkers", "tracePath", "videoPath", "videoSegments",
   "logs", "tests", "results", "testQueue", "generateInput", "promptAudit",
   "pipelineStats", "feedbackLoop", "currentStep",
+  "rateLimitError", "qualityAnalytics",
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

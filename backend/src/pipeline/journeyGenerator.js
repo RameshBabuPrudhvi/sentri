@@ -280,6 +280,10 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
         onProgress?.(`⚠️  AI rate limit reached after all retries: ${err.message.slice(0, 120)}`);
         onProgress?.(`⏳ Waiting ${RATE_LIMIT_GRACE_MS / 1000}s for quota window to reset before retrying…`);
         await new Promise((resolve, reject) => {
+          if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+          }
           const timer = setTimeout(resolve, RATE_LIMIT_GRACE_MS);
           signal?.addEventListener("abort", () => {
             clearTimeout(timer);

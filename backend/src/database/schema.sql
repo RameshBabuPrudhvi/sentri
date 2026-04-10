@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS runs (
   pipelineStats   TEXT,                              -- JSON object
   feedbackLoop    TEXT,                              -- JSON object
   currentStep     INTEGER DEFAULT 0,                 -- pipeline progress (1-8)
+  rateLimitError  TEXT,                              -- rate limit error message (if any)
+  qualityAnalytics TEXT,                             -- JSON object (feedback loop analytics)
   FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_runs_projectId ON runs(projectId);

@@ -14,6 +14,7 @@ export function next(name) {
   const db = getDatabase();
   const stmt = db.prepare("UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value");
   const row = stmt.get(name);
+  if (!row) throw new Error(`Unknown counter: "${name}"`);
   return row.value;
 }
 
