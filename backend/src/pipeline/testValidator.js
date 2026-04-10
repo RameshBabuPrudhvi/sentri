@@ -8,7 +8,7 @@
  */
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
-import { extractTestBody, stripPlaywrightImports } from "../runner/codeParsing.js";
+import { extractTestBody, stripPlaywrightImports, patchNetworkIdle, repairBrokenStringLiterals } from "../runner/codeParsing.js";
 import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
@@ -78,9 +78,13 @@ export function validateTest(test, projectUrl) {
     // is valid — matching the execution pattern in codeExecutor.js:45-67.
     try {
       const bodyForCheck = extractTestBody(test.playwrightCode);
-      const codeToCheck = bodyForCheck
+      const stripped = bodyForCheck
         ? stripPlaywrightImports(bodyForCheck)
         : stripPlaywrightImports(test.playwrightCode);
+      // Apply the same repair passes used at runtime (codeExecutor.js:37-41)
+      // so that known AI output patterns (e.g. newlines inside quoted strings,
+      // networkidle usage) don't cause false-positive rejections.
+      const codeToCheck = repairBrokenStringLiterals(patchNetworkIdle(stripped));
       // Wrap in async function so `await` is valid at the top level
       const wrapped = `(async () => {\n${codeToCheck}\n})();`;
       parse(wrapped, { ecmaVersion: 2022, sourceType: "script" });
