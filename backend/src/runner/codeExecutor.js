@@ -1,12 +1,26 @@
 /**
- * codeExecutor.js — Dynamic execution of AI-generated Playwright test bodies
+ * codeExecutor.js — Sandboxed execution of AI-generated Playwright test bodies
  *
  * Responsibilities:
  *   1. Parse, clean, and patch the AI-generated code (via codeParsing.js)
  *   2. Inject self-healing runtime helpers (via selfHealing.js)
- *   3. Wrap the code in a new Function() and execute it against a live page
+ *   3. Execute the code in a **vm sandbox** with a restricted global context
  *   4. Lazy-load Playwright's `expect` at runtime
  *   5. Provide a real Playwright `request` fixture for API tests
+ *
+ * ### Security model
+ * AI-generated code is executed via `vm.compileFunction()` inside a sandbox
+ * context that only exposes the specific objects the test needs (page, context,
+ * expect, etc.) plus safe JS built-ins. Dangerous APIs are explicitly blocked:
+ *   - `process`     — env vars, exit, spawn
+ *   - `require`     — arbitrary module loading
+ *   - `import()`    — dynamic ESM imports
+ *   - `global` / `globalThis` — escape to the real global scope
+ *   - `fs`, `child_process`, `net`, `http`, etc. — not available
+ *
+ * This prevents prompt-injection payloads in tested page content from causing
+ * the LLM to emit code that reads API keys, accesses the filesystem, or makes
+ * outbound network calls from the server process.
  *
  * Exports:
  *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
@@ -14,9 +28,125 @@
  *   getExpect()
  */
 
+import vm from "vm";
 import { extractTestBody, patchNetworkIdle, stripPlaywrightImports, stripHallucinatedPageAssertions, repairBrokenStringLiterals } from "./codeParsing.js";
 import { getSelfHealingHelperCode, applyHealingTransforms } from "../selfHealing.js";
 import playwright from "playwright";
+
+// ─── Sandbox helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Build a restricted global context for vm.compileFunction().
+ * Only safe JS built-ins and the caller-provided objects are available.
+ * Dangerous APIs (process, require, import, fs, etc.) are explicitly undefined.
+ *
+ * @param {Object} exposed — caller-provided objects to inject (e.g. page, context, expect)
+ * @returns {Object} A vm context object
+ */
+function buildSandboxContext(exposed) {
+  const ctx = vm.createContext({
+    // ── Caller-provided objects (Playwright page, context, expect, etc.) ────
+    ...exposed,
+
+    // ── Safe JS built-ins required by generated Playwright code ─────────────
+    console:        Object.freeze({ log: console.log, warn: console.warn, error: console.error, info: console.info }),
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    Promise,
+    Error,
+    TypeError,
+    RangeError,
+    SyntaxError,
+    ReferenceError,
+    URIError,
+    AggregateError,
+    DOMException,
+    JSON,
+    Date,
+    Math,
+    RegExp,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Symbol,
+    Map,
+    Set,
+    WeakMap,
+    WeakSet,
+    Int8Array,
+    Uint8Array,
+    Uint8ClampedArray,
+    Int16Array,
+    Uint16Array,
+    Int32Array,
+    Uint32Array,
+    Float32Array,
+    Float64Array,
+    BigInt64Array,
+    BigUint64Array,
+    ArrayBuffer,
+    SharedArrayBuffer,
+    DataView,
+    BigInt,
+    URL,
+    URLSearchParams,
+    TextEncoder,
+    TextDecoder,
+    atob:           typeof atob === "function" ? atob : undefined,
+    btoa:           typeof btoa === "function" ? btoa : undefined,
+    structuredClone: typeof structuredClone === "function" ? structuredClone : undefined,
+    Buffer,
+    isNaN,
+    isFinite,
+    parseInt,
+    parseFloat,
+    encodeURIComponent,
+    decodeURIComponent,
+    encodeURI,
+    decodeURI,
+    undefined,
+    NaN,
+    Infinity,
+
+    // ── Explicitly blocked — prevent escape from sandbox ────────────────────
+    process:        undefined,
+    require:        undefined,
+    module:         undefined,
+    exports:        undefined,
+    __filename:     undefined,
+    __dirname:      undefined,
+    global:         undefined,
+    globalThis:     undefined,
+    fetch:          undefined,   // block outbound HTTP from generated code
+    XMLHttpRequest: undefined,
+    WebSocket:      undefined,
+    Deno:           undefined,
+    Bun:            undefined,
+  });
+
+  return ctx;
+}
+
+/**
+ * Compile and execute code inside a vm sandbox.
+ *
+ * @param {string}   code     — The full async IIFE source to execute
+ * @param {Object}   exposed  — Objects to inject into the sandbox context
+ * @param {string}   [filename] — Virtual filename for stack traces
+ * @returns {Promise<*>} The return value of the executed code
+ */
+async function runInSandbox(code, exposed, filename = "generated-test.js") {
+  const ctx = buildSandboxContext(exposed);
+  const fn = vm.compileFunction(code, [], {
+    parsingContext: ctx,
+    filename,
+  });
+  return await fn();
+}
 
 /**
  * runGeneratedCode(page, context, playwrightCode, expect, healingHints)
@@ -41,8 +171,9 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   );
   const helpers = getSelfHealingHelperCode(healingHints);
 
-  // eslint-disable-next-line no-new-func
-  const fn = new Function("page", "context", "expect", `
+  // Build the code string that will run inside the vm sandbox.
+  // The sandbox context provides page, context, expect as globals.
+  const code = `
     return (async () => {
       ${helpers}
       // Stubs for Playwright fixtures that some LLMs hallucinate in the function
@@ -65,10 +196,10 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       }
       return { __healingEvents };
     })();
-  `);
+  `;
 
   try {
-    const result = await fn(page, context, expect);
+    const result = await runInSandbox(code, { page, context, expect }, "browser-test.js");
     return { passed: true, healingEvents: result?.__healingEvents || [] };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
@@ -104,12 +235,11 @@ export async function runApiTestCode(playwrightCode, expect, { signal } = {}) {
     )
   );
 
-  // Compile the function BEFORE creating the request context so that a
-  // SyntaxError in the AI-generated code doesn't leak the HTTP context.
-  // new Function() only parses — it doesn't execute — so it doesn't need
-  // the request object yet.
-  // eslint-disable-next-line no-new-func
-  const fn = new Function("request", "expect", "__apiLogs", `
+  // Build the code string. We validate syntax eagerly (before creating the
+  // request context) by compiling once with a throwaway context. If the AI
+  // generated invalid JS, this throws SyntaxError without leaking an HTTP
+  // context. The actual execution happens later with the real request object.
+  const apiCode = `
     return (async () => {
       // API tests don't use page/context — provide stubs to prevent ReferenceError
       const page = undefined;
@@ -127,7 +257,10 @@ export async function runApiTestCode(playwrightCode, expect, { signal } = {}) {
       }
       return { passed: true };
     })();
-  `);
+  `;
+
+  // Eagerly validate syntax — throws SyntaxError before we allocate HTTP resources.
+  vm.compileFunction(apiCode, [], { parsingContext: buildSandboxContext({}) });
 
   // Now that we know the code is syntactically valid, create the context.
   const apiLogs = [];
@@ -221,7 +354,7 @@ export async function runApiTestCode(playwrightCode, expect, { signal } = {}) {
   }
 
   try {
-    await fn(request, expect, apiLogs);
+    await runInSandbox(apiCode, { request, expect, __apiLogs: apiLogs }, "api-test.js");
     return { passed: true, apiLogs };
   } catch (err) {
     err.__apiLogs = apiLogs;
