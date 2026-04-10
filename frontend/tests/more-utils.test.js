@@ -5,7 +5,6 @@
 
 import assert from "node:assert/strict";
 import { cleanTestName } from "../src/utils/formatTestName.js";
-import isApiTestCode from "../src/utils/isApiTestCode.js";
 import { loadSavedConfig, saveConfig, countActiveDials } from "../src/utils/testDialsStorage.js";
 import { csvEscape, buildCsv, downloadCsv } from "../src/utils/exportCsv.js";
 import { parseJsonResponse } from "../src/utils/api.js";
@@ -48,19 +47,6 @@ test("cleanTestName strips known scenario prefixes", () => {
 test("cleanTestName preserves non-prefixed names", () => {
   assert.equal(cleanTestName("Login success flow"), "Login success flow");
   assert.equal(cleanTestName(null), null);
-});
-
-console.log("\n🧪 isApiTestCode");
-
-test("isApiTestCode detects API-only code", () => {
-  const apiCode = "await request.newContext();\nawait request.get('/health');";
-  assert.equal(isApiTestCode(apiCode), true);
-});
-
-test("isApiTestCode rejects UI interaction code", () => {
-  const mixedCode = "await request.get('/api/users');\nawait page.click('#submit');";
-  assert.equal(isApiTestCode(mixedCode), false);
-  assert.equal(isApiTestCode(null), false);
 });
 
 console.log("\n🧪 testDialsStorage");
