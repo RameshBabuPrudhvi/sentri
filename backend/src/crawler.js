@@ -349,6 +349,11 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
     } else {
       logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
     }
+    structuredLog("crawl.complete", {
+      runId: run.id, projectId: project.id, mode,
+      pages: snapshots.length, tests: run.tests.length, durationMs: run.duration,
+      apiEndpoints: apiEndpoints.length,
+    });
     emitRunEvent(run.id, "done", { status: "completed" });
   });
 }
