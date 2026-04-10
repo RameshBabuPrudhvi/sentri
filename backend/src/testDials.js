@@ -21,6 +21,8 @@
  *   {@link TEST_COUNT_OPTIONS}, {@link EXPLORE_MODE_OPTIONS}.
  */
 
+import { formatLogLine } from "./utils/logFormatter.js";
+
 // ─── Canonical option definitions ──────────────────────────────────────────────
 
 export const APPROACH_OPTIONS = [
@@ -329,8 +331,8 @@ export function buildDialsPrompt(cfg) {
 
   const result = lines.length > 1 ? lines.join("\n") : "";
   if (result && (process.env.LOG_LEVEL || "").toLowerCase() === "debug") {
-    console.log("[buildDialsPrompt] Validated config:", JSON.stringify(cfg, null, 2));
-    console.log("[buildDialsPrompt] Generated fragment (%d chars):\n%s", result.length, result);
+    console.log(formatLogLine("debug", null, `[buildDialsPrompt] Validated config: ${JSON.stringify(cfg)}`));
+    console.log(formatLogLine("debug", null, `[buildDialsPrompt] Generated fragment (${result.length} chars):\n${result}`));
   }
   return result;
 }

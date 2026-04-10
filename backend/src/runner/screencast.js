@@ -9,6 +9,7 @@
  */
 
 import { emitRunEvent } from "../utils/runLogger.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 /**
  * startScreencast(page, runId)
@@ -38,7 +39,7 @@ export async function startScreencast(page, runId) {
       everyNthFrame: 2, // ~15 FPS source → ~7 FPS net
     });
   } catch (cdpErr) {
-    console.warn("[screencast] CDP screencast unavailable:", cdpErr.message);
+    console.warn(formatLogLine("warn", null, `[screencast] CDP screencast unavailable: ${cdpErr.message}`));
     return null;
   }
 

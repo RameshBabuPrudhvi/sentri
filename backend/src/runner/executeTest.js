@@ -25,6 +25,7 @@ import { startScreencast } from "./screencast.js";
 import { captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 /**
  * Attach network & console listeners to a page.

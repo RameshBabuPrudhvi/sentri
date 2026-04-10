@@ -21,6 +21,7 @@
 import dotenv from "dotenv";
 import { initCountersFromExistingData } from "./utils/idGenerator.js";
 import { getDb } from "./db.js";
+import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -50,10 +51,14 @@ dotenv.config();
 // Playwright can throw unhandled rejections from browser internals, page event
 // handlers, or video flush operations — especially when assertions fail mid-test.
 process.on("uncaughtException", (err) => {
-  console.error("[FATAL] Uncaught exception (server kept alive):", err);
+  // Use formatLogLine for consistent output — but wrapped in try/catch since
+  // the formatter itself could theoretically fail during a fatal error.
+  try { console.error(formatLogLine("error", null, `[FATAL] Uncaught exception (server kept alive): ${err?.message || err}`)); }
+  catch { console.error("[FATAL] Uncaught exception (server kept alive):", err); }
 });
 process.on("unhandledRejection", (reason) => {
-  console.error("[FATAL] Unhandled rejection (server kept alive):", reason);
+  try { console.error(formatLogLine("error", null, `[FATAL] Unhandled rejection (server kept alive): ${reason?.message || reason}`)); }
+  catch { console.error("[FATAL] Unhandled rejection (server kept alive):", reason); }
 });
 
 // ─── DB init ──────────────────────────────────────────────────────────────────
@@ -89,4 +94,7 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🐻 Sentri API running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(formatLogLine("info", null, `🐻 Sentri API running on port ${PORT}`));
+  structuredLog("server.start", { port: PORT });
+});

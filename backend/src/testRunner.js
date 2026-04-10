@@ -35,7 +35,7 @@ import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser } from "./runner/co
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
-import { structuredLog } from "./utils/logFormatter.js";
+import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item

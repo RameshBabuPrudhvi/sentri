@@ -16,6 +16,7 @@
  */
 
 import crypto from "crypto";
+import { formatLogLine } from "./logFormatter.js";
 
 /**
  * Cached encryption key — derived once per process to avoid repeated
@@ -117,7 +118,7 @@ export function decryptCredentials(creds) {
       submitSelector: creds.submitSelector || "",
     };
   } catch (err) {
-    console.error("[credentialEncryption] Decryption failed:", err.message);
+    console.error(formatLogLine("error", null, `[credentialEncryption] Decryption failed: ${err.message}`));
     return null;
   }
 }
