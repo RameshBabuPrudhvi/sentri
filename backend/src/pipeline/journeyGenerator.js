@@ -279,17 +279,29 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
         // provider's quota window before making one final attempt.
         onProgress?.(`⚠️  AI rate limit reached after all retries: ${err.message.slice(0, 120)}`);
         onProgress?.(`⏳ Waiting ${RATE_LIMIT_GRACE_MS / 1000}s for quota window to reset before retrying…`);
-        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_GRACE_MS));
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, RATE_LIMIT_GRACE_MS);
+          signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+          }, { once: true });
+        });
         throwIfAborted(signal);
         try {
           return await fn();
         } catch (retryErr) {
           if (retryErr.name === "AbortError" || signal?.aborted) throw retryErr;
-          // Grace-period retry also failed — quota is durably exhausted.
-          // Stop all remaining calls to avoid hammering the provider.
-          rateLimitHit = true;
-          rateLimitError = retryErr;
-          onProgress?.(`⏭️  Rate limit persists after grace period — skipping remaining AI calls (${allTests.length} tests saved so far)`);
+          if (isRateLimitError(retryErr)) {
+            // Grace-period retry also hit rate limit — quota is durably exhausted.
+            // Stop all remaining calls to avoid hammering the provider.
+            rateLimitHit = true;
+            rateLimitError = retryErr;
+            onProgress?.(`⏭️  Rate limit persists after grace period — skipping remaining AI calls (${allTests.length} tests saved so far)`);
+            return [];
+          }
+          // Non-rate-limit error on retry — log and return empty but don't
+          // permanently skip remaining calls since this isn't a quota issue.
+          onProgress?.(`⚠️  ${label} retry failed: ${retryErr.message?.slice(0, 100)}`);
           return [];
         }
       }
