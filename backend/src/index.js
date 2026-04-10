@@ -53,11 +53,11 @@ dotenv.config();
 process.on("uncaughtException", (err) => {
   // Use formatLogLine for consistent output — but wrapped in try/catch since
   // the formatter itself could theoretically fail during a fatal error.
-  try { console.error(formatLogLine("error", null, `[FATAL] Uncaught exception (server kept alive): ${err?.message || err}`)); }
+  try { console.error(formatLogLine("error", null, `[FATAL] Uncaught exception (server kept alive): ${err?.stack || err?.message || err}`)); }
   catch { console.error("[FATAL] Uncaught exception (server kept alive):", err); }
 });
 process.on("unhandledRejection", (reason) => {
-  try { console.error(formatLogLine("error", null, `[FATAL] Unhandled rejection (server kept alive): ${reason?.message || reason}`)); }
+  try { console.error(formatLogLine("error", null, `[FATAL] Unhandled rejection (server kept alive): ${reason?.stack || reason?.message || reason}`)); }
   catch { console.error("[FATAL] Unhandled rejection (server kept alive):", reason); }
 });
 

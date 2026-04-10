@@ -110,7 +110,6 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   if (!allApiOnly) {
     try {
       browser = await launchBrowser();
-      structuredLog("browser.launched", { runId });
     } catch (launchErr) {
       const classified = classifyError(launchErr, "run");
       run.status = "failed";
@@ -121,6 +120,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       structuredLog("browser.launch_failed", { runId, error: classified.message });
       throw launchErr;
     }
+    structuredLog("browser.launched", { runId });
 
     // Shared tracing context (separate from per-test video contexts)
     try {
