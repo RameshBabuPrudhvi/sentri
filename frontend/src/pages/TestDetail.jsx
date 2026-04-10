@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Play, Edit2, RefreshCw, Download,
-  CheckCircle2, XCircle, Clock,
+  Play, Edit2, RefreshCw, Download,
+  CheckCircle2, Clock,
   ChevronRight, Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
   Link2, Tag, Clipboard, Wand2,
@@ -17,7 +17,6 @@ import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
-import CodeEditorModal from "../components/test/CodeEditorModal.jsx";
 import AiFixPanel from "../components/AiFixPanel.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
@@ -96,10 +95,6 @@ export default function TestDetail() {
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
   const [showDiff,  setShowDiff]  = useState(false);   // show code diff when playwrightCodePrev exists
   const [curlCopied, setCurlCopied] = useState(null);  // index of step whose cURL was just copied
-
-  // ── Code editor modal state ──────────────────────────────────────────────
-  const [codeEditorOpen, setCodeEditorOpen] = useState(false);
-  const [codeEditorInitial, setCodeEditorInitial] = useState(null); // pre-fill code for editor
 
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
@@ -999,17 +994,6 @@ export default function TestDetail() {
             )}
           </div>
         </div>
-
-        {/* ── Code Editor Modal ───────────────────────────────────────────── */}
-        {codeEditorOpen && (
-          <CodeEditorModal
-            test={test}
-            testId={testId}
-            initialCode={codeEditorInitial}
-            onClose={() => { setCodeEditorOpen(false); setCodeEditorInitial(null); setEditing(false); }}
-            onSaved={(updated) => { setTest(updated); setCodeEditorInitial(null); setEditing(false); }}
-          />
-        )}
 
         {/* RIGHT SIDEBAR */}
         <div className="card" style={{ padding: 22 }}>
