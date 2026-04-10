@@ -174,6 +174,40 @@ test("handles more steps than lines", () => {
   assert.ok(chunks.some(c => c.length > 0), "At least one chunk should have content");
 });
 
+test("splits by step comment markers when present", () => {
+  const code = `test('markers', async ({ page }) => {
+  // Step 1: Navigate
+  await page.goto('https://example.com');
+  // Step 2: Click button
+  await page.click('#btn');
+  await page.waitForLoadState();
+  // Step 3: Verify
+  await expect(page).toHaveTitle('Done');
+});`;
+  const chunks = splitCodeBySteps(code, 3);
+  assert.equal(chunks.length, 3, "Expected 3 chunks");
+  assert.ok(chunks[0].includes("goto"), "Step 1 should have goto");
+  assert.ok(chunks[1].includes("click"), "Step 2 should have click");
+  assert.ok(chunks[2].includes("toHaveTitle"), "Step 3 should have assertion");
+});
+
+test("accepts optional step descriptions for keyword matching", () => {
+  const code = `test('kw', async ({ page }) => {
+  await page.goto('https://example.com');
+  await safeFill(page, 'Email', 'test@x.com');
+  await safeClick(page, 'Submit');
+  await safeExpect(page, expect, 'Success');
+});`;
+  const steps = [
+    "User opens the homepage",
+    "User fills in their email address",
+    "User clicks the submit button",
+    "User sees the success message",
+  ];
+  const chunks = splitCodeBySteps(code, 4, steps);
+  assert.equal(chunks.length, 4, "Expected 4 chunks");
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // highlightCode
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -128,5 +128,6 @@ CODE REQUIREMENTS:
 - playwrightCode must be fully self-contained and executable on its own.
 - Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.
 - INLINE ALL TEST DATA: Every value used in the test (search terms, email addresses, passwords, usernames, quantities, IDs) MUST be written as a string literal directly in the code. NEVER declare variables like "const searchTerm = 'iphone'" or reference testData keys by name. BAD: await safeFill(page, 'Search', searchTerm) — ReferenceError at runtime. GOOD: await safeFill(page, 'Search', 'iphone') — literal value always works.
-- NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.`;
+- NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.
+- STEP COMMENTS: Add a "// Step N:" comment before the code for each step in the "steps" array. This aligns the code with the step descriptions in the UI. Example: if steps has 3 items, the code should have "// Step 1:", "// Step 2:", "// Step 3:" comments marking where each step's code begins. Every step in the "steps" array MUST have corresponding code — do NOT leave steps without implementation.`;
 }

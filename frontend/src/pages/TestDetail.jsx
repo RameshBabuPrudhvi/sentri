@@ -566,7 +566,7 @@ export default function TestDetail() {
             ) : stepsView === "source" && test.playwrightCode ? (
               /* ── SOURCE view: numbered steps each with their code block ── */
               (() => {
-                const stepChunks = splitCodeBySteps(test.playwrightCode, (test.steps || []).length);
+                const stepChunks = splitCodeBySteps(test.playwrightCode, (test.steps || []).length, test.steps);
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                     {/* Diff panel — shown above source when "Show changes" is active */}

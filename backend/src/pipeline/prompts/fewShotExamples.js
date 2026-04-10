@@ -40,15 +40,21 @@ export const LOGIN_POSITIVE_EXAMPLE = {
   playwrightCode: `import { test, expect } from '@playwright/test';
 
 test('Successful login with valid credentials shows dashboard', async ({ page }) => {
+  // Step 1: User opens the login page and sees the heading 'Sign In'
   await page.goto('https://app.example.com/login', { waitUntil: 'domcontentloaded', timeout: 30000 });
-
   await safeExpect(page, expect, 'Sign In', 'heading');
-  // Values are inlined as string literals — NEVER assigned to variables
+
+  // Step 2: User enters credentials — values are inlined as string literals
   await safeFill(page, 'Email', 'jane@test.com');
   await safeFill(page, 'Password', 'Secure123!');
+
+  // Step 3: User clicks the 'Sign In' button
   await safeClick(page, 'Sign In');
 
+  // Step 4: The dashboard loads and shows 'Welcome back, Jane'
   await safeExpect(page, expect, 'Welcome back, Jane');
+
+  // Step 5: The navigation bar shows a 'My Account' link
   await safeExpect(page, expect, 'My Account', 'link');
 });`,
 };
@@ -73,14 +79,20 @@ export const FORM_VALIDATION_NEGATIVE_EXAMPLE = {
   playwrightCode: `import { test, expect } from '@playwright/test';
 
 test('Empty required fields show validation errors on submit', async ({ page }) => {
+  // Step 1: User opens the contact page and sees the heading 'Contact Us'
   await page.goto('https://app.example.com/contact', { waitUntil: 'domcontentloaded', timeout: 30000 });
-
   await safeExpect(page, expect, 'Contact Us', 'heading');
+
+  // Step 2: User leaves all fields empty and clicks 'Send Message'
   await safeClick(page, 'Send Message');
 
+  // Step 3: Validation error 'Name is required' appears
   await safeExpect(page, expect, 'Name is required');
+
+  // Step 4: Validation error 'Email is required' appears
   await safeExpect(page, expect, 'Email is required');
-  // Confirm we're still on the contact page (form did not submit)
+
+  // Step 5: The form does NOT submit — user remains on the same page
   await safeExpect(page, expect, 'Contact Us', 'heading');
 });`,
 };
@@ -116,21 +128,21 @@ export const SEARCH_POSITIVE_EXAMPLE = {
   playwrightCode: `import { test, expect } from '@playwright/test';
 
 test('Search for laptop returns relevant product listings', async ({ page }) => {
+  // Step 1: User opens the homepage and sees the search bar
   await page.goto('https://shop.example.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
+  // Step 2: User types 'laptop' into the search bar and clicks Search
   // CORRECT: 'laptop' is a string literal — not a variable
   await safeFill(page, 'Search', 'laptop');
   await safeClick(page, 'Search');
 
-  // Wait for results before asserting
+  // Step 3: Search results page loads showing product listings
   await page.waitForSelector('.product-title', { timeout: 15000 });
-
   // CORRECT: locator written inline inside expect() — no variable declaration
   await expect(page.locator('.product-title')).not.toHaveCount(0);
 
-  // Assert visible content — first result must contain the search term
+  // Step 4: At least one result is visible and contains 'laptop'
   await expect(page.locator('.product-title').first()).toContainText('laptop', { ignoreCase: true });
-
   // CORRECT: assert visible content, NOT toHaveURL() — URL will have query params like ?q=laptop&ref=...
   await safeExpect(page, expect, 'results for');
 });`,
@@ -156,6 +168,7 @@ CRITICAL RULES demonstrated by the examples above — violating any of these mak
 2. Count/locator assertions: page.locator() is written INLINE inside expect() — never assigned to a const/let first.
 3. Search/filter tests: assert on visible CONTENT (result titles, headings, counts). NEVER use toHaveURL() with a literal URL string after a search or navigation — the URL will always contain query params that make an exact match fail.
 4. No unused variable declarations. If you assign page.locator() to a variable, use it immediately on the very next line.
+5. STEP COMMENTS: Every step in the "steps" array MUST have a corresponding "// Step N:" comment in playwrightCode marking where that step's code begins. Do NOT leave any step without implementation code.
 
-Your generated tests must follow all four rules above.`.trim();
+Your generated tests must follow all five rules above.`.trim();
 }
