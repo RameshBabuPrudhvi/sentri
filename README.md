@@ -111,11 +111,13 @@ Open [http://localhost:80](http://localhost:80)
 **Backend:**
 ```bash
 cd backend
-npm install
+npm install                 # Installs deps including better-sqlite3 (native module — prebuilt binaries for most platforms)
 npx playwright install chromium
 cp .env.example .env        # Add at least one AI provider key
-npm run dev                 # Starts on :3001
+npm run dev                 # Starts on :3001, creates data/sentri.db automatically
 ```
+
+> **Database:** SQLite (`data/sentri.db`) is created automatically on first startup — no manual setup needed. If upgrading from a previous version that used `sentri-db.json`, data is auto-migrated on first run.
 
 **Frontend:**
 ```bash
