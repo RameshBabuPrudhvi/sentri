@@ -43,7 +43,7 @@ export const ASSERTION_RULES = `
 - In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state.`.trim();
 
 export const STABILITY_RULES = `
-- URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs, consent pages, geo-redirects, login walls, URL-encoded params). Instead: (a) PREFER asserting visible page CONTENT over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/example\\.com/i) — never match on path segments or query params. (c) For search flows, assert that results appeared on the page rather than checking the URL.
+- URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs, consent pages, geo-redirects, login walls, URL-encoded params). Instead: (a) PREFER asserting visible page CONTENT over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/example\\.com/i) — never match on path segments or query params. (c) For search flows, assert that results appeared on the page rather than checking the URL. (d) NEVER use toHaveURL() with a literal string — it will fail on any redirect, query param, or geo-variant of the URL. (e) NEVER add toHaveURL() as a final assertion after a search, filter, or form action — the URL will contain query params that make an exact match impossible.
 - After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites continuously fire background requests and never reach networkidle, causing a guaranteed 30s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content, use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.`.trim();
 
 // ─── JSON output schema block ────────────────────────────────────────────────
@@ -82,7 +82,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 FIELD RULES:
 - "type" must be one of: ${VALID_TEST_TYPES.map(t => `"${t}"`).join(", ")}. Pick the best match. If unsure, use "functional".
 - "preconditions" — state any required setup (user role, data state, browser context). Omit or set to "" if the test starts from a clean state.
-- "testData" — provide concrete sample values (emails, IDs, amounts) so the test can be executed immediately without modification. Omit or set to {} if no test data is needed.
+- "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const searchTerm = ...) and NEVER reference a testData key by name inside the code. BAD: safeFill(page, 'Search', searchTerm) — searchTerm is not defined at runtime. GOOD: safeFill(page, 'Search', 'iphone') — literal value inline. Omit testData or set to {} if no test data is needed.
 - "steps" — SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
   Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result.
   BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed"]
@@ -103,7 +103,7 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.0.0";
+export const PROMPT_VERSION = "2.1.0";
 
 export function buildSystemPrompt() {
   return `You are a senior QA automation engineer generating production-grade Playwright test suites.
@@ -126,5 +126,7 @@ ${STABILITY_RULES}
 
 CODE REQUIREMENTS:
 - playwrightCode must be fully self-contained and executable on its own.
-- Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.`;
+- Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.
+- INLINE ALL TEST DATA: Every value used in the test (search terms, email addresses, passwords, usernames, quantities, IDs) MUST be written as a string literal directly in the code. NEVER declare variables like "const searchTerm = 'iphone'" or reference testData keys by name. BAD: await safeFill(page, 'Search', searchTerm) — ReferenceError at runtime. GOOD: await safeFill(page, 'Search', 'iphone') — literal value always works.
+- NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.`;
 }

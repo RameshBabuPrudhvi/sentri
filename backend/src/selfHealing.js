@@ -28,28 +28,29 @@
 // Key format: "<testId>::<action>::<label>"
 // Value: { strategyIndex: number, succeededAt: string, failCount: number }
 
-import * as healingRepo from "./database/repositories/healingRepo.js";
-
 /**
  * Record a successful healing result in the DB.
  *
- * @param {Object} db             - The database object (unused — kept for backward compat).
+ * @param {Object} db             - The database object from {@link module:db.getDb}.
  * @param {string} testId         - Test ID (e.g. `"TC-1"`).
  * @param {string} action         - Action type (`"click"`, `"fill"`, `"expect"`).
  * @param {string} label          - Element label/text used in the action.
  * @param {number} strategyIndex  - Index of the winning strategy in the waterfall.
  */
 export function recordHealing(db, testId, action, label, strategyIndex) {
+  if (!db?.healingHistory) return;
   if (!testId || !action || typeof label !== "string") return;
+  // Guard against corrupt strategy indices — only store valid non-negative integers.
+  // A negative or non-integer value would poison the hint map and cause future runs
+  // to try a nonexistent strategy index in findElement.
   const idx = Number.isInteger(strategyIndex) && strategyIndex >= 0 ? strategyIndex : -1;
-  if (idx < 0) return;
+  if (idx < 0) return; // Nothing useful to record — don't overwrite a good entry with garbage
   const key = `${testId}::${action}::${label}`;
-  const existing = healingRepo.get(key);
-  healingRepo.set(key, {
+  db.healingHistory[key] = {
     strategyIndex: idx,
     succeededAt: new Date().toISOString(),
-    failCount: existing?.failCount || 0,
-  });
+    failCount: (db.healingHistory[key]?.failCount || 0),
+  };
 }
 
 /**
@@ -78,10 +79,10 @@ export function recordHealingFailure(db, testId, action, label) {
  * @returns {number}         Strategy index (0-based), or `-1` if no history.
  */
 export function getHealingHint(db, testId, action, label) {
+  if (!db?.healingHistory) return -1;
   if (!testId || !action || typeof label !== "string") return -1;
   const key = `${testId}::${action}::${label}`;
-  const entry = healingRepo.get(key);
-  return entry?.strategyIndex ?? -1;
+  return db.healingHistory[key]?.strategyIndex ?? -1;
 }
 
 /**
@@ -724,6 +725,16 @@ VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
   ✓ await safeExpect(page, expect, text)           — assert any element is visible
   ✓ await safeExpect(page, expect, text, 'button') — scoped to a role
 
+COUNT / VALUE ASSERTIONS — use page.locator() scoped to a semantic selector:
+  ✓ await expect(page.locator(...)).toHaveCount(5);
+  ✓ await expect(page.locator(...)).toHaveCount(5);
+  ✓ await expect(page.locator(...).toHaveCount(5);
+  ✗ NEVER assign the locator to a variable first — write it inline inside expect():
+    BAD:  const items = page.locator(...); await expect(items).toHaveCount(5);
+    GOOD: await expect(page.locator(...)).toHaveCount(5);
+  ✗ NEVER assert a hard-coded count on a generic container that may change (e.g. toHaveCount(5) on search results).
+    Instead verify AT LEAST one result is visible: await expect(page.locator(...)).not.toHaveCount(0);
+
 OTHER ASSERTIONS — these are fine as-is (do not wrap them):
   ✓ await expect(page).toHaveURL(...)
   ✓ await expect(page).toHaveTitle(...)
@@ -789,4 +800,9 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ expect(page.getByTestId(...)).toBeVisible()
   ✗ expect(page.getByAltText(...)).toBeVisible()
   ✗ expect(page.locator(...)).toBeVisible()  ← use safeExpect with the text/label instead
+
+  Variable-based locator declarations (always inline inside expect()):
+  ✗ const searchInput = page.locator(...);   ← declare AND use in one line, or use safeFill/safeClick
+  ✗ const results = page.locator(...);  ← inline: expect(page.locator(...)).toHaveCount(N)
+  ✗ const searchButton = page.locator(...);     ← use safeClick(page, text) instead
 `.trim();
