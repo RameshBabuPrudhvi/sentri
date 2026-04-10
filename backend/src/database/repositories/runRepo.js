@@ -109,8 +109,12 @@ export function create(run) {
   db.prepare(INSERT_SQL).run(params);
 }
 
+// Set of valid column names for filtering unknown properties in update().
+const VALID_COLS = new Set(INSERT_COLS);
+
 /**
  * Update specific fields on a run (full replacement of provided fields).
+ * Unknown properties (not in the runs table) are silently skipped.
  * @param {string} id
  * @param {Object} fields
  */
@@ -121,6 +125,7 @@ export function update(id, fields) {
   const params = { id };
   for (const [key, val] of Object.entries(row)) {
     if (key === "id") continue;
+    if (!VALID_COLS.has(key)) continue;
     sets.push(`${key} = @${key}`);
     params[key] = val;
   }
@@ -129,13 +134,22 @@ export function update(id, fields) {
 }
 
 /**
- * Save the entire run object (upsert-style update of all fields).
+ * Save the entire run object (upsert-style update of all known columns).
  * Used by pipeline code that mutates the run in-memory and then flushes.
+ *
+ * Pipeline code accumulates non-column properties on the run object
+ * (e.g. currentStep, snapshots, pages, testsGenerated, rateLimitError,
+ * qualityAnalytics). These are filtered out so the generated SQL only
+ * references actual table columns.
+ *
  * @param {Object} run — Full run object with `id`.
  */
 export function save(run) {
-  const fields = { ...run };
-  delete fields.id;
+  const fields = {};
+  for (const col of INSERT_COLS) {
+    if (col !== "id" && col in run) fields[col] = run[col];
+  }
+  if (Object.keys(fields).length === 0) return;
   update(run.id, fields);
 }
 

@@ -404,7 +404,11 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
       // auto-approving. This preserves the "nothing executes until a
       // human approves" principle and prevents silently introducing
       // flawed tests into the approved pool.
-      const { id: _id, ...fields } = regenerated;
+      // Strip non-column properties before persisting. regenerateFailingTest()
+      // adds underscore-prefixed metadata (_regenerated, _regenerationReason,
+      // _originalCode) and the original test may carry _quality, _assertionEnhanced,
+      // _generatedFrom — none of which are columns in the tests table.
+      const { id: _id, _regenerated, _regenerationReason, _originalCode, _quality, _assertionEnhanced, _generatedFrom, ...fields } = regenerated;
       testRepo.update(improvement.testId, { ...fields, reviewStatus: "draft" });
       improved++;
     }

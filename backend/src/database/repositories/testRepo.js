@@ -124,6 +124,9 @@ export function create(test) {
  * @param {string} id
  * @param {Object} fields — Partial test fields to update.
  */
+// Set of valid column names for filtering unknown properties in update().
+const VALID_COLS = new Set(INSERT_COLS);
+
 export function update(id, fields) {
   const db = getDatabase();
   const row = testToRow(fields);
@@ -131,6 +134,9 @@ export function update(id, fields) {
   const params = { id };
   for (const [key, val] of Object.entries(row)) {
     if (key === "id") continue;
+    // Skip properties that are not actual table columns (e.g. _regenerated,
+    // _quality, _generatedFrom) to prevent SQLite "no column" errors.
+    if (!VALID_COLS.has(key)) continue;
     sets.push(`${key} = @${key}`);
     params[key] = val;
   }

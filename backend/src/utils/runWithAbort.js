@@ -7,7 +7,7 @@
  *
  * ### Exports
  * - {@link runWithAbort} — Execute an async function with abort support.
- * - {@link runAbortControllers} — `Map<runId, AbortController>` registry.
+ * - {@link runAbortControllers} — `Map<runId, { controller: AbortController, run: Object }>` registry.
  */
 
 import { emitRunEvent } from "../routes/sse.js";
@@ -18,11 +18,14 @@ import { formatLogLine } from "./logFormatter.js";
 
 // ─── Abort registry: runId → AbortController ──────────────────────────────────
 // Allows in-progress crawl / generate / test_run operations to be cancelled.
+// Maps runId → { controller: AbortController, run: Object }
+// Storing the run reference lets the abort endpoint mutate the same
+// in-memory object the pipeline holds, preventing status overwrites.
 export const runAbortControllers = new Map();
 
 export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity }) {
   const abortController = new AbortController();
-  runAbortControllers.set(runId, abortController);
+  runAbortControllers.set(runId, { controller: abortController, run });
 
   asyncFn(abortController.signal)
     .then((result) => {

@@ -173,9 +173,18 @@ router.post("/runs/:runId/abort", (req, res) => {
     return res.status(409).json({ error: "Run is not in progress" });
   }
 
-  const controller = runAbortControllers.get(req.params.runId);
-  if (controller) {
-    controller.abort();
+  const entry = runAbortControllers.get(req.params.runId);
+  if (entry) {
+    // Mutate the in-memory run object that the pipeline holds so that
+    // finalizeRunIfNotAborted() and runRepo.save(run) see "aborted" and
+    // don't overwrite it with "running" or "completed".
+    const liveRun = entry.run;
+    liveRun.status = "aborted";
+    liveRun.finishedAt = new Date().toISOString();
+    liveRun.duration = liveRun.startedAt ? Date.now() - new Date(liveRun.startedAt).getTime() : null;
+    liveRun.error = "Aborted by user";
+
+    entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
   }
 
