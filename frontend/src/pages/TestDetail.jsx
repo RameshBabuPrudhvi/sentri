@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Play, Edit2, RefreshCw, Download,
@@ -128,13 +128,23 @@ export default function TestDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
+  // ── Inline code editing state ─────────────────────────────────────────
+  const [editCode, setEditCode] = useState("");
+  const [codeEdited, setCodeEdited] = useState(false); // tracks if user manually touched code
+  const inlineEditorRef = useRef(null);
+  const inlineHighlightRef = useRef(null);
+  const inlineLineNumRef = useRef(null);
+
   function startEditing() {
     setEditName(test.name || "");
     setEditDesc(test.description || "");
     setEditSteps([...(test.steps || [])]);
     setEditPriority(test.priority || "medium");
+    setEditCode(test.playwrightCode || "");
+    setCodeEdited(false);
     setEditError(null);
     setEditing(true);
+    setStepsView("steps");
   }
 
   async function handleSaveEdit() {
@@ -144,18 +154,25 @@ export default function TestDetail() {
     try {
       const cleanSteps = editSteps.filter(s => s.trim());
 
-      // Save steps + metadata, and request a code preview (not auto-applied).
-      // The backend generates new code but returns it in _codePreview instead
-      // of persisting it — the user reviews a diff before accepting.
-      const updated = await api.updateTest(testId, {
+      const payload = {
         name: editName.trim(),
         description: editDesc.trim(),
         steps: cleanSteps,
         priority: editPriority,
-        previewCode: !!test.playwrightCode,
-      });
+      };
+
+      if (codeEdited && editCode.trim()) {
+        // User manually edited code — save it directly, skip AI regeneration
+        payload.playwrightCode = editCode;
+      } else if (test.playwrightCode) {
+        // Steps may have changed — request a code preview for review
+        payload.previewCode = true;
+      }
+
+      const updated = await api.updateTest(testId, payload);
       setTest(updated);
       setEditing(false);
+      setStepsView("steps");
 
       // If the backend returned a code preview, show the review panel
       if (updated._codePreview) {
@@ -344,7 +361,7 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? (test.playwrightCode ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
+                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
               </button>
             </>
           ) : (
@@ -479,34 +496,29 @@ export default function TestDetail() {
                       padding: "5px 12px", borderRadius: 6, border: "none",
                       cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
                       transition: "all 0.15s",
-                      background: stepsView === "steps" || editing ? "var(--surface)" : "transparent",
-                      color:      stepsView === "steps" || editing ? "var(--text)"    : "var(--text3)",
-                      boxShadow:  stepsView === "steps" || editing ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                      background: stepsView === "steps" ? "var(--surface)" : "transparent",
+                      color:      stepsView === "steps" ? "var(--text)"    : "var(--text3)",
+                      boxShadow:  stepsView === "steps" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
                     }}
                   >
                     <CheckCircle2 size={12} />
                     Steps
                   </button>
-                  {/* Source pill — in edit mode, opens the code editor modal */}
+                  {/* Source pill — toggles inline code view (editable in edit mode) */}
                   <button
-                    onClick={() => {
-                      if (editing) {
-                        setCodeEditorOpen(true);
-                      } else {
-                        setStepsView("source");
-                      }
-                    }}
+                    onClick={() => setStepsView(stepsView === "source" ? "steps" : "source")}
                     style={{
                       display: "flex", alignItems: "center", gap: 5,
                       padding: "5px 12px", borderRadius: 6, border: "none",
                       cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
                       transition: "all 0.15s",
-                      background: !editing && stepsView === "source" ? "var(--surface)" : "transparent",
-                      color:      !editing && stepsView === "source" ? "var(--accent)"  : "var(--text3)",
-                      boxShadow:  !editing && stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                      background: stepsView === "source" ? "var(--surface)" : "transparent",
+                      color:      stepsView === "source" ? "var(--accent)"  : "var(--text3)",
+                      boxShadow:  stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
                     }}
                   >
                     {"</>"} Source
+                    {editing && codeEdited && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} title="Code edited" />}
                   </button>
                 </div>
               )}
@@ -560,7 +572,90 @@ export default function TestDetail() {
             </div>
 
             {/* ── Edit mode ── */}
-            {editing ? (
+            {editing && stepsView === "source" && test.playwrightCode ? (
+              /* ── Inline code editor (edit mode + Source tab) ── */
+              <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e2130" }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "6px 12px",
+                  background: "#0d0f17", borderBottom: "1px solid #1e2130",
+                  fontSize: "0.7rem", color: "#4a5070",
+                }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{editCode.split("\n").length} lines</span>
+                  <span>·</span>
+                  <span>Tab inserts 2 spaces</span>
+                  {codeEdited && <span style={{ marginLeft: "auto", color: "#f59e0b", fontWeight: 600 }}>● Modified</span>}
+                </div>
+                <div style={{ display: "flex", background: "#13151c", minHeight: 280, maxHeight: 500 }}>
+                  <div
+                    ref={inlineLineNumRef}
+                    style={{
+                      padding: "14px 0", minWidth: 44, flexShrink: 0,
+                      textAlign: "right",
+                      fontFamily: "'Fira Code', 'Cascadia Code', monospace",
+                      fontSize: "0.76rem", lineHeight: 1.75,
+                      color: "#3a3f5c", borderRight: "1px solid #1e2130",
+                      userSelect: "none", overflow: "hidden",
+                    }}
+                  >
+                    {editCode.split("\n").map((_, i) => (
+                      <div key={i} style={{ padding: "0 10px" }}>{i + 1}</div>
+                    ))}
+                  </div>
+                  <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+                    <pre
+                      ref={inlineHighlightRef}
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute", inset: 0,
+                        margin: 0, padding: "14px 16px",
+                        fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+                        fontSize: "0.76rem", lineHeight: 1.75,
+                        color: "#cdd5f0", whiteSpace: "pre", overflow: "auto",
+                        pointerEvents: "none", background: "transparent",
+                        border: "none", outline: "none",
+                      }}
+                      dangerouslySetInnerHTML={{ __html: highlightCode(editCode) + "\n" }}
+                    />
+                    <textarea
+                      ref={inlineEditorRef}
+                      value={editCode}
+                      onChange={e => { setEditCode(e.target.value); setCodeEdited(true); }}
+                      onScroll={e => {
+                        if (inlineHighlightRef.current) inlineHighlightRef.current.scrollTop = e.target.scrollTop;
+                        if (inlineLineNumRef.current) inlineLineNumRef.current.scrollTop = e.target.scrollTop;
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === "Tab") {
+                          e.preventDefault();
+                          const ta = e.target;
+                          const start = ta.selectionStart;
+                          const end = ta.selectionEnd;
+                          const newVal = ta.value.substring(0, start) + "  " + ta.value.substring(end);
+                          setEditCode(newVal);
+                          setCodeEdited(true);
+                          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2; });
+                        }
+                      }}
+                      spellCheck={false}
+                      style={{
+                        position: "absolute", inset: 0,
+                        width: "100%", height: "100%",
+                        background: "transparent", color: "transparent",
+                        fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+                        fontSize: "0.76rem", lineHeight: 1.75,
+                        padding: "14px 16px", border: "none", outline: "none",
+                        resize: "none", boxSizing: "border-box",
+                        caretColor: "#7c6af5", tabSize: 2,
+                        whiteSpace: "pre", overflow: "auto",
+                      }}
+                      aria-label="Inline code editor"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : editing ? (
+              /* ── Step editor (edit mode + Steps tab) ── */
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {editSteps.map((step, idx) => (
@@ -734,7 +829,7 @@ export default function TestDetail() {
             )}
 
             {/* Editing hint: code regeneration + source tab access */}
-            {editing && test.playwrightCode && (
+            {editing && test.playwrightCode && stepsView === "steps" && (
               <div style={{
                 marginTop: 14, padding: "8px 12px",
                 background: "var(--accent-bg)", borderRadius: 6,
@@ -743,7 +838,7 @@ export default function TestDetail() {
                 display: "flex", alignItems: "center", gap: 6,
               }}>
                 <RefreshCw size={12} />
-                Code will be regenerated on save — you'll review changes before applying. Click <strong>Source</strong> above to edit code directly.
+                Code will be regenerated on save — you'll review changes before applying. Switch to <strong>Source</strong> to edit code directly.
               </div>
             )}
           </div>
@@ -899,8 +994,8 @@ export default function TestDetail() {
             test={test}
             testId={testId}
             initialCode={codeEditorInitial}
-            onClose={() => { setCodeEditorOpen(false); setCodeEditorInitial(null); }}
-            onSaved={(updated) => { setTest(updated); setCodeEditorInitial(null); }}
+            onClose={() => { setCodeEditorOpen(false); setCodeEditorInitial(null); setEditing(false); }}
+            onSaved={(updated) => { setTest(updated); setCodeEditorInitial(null); setEditing(false); }}
           />
         )}
 

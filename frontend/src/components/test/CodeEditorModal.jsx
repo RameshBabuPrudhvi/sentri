@@ -96,7 +96,9 @@ export default function CodeEditorModal({ test, testId, initialCode, onClose, on
       const updated = await api.updateTest(testId, { playwrightCode: editedCode });
       onSaved(updated);
       setCodeSaveSuccess(true);
-      setTimeout(() => setCodeSaveSuccess(false), 2500);
+      // Auto-close after a brief success flash so the user doesn't have to
+      // manually close the editor and then exit edit mode.
+      setTimeout(() => onClose(), 800);
     } catch (err) {
       setCodeSaveError(err.message || "Failed to save code.");
     } finally {
@@ -275,7 +277,7 @@ export default function CodeEditorModal({ test, testId, initialCode, onClose, on
             )}
           </div>
 
-          <button className="td-editor-footer-btn" onClick={() => { setEditedCode(test.playwrightCode || ""); }}>
+          <button className="td-editor-footer-btn" onClick={() => { setEditedCode(initialCode || test.playwrightCode || ""); }}>
             <RotateCcw size={12} /> Discard
           </button>
           <button className="td-editor-footer-btn" onClick={onClose}>
