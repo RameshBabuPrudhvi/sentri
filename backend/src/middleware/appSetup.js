@@ -45,6 +45,12 @@ app.use(helmet({
 // CORS — restrict origins in production, allow all in development.
 // Set CORS_ORIGIN env var to the frontend URL (e.g. "https://sentri.example.com").
 const corsOrigin = process.env.CORS_ORIGIN || "*";
+if (corsOrigin === "*" && process.env.NODE_ENV === "production") {
+  console.warn(
+    "[Sentri] ⚠️  CORS_ORIGIN is not set — all origins are allowed. " +
+    "Set CORS_ORIGIN to your frontend URL(s) in production (comma-separated)."
+  );
+}
 app.use(cors({
   origin: corsOrigin === "*" ? true : corsOrigin.split(",").map(o => o.trim()),
   credentials: true,

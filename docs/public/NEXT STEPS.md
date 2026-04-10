@@ -72,11 +72,11 @@ These are production blockers. None of the remaining sprints should ship to a sh
 
 ---
 
-### S1-04 — Add bounded retry with back-off cap to AI provider calls 🔴 Blocker
+### S1-04 — Add bounded retry with back-off cap to AI provider calls ✅ Done
 
 **Problem:** `backend/src/pipeline/journeyGenerator.js` retries on rate-limit errors using `isRateLimitError` but has no maximum retry count and no back-off cap. A sustained provider outage or persistent rate-limiting leaves a run hanging indefinitely, consuming a browser process and blocking other runs.
 
-**Fix:** Add `MAX_RETRIES = 4` and `MAX_BACKOFF_MS = 30_000` constants. On each retry, delay by `Math.min((attempt + 1) * 5000, MAX_BACKOFF_MS)`. After `MAX_RETRIES` attempts, classify the error as fatal, emit a run event, and abort gracefully. Distinguish retryable errors (429/429/503/overloaded) from fatal errors (invalid_request, tool_use schema violations) and never retry the latter.
+**Status:** Implemented in `backend/src/aiProvider.js` — `MAX_RETRIES`, `BASE_DELAY_MS`, and `MAX_BACKOFF_MS` constants with exponential backoff clamped at 30s. Server-requested `Retry-After` delays are honored separately (capped at 2× MAX_BACKOFF_MS). Both cloud and Ollama retry paths are covered.
 
 **Pattern from Assrt (`agent.ts`):**
 ```javascript
@@ -108,11 +108,11 @@ for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 
 ---
 
-### S1-05 — Per-test crash isolation in parallel runner 🟡 High
+### S1-05 — Per-test crash isolation in parallel runner ✅ Done
 
 **Problem:** `backend/src/testRunner.js` uses `poolMap` for parallel execution. If one test throws an unhandled exception inside the pool callback, the Promise rejects and can abort the entire run batch — all remaining tests are cancelled and their results are lost.
 
-**Fix:** Wrap the `executeTest` call inside the `poolMap` callback with a try/catch. On error, construct a synthetic failed result and continue. Log the crash details via `logWarn`.
+**Status:** Implemented in `backend/src/testRunner.js:200-213` — the `poolMap` callback wraps `executeTest` in try/catch, constructs a synthetic failed result on crash, and routes it through `processResult` for proper SSE emission.
 
 **Pattern from Assrt (`agent.ts`):**
 ```javascript
@@ -138,11 +138,11 @@ async function safeExecuteTest(test, browser, run, db) {
 
 ---
 
-### S1-06 — Restrict CORS origins in production 🔴 Blocker
+### S1-06 — Restrict CORS origins in production 🟡 High (partially addressed)
 
 **Problem:** `backend/src/middleware/appSetup.js` sets permissive CORS for development. The README production checklist explicitly marks CORS restriction as incomplete.
 
-**Fix:** Read allowed origins from `CORS_ORIGINS` environment variable (comma-separated). Default to `http://localhost:3000` in development. Throw on startup in `NODE_ENV=production` if `CORS_ORIGINS` is not set.
+**Status (partial):** `appSetup.js` already reads `CORS_ORIGIN` from env and splits comma-separated values. PR #66 adds a startup warning when `CORS_ORIGIN` is unset in `NODE_ENV=production`. Remaining: consider throwing instead of warning, and document `CORS_ORIGIN` in `.env.example`.
 
 **Files to change:**
 - `backend/src/middleware/appSetup.js` — CORS origin whitelist from env
@@ -213,11 +213,11 @@ These features are required to compete with every major autonomous QA platform. 
 
 ---
 
-### S2-04 — Structured JSON logging throughout the backend 🔵 Medium
+### S2-04 — Structured JSON logging throughout the backend 🔵 Medium (partially exists)
 
 **Problem:** `backend/src/utils/runLogger.js` emits SSE events and free-form `console.log` strings. Backend process logs are not machine-parseable — they cannot be queried in Datadog, Google Cloud Logging, or any log aggregator.
 
-**Fix:** Add a `log` wrapper that emits `JSON.stringify({ event, ...props, ts: new Date().toISOString() })` for all lifecycle events (browser launch, navigate, pipeline stages, run complete). Keep the existing SSE emit path — only add structured stdout logging alongside it.
+**Status (partial):** `backend/src/utils/logFormatter.js` already supports `LOG_JSON=true` which emits structured JSON lines `{"ts":…,"level":…,"runId":…,"msg":…}`. The remaining work is adding semantic event names to lifecycle log calls (browser launch, run start/end, pipeline stage transitions) so they can be filtered in log aggregators.
 
 **Pattern from Assrt (`agent.ts`):**
 ```javascript
@@ -243,11 +243,11 @@ These items directly improve the reliability and coverage of generated tests, an
 
 ---
 
-### S3-01 — Playwright AST syntax validation before saving tests 🔵 Medium
+### S3-01 — Playwright AST syntax validation before saving tests ✅ Done (partial)
 
 **Problem:** `backend/src/pipeline/testValidator.js` checks for URL presence and step count but not Playwright code syntax. A test with a syntax error passes Draft → Approved review and only fails at execution time, wasting browser compute and confusing the approver.
 
-**Fix:** Add `@babel/parser` (or `acorn`) as a backend dependency. After code generation and before saving, parse the `playwrightCode` string as JavaScript. If the parse throws a `SyntaxError`, reject the test with a `SYNTAX_ERROR` reason and log the error position. Surface this in the rejection reason displayed in the review queue.
+**Status:** Implemented in `backend/src/pipeline/testValidator.js:69-89` using `new Function()` with `extractTestBody()` + `stripPlaywrightImports()` pre-processing. This catches syntax errors (unbalanced braces, unterminated strings) without a new dependency. A follow-up could add `@babel/parser` for deeper AST validation.
 
 **Files to change:**
 - `backend/src/pipeline/testValidator.js` — add `validateSyntax(code)` using Babel parser
@@ -301,11 +301,11 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-03 — Regenerated tests route to Draft, not auto-Approved 🔴 Blocker
+### S3-03 — Regenerated tests route to Draft, not auto-Approved ✅ Done
 
 **Problem:** `backend/src/runner/feedbackIntegration.js` sets `status: "approved"` on AI-regenerated tests. This bypasses the human review queue and violates Sentri's core trust model: "nothing executes until a human approves it." The feedback loop could silently introduce regressions.
 
-**Fix:** Change the regenerated test status to `"draft"`. Emit a `test.regenerate` activity log entry with a link to the test for re-review. If notification config is set on the project, send a "test regenerated — needs review" message via the notifications module (S2-03).
+**Status:** Implemented in `backend/src/pipeline/feedbackLoop.js:406` — regenerated tests now set `reviewStatus: "draft"` explicitly.
 
 **Files to change:**
 - `backend/src/runner/feedbackIntegration.js` — change `status: "approved"` to `status: "draft"`
@@ -331,11 +331,11 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-05 — GraphQL operation-aware API test generation 🔵 Medium
+### S3-05 — GraphQL operation-aware API test generation ✅ Done
 
 **Problem:** `backend/src/pipeline/harCapture.js` deduplicates API endpoints by URL + method. All GraphQL operations share `POST /graphql`, so they are merged into a single test regardless of the operation name. The generated API tests for GraphQL apps are meaningless.
 
-**Fix:** For `POST` requests where the `Content-Type` is `application/json` and the URL path contains `/graphql` or `gql`, read the request body and extract `operationName`. Use `operationName` as an additional deduplication key. Generate a separate Playwright `request` test per operation.
+**Status:** Implemented in `backend/src/pipeline/harCapture.js:88-111` — `extractGraphQLOperationName()` parses operation names from raw POST bodies (before truncation). Grouping key includes `[operationName]` so different operations are tracked separately.
 
 **Files to change:**
 - `backend/src/pipeline/harCapture.js` — parse GraphQL operation names from POST bodies
@@ -637,10 +637,11 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28  
-**Critical blockers (must ship before team use):** S1-01, S1-02, S1-03, S1-06, S3-03  
+**Total items:** 28 (5 completed in PR #66)  
+**Completed:** S1-04 ✅, S1-05 ✅, S3-01 ✅ (partial), S3-03 ✅, S3-05 ✅  
+**Critical blockers (must ship before team use):** S1-01, S1-02, S1-03, S1-06  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
-**Lowest effort / highest value (quick wins):** S1-04, S1-05, S3-03, S3-06, S3-07
+**Lowest effort / highest value (remaining quick wins):** S3-06, S3-07, S2-04
 
 ---
 

@@ -118,9 +118,17 @@ export function fingerprintState(snapshot) {
   const forms = formStateSignature(snapshot.formStructures);
   // Include the page title to distinguish SPA route changes where the URL
   // and DOM structure are identical but the title differs (e.g. tabbed
-  // dashboards, wizard steps). The title is normalised to lowercase and
-  // truncated to avoid noise from dynamic suffixes like timestamps.
-  const title = (snapshot.title || "").toLowerCase().slice(0, 60);
+  // dashboards, wizard steps). The title is normalised to lowercase,
+  // stripped of common dynamic fragments (counts, timestamps, notification
+  // badges), and truncated to avoid noise.
+  const title = (snapshot.title || "")
+    .toLowerCase()
+    .replace(/\(\d+\)/g, "")            // "(3)" notification counts
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, "") // "2:30 PM", "14:30:00"
+    .replace(/\b\d+\s*new\b/gi, "")     // "3 new"
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
 
   const composite = `${route}|${structure}|${content}|${modal}|${tabs}|${forms}|${title}`;
   return simpleHash(composite);

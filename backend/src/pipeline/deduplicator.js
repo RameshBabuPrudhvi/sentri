@@ -166,7 +166,10 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // the same URL, treat it as a duplicate even if the code differs slightly
     // (e.g. regenerated with different selector strategies).
     const normName = normalizeText(t.name);
-    if (normName && existingNames.has(normName)) {
+    // Require a minimum normalised length to avoid false-positive collisions
+    // on very short names (e.g. "login" matching both positive and negative
+    // login tests). 15 chars ≈ 3 meaningful words.
+    if (normName && normName.length >= 15 && existingNames.has(normName)) {
       const match = existingTests.find(e =>
         normalizeText(e.name) === normName && e.sourceUrl === t.sourceUrl
       );

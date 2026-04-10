@@ -170,9 +170,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
 
   // Per-test timeout guard — prevents a single hanging test from blocking
   // the worker slot indefinitely during parallel execution.
+  // When the timeout fires, we proactively close the page to interrupt any
+  // hung Playwright operations (navigation, waitFor, click, etc.). Without
+  // this, the Promise.race only detects the timeout but the in-flight
+  // Playwright call continues running until the finally block — which may
+  // itself hang if Chromium is unresponsive.
   let testTimeoutHandle;
   const testTimeoutPromise = new Promise((_, reject) => {
     testTimeoutHandle = setTimeout(() => {
+      // Force-close the page to unblock any hung Playwright operation.
+      // This triggers errors inside the testExecution IIFE which are
+      // swallowed by the .catch(() => {}) on line below.
+      page.close().catch(() => {});
       reject(new Error(`Browser test timed out after ${BROWSER_TEST_TIMEOUT}ms`));
     }, BROWSER_TEST_TIMEOUT);
   });
