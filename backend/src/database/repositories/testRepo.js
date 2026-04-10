@@ -195,6 +195,33 @@ export function bulkUpdateReviewStatus(testIds, projectId, reviewStatus, reviewe
 }
 
 /**
+ * Count total tests.
+ * @returns {number}
+ */
+export function count() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests").get().cnt;
+}
+
+/**
+ * Count approved tests.
+ * @returns {number}
+ */
+export function countApproved() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'approved'").get().cnt;
+}
+
+/**
+ * Count draft tests.
+ * @returns {number}
+ */
+export function countDraft() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'draft'").get().cnt;
+}
+
+/**
  * Count tests by review status for a project.
  * @param {string} projectId
  * @returns {{ draft: number, approved: number, rejected: number }}

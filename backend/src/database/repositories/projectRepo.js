@@ -94,6 +94,15 @@ export function update(id, fields) {
 }
 
 /**
+ * Count total projects.
+ * @returns {number}
+ */
+export function count() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM projects").get().cnt;
+}
+
+/**
  * Delete a project by ID.
  * Cascade deletes (tests, runs, activities, healing) are handled by the caller
  * or by ON DELETE CASCADE foreign keys.

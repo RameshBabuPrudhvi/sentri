@@ -240,6 +240,15 @@ export function deleteByProjectId(projectId) {
 }
 
 /**
+ * Count total runs.
+ * @returns {number}
+ */
+export function count() {
+  const db = getDatabase();
+  return db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
+}
+
+/**
  * Delete all runs.
  * @returns {number} Number of deleted rows.
  */
