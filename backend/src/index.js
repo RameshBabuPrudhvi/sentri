@@ -19,8 +19,10 @@
  */
 
 import dotenv from "dotenv";
-import { initCountersFromExistingData } from "./utils/idGenerator.js";
 import { getDb } from "./db.js";
+import { getDatabase, closeDatabase } from "./database/sqlite.js";
+import { migrateFromJsonIfNeeded } from "./database/migrate.js";
+import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
@@ -62,13 +64,32 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ─── DB init ──────────────────────────────────────────────────────────────────
+// 1. Open SQLite and apply schema
+getDatabase();
+// 2. Migrate legacy sentri-db.json → SQLite (one-time, skips if already done)
+migrateFromJsonIfNeeded();
+// 3. Orphan recovery — mark any "running" runs from a previous crash as interrupted
+const orphanCount = runRepo.markOrphansInterrupted();
+if (orphanCount > 0) {
+  console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
+}
+// 4. Get a snapshot for the seed helper below
 const db = getDb();
-initCountersFromExistingData(db);
+
+// Graceful shutdown — close SQLite connection
+process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
+process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });
 
 // ─── Seed helper (dev / testing only) ─────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   app.patch("/api/_seed/runs/:id", requireAuth, (req, res) => {
-    db.runs[req.params.id] = { ...req.body, id: req.params.id };
+    const runData = { ...req.body, id: req.params.id };
+    const existing = runRepo.getById(req.params.id);
+    if (existing) {
+      runRepo.save(runData);
+    } else {
+      runRepo.create(runData);
+    }
     res.json({ ok: true, id: req.params.id });
   });
 }

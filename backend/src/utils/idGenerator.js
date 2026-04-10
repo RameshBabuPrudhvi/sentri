@@ -1,6 +1,6 @@
 /**
  * @module utils/idGenerator
- * @description Short, human-readable ID generators.
+ * @description Short, human-readable ID generators backed by SQLite counters.
  *
  * Produces IDs similar to major test management tools:
  * - Tests: `TC-1`, `TC-2` (like TestRail's C1234)
@@ -8,83 +8,55 @@
  * - Projects: `PRJ-1`, `PRJ-2`
  * - Activities: `ACT-1`, `ACT-2`
  *
- * IDs are globally sequential and persisted in `db._counters`.
+ * Counters are stored in the SQLite `counters` table and incremented atomically.
  *
  * ### Exports
  * - {@link generateTestId}, {@link generateRunId}, {@link generateProjectId}, {@link generateActivityId}
- * - {@link initCountersFromExistingData} — Seed counters from restored DB at startup.
+ * - {@link initCountersFromExistingData} — No-op (kept for backward compatibility).
  */
 
-/**
- * Ensure the _counters bucket exists on the DB object.
- * Called lazily on first use — avoids import-order issues with db.js.
- */
-function ensureCounters(db) {
-  if (!db._counters) {
-    db._counters = { test: 0, run: 0, project: 0, activity: 0 };
-  }
-  return db._counters;
-}
+import * as counterRepo from "../database/repositories/counterRepo.js";
 
 /**
  * generateTestId(db) → "TC-1", "TC-2", …
+ * @param {Object} [_db] — Ignored (kept for backward compatibility).
  */
-export function generateTestId(db) {
-  const c = ensureCounters(db);
-  c.test = (c.test || 0) + 1;
-  return `TC-${c.test}`;
+export function generateTestId(_db) {
+  return `TC-${counterRepo.next("test")}`;
 }
 
 /**
  * generateRunId(db) → "RUN-1", "RUN-2", …
+ * @param {Object} [_db] — Ignored (kept for backward compatibility).
  */
-export function generateRunId(db) {
-  const c = ensureCounters(db);
-  c.run = (c.run || 0) + 1;
-  return `RUN-${c.run}`;
+export function generateRunId(_db) {
+  return `RUN-${counterRepo.next("run")}`;
 }
 
 /**
  * generateProjectId(db) → "PRJ-1", "PRJ-2", …
+ * @param {Object} [_db] — Ignored (kept for backward compatibility).
  */
-export function generateProjectId(db) {
-  const c = ensureCounters(db);
-  c.project = (c.project || 0) + 1;
-  return `PRJ-${c.project}`;
+export function generateProjectId(_db) {
+  return `PRJ-${counterRepo.next("project")}`;
 }
 
 /**
  * generateActivityId(db) → "ACT-1", "ACT-2", …
+ * @param {Object} [_db] — Ignored (kept for backward compatibility).
  */
-export function generateActivityId(db) {
-  const c = ensureCounters(db);
-  c.activity = (c.activity || 0) + 1;
-  return `ACT-${c.activity}`;
+export function generateActivityId(_db) {
+  return `ACT-${counterRepo.next("activity")}`;
 }
 
 /**
- * initCountersFromExistingData(db)
+ * No-op — counters are now managed by the SQLite `counters` table.
+ * Kept for backward compatibility so existing callers don't break.
+ * The migration script (database/migrate.js) seeds the counters table
+ * from existing IDs when migrating from the legacy JSON store.
  *
- * Called once at startup to seed counters from existing data restored from disk.
- * Scans all existing IDs and sets counters to max(existing) so new IDs don't
- * collide with previously generated ones.
+ * @param {Object} [_db] — Ignored.
  */
-export function initCountersFromExistingData(db) {
-  const c = ensureCounters(db);
-
-  function maxNum(obj, prefix) {
-    let max = 0;
-    for (const key of Object.keys(obj || {})) {
-      if (key.startsWith(prefix)) {
-        const n = parseInt(key.slice(prefix.length), 10);
-        if (n > max) max = n;
-      }
-    }
-    return max;
-  }
-
-  c.test     = Math.max(c.test     || 0, maxNum(db.tests,      "TC-"));
-  c.run      = Math.max(c.run      || 0, maxNum(db.runs,       "RUN-"));
-  c.project  = Math.max(c.project  || 0, maxNum(db.projects,   "PRJ-"));
-  c.activity = Math.max(c.activity || 0, maxNum(db.activities,  "ACT-"));
+export function initCountersFromExistingData(_db) {
+  // Intentionally empty — counters are seeded during migration.
 }

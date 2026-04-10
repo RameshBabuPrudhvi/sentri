@@ -13,7 +13,7 @@
  */
 
 import { generateActivityId } from "./idGenerator.js";
-import { getDb } from "../db.js";
+import * as activityRepo from "../database/repositories/activityRepo.js";
 
 /**
  * Log an activity entry to the database.
@@ -29,9 +29,8 @@ import { getDb } from "../db.js";
  * @returns {Object}    The created activity record.
  */
 export function logActivity({ type, projectId, projectName, testId, testName, detail, status }) {
-  const db = getDb();
-  const id = generateActivityId(db);
-  db.activities[id] = {
+  const id = generateActivityId();
+  const activity = {
     id,
     type,
     projectId: projectId || null,
@@ -42,5 +41,6 @@ export function logActivity({ type, projectId, projectName, testId, testName, de
     status: status || "completed",
     createdAt: new Date().toISOString(),
   };
-  return db.activities[id];
+  activityRepo.create(activity);
+  return activity;
 }
