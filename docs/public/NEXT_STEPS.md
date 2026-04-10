@@ -55,18 +55,20 @@ These are production blockers. None of the remaining sprints should ship to a sh
 
 ---
 
-### S1-03 — Replace in-memory JSON database with SQLite 🔴 Blocker
+### S1-03 — Replace in-memory JSON database with SQLite ✅ Done
 
-**Problem:** `backend/src/db.js` is a single JSON file flushed to disk every 30 seconds. A crash, OOM kill, or Docker restart mid-run loses up to 30 seconds of results. There are no transactions, no indexes, and all queries are O(n) object scans. The README production checklist flags this as incomplete.
+**Problem:** `backend/src/db.js` was a single JSON file flushed to disk every 30 seconds. A crash, OOM kill, or Docker restart mid-run lost up to 30 seconds of results. There were no transactions, no indexes, and all queries were O(n) object scans.
 
-**Fix:** Replace `db.js` with `better-sqlite3` (zero external infra — SQLite file on disk) backed by a Prisma schema. This is a drop-in swap for the existing object store pattern with no Docker changes required. Add a `migrations/` directory with an initial schema migration. Add PostgreSQL as an optional target for multi-instance deployments.
-
-**Files to change:**
-- `backend/src/db.js` — replace with Prisma client wrapper
-- `backend/prisma/schema.prisma` — new file, full schema
-- `backend/prisma/migrations/` — new directory, initial migration
-- `backend/package.json` — add `@prisma/client`, `better-sqlite3`
-- All route files — update db access patterns to use Prisma queries
+**Status:** Fully implemented using `better-sqlite3` with WAL mode. The migration includes:
+- `backend/src/database/schema.sql` — 7 tables (`users`, `oauth_ids`, `projects`, `tests`, `runs`, `activities`, `healing_history`) + `counters` table with indexes
+- `backend/src/database/sqlite.js` — Singleton with WAL mode, `foreign_keys = ON`, `busy_timeout = 5000`
+- `backend/src/database/repositories/` — 7 repository modules (`counterRepo`, `userRepo`, `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`)
+- `backend/src/database/migrate.js` — Auto-migrates legacy `sentri-db.json` → SQLite on first startup (transactional, renames to `.migrated`)
+- `backend/src/db.js` — Compatibility shim: `getDb()` returns SQLite snapshot, `saveDb()` is no-op
+- All route files, pipeline modules, and test files migrated to use repository modules directly
+- JSON columns (`steps`, `tags`, `logs`, `results`, etc.) handled with automatic serialization/deserialization
+- Boolean columns (`isJourneyTest`, `assertionEnhanced`, `isApiTest`) stored as 0/1 integers
+- Atomic ID counters via `UPDATE ... RETURNING` in the `counters` table
 
 **Effort:** L | **Source:** Audit
 
@@ -637,9 +639,9 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28 (8 completed in PR #66)  
-**Completed:** S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅  
-**Critical blockers (must ship before team use):** S1-01, S1-02, S1-03  
+**Total items:** 28 (9 completed)  
+**Completed:** S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅  
+**Critical blockers (must ship before team use):** S1-01, S1-02  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
 **Lowest effort / highest value (remaining quick wins):** S3-06, S3-07
 

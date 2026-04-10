@@ -16,7 +16,12 @@ frontend/          React 18 SPA (Vite, no framework beyond React Router)
 backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
   src/
     index.js               Entry point — DB init, route mounting, process guards
-    db.js                  In-memory JSON store with atomic disk persistence
+    db.js                  SQLite compatibility shim (getDb → snapshot, saveDb → no-op)
+    database/
+      sqlite.js            SQLite singleton (WAL mode, auto-schema)
+      schema.sql           Table definitions, indexes, counter seeds
+      migrate.js           One-time JSON → SQLite migration
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
@@ -46,11 +51,11 @@ All imports use the `.js` extension explicitly, even when the file is TypeScript
 
 ```js
 // ✅ Correct
-import { getDb } from "./db.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 import { log } from "../utils/runLogger.js";
 
-// ❌ Wrong
-import { getDb } from "./db";
+// ❌ Wrong — missing .js extension
+import * as testRepo from "../database/repositories/testRepo";
 ```
 
 Named exports are preferred over default exports in backend modules. Default exports are only used in Express route files where `router` is the sole export.
@@ -281,11 +286,12 @@ console.error(`API key: ${apiKey}`);
 - All routes except `/api/auth/*` and `/health` require `requireAuth` middleware.
 
 ```js
-// ✅ Route pattern
+// ✅ Route pattern — use repository modules for DB access
+import * as projectRepo from "../database/repositories/projectRepo.js";
+
 router.post("/projects/:id/thing", async (req, res) => {
   const { id } = req.params;
-  const db = getDb();
-  const project = db.projects[id];
+  const project = projectRepo.getById(id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   // … logic …
   res.json({ ok: true, result });
@@ -294,20 +300,24 @@ router.post("/projects/:id/thing", async (req, res) => {
 
 ### Database
 
-- **`getDb()`** returns the singleton in-memory store. It is safe to call multiple times — always returns the same object.
-- **`saveDb()`** flushes to disk. Call it after any write that must survive a crash (e.g. creating a user, starting a run).
-- Never read or write `data/sentri-db.json` directly; always go through `db.js`.
-- The in-memory store is the source of truth. Treat `sentri-db.json` as a durability backup, not the primary store.
-- Collections: `db.users`, `db.oauthIds`, `db.projects`, `db.tests`, `db.runs`, `db.activities`, `db.healingHistory`.
+Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data/sentri.db`.
+
+- **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
+- **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
+- **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo` — each in `backend/src/database/repositories/`.
+- **JSON columns**: `steps`, `tags`, `logs`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer.
+- **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
+- **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
+- **Auto-migration**: On first startup, if `data/sentri-db.json` exists and SQLite is empty, `database/migrate.js` imports all data in a single transaction and renames the JSON file to `.migrated`.
 
 ### Data Migration & Schema Changes
 
-The JSON store has no formal migration system. When changing the DB schema:
+Schema is defined in `backend/src/database/schema.sql` (all `CREATE TABLE IF NOT EXISTS`). When changing the schema:
 
-- **Adding a new field**: Use `||` defaults at read time (e.g. `project.tags || []`). No migration needed.
-- **Renaming a field**: Write a one-time migration script in `backend/scripts/` that reads `sentri-db.json`, transforms the data, and writes it back via `db.js`. Document the script in the PR.
-- **Removing a field**: Leave orphaned data in place — it causes no harm. Do not delete fields from existing records without a migration.
-- **Changing key schemas** (e.g. `healingHistory` keys): This is a breaking change. All existing records with the old key format will silently stop matching. Require a migration that rewrites affected keys, and document the change prominently.
+- **Adding a new column**: Add it to `schema.sql` with a `DEFAULT` value, add it to the repository's `INSERT_COLS` and row conversion functions. SQLite does not auto-add columns to existing tables — use `ALTER TABLE ADD COLUMN` in a migration block at the top of `schema.sql`.
+- **Adding a new table**: Add `CREATE TABLE IF NOT EXISTS` + indexes to `schema.sql`. Create a new repository module in `database/repositories/`.
+- **Changing column types or constraints**: SQLite has limited `ALTER TABLE` support. For complex changes, create a new table, copy data, drop old, rename new — wrapped in a transaction.
 
 ### IDs
 
@@ -453,7 +463,7 @@ Or run all at once: `npm test` from `backend/`.
 
 - Each test file must include a final summary line showing pass/fail counts and exit with `process.exit(1)` on any failure.
 - Tests are synchronous where possible. Async tests must `await` all assertions before the test function returns.
-- Mock the DB by passing a plain object `{ tests: {}, projects: {}, healingHistory: {} }` — never call `getDb()` in tests.
+- Integration tests use a shared SQLite database file. Reset state between tests by calling `getDatabase().exec("DELETE FROM ...")` on each table and resetting counters. Seed test data using repository modules (`projectRepo.create(...)`, `testRepo.create(...)`, etc.) — never use `getDb()` for writes in tests.
 
 ### Frontend
 
@@ -564,7 +574,7 @@ When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
 - `docker-compose.prod.yml` — production overrides (stricter resource limits).
 - The frontend Dockerfile builds the Vite SPA and serves it with nginx. The nginx config proxies `/api/*` to the backend container.
 - **Never bake secrets into images.** Pass all keys via environment variables. The `.dockerignore` already excludes `.env` files.
-- `backend/data/` is a Docker volume — it persists `sentri-db.json` across container restarts.
+- `backend/data/` is a Docker volume — it persists `sentri.db` (SQLite) across container restarts.
 - The backend Dockerfile installs Playwright's system dependencies and uses the system Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`).
 
 ### Health Checks
@@ -718,7 +728,7 @@ The frontend follows a clear separation of concerns between pages:
 - **Do not change the `healingHistory` key schema** without a migration strategy — existing DB records will silently stop matching.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).
 - **Do not add a new test framework** to either package. Backend tests use `node:assert/strict`; keep it that way.
-- **Do not write to `sentri-db.json` directly** — always go through `db.js`.
+- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not use `getDb()` for writes — it returns a read-only snapshot.
 - **Do not skip `throwIfAborted(signal)`** in pipeline or runner stages — it breaks the abort/cancel feature.
 - **Do not use `dangerouslySetInnerHTML`** without escaping all dynamic content first. AI/user-generated text must be sanitised before DOM insertion to prevent XSS.
 - **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages via `classifyError()`. Log the real error server-side with `formatLogLine()`.

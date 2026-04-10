@@ -9,7 +9,7 @@
 
 ## Recommended
 
-- [ ] Replace in-memory `db.js` with PostgreSQL + Prisma ORM
+- [x] ~~Replace in-memory `db.js` with SQLite~~ — Done (better-sqlite3 with WAL mode, auto-migration from legacy JSON)
 - [ ] Add BullMQ + Redis for background crawl/run jobs with retries
 - [ ] Store videos and screenshots to S3/R2 instead of local disk
 - [ ] Restrict CORS origins in `backend/src/middleware/appSetup.js`

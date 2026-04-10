@@ -28,7 +28,7 @@ sentri/
 - **Framework:** Express
 - **Browser Automation:** Playwright (Chromium)
 - **AI Integration:** Anthropic SDK, OpenAI SDK, Google Generative AI, Ollama (HTTP)
-- **Database:** In-memory JSON with periodic disk persistence (swap for PostgreSQL in production)
+- **Database:** SQLite (better-sqlite3) with WAL mode — auto-migrates from legacy JSON on first startup
 - **Auth:** Custom JWT (HS256) with scrypt password hashing
 
 ## Data Flow
@@ -42,7 +42,7 @@ User → Frontend (React SPA)
        │ Playwright       │ ← browser automation
        │ AI Provider      │ ← test generation
        │ Self-Healing     │ ← selector waterfall
-       │ In-memory DB     │ ← JSON persistence
+       │ SQLite DB        │ ← WAL mode, data/sentri.db
        └─────────────────┘
 ```
 
@@ -50,7 +50,7 @@ User → Frontend (React SPA)
 
 | Decision | Rationale |
 |---|---|
-| In-memory DB | Zero setup for local dev. Swap for PostgreSQL via `db.js` interface |
+| SQLite (better-sqlite3) | Zero-config embedded database. WAL mode for concurrent reads. Repository pattern (`database/repositories/`) for all access. Auto-migrates legacy `sentri-db.json` on first startup |
 | SSE over WebSocket | Simpler server implementation, auto-reconnect built into `EventSource` |
 | Custom JWT (no library) | Zero dependencies. Uses Node.js `crypto` module only |
 | Multi-provider AI | Avoid vendor lock-in. All providers implement the same interface |

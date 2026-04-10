@@ -48,9 +48,13 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Volumes
 
-The backend stores data in `/app/data/sentri-db.json` inside the container. Mount a volume to persist across restarts:
+The backend stores data in `/app/data/sentri.db` (SQLite) inside the container. Mount a volume to persist across restarts:
 
 ```yaml
 volumes:
   - ./data:/app/data
 ```
+
+::: tip Migration from JSON
+If you have an existing `sentri-db.json` file in the data directory, it will be automatically migrated to SQLite on first startup and renamed to `sentri-db.json.migrated`.
+:::
