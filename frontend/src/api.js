@@ -313,6 +313,19 @@ export const api = {
         } catch { /* malformed SSE line — skip */ }
       }
     }
+    // Flush any data remaining in the buffer after the stream closes.
+    // This handles the case where the final SSE message straddles two read()
+    // chunks and the trailing \n\n lands in the last chunk that sets done=true.
+    if (buf.trim()) {
+      const line = buf.trim();
+      if (line.startsWith("data: ")) {
+        try {
+          const parsed = JSON.parse(line.slice(6).trim());
+          if (parsed.error) { onError?.(parsed.error); return; }
+          if (parsed.done) { onDone?.(parsed); return; }
+        } catch { /* malformed — ignore */ }
+      }
+    }
   },
 
   /**

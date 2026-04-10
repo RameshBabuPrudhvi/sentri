@@ -27,7 +27,8 @@ const router = Router();
 const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to fix a failing Playwright test.
 
 Rules:
-- Return ONLY the fixed Playwright test code — no markdown fences, no explanation text, no JSON wrapper.
+- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Replaced brittle CSS selector with getByRole('button') and added waitForLoadState after navigation."). Keep it under 120 characters.
+- After the FIX: line, output a blank line, then the complete fixed Playwright test code — no markdown fences, no other explanation text, no JSON wrapper.
 - The code must be a complete, runnable test function starting with \`test('...\` and ending with \`});\`.
 - Do NOT include import statements — test/expect are provided externally.
 - Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder().
@@ -151,21 +152,24 @@ router.post("/tests/:testId/fix", async (req, res) => {
     clearTimeout(timeout);
   });
 
-  // Heartbeat to keep connection alive through proxies
-  const heartbeat = setInterval(() => {
-    if (!res.writableEnded) {
-      try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
-    } else {
-      clearInterval(heartbeat);
-    }
-  }, 5000);
-
   const streamOpts = { signal: controller.signal, responseFormat: "text" };
   if (isLocalProvider()) streamOpts.maxTokens = 4096;
 
   let fixedCode = "";
+  // Heartbeat is declared here so the finally block can always clear it,
+  // even if the try block is never entered (e.g. synchronous throw).
+  let heartbeat = null;
 
   try {
+    // Start heartbeat inside try so it's always paired with the finally cleanup
+    heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+      } else {
+        clearInterval(heartbeat);
+      }
+    }, 5000);
+
     const startMs = Date.now();
     await streamText(
       { system: SYSTEM_PROMPT, user: userPrompt },
@@ -184,9 +188,21 @@ router.post("/tests/:testId/fix", async (req, res) => {
       .replace(/\n?\s*```\s*$/i, "")
       .trim();
 
-    // Build explanation and diff
+    // Extract the "FIX: ..." explanation line the AI prepends (per system prompt).
+    // If the model didn't emit one, fall back to a line-count summary.
+    let explanation = null;
+    const fixLineMatch = fixedCode.match(/^FIX:\s*(.+?)(?:\n|$)/i);
+    if (fixLineMatch) {
+      explanation = fixLineMatch[1].trim();
+      // Strip the FIX: line (and optional blank line) from the code body
+      fixedCode = fixedCode.replace(/^FIX:\s*.+?\n\n?/i, "").trim();
+    }
+
+    // Build diff summary
     const { diff, added, removed } = computeDiffSummary(test.playwrightCode, fixedCode);
-    const explanation = `Fixed ${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed.`;
+    if (!explanation) {
+      explanation = `${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed.`;
+    }
 
     console.log(formatLogLine("info", null, `[testFix] completed for ${test.id} in ${((Date.now() - startMs) / 1000).toFixed(1)}s — ${added}+ ${removed}-`));
 
@@ -222,12 +238,25 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
     return res.status(400).json({ error: "code is required" });
   }
 
+  // Strip markdown fences in case the AI response was not cleaned upstream
+  const sanitizedCode = code.trim()
+    .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
+    .replace(/\n?\s*```\s*$/i, "")
+    .trim();
+
+  // Basic structural validation — must look like a Playwright test function
+  if (!sanitizedCode.includes("test(") || !sanitizedCode.includes("async")) {
+    return res.status(400).json({
+      error: "Code does not appear to be a valid Playwright test. Must contain test() and async.",
+    });
+  }
+
   const updates = {};
-  if (test.playwrightCode && test.playwrightCode !== code.trim()) {
+  if (test.playwrightCode && test.playwrightCode !== sanitizedCode) {
     updates.playwrightCodePrev = test.playwrightCode;
   }
 
-  updates.playwrightCode = code.trim();
+  updates.playwrightCode = sanitizedCode;
   updates.updatedAt = new Date().toISOString();
   updates.aiFixAppliedAt = new Date().toISOString();
   updates.codeVersion = (test.codeVersion || 0) + 1;

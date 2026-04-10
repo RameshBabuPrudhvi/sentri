@@ -99,8 +99,8 @@ function trySplitByKeywords(lines, stepCount, steps) {
       }
     }
 
-    // Require at least 2 matching words
-    if (bestScore >= 2 && bestLine >= 0) {
+    // Require at least 1 matching word (lowered from 2 to handle short/generic steps)
+    if (bestScore >= 1 && bestLine >= 0) {
       assignments[s] = bestLine;
       usedLines.add(bestLine);
     }
@@ -177,21 +177,20 @@ export default function splitCodeBySteps(code, stepCount, steps) {
     if (byKeywords) return byKeywords;
   }
 
-  // Strategy 3: Even distribution (fallback)
-  const baseSize = Math.floor(lines.length / stepCount);
-  const remainder = lines.length % stepCount;
-
+  // Strategy 3: Even distribution (fallback) — every step gets at least one line
+  const baseSize = Math.max(1, Math.floor(lines.length / stepCount));
   const chunks = [];
   let cursor = 0;
   for (let s = 0; s < stepCount; s++) {
-    const take = baseSize + (s === stepCount - 1 ? remainder : 0);
-    const slice = lines.slice(cursor, cursor + Math.max(take, 1));
-    chunks.push(slice.join("\n"));
-    cursor += Math.max(take, 1);
     if (cursor >= lines.length) {
-      while (chunks.length < stepCount) chunks.push("");
-      break;
+      // No more lines — give remaining steps the last line rather than empty string
+      chunks.push(lines[lines.length - 1] || "");
+      continue;
     }
+    const isLast = s === stepCount - 1;
+    const take = isLast ? lines.length - cursor : baseSize;
+    chunks.push(lines.slice(cursor, cursor + Math.max(take, 1)).join("\n"));
+    cursor += Math.max(take, 1);
   }
   return chunks;
 }
