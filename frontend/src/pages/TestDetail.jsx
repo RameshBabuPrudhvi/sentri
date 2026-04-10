@@ -573,6 +573,33 @@ export default function TestDetail() {
               )}
             </div>
 
+            {/* ── Failure banner — shown above steps when test has failed ── */}
+            {(() => {
+              if (editing) return null;
+              const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
+              const failError = (test.lastResult === "failed" || latestRunResult?.status === "failed")
+                ? (latestRunResult?.error || null)
+                : null;
+              if (!failError) return null;
+              return (
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: 8,
+                  padding: "10px 12px", marginBottom: 14,
+                  background: "var(--red-bg)", borderRadius: 8,
+                  border: "1px solid rgba(239,68,68,0.2)",
+                  fontSize: "0.78rem", color: "var(--red)", lineHeight: 1.5,
+                }}>
+                  <span style={{ flexShrink: 0, marginTop: 1 }}>✗</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>Last run failed</div>
+                    <div style={{ color: "var(--red)", opacity: 0.85, wordBreak: "break-word" }}>
+                      {failError.length > 200 ? failError.slice(0, 200) + "…" : failError}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── Edit mode ── */}
             {editing && stepsView === "source" && test.playwrightCode ? (
               /* ── Inline code editor (edit mode + Source tab) ── */
@@ -785,6 +812,23 @@ export default function TestDetail() {
                 (() => {
                   const bdd = isBddTest(test.steps);
                   const gherkinKw = /^(Given|When|Then|And|But)\b/i;
+
+                  // Determine which step failed (if any) for highlighting
+                  const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
+                  const isFailed = test.lastResult === "failed" || latestRunResult?.status === "failed";
+                  const failError = isFailed ? (latestRunResult?.error || "") : "";
+                  let failedStepIdx = -1;
+                  if (isFailed && test.steps.length > 0) {
+                    // Try to find "Step N" in the error message
+                    const stepMatch = failError.match(/step\s+(\d+)/i);
+                    if (stepMatch) {
+                      failedStepIdx = parseInt(stepMatch[1], 10) - 1;
+                    } else {
+                      // Default: mark the last step as failed (errors usually occur at the last executed step)
+                      failedStepIdx = test.steps.length - 1;
+                    }
+                  }
+
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                       {test.steps.map((step, idx) => {
@@ -792,40 +836,61 @@ export default function TestDetail() {
                         const kwMatch = bdd ? trimmed.match(gherkinKw) : null;
                         const keyword = kwMatch ? kwMatch[1] : null;
                         const rest = keyword ? trimmed.slice(keyword.length) : trimmed;
+                        const isFailedStep = idx === failedStepIdx;
                         return (
                           <div
                             key={idx}
+                            title={isFailedStep && failError ? failError : undefined}
                             style={{
                               display: "flex", alignItems: "flex-start", gap: 16,
-                              padding: "12px 0",
-                              borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                              padding: "12px 8px",
+                              marginLeft: -8, marginRight: -8,
+                              borderRadius: isFailedStep ? 8 : 0,
+                              borderBottom: idx < test.steps.length - 1 && !isFailedStep ? "1px solid var(--border)" : "none",
+                              background: isFailedStep ? "var(--red-bg)" : "transparent",
+                              border: isFailedStep ? "1px solid rgba(239,68,68,0.25)" : undefined,
+                              cursor: isFailedStep ? "help" : undefined,
+                              transition: "background 0.15s",
                             }}
                           >
                             <div style={{
                               width: 26, height: 26, borderRadius: 6,
-                              background: bdd ? "var(--accent-bg)" : "var(--bg2)",
-                              border: bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
+                              background: isFailedStep ? "rgba(239,68,68,0.15)" : bdd ? "var(--accent-bg)" : "var(--bg2)",
+                              border: isFailedStep ? "1px solid rgba(239,68,68,0.4)" : bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
                               display: "flex", alignItems: "center", justifyContent: "center",
                               fontSize: "0.75rem", fontWeight: 700,
-                              color: bdd ? "var(--accent)" : "var(--text2)",
+                              color: isFailedStep ? "var(--red)" : bdd ? "var(--accent)" : "var(--text2)",
                               flexShrink: 0, marginTop: 1,
                             }}>
-                              {idx + 1}
+                              {isFailedStep ? "✗" : idx + 1}
                             </div>
-                            <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
-                              {keyword ? (
-                                <>
-                                  <span style={{
-                                    fontWeight: 700, color: "var(--accent)",
-                                    fontFamily: "var(--font-mono)", fontSize: "0.82rem",
-                                    letterSpacing: "0.01em",
-                                  }}>
-                                    {keyword}
-                                  </span>
-                                  {rest}
-                                </>
-                              ) : step}
-                            </span>
+                            <div style={{ flex: 1, paddingTop: 3 }}>
+                              <span style={{ fontSize: "0.875rem", color: isFailedStep ? "var(--red)" : "var(--text)", lineHeight: 1.6 }}>
+                                {keyword ? (
+                                  <>
+                                    <span style={{
+                                      fontWeight: 700, color: isFailedStep ? "var(--red)" : "var(--accent)",
+                                      fontFamily: "var(--font-mono)", fontSize: "0.82rem",
+                                      letterSpacing: "0.01em",
+                                    }}>
+                                      {keyword}
+                                    </span>
+                                    {rest}
+                                  </>
+                                ) : step}
+                              </span>
+                              {isFailedStep && failError && (
+                                <div style={{
+                                  marginTop: 6, padding: "6px 8px",
+                                  background: "rgba(239,68,68,0.08)", borderRadius: 4,
+                                  fontSize: "0.72rem", color: "var(--red)", opacity: 0.85,
+                                  fontFamily: "var(--font-mono)", lineHeight: 1.5,
+                                  wordBreak: "break-word",
+                                }}>
+                                  {failError.length > 300 ? failError.slice(0, 300) + "…" : failError}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
