@@ -12,7 +12,7 @@
 
 import { emitRunEvent } from "../routes/sse.js";
 import { logActivity } from "./activityLogger.js";
-import { saveDb } from "../db.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "./errorClassifier.js";
 import { formatLogLine } from "./logFormatter.js";
 
@@ -30,10 +30,9 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       if (run.status !== "aborted") {
         onSuccess?.(result);
       }
-      // Persist completed run (results, pass/fail counts, duration, feedback
-      // loop improvements). Without this, a crash before the 30s periodic
-      // flush restores the run as "interrupted" with all results gone.
-      saveDb();
+      // Persist completed run to SQLite (results, pass/fail counts, duration,
+      // feedback loop improvements).
+      runRepo.save(run);
     })
     .catch((err) => {
       runAbortControllers.delete(runId);
@@ -47,6 +46,6 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       run.finishedAt = new Date().toISOString();
       logActivity({ ...onFailActivity(err), status: "failed" });
       emitRunEvent(runId, "done", { status: "failed" });
-      saveDb(); // persist failed status so it isn't misreported as "interrupted"
+      runRepo.save(run); // persist failed status to SQLite
     });
 }

@@ -14,6 +14,7 @@ import { applyFeedbackLoop, analyzeRunResults } from "../pipeline/feedbackLoop.j
 import { isRunAborted } from "../utils/abortHelper.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 
 /**
  * runFeedbackLoop(run, tests, db, signal)
@@ -42,7 +43,10 @@ export async function runFeedbackLoop(run, tests, db, signal) {
     // Build testMap from the actual tests array (not run.tests which is
     // only populated during crawl runs).
     const testMap = {};
-    for (const t of tests) { if (db.tests[t.id]) testMap[t.id] = db.tests[t.id]; }
+    for (const t of tests) {
+      const fresh = testRepo.getById(t.id);
+      if (fresh) testMap[t.id] = fresh;
+    }
 
     // Populate run.tests so applyFeedbackLoop can find them
     if (!run.tests || run.tests.length === 0) {

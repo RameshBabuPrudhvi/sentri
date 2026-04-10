@@ -12,13 +12,14 @@
 import { generateTestId } from "../utils/idGenerator.js";
 import { getProviderName } from "../aiProvider.js";
 import { PROMPT_VERSION } from "./prompts/outputSchema.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 
 /**
- * Write validated test objects into db.tests and update the run record.
+ * Write validated test objects into SQLite and update the run record.
  *
  * @param {object[]} validatedTests — tests that passed validation
  * @param {object}   project        — project record (id, name, url)
- * @param {object}   db             — in-memory database
+ * @param {object}   db             — database object (unused — kept for backward compat)
  * @param {object}   run            — mutable run record
  * @param {object}   [defaults]     — fallback values for name/description/sourceUrl/pageTitle
  * @returns {string[]} array of created test IDs
@@ -26,8 +27,8 @@ import { PROMPT_VERSION } from "./prompts/outputSchema.js";
 export function persistGeneratedTests(validatedTests, project, db, run, defaults = {}) {
   const createdTestIds = [];
   for (const t of validatedTests) {
-    const testId = generateTestId(db);
-    db.tests[testId] = {
+    const testId = generateTestId();
+    const test = {
       // Spread AI-generated fields first so our critical fields below always win.
       // This prevents the AI from accidentally overriding id, projectId, reviewStatus, etc.
       ...t,
@@ -57,6 +58,7 @@ export function persistGeneratedTests(validatedTests, project, db, run, defaults
       // API test marker — "api_har_capture" when generated from captured network traffic
       generatedFrom: t._generatedFrom || null,
     };
+    testRepo.create(test);
     run.tests.push(testId);
     createdTestIds.push(testId);
   }

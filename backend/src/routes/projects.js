@@ -12,7 +12,11 @@
  */
 
 import { Router } from "express";
-import { getDb } from "../db.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as testRepo from "../database/repositories/testRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
+import * as activityRepo from "../database/repositories/activityRepo.js";
+import * as healingRepo from "../database/repositories/healingRepo.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
@@ -24,12 +28,11 @@ router.post("/", (req, res) => {
   const validationErr = validateProjectPayload(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
-  const db = getDb();
   const name = sanitise(req.body.name, 200);
   const url = req.body.url?.trim() || "";
   const credentials = req.body.credentials;
 
-  const id = generateProjectId(db);
+  const id = generateProjectId();
   const project = {
     id,
     name,
@@ -38,7 +41,7 @@ router.post("/", (req, res) => {
     createdAt: new Date().toISOString(),
     status: "idle",
   };
-  db.projects[id] = project;
+  projectRepo.create(project);
 
   logActivity({
     type: "project.create", projectId: id, projectName: name,
@@ -70,55 +73,41 @@ function sanitiseProjectForClient(project) {
 }
 
 router.get("/", (req, res) => {
-  const db = getDb();
-  res.json(Object.values(db.projects).map(sanitiseProjectForClient));
+  res.json(projectRepo.getAll().map(sanitiseProjectForClient));
 });
 
 router.get("/:id", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
   res.json(sanitiseProjectForClient(project));
 });
 
 router.delete("/:id", (req, res) => {
-  const db = getDb();
-  const project = db.projects[req.params.id];
+  const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
 
   // Refuse deletion while async operations are in progress to prevent orphaned data
-  const activeRuns = Object.values(db.runs).filter(
-    r => r.projectId === req.params.id && r.status === "running"
-  );
-  if (activeRuns.length > 0) {
+  const activeRun = runRepo.findActiveByProjectId(req.params.id);
+  if (activeRun) {
     return res.status(409).json({
       error: "Cannot delete project while operations are running. Wait for active crawls or test runs to complete.",
     });
   }
 
-  // Delete associated tests
-  const testIds = Object.keys(db.tests).filter(tid => db.tests[tid].projectId === req.params.id);
-  testIds.forEach(tid => delete db.tests[tid]);
-
-  // Delete associated healing history (keyed as "<testId>::<action>::<label>")
-  if (db.healingHistory) {
-    const testIdSet = new Set(testIds);
-    for (const key of Object.keys(db.healingHistory)) {
-      const testId = key.split("::")[0];
-      if (testIdSet.has(testId)) delete db.healingHistory[key];
-    }
+  // Delete associated tests and their healing history
+  const testIds = testRepo.deleteByProjectId(req.params.id);
+  if (testIds.length > 0) {
+    healingRepo.deleteByTestIds(testIds);
   }
 
   // Delete associated runs
-  const runIds = Object.keys(db.runs).filter(rid => db.runs[rid].projectId === req.params.id);
-  runIds.forEach(rid => delete db.runs[rid]);
+  const runIds = runRepo.deleteByProjectId(req.params.id);
 
   // Delete associated activities
-  const activityIds = Object.keys(db.activities).filter(aid => db.activities[aid].projectId === req.params.id);
-  activityIds.forEach(aid => delete db.activities[aid]);
+  activityRepo.deleteByProjectId(req.params.id);
 
   // Delete the project itself
-  delete db.projects[req.params.id];
+  projectRepo.deleteById(req.params.id);
 
   logActivity({
     type: "project.delete", projectId: req.params.id, projectName: project.name,

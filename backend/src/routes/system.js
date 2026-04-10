@@ -15,6 +15,9 @@
 
 import { Router } from "express";
 import { getDb } from "../db.js";
+import * as activityRepo from "../database/repositories/activityRepo.js";
+import * as runRepo from "../database/repositories/runRepo.js";
+import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 
 const router = Router();
@@ -22,19 +25,13 @@ const router = Router();
 // ─── Activities ───────────────────────────────────────────────────────────────
 
 router.get("/activities", (req, res) => {
-  const db = getDb();
-  let activities = Object.values(db.activities)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  if (req.query.type) {
-    activities = activities.filter(a => a.type === req.query.type);
-  }
-  if (req.query.projectId) {
-    activities = activities.filter(a => a.projectId === req.query.projectId);
-  }
-
   const limit = parseInt(req.query.limit, 10) || 200;
-  res.json(activities.slice(0, limit));
+  const activities = activityRepo.getFiltered({
+    type: req.query.type || undefined,
+    projectId: req.query.projectId || undefined,
+    limit,
+  });
+  res.json(activities);
 });
 
 // ─── URL reachability test ────────────────────────────────────────────────────
@@ -147,26 +144,18 @@ router.get("/system", async (req, res) => {
 // ─── Data Management ──────────────────────────────────────────────────────────
 
 router.delete("/data/runs", (req, res) => {
-  const db = getDb();
-  const count = Object.keys(db.runs).length;
-  for (const key of Object.keys(db.runs)) delete db.runs[key];
+  const count = runRepo.clearAll();
   logActivity({ type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
 
 router.delete("/data/activities", (req, res) => {
-  const db = getDb();
-  const count = Object.keys(db.activities).length;
-  for (const key of Object.keys(db.activities)) delete db.activities[key];
+  const count = activityRepo.clearAll();
   res.json({ ok: true, cleared: count });
 });
 
 router.delete("/data/healing", (req, res) => {
-  const db = getDb();
-  const count = Object.keys(db.healingHistory || {}).length;
-  if (db.healingHistory) {
-    for (const key of Object.keys(db.healingHistory)) delete db.healingHistory[key];
-  }
+  const count = healingRepo.clearAll();
   logActivity({ type: "settings.update", detail: `Cleared ${count} healing history entries` });
   res.json({ ok: true, cleared: count });
 });

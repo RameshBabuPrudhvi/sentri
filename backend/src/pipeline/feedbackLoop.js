@@ -19,6 +19,7 @@
 
 import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
+import * as testRepo from "../database/repositories/testRepo.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -365,7 +366,8 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
   // Build lookup maps
   const testMap = {};
   for (const testId of (run.tests || [])) {
-    if (db.tests[testId]) testMap[testId] = db.tests[testId];
+    const t = testRepo.getById(testId);
+    if (t) testMap[testId] = t;
   }
 
   const snapshotsByUrl = {};
@@ -396,15 +398,12 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
     if (signal?.aborted) break; // Respect abort signal between AI calls
     const regenerated = await regenerateFailingTest(improvement, signal);
     if (regenerated) {
-      db.tests[improvement.testId] = {
-        ...db.tests[improvement.testId],
-        ...regenerated,
-        // Route regenerated tests back through human review instead of
-        // auto-approving. This preserves the "nothing executes until a
-        // human approves" principle and prevents silently introducing
-        // flawed tests into the approved pool.
-        reviewStatus: "draft",
-      };
+      // Route regenerated tests back through human review instead of
+      // auto-approving. This preserves the "nothing executes until a
+      // human approves" principle and prevents silently introducing
+      // flawed tests into the approved pool.
+      const { id: _id, ...fields } = regenerated;
+      testRepo.update(improvement.testId, { ...fields, reviewStatus: "draft" });
       improved++;
     }
   }

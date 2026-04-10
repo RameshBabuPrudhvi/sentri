@@ -36,6 +36,7 @@ import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
+import * as testRepo from "./database/repositories/testRepo.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -93,9 +94,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     t._isApi = !!(t.playwrightCode && isApiTest(t.playwrightCode));
     // Persist the classification on the test object so the frontend can read
     // test.isApiTest directly without reimplementing the detection heuristic.
-    if (db.tests[t.id]) {
-      db.tests[t.id].isApiTest = t._isApi;
-    }
+    testRepo.update(t.id, { isApiTest: t._isApi });
   }
 
   // If every test is API-only, skip the entire browser launch + trace context
@@ -180,10 +179,10 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       });
     }
 
-    if (db.tests[test.id]) {
-      db.tests[test.id].lastResult = result.status;
-      db.tests[test.id].lastRunAt = new Date().toISOString();
-    }
+    testRepo.update(test.id, {
+      lastResult: result.status,
+      lastRunAt: new Date().toISOString(),
+    });
 
     // Broadcast a snapshot after each result so the frontend progress bar
     // updates in real time (especially important during parallel execution
