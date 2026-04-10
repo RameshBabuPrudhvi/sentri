@@ -195,7 +195,7 @@ router.post("/tests/:testId/fix", async (req, res) => {
     if (fixLineMatch) {
       explanation = fixLineMatch[1].trim();
       // Strip the FIX: line (and optional blank line) from the code body
-      fixedCode = fixedCode.replace(/^FIX:\s*.+?\n\n?/i, "").trim();
+      fixedCode = fixedCode.replace(/^FIX:\s*.+?(?:\n\n?|$)/i, "").trim();
     }
 
     // Build diff summary
