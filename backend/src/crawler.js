@@ -40,9 +40,11 @@ import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersis
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog } from "./utils/logFormatter.js";
+import * as runRepo from "./database/repositories/runRepo.js";
 
 function setStep(run, step) {
   run.currentStep = step;
+  runRepo.update(run.id, { currentStep: step });
   emitRunEvent(run.id, "snapshot", { run });
 }
 

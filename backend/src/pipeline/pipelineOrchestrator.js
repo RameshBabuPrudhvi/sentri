@@ -16,12 +16,14 @@ import { validateTest } from "./testValidator.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 
 /**
  * setStep — update the run's currentStep and broadcast a snapshot to SSE.
  */
 function setStep(run, step) {
   run.currentStep = step;
+  runRepo.update(run.id, { currentStep: step });
   emitRunEvent(run.id, "snapshot", { run });
 }
 
