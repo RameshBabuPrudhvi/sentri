@@ -102,7 +102,42 @@ router.patch("/tests/:testId", async (req, res) => {
       const appUrl = project?.url || test.sourceUrl || "";
       const { generateText, parseJSON } = await import("../aiProvider.js");
 
-      const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
+      // If existing code is available, ask the AI to adapt it to the new steps
+      // instead of generating from scratch. This preserves self-healing helpers,
+      // comments, and structure — only the changed/removed steps are affected.
+      const existingCode = updates.playwrightCode || test.playwrightCode;
+
+      const codePrompt = existingCode
+        ? `You are a Playwright automation expert. The user has edited the test steps. Update the existing Playwright test code to match the new steps.
+
+Test Name: ${currentName}
+Application URL: ${appUrl}
+
+PREVIOUS steps:
+${(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+UPDATED steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+EXISTING Playwright code:
+\`\`\`javascript
+${existingCode}
+\`\`\`
+
+Requirements:
+- Make MINIMAL changes to the existing code — only add, remove, or modify the code sections that correspond to changed or removed steps.
+- Keep ALL unchanged step code, comments (// Step N:), helpers (safeClick, safeFill, safeExpect), and structure exactly as-is.
+- If a step was removed, remove ONLY its corresponding code block and renumber the remaining "// Step N:" comments.
+- If a step was added, insert code for it in the correct position.
+- If a step was reworded, update only the affected line(s).
+- Do NOT rewrite the entire test from scratch.
+- Do NOT include import statements at the top — test/expect are provided externally.
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // updated test implementation\\n});"
+}`
+        : `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
 
 Test Name: ${currentName}
 Application URL: ${appUrl}
