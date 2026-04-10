@@ -586,7 +586,7 @@ export default function TestDetail() {
                   <span>Tab inserts 2 spaces</span>
                   {codeEdited && <span style={{ marginLeft: "auto", color: "#f59e0b", fontWeight: 600 }}>● Modified</span>}
                 </div>
-                <div style={{ display: "flex", background: "#13151c", minHeight: 280, maxHeight: 500 }}>
+                <div style={{ display: "flex", background: "#13151c", minHeight: 280, maxHeight: 500, overflow: "hidden" }}>
                   <div
                     ref={inlineLineNumRef}
                     style={{
@@ -595,14 +595,14 @@ export default function TestDetail() {
                       fontFamily: "'Fira Code', 'Cascadia Code', monospace",
                       fontSize: "0.76rem", lineHeight: 1.75,
                       color: "#3a3f5c", borderRight: "1px solid #1e2130",
-                      userSelect: "none", overflow: "hidden",
+                      userSelect: "none", overflowY: "hidden", overflowX: "hidden",
                     }}
                   >
                     {editCode.split("\n").map((_, i) => (
                       <div key={i} style={{ padding: "0 10px" }}>{i + 1}</div>
                     ))}
                   </div>
-                  <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+                  <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
                     <pre
                       ref={inlineHighlightRef}
                       aria-hidden="true"
@@ -611,7 +611,8 @@ export default function TestDetail() {
                         margin: 0, padding: "14px 16px",
                         fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
                         fontSize: "0.76rem", lineHeight: 1.75,
-                        color: "#cdd5f0", whiteSpace: "pre", overflow: "auto",
+                        color: "#cdd5f0", whiteSpace: "pre",
+                        overflowX: "hidden", overflowY: "hidden",
                         pointerEvents: "none", background: "transparent",
                         border: "none", outline: "none",
                       }}
@@ -622,8 +623,12 @@ export default function TestDetail() {
                       value={editCode}
                       onChange={e => { setEditCode(e.target.value); setCodeEdited(true); }}
                       onScroll={e => {
-                        if (inlineHighlightRef.current) inlineHighlightRef.current.scrollTop = e.target.scrollTop;
-                        if (inlineLineNumRef.current) inlineLineNumRef.current.scrollTop = e.target.scrollTop;
+                        const { scrollTop, scrollLeft } = e.target;
+                        if (inlineHighlightRef.current) {
+                          inlineHighlightRef.current.scrollTop = scrollTop;
+                          inlineHighlightRef.current.scrollLeft = scrollLeft;
+                        }
+                        if (inlineLineNumRef.current) inlineLineNumRef.current.scrollTop = scrollTop;
                       }}
                       onKeyDown={e => {
                         if (e.key === "Tab") {
@@ -647,7 +652,7 @@ export default function TestDetail() {
                         padding: "14px 16px", border: "none", outline: "none",
                         resize: "none", boxSizing: "border-box",
                         caretColor: "#7c6af5", tabSize: 2,
-                        whiteSpace: "pre", overflow: "auto",
+                        whiteSpace: "pre", overflowX: "auto", overflowY: "auto",
                       }}
                       aria-label="Inline code editor"
                     />
