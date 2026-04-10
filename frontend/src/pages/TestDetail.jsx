@@ -103,6 +103,7 @@ export default function TestDetail() {
   // ── Code regeneration review state ──────────────────────────────────────
   const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
   const [applyingPreview, setApplyingPreview] = useState(false);
+  const [regenWarning, setRegenWarning] = useState(null); // dismissible warning for regen failures
 
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
@@ -143,6 +144,7 @@ export default function TestDetail() {
     setStepsView("steps");
     setPrevSteps(null);
     setShowDiff(false);
+    setRegenWarning(null);
   }
 
   async function handleSaveEdit() {
@@ -181,6 +183,11 @@ export default function TestDetail() {
       // If the backend returned a code preview, show the review panel
       if (updated._codePreview) {
         setCodePreview(updated._codePreview);
+      }
+      // If code regeneration failed (e.g. Ollama timeout), show a dismissible warning.
+      // Use a temporary alert since we've already exited edit mode at this point.
+      if (updated._regenerationError) {
+        setRegenWarning(updated._regenerationError);
       }
     } catch (err) {
       setEditError(err.message || "Failed to save changes.");
@@ -443,6 +450,25 @@ export default function TestDetail() {
         <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 24 }}>
           {cleanTestName(test.name)}
         </h1>
+      )}
+
+      {/* ── Regeneration warning (shown after save when AI code regen failed) ── */}
+      {regenWarning && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, marginBottom: 16,
+          padding: "10px 14px", borderRadius: 8,
+          background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
+          fontSize: "0.82rem", color: "#f59e0b",
+        }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span style={{ flex: 1 }}>{regenWarning}</span>
+          <button
+            onClick={() => setRegenWarning(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#f59e0b", padding: 2, display: "flex" }}
+          >
+            <X size={14} />
+          </button>
+        </div>
       )}
 
       {/* ── Two-column layout ────────────────────────────────────────────── */}

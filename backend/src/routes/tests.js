@@ -30,7 +30,7 @@ import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
 import { classifyError } from "../utils/errorClassifier.js";
-import { hasProvider } from "../aiProvider.js";
+import { hasProvider, isLocalProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
@@ -171,7 +171,7 @@ Return ONLY valid JSON with no markdown fences:
   "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // full test implementation\\n});"
 }`;
 
-      const codeRaw = await generateText(codePrompt);
+      const codeRaw = await generateText(codePrompt, { maxTokens: isLocalProvider() ? 4096 : undefined });
       let pwCode = null;
       try {
         const parsed = parseJSON(codeRaw);
@@ -199,6 +199,12 @@ Return ONLY valid JSON with no markdown fences:
       }
     } catch (err) {
       console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
+      // Surface a user-friendly message for timeout errors (common with Ollama)
+      if (err.message?.includes("timed out") || err.message?.includes("ECONNREFUSED")) {
+        updates._regenerationError = isLocalProvider()
+          ? "Code regeneration timed out. Local models may need more time for large tests. Try editing the code directly via the Source tab."
+          : "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
+      }
     }
   }
 
@@ -225,6 +231,9 @@ Return ONLY valid JSON with no markdown fences:
   }
   if (previewResult) {
     response._codePreview = previewResult;
+  }
+  if (updates._regenerationError) {
+    response._regenerationError = updates._regenerationError;
   }
 
   res.json(response);
