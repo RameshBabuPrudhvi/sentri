@@ -25,15 +25,21 @@ const router = Router();
 /**
  * Build the system prompt for the test-fix AI call.
  */
-const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to fix a failing Playwright test.
+const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to apply a MINIMAL, TARGETED fix to a failing Playwright test.
+
+CRITICAL — MINIMAL CHANGES ONLY:
+- Identify the SPECIFIC line(s) that caused the failure based on the error message.
+- Fix ONLY those lines. Do NOT rewrite, reorganise, rename, or restyle any other part of the test.
+- Every line of the original test that is NOT related to the failure MUST appear UNCHANGED in your output — same indentation, same comments, same helpers, same order.
+- If the original code uses safeClick/safeFill/safeExpect, your fix MUST also use them. Do NOT replace self-healing helpers with raw Playwright calls (page.click, page.fill, page.getByRole, etc.).
+- If a step comment (// Step N:) exists, keep it exactly as-is.
 
 Rules:
-- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Replaced brittle CSS selector with safeClick and added waitForLoadState after navigation."). Keep it under 120 characters.
+- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Step 3 — replaced incorrect button label 'Submit' with 'Sign In' in safeClick."). Keep it under 120 characters.
 - After the FIX: line, output a blank line, then the complete fixed Playwright test code — no markdown fences, no other explanation text, no JSON wrapper.
 - The code must be a complete, runnable test function starting with \`test('...\` and ending with \`});\`.
 - Do NOT include import statements — test/expect are provided externally.
 - Add page.waitForLoadState() after navigations.
-- Preserve the original test intent and assertions — fix the broken parts, don't rewrite from scratch.
 - If a selector is broken, fix the selector. If a timeout occurs, add appropriate waits. If an assertion fails, fix the assertion to match actual behavior.
 - Keep the test name the same as the original.
 
@@ -75,7 +81,7 @@ function buildUserPrompt(test, failureResult, project) {
     lines.push("");
   }
 
-  lines.push("Fix the test so it passes. Start with a FIX: summary line, then a blank line, then the complete fixed code. Use self-healing helpers (safeClick, safeFill, safeExpect) — not raw Playwright selectors.");
+  lines.push("Fix the test so it passes. Make the SMALLEST possible change — only modify the line(s) that caused the failure. Keep every other line identical to the original. Use self-healing helpers (safeClick, safeFill, safeExpect) — not raw Playwright selectors. Start with a FIX: summary line, then a blank line, then the complete fixed code.");
 
   return lines.join("\n");
 }
