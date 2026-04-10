@@ -200,6 +200,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       const hasCode = !!(test.playwrightCode && extractTestBody(test.playwrightCode));
       const workerTag = workers > 1 ? ` [w${(i % workers) + 1}]` : "";
       const typeTag = test._isApi ? "🌐 API" : hasCode ? "executing generated code" : "fallback smoke test";
+      structuredLog("test.start", { runId, testId: test.id, index: i + 1, total: tests.length, isApi: !!test._isApi });
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
@@ -253,6 +254,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   //      would cut off the client while the feedback loop is still active.
   // The status is set to "completed" only after the feedback loop finishes.
   const elapsed = ((Date.now() - runStart) / 1000).toFixed(1);
+  structuredLog("run.execution_done", { runId, passed: run.passed, failed: run.failed, total: run.total, elapsedSec: parseFloat(elapsed) });
   log(run, `📋 Test execution done: ${run.passed} passed, ${run.failed} failed out of ${run.total} in ${elapsed}s${workers > 1 ? ` (${workers}x parallel)` : ""} — starting post-run analysis…`);
 
   // Broadcast a final snapshot so the frontend sees the complete pass/fail

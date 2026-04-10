@@ -60,6 +60,7 @@ function setStep(run, step) {
 async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal) {
   // ── Step 2: Element filtering ───────────────────────────────────────────
   setStep(run, 2);
+  structuredLog("pipeline.filter", { runId: run.id, pages: snapshots.length });
   log(run, `🔍 Filtering elements (removing noise)...`);
   const filteredSnapshots = snapshots.map(snap => {
     const filtered = filterElements(snap.elements);
@@ -72,6 +73,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
 
   // ── Step 3: Intent classification ───────────────────────────────────────
   setStep(run, 3);
+  structuredLog("pipeline.classify", { runId: run.id, pages: filteredSnapshots.length });
   log(run, `🧠 Classifying page intents...`);
   const classifiedPages = [];
   for (const snap of filteredSnapshots) {
@@ -281,6 +283,7 @@ export async function crawlAndGenerateTests(project, run, db, { dialsPrompt = ""
 
   // ── Step 4: AI test generation ──────────────────────────────────────────
   setStep(run, 4);
+  structuredLog("pipeline.generate", { runId: run.id, pages: classifiedPages.length, journeys: journeys.length });
   log(run, `🤖 Generating intent-driven tests...`);
   const genResult = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
   const rawTests = genResult.tests;

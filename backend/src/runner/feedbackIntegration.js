@@ -36,6 +36,7 @@ export async function runFeedbackLoop(run, tests, db, signal) {
     const { hasProvider } = await import("../aiProvider.js");
     if (!hasProvider()) return;
 
+    structuredLog("feedback.start", { runId: run.id, failures: run.failed });
     log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
 
     // Build testMap from the actual tests array (not run.tests which is
