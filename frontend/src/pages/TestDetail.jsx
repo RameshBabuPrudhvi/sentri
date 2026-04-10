@@ -157,7 +157,8 @@ export default function TestDetail() {
       // Capture previous steps before saving so we can show a diff
       const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
       if (stepsChanged && test.steps && test.steps.length > 0) {
-        setPrevSteps(test.steps);
+        setPrevSteps([...test.steps]);
+        setShowDiff(true); // auto-show the diff after save
       }
 
       const payload = {
