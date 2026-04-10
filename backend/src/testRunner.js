@@ -74,13 +74,12 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {Object}      project                   - The project `{ id, name, url }`.
  * @param {Object[]}    tests                     - Array of test objects to execute.
  * @param {Object}      run                       - The run record (mutated in place).
- * @param {Object}      db                        - The database object from {@link module:db.getDb}.
  * @param {Object}      [options]
  * @param {number}      [options.parallelWorkers]  - Concurrent browser contexts (1–10). Overrides env default.
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, db, { parallelWorkers, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
 
@@ -209,7 +208,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const result = await executeTest(test, browser, runId, i, runStart, db);
+        const result = await executeTest(test, browser, runId, i, runStart);
         structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
         processResult(test, result);
       } catch (err) {
@@ -273,7 +272,7 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
   // Delegated to runner/feedbackIntegration.js — no-ops when no failures,
   // aborted, or no AI provider configured.
-  await runFeedbackLoop(run, tests, db, signal);
+  await runFeedbackLoop(run, tests, signal);
 
   // Now that the feedback loop is done, finalize the run status.
   // This is the single place where status transitions to "completed".

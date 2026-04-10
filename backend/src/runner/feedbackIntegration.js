@@ -7,7 +7,7 @@
  * in runTests().
  *
  * Exports:
- *   runFeedbackLoop(run, tests, db, signal)
+ *   runFeedbackLoop(run, tests, signal)
  */
 
 import { applyFeedbackLoop, analyzeRunResults } from "../pipeline/feedbackLoop.js";
@@ -17,7 +17,7 @@ import { structuredLog } from "../utils/logFormatter.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 
 /**
- * runFeedbackLoop(run, tests, db, signal)
+ * runFeedbackLoop(run, tests, signal)
  *
  * Analyses failures from the completed test run and auto-regenerates
  * high-priority failing tests via AI.  No-ops silently when:
@@ -27,10 +27,9 @@ import * as testRepo from "../database/repositories/testRepo.js";
  *
  * @param {object}       run    — mutable run record
  * @param {Array}        tests  — the test objects that were executed
- * @param {object}       db     — database snapshot (from getDb shim)
  * @param {AbortSignal}  [signal]
  */
-export async function runFeedbackLoop(run, tests, db, signal) {
+export async function runFeedbackLoop(run, tests, signal) {
   if (run.failed === 0 || isRunAborted(run, signal)) return;
 
   try {
@@ -67,7 +66,7 @@ export async function runFeedbackLoop(run, tests, db, signal) {
       log(run, `📊 Failure breakdown: ${breakdown}`);
     }
 
-    const feedback = await applyFeedbackLoop(run, db, { signal });
+    const feedback = await applyFeedbackLoop(run, { signal });
     structuredLog("feedback.complete", { runId: run.id, improved: feedback.improved, skipped: feedback.skipped, failures: run.failed });
     if (feedback.improved > 0) {
       logSuccess(run, `Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);

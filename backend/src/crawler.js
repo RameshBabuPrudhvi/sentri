@@ -113,7 +113,7 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
  *   Step 7: Validate     — Reject malformed / placeholder tests
  *   Step 8: Done
  */
-export async function generateFromUserDescription(project, run, db, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
+export async function generateFromUserDescription(project, run, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
   structuredLog("generate.start", { runId: run.id, projectId: project.id, mode: "description", name });
   log(run, `✦ Starting test generation from description for "${name}"`);
@@ -151,10 +151,10 @@ export async function generateFromUserDescription(project, run, db, { name, desc
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
   const { validatedTests, enhancedTests, rejected, removed, enhancedCount, dedupStats } =
-    await runPostGenerationPipeline(rawTests, project, db, run, { signal });
+    await runPostGenerationPipeline(rawTests, project, run, { signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
-  const createdTestIds = persistGeneratedTests(validatedTests, project, db, run, {
+  const createdTestIds = persistGeneratedTests(validatedTests, project, run, {
     name, description, sourceUrl: project.url, pageTitle: project.name,
   });
 

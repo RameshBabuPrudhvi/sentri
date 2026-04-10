@@ -89,12 +89,12 @@ export function detectFlakiness(testHistory) {
 }
 
 /**
- * detectFlakyTests(db, projectId) → Map<testId, flakyInfo>
+ * detectFlakyTests(projectId) → Map<testId, flakyInfo>
  *
  * Scans all run results for a project and identifies tests that have both
  * passed and failed across different runs.
  */
-export function detectFlakyTests(db, projectId) {
+export function detectFlakyTests(projectId) {
   const testResults = new Map(); // testId → { passes, fails }
   const allRuns = runRepo.getByProjectId(projectId);
 
@@ -356,13 +356,13 @@ export async function regenerateFailingTest(improvement, signal) {
 }
 
 /**
- * applyFeedbackLoop(run, db, { signal } = {}) → summary
+ * applyFeedbackLoop(run, { signal } = {}) → summary
  *
  * Full feedback loop: analyzes results, regenerates failing tests.
  * Called after a test run completes.
  * Accepts an optional AbortSignal so long-running AI calls can be cancelled.
  */
-export async function applyFeedbackLoop(run, db, { signal } = {}) {
+export async function applyFeedbackLoop(run, { signal } = {}) {
   if (!run.results?.length) return { improved: 0, skipped: 0, analytics: null };
 
   // Build lookup maps
@@ -386,7 +386,7 @@ export async function applyFeedbackLoop(run, db, { signal } = {}) {
   // Detect flaky tests across all runs for this project
   const projectId = run.projectId;
   if (projectId) {
-    const flakyTests = detectFlakyTests(db, projectId);
+    const flakyTests = detectFlakyTests(projectId);
     analytics.flakyTests = Array.from(flakyTests.values());
     stats.flaky = flakyTests.size;
   }

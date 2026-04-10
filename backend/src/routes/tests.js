@@ -282,7 +282,6 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     });
   }
 
-  const db = {}; // legacy token — passed through to pipeline (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -316,7 +315,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
-    (signal) => generateFromUserDescription(project, run, db, {
+    (signal) => generateFromUserDescription(project, run, {
       name: cleanName,
       description: cleanDescription,
       dialsPrompt,
@@ -344,7 +343,6 @@ router.post("/tests/:testId/run", async (req, res) => {
   const project = projectRepo.getById(test.projectId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const db = {}; // legacy token — passed through to pipeline (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -367,7 +365,7 @@ router.post("/tests/:testId/run", async (req, res) => {
   });
 
   runWithAbort(runId, run,
-    (signal) => runTests(project, [test], run, db, { signal }),
+    (signal) => runTests(project, [test], run, { signal }),
     {
       onSuccess: () => logActivity({
         type: "test_run.complete", projectId: project.id, projectName: project.name,

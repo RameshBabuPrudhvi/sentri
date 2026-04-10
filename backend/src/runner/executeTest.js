@@ -12,7 +12,7 @@
  *   - healingPersistence.js             — write healing events to DB
  *
  * Exports:
- *   executeTest(test, browser, runId, stepIndex, runStart, db)
+ *   executeTest(test, browser, runId, stepIndex, runStart)
  */
 
 import { v4 as uuidv4 } from "uuid";
@@ -167,7 +167,7 @@ function formatTestError(err) {
  * Runs a single test case inside a fresh browser context and returns a
  * result object suitable for pushing into run.results.
  */
-export async function executeTest(test, browser, runId, stepIndex, runStart, db) {
+export async function executeTest(test, browser, runId, stepIndex, runStart) {
   // ── API-only test path: no browser context needed ──────────────────────
   // Use the cached _isApi flag set by testRunner.js (avoids re-parsing).
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
@@ -256,9 +256,9 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
           await page.waitForTimeout(800);
         }
 
-        const healingHints = getHealingHistoryForTest(db, test.id);
+        const healingHints = getHealingHistoryForTest(test.id);
         const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
-        persistHealingEvents(db, test.id, codeResult.healingEvents);
+        persistHealingEvents(test.id, codeResult.healingEvents);
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -299,7 +299,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, db)
     result.error = formatTestError(err);
 
     // Persist healing events from the failed run
-    persistHealingEvents(db, test.id, err.__healingEvents);
+    persistHealingEvents(test.id, err.__healingEvents);
 
     // Screenshot the failure state
     try {

@@ -10,23 +10,22 @@
  * success and failure branches of executeTest.
  *
  * Exports:
- *   persistHealingEvents(db, testId, events)
+ *   persistHealingEvents(testId, events)
  */
 
 import { recordHealing, recordHealingFailure } from "../selfHealing.js";
 
 /**
- * persistHealingEvents(db, testId, events)
+ * persistHealingEvents(testId, events)
  *
  * Writes healing events to the DB so future runs benefit from what we
  * learned.  Safe to call with an empty or undefined events array.
  *
- * @param {object}   db      — legacy database object (unused — kept for backward compat)
  * @param {string}   testId  — the test these events belong to
  * @param {Array}    events  — healing events from runGeneratedCode
  */
-export function persistHealingEvents(db, testId, events) {
-  if (!events?.length || !db) return;
+export function persistHealingEvents(testId, events) {
+  if (!events?.length) return;
 
   for (const evt of events) {
     // Guard: a bug in findElement could push an event with a missing key
@@ -38,9 +37,9 @@ export function persistHealingEvents(db, testId, events) {
     const [action, ...rest] = evt.key.split("::");
     const label = rest.join("::");
     if (evt.failed) {
-      recordHealingFailure(db, testId, action, label);
+      recordHealingFailure(testId, action, label);
     } else {
-      recordHealing(db, testId, action, label, evt.strategyIndex);
+      recordHealing(testId, action, label, evt.strategyIndex);
     }
   }
 }

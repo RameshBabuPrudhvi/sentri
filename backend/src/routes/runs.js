@@ -52,7 +52,6 @@ router.post("/projects/:id/crawl", async (req, res) => {
   };
   const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
 
-  const db = {}; // legacy token — passed through to selfHealing/feedbackLoop (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -72,7 +71,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   });
 
   runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, db, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
+    (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
     {
       onSuccess: () => logActivity({
         type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -110,7 +109,6 @@ router.post("/projects/:id/run", async (req, res) => {
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
-  const db = {}; // legacy token — passed through to selfHealing/feedbackLoop (unused)
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -134,7 +132,7 @@ router.post("/projects/:id/run", async (req, res) => {
   });
 
   runWithAbort(runId, run,
-    (signal) => runTests(project, tests, run, db, { parallelWorkers, signal }),
+    (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
     {
       onSuccess: () => logActivity({
         type: "test_run.complete", projectId: project.id, projectName: project.name,
