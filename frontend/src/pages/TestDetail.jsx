@@ -792,12 +792,10 @@ export default function TestDetail() {
                   const failError = isFailed ? (latestRunResult?.error || "") : "";
                   let failedStepIdx = -1;
                   if (isFailed && test.steps.length > 0) {
-                    // Try to find "Step N" in the error message
                     const stepMatch = failError.match(/step\s+(\d+)/i);
                     if (stepMatch) {
                       failedStepIdx = parseInt(stepMatch[1], 10) - 1;
                     } else {
-                      // Default: mark the last step as failed (errors usually occur at the last executed step)
                       failedStepIdx = test.steps.length - 1;
                     }
                   }
@@ -813,17 +811,23 @@ export default function TestDetail() {
                         return (
                           <div
                             key={idx}
-                            title={isFailedStep && failError ? failError : undefined}
                             style={{
                               display: "flex", alignItems: "flex-start", gap: 16,
-                              padding: "12px 8px",
-                              marginLeft: -8, marginRight: -8,
-                              borderRadius: isFailedStep ? 8 : 0,
-                              borderBottom: idx < test.steps.length - 1 && !isFailedStep ? "1px solid var(--border)" : "none",
-                              background: isFailedStep ? "var(--red-bg)" : "transparent",
-                              border: isFailedStep ? "1px solid rgba(239,68,68,0.25)" : undefined,
-                              cursor: isFailedStep ? "help" : undefined,
-                              transition: "background 0.15s",
+                              padding: "12px 0",
+                              borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                              position: "relative",
+                            }}
+                            onMouseEnter={e => {
+                              if (isFailedStep && failError) {
+                                const box = e.currentTarget.querySelector("[data-error-popover]");
+                                if (box) box.style.display = "block";
+                              }
+                            }}
+                            onMouseLeave={e => {
+                              if (isFailedStep) {
+                                const box = e.currentTarget.querySelector("[data-error-popover]");
+                                if (box) box.style.display = "none";
+                              }
                             }}
                           >
                             <div style={{
@@ -835,25 +839,43 @@ export default function TestDetail() {
                               color: isFailedStep ? "var(--red)" : bdd ? "var(--accent)" : "var(--text2)",
                               flexShrink: 0, marginTop: 1,
                             }}>
-                              {isFailedStep ? "✗" : idx + 1}
+                              {idx + 1}
                             </div>
-                            <div style={{ flex: 1, paddingTop: 3 }}>
-                              <span style={{ fontSize: "0.875rem", color: isFailedStep ? "var(--red)" : "var(--text)", lineHeight: 1.6 }}>
-                                {keyword ? (
-                                  <>
-                                    <span style={{
-                                      fontWeight: 700, color: isFailedStep ? "var(--red)" : "var(--accent)",
-                                      fontFamily: "var(--font-mono)", fontSize: "0.82rem",
-                                      letterSpacing: "0.01em",
-                                    }}>
-                                      {keyword}
-                                    </span>
-                                    {rest}
-                                  </>
-                                ) : step}
-                              </span>
-
-                            </div>
+                            <span style={{ fontSize: "0.875rem", color: isFailedStep ? "var(--red)" : "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                              {keyword ? (
+                                <>
+                                  <span style={{
+                                    fontWeight: 700, color: isFailedStep ? "var(--red)" : "var(--accent)",
+                                    fontFamily: "var(--font-mono)", fontSize: "0.82rem",
+                                    letterSpacing: "0.01em",
+                                  }}>
+                                    {keyword}
+                                  </span>
+                                  {rest}
+                                </>
+                              ) : step}
+                            </span>
+                            {/* Error popover — shown on hover */}
+                            {isFailedStep && failError && (
+                              <div
+                                data-error-popover
+                                style={{
+                                  display: "none",
+                                  position: "absolute", left: 42, right: 0, top: "100%",
+                                  zIndex: 10, marginTop: -4,
+                                  padding: "10px 12px",
+                                  background: "var(--surface)", borderRadius: 8,
+                                  border: "1px solid rgba(239,68,68,0.3)",
+                                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+                                  fontSize: "0.72rem", color: "var(--red)",
+                                  fontFamily: "var(--font-mono)", lineHeight: 1.55,
+                                  wordBreak: "break-word", whiteSpace: "pre-wrap",
+                                  maxHeight: 160, overflowY: "auto",
+                                }}
+                              >
+                                {failError}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
