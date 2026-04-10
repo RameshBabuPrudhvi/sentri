@@ -643,6 +643,8 @@ The following are **not yet implemented** but should be addressed before product
 | `LLM_MAX_TOKENS` | No | `16384` | Max tokens per LLM call |
 | `LLM_MAX_RETRIES` | No | `3` | Retry count on rate limits |
 | `LLM_BASE_DELAY_MS` | No | `2000` | Base back-off delay |
+| `LLM_MAX_BACKOFF_MS` | No | `30000` | Max computed backoff delay (server Retry-After capped at 2×) |
+| `BROWSER_TEST_TIMEOUT` | No | `120000` | Per-test timeout guard — aborts hung browser tests (ms) |
 | `NODE_ENV` | No | `development` | Enables dev-only seed endpoint when not `production` |
 
 ---

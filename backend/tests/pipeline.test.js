@@ -12,6 +12,8 @@ import { hashTest, scoreTest, deduplicateTests, deduplicateAcrossRuns } from "..
 import { hasStrongAssertions, hasWeakAssertions, hasNoAssertions, enhanceTest } from "../src/pipeline/assertionEnhancer.js";
 import { classifyFailure, detectFlakiness } from "../src/pipeline/feedbackLoop.js";
 import { scoreUrl, fingerprintStructure, extractPathPattern, SmartCrawlQueue } from "../src/pipeline/smartCrawl.js";
+import { fingerprintState, statesEqual } from "../src/pipeline/stateFingerprint.js";
+import { validateTest } from "../src/pipeline/testValidator.js";
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 
@@ -394,6 +396,124 @@ test("SmartCrawlQueue structure deduplication works", () => {
   q.markStructureSeen("abc123");
   assert.equal(q.isStructureDuplicate("abc123"), true);
   assert.equal(q.isStructureDuplicate("def456"), false);
+});
+
+// ── Layer 2b: Intent Classifier — weak email input (PR #66) ──────────────────
+
+console.log("\n🧠 Layer 2b: Intent Classifier — weak email signal");
+
+test("classifies email input as AUTH (weak signal)", () => {
+  const result = classifyElement({ tag: "input", text: "", type: "email", href: "", id: "", name: "" });
+  assert.equal(result.intent, "AUTH", "input[type=email] should weakly signal AUTH");
+  assert.ok(result.confidence > 0, "Confidence should be > 0");
+});
+
+test("email input alone scores lower than password input", () => {
+  const emailResult = classifyElement({ tag: "input", text: "", type: "email", href: "", id: "", name: "" });
+  const passResult = classifyElement({ tag: "input", text: "", type: "password", href: "", id: "", name: "" });
+  assert.ok(passResult.confidence > emailResult.confidence,
+    `password (${passResult.confidence}) should score higher than email (${emailResult.confidence})`);
+});
+
+// ── Layer 3b: Deduplicator — name-based cross-run dedup (PR #66) ─────────────
+
+console.log("\n🚫 Layer 3b: Deduplicator — name-based dedup");
+
+test("deduplicateAcrossRuns catches renamed duplicates with same name+URL", () => {
+  const existing = [{ name: "Verify user can login successfully", sourceUrl: "http://ex.com/login", playwrightCode: "await page.goto('/login'); // v1", steps: ["step1"] }];
+  const newTests = [{ name: "Verify user can login successfully", sourceUrl: "http://ex.com/login", playwrightCode: "await page.goto('/login'); // v2", steps: ["step1"] }];
+  const filtered = deduplicateAcrossRuns(newTests, existing);
+  assert.equal(filtered.length, 0, "Same normalised name + same URL should be treated as duplicate");
+});
+
+test("deduplicateAcrossRuns allows short names through (no false positives)", () => {
+  const existing = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "v1", steps: ["s"] }];
+  const newTests = [{ name: "Login test", sourceUrl: "http://ex.com/login", playwrightCode: "v2", steps: ["s"] }];
+  const filtered = deduplicateAcrossRuns(newTests, existing);
+  // "login test" normalises to 10 chars — below the 15-char minimum, so it passes through
+  assert.equal(filtered.length, 1, "Short names should not trigger name-based dedup");
+});
+
+test("deduplicateAcrossRuns allows same name but different URL", () => {
+  const existing = [{ name: "Verify user can login successfully", sourceUrl: "http://ex.com/login", playwrightCode: "v1", steps: ["s"] }];
+  const newTests = [{ name: "Verify user can login successfully", sourceUrl: "http://other.com/login", playwrightCode: "v2", steps: ["s"] }];
+  const filtered = deduplicateAcrossRuns(newTests, existing);
+  assert.equal(filtered.length, 1, "Same name but different URL should not be treated as duplicate");
+});
+
+// ── Layer 7: State Fingerprint (PR #66) ──────────────────────────────────────
+
+console.log("\n🔑 Layer 7: State Fingerprint");
+
+test("fingerprintState produces deterministic hash", () => {
+  const snap = { url: "http://ex.com/page", title: "My Page", elements: [], hasModals: false, hasTabs: false, formStructures: [], forms: 0, h1: "" };
+  const fp1 = fingerprintState(snap);
+  const fp2 = fingerprintState(snap);
+  assert.equal(fp1, fp2, "Same snapshot should produce same fingerprint");
+});
+
+test("fingerprintState differs when title changes meaningfully", () => {
+  const base = { url: "http://ex.com/page", elements: [], hasModals: false, hasTabs: false, formStructures: [], forms: 0, h1: "" };
+  const fp1 = fingerprintState({ ...base, title: "Settings" });
+  const fp2 = fingerprintState({ ...base, title: "Profile" });
+  assert.notEqual(fp1, fp2, "Different titles should produce different fingerprints");
+});
+
+test("fingerprintState ignores dynamic title fragments (notification counts)", () => {
+  const base = { url: "http://ex.com/inbox", elements: [], hasModals: false, hasTabs: false, formStructures: [], forms: 0, h1: "" };
+  const fp1 = fingerprintState({ ...base, title: "Inbox (3)" });
+  const fp2 = fingerprintState({ ...base, title: "Inbox (7)" });
+  assert.equal(fp1, fp2, "Notification counts in title should be stripped");
+});
+
+test("fingerprintState ignores timestamps in title", () => {
+  const base = { url: "http://ex.com/dash", elements: [], hasModals: false, hasTabs: false, formStructures: [], forms: 0, h1: "" };
+  const fp1 = fingerprintState({ ...base, title: "Dashboard - Updated 2:30" });
+  const fp2 = fingerprintState({ ...base, title: "Dashboard - Updated 4:15" });
+  assert.equal(fp1, fp2, "Timestamps in title should be stripped");
+});
+
+test("statesEqual compares fingerprint strings", () => {
+  assert.equal(statesEqual("abc", "abc"), true);
+  assert.equal(statesEqual("abc", "def"), false);
+});
+
+// ── Layer 8: Test Validator — syntax check (PR #66) ──────────────────────────
+
+console.log("\n✅ Layer 8: Test Validator");
+
+test("validateTest accepts valid AI-generated test with imports", () => {
+  const validTest = {
+    name: "Login flow test",
+    steps: ["Go to login", "Enter credentials", "Submit"],
+    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('Login', async ({ page }) => {\n  await page.goto('http://localhost:3000/login');\n  await page.fill('#email', 'user@test.com');\n});`,
+  };
+  const issues = validateTest(validTest, "http://localhost:3000");
+  const syntaxIssues = issues.filter(i => i.includes("syntax error"));
+  assert.equal(syntaxIssues.length, 0, `Should have no syntax errors, got: ${syntaxIssues.join(", ")}`);
+});
+
+test("validateTest catches syntax errors (unbalanced braces)", () => {
+  const badTest = {
+    name: "Broken test code",
+    steps: ["step1"],
+    playwrightCode: `import { test, expect } from '@playwright/test';\ntest('broken', async ({ page }) => {\n  await page.goto('http://localhost:3000');\n  if (true) {\n});`,
+  };
+  const issues = validateTest(badTest, "http://localhost:3000");
+  const syntaxIssues = issues.filter(i => i.includes("syntax error"));
+  assert.ok(syntaxIssues.length > 0, "Should detect syntax error from unbalanced braces");
+});
+
+test("validateTest rejects generic placeholder names", () => {
+  const genericTest = { name: "Test 1", steps: ["step"], playwrightCode: null };
+  const issues = validateTest(genericTest, "http://localhost:3000");
+  assert.ok(issues.some(i => i.includes("generic placeholder")), "Should reject generic name");
+});
+
+test("validateTest rejects tests with no steps", () => {
+  const noSteps = { name: "A valid test name", steps: [], playwrightCode: null };
+  const issues = validateTest(noSteps, "http://localhost:3000");
+  assert.ok(issues.some(i => i.includes("no test steps")), "Should reject empty steps");
 });
 
 // ── Results ───────────────────────────────────────────────────────────────────
