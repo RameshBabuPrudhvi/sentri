@@ -201,7 +201,7 @@ router.post("/tests/:testId/fix", async (req, res) => {
     // Build diff summary
     const { diff, added, removed } = computeDiffSummary(test.playwrightCode, fixedCode);
     if (!explanation) {
-      explanation = `${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed.`;
+      explanation = `AI applied a fix: ${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed. Review the diff below to see exactly what changed.`;
     }
 
     console.log(formatLogLine("info", null, `[testFix] completed for ${test.id} in ${((Date.now() - startMs) / 1000).toFixed(1)}s — ${added}+ ${removed}-`));

@@ -157,19 +157,29 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
 
       {/* Streaming output (shown while streaming, before final diff) */}
       {streaming && (
-        <div
-          ref={streamBoxRef}
-          style={{
-            maxHeight: 300, overflowY: "auto",
-            padding: "12px 16px",
-            fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-            fontSize: "0.76rem", lineHeight: 1.7,
-            color: "#cdd5f0", background: "#13151c",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-          }}
-        >
-          {tokens || "Analyzing failure and generating fix…"}
-        </div>
+        <>
+          <div style={{
+            padding: "8px 16px",
+            fontSize: "0.78rem", color: "var(--text3)",
+            background: "var(--bg2)",
+            borderBottom: "1px solid var(--border)",
+          }}>
+            🔍 Analyzing the failure and generating a fix. The final diff and explanation will appear when complete.
+          </div>
+          <div
+            ref={streamBoxRef}
+            style={{
+              maxHeight: 300, overflowY: "auto",
+              padding: "12px 16px",
+              fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+              fontSize: "0.76rem", lineHeight: 1.7,
+              color: "#cdd5f0", background: "#13151c",
+              whiteSpace: "pre-wrap", wordBreak: "break-word",
+            }}
+          >
+            {tokens || "Analyzing failure and generating fix…"}
+          </div>
+        </>
       )}
 
       {/* Diff view (shown after streaming completes) */}
@@ -178,13 +188,19 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
           {explanation && (
             <div style={{
               fontSize: "0.82rem", color: "var(--text2)",
-              marginBottom: 12, padding: "8px 12px",
+              marginBottom: 12, padding: "10px 12px",
               background: "var(--bg2)", borderRadius: 6,
               border: "1px solid var(--border)",
             }}>
+              <div style={{ fontWeight: 700, fontSize: "0.75rem", color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                What was fixed
+              </div>
               {explanation}
             </div>
           )}
+          <div style={{ fontWeight: 600, fontSize: "0.75rem", color: "var(--text3)", marginBottom: 6 }}>
+            Code changes
+          </div>
           <DiffView before={originalCode} after={fixedCode} />
         </div>
       )}
