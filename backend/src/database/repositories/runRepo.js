@@ -251,6 +251,34 @@ export function clearAll() {
 }
 
 /**
+ * Find the most recent run result for a specific test ID.
+ *
+ * Uses a LIKE pre-filter on the JSON results column to narrow down candidate
+ * rows, then parses and searches in JS. Only selects id, startedAt, results
+ * to avoid deserializing heavy columns.
+ *
+ * @param {string} testId — e.g. "TC-1"
+ * @returns {Object|null} The matching result object with `runId`, or null.
+ */
+export function findLatestResultForTest(testId) {
+  const db = getDatabase();
+  const rows = db.prepare(
+    `SELECT id, startedAt, results FROM runs
+     WHERE results LIKE ? AND results != '[]'
+     ORDER BY startedAt DESC LIMIT 20`
+  ).all(`%${testId}%`);
+
+  for (const row of rows) {
+    try {
+      const results = JSON.parse(row.results);
+      const match = results.find(r => r.testId === testId);
+      if (match) return { ...match, runId: row.id };
+    } catch { /* skip malformed JSON */ }
+  }
+  return null;
+}
+
+/**
  * Mark all "running" runs as "interrupted" (orphan recovery on startup).
  * @returns {number} Number of runs marked.
  */

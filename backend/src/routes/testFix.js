@@ -13,43 +13,13 @@
 import { Router } from "express";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
-import { getDatabase } from "../database/sqlite.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * Find the most recent run result for a specific test ID.
- * Returns the result object with runId, or null.
- *
- * Uses a targeted SQL query with LIKE pre-filter to avoid loading and
- * JSON-parsing every run in the database (which would be expensive with
- * the SQLite backend as the number of runs grows).
- */
-function findLatestTestResult(testId) {
-  const db = getDatabase();
-  // Pre-filter with LIKE to narrow down rows that might contain the testId,
-  // then parse and search the JSON results array in JS.
-  const rows = db.prepare(
-    `SELECT id, startedAt, results FROM runs
-     WHERE results LIKE ? AND results != '[]'
-     ORDER BY startedAt DESC LIMIT 20`
-  ).all(`%${testId}%`);
-
-  for (const row of rows) {
-    try {
-      const results = JSON.parse(row.results);
-      const match = results.find(r => r.testId === testId);
-      if (match) return { ...match, runId: row.id };
-    } catch { /* skip malformed JSON */ }
-  }
-  return null;
-}
 
 /**
  * Build the system prompt for the test-fix AI call.
@@ -160,7 +130,7 @@ router.post("/tests/:testId/fix", async (req, res) => {
   }
 
   const project = projectRepo.getById(test.projectId) || null;
-  const failureResult = findLatestTestResult(test.id);
+  const failureResult = runRepo.findLatestResultForTest(test.id);
 
   const userPrompt = buildUserPrompt(test, failureResult, project);
 
