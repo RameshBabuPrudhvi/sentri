@@ -171,8 +171,8 @@ export default function TestDetail() {
       if (codeEdited && editCode.trim()) {
         // User manually edited code — save it directly, skip AI regeneration
         payload.playwrightCode = editCode;
-      } else if (test.playwrightCode) {
-        // Steps may have changed — request a code preview for review
+      } else if (test.playwrightCode && stepsChanged) {
+        // Steps changed — request a code preview for review
         payload.previewCode = true;
       }
 
@@ -207,7 +207,9 @@ export default function TestDetail() {
       setTest(updated);
       setCodePreview(null);
     } catch (err) {
-      setEditError(err.message || "Failed to apply generated code.");
+      // Show the error as a dismissible warning — editError is only visible in
+      // edit mode, but we've already exited editing at this point.
+      setRegenWarning(err.message || "Failed to apply generated code.");
     } finally {
       setApplyingPreview(false);
     }
@@ -380,7 +382,7 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
+                {saving ? "Saving…" : "Save Changes"}
               </button>
             </>
           ) : (
