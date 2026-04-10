@@ -49,7 +49,7 @@ export default function DiffView({ before, after }) {
   const removed = chunks.filter(c => c.type === "removed").length;
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", minWidth: 0 }}>
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
@@ -109,8 +109,10 @@ export default function DiffView({ before, after }) {
                 background: bg,
                 borderLeft,
                 color,
-                whiteSpace: "pre",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
                 padding: "0 0 0 0",
+                minWidth: 0,
               }}
             >
               {/* Gutter: line prefix symbol */}
@@ -123,7 +125,7 @@ export default function DiffView({ before, after }) {
                 {prefix}
               </span>
               {/* Line content */}
-              <span style={{ padding: "0 12px", flex: 1 }}>
+              <span style={{ padding: "0 12px", flex: 1, minWidth: 0 }}>
                 {chunk.value}
               </span>
             </div>
