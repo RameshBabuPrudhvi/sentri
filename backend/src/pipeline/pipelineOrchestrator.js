@@ -15,6 +15,7 @@ import { enhanceTests } from "./assertionEnhancer.js";
 import { validateTest } from "./testValidator.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
+import { structuredLog } from "../utils/logFormatter.js";
 
 /**
  * setStep — update the run's currentStep and broadcast a snapshot to SSE.
@@ -49,6 +50,7 @@ export async function runPostGenerationPipeline(rawTests, project, db, run, { sn
   const { unique, removed, stats: dedupStats } = deduplicateTests(rawTests);
   const finalTests = deduplicateAcrossRuns(unique, existingTests);
   log(run, `   ${removed} duplicates removed | ${unique.length - finalTests.length} already exist | ${finalTests.length} new unique tests`);
+  structuredLog("pipeline.dedup", { runId: run.id, input: rawTests.length, unique: unique.length, removed, final: finalTests.length });
 
   // ── Step 6: Enhance assertions ──────────────────────────────────────────
   throwIfAborted(signal);
@@ -56,6 +58,7 @@ export async function runPostGenerationPipeline(rawTests, project, db, run, { sn
   log(run, `✨ Enhancing assertions...`);
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
+  structuredLog("pipeline.enhance", { runId: run.id, enhanced: enhancedCount, total: enhancedTests.length });
 
   // ── Step 7: Validate ────────────────────────────────────────────────────
   throwIfAborted(signal);
@@ -73,6 +76,7 @@ export async function runPostGenerationPipeline(rawTests, project, db, run, { sn
     }
   }
   log(run, `   ${validatedTests.length} valid | ${rejected} rejected`);
+  structuredLog("pipeline.validate", { runId: run.id, valid: validatedTests.length, rejected });
 
   throwIfAborted(signal);
 

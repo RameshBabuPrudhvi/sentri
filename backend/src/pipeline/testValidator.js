@@ -9,6 +9,7 @@
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
 import { extractTestBody, stripPlaywrightImports } from "../runner/codeParsing.js";
+import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
 
@@ -67,27 +68,25 @@ export function validateTest(test, projectUrl) {
       issues.push("playwrightCode missing page.goto navigation");
     }
     // Syntax validation — catch malformed code at generation time rather than
-    // at run time. Uses new Function() to parse without executing. This catches
-    // unbalanced braces, unterminated strings, and other syntax errors that
-    // would otherwise only surface during Playwright execution.
+    // at run time. Uses acorn to parse the code as a proper AST, which catches
+    // unbalanced braces, unterminated strings, and other syntax errors with
+    // precise line:column positions. This is more reliable than new Function()
+    // which couldn't handle `await` without an async wrapper.
     //
-    // We must apply the same transforms that codeExecutor.js uses before
-    // execution: extractTestBody() pulls the async arrow-fn body, and
-    // stripPlaywrightImports() removes `import ... from '@playwright/test'`
-    // lines. Without this, the `import` declaration (which is illegal inside
-    // a function body) would cause every AI-generated test to be falsely
-    // rejected as a syntax error.
+    // We strip imports first (they're removed at runtime by codeExecutor.js)
+    // and wrap the extracted body in an async function so top-level `await`
+    // is valid — matching the execution pattern in codeExecutor.js:45-67.
     try {
       const bodyForCheck = extractTestBody(test.playwrightCode);
       const codeToCheck = bodyForCheck
         ? stripPlaywrightImports(bodyForCheck)
         : stripPlaywrightImports(test.playwrightCode);
-      // Wrap in async IIFE so `await` expressions are valid — matches the
-      // pattern used by codeExecutor.js when it actually runs the code.
-      // eslint-disable-next-line no-new-func
-      new Function(`return (async () => {\n${codeToCheck}\n})();`);
+      // Wrap in async function so `await` is valid at the top level
+      const wrapped = `(async () => {\n${codeToCheck}\n})();`;
+      parse(wrapped, { ecmaVersion: 2022, sourceType: "script" });
     } catch (syntaxErr) {
-      issues.push(`playwrightCode has syntax error: ${syntaxErr.message}`);
+      const loc = syntaxErr.loc ? ` (line ${syntaxErr.loc.line}, col ${syntaxErr.loc.column})` : "";
+      issues.push(`playwrightCode has syntax error${loc}: ${syntaxErr.message}`);
     }
   }
 

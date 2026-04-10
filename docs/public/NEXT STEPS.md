@@ -138,11 +138,11 @@ async function safeExecuteTest(test, browser, run, db) {
 
 ---
 
-### S1-06 — Restrict CORS origins in production 🟡 High (partially addressed)
+### S1-06 — Restrict CORS origins in production ✅ Done
 
 **Problem:** `backend/src/middleware/appSetup.js` sets permissive CORS for development. The README production checklist explicitly marks CORS restriction as incomplete.
 
-**Status (partial):** `appSetup.js` already reads `CORS_ORIGIN` from env and splits comma-separated values. PR #66 adds a startup warning when `CORS_ORIGIN` is unset in `NODE_ENV=production`. Remaining: consider throwing instead of warning, and document `CORS_ORIGIN` in `.env.example`.
+**Status:** `appSetup.js` reads `CORS_ORIGIN` from env and splits comma-separated values. Throws on startup when `CORS_ORIGIN` is unset in `NODE_ENV=production`. Documented in `backend/.env.example` and `AGENT.md`.
 
 **Files to change:**
 - `backend/src/middleware/appSetup.js` — CORS origin whitelist from env
@@ -213,11 +213,11 @@ These features are required to compete with every major autonomous QA platform. 
 
 ---
 
-### S2-04 — Structured JSON logging throughout the backend 🔵 Medium (partially exists)
+### S2-04 — Structured JSON logging throughout the backend ✅ Done
 
 **Problem:** `backend/src/utils/runLogger.js` emits SSE events and free-form `console.log` strings. Backend process logs are not machine-parseable — they cannot be queried in Datadog, Google Cloud Logging, or any log aggregator.
 
-**Status (partial):** `backend/src/utils/logFormatter.js` already supports `LOG_JSON=true` which emits structured JSON lines `{"ts":…,"level":…,"runId":…,"msg":…}`. The remaining work is adding semantic event names to lifecycle log calls (browser launch, run start/end, pipeline stage transitions) so they can be filtered in log aggregators.
+**Status:** `logFormatter.js` supports `LOG_JSON=true` for structured JSON lines. New `structuredLog(event, props)` helper emits semantic lifecycle events: `run.start`, `browser.launched`, `run.complete`, `pipeline.dedup`, `pipeline.enhance`, `pipeline.validate`. Instrumented in `testRunner.js` and `pipelineOrchestrator.js`.
 
 **Pattern from Assrt (`agent.ts`):**
 ```javascript
@@ -243,11 +243,11 @@ These items directly improve the reliability and coverage of generated tests, an
 
 ---
 
-### S3-01 — Playwright AST syntax validation before saving tests ✅ Done (partial)
+### S3-01 — Playwright AST syntax validation before saving tests ✅ Done
 
 **Problem:** `backend/src/pipeline/testValidator.js` checks for URL presence and step count but not Playwright code syntax. A test with a syntax error passes Draft → Approved review and only fails at execution time, wasting browser compute and confusing the approver.
 
-**Status:** Implemented in `backend/src/pipeline/testValidator.js:69-89` using `new Function()` with `extractTestBody()` + `stripPlaywrightImports()` pre-processing. This catches syntax errors (unbalanced braces, unterminated strings) without a new dependency. A follow-up could add `@babel/parser` for deeper AST validation.
+**Status:** Implemented using `acorn` AST parser in `testValidator.js`. Code is preprocessed with `extractTestBody()` + `stripPlaywrightImports()`, wrapped in an async IIFE (matching `codeExecutor.js` runtime), then parsed with `acorn.parse()`. Errors include line:column positions for precise diagnostics.
 
 **Files to change:**
 - `backend/src/pipeline/testValidator.js` — add `validateSyntax(code)` using Babel parser
@@ -637,11 +637,11 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28 (5 completed in PR #66)  
-**Completed:** S1-04 ✅, S1-05 ✅, S3-01 ✅ (partial), S3-03 ✅, S3-05 ✅  
-**Critical blockers (must ship before team use):** S1-01, S1-02, S1-03, S1-06  
+**Total items:** 28 (8 completed in PR #66)  
+**Completed:** S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅  
+**Critical blockers (must ship before team use):** S1-01, S1-02, S1-03  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
-**Lowest effort / highest value (remaining quick wins):** S3-06, S3-07, S2-04
+**Lowest effort / highest value (remaining quick wins):** S3-06, S3-07
 
 ---
 

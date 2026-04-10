@@ -35,6 +35,7 @@ import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser } from "./runner/co
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
+import { structuredLog } from "./utils/logFormatter.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -104,9 +105,12 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
   let browser = null;
   let traceContext = null;
 
+  structuredLog("run.start", { runId, projectId: project.id, tests: tests.length, workers, allApiOnly });
+
   if (!allApiOnly) {
     try {
       browser = await launchBrowser();
+      structuredLog("browser.launched", { runId });
     } catch (launchErr) {
       const classified = classifyError(launchErr, "run");
       run.status = "failed";
@@ -271,6 +275,11 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
+    structuredLog("run.complete", {
+      runId, projectId: project.id,
+      passed: run.passed, failed: run.failed, total: run.total,
+      durationMs: run.duration,
+    });
   });
 
   // Emit "done" only now — after the feedback loop — so the frontend's
