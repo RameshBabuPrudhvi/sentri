@@ -464,8 +464,8 @@ export default function TestDetail() {
               </div>
               <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0, flex: 1 }}>Test Steps</h2>
 
-              {/* Steps / Source pill toggle — only shown in view mode with code present */}
-              {test.playwrightCode && !editing && (
+              {/* Steps / Source pill toggle — always shown when code exists */}
+              {test.playwrightCode && (
                 <div style={{
                   display: "flex", alignItems: "center",
                   background: "var(--bg2)", border: "1px solid var(--border)",
@@ -479,25 +479,31 @@ export default function TestDetail() {
                       padding: "5px 12px", borderRadius: 6, border: "none",
                       cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
                       transition: "all 0.15s",
-                      background: stepsView === "steps" ? "var(--surface)" : "transparent",
-                      color:      stepsView === "steps" ? "var(--text)"    : "var(--text3)",
-                      boxShadow:  stepsView === "steps" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                      background: stepsView === "steps" || editing ? "var(--surface)" : "transparent",
+                      color:      stepsView === "steps" || editing ? "var(--text)"    : "var(--text3)",
+                      boxShadow:  stepsView === "steps" || editing ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
                     }}
                   >
                     <CheckCircle2 size={12} />
                     Steps
                   </button>
-                  {/* Source pill */}
+                  {/* Source pill — in edit mode, opens the code editor modal */}
                   <button
-                    onClick={() => setStepsView("source")}
+                    onClick={() => {
+                      if (editing) {
+                        setCodeEditorOpen(true);
+                      } else {
+                        setStepsView("source");
+                      }
+                    }}
                     style={{
                       display: "flex", alignItems: "center", gap: 5,
                       padding: "5px 12px", borderRadius: 6, border: "none",
                       cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
                       transition: "all 0.15s",
-                      background: stepsView === "source" ? "var(--surface)" : "transparent",
-                      color:      stepsView === "source" ? "var(--accent)"  : "var(--text3)",
-                      boxShadow:  stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                      background: !editing && stepsView === "source" ? "var(--surface)" : "transparent",
+                      color:      !editing && stepsView === "source" ? "var(--accent)"  : "var(--text3)",
+                      boxShadow:  !editing && stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
                     }}
                   >
                     {"</>"} Source
@@ -727,7 +733,7 @@ export default function TestDetail() {
               )
             )}
 
-            {/* Editing hint: code will be regenerated on save */}
+            {/* Editing hint: code regeneration + source tab access */}
             {editing && test.playwrightCode && (
               <div style={{
                 marginTop: 14, padding: "8px 12px",
@@ -737,7 +743,7 @@ export default function TestDetail() {
                 display: "flex", alignItems: "center", gap: 6,
               }}>
                 <RefreshCw size={12} />
-                Playwright code will be regenerated when you save. You'll review the changes before they are applied.
+                Code will be regenerated on save — you'll review changes before applying. Click <strong>Source</strong> above to edit code directly.
               </div>
             )}
           </div>
