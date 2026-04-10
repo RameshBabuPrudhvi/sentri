@@ -18,6 +18,7 @@ import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
 
 const router = Router();
 
@@ -27,15 +28,17 @@ const router = Router();
 const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to fix a failing Playwright test.
 
 Rules:
-- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Replaced brittle CSS selector with getByRole('button') and added waitForLoadState after navigation."). Keep it under 120 characters.
+- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Replaced brittle CSS selector with safeClick and added waitForLoadState after navigation."). Keep it under 120 characters.
 - After the FIX: line, output a blank line, then the complete fixed Playwright test code — no markdown fences, no other explanation text, no JSON wrapper.
 - The code must be a complete, runnable test function starting with \`test('...\` and ending with \`});\`.
 - Do NOT include import statements — test/expect are provided externally.
-- Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder().
 - Add page.waitForLoadState() after navigations.
 - Preserve the original test intent and assertions — fix the broken parts, don't rewrite from scratch.
 - If a selector is broken, fix the selector. If a timeout occurs, add appropriate waits. If an assertion fails, fix the assertion to match actual behavior.
-- Keep the test name the same as the original.`;
+- Keep the test name the same as the original.
+
+SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
+${SELF_HEALING_PROMPT_RULES}`;
 
 /**
  * Build the user prompt with test code + failure context.
@@ -72,7 +75,7 @@ function buildUserPrompt(test, failureResult, project) {
     lines.push("");
   }
 
-  lines.push("Fix the test so it passes. Return ONLY the fixed code, nothing else.");
+  lines.push("Fix the test so it passes. Start with a FIX: summary line, then a blank line, then the complete fixed code. Use self-healing helpers (safeClick, safeFill, safeExpect) — not raw Playwright selectors.");
 
   return lines.join("\n");
 }
@@ -196,7 +199,20 @@ router.post("/tests/:testId/fix", async (req, res) => {
       explanation = fixLineMatch[1].trim();
       // Strip the FIX: line (and optional blank line) from the code body
       fixedCode = fixedCode.replace(/^FIX:\s*.+?(?:\n\n?|$)/i, "").trim();
+
+      // Re-run fence stripping: when the AI outputs "FIX: ...\n\n```js\ncode\n```",
+      // the first pass can't strip the opening fence because the FIX: line was at ^.
+      fixedCode = fixedCode
+        .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
+        .replace(/\n?\s*```\s*$/i, "")
+        .trim();
     }
+
+    // Safety net: rewrite any raw Playwright calls the AI may have used back
+    // to self-healing helpers (safeClick, safeFill, safeExpect). This ensures
+    // the fixed code stays consistent with the original code style even when
+    // the model ignores the self-healing prompt rules.
+    fixedCode = applyHealingTransforms(fixedCode);
 
     // Build diff summary
     const { diff, added, removed } = computeDiffSummary(test.playwrightCode, fixedCode);
