@@ -724,7 +724,7 @@ COUNT / VALUE ASSERTIONS — use page.locator() scoped to a semantic selector:
   ✓ await expect(page.locator(...)).toHaveCount(5);
   ✓ await expect(page.locator(...)).toHaveCount(5);
   ✓ await expect(page.locator(...).toHaveCount(5);
-  ✗ NEVER assign the locator to a variable first — write it inline inside expect():
+  ✓ await expect(page.locator(...)).not.toHaveCount(0);
     BAD:  const items = page.locator(...); await expect(items).toHaveCount(5);
     GOOD: await expect(page.locator(...)).toHaveCount(5);
   ✗ NEVER assert a hard-coded count on a generic container that may change (e.g. toHaveCount(5) on search results).
