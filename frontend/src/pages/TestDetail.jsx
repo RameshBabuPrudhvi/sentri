@@ -845,7 +845,8 @@ export default function TestDetail() {
                 display: "flex", alignItems: "center", gap: 6,
               }}>
                 <RefreshCw size={12} />
-                Code will be regenerated on save — you'll review changes before applying. Switch to <strong>Source</strong> to edit code directly.
+                Code will be regenerated on save — you'll review changes before applying.<br/>
+                <i>Switch to <strong>Source</strong> to edit code directly.</i>
               </div>
             )}
           </div>
