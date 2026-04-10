@@ -88,6 +88,18 @@ router.patch("/tests/:testId", async (req, res) => {
 
   updates.updatedAt = new Date().toISOString();
 
+  // Any content change (steps, name, description, code, priority) reverts
+  // the test to draft so it requires re-approval after editing.
+  const contentChanged = stepsChanged
+    || (typeof name === "string" && name.trim() !== test.name)
+    || (typeof description === "string" && description.trim() !== test.description)
+    || (typeof playwrightCode === "string" && playwrightCode !== test.playwrightCode)
+    || (typeof priority === "string" && priority !== test.priority);
+  if (contentChanged && test.reviewStatus !== "draft") {
+    updates.reviewStatus = "draft";
+    updates.reviewedAt = null;
+  }
+
   if (typeof playwrightCode === "string") {
     updates.isApiTest = !!(playwrightCode && isApiTest(playwrightCode));
   }
