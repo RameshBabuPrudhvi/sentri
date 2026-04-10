@@ -253,19 +253,45 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
   let rateLimitHit = false;
   let rateLimitError = null;
 
-  // Helper: call a generator and handle rate limit short-circuit
+  // How long to wait after exhausted retries before attempting one final
+  // recovery call. aiProvider.js already retries with exponential backoff
+  // (up to MAX_BACKOFF_MS = 30s). This grace period gives the provider's
+  // quota window a chance to partially reset between pages before we
+  // permanently abandon the rest of the run.
+  const RATE_LIMIT_GRACE_MS = 60_000;
+
+  // Helper: call a generator and handle rate limit short-circuit.
+  //
+  // When aiProvider.js exhausts all its internal retries and still gets a
+  // rate limit error, it surfaces that error here. Rather than immediately
+  // aborting every remaining call, we attempt one grace-period wait and
+  // retry — only setting rateLimitHit (permanent skip) if that also fails.
+  // This prevents a brief quota burst early in the run from silently
+  // discarding tests for all subsequent pages.
   async function safeGenerate(label, fn) {
-    if (rateLimitHit) return []; // skip remaining calls after rate limit
+    if (rateLimitHit) return []; // permanently short-circuit after confirmed unrecoverable limit
     try {
       return await fn();
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
       if (isRateLimitError(err)) {
-        rateLimitHit = true;
-        rateLimitError = err;
-        onProgress?.(`⚠️  AI rate limit reached: ${err.message.slice(0, 120)}`);
-        onProgress?.(`⏭️  Skipping remaining AI calls — ${allTests.length} tests generated so far`);
-        return [];
+        // aiProvider.js already exhausted its own retries — wait for the
+        // provider's quota window before making one final attempt.
+        onProgress?.(`⚠️  AI rate limit reached after all retries: ${err.message.slice(0, 120)}`);
+        onProgress?.(`⏳ Waiting ${RATE_LIMIT_GRACE_MS / 1000}s for quota window to reset before retrying…`);
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_GRACE_MS));
+        throwIfAborted(signal);
+        try {
+          return await fn();
+        } catch (retryErr) {
+          if (retryErr.name === "AbortError" || signal?.aborted) throw retryErr;
+          // Grace-period retry also failed — quota is durably exhausted.
+          // Stop all remaining calls to avoid hammering the provider.
+          rateLimitHit = true;
+          rateLimitError = retryErr;
+          onProgress?.(`⏭️  Rate limit persists after grace period — skipping remaining AI calls (${allTests.length} tests saved so far)`);
+          return [];
+        }
       }
       onProgress?.(`⚠️  ${label} failed: ${err.message.slice(0, 100)}`);
       return [];
