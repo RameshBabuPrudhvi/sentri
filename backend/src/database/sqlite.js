@@ -5,6 +5,12 @@
  * Uses better-sqlite3 (synchronous, single-writer) with WAL mode for
  * concurrent reads. The database file lives at `data/sentri.db`.
  *
+ * ### Schema management
+ * All schema changes go through the versioned migration system in
+ * `database/migrationRunner.js`. Migration files live in `database/migrations/`
+ * as numbered `.sql` files (001_*, 002_*, …). See the migration runner JSDoc
+ * for instructions on adding new migrations.
+ *
  * ### Exports
  * - {@link getDatabase} — Returns the singleton `better-sqlite3` instance.
  * - {@link closeDatabase} — Gracefully close the connection (shutdown hook).
@@ -15,13 +21,13 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { runMigrations } from "./migrationRunner.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH
   ? path.resolve(process.env.DB_PATH)
   : path.join(__dirname, "..", "..", "data", "sentri.db");
 const DB_DIR = path.dirname(DB_PATH);
-const SCHEMA_PATH = path.join(__dirname, "schema.sql");
 
 /** @type {Object|null} better-sqlite3 Database instance */
 let _db = null;
@@ -29,7 +35,7 @@ let _db = null;
 /**
  * Return the singleton better-sqlite3 database instance.
  * On first call, creates the data directory (if needed), opens the database,
- * applies pragmas, and runs the schema DDL.
+ * applies pragmas, and runs all pending migrations.
  *
  * @returns {Object} better-sqlite3 Database instance
  */
@@ -48,21 +54,12 @@ export function getDatabase() {
   _db.pragma("foreign_keys = ON");
   _db.pragma("busy_timeout = 5000");
 
-  // Apply schema (all statements use IF NOT EXISTS — safe to re-run)
-  const schema = fs.readFileSync(SCHEMA_PATH, "utf-8");
-  _db.exec(schema);
-
-  // ── Migrations (idempotent) ──────────────────────────────────────────────
-  // Add columns that were introduced after the initial schema.
-  const runCols = _db.prepare("PRAGMA table_info(runs)").all().map(c => c.name);
-  if (!runCols.includes("currentStep")) {
-    _db.exec("ALTER TABLE runs ADD COLUMN currentStep INTEGER DEFAULT 0");
-  }
-  if (!runCols.includes("rateLimitError")) {
-    _db.exec("ALTER TABLE runs ADD COLUMN rateLimitError TEXT");
-  }
-  if (!runCols.includes("qualityAnalytics")) {
-    _db.exec("ALTER TABLE runs ADD COLUMN qualityAnalytics TEXT");
+  // Run versioned migrations (creates tables on first run, applies
+  // incremental changes on subsequent runs). Each migration is tracked
+  // in the schema_migrations table and only applied once.
+  const { applied } = runMigrations(_db);
+  if (applied.length > 0) {
+    console.log(formatLogLine("info", null, `[sqlite] Applied ${applied.length} migration(s): ${applied.join(", ")}`));
   }
 
   console.log(formatLogLine("info", null, `[sqlite] Database opened at ${DB_PATH}`));
