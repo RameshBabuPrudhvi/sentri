@@ -116,6 +116,18 @@ function buildSandboxContext(exposed) {
   });
 }
 
+// ─── Env-stripping guard (concurrency-safe) ──────────────────────────────────
+// Reference counter: env is stripped while ANY sandbox is running, restored
+// only when the last concurrent sandbox finishes. Safe in single-threaded
+// Node.js because the counter is incremented/decremented synchronously
+// (before/after await), so no two increments can interleave.
+
+let _envGuardCount = 0;
+let _savedEnv = null;
+let _savedExit = null;
+let _savedKill = null;
+let _savedAbort = null;
+
 /**
  * Execute a function with process.env temporarily stripped.
  *
@@ -123,30 +135,42 @@ function buildSandboxContext(exposed) {
  * vm sandbox via `.constructor.constructor('return process')()`, it will find
  * an empty `process.env` — no API keys, no secrets, no database paths.
  *
- * Also blocks `process.exit()`, `process.kill()`, and `process.abort()` so
- * escaped code cannot crash the server.
+ * Concurrency-safe: uses a reference counter so parallel workers (poolMap in
+ * testRunner.js) all run with stripped env. The first entering test strips,
+ * the last exiting test restores. No interleaving is possible because the
+ * counter operations are synchronous (between await points).
  *
  * @param {Function} fn — async function to execute with stripped env
  * @returns {Promise<*>} return value of fn
  */
 async function runWithStrippedEnv(fn) {
-  const savedEnv = process.env;
-  const savedExit = process.exit;
-  const savedKill = process.kill;
-  const savedAbort = process.abort;
-  try {
-    // Replace env with an empty object — API keys become invisible
+  if (_envGuardCount === 0) {
+    // First test entering — save and strip
+    _savedEnv = process.env;
+    _savedExit = process.exit;
+    _savedKill = process.kill;
+    _savedAbort = process.abort;
     process.env = {};
-    // Block process termination
     process.exit = () => { throw new Error("process.exit() is blocked"); };
     process.kill = () => { throw new Error("process.kill() is blocked"); };
     process.abort = () => { throw new Error("process.abort() is blocked"); };
+  }
+  _envGuardCount++;
+  try {
     return await fn();
   } finally {
-    process.env = savedEnv;
-    process.exit = savedExit;
-    process.kill = savedKill;
-    process.abort = savedAbort;
+    _envGuardCount--;
+    if (_envGuardCount === 0) {
+      // Last test exiting — restore
+      process.env = _savedEnv;
+      process.exit = _savedExit;
+      process.kill = _savedKill;
+      process.abort = _savedAbort;
+      _savedEnv = null;
+      _savedExit = null;
+      _savedKill = null;
+      _savedAbort = null;
+    }
   }
 }
 
