@@ -37,6 +37,7 @@ import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLog
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
+import * as runRepo from "./database/repositories/runRepo.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -183,6 +184,11 @@ export async function runTests(project, tests, run, db, { parallelWorkers, signa
       lastResult: result.status,
       lastRunAt: new Date().toISOString(),
     });
+
+    // Flush run state to SQLite after each result so a crash mid-run
+    // doesn't lose all results collected so far. SQLite writes are
+    // synchronous (~1ms) so this adds negligible overhead per test.
+    runRepo.save(run);
 
     // Broadcast a snapshot after each result so the frontend progress bar
     // updates in real time (especially important during parallel execution

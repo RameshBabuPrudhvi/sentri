@@ -36,7 +36,13 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
     })
     .catch((err) => {
       runAbortControllers.delete(runId);
-      if (err.name === "AbortError" || run.status === "aborted") return;
+      if (err.name === "AbortError" || run.status === "aborted") {
+        // Flush any results accumulated before the abort so they aren't lost.
+        // The abort endpoint already set status="aborted" via runRepo.update(),
+        // but the in-memory run object may have results/logs not yet persisted.
+        runRepo.save(run);
+        return;
+      }
       const runType = run.type === "crawl" ? "crawl" : "run";
       const classified = classifyError(err, runType);
       console.error(formatLogLine("error", runId, `[${runType}] ${err.message}`));
