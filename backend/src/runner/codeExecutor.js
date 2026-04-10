@@ -9,24 +9,24 @@
  *   5. Provide a real Playwright `request` fixture for API tests
  *
  * ### Security model
- * AI-generated code runs inside a vm context that strips `process` from the
- * global scope. However, any injected host object (page, expect, Buffer, etc.)
- * exposes the host's Function constructor via `.constructor.constructor`, which
- * can be used to escape the sandbox:
+ * AI-generated code runs inside a vm context that sets `process: undefined`
+ * in the global scope. However, any injected host object (page, expect,
+ * Buffer, etc.) exposes the host's Function constructor via
+ * `.constructor.constructor`, which can be used to escape the sandbox:
  *
  *   `page.constructor.constructor('return process')()`
  *
  * Node.js docs explicitly warn: "The vm module is not a security mechanism.
  * Do not use it to run untrusted code."
  *
- * To mitigate this, we strip `process.env` before executing AI-generated code
- * and restore it afterward. This ensures that even if sandbox code reaches the
- * host `process` object, it cannot read API keys or secrets. We also block
- * `process.exit()`, `process.kill()`, and `process.abort()` so escaped code
- * cannot crash the server.
+ * We block `process.exit()`, `process.kill()`, and `process.abort()` so
+ * escaped code cannot crash the server. We do NOT strip `process.env` because
+ * doing so breaks concurrent Express handlers (JWT verification, AI provider
+ * calls, SQLite operations) that read env vars between await points during
+ * async test execution.
  *
- * For true isolation (e.g. running untrusted plugins), use worker_threads
- * with `env: {}` or a subprocess with a stripped environment.
+ * For true env isolation (preventing sandbox-escaped code from reading API
+ * keys), use worker_threads with `env: {}` — see NEXT_STEPS.md S1-02.
  *
  * Exports:
  *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
@@ -116,41 +116,55 @@ function buildSandboxContext(exposed) {
   });
 }
 
-// ─── Env-stripping guard (concurrency-safe) ──────────────────────────────────
-// Reference counter: env is stripped while ANY sandbox is running, restored
-// only when the last concurrent sandbox finishes. Safe in single-threaded
-// Node.js because the counter is incremented/decremented synchronously
-// (before/after await), so no two increments can interleave.
+// ─── Process guard (concurrency-safe) ─────────────────────────────────────────
+// Blocks process.exit / process.kill / process.abort while sandboxed code runs.
+// Uses reference counting so parallel workers all stay protected — the first
+// entering test installs the guards, the last exiting test removes them.
+//
+// NOTE: We intentionally do NOT strip or replace process.env. The previous
+// implementation replaced process.env with {} during async sandbox execution,
+// which broke concurrent Express handlers that read env vars between await
+// points (JWT verification, AI provider calls, SQLite config, etc.). Since
+// Node.js is single-threaded but test execution is async, the event loop
+// processes other tasks (including HTTP requests) while page actions await,
+// and those tasks would find process.env empty.
+//
+// The vm sandbox already sets `process: undefined` in its context. The only
+// way to reach the host process is via .constructor.constructor('return process')().
+// For true env isolation, use worker_threads with `env: {}` (see NEXT_STEPS.md
+// S1-02). The current approach blocks destructive operations (exit/kill/abort)
+// without breaking the server.
 
 let _envGuardCount = 0;
-let _savedEnv = null;
 let _savedExit = null;
 let _savedKill = null;
 let _savedAbort = null;
 
 /**
- * Execute a function with process.env temporarily stripped.
+ * Execute a function with destructive process methods blocked.
  *
- * This is the real security boundary. Even if AI-generated code escapes the
- * vm sandbox via `.constructor.constructor('return process')()`, it will find
- * an empty `process.env` — no API keys, no secrets, no database paths.
+ * Blocks `process.exit()`, `process.kill()`, and `process.abort()` so that
+ * sandbox-escaped code cannot crash the server. The vm sandbox already hides
+ * `process` from the global scope; these guards are a defense-in-depth layer
+ * for the `.constructor.constructor('return process')()` escape path.
+ *
+ * NOTE: `process.env` is NOT stripped — doing so breaks concurrent server
+ * operations (Express handlers, JWT verification, AI calls) that run on the
+ * same event loop between await points. For env isolation, use worker_threads
+ * with `env: {}`.
  *
  * Concurrency-safe: uses a reference counter so parallel workers (poolMap in
- * testRunner.js) all run with stripped env. The first entering test strips,
- * the last exiting test restores. No interleaving is possible because the
- * counter operations are synchronous (between await points).
+ * testRunner.js) all run with guards installed. The first entering test
+ * installs them, the last exiting test restores the originals.
  *
- * @param {Function} fn — async function to execute with stripped env
+ * @param {Function} fn — async function to execute with process guards
  * @returns {Promise<*>} return value of fn
  */
 async function runWithStrippedEnv(fn) {
   if (_envGuardCount === 0) {
-    // First test entering — save and strip
-    _savedEnv = process.env;
     _savedExit = process.exit;
     _savedKill = process.kill;
     _savedAbort = process.abort;
-    process.env = {};
     process.exit = () => { throw new Error("process.exit() is blocked"); };
     process.kill = () => { throw new Error("process.kill() is blocked"); };
     process.abort = () => { throw new Error("process.abort() is blocked"); };
@@ -161,12 +175,9 @@ async function runWithStrippedEnv(fn) {
   } finally {
     _envGuardCount--;
     if (_envGuardCount === 0) {
-      // Last test exiting — restore
-      process.env = _savedEnv;
       process.exit = _savedExit;
       process.kill = _savedKill;
       process.abort = _savedAbort;
-      _savedEnv = null;
       _savedExit = null;
       _savedKill = null;
       _savedAbort = null;

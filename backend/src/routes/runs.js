@@ -201,12 +201,16 @@ router.post("/runs/:runId/abort", (req, res) => {
     status: "aborted",
   });
 
+  // Use the live in-memory run (if available) for pass/fail counts — it has
+  // the latest results from processResult() calls that may not yet be flushed
+  // to SQLite. Fall back to the SQLite snapshot for runs without a live ref.
+  const countsSource = entry?.run || run;
   emitRunEvent(req.params.runId, "done", {
     status: "aborted",
-    passed: run.passed ?? undefined,
-    failed: run.failed ?? undefined,
-    total: run.total ?? undefined,
-    testsGenerated: run.testsGenerated ?? undefined,
+    passed: countsSource.passed ?? undefined,
+    failed: countsSource.failed ?? undefined,
+    total: countsSource.total ?? undefined,
+    testsGenerated: countsSource.testsGenerated ?? undefined,
   });
 
   res.json({ ok: true });

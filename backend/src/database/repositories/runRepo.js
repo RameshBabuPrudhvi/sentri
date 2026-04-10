@@ -193,9 +193,10 @@ export function update(id, fields) {
  * Used by pipeline code that mutates the run in-memory and then flushes.
  *
  * Pipeline code accumulates non-column properties on the run object
- * (e.g. currentStep, snapshots, pages, testsGenerated, rateLimitError,
- * qualityAnalytics). These are filtered out so the generated SQL only
- * references actual table columns.
+ * (e.g. snapshots, pages, testsGenerated). These are filtered out so
+ * the generated SQL only references actual table columns.
+ * Note: rateLimitError, qualityAnalytics, and currentStep ARE columns
+ * and are correctly persisted.
  *
  * @param {Object} run — Full run object with `id`.
  */

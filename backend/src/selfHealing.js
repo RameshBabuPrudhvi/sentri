@@ -722,8 +722,7 @@ VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
 
 COUNT / VALUE ASSERTIONS — use page.locator() scoped to a semantic selector:
   ✓ await expect(page.locator(...)).toHaveCount(5);
-  ✓ await expect(page.locator(...)).toHaveCount(5);
-  ✓ await expect(page.locator(...).toHaveCount(5);
+  ✓ await expect(page.locator(...)).toHaveValue('expected');
   ✓ await expect(page.locator(...)).not.toHaveCount(0);
     BAD:  const items = page.locator(...); await expect(items).toHaveCount(5);
     GOOD: await expect(page.locator(...)).toHaveCount(5);
