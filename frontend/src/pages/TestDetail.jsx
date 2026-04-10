@@ -103,6 +103,10 @@ export default function TestDetail() {
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
 
+  // ── Code regeneration review state ──────────────────────────────────────
+  const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
+  const [applyingPreview, setApplyingPreview] = useState(false);
+
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
     setTest(t);
@@ -138,24 +142,55 @@ export default function TestDetail() {
     setEditError(null);
     try {
       const cleanSteps = editSteps.filter(s => s.trim());
-      const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
 
+      // Save steps + metadata, and request a code preview (not auto-applied).
+      // The backend generates new code but returns it in _codePreview instead
+      // of persisting it — the user reviews a diff before accepting.
       const updated = await api.updateTest(testId, {
         name: editName.trim(),
         description: editDesc.trim(),
         steps: cleanSteps,
         priority: editPriority,
-        // Always regenerate Playwright code on save so the script stays
-        // in sync with any changes to steps, name, or description.
-        regenerateCode: true,
+        previewCode: !!test.playwrightCode,
       });
       setTest(updated);
       setEditing(false);
+
+      // If the backend returned a code preview, show the review panel
+      if (updated._codePreview) {
+        setCodePreview(updated._codePreview);
+      }
     } catch (err) {
       setEditError(err.message || "Failed to save changes.");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleAcceptPreview() {
+    if (!codePreview?.generatedCode || applyingPreview) return;
+    setApplyingPreview(true);
+    try {
+      const updated = await api.updateTest(testId, {
+        playwrightCode: codePreview.generatedCode,
+      });
+      setTest(updated);
+      setCodePreview(null);
+    } catch (err) {
+      setEditError(err.message || "Failed to apply generated code.");
+    } finally {
+      setApplyingPreview(false);
+    }
+  }
+
+  function handleEditPreview() {
+    // Open the code editor pre-filled with the generated code
+    setCodeEditorOpen(true);
+    setCodePreview(null);
+  }
+
+  function handleDiscardPreview() {
+    setCodePreview(null);
   }
 
   function cancelEditing() {
@@ -307,7 +342,7 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? "Saving & regenerating code…" : "Save Changes"}
+                {saving ? (test.playwrightCode ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
               </button>
             </>
           ) : (
@@ -700,10 +735,54 @@ export default function TestDetail() {
                 display: "flex", alignItems: "center", gap: 6,
               }}>
                 <RefreshCw size={12} />
-                Playwright code will be automatically regenerated from your updated steps when you save.
+                Playwright code will be regenerated when you save. You'll review the changes before they are applied.
               </div>
             )}
           </div>
+
+          {/* Code Regeneration Review Panel */}
+          {codePreview && (
+            <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--accent)", borderRadius: 10 }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "12px 16px",
+                background: "var(--accent-bg)",
+                borderBottom: "1px solid rgba(91,110,245,0.2)",
+              }}>
+                <RefreshCw size={15} color="var(--accent)" />
+                <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--accent)", flex: 1 }}>
+                  Code Regenerated — Review Changes
+                </span>
+                <button onClick={handleDiscardPreview} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 4, display: "flex" }} title="Discard">
+                  <X size={15} />
+                </button>
+              </div>
+              <div style={{ padding: "10px 16px", fontSize: "0.82rem", color: "var(--text2)", background: "var(--bg2)", borderBottom: "1px solid var(--border)" }}>
+                The AI updated the Playwright code to match your new steps. Review the diff below, then accept, edit, or discard.
+              </div>
+              <div style={{ padding: "12px 16px" }}>
+                <DiffView before={codePreview.originalCode || ""} after={codePreview.generatedCode} />
+              </div>
+              <div style={{
+                display: "flex", gap: 8, padding: "12px 16px",
+                borderTop: "1px solid var(--border)",
+                justifyContent: "flex-end",
+              }}>
+                <button className="btn btn-ghost btn-sm" onClick={handleDiscardPreview} disabled={applyingPreview}>
+                  <X size={13} /> Discard
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={handleEditPreview} disabled={applyingPreview}>
+                  <Edit2 size={13} /> Edit Code
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleAcceptPreview} disabled={applyingPreview}>
+                  {applyingPreview
+                    ? <><RefreshCw size={13} className="spin" /> Applying…</>
+                    : <><CheckCircle2 size={13} /> Accept</>
+                  }
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* AI Fix Panel */}
           {showFixPanel && test.playwrightCode && (

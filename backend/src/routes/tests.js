@@ -65,7 +65,7 @@ router.patch("/tests/:testId", async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode, playwrightCode, linkedIssueKey, tags } = req.body;
+  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags } = req.body;
 
   const updates = {};
 
@@ -96,7 +96,10 @@ router.patch("/tests/:testId", async (req, res) => {
   const currentSteps = updates.steps || test.steps;
   const currentName = updates.name || test.name;
 
-  if (regenerateCode && hasProvider() && Array.isArray(currentSteps) && currentSteps.length > 0) {
+  const shouldRegenerate = (regenerateCode || previewCode) && hasProvider() && Array.isArray(currentSteps) && currentSteps.length > 0;
+  let previewResult = null;
+
+  if (shouldRegenerate) {
     try {
       const project = projectRepo.getById(test.projectId);
       const appUrl = project?.url || test.sourceUrl || "";
@@ -167,14 +170,20 @@ Return ONLY valid JSON with no markdown fences:
         }
       }
       if (pwCode) {
-        const currentCode = updates.playwrightCode || test.playwrightCode;
-        if (currentCode && currentCode !== pwCode) {
-          updates.playwrightCodePrev = currentCode;
+        if (previewCode) {
+          // Preview mode: return generated code without persisting it.
+          // The frontend shows a diff panel for the user to accept/edit/discard.
+          previewResult = { generatedCode: pwCode, originalCode: existingCode || null };
+        } else {
+          const currentCode = updates.playwrightCode || test.playwrightCode;
+          if (currentCode && currentCode !== pwCode) {
+            updates.playwrightCodePrev = currentCode;
+          }
+          updates.playwrightCode = pwCode;
+          updates.isApiTest = !!(pwCode && isApiTest(pwCode));
+          updates.codeRegeneratedAt = new Date().toISOString();
+          codeRegeneratedNow = true;
         }
-        updates.playwrightCode = pwCode;
-        updates.isApiTest = !!(pwCode && isApiTest(pwCode));
-        updates.codeRegeneratedAt = new Date().toISOString();
-        codeRegeneratedNow = true;
       }
     } catch (err) {
       console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
@@ -199,8 +208,11 @@ Return ONLY valid JSON with no markdown fences:
   // Re-read the updated test from SQLite for the response
   const updatedTest = testRepo.getById(test.id);
   const response = { ...updatedTest };
-  if (regenerateCode && !codeRegeneratedNow) {
+  if (regenerateCode && !codeRegeneratedNow && !previewCode) {
     response._codeStale = true;
+  }
+  if (previewResult) {
+    response._codePreview = previewResult;
   }
 
   res.json(response);
