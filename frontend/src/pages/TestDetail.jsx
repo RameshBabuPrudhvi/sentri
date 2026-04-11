@@ -934,6 +934,7 @@ export default function TestDetail() {
                 </button>
               </div>
             ) : (
+              <>
               <table className="table" style={{ marginTop: 0 }}>
                 <thead>
                   <tr>
@@ -991,6 +992,7 @@ export default function TestDetail() {
                 onPageChange={setRunPage}
                 label="runs"
               />
+              </>
             )}
           </div>
         </div>
