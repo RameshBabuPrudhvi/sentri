@@ -12,6 +12,7 @@ import StatusBadge from "../components/StatusBadge";
 import PassFailChart from "../components/PassFailChart";
 import PassRateBar from "../components/PassRateBar";
 import usePageTitle from "../hooks/usePageTitle.js";
+import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
 
 function downloadCSV(runs, projectNames) {
   const header = ["Run ID","Project","Type","Status","Passed","Failed","Total","Started","Duration"];
@@ -36,6 +37,7 @@ export default function Reports() {
   usePageTitle("Reports");
   const { projects, allTests, testRuns, projMap, loading } = useProjectData();
   const [selectedProject, setSelectedProject] = useState("all");
+  const [runPage, setRunPage] = useState(1);
   const navigate = useNavigate();
 
   const filteredRuns = useMemo(() =>
@@ -358,7 +360,7 @@ export default function Reports() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRuns.slice(0, 50).map(run => {
+                {filteredRuns.slice((runPage - 1) * PAGE_SIZE, runPage * PAGE_SIZE).map(run => {
                   const rate = run.total ? Math.round(((run.passed || 0) / run.total) * 100) : null;
                   return (
                     <tr key={run.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${run.id}`)}>
@@ -386,6 +388,13 @@ export default function Reports() {
                 })}
               </tbody>
             </table>
+            <TablePagination
+              total={filteredRuns.length}
+              page={runPage}
+              totalPages={Math.max(1, Math.ceil(filteredRuns.length / PAGE_SIZE))}
+              onPageChange={setRunPage}
+              label="runs"
+            />
           </div>
         </>
       )}

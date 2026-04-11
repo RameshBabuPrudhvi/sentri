@@ -3,12 +3,21 @@
  * @description Runs table tab for ProjectDetail — lists all crawl/generate/test runs.
  */
 
-import React from "react";
+import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Ban } from "lucide-react";
+import TablePagination, { PAGE_SIZE } from "../TablePagination.jsx";
 
 export default function RunsTab({ runs }) {
   const navigate = useNavigate();
+  const [page, setPage] = useState(1);
+
+  const sorted = useMemo(() =>
+    [...runs].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)),
+  [runs]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   if (runs.length === 0) {
     return (
@@ -25,9 +34,7 @@ export default function RunsTab({ runs }) {
           <tr><th>Run ID</th><th>Type</th><th>Status</th><th>Tests / Pages</th><th>Started</th><th></th></tr>
         </thead>
         <tbody>
-          {[...runs]
-            .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
-            .map(r => {
+          {paged.map(r => {
               const isCrawl    = r.type === "crawl";
               const isGenerate = r.type === "generate";
               const isRun      = r.type === "run" || r.type === "test_run";
@@ -82,6 +89,13 @@ export default function RunsTab({ runs }) {
             })}
         </tbody>
       </table>
+      <TablePagination
+        total={sorted.length}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        label="runs"
+      />
     </div>
   );
 }

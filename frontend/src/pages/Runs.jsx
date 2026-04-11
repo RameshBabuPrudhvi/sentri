@@ -10,6 +10,7 @@ import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/StatusBadge";
 import RunRegressionModal from "../components/RunRegressionModal.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
+import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
 
 // ── Filter definitions (mirrors Tests.jsx icon-pill pattern) ──────────────────
 
@@ -76,6 +77,7 @@ export default function Work() {
   const [typeFilter, setTypeFilter]     = useState("all");
   const [search, setSearch]             = useState("");
   const [showRunModal, setShowRunModal] = useState(false);
+  const [page, setPage] = useState(1);
   const navigate = useNavigate();
 
   // ── Counts for filter dots ────────────────────────────────────────────────
@@ -111,6 +113,11 @@ export default function Work() {
   }), [runs, statusCounts]);
 
   const anyFilterActive = statusFilter !== "all" || typeFilter !== "all";
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  React.useEffect(() => { setPage(1); }, [statusFilter, typeFilter, search]);
 
   if (loading) return (
     <div className="page-container" style={{ maxWidth: 1000 }}>
@@ -328,7 +335,7 @@ export default function Work() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(run => (
+              {paged.map(run => (
                 <tr key={run.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/runs/${run.id}`)}>
                   <td>
                     <span className="mono-id">
@@ -370,6 +377,13 @@ export default function Work() {
               ))}
             </tbody>
           </table>
+          <TablePagination
+            total={filtered.length}
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            label="runs"
+          />
         )}
       </div>
 

@@ -24,6 +24,7 @@ import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
 import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
 import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
+import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -96,6 +97,9 @@ export default function TestDetail() {
   const [issueKeyDraft, setIssueKeyDraft]     = useState("");
   const [editingTags, setEditingTags]         = useState(false);
   const [tagsDraft, setTagsDraft]             = useState("");
+
+  // ── Runs pagination ──────────────────────────────────────────────────────
+  const [runPage, setRunPage] = useState(1);
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
@@ -941,7 +945,7 @@ export default function TestDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {runs.slice(0, 10).map(run => {
+                  {runs.slice((runPage - 1) * PAGE_SIZE, runPage * PAGE_SIZE).map(run => {
                     const result = run.results?.find(r => r.testId === testId);
                     const status = result?.status || run.status;
                     const duration = result?.durationMs;
@@ -980,6 +984,13 @@ export default function TestDetail() {
                   })}
                 </tbody>
               </table>
+              <TablePagination
+                total={runs.length}
+                page={runPage}
+                totalPages={Math.max(1, Math.ceil(runs.length / PAGE_SIZE))}
+                onPageChange={setRunPage}
+                label="runs"
+              />
             )}
           </div>
         </div>

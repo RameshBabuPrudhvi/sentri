@@ -54,7 +54,7 @@ export default function ProjectDetail() {
   const [search, setSearch]               = useState("");
   const [selected, setSelected]           = useState(new Set());
   const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 10;
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);

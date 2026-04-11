@@ -35,7 +35,7 @@ const CATEGORY_FILTERS = [
   { key: "API", tooltip: "API tests", activeColor: "#2563eb", activeBg: "rgba(37,99,235,0.12)",  label: "🌐 API" },
 ];
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 
 // ── Relative time utility ──────────────────────────────────────────────────────
 
