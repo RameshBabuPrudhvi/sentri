@@ -51,16 +51,37 @@ export function getAllAsDict() {
 
 /**
  * Get all healing entries for a specific test (keys starting with "<testId>::").
- * @param {string} testId
+ *
+ * Accepts both raw test IDs (`"TC-1"`) and versioned scope IDs
+ * (`"TC-1@v2"`).  When a versioned scope is passed we also query the
+ * legacy (unversioned) prefix so that pre-existing healing entries
+ * remain readable after upgrading to versioned scopes.
+ *
+ * @param {string} testId — raw test ID or versioned scope ID
  * @returns {Object<string, Object>} Map of `"action::label"` → entry.
  */
 export function getByTestId(testId) {
   const db = getDatabase();
-  const exactPrefix = `${testId}::`;
-  const versionedPrefix = `${testId}@v`;
+
+  // Strip the @vN suffix (if present) to derive the base test ID so we
+  // can also query legacy keys stored before versioned scopes existed.
+  const baseId = testId.replace(/@v\d+$/, "");
+
+  const patterns = [`${testId}::%`];
+  // When testId already contains @v, also query unversioned legacy keys
+  if (baseId !== testId) {
+    patterns.push(`${baseId}::%`);
+  }
+  // Also query any other versioned keys for this base ID
+  patterns.push(`${baseId}@v%::%`);
+
+  // Build a query with the right number of OR clauses
+  const uniquePatterns = [...new Set(patterns)];
+  const whereClauses = uniquePatterns.map(() => "key LIKE ?").join(" OR ");
   const rows = db.prepare(
-    "SELECT * FROM healing_history WHERE key LIKE ? OR key LIKE ?"
-  ).all(`${exactPrefix}%`, `${versionedPrefix}%`);
+    `SELECT * FROM healing_history WHERE ${whereClauses}`
+  ).all(...uniquePatterns);
+
   const result = {};
   for (const r of rows) {
     const sepIdx = r.key.indexOf("::");
@@ -77,11 +98,10 @@ export function getByTestId(testId) {
 export function deleteByTestIds(testIds) {
   const db = getDatabase();
   const stmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
-  const versionedStmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
   const txn = db.transaction(() => {
     for (const tid of testIds) {
       stmt.run(`${tid}::%`);
-      versionedStmt.run(`${tid}@v%::%`);
+      stmt.run(`${tid}@v%::%`);
     }
   });
   txn();

@@ -20,7 +20,20 @@ function formatJsonExample(raw, maxChars = 1800) {
   if (raw.length <= maxChars) return raw;
   try {
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return JSON.stringify(parsed.slice(0, 10), null, 2);
+    if (Array.isArray(parsed)) {
+      // Incrementally include elements until we exceed maxChars
+      const compact = [];
+      for (const item of parsed) {
+        compact.push(item);
+        if (JSON.stringify(compact, null, 2).length > maxChars) {
+          compact.pop();
+          break;
+        }
+      }
+      // Always include at least one element so the shape is visible
+      if (compact.length === 0 && parsed.length > 0) compact.push(parsed[0]);
+      return JSON.stringify(compact, null, 2);
+    }
     if (parsed && typeof parsed === "object") {
       const compact = {};
       for (const [k, v] of Object.entries(parsed)) {

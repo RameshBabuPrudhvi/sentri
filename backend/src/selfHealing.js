@@ -423,7 +423,18 @@ export function getSelfHealingHelperCode(healingHints) {
       if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
         throw new Error('safeSelect: labelOrText argument is required (got ' + typeof labelOrText + ')');
       }
-      const strValue = (value == null) ? '' : String(value);
+      // Playwright's selectOption() accepts string, { label?, value?, index? },
+      // or arrays for multi-select. Only coerce primitives (number/boolean) to
+      // string — preserve objects and arrays so callers can use forms like
+      // { label: 'United States' } or { index: 1 }.
+      let selectValue;
+      if (value == null) {
+        selectValue = '';
+      } else if (typeof value === 'object') {
+        selectValue = value; // array or { label/value/index } — pass through
+      } else {
+        selectValue = String(value);
+      }
       const strategies = looksLikeSelector(labelOrText)
         ? [p => p.locator(labelOrText)]
         : [
@@ -436,7 +447,7 @@ export function getSelfHealingHelperCode(healingHints) {
       await retry(async () => {
         const el = await findElement(page, strategies, { healingKey: 'select::' + labelOrText });
         await ensureReady(el);
-        await el.selectOption(strValue);
+        await el.selectOption(selectValue);
       });
     }
 
