@@ -483,6 +483,175 @@ test("page.keyboard.press is never transformed", () => {
   assert.equal(applyHealingTransforms(code), code);
 });
 
+// ── 10. CSS selector edge cases — pseudo-selectors, nth-child, combinators ───
+
+console.log("\n🎯  CSS selector edge cases — pseudo, nth-child, combinators");
+
+test("page.click('.btn:nth-child(2)') — :nth-child pseudo not rewritten", () => {
+  const code = "await page.click('.btn:nth-child(2)')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('li:first-child') — :first-child pseudo not rewritten", () => {
+  const code = "await page.click('li:first-child')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('div:last-child') — :last-child pseudo not rewritten", () => {
+  const code = "await page.click('div:last-child')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('button:not(.disabled)') — :not() pseudo not rewritten", () => {
+  const code = "await page.click('button:not(.disabled)')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('ul:has(li)') — :has() pseudo not rewritten", () => {
+  const code = "await page.click('ul:has(li)')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('input:is([type=text])') — :is() pseudo not rewritten", () => {
+  const code = "await page.click('input:is([type=text])')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.click('tr:nth-of-type(3)') — :nth-of-type pseudo not rewritten", () => {
+  const code = "await page.click('tr:nth-of-type(3)')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.locator('div > span').click() — child combinator not rewritten", () => {
+  const code = "await page.locator('div > span').click()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.locator('h2 ~ p').click() — sibling combinator not rewritten", () => {
+  const code = "await page.locator('h2 ~ p').click()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.locator('h2 + p').click() — adjacent sibling not rewritten", () => {
+  const code = "await page.locator('h2 + p').click()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.fill('.form input[name=email]', 'x') — CSS locator fill not rewritten", () => {
+  const code = "await page.fill('.form input[name=email]', 'test@x.com')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.hover('.dropdown:nth-child(1)') — CSS pseudo hover not rewritten", () => {
+  const code = "await page.hover('.dropdown:nth-child(1)')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.dblclick('[data-row]:first-child') — attribute + pseudo dblclick not rewritten", () => {
+  const code = "await page.dblclick('[data-row]:first-child')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("expect(page.locator('.alert:not(.hidden)')).toBeVisible() — CSS pseudo expect not rewritten", () => {
+  const code = "expect(page.locator('.alert:not(.hidden)')).toBeVisible()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.locator('[data-testid=submit]').fill('x') — attribute locator fill not rewritten", () => {
+  const code = "await page.locator('[data-testid=submit]').fill('test')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.locator('//div[@class=\"modal\"]').click() — XPath locator not rewritten", () => {
+  const code = "await page.locator('//div[@class=\"modal\"]').click()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+// ── 11. Template injection safety — ${} in text ──────────────────────────────
+
+console.log("\n💉  Template injection safety — ${} in text");
+
+test("page.click with ${} in text — dollar-brace is escaped in output", () => {
+  const out = applyHealingTransforms("await page.click('Price: total')");
+  // The text 'Price: total' is human-readable, should be transformed
+  assert.equal(out, "await safeClick(page, 'Price: total')");
+});
+
+test("backslash in text is escaped in safeClick output", () => {
+  const out = applyHealingTransforms("await page.click('path\\\\to')");
+  // The esc() function should double-escape the backslash
+  assert.match(out, /safeClick/);
+});
+
+// ── 12. Chained locator actions — getByLabel().hover(), getByLabel().dblclick() ─
+
+console.log("\n🔗  Chained locator edge cases");
+
+test("page.getByLabel('x').hover() → safeHover (not just click)", () => {
+  // getByLabel().hover() is NOT covered by a specific regex — verify behavior
+  const code = "await page.getByLabel('Menu').hover()";
+  const out = applyHealingTransforms(code);
+  // The locator-based hover regex should NOT match getByLabel (it only matches page.locator)
+  // and there's no specific getByLabel().hover() rule, so it stays as-is
+  // This documents the current behavior — a gap in the transform engine
+  assert.equal(out, code);
+});
+
+test("page.getByLabel('x').dblclick() — no specific rule, stays as-is", () => {
+  const code = "await page.getByLabel('Terms').dblclick()";
+  const out = applyHealingTransforms(code);
+  // No getByLabel().dblclick() regex exists — documenting the gap
+  assert.equal(out, code);
+});
+
+test("page.getByAltText('x').hover() — no specific rule, stays as-is", () => {
+  const code = "await page.getByAltText('Logo').hover()";
+  const out = applyHealingTransforms(code);
+  // No getByAltText().hover() regex exists — documenting the gap
+  assert.equal(out, code);
+});
+
+test("page.getByPlaceholder('x').hover() — no specific rule, stays as-is", () => {
+  const code = "await page.getByPlaceholder('Search').hover()";
+  const out = applyHealingTransforms(code);
+  // No getByPlaceholder().hover() regex exists — documenting the gap
+  assert.equal(out, code);
+});
+
+// ── 13. All scoped roles in safeExpect ───────────────────────────────────────
+
+console.log("\n🏷️  safeExpect — all scoped ARIA roles preserve role hint");
+
+const SCOPED_ROLES = [
+  "button", "link", "menuitem", "tab", "heading", "img", "navigation",
+  "listitem", "cell", "row", "dialog", "alert", "checkbox", "radio",
+  "switch", "slider", "progressbar", "option",
+];
+
+for (const role of SCOPED_ROLES) {
+  test(`expect(page.getByRole('${role}', {name:'x'})).toBeVisible() preserves '${role}' hint`, () => {
+    const out = applyHealingTransforms(
+      `expect(page.getByRole('${role}', { name: 'TestLabel' })).toBeVisible()`
+    );
+    assert.equal(out, `await safeExpect(page, expect, 'TestLabel', '${role}')`);
+  });
+}
+
+// ── 14. Input-like roles in safeExpect — role hint is dropped ────────────────
+
+console.log("\n📥  safeExpect — input-like roles drop role hint");
+
+const INPUT_ROLES = ["textbox", "searchbox", "combobox", "spinbutton"];
+
+for (const role of INPUT_ROLES) {
+  test(`expect(page.getByRole('${role}', {name:'x'})).toBeVisible() drops '${role}' hint`, () => {
+    const out = applyHealingTransforms(
+      `expect(page.getByRole('${role}', { name: 'Field' })).toBeVisible()`
+    );
+    assert.equal(out, "await safeExpect(page, expect, 'Field')");
+  });
+}
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

@@ -214,6 +214,51 @@ async function main() {
     });
     assert.equal(out.res.status, 401, "apply-fix should require auth");
 
+    // ── Test: apply-fix rejects code without test() call ──────────────────
+    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+      method: "POST",
+      token,
+      body: { code: "async function doStuff() { await page.click('#x'); }" },
+    });
+    assert.equal(out.res.status, 400, "apply-fix should 400 for code without test()");
+    assert.ok(out.json.error.includes("valid Playwright test"), "Error should mention valid Playwright test");
+
+    // ── Test: apply-fix rejects code without async ────────────────────────
+    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+      method: "POST",
+      token,
+      body: { code: "test('sync test', ({ page }) => { page.click('#x'); });" },
+    });
+    assert.equal(out.res.status, 400, "apply-fix should 400 for code without async");
+
+    // ── Test: apply-fix accepts test.only() variant ───────────────────────
+    const onlyCode = `test.only('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await page.fill('#email', 'user@test.com');\n  await expect(page).toHaveURL('/dashboard');\n});`;
+    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+      method: "POST",
+      token,
+      body: { code: onlyCode },
+    });
+    assert.equal(out.res.status, 200, "apply-fix should accept test.only()");
+
+    // ── Test: apply-fix accepts test.skip() variant ───────────────────────
+    const skipCode = `test.skip('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n});`;
+    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+      method: "POST",
+      token,
+      body: { code: skipCode },
+    });
+    assert.equal(out.res.status, 200, "apply-fix should accept test.skip()");
+
+    // ── Test: apply-fix strips markdown fences from code ──────────────────
+    const fencedCode = "```javascript\ntest('Failing login test', async ({ page }) => {\n  await page.goto('https://example.com/login');\n  await expect(page).toHaveURL('/dashboard');\n});\n```";
+    out = await reqJson(base, "/api/tests/TC-FIX1/apply-fix", {
+      method: "POST",
+      token,
+      body: { code: fencedCode },
+    });
+    assert.equal(out.res.status, 200, "apply-fix should strip markdown fences");
+    assert.ok(!out.json.playwrightCode.includes("```"), "Stored code should not contain fences");
+
     console.log("✅ test-fix: all checks passed");
   } finally {
     await new Promise((resolve) => server.close(resolve));

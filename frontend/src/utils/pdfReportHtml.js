@@ -5,6 +5,7 @@
  *
  * ### Exports
  * - {@link renderReportHtml} — `(metrics) → string` full HTML document.
+ * - {@link escapeHtml} — HTML-escape a user-sourced value (exported for testing).
  */
 
 import { fmtRelativeDate } from "./formatters.js";
@@ -15,7 +16,7 @@ import { fmtRelativeDate } from "./formatters.js";
 // escaping, a test named `<script>alert(1)</script>` renders executable markup
 // in the generated PDF/HTML. This function is the single escape gate — every
 // user-controlled value must pass through it before template interpolation.
-function esc(value) {
+export function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value)
     .replace(/&/g, "&amp;")
@@ -24,6 +25,9 @@ function esc(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#x27;");
 }
+
+// Internal alias — all template interpolation uses esc() for brevity.
+const esc = escapeHtml;
 
 function fmtMs(ms) {
   if (!ms || ms <= 0) return "—";
