@@ -17,7 +17,7 @@
  * const dashboard = await api.getDashboard();
  */
 
-import { API_BASE, parseJsonResponse } from "./utils/api.js";
+import { API_BASE, parseJsonResponse } from "./utils/apiBase.js";
 
 /** @type {string} Full base URL for API endpoints (e.g. `"/api"` or `"https://backend.example.com/api"`). */
 const BASE = `${API_BASE}/api`;

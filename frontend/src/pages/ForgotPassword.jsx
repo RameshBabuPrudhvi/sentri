@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AppLogo from "../components/AppLogo.jsx";
-import { API_BASE, parseJsonResponse } from "../utils/api.js";
+import { API_BASE, parseJsonResponse } from "../utils/apiBase.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 function Spinner() {

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { cleanTestName } from "../src/utils/formatTestName.js";
 import { loadSavedConfig, saveConfig, countActiveDials } from "../src/utils/testDialsStorage.js";
 import { csvEscape, buildCsv, downloadCsv } from "../src/utils/exportCsv.js";
-import { parseJsonResponse } from "../src/utils/api.js";
+import { parseJsonResponse } from "../src/utils/apiBase.js";
 import { escapeHtml } from "../src/utils/pdfReportHtml.js";
 
 let passed = 0;

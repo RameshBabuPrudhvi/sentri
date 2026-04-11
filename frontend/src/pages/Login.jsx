@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/AppLogo.jsx";
-import { API_BASE, parseJsonResponse } from "../utils/api.js";
+import { API_BASE, parseJsonResponse } from "../utils/apiBase.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import "../styles/pages/login.css";
 
