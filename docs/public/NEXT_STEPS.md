@@ -1,6 +1,6 @@
 # Sentri — Implementation Plan
 
-> **Purpose:** This document tracks all known issues, improvement opportunities, and new features for Sentri. It consolidates findings from the full codebase audit, the Assrt MCP cross-reference analysis, and competitive research against autonomous QA platforms (Mabl, Testim, QA Wolf, Reflect).
+> **Purpose:** This document tracks all known issues, improvement opportunities, and new features for Sentri. It consolidates findings from the full codebase audit an and competitive research against autonomous QA platforms (Mabl, Testim, Bearq)
 >
 > Each item includes the affected files, effort estimate, and the source of the finding so contributors know exactly where to start.
 
