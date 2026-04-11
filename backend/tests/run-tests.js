@@ -11,6 +11,7 @@ const files = [
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
   "tests/integration-routes.test.js",
+  "tests/auth-cookies.test.js",
   "tests/utils.test.js",
   "tests/test-fix.test.js",
   "tests/healing-transforms.test.js",

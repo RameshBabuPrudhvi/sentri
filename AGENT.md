@@ -156,9 +156,10 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 
 | Module | What it provides | When to use |
 |---|---|---|
-| `src/api.js` | All `api.*` methods, `getToken()`, `handleUnauthorized()` | Every backend call |
-| `src/utils/api.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
-| `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout/register | Auth state in any component |
+| `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
+| `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
+| `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
+| `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
 
@@ -395,7 +396,7 @@ const project = await api.getProject(id);
 const res = await fetch(`/api/projects/${id}`);
 ```
 
-The `api.js` `req()` wrapper handles 401 responses globally — it clears the stored token and redirects to `/login`. Any new `api.*` method that bypasses `req()` (e.g. for streaming) **must** replicate the 401 handling by calling `handleUnauthorized()`.
+The `api.js` `req()` wrapper sends `credentials: "include"` on every request so the HttpOnly auth cookie is attached automatically. It also injects the `X-CSRF-Token` header (from `utils/csrf.js`) on mutating methods (POST/PATCH/PUT/DELETE). On 401 responses it clears the stored user profile and redirects to `/login`. Any new `api.*` method that bypasses `req()` (e.g. for streaming) **must** replicate the 401 handling by calling `handleUnauthorized()` and include `credentials: "include"` + the CSRF header.
 
 ### Error Handling (Frontend)
 
@@ -457,6 +458,7 @@ node tests/pipeline.test.js
 node tests/self-healing.test.js
 node tests/code-parsing.test.js
 node tests/api-flow.test.js
+node tests/auth-cookies.test.js
 ```
 
 Or run all at once: `npm test` from `backend/`.
@@ -648,6 +650,8 @@ Before submitting any PR that touches auth, routes, or data handling, verify:
 
 - [ ] Passwords are hashed with `hashPassword()` (scrypt, random salt) — never stored plaintext.
 - [ ] JWTs are validated with `requireAuth` on every non-public endpoint.
+- [ ] JWTs are stored in HttpOnly cookies only — never returned in response bodies or stored in localStorage.
+- [ ] Mutating endpoints (POST/PATCH/PUT/DELETE) are protected by CSRF double-submit cookie validation (handled by `csrfMiddleware` in `appSetup.js`). New exempt paths must be added to `CSRF_EXEMPT_PATHS`.
 - [ ] User-supplied strings are validated with `utils/validate.js` before DB writes.
 - [ ] No sensitive data (API keys, passwords, full JWTs) is returned in API responses. Use `maskKey()` for display.
 - [ ] Credential values stored in the DB use `credentialEncryption.js`.
@@ -658,6 +662,9 @@ Before submitting any PR that touches auth, routes, or data handling, verify:
 
 The following have been implemented and are no longer open:
 
+- **Cookie-based auth** ✅: JWTs are stored in `access_token` HttpOnly; Secure; SameSite=Strict cookies. A `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX. Tokens are never returned in response bodies or stored in localStorage.
+- **CSRF protection** ✅: Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. All mutating endpoints are validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints are exempt via `CSRF_EXEMPT_PATHS`.
+- **Session refresh** ✅: `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 minutes before expiry.
 - **Rate limiting** ✅: Per-endpoint rate limiters are configured in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
 - **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). Tighten `'unsafe-inline'` to nonce-based in production.
 - **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
@@ -706,9 +713,10 @@ The following are **not yet implemented** but should be addressed before product
 
 1. Add the handler to the appropriate file in `backend/src/routes/`.
 2. Mount it in `index.js` behind `requireAuth` unless it is explicitly public.
-3. Add a JSDoc block documenting method, path, auth requirement, request body, and response shape.
-4. Add a corresponding function in `frontend/src/api.js`.
-5. Write a test in `backend/tests/api-flow.test.js`.
+3. If the endpoint is a public mutation (no auth required), add it to `CSRF_EXEMPT_PATHS` in `backend/src/middleware/appSetup.js`.
+4. Add a JSDoc block documenting method, path, auth requirement, request body, and response shape.
+5. Add a corresponding function in `frontend/src/api.js`. The `req()` wrapper auto-injects `credentials: "include"` and `X-CSRF-Token` — no manual auth handling needed.
+6. Write a test in `backend/tests/api-flow.test.js` or a dedicated test file. Register it in `backend/tests/run-tests.js`.
 
 ### Adding a New Pipeline Stage
 
@@ -764,7 +772,9 @@ The frontend follows a clear separation of concerns between pages:
 
 - **Do not use `require()` anywhere.** The entire repo is ES Modules.
 - **Do not import LLM SDKs directly** outside of `aiProvider.js`.
-- **Do not call `fetch()` directly** in frontend components; use `api.js`. Streaming endpoints that bypass `req()` must still handle 401 via `handleUnauthorized()`.
+- **Do not call `fetch()` directly** in frontend components; use `api.js`. Streaming endpoints that bypass `req()` must still handle 401 via `handleUnauthorized()`, send `credentials: "include"`, and include `X-CSRF-Token` on mutating requests.
+- **Do not return JWTs in response bodies.** Auth cookies are set via `setAuthCookie()` — the token string must never appear in JSON responses.
+- **Do not store tokens in localStorage.** The JWT lives exclusively in the HttpOnly `access_token` cookie. Only the safe user profile (`app_auth_user`) is stored in localStorage.
 - **Do not store secrets in code or commit `.env` files.**
 - **Do not change the `healingHistory` key schema** (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).

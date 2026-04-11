@@ -27,13 +27,15 @@ async function testAsync(name, fn) {
 const originalFetch = global.fetch;
 const originalLocalStorage = global.localStorage;
 const originalWindow = global.window;
+const originalDocument = global.document;
 
 global.localStorage = {
-  getItem() { return "test-token"; },
+  getItem() { return null; },
   setItem() {},
   removeItem() {},
 };
 global.window = { location: { pathname: "/tests/TC-1", href: "/tests/TC-1" } };
+global.document = { cookie: "_csrf=test-csrf-token" };
 global.fetch = async () => ({ ok: true, status: 200 });
 
 const { api } = await import("../src/api.js");
@@ -61,7 +63,8 @@ await testAsync("fixTest streams tokens and calls onDone", async () => {
   global.fetch = async (url, init) => {
     assert.ok(url.includes("/tests/TC-1/fix"), "URL should target the fix endpoint");
     assert.equal(init.method, "POST");
-    assert.equal(init.headers.Authorization, "Bearer test-token");
+    assert.equal(init.credentials, "include", "Should send credentials: include");
+    assert.equal(init.headers["X-CSRF-Token"], "test-csrf-token", "Should send CSRF token");
     return { ok: true, status: 200, body: stream };
   };
 
@@ -153,6 +156,7 @@ await testAsync("applyTestFix sends POST with code body", async () => {
 global.fetch = originalFetch;
 global.localStorage = originalLocalStorage;
 global.window = originalWindow;
+global.document = originalDocument;
 
 console.log("\n──────────────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);
