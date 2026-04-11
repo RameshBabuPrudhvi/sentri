@@ -16,14 +16,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { API_BASE } from "../utils/apiBase.js";
 
-/** localStorage key — must match AuthContext.jsx and api.js */
-const TOKEN_KEY = "app_auth_token";
-
-/** Read the stored JWT token for SSE and polling requests. */
-function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
-
 // ── Favicon badge ─────────────────────────────────────────────────────────────
 
 function setFaviconStatus(status) {
@@ -89,10 +81,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     const poll = async () => {
       if (doneRef.current) return;
       try {
-        const headers = {};
-        const tk = getToken();
-        if (tk) headers["Authorization"] = `Bearer ${tk}`;
-        const res = await fetch(`${API_BASE}/api/runs/${runId}`, { headers });
+        const res = await fetch(`${API_BASE}/api/runs/${runId}`, { credentials: "include" });
         if (res.ok) {
           const run = await res.json();
           onEventRef.current?.({ type: "snapshot", run });
@@ -113,11 +102,11 @@ export function useRunSSE(runId, onEvent, initialStatus) {
   const connect = useCallback(() => {
     if (!runId || doneRef.current) return;
 
-    // EventSource cannot send custom headers, so pass the JWT as a query param.
-    // The backend requireAuth middleware accepts ?token= as a fallback.
-    const tk = getToken();
-    const sseUrl = `${API_BASE}/api/runs/${runId}/events${tk ? `?token=${encodeURIComponent(tk)}` : ""}`;
-    const es = new EventSource(sseUrl);
+    // EventSource sends cookies automatically for same-origin requests.
+    // The HttpOnly auth cookie is included by the browser without JS intervention.
+    // For cross-origin setups, withCredentials ensures cookies are sent.
+    const sseUrl = `${API_BASE}/api/runs/${runId}/events`;
+    const es = new EventSource(sseUrl, { withCredentials: true });
     esRef.current = es;
 
     es.onmessage = (e) => {

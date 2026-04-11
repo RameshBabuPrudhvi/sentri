@@ -104,10 +104,10 @@ export default function Login() {
       if (!returnedState || returnedState !== savedState) {
         throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
       }
-      const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`);
+      const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`, { credentials: "include" });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "OAuth sign-in failed");
-      await login(data.token, data.user);
+      login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
     } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
   }
@@ -141,11 +141,11 @@ export default function Login() {
     try {
       const endpoint = mode === "login" ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/register`;
       const body = mode === "login" ? { email, password } : { name, email, password };
-      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       if (mode === "register") { setSuccess("Account created! You can now sign in."); setMode("login"); setPassword(""); setConfirmPassword(""); }
-      else await login(data.token, data.user);
+      else login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
