@@ -18,6 +18,7 @@ body {
   line-height: 1.6;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  transition: var(--theme-transition);
 }
 
 ::-webkit-scrollbar { width: 5px; }

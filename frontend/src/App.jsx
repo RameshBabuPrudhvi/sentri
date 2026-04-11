@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { NotificationProvider } from "./context/NotificationContext.jsx";
+import { ThemeProvider } from "./context/ThemeContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Layout from "./components/Layout.jsx";
 
@@ -61,6 +62,7 @@ class ErrorBoundary extends React.Component {
 
 export default function App() {
   return (
+    <ThemeProvider>
     <BrowserRouter basename={import.meta.env.BASE_URL}>
       <AuthProvider>
         <NotificationProvider>
@@ -98,5 +100,6 @@ export default function App() {
         </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
+    </ThemeProvider>
   );
 }

@@ -4,11 +4,19 @@
  * Single source of truth for colors, typography, spacing, and shadows.
  * Every other stylesheet references these tokens — never hardcoded values.
  *
+ * Theme strategy:
+ *   1. `:root` defines light-mode tokens (default).
+ *   2. `[data-theme="dark"]` overrides with dark-mode tokens (set by ThemeContext.jsx).
+ *   3. `@media (prefers-color-scheme: dark)` applies dark tokens when no explicit
+ *      preference is saved (i.e. data-theme is not yet set on first paint).
+ *   This ensures: manual toggle wins → OS preference is the fallback → light is the default.
+ *
  * Layer: Settings (ITCSS)
  */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* ── Light tokens (default) ─────────────────────────────────────────────────── */
 :root {
   /* ── Colors ── */
   --bg: #ffffff;
@@ -46,10 +54,72 @@
   /* ── Shadows ── */
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
   --shadow: 0 4px 12px rgba(0,0,0,0.08);
+
+  /* ── Theme transition ── */
+  --theme-transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
+/* ── Dark tokens — manual toggle (highest priority) ─────────────────────────── */
+[data-theme="dark"] {
+  --bg:         #0f1117;
+  --bg2:        #161b27;
+  --bg3:        #1e2535;
+  --surface:    #1a2030;
+  --surface2:   #1e2638;
+  --border:     #2a3348;
+  --border2:    #344060;
+  --text:       #e8eaf0;
+  --text2:      #8b93a8;
+  --text3:      #5a6378;
+  --accent:     #6e7ff5;
+  --accent2:    #5b6ef5;
+  --accent-bg:  rgba(110,127,245,0.15);
+  --green:      #34d174;
+  --green-bg:   rgba(52,209,116,0.12);
+  --red:        #f06060;
+  --red-bg:     rgba(240,96,96,0.12);
+  --amber:      #f5a623;
+  --amber-bg:   rgba(245,166,35,0.12);
+  --blue:       #5b9cf5;
+  --blue-bg:    rgba(91,156,245,0.12);
+  --purple:     #a78bfa;
+  --purple-bg:  rgba(167,139,250,0.12);
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow:     0 4px 12px rgba(0,0,0,0.5);
+}
+
+/* ── Light tokens — explicit override (for when user picks light on a dark-OS) */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg2: #f8f9fb;
+  --bg3: #f1f3f7;
+  --surface: #ffffff;
+  --surface2: #f5f6fa;
+  --border: #e5e8ef;
+  --border2: #d0d5e0;
+  --text: #111827;
+  --text2: #6b7280;
+  --text3: #9ca3af;
+  --accent: #5b6ef5;
+  --accent2: #4455e8;
+  --accent-bg: #eef0fe;
+  --green: #16a34a;
+  --green-bg: #dcfce7;
+  --red: #dc2626;
+  --red-bg: #fee2e2;
+  --amber: #d97706;
+  --amber-bg: #fef3c7;
+  --blue: #2563eb;
+  --blue-bg: #dbeafe;
+  --purple: #7c3aed;
+  --purple-bg: #ede9fe;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* ── OS-level fallback (before ThemeContext mounts) ──────────────────────────── */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg:         #0f1117;
     --bg2:        #161b27;
     --bg3:        #1e2535;
