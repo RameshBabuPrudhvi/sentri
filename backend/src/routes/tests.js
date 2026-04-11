@@ -235,6 +235,8 @@ No imports, no explanation.`;
         regenerationError = isLocalProvider()
           ? "Code regeneration timed out. Local models may need more time for large tests. Try editing the code directly via the Source tab."
           : "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
+      } else {
+        regenerationError = "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
       }
     }
   }
