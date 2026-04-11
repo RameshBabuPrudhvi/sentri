@@ -503,12 +503,41 @@ The self-healing system in `selfHealing.js` uses a strategy waterfall:
 6. locator(CSS selector)                     ← least semantic, last resort
 ```
 
-On every test run, the winning strategy index is recorded in `db.healingHistory` keyed by `"<testId>::<action>::<label>"`. The next run loads that hint and tries the winning strategy first via `getHealingHint()`.
+### Runtime helpers
 
-When adding new selector strategies:
+All interactions in generated tests are routed through safe wrappers:
+
+| Helper | Purpose |
+|---|---|
+| `safeClick(page, text)` | Click by accessible name/text |
+| `safeDblClick(page, text)` | Double-click |
+| `safeHover(page, text)` | Hover (menus, tooltips) |
+| `safeFill(page, label, value)` | Fill input fields |
+| `safeSelect(page, label, value)` | Select/dropdown (preserves object/array values) |
+| `safeCheck(page, label)` | Check checkbox/radio |
+| `safeUncheck(page, label)` | Uncheck checkbox/radio |
+| `safeExpect(page, expect, text, role?)` | Visibility assertions |
+
+`applyHealingTransforms()` rewrites raw Playwright calls (e.g. `page.click(...)`, `page.locator(...).check()`) into the safe helpers. When adding new transform rules, ensure **every** Playwright call pattern listed in `SELF_HEALING_PROMPT_RULES` has a corresponding regex in `applyHealingTransforms`.
+
+### Healing history & versioned scoping
+
+On every test run, the winning strategy index is recorded in `db.healingHistory`. Keys are **versioned** by test code revision: `"<testId>@v<codeVersion>::<action>::<label>"`. This ensures stale hints from old code versions don't pollute current runs. The repository layer (`healingRepo.getByTestId`) reads both versioned and legacy (unversioned) keys for backward compatibility.
+
+### Fail-count cap
+
+Hints that have failed `≥ HEALING_HINT_MAX_FAILS` (default 3, env-configurable) consecutive times are skipped by both `getHealingHint()` and `getHealingHistoryForTest()`. This prevents the runtime from retrying strategies that are known-broken.
+
+### Visibility wait cap
+
+The `firstVisible()` helper caps its `waitFor` timeout at `HEALING_VISIBLE_WAIT_CAP` (default 1200ms, env-configurable) to avoid slow waterfalls when a strategy doesn't match. The full retry loop still provides multiple attempts.
+
+### Adding new selector strategies
+
 - Add them to the `strategies` array in the helper code returned by `getSelfHealingHelperCode()`.
 - Keep strategies ordered from most-semantic (ARIA) to least-semantic (CSS), so the adaptive hint system consistently learns the best approach.
-- Do not change the index of existing strategies without running a DB migration that resets all `healingHistory` entries.
+- Bump `STRATEGY_VERSION` in `selfHealing.js` when reordering or removing strategies — hints from older versions are automatically ignored.
+- Do not change the healing key schema (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching.
 
 ---
 
@@ -625,12 +654,18 @@ Before submitting any PR that touches auth, routes, or data handling, verify:
 - [ ] Any HTML rendered via `dangerouslySetInnerHTML` is sanitised — escape all user/AI-generated content before insertion. Use `escapeHtml()` on raw text before applying markdown/formatting transforms.
 - [ ] Error responses to clients never leak internal details (stack traces, SDK error messages, API key validation failures). Return generic messages for 5xx errors.
 
+### Resolved Security Items
+
+The following have been implemented and are no longer open:
+
+- **Rate limiting** ✅: Per-endpoint rate limiters are configured in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
+- **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). Tighten `'unsafe-inline'` to nonce-based in production.
+- **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
+
 ### Known Security Gaps (TODO)
 
 The following are **not yet implemented** but should be addressed before production:
 
-- **Rate limiting**: No `express-rate-limit` or equivalent middleware is configured. Endpoints that trigger expensive operations (AI calls, crawl, test execution) are unprotected against abuse.
-- **Content-Security-Policy**: Helmet is enabled but CSP is explicitly disabled (`contentSecurityPolicy: false` in `middleware/appSetup.js`). The SPA needs a proper CSP policy before production deployment.
 - **Artifact authentication**: The `/artifacts` static route is **not behind `requireAuth`**. Screenshots, videos, and traces are served publicly. Artifact filenames contain random run IDs which provide obscurity but not security. To add auth, implement `?token=` query param validation (same pattern as SSE/export endpoints) and update all frontend artifact URLs.
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
 
@@ -656,6 +691,12 @@ The following are **not yet implemented** but should be addressed before product
 | `LLM_MAX_BACKOFF_MS` | No | `30000` | Max computed backoff delay (server Retry-After capped at 2×) |
 | `BROWSER_TEST_TIMEOUT` | No | `120000` | Per-test timeout guard — aborts hung browser tests (ms) |
 | `NODE_ENV` | No | `development` | Enables dev-only seed endpoint when not `production` |
+| `HEALING_ELEMENT_TIMEOUT` | No | `5000` | Per-strategy element wait timeout (ms) |
+| `HEALING_RETRY_COUNT` | No | `3` | Number of retry attempts per self-healing action |
+| `HEALING_RETRY_DELAY` | No | `400` | Delay between retries (ms) |
+| `HEALING_HINT_MAX_FAILS` | No | `3` | Skip healing hints that have failed this many consecutive times |
+| `HEALING_VISIBLE_WAIT_CAP` | No | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
+| `ENABLE_DEV_RESET_TOKENS` | No | `false` | When `"true"`, forgot-password response includes the reset token (dev/test only) |
 
 ---
 
@@ -725,7 +766,7 @@ The frontend follows a clear separation of concerns between pages:
 - **Do not import LLM SDKs directly** outside of `aiProvider.js`.
 - **Do not call `fetch()` directly** in frontend components; use `api.js`. Streaming endpoints that bypass `req()` must still handle 401 via `handleUnauthorized()`.
 - **Do not store secrets in code or commit `.env` files.**
-- **Do not change the `healingHistory` key schema** without a migration strategy — existing DB records will silently stop matching.
+- **Do not change the `healingHistory` key schema** (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).
 - **Do not add a new test framework** to either package. Backend tests use `node:assert/strict`; keep it that way.
 - **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not use `getDb()` for writes — it returns a read-only snapshot.
