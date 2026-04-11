@@ -423,9 +423,16 @@ The `api.js` `req()` wrapper sends `credentials: "include"` on every request so 
 
 ## CI / CD
 
-> **Status**: No CI pipeline is configured yet. There are no GitHub Actions workflows in `.github/workflows/`.
+CI runs automatically on every push to `main`/`develop` and on PRs to `main` via `.github/workflows/ci.yml`. The pipeline includes:
 
-Until CI is set up, **manually verify before every PR**:
+1. **Backend** — `npm install` → syntax check (`node --check`) → `npm test` → JSDoc generation → live smoke test (starts server, registers user, verifies cookie-based auth + CSRF on authenticated endpoints).
+2. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
+3. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
+4. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
+
+All four jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
+
+To run locally before pushing:
 
 ```bash
 # Backend — tests must all pass
@@ -437,13 +444,6 @@ cd frontend && npm run build
 # Frontend — tests must pass
 cd frontend && npm test
 ```
-
-When CI is added, the pipeline should include at minimum:
-1. **Lint** — ESLint / Prettier check (once configured).
-2. **Backend tests** — `npm --prefix backend test`.
-3. **Frontend build** — `npm --prefix frontend run build` (catches import errors, type issues).
-4. **Frontend tests** — `npm --prefix frontend test`.
-5. **Docker build** — Verify both Dockerfiles build successfully.
 
 ---
 
@@ -551,7 +551,7 @@ The AI chat assistant (`⌘K` or top bar trigger) streams responses via `POST /a
 
 | Tier | What | How | Token cost |
 |---|---|---|---|
-| **Tier 1 — Workspace summary** | Projects, test counts, recent runs, failing tests, pass rate | `buildWorkspaceContext()` reads `getDb()` on every request | ~200-400 tokens |
+| **Tier 1 — Workspace summary** | Projects, test counts, recent runs, failing tests, pass rate | `buildWorkspaceContext()` reads from repository modules on every request | ~200-400 tokens |
 | **Tier 2 — Entity deep-dive** | Full test steps, Playwright code, run errors, project details | `buildEntityContext()` scans the user message for `TC-*`, `RUN-*`, `PRJ-*` IDs and fetches details | ~100-800 tokens per entity |
 
 Both tiers are **read-only** — no DB writes, no mutations, no actions. The AI cannot approve tests, trigger runs, or modify data.
@@ -579,6 +579,10 @@ When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
 | `frontend/src/components/AIChat.jsx` | Chat panel UI, markdown renderer, streaming display |
 | `frontend/src/api.js` → `api.chat()` | SSE stream parser with 401 handling |
 | `frontend/src/styles/features/chat.css` | All chat UI styles (`.chat-*` namespace) |
+
+### Sliding context window
+
+Long conversations are automatically trimmed by `trimConversationHistory()` before the prompt is built. It keeps the first message (initial context) and the most recent `MAX_CONVERSATION_TURNS` turn pairs (default 20), cutting at an assistant boundary so user↔assistant pairs are never split. This is pure truncation — zero extra LLM calls.
 
 ### When modifying the chat system
 
@@ -628,17 +632,16 @@ The Vite dev server proxies `/api/*` to `http://localhost:3001` automatically.
 
 ## Monitoring & Observability
 
-> **Status**: No external monitoring or observability tools are configured.
+> **Status**: No external monitoring or APM tools are configured. Structured logging is in place.
 
-Current observability is limited to:
+Current observability:
 
 - **Health endpoint**: `GET /health` — use for uptime monitoring (e.g. UptimeRobot, Pingdom).
 - **System info**: `GET /api/system` (authenticated) — returns uptime, Node/Playwright versions, memory usage, and DB record counts.
-- **Server logs**: `console.error` / `console.log` output. In Docker, access via `docker logs sentri-backend`.
-- **SSE events**: Real-time run progress is streamed to the frontend. No server-side log aggregation.
+- **Structured logging**: All backend logs go through `formatLogLine()` from `utils/logFormatter.js`. Set `LOG_JSON=true` for machine-parseable JSON lines (compatible with Datadog, Cloud Logging, etc.). Semantic lifecycle events (`run.start`, `browser.launched`, `run.complete`, etc.) are emitted via `structuredLog()`.
+- **SSE events**: Real-time run progress is streamed to the frontend via Server-Sent Events.
 
-When adding observability, consider:
-- Structured JSON logging (e.g. `pino`) to replace bare `console.*` calls.
+When adding external observability, consider:
 - APM integration (Datadog, New Relic) for request tracing.
 - Error tracking (Sentry) for both backend and frontend.
 
@@ -764,7 +767,7 @@ The frontend follows a clear separation of concerns between pages:
 > **Status**: No formal release process exists yet.
 
 - Both packages are at `1.0.0`. Version bumps are manual.
-- No changelog is maintained. Use descriptive PR titles — they become the squash-merge commit messages.
+- A changelog is maintained at `docs/changelog.md`. Update the **Unreleased** section in every PR that adds user-visible features, fixes, or security changes.
 - Docker images are tagged `latest` on GHCR. When a tagging strategy is adopted, update `docker-compose.yml` to reference specific tags.
 
 ---
