@@ -34,7 +34,7 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
   ];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 16, alignItems: "start" }}>
+    <div className="run-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 16, alignItems: "start" }}>
 
       {/* ── LEFT: Pipeline + Info Banner + Logs ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>

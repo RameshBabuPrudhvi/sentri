@@ -230,3 +230,105 @@
 }
 
 .mono-id { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text3); }
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * Component-level responsive overrides
+ *
+ * These rules target reusable component classes that appear on multiple pages.
+ * Page-specific column hiding / layout changes stay in pages/*.css.
+ * Shared grid breakpoints (stat-grid, page-header) stay in utilities.css.
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 900px: tablet (sidebar icon-rail) ──────────────────────────────────────── */
+@media (max-width: 900px) {
+  /* Run views (TestRunView, CrawlView, GenerateView) use a 2-column grid
+     with a fixed 300–320px sidebar. Stack them on narrower viewports. */
+  .run-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Cards: reduce generous padding */
+  .card-padded    { padding: 18px; }
+  .card-padded-lg { padding: 22px 24px; }
+
+  /* StatCard: smaller value font so 4→2 grid doesn't clip */
+  .stat-card-value {
+    font-size: 1.5rem;
+  }
+}
+
+/* ── 600px: sidebar hidden ──────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  /* Modal panel: full-width minus small margin */
+  .modal-panel {
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 24px);
+  }
+
+  /* Banners: stack icon + text vertically when text is long */
+  .banner {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  /* Empty state: tighten padding */
+  .empty-state {
+    padding: 36px 20px;
+  }
+
+  /* Log terminal: reduce max-height so it doesn't dominate */
+  .log-box {
+    max-height: 260px;
+    padding: 12px;
+    font-size: 0.72rem;
+  }
+}
+
+/* ── 480px: mobile ──────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Cards: tighter padding on small phones */
+  .card-padded    { padding: 14px; }
+  .card-padded-sm { padding: 14px 16px; }
+  .card-padded-lg { padding: 16px 18px; }
+
+  /* Buttons: ensure tap targets meet 44px minimum height */
+  .btn {
+    min-height: 36px;
+  }
+  .btn-sm {
+    min-height: 32px;
+  }
+
+  /* List rows: allow content to wrap */
+  .list-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  /* Legend row: tighter gap, allow wrapping */
+  .legend-row {
+    gap: 10px 14px;
+  }
+
+  /* Empty state: even tighter */
+  .empty-state {
+    padding: 28px 16px;
+  }
+
+  .empty-state-title {
+    font-size: 0.95rem;
+  }
+
+  .empty-state-desc {
+    font-size: 0.82rem;
+  }
+
+  /* Modal: nearly full-screen on phones */
+  .modal-panel {
+    width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 16px);
+    border-radius: var(--radius);
+  }
+}

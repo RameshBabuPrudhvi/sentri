@@ -447,7 +447,7 @@ export default function TestRunView({ run, frames = [] }) {
   };
 
   return (
-    <div style={{
+    <div className="run-grid" style={{
       display: "grid",
       gridTemplateColumns: "minmax(260px, 320px) 1fr",
       gap: 16,

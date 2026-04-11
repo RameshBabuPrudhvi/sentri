@@ -89,6 +89,7 @@ export default function CrawlView({ run, isRunning }) {
 
   return (
     <div
+      className="run-grid"
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr) 300px",
