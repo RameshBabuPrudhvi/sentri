@@ -374,14 +374,18 @@ export default function Tests() {
     // fail, we roll back only those specific tests to their original status.
     const idSet = new Set(ids);
     const newStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : null;
-    const originalStatuses = {}; // testId → previous reviewStatus (for rollback)
 
+    // Capture original statuses BEFORE the state update — React state updater
+    // functions must be pure (no side effects). Reading from the current `tests`
+    // snapshot is safe because it's a stable reference at this point in the handler.
+    const originalStatuses = {};
     if (newStatus) {
-      setTests(prev => prev.map(t => {
-        if (!idSet.has(t.id)) return t;
-        originalStatuses[t.id] = t.reviewStatus;
-        return { ...t, reviewStatus: newStatus };
-      }));
+      for (const t of tests) {
+        if (idSet.has(t.id)) originalStatuses[t.id] = t.reviewStatus;
+      }
+      setTests(prev => prev.map(t =>
+        idSet.has(t.id) ? { ...t, reviewStatus: newStatus } : t
+      ));
     }
 
     try {

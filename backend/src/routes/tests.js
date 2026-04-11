@@ -227,6 +227,9 @@ No imports, no explanation.`;
           updates.codeRegeneratedAt = new Date().toISOString();
           codeRegeneratedNow = true;
         }
+      } else {
+        // AI returned output that didn't parse as valid code — surface to user
+        regenerationError = "Code regeneration produced invalid output. Please try again or edit the code directly via the Source tab.";
       }
     } catch (err) {
       console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
