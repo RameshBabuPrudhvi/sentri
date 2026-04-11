@@ -108,3 +108,66 @@
 .lp-tos a { color: #334155; text-decoration: underline; }
 .lp-tos a:hover { color: #64748b; }
 .fe { animation: slideUp 0.3s ease both; }
+
+/* ── Responsive: 600px ──────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  /* Right panel: reduce generous padding */
+  .lp-right {
+    padding: 32px 24px;
+  }
+
+  /* Form title: slightly smaller */
+  .lp-ftit {
+    font-size: 1.35rem;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Right panel: tighten further — 375px viewport minus 32px = 343px usable */
+  .lp-right {
+    padding: 24px 16px;
+  }
+
+  /* Form wrapper: let it fill available width */
+  .lp-fw {
+    max-width: 100%;
+  }
+
+  /* Form header: tighter spacing */
+  .lp-fh {
+    margin-bottom: 20px;
+  }
+
+  /* OAuth buttons: stack vertically on very narrow screens */
+  .lp-oauth {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Submit button: ensure comfortable tap target */
+  .lp-sub {
+    padding: 13px 16px;
+    font-size: 0.88rem;
+  }
+
+  /* Fields: tighter bottom margin */
+  .lp-field {
+    margin-bottom: 12px;
+  }
+
+  /* Footer text: tighter */
+  .lp-sw {
+    margin-top: 14px;
+  }
+
+  .lp-tos {
+    margin-top: 10px;
+  }
+
+  /* ForgotPassword card shares the login dark theme */
+  .lp-card {
+    padding: 28px 20px !important;
+    border-radius: 12px;
+  }
+}

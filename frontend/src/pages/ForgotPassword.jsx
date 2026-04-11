@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import AppLogo from "../components/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/apiBase.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import "../styles/pages/login.css";
 
 function Spinner() {
   return (
@@ -20,7 +21,7 @@ function EyeIcon({ open }) {
 
 const S = {
   root: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#060810", fontFamily: "'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif", padding: 24 },
-  card: { width: "100%", maxWidth: 400, background: "#0d1117", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: "40px 36px" },
+  card: { width: "100%", maxWidth: 400, background: "#0d1117", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: "40px 36px", boxSizing: "border-box" },
   logo: { marginBottom: 28, textAlign: "center" },
   title: { fontFamily: "'Syne',sans-serif", fontSize: "1.4rem", fontWeight: 700, color: "#f1f5f9", margin: "0 0 6px", letterSpacing: "-0.5px", textAlign: "center" },
   sub: { fontSize: "0.85rem", color: "#64748b", margin: "0 0 24px", textAlign: "center", lineHeight: 1.6 },
@@ -97,7 +98,7 @@ export default function ForgotPassword() {
   return (
     <div style={S.root}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={S.card}>
+      <div className="lp-card" style={S.card}>
         <div style={S.logo}><AppLogo size={36} variant="full" color="#f1f5f9" /></div>
 
         {mode === "request" ? (
