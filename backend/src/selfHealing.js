@@ -120,7 +120,7 @@ const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 
 // (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
 // Healing hints recorded with a different version are ignored so stale
 // strategyIndex values don't point to the wrong strategy after an upgrade.
-const STRATEGY_VERSION = 2;
+const STRATEGY_VERSION = 3;
 
 /**
  * Generate the self-healing runtime helper code as a string for injection
@@ -513,7 +513,161 @@ export function getSelfHealingHelperCode(healingHints) {
       });
     }
 
-    // safeExpect — self-healing visibility assertions
+    // ── safeDrag — drag and drop with self-healing source/target lookup ──────
+    async function safeDrag(page, sourceText, targetText) {
+      if (sourceText == null || typeof sourceText !== 'string' || !sourceText.trim()) {
+        throw new Error('safeDrag: sourceText argument is required (got ' + typeof sourceText + ')');
+      }
+      if (targetText == null || typeof targetText !== 'string' || !targetText.trim()) {
+        throw new Error('safeDrag: targetText argument is required (got ' + typeof targetText + ')');
+      }
+      const makeStrategies = (text) => looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.getByRole('listitem', { name: text }),
+          p => p.getByRole('treeitem', { name: text }),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+          p => p.locator(\`[title*="\${text}"]\`),
+        ];
+
+      await retry(async () => {
+        const src = await findElement(page, makeStrategies(sourceText), { healingKey: 'drag-src::' + sourceText });
+        const tgt = await findElement(page, makeStrategies(targetText), { healingKey: 'drag-tgt::' + targetText });
+        await ensureReady(src);
+        await src.dragTo(tgt);
+      });
+    }
+
+    // ── safeUpload — file upload with self-healing element lookup ────────────
+    async function safeUpload(page, labelOrSelector, files) {
+      if (labelOrSelector == null || typeof labelOrSelector !== 'string' || !labelOrSelector.trim()) {
+        throw new Error('safeUpload: labelOrSelector argument is required (got ' + typeof labelOrSelector + ')');
+      }
+      const strategies = looksLikeSelector(labelOrSelector)
+        ? [p => p.locator(labelOrSelector)]
+        : [
+          p => p.getByLabel(labelOrSelector),
+          p => p.getByRole('button', { name: labelOrSelector }),
+          p => p.getByText(labelOrSelector, { exact: true }),
+          p => p.locator(\`input[type="file"][aria-label*="\${labelOrSelector}"]\`),
+          p => p.locator('input[type="file"]'),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'upload::' + labelOrSelector });
+        await el.setInputFiles(files);
+      });
+    }
+
+    // ── safeFocus — focus with self-healing element lookup ───────────────────
+    async function safeFocus(page, labelOrText) {
+      if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
+        throw new Error('safeFocus: labelOrText argument is required (got ' + typeof labelOrText + ')');
+      }
+      const strategies = looksLikeSelector(labelOrText)
+        ? [p => p.locator(labelOrText)]
+        : [
+          p => onlyFillable(p.getByLabel(labelOrText)),
+          p => p.getByPlaceholder(labelOrText),
+          p => p.getByRole('textbox', { name: labelOrText }),
+          p => p.getByRole('button', { name: labelOrText }),
+          p => p.getByText(labelOrText, { exact: true }),
+          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'focus::' + labelOrText });
+        await ensureReady(el);
+        await el.focus();
+      });
+    }
+
+    // ── safeTap — touch tap with self-healing (mobile viewports) ────────────
+    async function safeTap(page, text) {
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeTap: text argument is required (got ' + typeof text + ')');
+      }
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByRole('button', { name: text }),
+          p => p.getByRole('link',   { name: text }),
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'tap::' + text });
+        await ensureReady(el);
+        await el.tap();
+      });
+    }
+
+    // ── safePress — keyboard press on a specific element ────────────────────
+    async function safePress(page, labelOrSelector, key) {
+      if (labelOrSelector == null || typeof labelOrSelector !== 'string' || !labelOrSelector.trim()) {
+        throw new Error('safePress: labelOrSelector argument is required (got ' + typeof labelOrSelector + ')');
+      }
+      const strategies = looksLikeSelector(labelOrSelector)
+        ? [p => p.locator(labelOrSelector)]
+        : [
+          p => onlyFillable(p.getByLabel(labelOrSelector)),
+          p => p.getByPlaceholder(labelOrSelector),
+          p => p.getByRole('textbox', { name: labelOrSelector }),
+          p => p.getByRole('button', { name: labelOrSelector }),
+          p => p.getByText(labelOrSelector, { exact: true }),
+          p => p.locator(\`[aria-label*="\${labelOrSelector}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'press::' + labelOrSelector });
+        await ensureReady(el);
+        await el.press(key);
+      });
+    }
+
+    // ── safeRightClick — context-menu click with self-healing ────────────────
+    async function safeRightClick(page, text) {
+      if (text == null || typeof text !== 'string' || !text.trim()) {
+        throw new Error('safeRightClick: text argument is required (got ' + typeof text + ')');
+      }
+      const strategies = looksLikeSelector(text)
+        ? [p => p.locator(text)]
+        : [
+          p => p.getByRole('button', { name: text }),
+          p => p.getByRole('link',   { name: text }),
+          p => p.getByRole('treeitem', { name: text }),
+          p => p.getByRole('listitem', { name: text }),
+          p => p.getByText(text, { exact: true }),
+          p => p.getByText(text),
+          p => p.locator(\`[aria-label*="\${text}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'rightclick::' + text });
+        await ensureReady(el);
+        await el.click({ button: 'right', timeout: DEFAULT_TIMEOUT });
+      });
+    }
+
+    // ── safeSelectFrame — switch into an iframe with self-healing ────────────
+    function safeSelectFrame(page, selectorOrName) {
+      if (selectorOrName == null || typeof selectorOrName !== 'string' || !selectorOrName.trim()) {
+        throw new Error('safeSelectFrame: selectorOrName argument is required');
+      }
+      // Returns a FrameLocator — callers chain further locator calls on it.
+      // Try the raw selector first, then fall back to name/title attributes.
+      if (looksLikeSelector(selectorOrName)) {
+        return page.frameLocator(selectorOrName);
+      }
+      // Attempt by title, name, or aria-label
+      return page.frameLocator(\`iframe[title*="\${selectorOrName}"], iframe[name*="\${selectorOrName}"], iframe[aria-label*="\${selectorOrName}"]\`);
+    }
+
+    // ── safeExpect — self-healing visibility assertions
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
@@ -778,6 +932,96 @@ export function applyHealingTransforms(code) {
       /page\.locator\(['"`]([^'"`]+)['"`]\)\.selectOption\(([^)]+)\)/g,
       (match, sel, val) => looksLikeCssSelector(sel) ? match : `safeSelect(page, '${esc(sel)}', ${val})`
     )
+    // ── Type transforms → safeFill (page.type is deprecated but AI emits it) ─
+    .replace(
+      /\bpage\.type\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
+      (match, arg, val) => looksLikeCssSelector(arg) ? match : `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.type\(([^)]+)\)/g,
+      (match, sel, val) => looksLikeCssSelector(sel) ? match : `safeFill(page, '${esc(sel)}', ${val})`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.type\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.type\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.type\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.type\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // ── Missing check/uncheck/selectOption locator variants ──────────────────
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.check\(\)/g,
+      (match, arg) => `safeCheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.uncheck\(\)/g,
+      (match, arg) => `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.selectOption\(([^)]+)\)/g,
+      (match, arg, val) => `safeSelect(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.check\(\)/g,
+      (match, arg) => `safeCheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.uncheck\(\)/g,
+      (match, arg) => `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.selectOption\(([^)]+)\)/g,
+      (match, arg, val) => `safeSelect(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.check\(\)/g,
+      (match, arg) => `safeCheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.uncheck\(\)/g,
+      (match, arg) => `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByPlaceholder\(['"`]([^'"`]+)['"`]\)\.selectOption\(([^)]+)\)/g,
+      (match, arg, val) => `safeSelect(page, '${esc(arg)}', ${val})`
+    )
+    // ── Tap transforms → safeTap ────────────────────────────────────────────
+    .replace(
+      /\bpage\.tap\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeTap(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.tap\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeTap(page, '${esc(sel)}')`
+    )
+    // ── Focus transforms → safeFocus ────────────────────────────────────────
+    .replace(
+      /\bpage\.focus\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeFocus(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.focus\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeFocus(page, '${esc(sel)}')`
+    )
+    // ── DragTo transforms → safeDrag ────────────────────────────────────────
+    .replace(
+      /\bpage\.dragAndDrop\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    // ── Press transforms → safePress ────────────────────────────────────────
+    .replace(
+      /\bpage\.press\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      (match, sel, key) => looksLikeCssSelector(sel) ? match : `safePress(page, '${esc(sel)}', '${esc(key)}')`
+    )
     // ── Assertion transforms ────────────────────────────────────────────────
     // Rewrite ALL role-based visibility assertions into safeExpect.
     // Covers every common ARIA role — not just the original 5.
@@ -850,19 +1094,62 @@ INTERACTIONS — use these exclusively:
   ✓ await safeClick(page, text)            — for any click
   ✓ await safeDblClick(page, text)         — for any double-click
   ✓ await safeHover(page, text)            — for any hover (menus, tooltips)
-  ✓ await safeFill(page, label, value)     — for any input fill
+  ✓ await safeFill(page, label, value)     — for any input fill (also replaces page.type)
   ✓ await safeSelect(page, label, value)   — for any select/dropdown
   ✓ await safeCheck(page, label)           — for checkbox/radio checked state
   ✓ await safeUncheck(page, label)         — for checkbox/radio unchecked state
+  ✓ await safeDrag(page, sourceText, targetText) — for drag-and-drop
+  ✓ await safeUpload(page, label, filePaths)     — for file upload (accepts string or string[])
+  ✓ await safeFocus(page, label)           — for focusing an element
+  ✓ await safeTap(page, text)              — for touch tap (mobile viewports)
+  ✓ await safePress(page, label, key)      — for pressing a key on a focused element
+  ✓ await safeRightClick(page, text)       — for context-menu / right-click
+
+IFRAME / FRAME — use safeSelectFrame to get a FrameLocator, then chain helpers:
+  ✓ const frame = safeSelectFrame(page, 'Payment')  — returns a FrameLocator
+    Then use frame.locator(...) or frame.getByRole(...) inside the iframe.
+
+DIALOGS (window.alert / confirm / prompt):
+  Dialogs are auto-accepted by the runtime. If you need to dismiss instead:
+  ✓ page.on('dialog', d => d.dismiss())    — register BEFORE the action that triggers it
+
+NEW TABS / POPUPS:
+  ✓ const [newPage] = await Promise.all([
+      context.waitForEvent('page'),
+      safeClick(page, 'Open in new tab'),
+    ]);
+    await newPage.waitForLoadState('domcontentloaded');
+    // ... interact with newPage ...
+    await newPage.close();
+
+DOWNLOADS:
+  ✓ const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      safeClick(page, 'Download PDF'),
+    ]);
+    const path = await download.path();
+
+KEYBOARD (global, not element-scoped):
+  ✓ await page.keyboard.press('Enter')     — for global key presses (Escape, Tab, etc.)
+  ✓ await page.keyboard.type('search term') — for typing without a specific element
+
+MOUSE (coordinate-based — use only when no element label exists):
+  ✓ await page.mouse.click(x, y)
+  ✓ await page.mouse.move(x, y)
+  ✓ await page.mouse.wheel(0, 500)         — for scrolling
 
 VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
   ✓ await safeExpect(page, expect, text)           — assert any element is visible
   ✓ await safeExpect(page, expect, text, 'button') — scoped to a role
 
-COUNT / VALUE ASSERTIONS — use page.locator() scoped to a semantic selector:
+COUNT / VALUE / STATE ASSERTIONS — use page.locator() scoped to a semantic selector:
   ✓ await expect(page.locator(...)).toHaveCount(5);
   ✓ await expect(page.locator(...)).toHaveValue('expected');
   ✓ await expect(page.locator(...)).not.toHaveCount(0);
+  ✓ await expect(page.locator(...)).toBeHidden();
+  ✓ await expect(page.locator(...)).toHaveAttribute('href', /expected/);
+  ✓ await expect(page.locator(...)).toHaveClass(/active/);
+  ✓ await expect(page.locator(...)).toHaveCSS('color', 'rgb(0, 0, 0)');
     BAD:  const items = page.locator(...); await expect(items).toHaveCount(5);
     GOOD: await expect(page.locator(...)).toHaveCount(5);
   ✗ NEVER assert a hard-coded count on a generic container that may change (e.g. toHaveCount(5) on search results).
@@ -874,6 +1161,8 @@ OTHER ASSERTIONS — these are fine as-is (do not wrap them):
   ✓ await expect(locator).toContainText(...)
   ✓ await expect(locator).toHaveValue(...)
   ✓ await expect(locator).toBeEnabled()
+  ✓ await expect(locator).toBeDisabled()
+  ✓ await expect(locator).toBeChecked()
 
 FORBIDDEN — never use these (they bypass self-healing and will break on selector changes):
 
@@ -886,7 +1175,10 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.getByPlaceholder(...).click()
   ✗ page.getByTestId(...).click()
   ✗ page.getByAltText(...).click()
+
+  Taps (use safeTap instead):
   ✗ page.tap(...)
+  ✗ page.locator(...).tap()
 
   Fills / typing (use safeFill instead):
   ✗ page.fill(...)
@@ -894,8 +1186,13 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.locator(...).fill(...)
   ✗ page.locator(...).type(...)
   ✗ page.getByLabel(...).fill(...)
-  ✗ page.getByPlaceholder(...).fill(...)   ← already handled by safeFill
+  ✗ page.getByLabel(...).type(...)
+  ✗ page.getByPlaceholder(...).fill(...)
+  ✗ page.getByPlaceholder(...).type(...)
   ✗ page.getByTestId(...).fill(...)
+  ✗ page.getByTestId(...).type(...)
+  ✗ page.getByRole(...).fill(...)
+  ✗ page.getByRole(...).type(...)
 
   Form controls (use safeSelect/safeCheck/safeUncheck):
   ✗ page.check(...)
@@ -904,6 +1201,16 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.locator(...).check()
   ✗ page.locator(...).uncheck()
   ✗ page.locator(...).selectOption(...)
+  ✗ page.getByRole(...).check()
+  ✗ page.getByRole(...).uncheck()
+  ✗ page.getByRole(...).selectOption(...)
+  ✗ page.getByLabel(...).selectOption(...)
+  ✗ page.getByTestId(...).check()
+  ✗ page.getByTestId(...).uncheck()
+  ✗ page.getByTestId(...).selectOption(...)
+  ✗ page.getByPlaceholder(...).check()
+  ✗ page.getByPlaceholder(...).uncheck()
+  ✗ page.getByPlaceholder(...).selectOption(...)
 
   Double-clicks (use safeDblClick instead):
   ✗ page.dblclick(...)
@@ -919,11 +1226,20 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.getByRole(...).hover()
   ✗ page.getByTestId(...).hover()
 
-  Other interactions (no self-healing equivalent — avoid if possible):
-  ✗ page.press(...)                        ← use page.keyboard.press() only when absolutely needed
-  ✗ page.focus(...)
-  ✗ page.dragTo(...)
+  Drag-and-drop (use safeDrag instead):
+  ✗ page.dragAndDrop(...)
+  ✗ locator.dragTo(...)
+
+  File upload (use safeUpload instead):
   ✗ page.setInputFiles(...)
+  ✗ locator.setInputFiles(...)
+
+  Focus (use safeFocus instead):
+  ✗ page.focus(...)
+  ✗ locator.focus()
+
+  Press on selector (use safePress instead):
+  ✗ page.press(selector, key)              ← use safePress(page, label, key)
 
   Visibility assertions (use safeExpect instead):
   ✗ expect(page.getByRole(...)).toBeVisible()
@@ -936,6 +1252,6 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
 
   Variable-based locator declarations (always inline inside expect()):
   ✗ const searchInput = page.locator(...);   ← declare AND use in one line, or use safeFill/safeClick
-  ✗ const results = page.locator(...);  ← inline: expect(page.locator(...)).toHaveCount(N)
-  ✗ const searchButton = page.locator(...);     ← use safeClick(page, text) instead
+  ✗ const results = page.locator(...);       ← inline: expect(page.locator(...)).toHaveCount(N)
+  ✗ const searchButton = page.locator(...);  ← use safeClick(page, text) instead
 `.trim();

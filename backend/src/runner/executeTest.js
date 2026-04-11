@@ -193,9 +193,18 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
     viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
     permissions: ["geolocation", "notifications"],
     ignoreHTTPSErrors: true,
+    // Enable downloads so page.waitForEvent('download') works (#42)
+    acceptDownloads: true,
   });
 
   const page = await context.newPage();
+
+  // Auto-accept dialogs (window.alert, confirm, prompt) so they don't hang
+  // the test until timeout. Tests that need to dismiss can override with
+  // page.on('dialog', d => d.dismiss()) before the triggering action. (#40)
+  page.on("dialog", (dialog) => {
+    dialog.accept().catch(() => {});
+  });
 
   // Start CDP screencast (returns cleanup fn or null)
   const stopScreencast = await startScreencast(page, runId);
@@ -329,6 +338,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
     // handlers from calling res.url()/res.status() on a closed page,
     // which would throw an unhandled rejection and crash Node.js.
     disposeListeners();
+
+    // Close any popup / new-tab pages opened during the test so they don't
+    // leak browser memory. context.pages() includes the main page — skip it
+    // and close everything else. (#41)
+    for (const p of context.pages()) {
+      if (p !== page) await p.close().catch(() => {});
+    }
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});
