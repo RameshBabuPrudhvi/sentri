@@ -81,6 +81,37 @@ app.use(cors({
   credentials: true,
 }));
 
+// ─── Cross-origin cookie helper ──────────────────────────────────────────────
+// When the frontend and backend live on different origins (e.g. GitHub Pages +
+// Render), SameSite=Strict cookies are never sent on cross-site requests.
+// Detect this at startup so cookie-setting code can use SameSite=None; Secure.
+const _corsOrigins = corsOrigin === "*" ? [] : corsOrigin.split(",").map(o => o.trim());
+
+/**
+ * `true` when CORS_ORIGIN is set to a different origin than the backend.
+ * In that case cookies must use `SameSite=None; Secure` to be sent cross-site.
+ * @type {boolean}
+ */
+export const isCrossOrigin = _corsOrigins.length > 0 && (() => {
+  try {
+    const backendOrigin = `${process.env.APP_URL || "http://localhost:3001"}`;
+    return _corsOrigins.some(o => new URL(o).origin !== new URL(backendOrigin).origin);
+  } catch { return false; }
+})();
+
+/**
+ * Build the SameSite + Secure suffix for a Set-Cookie header.
+ * Cross-origin → `SameSite=None; Secure` (required by browsers).
+ * Same-origin  → `SameSite=Strict` + Secure only in production.
+ * @param {boolean} [httpOnly=false] - Not used for the suffix, but kept for symmetry.
+ * @returns {string}
+ */
+export function cookieSameSite() {
+  if (isCrossOrigin) return "; SameSite=None; Secure";
+  const secure = process.env.NODE_ENV === "production";
+  return `; SameSite=Strict${secure ? "; Secure" : ""}`;
+}
+
 app.use(express.json({ limit: "1mb" }));
 
 // ─── Cookie parsing ───────────────────────────────────────────────────────────
@@ -145,7 +176,6 @@ export function csrfMiddleware(req, res, next) {
   let csrfToken = req.cookies[CSRF_COOKIE_NAME];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString("base64url");
-    const secure = process.env.NODE_ENV === "production";
     // Session cookie (no Max-Age / Expires) — lives until the browser is closed.
     // This avoids a subtle bug where the CSRF cookie expires after a fixed TTL
     // while the JWT is refreshed indefinitely by the frontend. With a session
@@ -153,7 +183,7 @@ export function csrfMiddleware(req, res, next) {
     // The CSRF token is not a secret — it's Non-HttpOnly by design so JS can
     // read it for the double-submit header. A long-lived cookie is safe here.
     res.setHeader("Set-Cookie",
-      `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; SameSite=Strict${secure ? "; Secure" : ""}`
+      `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/${cookieSameSite()}`
     );
     req.cookies[CSRF_COOKIE_NAME] = csrfToken; // make it available for this request
   }

@@ -103,13 +103,13 @@ export default function ProjectHeader({
                         Export all {tests.length} tests
                       </div>
                       {[
-                        { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import", url: api.exportZephyrUrl(projectId) },
-                        { label: "TestRail CSV", desc: "TestRail bulk import", url: api.exportTestRailUrl(projectId) },
+                        { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import", format: "zephyr" },
+                        { label: "TestRail CSV", desc: "TestRail bulk import", format: "testrail" },
                       ].map(fmt => (
-                        <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)} className="pd-dropdown-item">
+                        <button key={fmt.label} onClick={() => { setShowExportMenu(false); api.downloadExport(projectId, fmt.format); }} className="pd-dropdown-item" style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
                           <div className="pd-dropdown-item-title">{fmt.label}</div>
                           <div className="pd-dropdown-item-desc">{fmt.desc}</div>
-                        </a>
+                        </button>
                       ))}
                       {approvedTests.length > 0 && (
                         <>
@@ -118,13 +118,13 @@ export default function ProjectHeader({
                             Approved only ({approvedTests.length})
                           </div>
                           {[
-                            { label: "Zephyr CSV (approved)", url: api.exportZephyrUrl(projectId, "approved") },
-                            { label: "TestRail CSV (approved)", url: api.exportTestRailUrl(projectId, "approved") },
+                            { label: "Zephyr CSV (approved)", format: "zephyr" },
+                            { label: "TestRail CSV (approved)", format: "testrail" },
                           ].map(fmt => (
-                            <a key={fmt.label} href={fmt.url} download onClick={() => setShowExportMenu(false)}
-                              className="pd-dropdown-item" style={{ padding: "7px 12px", fontSize: "0.82rem" }}>
+                            <button key={fmt.label} onClick={() => { setShowExportMenu(false); api.downloadExport(projectId, fmt.format, "approved"); }}
+                              className="pd-dropdown-item" style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer", padding: "7px 12px", fontSize: "0.82rem" }}>
                               {fmt.label}
-                            </a>
+                            </button>
                           ))}
                         </>
                       )}

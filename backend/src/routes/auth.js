@@ -36,6 +36,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { cookieSameSite } from "../middleware/appSetup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -57,20 +58,21 @@ const JWT_TTL_SEC     = 8 * 60 * 60;
  * @param {number} expSec    - Unix timestamp of token expiry (seconds).
  */
 function setAuthCookie(res, token, expSec) {
-  const secure  = process.env.NODE_ENV === "production";
   const maxAge  = JWT_TTL_SEC;
+  const sameSite = cookieSameSite();
 
   // Use appendHeader so we don't overwrite the _csrf cookie that the
   // CSRF middleware may have already queued on this response via setHeader.
   // Primary cookie: HttpOnly prevents JS from ever reading the JWT.
-  // SameSite=Strict prevents it being sent on cross-site navigations.
+  // SameSite policy is determined by cookieSameSite() — Strict for same-origin,
+  // None; Secure for cross-origin (GitHub Pages + Render).
   res.appendHeader("Set-Cookie",
-    `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`
+    `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}${sameSite}`
   );
   // Expiry hint: NOT HttpOnly — frontend reads it for proactive expiry UX.
   // Contains only the numeric exp timestamp, not the token.
   res.appendHeader("Set-Cookie",
-    `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`
+    `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}${sameSite}`
   );
 }
 
@@ -79,8 +81,9 @@ function setAuthCookie(res, token, expSec) {
  * @param {Object} res - Express response object.
  */
 function clearAuthCookies(res) {
-  res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict`);
-  res.appendHeader("Set-Cookie", `${EXP_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict`);
+  const sameSite = cookieSameSite();
+  res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=; Path=/; HttpOnly; Max-Age=0${sameSite}`);
+  res.appendHeader("Set-Cookie", `${EXP_COOKIE}=; Path=/; Max-Age=0${sameSite}`);
 }
 
 

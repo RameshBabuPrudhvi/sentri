@@ -212,25 +212,57 @@ export const api = {
   /** @param {string} url - Verify a URL is reachable before creating a project. */
   testConnection: (url) => req("POST", "/test-connection", { url }),
 
-  // ── Export (returns download URLs) ──────────────────────────────────────────
+  // ── Export (download helpers) ────────────────────────────────────────────────
   // With cookie-based auth, same-origin anchor clicks automatically include the
-  // auth cookie — no need to append a ?token= query param.
-  // For cross-origin static deployments (GitHub Pages + separate backend), the
-  // backend must set CORS credentials headers; same-origin Docker/dev works out of box.
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportZephyrUrl:   (projectId, status) => {
+  // auth cookie. For cross-origin deploys (GitHub Pages + Render), we use fetch
+  // with credentials: "include" and trigger a Blob download programmatically.
+
+  /**
+   * Build export URL for a given format.
+   * @param {string} projectId @param {string} format @param {string} [status]
+   * @returns {string}
+   * @private
+   */
+  _exportUrl: (projectId, format, status) => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     const qs = params.toString();
-    return `${BASE}/projects/${projectId}/tests/export/zephyr${qs ? `?${qs}` : ""}`;
+    return `${BASE}/projects/${projectId}/tests/export/${format}${qs ? `?${qs}` : ""}`;
   },
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
-  exportTestRailUrl: (projectId, status) => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    const qs = params.toString();
-    return `${BASE}/projects/${projectId}/tests/export/testrail${qs ? `?${qs}` : ""}`;
+
+  /**
+   * Download an export file. Uses a simple <a> navigation for same-origin,
+   * or fetch + Blob for cross-origin (where cookies aren't sent on navigations).
+   * @param {string} projectId @param {string} format @param {string} [status]
+   * @returns {Promise<void>}
+   */
+  downloadExport: async (projectId, format, status) => {
+    const url = api._exportUrl(projectId, format, status);
+    // Same-origin: simple navigation works (cookies sent automatically)
+    if (!API_BASE || new URL(url).origin === window.location.origin) {
+      window.open(url, "_blank");
+      return;
+    }
+    // Cross-origin: fetch with credentials and trigger Blob download
+    const res = await fetch(url, { credentials: "include" });
+    if (res.status === 401) { handleUnauthorized(); throw new Error("Session expired."); }
+    if (!res.ok) throw new Error(`Export failed (${res.status})`);
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || `export-${format}.csv`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
   },
+
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL (same-origin only). */
+  exportZephyrUrl:   (projectId, status) => api._exportUrl(projectId, "zephyr", status),
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL (same-origin only). */
+  exportTestRailUrl: (projectId, status) => api._exportUrl(projectId, "testrail", status),
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 
