@@ -500,3 +500,47 @@
   0%, 80%, 100% { transform: scale(0.8); opacity: 0.4; }
   40%            { transform: scale(1.2); opacity: 1;   }
 }
+
+/* ── Responsive ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  /* Chat panel: fill the screen on small devices */
+  .chat-panel {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    border-radius: var(--radius);
+  }
+
+  .chat-panel--expanded {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+
+  /* Suggestion grid: single column on mobile */
+  .chat-suggestions {
+    grid-template-columns: 1fr;
+  }
+
+  /* Messages: tighter padding */
+  .chat-messages {
+    padding: 14px 12px 8px;
+  }
+
+  /* Bubble max-width: wider on mobile since screen is narrow */
+  .chat-message__bubble {
+    max-width: 90%;
+  }
+
+  /* Trigger bar: shrink max-width */
+  .chat-trigger {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Hide keyboard shortcut badges — no keyboard on phones */
+  .chat-trigger__kbd,
+  .chat-input-hint {
+    display: none;
+  }
+}

@@ -539,7 +539,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
                         </svg>
                       </button>
                       {showExamples && (
-                        <div style={{
+                        <div className="gen-examples-popover" style={{
                           position: "absolute", bottom: "calc(100% + 6px)", right: 0,
                           width: 340, maxHeight: 320, overflowY: "auto",
                           background: "var(--surface)", border: "1px solid var(--border)",
@@ -652,7 +652,7 @@ export default function GenerateTestModal({ projects = [], onClose }) {
               <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 16px" }} />
 
               {/* Set Assignee + Folder Override */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div className="gen-options-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <div>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, cursor: "pointer", fontSize: "0.82rem", color: "var(--text2)" }}>
                     <input
