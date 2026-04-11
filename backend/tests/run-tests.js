@@ -13,6 +13,12 @@ const files = [
   "tests/integration-routes.test.js",
   "tests/utils.test.js",
   "tests/test-fix.test.js",
+  "tests/healing-transforms.test.js",
+  "tests/deduplicator.test.js",
+  "tests/assertion-enhancer.test.js",
+  "tests/test-validator.test.js",
+  "tests/feedback-loop.test.js",
+  "tests/pipeline-orchestrator.test.js",
 ];
 
 let passed = 0;
