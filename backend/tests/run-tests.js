@@ -14,6 +14,7 @@ const files = [
   "tests/utils.test.js",
   "tests/test-fix.test.js",
   "tests/healing-transforms.test.js",
+  "tests/api-test-prompt.test.js",
   "tests/deduplicator.test.js",
   "tests/assertion-enhancer.test.js",
   "tests/test-validator.test.js",

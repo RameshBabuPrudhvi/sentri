@@ -15,7 +15,7 @@ import { isLocalProvider } from "../../aiProvider.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 import { PROMPT_VERSION } from "./outputSchema.js";
 
-function formatJsonExample(raw, maxChars = 1800) {
+export function formatJsonExample(raw, maxChars = 1800) {
   if (!raw || typeof raw !== "string") return raw || "";
   if (raw.length <= maxChars) return raw;
   try {
