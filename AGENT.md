@@ -704,6 +704,7 @@ The following are **not yet implemented** but should be addressed before product
 | `HEALING_HINT_MAX_FAILS` | No | `3` | Skip healing hints that have failed this many consecutive times |
 | `HEALING_VISIBLE_WAIT_CAP` | No | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
 | `ENABLE_DEV_RESET_TOKENS` | No | `false` | When `"true"`, forgot-password response includes the reset token (dev/test only) |
+| `MAX_CONVERSATION_TURNS` | No | `20` | Max user↔assistant turn pairs in chat context window (sliding window trims older turns) |
 
 ---
 

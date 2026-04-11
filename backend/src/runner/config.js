@@ -65,6 +65,13 @@ export const DEFAULT_PARALLEL_WORKERS = Math.max(1, Math.min(10,
   parseInt(process.env.PARALLEL_WORKERS, 10) || 1
 ));
 
+// ── Conversation limits ───────────────────────────────────────────────────────
+// Maximum number of user↔assistant turn pairs to keep in the AI chat context
+// window. When the conversation exceeds this, older turns in the middle are
+// trimmed — keeping the first message (initial context) and the most recent
+// turns. This prevents unbounded token growth without extra LLM calls.
+export const MAX_CONVERSATION_TURNS = parseInt(process.env.MAX_CONVERSATION_TURNS, 10) || 20;
+
 // ── Artifact paths ────────────────────────────────────────────────────────────
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
 export const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");

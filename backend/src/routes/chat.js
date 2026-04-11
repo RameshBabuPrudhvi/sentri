@@ -26,6 +26,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
+import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
 
 const router = Router();
 
@@ -274,6 +275,40 @@ function findLatestTestResult(ctx, testId) {
 // in utils/errorClassifier.js — no local classifier needed.
 
 /**
+ * Trim a conversation to fit within MAX_CONVERSATION_TURNS.
+ *
+ * Strategy: keep the first message (initial context) and the most recent
+ * turns. Walk forward from the cut point to find a safe boundary at an
+ * assistant message — never split a user message from its assistant reply.
+ *
+ * This is pure truncation — no extra LLM calls. The same single
+ * streamText() call is made regardless of whether trimming occurred.
+ *
+ * @param   {Array<{role: string, content: string}>} messages
+ * @returns {Array<{role: string, content: string}>} Trimmed copy (or original if short enough).
+ */
+function trimConversationHistory(messages) {
+  // MAX_CONVERSATION_TURNS * 2 = max individual messages (each turn = user + assistant).
+  // +2 accounts for the initial user message and the final user message.
+  const maxMessages = MAX_CONVERSATION_TURNS * 2 + 2;
+  if (messages.length <= maxMessages) return messages;
+
+  const initial = messages.slice(0, 1); // keep the very first message for context
+  let cutIdx = messages.length - MAX_CONVERSATION_TURNS * 2;
+
+  // Walk forward to a safe cut point — an assistant message boundary.
+  // This ensures we never split a user message from its assistant reply,
+  // which would confuse the LLM about who said what.
+  while (cutIdx < messages.length - 2) {
+    if (messages[cutIdx].role === "assistant") break;
+    cutIdx++;
+  }
+
+  const recent = messages.slice(cutIdx);
+  return [...initial, ...recent];
+}
+
+/**
  * POST /api/chat
  *
  * Accepts a messages array and streams the AI reply token-by-token via SSE.
@@ -292,10 +327,15 @@ router.post("/chat", async (req, res) => {
     });
   }
 
-  const { messages } = req.body;
-  if (!Array.isArray(messages) || messages.length === 0) {
+  const { messages: rawMessages } = req.body;
+  if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
     return res.status(400).json({ error: "messages array is required." });
   }
+
+  // Sliding context window: trim long conversations from the middle so the
+  // prompt stays within the LLM's context limit. Zero extra LLM calls —
+  // just truncation before the single existing streamText() call.
+  const messages = trimConversationHistory(rawMessages);
 
   // Build the user prompt — include conversation history as context
   const history = messages

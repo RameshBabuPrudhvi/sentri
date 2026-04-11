@@ -52,27 +52,30 @@ jobs:
             sleep 2
           done
 
-          # Register a test user and get a JWT token
+          # Register a test user and login (cookie-based auth)
+          COOKIE_JAR=$(mktemp)
           curl -sf -X POST http://localhost:3001/api/auth/register \
             -H "Content-Type: application/json" \
             -d '{"name":"CI Bot","email":"ci@test.local","password":"CiTestPass123!"}' \
             | grep -q "Account created" && echo "✅ POST /api/auth/register OK"
 
-          TOKEN=$(curl -sf -X POST http://localhost:3001/api/auth/login \
+          # Login — JWT is set as HttpOnly cookie, not in response body.
+          # Use -c to save cookies (access_token, _csrf) to a jar file.
+          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
             -H "Content-Type: application/json" \
             -d '{"email":"ci@test.local","password":"CiTestPass123!"}' \
-            | node -e "process.stdin.on('data',d=>{const j=JSON.parse(d);process.stdout.write(j.token||'')})")
-          echo "✅ POST /api/auth/login OK (token length: ${#TOKEN})"
+            | grep -q '"user"' && echo "✅ POST /api/auth/login OK"
 
-          AUTH="Authorization: Bearer $TOKEN"
+          # Extract CSRF token from cookie jar for mutating requests
+          CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
 
-          # Verify authenticated endpoints
-          curl -sf -H "$AUTH" http://localhost:3001/api/dashboard | grep -q "totalProjects" && echo "✅ /api/dashboard OK"
-          curl -sf -H "$AUTH" http://localhost:3001/api/projects | grep -q "\[\]" && echo "✅ /api/projects OK"
+          # Verify authenticated endpoints (use -b to send cookies)
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard | grep -q "totalProjects" && echo "✅ /api/dashboard OK"
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/projects | grep -q "\[\]" && echo "✅ /api/projects OK"
 
-          PROJ=$(curl -sf -X POST http://localhost:3001/api/projects \
+          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/projects \
             -H "Content-Type: application/json" \
-            -H "$AUTH" \
+            -H "X-CSRF-Token: $CSRF" \
             -d '{"name":"CI Test","url":"https://example.com"}')
           echo "$PROJ" | grep -q '"name":"CI Test"' && echo "✅ POST /api/projects OK"
 
@@ -193,17 +196,17 @@ jobs:
             sleep 2
           done
 
-          # Register + login to get a JWT for authenticated endpoints
+          # Register + login (cookie-based auth)
+          COOKIE_JAR=$(mktemp)
           curl -sf -X POST http://localhost:3001/api/auth/register \
             -H "Content-Type: application/json" \
             -d '{"name":"CI Bot","email":"ci@test.local","password":"CiTestPass123!"}'
 
-          TOKEN=$(curl -sf -X POST http://localhost:3001/api/auth/login \
+          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
             -H "Content-Type: application/json" \
-            -d '{"email":"ci@test.local","password":"CiTestPass123!"}' \
-            | node -e "process.stdin.on('data',d=>{const j=JSON.parse(d);process.stdout.write(j.token||'')})")
+            -d '{"email":"ci@test.local","password":"CiTestPass123!"}' > /dev/null
 
-          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/dashboard \
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard \
             | grep -q "totalProjects" \
             && echo "✅ /api/dashboard OK" \
             || (docker logs sentri-ci && exit 1)

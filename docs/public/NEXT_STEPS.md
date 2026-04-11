@@ -365,31 +365,15 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-07 — Sliding context window for long-running test agent 🔵 Medium
+### S3-07 — Sliding context window for long-running conversations ✅ Done
 
-**Problem:** The AI conversation history used during test execution accumulates without bound. Long test suites or complex multi-step flows will eventually hit the LLM's context limit, produce degraded responses, and fail. There is no sliding window or history trimming.
+**Problem:** The AI chat conversation history accumulates without bound. Long conversations eventually hit the LLM's context limit, produce degraded responses, and fail. There was no sliding window or history trimming.
 
-**Fix:** Add a `MAX_CONVERSATION_TURNS` constant (default: 20). After each turn, if the message history exceeds `MAX_CONVERSATION_TURNS * 2 + 2`, trim from the middle — keeping the first user message (initial context) and the most recent turns. Crucially, walk forward to find a safe cut point at an assistant boundary, never splitting a `tool_use` from its `tool_result`.
+**Status:** Implemented in `backend/src/routes/chat.js`. The `trimConversationHistory()` function trims from the middle when the conversation exceeds `MAX_CONVERSATION_TURNS * 2 + 2` messages — keeping the first message (initial context) and the most recent turns. Walks forward to find a safe cut point at an assistant boundary so user↔assistant pairs are never split. Zero additional LLM calls — pure truncation before the existing single `streamText()` call.
 
-**Pattern from Assrt (`agent.ts`):**
-```javascript
-if (messages.length > MAX_CONVERSATION_TURNS * 2 + 2) {
-  const initial = messages.slice(0, 1);
-  let cutIdx = messages.length - MAX_CONVERSATION_TURNS * 2;
-  // Walk to safe cut point — never between tool_use and tool_result
-  while (cutIdx < messages.length - 2) {
-    if (messages[cutIdx].role === "assistant") break;
-    cutIdx++;
-  }
-  const recent = messages.slice(cutIdx);
-  messages.length = 0;
-  messages.push(...initial, ...recent);
-}
-```
-
-**Files to change:**
-- `backend/src/runner/codeExecutor.js` — add sliding window to message history management
-- `backend/src/runner/config.js` — add `MAX_CONVERSATION_TURNS` constant
+**Files changed:**
+- `backend/src/routes/chat.js` — added `trimConversationHistory()`, applied before prompt construction
+- `backend/src/runner/config.js` — added `MAX_CONVERSATION_TURNS` constant (default 20, env-configurable)
 
 **Effort:** S | **Source:** Assrt
 
@@ -631,11 +615,11 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28 (11 completed)  
-**Completed:** S1-01 ✅, S1-02 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅  
+**Total items:** 28 (12 completed)  
+**Completed:** S1-01 ✅, S1-02 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅, S3-07 ✅  
 **Critical blockers (must ship before team use):** None — all Sprint 1 items complete  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
-**Lowest effort / highest value (remaining quick wins):** S3-07
+**Lowest effort / highest value (remaining quick wins):** S3-02, S4-09
 
 ---
 
