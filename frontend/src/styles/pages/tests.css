@@ -11,6 +11,13 @@
  * Layer: Pages (ITCSS) — import after dashboard.css in index.css
  */
 
+/* ── Table horizontal scroll on narrow viewports ────────────────────────────── */
+/* The tests table has 9 columns — even after hiding some, the remaining        */
+/* columns can still overflow on narrow screens. Allow horizontal scroll.       */
+.tests-table {
+  overflow-x: auto;
+}
+
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 /* At 900px: 900 − 56px sidebar − 40px padding = 804px content.                */
 /* The filter toolbar still fits; table drops Priority + Type columns.          */
@@ -62,6 +69,14 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
+  }
+
+  /* Table: also hide Test ID + Project at 600px (not just 480px) */
+  .tests-table .table th:nth-child(2),   /* Test ID */
+  .tests-table .table td:nth-child(2),
+  .tests-table .table th:nth-child(4),   /* Project */
+  .tests-table .table td:nth-child(4) {
+    display: none;
   }
 }
 

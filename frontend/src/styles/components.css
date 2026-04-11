@@ -257,6 +257,15 @@
   }
 }
 
+/* ── 768px: table containers need horizontal scroll ─────────────────────────── */
+@media (max-width: 768px) {
+  /* Any card containing a table may overflow — allow horizontal scroll */
+  .card:has(.table) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 /* ── 600px: sidebar hidden ──────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   /* Modal panel: full-width minus small margin */
