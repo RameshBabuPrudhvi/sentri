@@ -731,8 +731,16 @@ export function applyHealingTransforms(code) {
       (match, arg) => `safeCheck(page, '${esc(arg)}')`
     )
     .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.check\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeCheck(page, '${esc(sel)}')`
+    )
+    .replace(
       /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.uncheck\(\)/g,
       (match, arg) => `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.uncheck\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeUncheck(page, '${esc(sel)}')`
     )
     .replace(
       /\bpage\.selectOption\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
