@@ -3,7 +3,7 @@ import React from "react";
 /**
  * Shared outcome banner — colored strip with title, subtitle, and action buttons.
  *
- * Used by CompletionCTA (generate/crawl success) and TestRunView (post-run footer).
+ * Used by GenerationSuccessBanner (generate/crawl success) and TestRunView (post-run footer).
  *
  * Props:
  *   variant   — "success" | "warning" | "error" (controls background / border color)

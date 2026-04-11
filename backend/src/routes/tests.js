@@ -105,6 +105,7 @@ router.patch("/tests/:testId", async (req, res) => {
   }
 
   let codeRegeneratedNow = false;
+  let regenerationError = null; // transient — not persisted, only returned in the response
   const currentSteps = updates.steps || test.steps;
   const currentName = updates.name || test.name;
 
@@ -231,7 +232,7 @@ No imports, no explanation.`;
       console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
       // Surface a user-friendly message for timeout errors (common with Ollama)
       if (err.message?.includes("timed out") || err.message?.includes("ECONNREFUSED")) {
-        updates._regenerationError = isLocalProvider()
+        regenerationError = isLocalProvider()
           ? "Code regeneration timed out. Local models may need more time for large tests. Try editing the code directly via the Source tab."
           : "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
       }
@@ -262,8 +263,8 @@ No imports, no explanation.`;
   if (previewResult) {
     response._codePreview = previewResult;
   }
-  if (updates._regenerationError) {
-    response._regenerationError = updates._regenerationError;
+  if (regenerationError) {
+    response._regenerationError = regenerationError;
   }
 
   res.json(response);

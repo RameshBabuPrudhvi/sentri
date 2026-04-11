@@ -384,5 +384,16 @@ export const api = {
         } catch { /* malformed SSE line — skip */ }
       }
     }
+    // Flush any data remaining in the buffer after the stream closes.
+    if (buf.trim()) {
+      const line = buf.trim();
+      if (line.startsWith("data: ")) {
+        try {
+          const parsed = JSON.parse(line.slice(6).trim());
+          if (parsed.error) { onError?.(parsed.error); return; }
+          if (parsed.token) onToken(parsed.token);
+        } catch { /* malformed — ignore */ }
+      }
+    }
   },
 };

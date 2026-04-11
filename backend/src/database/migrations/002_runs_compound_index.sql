@@ -1,5 +1,9 @@
 -- Migration 002: Add compound index on runs(projectId, status)
 --
+-- NOTE: This index is also defined in 001_initial_schema.sql for new databases.
+-- This migration exists solely to add the index to databases created before
+-- the 001 schema was updated. Both use IF NOT EXISTS so the duplicate is safe.
+--
 -- findActiveByProjectId() runs:
 --   SELECT * FROM runs WHERE projectId = ? AND status = 'running'
 --

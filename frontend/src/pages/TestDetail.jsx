@@ -22,7 +22,6 @@ import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
-// AiFixPanel imported above via React.lazy()
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -874,23 +873,12 @@ export default function TestDetail() {
                         return (
                           <div
                             key={idx}
+                            className={isFailedStep && failError ? "td-step-row" : undefined}
                             style={{
                               display: "flex", alignItems: "flex-start", gap: 16,
                               padding: "12px 0",
                               borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
                               position: "relative",
-                            }}
-                            onMouseEnter={e => {
-                              if (isFailedStep && failError) {
-                                const box = e.currentTarget.querySelector("[data-error-popover]");
-                                if (box) box.style.display = "block";
-                              }
-                            }}
-                            onMouseLeave={e => {
-                              if (isFailedStep) {
-                                const box = e.currentTarget.querySelector("[data-error-popover]");
-                                if (box) box.style.display = "none";
-                              }
                             }}
                           >
                             <div style={{
@@ -918,12 +906,11 @@ export default function TestDetail() {
                                 </>
                               ) : step}
                             </span>
-                            {/* Error popover — shown on hover */}
+                            {/* Error popover — shown on hover via .td-step-row:hover CSS rule */}
                             {isFailedStep && failError && (
                               <div
                                 data-error-popover
                                 style={{
-                                  display: "none",
                                   position: "absolute", left: 42, right: 0, top: "100%",
                                   zIndex: 10, marginTop: -4,
                                   padding: "10px 12px",
