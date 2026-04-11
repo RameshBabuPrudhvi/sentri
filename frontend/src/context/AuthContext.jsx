@@ -64,10 +64,6 @@ function msUntilRefresh() {
   return ms > 0 ? ms : 0;
 }
 
-// getCsrfToken is imported from ../utils/csrf.js and re-exported below
-// so existing consumers that import { getCsrfToken } from AuthContext still work.
-export { getCsrfToken };
-
 function sanitiseUser(u) {
   return { id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user" };
 }
