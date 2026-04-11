@@ -110,6 +110,12 @@
   white-space: pre; overflow: auto;
 }
 
+/* Unsaved-changes dot on the file tab */
+.td-editor-tab .td-unsaved-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #f59e0b; display: inline-block;
+}
+
 .td-editor-footer {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
@@ -129,6 +135,10 @@
   padding: 6px 16px; font-size: 0.78rem; font-weight: 600;
   display: flex; align-items: center; gap: 6px;
 }
+
+/* ── Failed step error popover (CSS :hover instead of JS DOM manipulation) ── */
+.td-step-row [data-error-popover] { display: none; }
+.td-step-row:hover [data-error-popover] { display: block; }
 
 /* ── Keyboard shortcut badge ────────────────────────────────────────────────── */
 .td-kbd {

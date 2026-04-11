@@ -208,6 +208,55 @@ test("accepts optional step descriptions for keyword matching", () => {
   assert.equal(chunks.length, 4, "Expected 4 chunks");
 });
 
+test("even distribution: baseSize floor guard — more steps than lines produces no empty chunks from division", () => {
+  // With 2 lines and 10 steps, Math.floor(2/10) = 0 which would cause an infinite loop.
+  // The fix uses Math.max(1, ...) so baseSize is at least 1.
+  const code = `test('tiny', async ({ page }) => {
+  await page.goto('https://example.com');
+  await page.click('#btn');
+});`;
+  const chunks = splitCodeBySteps(code, 10);
+  assert.equal(chunks.length, 10, "Expected 10 chunks");
+  // First few chunks should have content, rest should be empty strings
+  assert.ok(chunks[0].length > 0, "First chunk should have content");
+  // Exhausted lines should produce empty strings, not crash
+  const emptyCount = chunks.filter(c => c === "").length;
+  assert.ok(emptyCount > 0, "Some chunks should be empty when steps > lines");
+});
+
+test("even distribution: last chunk gets all remaining lines", () => {
+  // With 7 lines and 3 steps: baseSize=2, last step should get lines 4-6 (3 lines)
+  const code = `test('last', async ({ page }) => {
+  await page.goto('https://example.com');
+  await page.click('#a');
+  await page.click('#b');
+  await page.click('#c');
+  await page.click('#d');
+  await page.click('#e');
+  await page.click('#f');
+});`;
+  const chunks = splitCodeBySteps(code, 3);
+  assert.equal(chunks.length, 3, "Expected 3 chunks");
+  // Last chunk should have content (not be empty due to remainder miscalculation)
+  assert.ok(chunks[2].length > 0, "Last chunk must have remaining lines");
+  // Last chunk should have more lines than the others (it gets the remainder)
+  const lastLines = chunks[2].split("\n").length;
+  const firstLines = chunks[0].split("\n").length;
+  assert.ok(lastLines >= firstLines, "Last chunk should get remainder lines");
+});
+
+test("even distribution: single step gets all lines", () => {
+  const code = `test('single', async ({ page }) => {
+  await page.goto('https://example.com');
+  await page.click('#btn');
+  await expect(page).toHaveTitle('Done');
+});`;
+  const chunks = splitCodeBySteps(code, 1);
+  assert.equal(chunks.length, 1, "Expected 1 chunk");
+  assert.ok(chunks[0].includes("goto"), "Single chunk should contain all code");
+  assert.ok(chunks[0].includes("toHaveTitle"), "Single chunk should contain all code");
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // highlightCode
 // ═══════════════════════════════════════════════════════════════════════════════

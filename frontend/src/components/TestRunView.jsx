@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, Suspense, lazy } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
@@ -12,7 +12,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { api } from "../api.js";
-import StepResultsView from "./StepResultsView";
+// StepResultsView is 55KB — lazy-loaded since it only renders when a user
+// drills into a specific test result, never on initial run view render.
+const StepResultsView = lazy(() => import("./StepResultsView"));
 import LiveBrowserView from "./LiveBrowserView";
 import ExecutionTimeline from "./ExecutionTimeline";
 import OutcomeBanner from "./OutcomeBanner.jsx";
@@ -423,11 +425,13 @@ export default function TestRunView({ run, frames = [] }) {
   // ── Drill-in: show StepResultsView ────────────────────────────────────
   if (drilledCase !== null && results[drilledCase]) {
     return (
-      <StepResultsView
-        result={results[drilledCase]}
-        run={run}
-        onBack={() => setDrilledCase(null)}
-      />
+      <Suspense fallback={<div style={{ padding: 32, textAlign: "center", color: "var(--text3)", fontSize: "0.85rem" }}>Loading details…</div>}>
+        <StepResultsView
+          result={results[drilledCase]}
+          run={run}
+          onBack={() => setDrilledCase(null)}
+        />
+      </Suspense>
     );
   }
 

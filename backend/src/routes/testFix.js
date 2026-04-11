@@ -18,23 +18,33 @@ import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
 
 const router = Router();
 
 /**
  * Build the system prompt for the test-fix AI call.
  */
-const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to fix a failing Playwright test.
+const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to apply a MINIMAL, TARGETED fix to a failing Playwright test.
+
+CRITICAL — MINIMAL CHANGES ONLY:
+- Identify the SPECIFIC line(s) that caused the failure based on the error message.
+- Fix ONLY those lines. Do NOT rewrite, reorganise, rename, or restyle any other part of the test.
+- Every line of the original test that is NOT related to the failure MUST appear UNCHANGED in your output — same indentation, same comments, same helpers, same order.
+- If the original code uses safeClick/safeFill/safeExpect, your fix MUST also use them. Do NOT replace self-healing helpers with raw Playwright calls (page.click, page.fill, page.getByRole, etc.).
+- If a step comment (// Step N:) exists, keep it exactly as-is.
 
 Rules:
-- Return ONLY the fixed Playwright test code — no markdown fences, no explanation text, no JSON wrapper.
+- Start your response with a single line beginning with "FIX: " that summarises in plain English what you changed and why (e.g. "FIX: Step 3 — replaced incorrect button label 'Submit' with 'Sign In' in safeClick."). Keep it under 120 characters.
+- After the FIX: line, output a blank line, then the complete fixed Playwright test code — no markdown fences, no other explanation text, no JSON wrapper.
 - The code must be a complete, runnable test function starting with \`test('...\` and ending with \`});\`.
 - Do NOT include import statements — test/expect are provided externally.
-- Use role-based selectors: getByRole(), getByLabel(), getByText(), getByPlaceholder().
 - Add page.waitForLoadState() after navigations.
-- Preserve the original test intent and assertions — fix the broken parts, don't rewrite from scratch.
 - If a selector is broken, fix the selector. If a timeout occurs, add appropriate waits. If an assertion fails, fix the assertion to match actual behavior.
-- Keep the test name the same as the original.`;
+- Keep the test name the same as the original.
+
+SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
+${SELF_HEALING_PROMPT_RULES}`;
 
 /**
  * Build the user prompt with test code + failure context.
@@ -71,7 +81,7 @@ function buildUserPrompt(test, failureResult, project) {
     lines.push("");
   }
 
-  lines.push("Fix the test so it passes. Return ONLY the fixed code, nothing else.");
+  lines.push("Fix the test so it passes. Make the SMALLEST possible change — only modify the line(s) that caused the failure. Keep every other line identical to the original. Use self-healing helpers (safeClick, safeFill, safeExpect) — not raw Playwright selectors. Start with a FIX: summary line, then a blank line, then the complete fixed code.");
 
   return lines.join("\n");
 }
@@ -151,21 +161,24 @@ router.post("/tests/:testId/fix", async (req, res) => {
     clearTimeout(timeout);
   });
 
-  // Heartbeat to keep connection alive through proxies
-  const heartbeat = setInterval(() => {
-    if (!res.writableEnded) {
-      try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
-    } else {
-      clearInterval(heartbeat);
-    }
-  }, 5000);
-
   const streamOpts = { signal: controller.signal, responseFormat: "text" };
   if (isLocalProvider()) streamOpts.maxTokens = 4096;
 
   let fixedCode = "";
+  // Heartbeat is declared here so the finally block can always clear it,
+  // even if the try block is never entered (e.g. synchronous throw).
+  let heartbeat = null;
 
   try {
+    // Start heartbeat inside try so it's always paired with the finally cleanup
+    heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        try { res.write(": heartbeat\n\n"); } catch { clearInterval(heartbeat); }
+      } else {
+        clearInterval(heartbeat);
+      }
+    }, 5000);
+
     const startMs = Date.now();
     await streamText(
       { system: SYSTEM_PROMPT, user: userPrompt },
@@ -178,15 +191,38 @@ router.post("/tests/:testId/fix", async (req, res) => {
       streamOpts,
     );
 
-    // Clean the response — strip markdown fences if the model added them
-    fixedCode = fixedCode.trim()
+    // Extract the "FIX: ..." explanation line the AI prepends (per system prompt).
+    // This must happen BEFORE fence stripping: when the AI outputs
+    //   FIX: ...\n\n```js\ncode\n```
+    // the opening fence isn't at ^ while the FIX: line is still present, so
+    // stripping fences first would leave an orphaned "```javascript" line.
+    fixedCode = fixedCode.trim();
+    let explanation = null;
+    const fixLineMatch = fixedCode.match(/^FIX:\s*(.+?)(?:\n|$)/i);
+    if (fixLineMatch) {
+      explanation = fixLineMatch[1].trim();
+      // Strip the FIX: line (and optional blank line) from the code body
+      fixedCode = fixedCode.replace(/^FIX:\s*.+?(?:\n\n?|$)/i, "").trim();
+    }
+
+    // Clean the response — strip markdown fences if the model added them.
+    // Runs after FIX: extraction so the opening fence is always at ^.
+    fixedCode = fixedCode
       .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
       .replace(/\n?\s*```\s*$/i, "")
       .trim();
 
-    // Build explanation and diff
+    // Safety net: rewrite any raw Playwright calls the AI may have used back
+    // to self-healing helpers (safeClick, safeFill, safeExpect). This ensures
+    // the fixed code stays consistent with the original code style even when
+    // the model ignores the self-healing prompt rules.
+    fixedCode = applyHealingTransforms(fixedCode);
+
+    // Build diff summary
     const { diff, added, removed } = computeDiffSummary(test.playwrightCode, fixedCode);
-    const explanation = `Fixed ${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed.`;
+    if (!explanation) {
+      explanation = `AI applied a fix: ${added} line${added !== 1 ? "s" : ""} added, ${removed} line${removed !== 1 ? "s" : ""} removed. Review the diff below to see exactly what changed.`;
+    }
 
     console.log(formatLogLine("info", null, `[testFix] completed for ${test.id} in ${((Date.now() - startMs) / 1000).toFixed(1)}s — ${added}+ ${removed}-`));
 
@@ -222,12 +258,27 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
     return res.status(400).json({ error: "code is required" });
   }
 
+  // Strip markdown fences in case the AI response was not cleaned upstream
+  const sanitizedCode = code.trim()
+    .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
+    .replace(/\n?\s*```\s*$/i, "")
+    .trim();
+
+  // Basic structural validation — must look like a Playwright test function.
+  // Accept test(), test.only(), test.skip(), test.fixme(), test.describe(), etc.
+  const looksLikeTest = /\btest\s*(\.\s*\w+\s*)?\(/.test(sanitizedCode);
+  if (!looksLikeTest || !sanitizedCode.includes("async")) {
+    return res.status(400).json({
+      error: "Code does not appear to be a valid Playwright test. Must contain a test() call and async.",
+    });
+  }
+
   const updates = {};
-  if (test.playwrightCode && test.playwrightCode !== code.trim()) {
+  if (test.playwrightCode && test.playwrightCode !== sanitizedCode) {
     updates.playwrightCodePrev = test.playwrightCode;
   }
 
-  updates.playwrightCode = code.trim();
+  updates.playwrightCode = sanitizedCode;
   updates.updatedAt = new Date().toISOString();
   updates.aiFixAppliedAt = new Date().toISOString();
   updates.codeVersion = (test.codeVersion || 0) + 1;

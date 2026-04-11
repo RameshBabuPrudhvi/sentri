@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_projectId ON runs(projectId);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+-- Compound index for the common findActiveByProjectId query:
+-- SELECT * FROM runs WHERE projectId = ? AND status = 'running'
+-- Without this, SQLite does an index intersection of the two single-column
+-- indexes above. The compound index resolves both predicates in one scan.
+CREATE INDEX IF NOT EXISTS idx_runs_project_status ON runs(projectId, status);
 
 CREATE TABLE IF NOT EXISTS activities (
   id          TEXT PRIMARY KEY,  -- "ACT-1"

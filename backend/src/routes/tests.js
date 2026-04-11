@@ -30,7 +30,7 @@ import { generateTestId, generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
 import { classifyError } from "../utils/errorClassifier.js";
-import { hasProvider } from "../aiProvider.js";
+import { hasProvider, isLocalProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
@@ -65,7 +65,7 @@ router.patch("/tests/:testId", async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
 
-  const { steps, name, description, priority, regenerateCode, playwrightCode, linkedIssueKey, tags } = req.body;
+  const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags } = req.body;
 
   const updates = {};
 
@@ -88,21 +88,88 @@ router.patch("/tests/:testId", async (req, res) => {
 
   updates.updatedAt = new Date().toISOString();
 
+  // Any content change (steps, name, description, code, priority) reverts
+  // the test to draft so it requires re-approval after editing.
+  const contentChanged = stepsChanged
+    || (typeof name === "string" && name.trim() !== test.name)
+    || (typeof description === "string" && description.trim() !== test.description)
+    || (typeof playwrightCode === "string" && playwrightCode !== test.playwrightCode)
+    || (typeof priority === "string" && priority !== test.priority);
+  if (contentChanged && test.reviewStatus !== "draft") {
+    updates.reviewStatus = "draft";
+    updates.reviewedAt = null;
+  }
+
   if (typeof playwrightCode === "string") {
     updates.isApiTest = !!(playwrightCode && isApiTest(playwrightCode));
   }
 
   let codeRegeneratedNow = false;
+  let regenerationError = null; // transient — not persisted, only returned in the response
   const currentSteps = updates.steps || test.steps;
   const currentName = updates.name || test.name;
 
-  if (regenerateCode && hasProvider() && Array.isArray(currentSteps) && currentSteps.length > 0) {
+  const shouldRegenerate = (regenerateCode || previewCode) && hasProvider() && Array.isArray(currentSteps) && currentSteps.length > 0;
+  let previewResult = null;
+
+  if (shouldRegenerate) {
     try {
       const project = projectRepo.getById(test.projectId);
       const appUrl = project?.url || test.sourceUrl || "";
       const { generateText, parseJSON } = await import("../aiProvider.js");
 
-      const codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
+      // If existing code is available, ask the AI to adapt it to the new steps
+      // instead of generating from scratch. This preserves self-healing helpers,
+      // comments, and structure — only the changed/removed steps are affected.
+      const existingCode = updates.playwrightCode || test.playwrightCode;
+      const local = isLocalProvider();
+
+      // Local models (7B) struggle with verbose prompts and JSON output.
+      // Use a shorter prompt and request plain code (no JSON wrapper) for Ollama.
+      let codePrompt;
+      if (existingCode && !local) {
+        codePrompt = `You are a Playwright automation expert. The user has edited the test steps. Update the existing Playwright test code to match the new steps.
+
+Test Name: ${currentName}
+Application URL: ${appUrl}
+
+PREVIOUS steps:
+${(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+UPDATED steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+EXISTING Playwright code:
+\`\`\`javascript
+${existingCode}
+\`\`\`
+
+Requirements:
+- Make MINIMAL changes to the existing code — only add, remove, or modify the code sections that correspond to changed or removed steps.
+- Keep ALL unchanged step code, comments (// Step N:), helpers (safeClick, safeFill, safeExpect), and structure exactly as-is.
+- If a step was removed, remove ONLY its corresponding code block and renumber the remaining "// Step N:" comments.
+- If a step was added, insert code for it in the correct position.
+- If a step was reworded, update only the affected line(s).
+- Do NOT rewrite the entire test from scratch.
+- Do NOT include import statements at the top — test/expect are provided externally.
+
+Return ONLY valid JSON with no markdown fences:
+{
+  "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // updated test implementation\\n});"
+}`;
+      } else if (existingCode && local) {
+        // Shorter prompt for local models — skip JSON wrapper, request plain code
+        codePrompt = `Update this Playwright test to match the new steps. Only change what's needed.
+
+Steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Current code:
+${existingCode}
+
+Return ONLY the updated test code, no explanation.`;
+      } else if (!local) {
+        codePrompt = `You are a Playwright automation expert. Convert the following QA test steps into a complete, runnable Playwright test.
 
 Test Name: ${currentName}
 Application URL: ${appUrl}
@@ -120,8 +187,22 @@ Return ONLY valid JSON with no markdown fences:
 {
   "playwrightCode": "test('${currentName}', async ({ page }) => {\\n  // full test implementation\\n});"
 }`;
+      } else {
+        // Shorter prompt for local models — skip JSON wrapper
+        codePrompt = `Write a Playwright test for these steps. Start with page.goto('${appUrl}').
 
-      const codeRaw = await generateText(codePrompt);
+Test: ${currentName}
+Steps:
+${currentSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Return ONLY the test code starting with test('${currentName}', async ({ page }) => {
+No imports, no explanation.`;
+      }
+
+      const genOpts = local
+        ? { maxTokens: 4096, responseFormat: "text" }
+        : {};
+      const codeRaw = await generateText(codePrompt, genOpts);
       let pwCode = null;
       try {
         const parsed = parseJSON(codeRaw);
@@ -132,17 +213,34 @@ Return ONLY valid JSON with no markdown fences:
         }
       }
       if (pwCode) {
-        const currentCode = updates.playwrightCode || test.playwrightCode;
-        if (currentCode && currentCode !== pwCode) {
-          updates.playwrightCodePrev = currentCode;
+        if (previewCode) {
+          // Preview mode: return generated code without persisting it.
+          // The frontend shows a diff panel for the user to accept/edit/discard.
+          previewResult = { generatedCode: pwCode, originalCode: existingCode || null };
+        } else {
+          const currentCode = updates.playwrightCode || test.playwrightCode;
+          if (currentCode && currentCode !== pwCode) {
+            updates.playwrightCodePrev = currentCode;
+          }
+          updates.playwrightCode = pwCode;
+          updates.isApiTest = !!(pwCode && isApiTest(pwCode));
+          updates.codeRegeneratedAt = new Date().toISOString();
+          codeRegeneratedNow = true;
         }
-        updates.playwrightCode = pwCode;
-        updates.isApiTest = !!(pwCode && isApiTest(pwCode));
-        updates.codeRegeneratedAt = new Date().toISOString();
-        codeRegeneratedNow = true;
+      } else {
+        // AI returned output that didn't parse as valid code — surface to user
+        regenerationError = "Code regeneration produced invalid output. Please try again or edit the code directly via the Source tab.";
       }
     } catch (err) {
       console.error(formatLogLine("error", null, `[PATCH test] code regeneration failed: ${err.message}`));
+      // Surface a user-friendly message for timeout errors (common with Ollama)
+      if (err.message?.includes("timed out") || err.message?.includes("ECONNREFUSED")) {
+        regenerationError = isLocalProvider()
+          ? "Code regeneration timed out. Local models may need more time for large tests. Try editing the code directly via the Source tab."
+          : "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
+      } else {
+        regenerationError = "Code regeneration failed. Please try again or edit the code directly via the Source tab.";
+      }
     }
   }
 
@@ -151,7 +249,7 @@ Return ONLY valid JSON with no markdown fences:
 
   const project = projectRepo.getById(test.projectId);
   logActivity({
-    type: stepsChanged && regenerateCode ? "test.regenerate" : "test.edit",
+    type: stepsChanged && (regenerateCode || previewCode) ? "test.regenerate" : "test.edit",
     projectId: test.projectId,
     projectName: project?.name || null,
     testId: test.id,
@@ -164,8 +262,14 @@ Return ONLY valid JSON with no markdown fences:
   // Re-read the updated test from SQLite for the response
   const updatedTest = testRepo.getById(test.id);
   const response = { ...updatedTest };
-  if (regenerateCode && !codeRegeneratedNow) {
+  if (regenerateCode && !codeRegeneratedNow && !previewCode) {
     response._codeStale = true;
+  }
+  if (previewResult) {
+    response._codePreview = previewResult;
+  }
+  if (regenerationError) {
+    response._regenerationError = regenerationError;
   }
 
   res.json(response);

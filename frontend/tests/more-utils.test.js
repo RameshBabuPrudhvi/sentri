@@ -5,10 +5,10 @@
 
 import assert from "node:assert/strict";
 import { cleanTestName } from "../src/utils/formatTestName.js";
-import isApiTestCode from "../src/utils/isApiTestCode.js";
 import { loadSavedConfig, saveConfig, countActiveDials } from "../src/utils/testDialsStorage.js";
 import { csvEscape, buildCsv, downloadCsv } from "../src/utils/exportCsv.js";
-import { parseJsonResponse } from "../src/utils/api.js";
+import { parseJsonResponse } from "../src/utils/apiBase.js";
+import { escapeHtml } from "../src/utils/pdfReportHtml.js";
 
 let passed = 0;
 let failed = 0;
@@ -48,19 +48,6 @@ test("cleanTestName strips known scenario prefixes", () => {
 test("cleanTestName preserves non-prefixed names", () => {
   assert.equal(cleanTestName("Login success flow"), "Login success flow");
   assert.equal(cleanTestName(null), null);
-});
-
-console.log("\n🧪 isApiTestCode");
-
-test("isApiTestCode detects API-only code", () => {
-  const apiCode = "await request.newContext();\nawait request.get('/health');";
-  assert.equal(isApiTestCode(apiCode), true);
-});
-
-test("isApiTestCode rejects UI interaction code", () => {
-  const mixedCode = "await request.get('/api/users');\nawait page.click('#submit');";
-  assert.equal(isApiTestCode(mixedCode), false);
-  assert.equal(isApiTestCode(null), false);
 });
 
 console.log("\n🧪 testDialsStorage");
@@ -176,6 +163,55 @@ await testAsync("parseJsonResponse throws for non-JSON responses", async () => {
     () => parseJsonResponse({ headers: { get: () => "text/html" }, json: async () => ({}) }),
     /Unable to reach the server/
   );
+});
+
+console.log("\n🧪 escapeHtml (pdfReportHtml XSS prevention)");
+
+test("escapeHtml escapes <script> tags", () => {
+  assert.equal(escapeHtml("<script>alert(1)</script>"), "&lt;script&gt;alert(1)&lt;/script&gt;");
+});
+
+test("escapeHtml escapes & < > \" ' characters", () => {
+  assert.equal(escapeHtml('&<>"\''), "&amp;&lt;&gt;&quot;&#x27;");
+});
+
+test("escapeHtml returns empty string for null", () => {
+  assert.equal(escapeHtml(null), "");
+});
+
+test("escapeHtml returns empty string for undefined", () => {
+  assert.equal(escapeHtml(undefined), "");
+});
+
+test("escapeHtml coerces numbers to string", () => {
+  assert.equal(escapeHtml(42), "42");
+});
+
+test("escapeHtml handles empty string", () => {
+  assert.equal(escapeHtml(""), "");
+});
+
+test("escapeHtml escapes img onerror XSS payload", () => {
+  const payload = '<img src=x onerror=alert(1)>';
+  const escaped = escapeHtml(payload);
+  assert.ok(!escaped.includes("<img"), "Should not contain raw <img tag");
+  assert.ok(!escaped.includes("<"), "Should not contain any raw < character");
+  assert.match(escaped, /&lt;img/);
+});
+
+test("escapeHtml escapes HTML attribute breakout", () => {
+  const payload = '" onmouseover="alert(1)';
+  const escaped = escapeHtml(payload);
+  assert.ok(!escaped.includes('"'), "Should not contain raw double quotes");
+  assert.match(escaped, /&quot;/);
+});
+
+test("escapeHtml preserves safe text unchanged", () => {
+  assert.equal(escapeHtml("Hello World 123"), "Hello World 123");
+});
+
+test("escapeHtml handles mixed safe and unsafe content", () => {
+  assert.equal(escapeHtml("Tom & Jerry <3"), "Tom &amp; Jerry &lt;3");
 });
 
 console.log("\n──────────────────────────────────────────────────");

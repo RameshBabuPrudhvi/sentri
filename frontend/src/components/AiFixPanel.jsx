@@ -26,8 +26,17 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
   const abortRef = useRef(null);
   const streamBoxRef = useRef(null);
 
-  // Start streaming on mount
+  // Start streaming on mount (guarded internally so hooks are always called)
   useEffect(() => {
+    if (!originalCode) return;
+
+    // Reset state for a clean slate when the effect re-runs
+    setStreaming(true);
+    setTokens("");
+    setFixedCode(null);
+    setExplanation(null);
+    setError(null);
+
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -59,7 +68,7 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
     return () => {
       controller.abort();
     };
-  }, [testId]);
+  }, [testId, originalCode]);
 
   // Auto-scroll the streaming output
   useEffect(() => {
@@ -85,6 +94,36 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
     if (abortRef.current) abortRef.current.abort();
     onClose?.();
   }, [onClose]);
+
+  // Guard: if the test has no Playwright code, show an informative message
+  // instead of firing a fix request that will return a 400.
+  if (!originalCode) {
+    return (
+      <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--accent)", borderRadius: 10 }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "12px 16px",
+          background: "var(--accent-bg)",
+          borderBottom: "1px solid rgba(91,110,245,0.2)",
+        }}>
+          <Wand2 size={15} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--accent)", flex: 1 }}>
+            AI Fix — unavailable
+          </span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 4, display: "flex" }} title="Close">
+            <X size={15} />
+          </button>
+        </div>
+        <div style={{ padding: "14px 16px", fontSize: "0.83rem", color: "var(--text2)" }}>
+          <AlertTriangle size={14} style={{ marginRight: 6, color: "var(--yellow)" }} />
+          This test has no Playwright code yet. Edit the test and save to generate code, then use AI Fix.
+        </div>
+        <div style={{ display: "flex", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--border)", justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={13} /> Close</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--accent)", borderRadius: 10 }}>
@@ -127,19 +166,29 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
 
       {/* Streaming output (shown while streaming, before final diff) */}
       {streaming && (
-        <div
-          ref={streamBoxRef}
-          style={{
-            maxHeight: 300, overflowY: "auto",
-            padding: "12px 16px",
-            fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-            fontSize: "0.76rem", lineHeight: 1.7,
-            color: "#cdd5f0", background: "#13151c",
-            whiteSpace: "pre-wrap", wordBreak: "break-word",
-          }}
-        >
-          {tokens || "Analyzing failure and generating fix…"}
-        </div>
+        <>
+          <div style={{
+            padding: "8px 16px",
+            fontSize: "0.78rem", color: "var(--text3)",
+            background: "var(--bg2)",
+            borderBottom: "1px solid var(--border)",
+          }}>
+            🔍 Analyzing the failure and generating a fix. The final diff and explanation will appear when complete.
+          </div>
+          <div
+            ref={streamBoxRef}
+            style={{
+              maxHeight: 300, overflowY: "auto",
+              padding: "12px 16px",
+              fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+              fontSize: "0.76rem", lineHeight: 1.7,
+              color: "#cdd5f0", background: "#13151c",
+              whiteSpace: "pre-wrap", wordBreak: "break-word",
+            }}
+          >
+            {tokens || "Analyzing failure and generating fix…"}
+          </div>
+        </>
       )}
 
       {/* Diff view (shown after streaming completes) */}
@@ -148,13 +197,19 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
           {explanation && (
             <div style={{
               fontSize: "0.82rem", color: "var(--text2)",
-              marginBottom: 12, padding: "8px 12px",
+              marginBottom: 12, padding: "10px 12px",
               background: "var(--bg2)", borderRadius: 6,
               border: "1px solid var(--border)",
             }}>
+              <div style={{ fontWeight: 700, fontSize: "0.75rem", color: "var(--text3)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                What was fixed
+              </div>
               {explanation}
             </div>
           )}
+          <div style={{ fontWeight: 600, fontSize: "0.75rem", color: "var(--text3)", marginBottom: 6 }}>
+            Code changes
+          </div>
           <DiffView before={originalCode} after={fixedCode} />
         </div>
       )}

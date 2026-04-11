@@ -19,7 +19,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { API_BASE } from "../utils/api.js";
+import { API_BASE } from "../utils/apiBase.js";
 
 const AuthContext = createContext(null);
 

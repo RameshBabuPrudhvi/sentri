@@ -5,11 +5,29 @@
  *
  * ### Exports
  * - {@link renderReportHtml} — `(metrics) → string` full HTML document.
+ * - {@link escapeHtml} — HTML-escape a user-sourced value (exported for testing).
  */
 
 import { fmtRelativeDate } from "./formatters.js";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── HTML escaping ─────────────────────────────────────────────────────────────
+// All user-sourced values (test names, project names, URLs, descriptions,
+// step text) are interpolated directly into an HTML string template. Without
+// escaping, a test named `<script>alert(1)</script>` renders executable markup
+// in the generated PDF/HTML. This function is the single escape gate — every
+// user-controlled value must pass through it before template interpolation.
+export function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
+// Internal alias — all template interpolation uses esc() for brevity.
+const esc = escapeHtml;
 
 function fmtMs(ms) {
   if (!ms || ms <= 0) return "—";
@@ -97,17 +115,17 @@ export function renderReportHtml(m) {
 
   // S7
   S.push(sh("7. Today's Failing Tests", todayFailing.length > 0 ? todayFailing.length + " failures" : ""));
-  S.push(todayFailing.length > 0 ? card(`<table><thead><tr><th>#</th><th>Test Name</th><th>Project</th><th>Failures</th></tr></thead><tbody>${todayFailing.map((t, i) => `<tr><td style="color:#9ca3af;font-weight:700">${i + 1}</td><td style="font-weight:500">${t.name || "—"}</td><td style="color:#6b7280">${projMap[t.projectId] || t.projectId || "—"}</td><td>${pill(t.failCount + " failure" + (t.failCount > 1 ? "s" : ""), "red")}</td></tr>`).join("")}</tbody></table>`) : card(`<div style="padding:12px 16px;color:#16a34a;font-weight:600;font-size:9.5pt">✓ No failures recorded today</div>`));
+  S.push(todayFailing.length > 0 ? card(`<table><thead><tr><th>#</th><th>Test Name</th><th>Project</th><th>Failures</th></tr></thead><tbody>${todayFailing.map((t, i) => `<tr><td style="color:#9ca3af;font-weight:700">${i + 1}</td><td style="font-weight:500">${esc(t.name) || "—"}</td><td style="color:#6b7280">${esc(projMap[t.projectId] || t.projectId) || "—"}</td><td>${pill(t.failCount + " failure" + (t.failCount > 1 ? "s" : ""), "red")}</td></tr>`).join("")}</tbody></table>`) : card(`<div style="padding:12px 16px;color:#16a34a;font-weight:600;font-size:9.5pt">✓ No failures recorded today</div>`));
 
   // S8
-  if (topFailing.length > 0) { S.push(sh("8. Chronic Failures — Top " + topFailing.length + " Tests (All Time)")); S.push(card(`<table><thead><tr><th>Rank</th><th>Test Name</th><th>Project</th><th>Total Failures</th><th>Risk Level</th></tr></thead><tbody>${topFailing.map((t, i) => `<tr><td style="color:#9ca3af;font-weight:700">#${i + 1}</td><td style="font-weight:500;max-width:300px">${t.name || "—"}</td><td style="color:#6b7280">${projMap[t.projectId] || t.projectId || "—"}</td><td>${pill(t.failCount, "red")}</td><td>${t.risk === "High" ? pill("High", "red") : t.risk === "Medium" ? pill("Medium", "amber") : pill("Low", "green")}</td></tr>`).join("")}</tbody></table>`)); }
+  if (topFailing.length > 0) { S.push(sh("8. Chronic Failures — Top " + topFailing.length + " Tests (All Time)")); S.push(card(`<table><thead><tr><th>Rank</th><th>Test Name</th><th>Project</th><th>Total Failures</th><th>Risk Level</th></tr></thead><tbody>${topFailing.map((t, i) => `<tr><td style="color:#9ca3af;font-weight:700">#${i + 1}</td><td style="font-weight:500;max-width:300px">${esc(t.name) || "—"}</td><td style="color:#6b7280">${esc(projMap[t.projectId] || t.projectId) || "—"}</td><td>${pill(t.failCount, "red")}</td><td>${t.risk === "High" ? pill("High", "red") : t.risk === "Medium" ? pill("Medium", "amber") : pill("Low", "green")}</td></tr>`).join("")}</tbody></table>`)); }
 
   // S9
-  if (flakyTests.length > 0) { S.push(sh("9. Flaky Tests — Inconsistent Results", flakyTests.length + " tests")); S.push(card(`<table><thead><tr><th>#</th><th>Test Name</th><th>Project</th><th>Status</th></tr></thead><tbody>${flakyTests.map((t, i) => `<tr><td style="color:#9ca3af">${i + 1}</td><td>${t.name || "—"}</td><td style="color:#6b7280">${projMap[t.projectId] || t.projectId || "—"}</td><td>${pill("Intermittent", "amber")}</td></tr>`).join("")}</tbody></table>`)); }
+  if (flakyTests.length > 0) { S.push(sh("9. Flaky Tests — Inconsistent Results", flakyTests.length + " tests")); S.push(card(`<table><thead><tr><th>#</th><th>Test Name</th><th>Project</th><th>Status</th></tr></thead><tbody>${flakyTests.map((t, i) => `<tr><td style="color:#9ca3af">${i + 1}</td><td>${esc(t.name) || "—"}</td><td style="color:#6b7280">${esc(projMap[t.projectId] || t.projectId) || "—"}</td><td>${pill("Intermittent", "amber")}</td></tr>`).join("")}</tbody></table>`)); }
 
   // S10: Per-Project
   S.push(sh("10. Per-Project Breakdown"));
-  S.push(card(`<table><thead><tr><th>Project</th><th>URL</th><th>Tests</th><th>Total Runs</th><th>Today</th><th>Overall Pass %</th><th>Weekly Pass %</th><th>Avg Duration</th><th>Last Run</th></tr></thead><tbody>${projectBreakdown.map(p => `<tr><td style="font-weight:600">${p.name}</td><td style="color:#6b7280;font-size:8pt" class="mono">${p.url ? p.url.replace(/^https?:\/\//, "") : "—"}</td><td>${p.approved}<span style="color:#9ca3af;font-size:8pt"> / ${p.tests}</span></td><td>${p.runs}</td><td>${p.tod.total > 0 ? `${p.tod.passed}✓ ${p.tod.failed}✗` : "—"}</td><td style="font-weight:700;color:${pctColor(p.all.pct)}">${p.all.pct !== null ? p.all.pct + "%" : "—"}</td><td style="font-weight:700;color:${pctColor(p.wk.pct)}">${p.wk.pct !== null ? p.wk.pct + "%" : "—"}</td><td class="mono">${fmtMs(p.avgDur)}</td><td style="color:#6b7280;font-size:8.5pt">${p.lastRun ? fmtRelativeDate(p.lastRun.startedAt) : "Never"}</td></tr>`).join("")}</tbody></table>`));
+  S.push(card(`<table><thead><tr><th>Project</th><th>URL</th><th>Tests</th><th>Total Runs</th><th>Today</th><th>Overall Pass %</th><th>Weekly Pass %</th><th>Avg Duration</th><th>Last Run</th></tr></thead><tbody>${projectBreakdown.map(p => `<tr><td style="font-weight:600">${esc(p.name)}</td><td style="color:#6b7280;font-size:8pt" class="mono">${p.url ? esc(p.url.replace(/^https?:\/\//, "")) : "—"}</td><td>${p.approved}<span style="color:#9ca3af;font-size:8pt"> / ${p.tests}</span></td><td>${p.runs}</td><td>${p.tod.total > 0 ? `${p.tod.passed}✓ ${p.tod.failed}✗` : "—"}</td><td style="font-weight:700;color:${pctColor(p.all.pct)}">${p.all.pct !== null ? p.all.pct + "%" : "—"}</td><td style="font-weight:700;color:${pctColor(p.wk.pct)}">${p.wk.pct !== null ? p.wk.pct + "%" : "—"}</td><td class="mono">${fmtMs(p.avgDur)}</td><td style="color:#6b7280;font-size:8.5pt">${p.lastRun ? fmtRelativeDate(p.lastRun.startedAt) : "Never"}</td></tr>`).join("")}</tbody></table>`));
 
   // S11: Runtime Config
   S.push(sh("11. Runtime Configuration"));
@@ -116,7 +134,7 @@ export function renderReportHtml(m) {
   // S12: Recent Runs
   if (completedRuns.length > 0) {
     S.push(sh("12. Recent Run Log (Last 10)"));
-    S.push(card(`<table><thead><tr><th>Run ID</th><th>Project</th><th>Status</th><th>Passed</th><th>Failed</th><th>Total</th><th>Pass %</th><th>Duration</th><th>Started</th></tr></thead><tbody>${testRuns.slice(0, 10).map(r => { const dur = r.startedAt && r.finishedAt ? fmtMs(new Date(r.finishedAt) - new Date(r.startedAt)) : "—"; const p = r.total ? Math.round(((r.passed || 0) / r.total) * 100) : null; return `<tr><td class="mono" style="color:#9ca3af;font-size:7.5pt">${(r.id || "").slice(0,8)}</td><td style="font-weight:500">${projMap[r.projectId] || r.projectId || "—"}</td><td>${r.status === "completed" ? pill("✓ Completed","green") : r.status === "failed" ? pill("✗ Failed","red") : r.status === "running" ? pill("● Running","blue") : pill(r.status,"gray")}</td><td style="color:#16a34a;font-weight:600">${r.passed ?? "—"}</td><td style="color:${(r.failed || 0) > 0 ? "#dc2626" : "#9ca3af"};font-weight:${(r.failed || 0) > 0 ? 700 : 400}">${r.failed ?? "—"}</td><td>${r.total ?? "—"}</td><td style="font-weight:700;color:${pctColor(p)}">${p !== null ? p + "%" : "—"}</td><td class="mono">${dur}</td><td style="color:#6b7280;font-size:8pt">${r.startedAt ? fmtRelativeDate(r.startedAt) : "—"}</td></tr>`; }).join("")}</tbody></table>`));
+    S.push(card(`<table><thead><tr><th>Run ID</th><th>Project</th><th>Status</th><th>Passed</th><th>Failed</th><th>Total</th><th>Pass %</th><th>Duration</th><th>Started</th></tr></thead><tbody>${testRuns.slice(0, 10).map(r => { const dur = r.startedAt && r.finishedAt ? fmtMs(new Date(r.finishedAt) - new Date(r.startedAt)) : "—"; const p = r.total ? Math.round(((r.passed || 0) / r.total) * 100) : null; return `<tr><td class="mono" style="color:#9ca3af;font-size:7.5pt">${(r.id || "").slice(0,8)}</td><td style="font-weight:500">${esc(projMap[r.projectId] || r.projectId) || "—"}</td><td>${r.status === "completed" ? pill("✓ Completed","green") : r.status === "failed" ? pill("✗ Failed","red") : r.status === "running" ? pill("● Running","blue") : pill(r.status,"gray")}</td><td style="color:#16a34a;font-weight:600">${r.passed ?? "—"}</td><td style="color:${(r.failed || 0) > 0 ? "#dc2626" : "#9ca3af"};font-weight:${(r.failed || 0) > 0 ? 700 : 400}">${r.failed ?? "—"}</td><td>${r.total ?? "—"}</td><td style="font-weight:700;color:${pctColor(p)}">${p !== null ? p + "%" : "—"}</td><td class="mono">${dur}</td><td style="color:#6b7280;font-size:8pt">${r.startedAt ? fmtRelativeDate(r.startedAt) : "—"}</td></tr>`; }).join("")}</tbody></table>`));
   }
 
   // S13: Recommended Actions

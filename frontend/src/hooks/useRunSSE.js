@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { API_BASE } from "../utils/api.js";
+import { API_BASE } from "../utils/apiBase.js";
 
 /** localStorage key — must match AuthContext.jsx and api.js */
 const TOKEN_KEY = "app_auth_token";

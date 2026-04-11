@@ -1,14 +1,19 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, Suspense, lazy } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Play, Edit2, RefreshCw, Download,
-  CheckCircle2, XCircle, Clock,
+  Play, Edit2, RefreshCw, Download,
+  CheckCircle2, Clock,
   ChevronRight, Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
   Link2, Tag, Clipboard, Wand2,
 } from "lucide-react";
 import { api } from "../api.js";
-import DiffView from "../components/DiffView.jsx";
+// Heavy components lazy-loaded — only fetched when the user actually needs them.
+// DiffView and AiFixPanel are only rendered on explicit user interaction (click to
+// show diff / click to open AI fix panel), so they are ideal lazy-load candidates.
+// This removes ~40KB from the initial TestDetail chunk.
+const DiffView    = lazy(() => import("../components/DiffView.jsx"));
+const AiFixPanel  = lazy(() => import("../components/AiFixPanel.jsx"));
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
@@ -17,8 +22,8 @@ import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
-import CodeEditorModal from "../components/test/CodeEditorModal.jsx";
-import AiFixPanel from "../components/AiFixPanel.jsx";
+import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
+import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -94,14 +99,17 @@ export default function TestDetail() {
 
   // ── Steps / Source tab toggle ────────────────────────────────────────────
   const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
-  const [showDiff,  setShowDiff]  = useState(false);   // show code diff when playwrightCodePrev exists
+  const [showDiff,  setShowDiff]  = useState(false);   // show diff when previous version exists
   const [curlCopied, setCurlCopied] = useState(null);  // index of step whose cURL was just copied
-
-  // ── Code editor modal state ──────────────────────────────────────────────
-  const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+  const [prevSteps, setPrevSteps] = useState(null);     // previous steps for diff (captured before save)
 
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
+
+  // ── Code regeneration review state ──────────────────────────────────────
+  const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
+  const [applyingPreview, setApplyingPreview] = useState(false);
+  const [regenWarning, setRegenWarning] = useState(null); // dismissible warning for regen failures
 
   const load = useCallback(async () => {
     const t = await api.getTest(testId);
@@ -123,13 +131,23 @@ export default function TestDetail() {
     load().finally(() => setLoading(false));
   }, [load]);
 
+  // ── Inline code editing state ─────────────────────────────────────────
+  const [editCode, setEditCode] = useState("");
+  const [codeEdited, setCodeEdited] = useState(false); // tracks if user manually touched code
+
   function startEditing() {
     setEditName(test.name || "");
     setEditDesc(test.description || "");
     setEditSteps([...(test.steps || [])]);
     setEditPriority(test.priority || "medium");
+    setEditCode(test.playwrightCode || "");
+    setCodeEdited(false);
     setEditError(null);
     setEditing(true);
+    setStepsView("steps");
+    setPrevSteps(null);
+    setShowDiff(false);
+    setRegenWarning(null);
   }
 
   async function handleSaveEdit() {
@@ -138,24 +156,87 @@ export default function TestDetail() {
     setEditError(null);
     try {
       const cleanSteps = editSteps.filter(s => s.trim());
-      const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
 
-      const updated = await api.updateTest(testId, {
+      // Capture previous steps before saving so we can show a diff
+      const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
+      if (stepsChanged && test.steps && test.steps.length > 0) {
+        setPrevSteps([...test.steps]);
+        setShowDiff(true); // auto-show the diff after save
+      }
+
+      const payload = {
         name: editName.trim(),
         description: editDesc.trim(),
         steps: cleanSteps,
         priority: editPriority,
-        // Always regenerate Playwright code on save so the script stays
-        // in sync with any changes to steps, name, or description.
-        regenerateCode: true,
-      });
+      };
+
+      if (codeEdited) {
+        // User manually edited code — save it directly, skip AI regeneration.
+        // Empty string is valid (clears the code, making it a manual test).
+        payload.playwrightCode = editCode;
+      } else if (test.playwrightCode && stepsChanged) {
+        // Steps may have changed — request a code preview for review
+        payload.previewCode = true;
+      } else if (!test.playwrightCode && stepsChanged && cleanSteps.length > 0) {
+        // No existing code — generate for the first time (no preview needed
+        // since there's nothing to diff against).
+        payload.regenerateCode = true;
+      }
+
+      const updated = await api.updateTest(testId, payload);
       setTest(updated);
       setEditing(false);
+      setStepsView("steps");
+
+      // If the backend returned a code preview, show the review panel
+      if (updated._codePreview) {
+        setCodePreview(updated._codePreview);
+      }
+      // If code regeneration failed (e.g. Ollama timeout), show a dismissible warning.
+      // Use a temporary alert since we've already exited edit mode at this point.
+      if (updated._regenerationError) {
+        setRegenWarning(updated._regenerationError);
+      }
     } catch (err) {
       setEditError(err.message || "Failed to save changes.");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleAcceptPreview() {
+    if (!codePreview?.generatedCode || applyingPreview) return;
+    setApplyingPreview(true);
+    try {
+      const updated = await api.updateTest(testId, {
+        playwrightCode: codePreview.generatedCode,
+      });
+      setTest(updated);
+      setCodePreview(null);
+    } catch (err) {
+      setRegenWarning(err.message || "Failed to apply generated code.");
+    } finally {
+      setApplyingPreview(false);
+    }
+  }
+
+  function handleEditPreview() {
+    // Enter edit mode with the generated code pre-filled in the inline editor
+    setEditName(test.name || "");
+    setEditDesc(test.description || "");
+    setEditSteps([...(test.steps || [])]);
+    setEditPriority(test.priority || "medium");
+    setEditCode(codePreview.generatedCode);
+    setCodeEdited(true);
+    setEditError(null);
+    setEditing(true);
+    setStepsView("source");
+    setCodePreview(null);
+  }
+
+  function handleDiscardPreview() {
+    setCodePreview(null);
   }
 
   function cancelEditing() {
@@ -307,7 +388,7 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? "Saving & regenerating code…" : "Save Changes"}
+                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
               </button>
             </>
           ) : (
@@ -380,6 +461,25 @@ export default function TestDetail() {
         </h1>
       )}
 
+      {/* ── Regeneration warning (shown after save when AI code regen failed) ── */}
+      {regenWarning && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, marginBottom: 16,
+          padding: "10px 14px", borderRadius: 8,
+          background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
+          fontSize: "0.82rem", color: "#f59e0b",
+        }}>
+          <span style={{ flexShrink: 0 }}>⚠</span>
+          <span style={{ flex: 1 }}>{regenWarning}</span>
+          <button
+            onClick={() => setRegenWarning(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#f59e0b", padding: 2, display: "flex" }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* ── Two-column layout ────────────────────────────────────────────── */}
       <div className="td-layout">
 
@@ -427,8 +527,8 @@ export default function TestDetail() {
               </div>
               <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0, flex: 1 }}>Test Steps</h2>
 
-              {/* Steps / Source pill toggle — only shown in view mode with code present */}
-              {test.playwrightCode && !editing && (
+              {/* Steps / Source pill toggle — always shown when code exists */}
+              {test.playwrightCode && (
                 <div style={{
                   display: "flex", alignItems: "center",
                   background: "var(--bg2)", border: "1px solid var(--border)",
@@ -450,9 +550,9 @@ export default function TestDetail() {
                     <CheckCircle2 size={12} />
                     Steps
                   </button>
-                  {/* Source pill */}
+                  {/* Source pill — toggles inline code view (editable in edit mode) */}
                   <button
-                    onClick={() => setStepsView("source")}
+                    onClick={() => setStepsView(stepsView === "source" ? "steps" : "source")}
                     style={{
                       display: "flex", alignItems: "center", gap: 5,
                       padding: "5px 12px", borderRadius: 6, border: "none",
@@ -464,6 +564,7 @@ export default function TestDetail() {
                     }}
                   >
                     {"</>"} Source
+                    {editing && codeEdited && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} title="Code edited" />}
                   </button>
                 </div>
               )}
@@ -496,8 +597,8 @@ export default function TestDetail() {
                 </button>
               )}
 
-              {/* Show changes — only when a regenerated previous version exists */}
-              {test.playwrightCodePrev && !editing && (
+              {/* Show changes — when a previous version exists (code or steps) */}
+              {(test.playwrightCodePrev || prevSteps) && !editing && (
                 <button
                   onClick={() => setShowDiff(v => !v)}
                   style={{
@@ -517,7 +618,15 @@ export default function TestDetail() {
             </div>
 
             {/* ── Edit mode ── */}
-            {editing ? (
+            {editing && stepsView === "source" && test.playwrightCode ? (
+              /* ── Inline code editor (edit mode + Source tab) ── */
+              <InlineCodeEditor
+                code={editCode}
+                modified={codeEdited}
+                onChange={(val) => { setEditCode(val); setCodeEdited(true); }}
+              />
+            ) : editing ? (
+              /* ── Step editor (edit mode + Steps tab) ── */
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {editSteps.map((step, idx) => (
@@ -572,10 +681,12 @@ export default function TestDetail() {
                     {/* Diff panel — shown above source when "Show changes" is active */}
                     {showDiff && test.playwrightCodePrev && (
                       <div style={{ marginBottom: 16 }}>
-                        <DiffView
-                          before={test.playwrightCodePrev}
-                          after={test.playwrightCode}
-                        />
+                        <Suspense fallback={<div style={{ height: 60, background: "var(--bg2)", borderRadius: 6 }} />}>
+                          <DiffView
+                            before={test.playwrightCodePrev}
+                            after={test.playwrightCode}
+                          />
+                        </Suspense>
                       </div>
                     )}
                     {(test.steps || []).map((step, idx) => (
@@ -638,40 +749,73 @@ export default function TestDetail() {
                 </div>
               ) : (
                 (() => {
+                  // Steps diff — shown above step list when "Show changes" is active
+                  const stepsDiffPanel = showDiff && prevSteps ? (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        Steps changes
+                      </div>
+                      <Suspense fallback={<div style={{ height: 40, background: "var(--bg2)", borderRadius: 6 }} />}>
+                        <DiffView
+                          before={prevSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                          after={(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                        />
+                      </Suspense>
+                    </div>
+                  ) : null;
                   const bdd = isBddTest(test.steps);
                   const gherkinKw = /^(Given|When|Then|And|But)\b/i;
+
+                  // Determine which step failed (if any) for highlighting
+                  const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
+                  const isFailed = test.lastResult === "failed" || latestRunResult?.status === "failed";
+                  const failError = isFailed ? (latestRunResult?.error || "") : "";
+                  let failedStepIdx = -1;
+                  if (isFailed && test.steps.length > 0) {
+                    const stepMatch = failError.match(/step\s+(\d+)/i);
+                    if (stepMatch) {
+                      failedStepIdx = parseInt(stepMatch[1], 10) - 1;
+                    } else {
+                      failedStepIdx = test.steps.length - 1;
+                    }
+                  }
+
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {stepsDiffPanel}
                       {test.steps.map((step, idx) => {
                         const trimmed = (step || "").trim();
                         const kwMatch = bdd ? trimmed.match(gherkinKw) : null;
                         const keyword = kwMatch ? kwMatch[1] : null;
                         const rest = keyword ? trimmed.slice(keyword.length) : trimmed;
+                        const isFailedStep = idx === failedStepIdx;
                         return (
                           <div
                             key={idx}
+                            className={isFailedStep && failError ? "td-step-row" : undefined}
                             style={{
                               display: "flex", alignItems: "flex-start", gap: 16,
                               padding: "12px 0",
                               borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
+                              position: "relative",
                             }}
                           >
                             <div style={{
                               width: 26, height: 26, borderRadius: 6,
-                              background: bdd ? "var(--accent-bg)" : "var(--bg2)",
-                              border: bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
+                              background: isFailedStep ? "rgba(239,68,68,0.15)" : bdd ? "var(--accent-bg)" : "var(--bg2)",
+                              border: isFailedStep ? "1px solid rgba(239,68,68,0.4)" : bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
                               display: "flex", alignItems: "center", justifyContent: "center",
                               fontSize: "0.75rem", fontWeight: 700,
-                              color: bdd ? "var(--accent)" : "var(--text2)",
+                              color: isFailedStep ? "var(--red)" : bdd ? "var(--accent)" : "var(--text2)",
                               flexShrink: 0, marginTop: 1,
                             }}>
                               {idx + 1}
                             </div>
-                            <span style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                            <span style={{ fontSize: "0.875rem", color: isFailedStep ? "var(--red)" : "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
                               {keyword ? (
                                 <>
                                   <span style={{
-                                    fontWeight: 700, color: "var(--accent)",
+                                    fontWeight: 700, color: isFailedStep ? "var(--red)" : "var(--accent)",
                                     fontFamily: "var(--font-mono)", fontSize: "0.82rem",
                                     letterSpacing: "0.01em",
                                   }}>
@@ -681,6 +825,26 @@ export default function TestDetail() {
                                 </>
                               ) : step}
                             </span>
+                            {/* Error popover — shown on hover via .td-step-row:hover CSS rule */}
+                            {isFailedStep && failError && (
+                              <div
+                                data-error-popover
+                                style={{
+                                  position: "absolute", left: 42, right: 0, top: "100%",
+                                  zIndex: 10, marginTop: -4,
+                                  padding: "10px 12px",
+                                  background: "var(--surface)", borderRadius: 8,
+                                  border: "1px solid rgba(239,68,68,0.3)",
+                                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+                                  fontSize: "0.72rem", color: "var(--red)",
+                                  fontFamily: "var(--font-mono)", lineHeight: 1.55,
+                                  wordBreak: "break-word", whiteSpace: "pre-wrap",
+                                  maxHeight: 160, overflowY: "auto",
+                                }}
+                              >
+                                {failError}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -690,8 +854,8 @@ export default function TestDetail() {
               )
             )}
 
-            {/* Editing hint: code will be regenerated on save */}
-            {editing && test.playwrightCode && (
+            {/* Editing hint: code regeneration + source tab access */}
+            {editing && test.playwrightCode && stepsView === "steps" && (
               <div style={{
                 marginTop: 14, padding: "8px 12px",
                 background: "var(--accent-bg)", borderRadius: 6,
@@ -700,22 +864,36 @@ export default function TestDetail() {
                 display: "flex", alignItems: "center", gap: 6,
               }}>
                 <RefreshCw size={12} />
-                Playwright code will be automatically regenerated from your updated steps when you save.
+                Code will be regenerated on save — you'll review changes before applying.<br/>
+                <i>Switch to <strong>Source</strong> to edit code directly.</i>
               </div>
             )}
           </div>
 
+          {/* Code Regeneration Review Panel */}
+          {codePreview && (
+            <CodePreviewPanel
+              preview={codePreview}
+              applying={applyingPreview}
+              onAccept={handleAcceptPreview}
+              onEdit={handleEditPreview}
+              onDiscard={handleDiscardPreview}
+            />
+          )}
+
           {/* AI Fix Panel */}
           {showFixPanel && test.playwrightCode && (
-            <AiFixPanel
-              testId={testId}
-              originalCode={test.playwrightCode}
-              onApplied={(updated) => {
-                setTest(updated);
-                setShowFixPanel(false);
-              }}
-              onClose={() => setShowFixPanel(false)}
-            />
+            <Suspense fallback={<div style={{ height: 120, background: "var(--bg2)", borderRadius: 8, margin: "0 0 16px" }} />}>
+              <AiFixPanel
+                testId={testId}
+                originalCode={test.playwrightCode}
+                onApplied={(updated) => {
+                  setTest(updated);
+                  setShowFixPanel(false);
+                }}
+                onClose={() => setShowFixPanel(false)}
+              />
+            </Suspense>
           )}
 
           {/* Recent Test Runs card */}
@@ -805,16 +983,6 @@ export default function TestDetail() {
             )}
           </div>
         </div>
-
-        {/* ── Code Editor Modal ───────────────────────────────────────────── */}
-        {codeEditorOpen && (
-          <CodeEditorModal
-            test={test}
-            testId={testId}
-            onClose={() => setCodeEditorOpen(false)}
-            onSaved={setTest}
-          />
-        )}
 
         {/* RIGHT SIDEBAR */}
         <div className="card" style={{ padding: 22 }}>

@@ -1,5 +1,5 @@
 /**
- * @module utils/api
+ * @module utils/apiBase
  * @description Shared API base URL helper and response parser.
  *
  * - **Development** (Vite dev server): API calls are proxied via `vite.config.js`, so the base is `""`.

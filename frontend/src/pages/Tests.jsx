@@ -367,6 +367,27 @@ export default function Tests() {
     setBulkError(null);
     if (!ids?.length) return;
     setActionLoading(action);
+
+    // ── Optimistic update ───────────────────────────────────────────────
+    // Immediately reflect the new reviewStatus in local state so the list
+    // updates without waiting for the server round-trip. If any requests
+    // fail, we roll back only those specific tests to their original status.
+    const idSet = new Set(ids);
+    const newStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : null;
+
+    // Capture original statuses BEFORE the state update — React state updater
+    // functions must be pure (no side effects). Reading from the current `tests`
+    // snapshot is safe because it's a stable reference at this point in the handler.
+    const originalStatuses = {};
+    if (newStatus) {
+      for (const t of tests) {
+        if (idSet.has(t.id)) originalStatuses[t.id] = t.reviewStatus;
+      }
+      setTests(prev => prev.map(t =>
+        idSet.has(t.id) ? { ...t, reviewStatus: newStatus } : t
+      ));
+    }
+
     try {
       // Use allSettled so one failure doesn't abort the rest of the batch
       const results = await Promise.allSettled(ids.map(testId => {
@@ -376,27 +397,30 @@ export default function Tests() {
         if (action === "reject") return api.rejectTest(t.projectId, testId);
         return Promise.resolve();
       }));
-      const failedCount = results.filter(r => r.status === "rejected").length;
-      if (failedCount > 0) {
+
+      // Roll back only the tests that failed — keep the successful ones updated
+      const failedIds = ids.filter((_, i) => results[i].status === "rejected");
+      if (failedIds.length > 0) {
+        const failedSet = new Set(failedIds);
+        setTests(prev => prev.map(t =>
+          failedSet.has(t.id) ? { ...t, reviewStatus: originalStatuses[t.id] } : t
+        ));
+        const failedCount = failedIds.length;
         console.warn(`Bulk ${action}: ${failedCount}/${ids.length} failed`);
         setBulkError(`${failedCount} of ${ids.length} tests failed to ${action}. The rest were updated successfully.`);
         setTimeout(() => setBulkError(null), 6000);
       }
+
       // Bust shared cache so other pages (Dashboard, Reports, etc.) see fresh data
       invalidateProjectDataCache();
-      // Refresh tests — but don't wipe state if the refresh itself fails
-      try {
-        const allFromBatch = await api.getAllTests().catch(() => null);
-        if (allFromBatch) { setTests(allFromBatch); }
-        else {
-          const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
-          if (all.flat().length > 0) setTests(all.flat());
-        }
-      } catch (refreshErr) {
-        console.error("Refresh after bulk action failed:", refreshErr);
-      }
       setSelected(new Set());
     } catch (err) {
+      // Full failure — roll back all optimistic updates
+      if (newStatus) {
+        setTests(prev => prev.map(t =>
+          idSet.has(t.id) ? { ...t, reviewStatus: originalStatuses[t.id] } : t
+        ));
+      }
       console.error("Bulk action failed:", err);
     } finally {
       setActionLoading(null);
