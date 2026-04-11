@@ -180,6 +180,10 @@ export default function TestDetail() {
       } else if (test.playwrightCode && stepsChanged) {
         // Steps may have changed — request a code preview for review
         payload.previewCode = true;
+      } else if (!test.playwrightCode && stepsChanged && cleanSteps.length > 0) {
+        // No existing code — generate for the first time (no preview needed
+        // since there's nothing to diff against).
+        payload.regenerateCode = true;
       }
 
       const updated = await api.updateTest(testId, payload);

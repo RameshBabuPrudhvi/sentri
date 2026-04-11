@@ -128,13 +128,20 @@ app.get("/health/ready", async (_req, res) => {
     allOk = false;
   }
 
-  // 2. Memory guard — flag if heap is over 90% of available
+  // 2. Memory guard — flag if heap is over 90% of the V8 heap limit.
+  //    We use v8.getHeapStatistics().heap_size_limit (the actual max the heap
+  //    can grow to) instead of process.memoryUsage().heapTotal (the currently
+  //    allocated heap, which V8 resizes dynamically). Using heapTotal would
+  //    give a misleadingly high ratio after GC cycles and cause false 503s.
   try {
-    const mem = process.memoryUsage();
-    const heapMb = Math.round(mem.heapUsed / 1024 / 1024);
-    const totalMb = Math.round(mem.heapTotal / 1024 / 1024);
-    const pct = Math.round((mem.heapUsed / mem.heapTotal) * 100);
-    checks.memory = { ok: pct < 90, heapMb, totalMb, pct };
+    const v8 = await import("v8");
+    const heapStats = v8.getHeapStatistics();
+    const heapUsed = heapStats.used_heap_size;
+    const heapLimit = heapStats.heap_size_limit;
+    const heapMb = Math.round(heapUsed / 1024 / 1024);
+    const limitMb = Math.round(heapLimit / 1024 / 1024);
+    const pct = Math.round((heapUsed / heapLimit) * 100);
+    checks.memory = { ok: pct < 90, heapMb, limitMb, pct };
     if (pct >= 90) allOk = false;
   } catch (err) {
     checks.memory = { ok: true }; // non-fatal if unavailable
