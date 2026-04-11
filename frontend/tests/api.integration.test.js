@@ -1,6 +1,11 @@
 /**
  * @module tests/api-integration
  * @description Integration-style tests for frontend API client behavior.
+ *
+ * After the cookie-based auth migration (S1-02), the api.js module:
+ *   - Sends `credentials: "include"` instead of an Authorization header
+ *   - Reads the CSRF token from `document.cookie` (via utils/csrf.js)
+ *   - On 401, clears `app_auth_user` from localStorage and redirects
  */
 
 import assert from "node:assert/strict";
@@ -40,14 +45,16 @@ async function run() {
   const originalFetch = global.fetch;
   const originalWindow = global.window;
   const originalLocalStorage = global.localStorage;
+  const originalDocument = global.document;
 
   const requests = [];
 
   global.localStorage = makeStorage({
-    app_auth_token: "test-token",
     app_auth_user: JSON.stringify({ id: "U-1" }),
   });
   global.window = { location: { pathname: "/dashboard", href: "/dashboard" } };
+  // Provide document.cookie so getCsrfToken() can read the CSRF token
+  global.document = { cookie: "sentri_csrf=test-csrf-token" };
   global.fetch = async (url, init = {}) => {
     requests.push({ url, init });
     if (url.endsWith("/api/projects")) {
@@ -66,7 +73,9 @@ async function run() {
     assert.equal(Array.isArray(projects), true);
     assert.equal(projects[0].id, "PRJ-1");
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].init.headers.Authorization, "Bearer test-token");
+    // Cookie-based auth: no Authorization header, but credentials: "include" is set
+    assert.equal(requests[0].init.credentials, "include", "Should send credentials: include");
+    assert.equal(requests[0].init.headers.Authorization, undefined, "Should NOT send Authorization header");
 
     let unauthorizedError = null;
     try {
@@ -77,8 +86,7 @@ async function run() {
 
     assert.ok(unauthorizedError instanceof Error, "Expected unauthorized request to throw");
     assert.match(unauthorizedError.message, /Session expired/i);
-    assert.equal(global.localStorage.getItem("app_auth_token"), null);
-    assert.equal(global.localStorage.getItem("app_auth_user"), null);
+    assert.equal(global.localStorage.getItem("app_auth_user"), null, "User profile should be cleared on 401");
     assert.match(global.window.location.href, /\/login$/);
 
     console.log("✅ api-integration: all checks passed");
@@ -86,6 +94,7 @@ async function run() {
     global.fetch = originalFetch;
     global.window = originalWindow;
     global.localStorage = originalLocalStorage;
+    global.document = originalDocument;
   }
 }
 

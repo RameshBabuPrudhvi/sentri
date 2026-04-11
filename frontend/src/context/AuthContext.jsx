@@ -21,6 +21,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { API_BASE } from "../utils/apiBase.js";
+import { getCsrfToken } from "../utils/csrf.js";
 
 const AuthContext = createContext(null);
 
@@ -63,14 +64,9 @@ function msUntilRefresh() {
   return ms > 0 ? ms : 0;
 }
 
-/**
- * Read the CSRF token from the `sentri_csrf` cookie (Non-HttpOnly).
- * Exported so api.js can use it without importing from AuthContext.
- * @returns {string}
- */
-export function getCsrfToken() {
-  return readCookie("sentri_csrf");
-}
+// getCsrfToken is imported from ../utils/csrf.js and re-exported below
+// so existing consumers that import { getCsrfToken } from AuthContext still work.
+export { getCsrfToken };
 
 function sanitiseUser(u) {
   return { id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user" };

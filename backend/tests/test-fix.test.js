@@ -89,8 +89,8 @@ async function main() {
       body: { email, password: "Password123!" },
     });
     assert.equal(out.res.status, 200);
-    const token = out.json.token;
-    assert.ok(token);
+    const token = extractAuthCookie(out.res);
+    assert.ok(token, "Login response should set sentri_auth cookie");
 
     // ── Seed test data ────────────────────────────────────────────────────
     projectRepo.create({

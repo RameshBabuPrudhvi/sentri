@@ -18,7 +18,7 @@
  */
 
 import { API_BASE, parseJsonResponse } from "./utils/apiBase.js";
-import { getCsrfToken } from "./context/AuthContext.jsx";
+import { getCsrfToken } from "./utils/csrf.js";
 
 /** @type {string} Full base URL for API endpoints (e.g. `"/api"` or `"https://backend.example.com/api"`). */
 const BASE = `${API_BASE}/api`;

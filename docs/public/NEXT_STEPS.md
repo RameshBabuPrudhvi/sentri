@@ -44,17 +44,17 @@ These are production blockers. None of the remaining sprints should ship to a sh
 
 ---
 
-### S1-02 — Move JWT from localStorage to HttpOnly cookies 🔴 Blocker
+### S1-02 — Move JWT from localStorage to HttpOnly cookies ✅ Done
 
-**Problem:** The JWT is stored in `localStorage`. Any XSS vulnerability — including inside pages rendered by the live browser view — can exfiltrate the token. The production checklist in `README.md` explicitly flags this as incomplete.
+**Problem:** The JWT was stored in `localStorage`. Any XSS vulnerability — including inside pages rendered by the live browser view — could exfiltrate the token. The production checklist in `README.md` explicitly flagged this as incomplete.
 
-**Fix:** Replace `localStorage.getItem('token')` / `setItem` calls throughout the frontend with cookie-based auth. Add `SameSite=Strict; HttpOnly; Secure` to the Set-Cookie header on login/refresh. Add a CSRF double-submit cookie for state-mutating endpoints.
-
-**Files to change:**
-- `frontend/src/context/AuthContext.jsx` — remove localStorage token handling
-- `frontend/src/utils/api.js` — remove Authorization header injection; rely on cookie
-- `backend/src/routes/auth.js` — set HttpOnly cookie on login/register/OAuth callback
-- `backend/src/middleware/appSetup.js` — add CSRF middleware
+**Status:** Implemented in PR #70. The JWT now lives exclusively in an HttpOnly; Secure; SameSite=Strict cookie (`sentri_auth`). A companion `sentri_exp` cookie (Non-HttpOnly) exposes only the numeric expiry timestamp for frontend UX (proactive refresh). A CSRF double-submit cookie (`sentri_csrf`) protects all mutating endpoints. Key changes:
+- `backend/src/routes/auth.js` — `setAuthCookie()` / `clearAuthCookies()` helpers; login, OAuth, and refresh endpoints set cookies instead of returning tokens in JSON; new `POST /api/auth/refresh` endpoint
+- `backend/src/middleware/appSetup.js` — cookie parser middleware + CSRF double-submit middleware (`csrfMiddleware`)
+- `frontend/src/context/AuthContext.jsx` — removed `token` from state; reads `sentri_exp` cookie for session validity; proactive refresh scheduler; `login(userData)` no longer takes a token
+- `frontend/src/api.js` — `credentials: "include"` on all requests; `X-CSRF-Token` header on mutating requests; no more `Authorization: Bearer` header
+- `frontend/src/utils/csrf.js` — shared `getCsrfToken()` utility
+- `frontend/src/hooks/useRunSSE.js` — `EventSource` with `withCredentials: true`; polling fallback uses `credentials: "include"`
 
 **Effort:** M | **Source:** Audit
 
@@ -479,12 +479,11 @@ These items build the features that separate Sentri from all other QA tools and 
 
 **Problem:** The `/chat` route and `LLMStreamPanel` component exist but are not connected to specific tests. Users who want to modify a test must edit the Playwright code directly. Natural-language test editing — "add an assertion that the cart total updates" — is a significant UX differentiator that no other platform has.
 
-**Fix:** In `TestDetail.jsx`, add an "Edit with AI" panel that opens a chat thread pre-seeded with the test's current Playwright code. The AI response proposes a code change. Show a Myers diff of old vs. new code (the diff infrastructure already exists via `CodeEditorModal.jsx`). One-click "Apply" patches the code and saves.
+**Fix:** In `TestDetail.jsx`, add an "Edit with AI" panel that opens a chat thread pre-seeded with the test's current Playwright code. The AI response proposes a code change. Show a Myers diff of old vs. new code. One-click "Apply" patches the code and saves.
 
 **Files to change:**
-- `frontend/src/pages/TestDetail.jsx` — add AI edit panel
+- `frontend/src/pages/TestDetail.jsx` — add AI edit panel with inline diff view
 - `backend/src/routes/chat.js` — add test-context mode with code diff response format
-- `frontend/src/components/test/CodeEditorModal.jsx` — expose diff-apply API
 
 **Effort:** M | **Source:** Competitive
 
@@ -632,9 +631,9 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
 | Ongoing | M-01 through M-05 | Infrastructure hardening |
 
-**Total items:** 28 (10 completed)  
-**Completed:** S1-01 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅  
-**Critical blockers (must ship before team use):** S1-02  
+**Total items:** 28 (11 completed)  
+**Completed:** S1-01 ✅, S1-02 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅  
+**Critical blockers (must ship before team use):** None — all Sprint 1 items complete  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
 **Lowest effort / highest value (remaining quick wins):** S3-07
 

@@ -60,14 +60,18 @@ function setAuthCookie(res, token, expSec) {
   const secure  = process.env.NODE_ENV === "production";
   const maxAge  = JWT_TTL_SEC;
 
+  // Use appendHeader so we don't overwrite the sentri_csrf cookie that the
+  // CSRF middleware may have already queued on this response via setHeader.
   // Primary cookie: HttpOnly prevents JS from ever reading the JWT.
   // SameSite=Strict prevents it being sent on cross-site navigations.
-  res.setHeader("Set-Cookie", [
-    `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`,
-    // Expiry hint: NOT HttpOnly — frontend reads it for proactive expiry UX.
-    // Contains only the numeric exp timestamp, not the token.
-    `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`,
-  ]);
+  res.appendHeader("Set-Cookie",
+    `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`
+  );
+  // Expiry hint: NOT HttpOnly — frontend reads it for proactive expiry UX.
+  // Contains only the numeric exp timestamp, not the token.
+  res.appendHeader("Set-Cookie",
+    `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`
+  );
 }
 
 /**
@@ -75,10 +79,8 @@ function setAuthCookie(res, token, expSec) {
  * @param {Object} res - Express response object.
  */
 function clearAuthCookies(res) {
-  res.setHeader("Set-Cookie", [
-    `${AUTH_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict`,
-    `${EXP_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict`,
-  ]);
+  res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict`);
+  res.appendHeader("Set-Cookie", `${EXP_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict`);
 }
 
 
