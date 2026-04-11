@@ -72,7 +72,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | 🔀 **Code Diff View** | Built-in Myers line diff shows what changed when Playwright code is regenerated |
 | 📦 **Smart Data Fetching** | `useProjectData` hook with 30s TTL cache + batch `/api/tests` endpoint eliminates N+1 fetches |
 | 🦙 **Ollama Support** | Completely free, private, local inference. NDJSON response fallback, `OLLAMA_MAX_PREDICT` token cap, HTTP 500 retry |
-| 🔐 **Built-in Auth** | Email/password + GitHub/Google OAuth. Scrypt hashing, JWT with HS256, rate limiting, CSRF protection |
+| 🔐 **Built-in Auth** | Email/password + GitHub/Google OAuth. Scrypt hashing, JWT in HttpOnly cookies (never in localStorage), CSRF double-submit protection, rate limiting, proactive session refresh |
 | 📖 **Full Documentation** | VitePress guide, REST API reference, and auto-generated JSDoc — all deployed to GitHub Pages |
 | 🌙 **Dark Mode** | Automatic via `prefers-color-scheme` — all UI components adapt |
 | 🔍 **Command Palette** | `⌘K` / `Ctrl+K` opens a two-mode command palette: fuzzy-search navigation and actions (zero LLM cost), or fall through to AI Chat for natural-language questions. Prefix `>` for commands, `?` for AI |
@@ -252,7 +252,7 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |
 | **CORS** | ⬜ Restrict origins in `backend/src/middleware/appSetup.js` |
-| **Token Storage** | ⬜ Move JWT from localStorage to HttpOnly cookies |
+| **Token Storage** | ✅ JWT in HttpOnly; Secure; SameSite=Strict cookie + CSRF double-submit protection |
 | **Scheduling** | ⬜ Add cron-based auto-runs via `node-cron` |
 | **Notifications** | ⬜ Send Slack/email alerts on test failures |
 | **Multi-tenancy** | ⬜ Add workspace/organisation scoping |

@@ -6,13 +6,15 @@ The Sentri backend exposes a RESTful JSON API on port `3001` by default.
 
 ## Authentication
 
-Protected endpoints require a `Bearer` token in the `Authorization` header:
+Protected endpoints use **HttpOnly cookie-based auth**. After signing in via [`POST /api/auth/login`](/api/auth) or an OAuth callback, the server sets an `access_token` cookie that the browser sends automatically on every request.
+
+All mutating requests (POST, PATCH, PUT, DELETE) must also include the CSRF token in the `X-CSRF-Token` header (read from the `_csrf` cookie).
+
+For direct API consumers (scripts, CI), a `Bearer` token in the `Authorization` header is still accepted as a fallback:
 
 ```
 Authorization: Bearer <jwt-token>
 ```
-
-Obtain a token via [`POST /api/auth/login`](/api/auth) or OAuth callback.
 
 ## Endpoints
 

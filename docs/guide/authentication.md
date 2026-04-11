@@ -42,10 +42,16 @@ openssl rand -base64 48
 
 ## Token Storage
 
-Tokens are stored in `localStorage` on the client. The `AuthContext` provider handles:
-- Auto-logout when token expires (polled every 60s)
-- 401 response interception → automatic session clear
-- Server-side token revocation on sign-out
+JWTs are stored in **HttpOnly; Secure; SameSite=Strict** cookies (`access_token`) — never in `localStorage` or JavaScript-accessible storage. This eliminates XSS-based token theft entirely.
+
+A companion `token_exp` cookie (Non-HttpOnly) exposes only the numeric expiry timestamp so the frontend can drive proactive refresh UX without ever reading the JWT.
+
+All mutating API requests are protected by a **CSRF double-submit cookie** (`_csrf`). The frontend reads this cookie and sends its value in the `X-CSRF-Token` header.
+
+The `AuthContext` provider handles:
+- Proactive session refresh (5 minutes before expiry via `POST /api/auth/refresh`)
+- 401 response interception → automatic session clear and redirect
+- Server-side token revocation on sign-out (clears cookies)
 
 ## Protected Routes
 

@@ -54,7 +54,7 @@ async function run() {
   });
   global.window = { location: { pathname: "/dashboard", href: "/dashboard" } };
   // Provide document.cookie so getCsrfToken() can read the CSRF token
-  global.document = { cookie: "sentri_csrf=test-csrf-token" };
+  global.document = { cookie: "_csrf=test-csrf-token" };
   global.fetch = async (url, init = {}) => {
     requests.push({ url, init });
     if (url.endsWith("/api/projects")) {

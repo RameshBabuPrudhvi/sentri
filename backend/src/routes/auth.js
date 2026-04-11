@@ -18,7 +18,7 @@
  * ### Security measures
  * - Passwords hashed with scrypt (64-byte key, 16-byte random salt)
  * - JWT stored in HttpOnly; Secure; SameSite=Strict cookie — never in localStorage
- * - A companion `sentri_exp` cookie (Non-HttpOnly) exposes only the exp timestamp
+ * - A companion `token_exp` cookie (Non-HttpOnly) exposes only the exp timestamp
  *   so the frontend can proactively warn before expiry without ever touching the JWT
  * - JWT signed with HS256, 8-hour expiry
  * - Rate limiting: separate per-endpoint buckets (login: 10, forgot/reset: 5 per IP per 15 min)
@@ -42,9 +42,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 /** JWT cookie name — HttpOnly so JS cannot read the token. */
-const AUTH_COOKIE     = "sentri_auth";
+const AUTH_COOKIE     = "access_token";
 /** Expiry hint cookie — Non-HttpOnly so the frontend can read the `exp` timestamp. */
-const EXP_COOKIE      = "sentri_exp";
+const EXP_COOKIE      = "token_exp";
 /** JWT TTL in seconds (8 hours). Must match signJwt default. */
 const JWT_TTL_SEC     = 8 * 60 * 60;
 
@@ -60,7 +60,7 @@ function setAuthCookie(res, token, expSec) {
   const secure  = process.env.NODE_ENV === "production";
   const maxAge  = JWT_TTL_SEC;
 
-  // Use appendHeader so we don't overwrite the sentri_csrf cookie that the
+  // Use appendHeader so we don't overwrite the _csrf cookie that the
   // CSRF middleware may have already queued on this response via setHeader.
   // Primary cookie: HttpOnly prevents JS from ever reading the JWT.
   // SameSite=Strict prevents it being sent on cross-site navigations.
@@ -452,7 +452,7 @@ router.post("/login", async (req, res) => {
 
     // Note: token is NOT returned in the response body — it lives in the HttpOnly
     // cookie only. The frontend reads user profile from this response and stores
-    // it in React state. The sentri_exp cookie exposes the expiry timestamp.
+    // it in React state. The token_exp cookie exposes the expiry timestamp.
     return res.json({
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });

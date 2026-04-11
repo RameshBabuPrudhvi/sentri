@@ -48,10 +48,10 @@ These are production blockers. None of the remaining sprints should ship to a sh
 
 **Problem:** The JWT was stored in `localStorage`. Any XSS vulnerability — including inside pages rendered by the live browser view — could exfiltrate the token. The production checklist in `README.md` explicitly flagged this as incomplete.
 
-**Status:** Implemented in PR #70. The JWT now lives exclusively in an HttpOnly; Secure; SameSite=Strict cookie (`sentri_auth`). A companion `sentri_exp` cookie (Non-HttpOnly) exposes only the numeric expiry timestamp for frontend UX (proactive refresh). A CSRF double-submit cookie (`sentri_csrf`) protects all mutating endpoints. Key changes:
+**Status:** Implemented in PR #70. The JWT now lives exclusively in an HttpOnly; Secure; SameSite=Strict cookie (`access_token`). A companion `token_exp` cookie (Non-HttpOnly) exposes only the numeric expiry timestamp for frontend UX (proactive refresh). A CSRF double-submit cookie (`_csrf`) protects all mutating endpoints. Key changes:
 - `backend/src/routes/auth.js` — `setAuthCookie()` / `clearAuthCookies()` helpers; login, OAuth, and refresh endpoints set cookies instead of returning tokens in JSON; new `POST /api/auth/refresh` endpoint
 - `backend/src/middleware/appSetup.js` — cookie parser middleware + CSRF double-submit middleware (`csrfMiddleware`)
-- `frontend/src/context/AuthContext.jsx` — removed `token` from state; reads `sentri_exp` cookie for session validity; proactive refresh scheduler; `login(userData)` no longer takes a token
+- `frontend/src/context/AuthContext.jsx` — removed `token` from state; reads `token_exp` cookie for session validity; proactive refresh scheduler; `login(userData)` no longer takes a token
 - `frontend/src/api.js` — `credentials: "include"` on all requests; `X-CSRF-Token` header on mutating requests; no more `Authorization: Bearer` header
 - `frontend/src/utils/csrf.js` — shared `getCsrfToken()` utility
 - `frontend/src/hooks/useRunSSE.js` — `EventSource` with `withCredentials: true`; polling fallback uses `credentials: "include"`

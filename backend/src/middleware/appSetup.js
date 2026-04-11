@@ -107,7 +107,7 @@ app.use((req, _res, next) => {
 // Cross-Site Request Forgery.
 //
 // Strategy: double-submit cookie pattern.
-//   1. On every request the server checks for a `sentri_csrf` cookie.
+//   1. On every request the server checks for a `_csrf` cookie.
 //      If missing, it creates one (a random 32-byte token) and sets it as
 //      a Non-HttpOnly cookie so JavaScript can read it.
 //   2. Every mutating fetch sends the same token in the `X-CSRF-Token` header.
@@ -122,7 +122,7 @@ app.use((req, _res, next) => {
 // The /api/auth/login endpoint is also exempt because the user has no session yet.
 
 const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CSRF_COOKIE_NAME  = "sentri_csrf";
+const CSRF_COOKIE_NAME  = "_csrf";
 const CSRF_HEADER_NAME  = "x-csrf-token";
 
 // These paths receive mutations but are either public (login, register) or

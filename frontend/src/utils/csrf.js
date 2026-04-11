@@ -8,12 +8,12 @@
  */
 
 /**
- * Read the CSRF token from the `sentri_csrf` cookie (Non-HttpOnly).
+ * Read the CSRF token from the `_csrf` cookie (Non-HttpOnly).
  * @returns {string}
  */
 export function getCsrfToken() {
   try {
-    const match = document.cookie.split(";").find(c => c.trim().startsWith("sentri_csrf="));
+    const match = document.cookie.split(";").find(c => c.trim().startsWith("_csrf="));
     if (!match) return "";
     return match.split("=")[1]?.trim() || "";
   } catch { return ""; }

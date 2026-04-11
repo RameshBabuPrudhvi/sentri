@@ -17,7 +17,7 @@ Run a case-sensitive find-and-replace across the repo:
 | `frontend/public/404.html` | `<title>` |
 | `frontend/src/components/AppLogo.jsx` | Wordmark text (line 86), aria-labels, SVG gradient IDs |
 | `frontend/src/pages/Login.jsx` | Tagline, subtitle, button text, testimonials |
-| `frontend/src/context/AuthContext.jsx` | No changes needed — keys are generic (`app_auth_token`, `app_auth_user`) |
+| `frontend/src/context/AuthContext.jsx` | No changes needed — localStorage key is generic (`app_auth_user`) |
 
 ### Backend
 | File | What |
@@ -58,5 +58,5 @@ The `AppLogo.jsx` component at `frontend/src/components/AppLogo.jsx` renders the
 This single component controls the entire visual brand across the app.
 
 ::: tip Storage Keys
-The localStorage keys (`app_auth_token`, `app_auth_user`) are already brand-neutral — no changes needed during rebranding.
+The localStorage key (`app_auth_user`) and cookie names (`access_token`, `token_exp`, `_csrf`) are already brand-neutral — no changes needed during rebranding.
 :::

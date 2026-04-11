@@ -7,7 +7,7 @@
  * the backend. JavaScript (including this file) can never read it — which eliminates
  * the entire class of XSS-based token theft.
  *
- * The backend also sets a companion `sentri_exp` cookie (Non-HttpOnly) that exposes
+ * The backend also sets a companion `token_exp` cookie (Non-HttpOnly) that exposes
  * only the numeric expiry timestamp. This file reads that cookie to drive proactive
  * refresh and session-expiry warnings without ever touching the actual JWT.
  *
@@ -29,7 +29,7 @@ const AuthContext = createContext(null);
 const USER_KEY = "app_auth_user";
 
 /** Name of the Non-HttpOnly expiry-hint cookie written by the backend. */
-const EXP_COOKIE = "sentri_exp";
+const EXP_COOKIE = "token_exp";
 
 /** Proactive refresh fires this many ms before the token actually expires. */
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes

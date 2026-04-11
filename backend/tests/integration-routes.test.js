@@ -37,11 +37,11 @@ function resetDb() {
   db.exec("UPDATE counters SET value = 0");
 }
 
-/** Extract the sentri_auth cookie value from a fetch Response's Set-Cookie header. */
+/** Extract the access_token cookie value from a fetch Response's Set-Cookie header. */
 function extractAuthCookie(res) {
   const raw = res.headers.getSetCookie?.() || [];
   for (const c of raw) {
-    const match = c.match(/^sentri_auth=([^;]+)/);
+    const match = c.match(/^access_token=([^;]+)/);
     if (match) return match[1];
   }
   return null;
@@ -84,7 +84,7 @@ async function main() {
     });
     assert.equal(out.res.status, 200);
     const token = extractAuthCookie(out.res);
-    assert.ok(token, "Login response should set sentri_auth cookie");
+    assert.ok(token, "Login response should set access_token cookie");
 
     out = await req(base, "/api/dashboard");
     assert.equal(out.res.status, 401);

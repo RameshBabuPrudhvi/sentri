@@ -10,10 +10,10 @@
 ## Recommended
 
 - [x] ~~Replace in-memory `db.js` with SQLite~~ — Done (better-sqlite3 with WAL mode, auto-migration from legacy JSON)
+- [x] ~~Move JWT from localStorage to HttpOnly cookies~~ — Done (HttpOnly; Secure; SameSite=Strict cookie + CSRF double-submit protection)
 - [ ] Add BullMQ + Redis for background crawl/run jobs with retries
 - [ ] Store videos and screenshots to S3/R2 instead of local disk
 - [ ] Restrict CORS origins in `backend/src/middleware/appSetup.js`
-- [ ] Move JWT from localStorage to HttpOnly cookies
 - [ ] Add cron-based auto-runs via `node-cron`
 - [ ] Send Slack/email alerts on test failures
 - [ ] Add workspace/organisation scoping for multi-tenancy
@@ -21,9 +21,11 @@
 
 ## Security
 
-- [ ] OAuth state parameter is validated (already implemented)
-- [ ] JWT secret throws in production if missing (already implemented)
-- [ ] Rate limiting on sign-in (already implemented — 10/IP/15min)
-- [ ] Passwords hashed with scrypt (already implemented)
-- [ ] No sensitive data in API responses (already implemented)
-- [ ] CORS restricted to your frontend domain (manual — update `appSetup.js`)
+- [x] OAuth state parameter validated
+- [x] JWT secret throws in production if missing
+- [x] Rate limiting on sign-in (10/IP/15min)
+- [x] Passwords hashed with scrypt
+- [x] JWT in HttpOnly; Secure; SameSite=Strict cookie (never in localStorage)
+- [x] CSRF double-submit cookie on all mutating endpoints
+- [x] No sensitive data in API responses (JWT never in response body)
+- [ ] CORS restricted to your frontend domain (manual — set `CORS_ORIGIN` env var)
