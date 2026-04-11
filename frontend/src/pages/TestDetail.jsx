@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, Suspense, lazy } from "react";
+import React, { useEffect, useState, useCallback, Suspense, lazy } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Play, Edit2, RefreshCw, Download,
@@ -22,6 +22,8 @@ import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
+import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
+import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -132,9 +134,6 @@ export default function TestDetail() {
   // ── Inline code editing state ─────────────────────────────────────────
   const [editCode, setEditCode] = useState("");
   const [codeEdited, setCodeEdited] = useState(false); // tracks if user manually touched code
-  const inlineEditorRef = useRef(null);
-  const inlineHighlightRef = useRef(null);
-  const inlineLineNumRef = useRef(null);
 
   function startEditing() {
     setEditName(test.name || "");
@@ -621,91 +620,11 @@ export default function TestDetail() {
             {/* ── Edit mode ── */}
             {editing && stepsView === "source" && test.playwrightCode ? (
               /* ── Inline code editor (edit mode + Source tab) ── */
-              <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #1e2130" }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "6px 12px",
-                  background: "#0d0f17", borderBottom: "1px solid #1e2130",
-                  fontSize: "0.7rem", color: "#4a5070",
-                }}>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{editCode.split("\n").length} lines</span>
-                  <span>·</span>
-                  <span>Tab inserts 2 spaces</span>
-                  {codeEdited && <span style={{ marginLeft: "auto", color: "#f59e0b", fontWeight: 600 }}>● Modified</span>}
-                </div>
-                <div style={{ display: "flex", background: "#13151c", minHeight: 280, maxHeight: 500, overflow: "hidden" }}>
-                  <div
-                    ref={inlineLineNumRef}
-                    style={{
-                      padding: "14px 0", minWidth: 44, flexShrink: 0,
-                      textAlign: "right",
-                      fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-                      fontSize: "0.76rem", lineHeight: 1.75,
-                      color: "#3a3f5c", borderRight: "1px solid #1e2130",
-                      userSelect: "none", overflowY: "hidden", overflowX: "hidden",
-                    }}
-                  >
-                    {editCode.split("\n").map((_, i) => (
-                      <div key={i} style={{ padding: "0 10px" }}>{i + 1}</div>
-                    ))}
-                  </div>
-                  <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
-                    <pre
-                      ref={inlineHighlightRef}
-                      aria-hidden="true"
-                      style={{
-                        position: "absolute", inset: 0,
-                        margin: 0, padding: "14px 16px",
-                        fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                        fontSize: "0.76rem", lineHeight: 1.75,
-                        color: "#cdd5f0", whiteSpace: "pre",
-                        overflowX: "hidden", overflowY: "hidden",
-                        pointerEvents: "none", background: "transparent",
-                        border: "none", outline: "none",
-                      }}
-                      dangerouslySetInnerHTML={{ __html: highlightCode(editCode) + "\n" }}
-                    />
-                    <textarea
-                      ref={inlineEditorRef}
-                      value={editCode}
-                      onChange={e => { setEditCode(e.target.value); setCodeEdited(true); }}
-                      onScroll={e => {
-                        const { scrollTop, scrollLeft } = e.target;
-                        if (inlineHighlightRef.current) {
-                          inlineHighlightRef.current.scrollTop = scrollTop;
-                          inlineHighlightRef.current.scrollLeft = scrollLeft;
-                        }
-                        if (inlineLineNumRef.current) inlineLineNumRef.current.scrollTop = scrollTop;
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === "Tab") {
-                          e.preventDefault();
-                          const ta = e.target;
-                          const start = ta.selectionStart;
-                          const end = ta.selectionEnd;
-                          const newVal = ta.value.substring(0, start) + "  " + ta.value.substring(end);
-                          setEditCode(newVal);
-                          setCodeEdited(true);
-                          requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2; });
-                        }
-                      }}
-                      spellCheck={false}
-                      style={{
-                        position: "absolute", inset: 0,
-                        width: "100%", height: "100%",
-                        background: "transparent", color: "transparent",
-                        fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                        fontSize: "0.76rem", lineHeight: 1.75,
-                        padding: "14px 16px", border: "none", outline: "none",
-                        resize: "none", boxSizing: "border-box",
-                        caretColor: "#7c6af5", tabSize: 2,
-                        whiteSpace: "pre", overflowX: "auto", overflowY: "auto",
-                      }}
-                      aria-label="Inline code editor"
-                    />
-                  </div>
-                </div>
-              </div>
+              <InlineCodeEditor
+                code={editCode}
+                modified={codeEdited}
+                onChange={(val) => { setEditCode(val); setCodeEdited(true); }}
+              />
             ) : editing ? (
               /* ── Step editor (edit mode + Steps tab) ── */
               <>
@@ -953,48 +872,13 @@ export default function TestDetail() {
 
           {/* Code Regeneration Review Panel */}
           {codePreview && (
-            <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--accent)", borderRadius: 10 }}>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "12px 16px",
-                background: "var(--accent-bg)",
-                borderBottom: "1px solid rgba(91,110,245,0.2)",
-              }}>
-                <RefreshCw size={15} color="var(--accent)" />
-                <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--accent)", flex: 1 }}>
-                  Code Regenerated — Review Changes
-                </span>
-                <button onClick={handleDiscardPreview} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 4, display: "flex" }} title="Discard">
-                  <X size={15} />
-                </button>
-              </div>
-              <div style={{ padding: "10px 16px", fontSize: "0.82rem", color: "var(--text2)", background: "var(--bg2)", borderBottom: "1px solid var(--border)" }}>
-                The AI updated the Playwright code to match your new steps. Review the diff below, then accept, edit, or discard.
-              </div>
-              <div style={{ padding: "12px 16px" }}>
-                <Suspense fallback={<div style={{ height: 80, background: "var(--bg2)", borderRadius: 6 }} />}>
-                  <DiffView before={codePreview.originalCode || ""} after={codePreview.generatedCode} />
-                </Suspense>
-              </div>
-              <div style={{
-                display: "flex", gap: 8, padding: "12px 16px",
-                borderTop: "1px solid var(--border)",
-                justifyContent: "flex-end",
-              }}>
-                <button className="btn btn-ghost btn-sm" onClick={handleDiscardPreview} disabled={applyingPreview}>
-                  <X size={13} /> Discard
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={handleEditPreview} disabled={applyingPreview}>
-                  <Edit2 size={13} /> Edit Code
-                </button>
-                <button className="btn btn-primary btn-sm" onClick={handleAcceptPreview} disabled={applyingPreview}>
-                  {applyingPreview
-                    ? <><RefreshCw size={13} className="spin" /> Applying…</>
-                    : <><CheckCircle2 size={13} /> Accept</>
-                  }
-                </button>
-              </div>
-            </div>
+            <CodePreviewPanel
+              preview={codePreview}
+              applying={applyingPreview}
+              onAccept={handleAcceptPreview}
+              onEdit={handleEditPreview}
+              onDiscard={handleDiscardPreview}
+            />
           )}
 
           {/* AI Fix Panel */}
