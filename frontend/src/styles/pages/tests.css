@@ -5,6 +5,9 @@
  * .stat-grid responsive rules live in utilities.css (last import), not here.
  * This file targets Tests-specific class hooks added to Tests.jsx.
  *
+ * All table column rules are scoped under `.tests-table` to prevent them from
+ * leaking to tables on other pages (Reports, Runs, ProjectDetail, etc.).
+ *
  * Layer: Pages (ITCSS) — import after dashboard.css in index.css
  */
 
@@ -24,15 +27,15 @@
   }
 
   /* Table: hide lower-priority badge columns — they duplicate visible info */
-  .table th:nth-child(5),   /* Priority */
-  .table td:nth-child(5),
-  .table th:nth-child(6),   /* Type */
-  .table td:nth-child(6) {
+  .tests-table .table th:nth-child(5),   /* Priority */
+  .tests-table .table td:nth-child(5),
+  .tests-table .table th:nth-child(6),   /* Type */
+  .tests-table .table td:nth-child(6) {
     display: none;
   }
 
   /* Test-name description line: clamp width to avoid overflow */
-  .table td:nth-child(3) [style*="maxWidth: 400"] {
+  .tests-table .table td:nth-child(3) [style*="maxWidth: 400"] {
     max-width: 200px !important;
   }
 }
@@ -67,32 +70,32 @@
 /* Keep checkbox, Test Name, Review status, Run status. Hide the rest.          */
 @media (max-width: 480px) {
   /* Hide all non-essential table columns */
-  .table th:nth-child(2),   /* Test ID */
-  .table td:nth-child(2),
-  .table th:nth-child(4),   /* Project */
-  .table td:nth-child(4),
-  .table th:nth-child(5),   /* Priority */
-  .table td:nth-child(5),
-  .table th:nth-child(6),   /* Type */
-  .table td:nth-child(6),
-  .table th:nth-child(9),   /* Last Run */
-  .table td:nth-child(9) {
+  .tests-table .table th:nth-child(2),   /* Test ID */
+  .tests-table .table td:nth-child(2),
+  .tests-table .table th:nth-child(4),   /* Project */
+  .tests-table .table td:nth-child(4),
+  .tests-table .table th:nth-child(5),   /* Priority */
+  .tests-table .table td:nth-child(5),
+  .tests-table .table th:nth-child(6),   /* Type */
+  .tests-table .table td:nth-child(6),
+  .tests-table .table th:nth-child(9),   /* Last Run */
+  .tests-table .table td:nth-child(9) {
     display: none;
   }
 
   /* Remove AgentTag avatar in name cell — recovers ~44px per row */
-  .table td:nth-child(3) .avatar {
+  .tests-table .table td:nth-child(3) .avatar {
     display: none;
   }
 
   /* Name text: use full column width now avatar is gone */
-  .table td:nth-child(3) [style*="maxWidth"] {
+  .tests-table .table td:nth-child(3) [style*="maxWidth"] {
     max-width: 100% !important;
   }
 
   /* Tighten table cell padding */
-  .table th,
-  .table td {
+  .tests-table .table th,
+  .tests-table .table td {
     padding: 10px 8px;
   }
 

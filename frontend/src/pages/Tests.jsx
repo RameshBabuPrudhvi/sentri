@@ -671,7 +671,7 @@ export default function Tests() {
       </div>
 
       {/* Tests table */}
-      <div className="card">
+      <div className="card tests-table">
         <div className="tests-filter-bar" style={{
           padding: "14px 16px", borderBottom: "1px solid var(--border)",
           display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
