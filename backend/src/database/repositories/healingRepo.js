@@ -89,8 +89,11 @@ export function getByTestId(testId) {
   // Build a query with the right number of OR clauses
   const uniquePatterns = [...new Set(patterns)];
   const whereClauses = uniquePatterns.map(() => "key LIKE ?").join(" OR ");
+  // ORDER BY ensures that when multiple versions exist for the same
+  // action::label, the versioned entry (strategyVersion IS NOT NULL)
+  // is processed last and wins the collision in the flat result dict.
   const rows = db.prepare(
-    `SELECT * FROM healing_history WHERE ${whereClauses}`
+    `SELECT * FROM healing_history WHERE ${whereClauses} ORDER BY strategyVersion ASC NULLS FIRST`
   ).all(...uniquePatterns);
 
   const result = {};

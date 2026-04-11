@@ -8,6 +8,7 @@
  * directly and assert on status codes, response shapes, and headers.
  *
  * ### Exports
+ * - {@link formatJsonExample} — `(raw, maxChars?) → string`
  * - {@link buildApiTestPrompt} — `(endpoints, appUrl) → { system, user }`
  */
 
@@ -15,6 +16,18 @@ import { isLocalProvider } from "../../aiProvider.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 import { PROMPT_VERSION } from "./outputSchema.js";
 
+/**
+ * Truncate a JSON request/response body example to fit within a token budget.
+ *
+ * For JSON arrays, incrementally includes elements until `maxChars` is reached.
+ * For JSON objects, incrementally includes keys. Always preserves at least one
+ * element/key so the shape is visible. Non-JSON payloads are sliced with a
+ * `[truncated]` marker.
+ *
+ * @param {string|*} raw           — raw body string (or falsy/non-string passthrough)
+ * @param {number}   [maxChars=1800] — approximate character budget
+ * @returns {string} Truncated JSON or sliced string
+ */
 export function formatJsonExample(raw, maxChars = 1800) {
   if (!raw || typeof raw !== "string") return raw || "";
   if (raw.length <= maxChars) return raw;

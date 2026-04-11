@@ -51,6 +51,7 @@ export function hasNoAssertions(playwrightCode) {
 function hostnameRegex(url) {
   try {
     const h = new URL(url).hostname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!h) return "/.+/";
     return `/${h}/i`;
   } catch {
     return "/.+/";
