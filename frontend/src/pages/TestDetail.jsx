@@ -173,10 +173,11 @@ export default function TestDetail() {
         priority: editPriority,
       };
 
-      if (codeEdited && editCode.trim()) {
-        // User manually edited code — save it directly, skip AI regeneration
+      if (codeEdited) {
+        // User manually edited code — save it directly, skip AI regeneration.
+        // Empty string is valid (clears the code, making it a manual test).
         payload.playwrightCode = editCode;
-      } else if (test.playwrightCode) {
+      } else if (test.playwrightCode && stepsChanged) {
         // Steps may have changed — request a code preview for review
         payload.previewCode = true;
       }
