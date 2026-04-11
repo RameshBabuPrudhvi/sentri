@@ -41,6 +41,56 @@
 .stat-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px; }
 .stat-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 
+/* ── Stat grid responsive breakpoints ───────────────────────────────────────── */
+/* These live here (not in pages/*.css) because utilities.css is the last        */
+/* imported sheet — page files can't override a rule defined here without !imp.  */
+/* Breakpoints account for the sidebar width at each viewport:                   */
+/*   768px viewport − 192px sidebar − 40px padding = 536px content              */
+/*   600px viewport − 56px icon sidebar − 40px padding = 504px content          */
+/*   480px viewport − 0px sidebar (hidden) − 32px padding = 448px content       */
+
+/* 4 → 2 columns: fires when viewport can't fit 4 decent-width cards            */
+/* At 900px: content ≈ 900−192−64 = 644px / 4 cols = 161px — gets tight        */
+@media (max-width: 900px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+}
+
+/* 3-col grid also drops to 2 at 900px */
+@media (max-width: 900px) {
+  .stat-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* All grids → single column on small phones */
+@media (max-width: 480px) {
+  .stat-grid,
+  .stat-grid-2,
+  .stat-grid-3 {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+/* ── Page header responsive ─────────────────────────────────────────────────── */
+/* Stack title + action button vertically on small screens                       */
+@media (max-width: 480px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .page-header > .btn {
+    align-self: stretch;
+    justify-content: center;
+  }
+}
+
 /* ── Flex ────────────────────────────────────────────────────────────────────── */
 .flex-between { display: flex; align-items: center; justify-content: space-between; }
 .flex-center  { display: flex; align-items: center; justify-content: center; }

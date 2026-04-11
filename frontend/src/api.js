@@ -18,6 +18,7 @@
  */
 
 import { API_BASE, parseJsonResponse } from "./utils/apiBase.js";
+import { getCsrfToken } from "./context/AuthContext.jsx";
 
 /** @type {string} Full base URL for API endpoints (e.g. `"/api"` or `"https://backend.example.com/api"`). */
 const BASE = `${API_BASE}/api`;
@@ -27,38 +28,18 @@ const TIMEOUT_DEFAULT = 30_000;
 /** @type {number} Extended timeout for long-running operations like crawl and test runs (5 minutes). */
 const TIMEOUT_LONG    = 300_000;
 
-/** localStorage keys — must match AuthContext.jsx */
-const TOKEN_KEY = "app_auth_token";
-const USER_KEY  = "app_auth_user";
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
 /**
- * Read the stored JWT token from localStorage.
- * Returns null if no token is stored or localStorage is unavailable.
- * @returns {string|null}
- * @private
- */
-function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
-
-/**
- * Handle a 401 Unauthorized response by clearing the stored session
- * and redirecting to the login page. This ensures stale tokens don't
- * leave the user in a broken state where every API call silently fails.
+ * Handle a 401 Unauthorized response by clearing the stored user profile
+ * and redirecting to the login page.
+ * The HttpOnly cookie is cleared by the backend on logout — we just redirect.
  * @private
  */
 function handleUnauthorized() {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-  } catch { /* localStorage unavailable */ }
-  // Skip redirect if already on the login or forgot-password page to avoid
-  // an infinite redirect loop (e.g. login returns 401 for wrong credentials,
-  // or a token expires while on the forgot-password page).
+  try { localStorage.removeItem("app_auth_user"); } catch { /* localStorage unavailable */ }
   const path = window.location.pathname;
   if (path.endsWith("/login") || path.endsWith("/forgot-password")) return;
-  // Redirect to login — use the Vite BASE_URL so subpath deploys work
   const base = BASE_URL.replace(/\/$/, "");
   window.location.href = `${base}/login`;
 }
@@ -82,9 +63,13 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
-  const headers = { "Content-Type": "application/json" };
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // All state-mutating methods need the CSRF double-submit token.
+  // Safe methods (GET/HEAD/OPTIONS) are exempt per the backend middleware.
+  const safeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+  const headers = {
+    "Content-Type": "application/json",
+    ...(!safeMethods.has(method.toUpperCase()) ? { "X-CSRF-Token": getCsrfToken() } : {}),
+  };
 
   let res;
   try {
@@ -93,6 +78,9 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
+      // Send the HttpOnly auth cookie automatically on every request.
+      // This replaces the old "Authorization: Bearer <token>" header approach.
+      credentials: "include",
     });
   } catch (err) {
     clearTimeout(timer);
@@ -101,7 +89,6 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
   }
   clearTimeout(timer);
 
-  // Handle expired / revoked tokens globally
   if (res.status === 401) {
     handleUnauthorized();
     throw new Error("Session expired. Please sign in again.");
@@ -225,26 +212,22 @@ export const api = {
   /** @param {string} url - Verify a URL is reachable before creating a project. */
   testConnection: (url) => req("POST", "/test-connection", { url }),
 
-  // ── Export (returns download URLs, not JSON) ────────────────────────────────
-  // These return plain URL strings used as <a href> downloads. Since the browser
-  // can't send Authorization headers on <a> clicks, we append ?token= as a query
-  // param — the backend requireAuth middleware accepts this as a fallback (same
-  // pattern as SSE EventSource in useRunSSE.js).
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL with auth token. */
+  // ── Export (returns download URLs) ──────────────────────────────────────────
+  // With cookie-based auth, same-origin anchor clicks automatically include the
+  // auth cookie — no need to append a ?token= query param.
+  // For cross-origin static deployments (GitHub Pages + separate backend), the
+  // backend must set CORS credentials headers; same-origin Docker/dev works out of box.
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
   exportZephyrUrl:   (projectId, status) => {
-    const tk = getToken();
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    if (tk) params.set("token", tk);
     const qs = params.toString();
     return `${BASE}/projects/${projectId}/tests/export/zephyr${qs ? `?${qs}` : ""}`;
   },
-  /** @param {string} projectId @param {string} [status] @returns {string} Download URL with auth token. */
+  /** @param {string} projectId @param {string} [status] @returns {string} Download URL. */
   exportTestRailUrl: (projectId, status) => {
-    const tk = getToken();
     const params = new URLSearchParams();
     if (status) params.set("status", status);
-    if (tk) params.set("token", tk);
     const qs = params.toString();
     return `${BASE}/projects/${projectId}/tests/export/testrail${qs ? `?${qs}` : ""}`;
   },
@@ -274,14 +257,14 @@ export const api = {
    * @returns {Promise<void>}
    */
   fixTest: async (testId, onToken, onDone, onError, signal) => {
-    const token = getToken();
     const res = await fetch(`${BASE}/tests/${testId}/fix`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "X-CSRF-Token": getCsrfToken(),
       },
       body: JSON.stringify({}),
+      credentials: "include",
       signal,
     });
     if (res.status === 401) {
@@ -346,14 +329,14 @@ export const api = {
    * @returns {Promise<void>}
    */
   chat: async (messages, onToken, onError, signal) => {
-    const token = getToken();
     const res = await fetch(`${BASE}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "X-CSRF-Token": getCsrfToken(),
       },
       body: JSON.stringify({ messages }),
+      credentials: "include",
       signal,
     });
     if (res.status === 401) {

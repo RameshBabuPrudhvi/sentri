@@ -24,6 +24,7 @@ export default function Layout() {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [chatOpen, setChatOpen] = React.useState(false);
   const [chatQuery, setChatQuery] = React.useState("");
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
 
   function openPalette() {
     setPaletteOpen(true);
@@ -36,7 +37,24 @@ export default function Layout() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg2)" }}>
-      <Sidebar />
+      {/* Mobile sidebar overlay */}
+      <div
+        className={`sidebar-overlay${sidebarOpen ? " active" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+      <Sidebar open={sidebarOpen} />
+      {/* Mobile hamburger toggle */}
+      <button
+        className="sidebar-toggle"
+        onClick={() => setSidebarOpen(o => !o)}
+        aria-label="Toggle navigation"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="4" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+          <rect x="2" y="7.25" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+          <rect x="2" y="10.5" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+        </svg>
+      </button>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <TopBar onOpenPalette={openPalette} onOpenChat={openChat} />
         <main style={{ flex: 1, padding: "28px 32px", overflow: "auto" }}>
@@ -50,9 +68,9 @@ export default function Layout() {
   );
 }
 
-function Sidebar() {
+function Sidebar({ open }) {
   return (
-    <aside style={{
+    <aside className={open ? "sidebar-open" : ""} style={{
       width: 192, background: "var(--surface)", borderRight: "1px solid var(--border)",
       display: "flex", flexDirection: "column", flexShrink: 0,
       position: "sticky", top: 0, height: "100vh", overflowY: "auto",

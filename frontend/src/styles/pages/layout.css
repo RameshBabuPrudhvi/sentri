@@ -1,0 +1,176 @@
+/**
+ * Layout — shell-level responsive styles
+ *
+ * The app shell (sidebar + topbar + main) is built with inline styles in
+ * Layout.jsx, which means @media rules cannot directly target those elements.
+ * This file uses the CSS child / descendant selectors on the known DOM
+ * structure to apply responsive overrides without touching JSX.
+ *
+ * Layer: Pages (ITCSS) — import last in pages group in index.css
+ *
+ * Breakpoints:
+ *   768px — sidebar narrows; main padding tightens
+ *   480px — sidebar hides; hamburger toggle shown via .sidebar-toggle
+ */
+
+/* ── Sidebar toggle button (hidden on desktop) ──────────────────────────────── */
+/* Rendered as a floating button injected by Layout at mobile widths.
+   When you add the JSX hook, give it className="sidebar-toggle". */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 12px;
+  z-index: 300;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── 768px: tablet ──────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Reduce main content padding from 28px 32px → 20px 20px */
+  /* The <main> tag is a direct child of the flex column div inside Layout */
+  main {
+    padding: 20px !important;
+  }
+
+  /* Sidebar: shrink from 192px to 56px, show only icons */
+  aside {
+    width: 56px !important;
+    overflow: hidden;
+  }
+
+  /* Hide text labels inside nav links — only icons remain */
+  aside nav a span,
+  aside nav a ~ span,
+  aside > div:nth-child(2) div:last-child,   /* "Personal" sub-label */
+  aside > div:last-child a span:first-of-type { /* Settings / Docs labels */
+    display: none;
+  }
+
+  /* Hide the logo wordmark — keep just the icon mark if AppLogo supports it */
+  aside > div:first-child {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 0;
+  }
+
+  /* Center nav icons */
+  aside nav a {
+    justify-content: center !important;
+    padding: 9px 0 !important;
+  }
+
+  /* Hide workspace label block entirely at this width */
+  aside > div:nth-child(2) {
+    display: none;
+  }
+
+  /* Bottom settings row: center icon */
+  aside > div:last-child a,
+  aside > div:last-child button {
+    justify-content: center !important;
+    padding: 9px 0 !important;
+  }
+
+  /* ExternalLink icon in Docs link looks odd alone — hide it */
+  aside > div:last-child a svg:last-child {
+    display: none;
+  }
+
+  /* TopBar: command palette trigger shrinks — hide the placeholder text */
+  .chat-trigger__placeholder {
+    display: none;
+  }
+
+  /* TopBar: ProviderBadge text can be long — hide the label text if needed */
+  /* (ProviderBadge already has an icon, so icon-only is readable) */
+}
+
+/* ── 480px: mobile ──────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Sidebar slides off-screen by default; .sidebar-open class re-shows it */
+  aside {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 192px !important;   /* full width when open */
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: var(--shadow);
+    overflow-y: auto;
+  }
+
+  aside.sidebar-open {
+    transform: translateX(0);
+    /* Restore all hidden labels when sidebar is fully open */
+  }
+
+  /* When sidebar is open restore the text labels */
+  aside.sidebar-open nav a span,
+  aside.sidebar-open > div:last-child a span,
+  aside.sidebar-open > div:last-child button span {
+    display: inline !important;
+  }
+
+  aside.sidebar-open nav a {
+    justify-content: flex-start !important;
+    padding: 7px 10px !important;
+  }
+
+  aside.sidebar-open > div:last-child a,
+  aside.sidebar-open > div:last-child button {
+    justify-content: flex-start !important;
+    padding: 7px 10px !important;
+  }
+
+  /* Overlay behind open sidebar */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar-overlay.active {
+    display: block;
+  }
+
+  /* Show the hamburger toggle */
+  .sidebar-toggle {
+    display: flex;
+  }
+
+  /* Main area fills full width (sidebar is off-screen) */
+  main {
+    padding: 16px !important;
+  }
+
+  /* TopBar: reduce horizontal padding */
+  header {
+    padding: 0 12px !important;
+  }
+
+  /* Push content down so it clears the fixed topbar */
+  main {
+    padding-top: 16px !important;
+  }
+
+  /* ProviderBadge: icon-only on mobile */
+  .provider-badge-label {
+    display: none;
+  }
+
+  /* NotificationBell count badge is sufficient on its own */
+}

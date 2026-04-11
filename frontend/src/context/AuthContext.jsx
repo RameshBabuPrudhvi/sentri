@@ -1,211 +1,216 @@
 /**
  * @module context/AuthContext
- * @description Provides authentication state (user, token) across the app via React Context.
+ * @description Provides authentication state (user) across the app via React Context.
  *
- * Token is stored in `localStorage` with a short-lived accessToken pattern.
- * Sensitive data is never stored — only the JWT string and safe user fields.
+ * ### Security model (S1-02)
+ * The JWT lives exclusively in an HttpOnly; Secure; SameSite=Strict cookie set by
+ * the backend. JavaScript (including this file) can never read it — which eliminates
+ * the entire class of XSS-based token theft.
  *
- * ### Security notes
- * - Passwords are NEVER handled here — they go straight to the API.
- * - Tokens are validated on every protected API call via `Authorization` header.
- * - On 401 responses, the user is automatically signed out (token revoked or expired).
- * - Token expiry is decoded client-side only for UX (redirect before it expires).
- *   The server always validates independently.
+ * The backend also sets a companion `sentri_exp` cookie (Non-HttpOnly) that exposes
+ * only the numeric expiry timestamp. This file reads that cookie to drive proactive
+ * refresh and session-expiry warnings without ever touching the actual JWT.
+ *
+ * All API requests send `credentials: "include"` so the browser automatically
+ * attaches the HttpOnly cookie on every fetch — no manual header injection needed.
  *
  * ### Exports
  * - {@link AuthProvider} — React context provider component.
- * - {@link useAuth} — Hook to access `{ user, token, login, logout, authFetch, loading }`.
+ * - {@link useAuth} — Hook to access `{ user, login, logout, authFetch, loading }`.
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { API_BASE } from "../utils/apiBase.js";
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = "app_auth_token";
-const USER_KEY  = "app_auth_user";
+/** localStorage key for the safe user profile (no token — only id/name/email/role/avatar). */
+const USER_KEY = "app_auth_user";
 
-/**
- * Decode a JWT payload without verifying the signature.
- * Verification always happens server-side — this is only for client-side UX
- * (e.g. checking expiry before making a request).
- *
- * @param   {string}      token - The JWT string.
- * @returns {Object|null}         Decoded payload, or `null` on failure.
- * @private
- */
-function decodeJwt(token) {
+/** Name of the Non-HttpOnly expiry-hint cookie written by the backend. */
+const EXP_COOKIE = "sentri_exp";
+
+/** Proactive refresh fires this many ms before the token actually expires. */
+const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+// ─── Cookie helpers ───────────────────────────────────────────────────────────
+
+function readCookie(name) {
   try {
-    let payload = token.split(".")[1];
-    // Convert base64url → base64 and add padding so atob never fails
-    payload = payload.replace(/-/g, "+").replace(/_/g, "/");
-    payload = payload.padEnd(payload.length + (4 - (payload.length % 4)) % 4, "=");
-    return JSON.parse(atob(payload));
-  } catch {
-    return null;
-  }
+    const match = document.cookie.split(";").find(c => c.trim().startsWith(`${name}=`));
+    if (!match) return "";
+    return match.split("=")[1]?.trim() || "";
+  } catch { return ""; }
+}
+
+function readExpCookie() {
+  const val = readCookie(EXP_COOKIE);
+  const n   = parseInt(val, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isCookieSessionValid() {
+  const exp = readExpCookie();
+  if (!exp) return false;
+  return exp * 1000 > Date.now() + 30_000;
+}
+
+function msUntilRefresh() {
+  const exp = readExpCookie();
+  if (!exp) return null;
+  const refreshAt = exp * 1000 - REFRESH_BEFORE_EXPIRY_MS;
+  const ms = refreshAt - Date.now();
+  return ms > 0 ? ms : 0;
 }
 
 /**
- * Check if a decoded JWT payload is still valid (not expired).
- * Includes a 30-second buffer so the client redirects before the server rejects.
- *
- * @param   {Object|null} decoded - Decoded JWT payload (from {@link decodeJwt}).
- * @returns {boolean}               `true` if the token has not expired.
- * @private
+ * Read the CSRF token from the `sentri_csrf` cookie (Non-HttpOnly).
+ * Exported so api.js can use it without importing from AuthContext.
+ * @returns {string}
  */
-function isTokenValid(decoded) {
-  if (!decoded?.exp) return false;
-  // Give a 30-second buffer so we refresh before the server rejects it
-  return decoded.exp * 1000 > Date.now() + 30_000;
+export function getCsrfToken() {
+  return readCookie("sentri_csrf");
 }
 
-/**
- * React context provider that manages authentication state.
- * Wrap your app's root with this to enable `useAuth()` in child components.
- *
- * Provides: `{ user, token, login, logout, authFetch, loading }`.
- *
- * @param {Object} props
- * @param {React.ReactNode} props.children - Child components.
- * @returns {React.ReactElement}
- *
- * @example
- * <AuthProvider>
- *   <App />
- * </AuthProvider>
- */
+function sanitiseUser(u) {
+  return { id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user" };
+}
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
 export function AuthProvider({ children }) {
-  const [token, setToken]   = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser]     = useState(() => {
     try { return JSON.parse(localStorage.getItem(USER_KEY)); } catch { return null; }
   });
   const [loading, setLoading] = useState(true);
+  const refreshTimerRef       = useRef(null);
 
-  // On mount, verify the stored token is still valid
-  useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY);
-    if (stored) {
-      const decoded = decodeJwt(stored);
-      if (!isTokenValid(decoded)) {
-        // Token expired — clear silently
-        clearSession();
-      } else {
-        setToken(stored);
-        try { setUser(JSON.parse(localStorage.getItem(USER_KEY))); } catch { /* no-op */ }
+  // ── Proactive refresh scheduler ──────────────────────────────────────────
+  const scheduleRefresh = useCallback(function schedule() {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const ms = msUntilRefresh();
+    if (ms === null) return;
+    refreshTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            const safe = sanitiseUser(data.user);
+            localStorage.setItem(USER_KEY, JSON.stringify(safe));
+            setUser(safe);
+            schedule();
+          } else {
+            doLogout(false);
+          }
+        } else {
+          doLogout(false);
+        }
+      } catch {
+        // Network hiccup — retry in 60s
+        refreshTimerRef.current = setTimeout(schedule, 60_000);
+      }
+    }, ms);
+  }, []); // eslint-disable-line
+
+  // ── Logout helper (shared by logout() and clearSession) ──────────────────
+  function doLogout(shouldRedirect = true) {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    localStorage.removeItem(USER_KEY);
+    setUser(null);
+    if (shouldRedirect) {
+      const path = window.location.pathname;
+      if (!path.endsWith("/login") && !path.endsWith("/forgot-password")) {
+        const base = (import.meta?.env?.BASE_URL || "/").replace(/\/$/, "");
+        window.location.href = `${base}/login`;
       }
     }
-    setLoading(false);
-  }, []);
+  }
 
-  // Auto-logout when token expires (poll every 60s)
+  // ── Mount: verify session via /api/auth/me ────────────────────────────────
   useEffect(() => {
-    if (!token) return;
-    const interval = setInterval(() => {
-      const decoded = decodeJwt(token);
-      if (!isTokenValid(decoded)) clearSession();
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, [token]);
-
-  function clearSession() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    setToken(null);
-    setUser(null);
-  }
-
-  /**
-   * Store a new token and user profile after successful sign-in or OAuth callback.
-   * Validates the token before storing. Only safe fields are persisted.
-   *
-   * @param {string} newToken - The JWT string from the backend.
-   * @param {Object} userData - User profile `{ id, name, email, avatar?, role? }`.
-   * @throws {Error} If the token is invalid or expired.
-   */
-  async function login(newToken, userData) {
-    const decoded = decodeJwt(newToken);
-    if (!decoded || !isTokenValid(decoded)) {
-      throw new Error("Received an invalid or expired token.");
+    if (!isCookieSessionValid()) {
+      doLogout(false);
+      setLoading(false);
+      return;
     }
-    // Only store safe fields — never full profile blobs from OAuth providers
-    const safeUser = {
-      id:     userData.id,
-      name:   userData.name,
-      email:  userData.email,
-      avatar: userData.avatar || null,
-      role:   userData.role  || "user",
-    };
-    localStorage.setItem(TOKEN_KEY, newToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(safeUser));
-    setToken(newToken);
-    setUser(safeUser);
-  }
+    fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.id) {
+          const safe = sanitiseUser(data);
+          localStorage.setItem(USER_KEY, JSON.stringify(safe));
+          setUser(safe);
+          scheduleRefresh();
+        } else {
+          doLogout(false);
+        }
+      })
+      .catch(() => { /* network error — keep cached user, next 401 will redirect */ })
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
+
+  // ─── Public actions ───────────────────────────────────────────────────────
 
   /**
-   * Sign out the current user. Revokes the token server-side (fire-and-forget)
-   * and clears localStorage immediately.
+   * Called after a successful login/OAuth response.
+   * The JWT is already in the HttpOnly cookie — this just records the user profile.
    */
-  function logout() {
-    // Call /api/auth/logout to invalidate server-side session
-    fetch(`${API_BASE}/api/auth/logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => { /* fire-and-forget */ });
-    clearSession();
+  function login(userData) {
+    const safe = sanitiseUser(userData);
+    localStorage.setItem(USER_KEY, JSON.stringify(safe));
+    setUser(safe);
+    scheduleRefresh();
+  }
+
+  /** Sign out — revokes token server-side, clears cookie, wipes local state. */
+  async function logout() {
+    try {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch { /* fire-and-forget */ }
+    doLogout(true);
   }
 
   /**
    * Authenticated fetch wrapper.
-   * Automatically injects the `Authorization: Bearer` header and handles
-   * 401 responses by clearing the session and throwing.
-   *
-   * @param {string} url     - API path (e.g. `"/api/projects"`) or full URL.
-   * @param {Object} [options] - Standard `fetch` options (method, headers, body, etc.).
-   * @returns {Promise<Response>} The raw Fetch API response (caller must parse).
-   * @throws {Error} If the server responds with 401 (session expired).
+   * Sends `credentials: "include"` so the HttpOnly cookie is attached automatically.
+   * Injects X-CSRF-Token for mutating requests.
+   * Handles 401 by clearing the session and redirecting.
    */
   const authFetch = useCallback(async (url, options = {}) => {
+    const method = (options.method || "GET").toUpperCase();
+    const safe   = new Set(["GET", "HEAD", "OPTIONS"]);
     const headers = {
       "Content-Type": "application/json",
       ...(options.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(!safe.has(method) ? { "X-CSRF-Token": getCsrfToken() } : {}),
     };
     const fullUrl = url.startsWith("/api") ? `${API_BASE}${url}` : url;
-    const res = await fetch(fullUrl, { ...options, headers });
+    const res = await fetch(fullUrl, { ...options, headers, credentials: "include" });
     if (res.status === 401) {
-      clearSession();
+      doLogout(true);
       throw new Error("Session expired. Please sign in again.");
     }
     return res;
-  }, [token]);
+  }, []); // eslint-disable-line
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, authFetch, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, authFetch, loading }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-/**
- * Hook to access authentication state and actions.
- * Must be called inside an `<AuthProvider>`.
- *
- * @returns {AuthContextValue}
- *
- * @typedef {Object} AuthContextValue
- * @property {Object|null}  user      - Current user `{ id, name, email, avatar, role }`, or `null`.
- * @property {string|null}  token     - JWT string, or `null` if not signed in.
- * @property {Function}     login     - `(token, userData) => Promise<void>` — store credentials.
- * @property {Function}     logout    - `() => void` — clear session and revoke token.
- * @property {Function}     authFetch - `(url, options?) => Promise<Response>` — fetch with auth header.
- * @property {boolean}      loading   - `true` while initial token validation is in progress.
- *
- * @example
- * const { user, logout } = useAuth();
- * if (user) console.log(`Signed in as ${user.name}`);
- */
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");

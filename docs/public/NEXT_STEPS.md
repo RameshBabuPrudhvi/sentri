@@ -648,4 +648,3 @@ Before starting any item:
 3. Create a branch named `feat/S1-01-sandbox-code-execution` or `fix/S1-03-sqlite-migration`
 4. Reference the issue in your PR description
 
-For items marked with a **Pattern from Assrt** code block, the code is provided as a starting point and has been adapted to Sentri's JavaScript ESM conventions. The original TypeScript source is in `assrt-mcp/src/core/agent.ts`.

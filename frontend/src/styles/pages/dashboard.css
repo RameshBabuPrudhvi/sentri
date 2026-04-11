@@ -3,6 +3,10 @@
  *
  * Hero banner and dashboard-only visual elements.
  * Scoped by `.dash-*` prefix.
+ *
+ * NOTE: stat-grid responsive breakpoints live in utilities.css (last import),
+ * not here. Rules here only cover Dashboard-specific elements (.dash-*,
+ * .dash-defect-row, .list-row, .legend-row).
  */
 
 .dash-hero {
@@ -58,4 +62,95 @@
   color: var(--accent);
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  .dash-hero {
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+
+  /* Decorative shield clips at this width */
+  .dash-hero-shield {
+    display: none;
+  }
+
+  /* Stack logo+desc above the pill/date/export strip */
+  .dash-hero-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  /* Pill + date + export button become a horizontal strip */
+  .dash-hero-meta {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .dash-hero-desc {
+    font-size: 0.82rem;
+    margin-top: 8px;
+    max-width: 100%;
+  }
+
+  /* Defect row: 1:2 split → single column */
+  .dash-defect-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* Recent-activity list rows: let badge + timestamp wrap */
+  .list-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  .dash-hero {
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+  }
+
+  .dash-hero-desc {
+    font-size: 0.8rem;
+    margin-top: 6px;
+  }
+
+  .dash-hero-meta {
+    gap: 8px;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  .dash-hero {
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  /* Pill is decorative — not worth the line-height on a phone */
+  .dash-hero-pill {
+    display: none;
+  }
+
+  .card-padded {
+    padding: 14px;
+  }
+
+  /* Legend chips wrap rather than overflow */
+  .legend-row {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  /* Timestamp in recent-activity rows is redundant on mobile */
+  .list-row .dash-hero-date {
+    display: none;
+  }
 }

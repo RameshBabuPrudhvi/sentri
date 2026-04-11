@@ -7,8 +7,9 @@
  * |--------|-------------------------------|--------------------------------------|
  * | POST   | `/api/auth/register`          | Email/password registration          |
  * | POST   | `/api/auth/login`             | Email/password sign-in               |
- * | POST   | `/api/auth/logout`            | Token revocation (server-side)       |
- * | GET    | `/api/auth/me`                | Return current user from token       |
+ * | POST   | `/api/auth/logout`            | Token revocation + cookie clear      |
+ * | POST   | `/api/auth/refresh`           | Refresh session (extend cookie TTL)  |
+ * | GET    | `/api/auth/me`                | Return current user from cookie      |
  * | POST   | `/api/auth/forgot-password`   | Request a password reset token       |
  * | POST   | `/api/auth/reset-password`    | Reset password using a valid token   |
  * | GET    | `/api/auth/github/callback`   | GitHub OAuth token exchange          |
@@ -16,12 +17,16 @@
  *
  * ### Security measures
  * - Passwords hashed with scrypt (64-byte key, 16-byte random salt)
+ * - JWT stored in HttpOnly; Secure; SameSite=Strict cookie — never in localStorage
+ * - A companion `sentri_exp` cookie (Non-HttpOnly) exposes only the exp timestamp
+ *   so the frontend can proactively warn before expiry without ever touching the JWT
  * - JWT signed with HS256, 8-hour expiry
  * - Rate limiting: separate per-endpoint buckets (login: 10, forgot/reset: 5 per IP per 15 min)
  * - Revoked tokens kept in an in-memory Map (production: use Redis)
  * - Input validation and sanitisation on every endpoint
  * - OAuth state parameter validated on the frontend to prevent CSRF
- * - No sensitive data (passwords, raw OAuth tokens) returned to client
+ * - CSRF double-submit cookie protection on all mutating endpoints (via appSetup.js)
+ * - No sensitive data (passwords, raw OAuth tokens, JWT strings) returned to client
  */
 
 import express from "express";
@@ -33,6 +38,49 @@ import * as userRepo from "../database/repositories/userRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ─── Cookie helpers ───────────────────────────────────────────────────────────
+
+/** JWT cookie name — HttpOnly so JS cannot read the token. */
+const AUTH_COOKIE     = "sentri_auth";
+/** Expiry hint cookie — Non-HttpOnly so the frontend can read the `exp` timestamp. */
+const EXP_COOKIE      = "sentri_exp";
+/** JWT TTL in seconds (8 hours). Must match signJwt default. */
+const JWT_TTL_SEC     = 8 * 60 * 60;
+
+/**
+ * Set the HttpOnly auth cookie + a readable expiry hint cookie on a response.
+ * Called after every successful authentication (login, OAuth, refresh).
+ *
+ * @param {Object} res       - Express response object.
+ * @param {string} token     - The signed JWT string.
+ * @param {number} expSec    - Unix timestamp of token expiry (seconds).
+ */
+function setAuthCookie(res, token, expSec) {
+  const secure  = process.env.NODE_ENV === "production";
+  const maxAge  = JWT_TTL_SEC;
+
+  // Primary cookie: HttpOnly prevents JS from ever reading the JWT.
+  // SameSite=Strict prevents it being sent on cross-site navigations.
+  res.setHeader("Set-Cookie", [
+    `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`,
+    // Expiry hint: NOT HttpOnly — frontend reads it for proactive expiry UX.
+    // Contains only the numeric exp timestamp, not the token.
+    `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`,
+  ]);
+}
+
+/**
+ * Clear both auth cookies, effectively logging the user out client-side.
+ * @param {Object} res - Express response object.
+ */
+function clearAuthCookies(res) {
+  res.setHeader("Set-Cookie", [
+    `${AUTH_COOKIE}=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict`,
+    `${EXP_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict`,
+  ]);
+}
+
 
 const router = express.Router();
 
@@ -257,16 +305,23 @@ _purgeInterval.unref();
  * });
  */
 export function requireAuth(req, res, next) {
-  // 1. Try Authorization header (preferred)
-  const authHeader = req.headers.authorization;
-  let token = null;
-  if (authHeader?.startsWith("Bearer ")) {
-    token = authHeader.slice(7);
+  // 1. Preferred: read JWT from the HttpOnly cookie (set by login/OAuth/refresh).
+  //    This is the primary auth mechanism — the token is never exposed to JS.
+  let token = req.cookies?.[AUTH_COOKIE] || null;
+
+  // 2. Fallback: Authorization: Bearer header (keeps backward compat for any
+  //    direct API consumers, test scripts, or the CI trigger endpoint).
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7);
   }
-  // 2. Fallback to ?token= query param (for EventSource / SSE)
+
+  // 3. Last resort: ?token= query param (for EventSource / SSE which cannot
+  //    send custom headers or cookies in all environments).
   if (!token && req.query.token) {
     token = req.query.token;
   }
+
   if (!token) {
     return res.status(401).json({ error: "Authentication required." });
   }
@@ -389,9 +444,14 @@ router.post("/login", async (req, res) => {
 
     const jti   = crypto.randomUUID();
     const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
+    setAuthCookie(res, token, exp);
+
+    // Note: token is NOT returned in the response body — it lives in the HttpOnly
+    // cookie only. The frontend reads user profile from this response and stores
+    // it in React state. The sentri_exp cookie exposes the expiry timestamp.
     return res.json({
-      token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
@@ -411,6 +471,7 @@ router.post("/login", async (req, res) => {
 router.post("/logout", requireAuth, (req, res) => {
   const { jti, exp } = req.authUser;
   if (jti) revokedTokens.set(jti, exp);
+  clearAuthCookies(res);
   return res.json({ message: "Signed out successfully." });
 });
 
@@ -427,6 +488,37 @@ router.get("/me", requireAuth, (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
   return res.json({ id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null, createdAt: user.createdAt });
+});
+
+/**
+ * Refresh the session — issue a new JWT and reset the cookie TTL.
+ * Called proactively by the frontend 5 minutes before expiry so users
+ * never get silently logged out mid-session.
+ *
+ * The existing token must still be valid (not expired, not revoked).
+ * The old JTI is revoked and a new one is issued.
+ *
+ * @route POST /api/auth/refresh
+ * @returns {200} `{ user }` — same shape as login response.
+ * @returns {401} If the current session is invalid or expired.
+ */
+router.post("/refresh", requireAuth, (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(401).json({ error: "User not found." });
+
+  // Revoke the old token
+  const { jti: oldJti, exp: oldExp } = req.authUser;
+  if (oldJti) revokedTokens.set(oldJti, oldExp);
+
+  // Issue a fresh token with a new JTI
+  const jti   = crypto.randomUUID();
+  const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+  const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+  setAuthCookie(res, token, exp);
+
+  return res.json({
+    user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
+  });
 });
 
 // ─── Password Reset ──────────────────────────────────────────────────────────
@@ -623,9 +715,10 @@ router.get("/github/callback", async (req, res) => {
 
     const jti   = crypto.randomUUID();
     const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+    setAuthCookie(res, token, exp);
 
     return res.json({
-      token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
@@ -689,9 +782,10 @@ router.get("/google/callback", async (req, res) => {
 
     const jti   = crypto.randomUUID();
     const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+    setAuthCookie(res, token, exp);
 
     return res.json({
-      token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
     });
   } catch (err) {
