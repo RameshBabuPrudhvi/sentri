@@ -321,6 +321,7 @@ export default function Work() {
             )}
           </div>
         ) : (
+          <>
           <table className="table">
             <thead>
               <tr>
@@ -384,6 +385,7 @@ export default function Work() {
             onPageChange={setPage}
             label="runs"
           />
+          </>
         )}
       </div>
 
