@@ -162,3 +162,99 @@
   border-radius: var(--radius-lg);
   display: flex; align-items: center; gap: 14px;
 }
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Provider cards: tighten padding */
+  .st-provider-card {
+    padding: 18px;
+  }
+
+  /* Key-value rows: stack label above value */
+  .kv-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px 16px;
+  }
+
+  /* Data action rows: stack label above button */
+  .st-data-action {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .st-data-action .btn {
+    align-self: flex-start;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  /* Tab bar: allow horizontal scroll instead of wrapping */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  /* Tab buttons: shrink padding */
+  .tab-btn {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  /* Provider banner: stack vertically */
+  .st-provider-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+
+  /* Tour card: stack */
+  .st-tour-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Key input row: stack input above save button */
+  .st-key-input-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .st-key-input-row .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Key status row: stack */
+  .st-key-status {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* Provider header: tighter gap */
+  .st-provider-header {
+    gap: 10px;
+  }
+
+  /* Info rows: stack */
+  .info-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 16px;
+  }
+}

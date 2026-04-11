@@ -157,10 +157,10 @@ export default function Work() {
       </div>
 
       {/* Table card */}
-      <div className="card">
+      <div className="card runs-table">
 
         {/* ── Toolbar ── */}
-        <div style={{
+        <div className="runs-toolbar" style={{
           padding: "14px 16px", borderBottom: "1px solid var(--border)",
           display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
         }}>
@@ -187,7 +187,7 @@ export default function Work() {
           </div>
 
           {/* Spacer */}
-          <div style={{ flex: 1 }} />
+          <div className="runs-toolbar-spacer" style={{ flex: 1 }} />
 
           {/* ── Icon-only filter pill bar ── */}
           <div style={{

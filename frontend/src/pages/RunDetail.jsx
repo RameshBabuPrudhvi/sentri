@@ -316,6 +316,7 @@ export default function RunDetail() {
       {/* ── Task header ────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 16 }}>
         <div
+          className="rd-header"
           style={{
             display: "flex",
             alignItems: "center",
@@ -352,7 +353,7 @@ export default function RunDetail() {
             </span>
           )}
 
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div className="rd-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             {isRunning && (
               <button
                 className="btn btn-sm"
@@ -381,6 +382,7 @@ export default function RunDetail() {
         </div>
 
         <div
+          className="rd-meta"
           style={{
             display: "flex",
             alignItems: "center",
@@ -559,7 +561,7 @@ export default function RunDetail() {
           )}
 
           {/* Breakdown grids */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+          <div className="rd-analytics-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
             {/* By category */}
             {Object.keys(run.qualityAnalytics.byCategory || {}).length > 0 && (
               <div>

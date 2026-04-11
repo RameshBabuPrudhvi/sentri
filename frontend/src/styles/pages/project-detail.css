@@ -174,3 +174,106 @@
 .pd-empty-sm {
   padding: 48px 24px; text-align: center; color: var(--text2); font-size: 0.875rem;
 }
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Header card: stack identity + actions vertically */
+  .pd-header-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pd-header-actions {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  /* Stats row: allow wrapping with tighter gap */
+  .pd-stats {
+    gap: 16px;
+  }
+
+  /* Table: hide Type + Confidence columns */
+  .pd-review-table .table th:nth-child(6),   /* Type */
+  .pd-review-table .table td:nth-child(6),
+  .pd-review-table .table th:nth-child(7),   /* Confidence */
+  .pd-review-table .table td:nth-child(7) {
+    display: none;
+  }
+
+  /* Filter row: wrap pills */
+  .pd-filter-row {
+    row-gap: 6px;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  .pd-header {
+    padding: 18px;
+  }
+
+  /* Also hide Test ID column */
+  .pd-review-table .table th:nth-child(2),   /* Test ID */
+  .pd-review-table .table td:nth-child(2) {
+    display: none;
+  }
+
+  /* Pagination: stack */
+  .pd-pagination {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Bulk bar: tighten */
+  .pd-bulk-bar {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+
+  /* Tab bar: smaller padding on tabs */
+  .pd-tab {
+    padding: 8px 12px;
+    font-size: 0.82rem;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Hide Status column — Review badge is enough */
+  .pd-review-table .table th:nth-child(4),   /* Status */
+  .pd-review-table .table td:nth-child(4) {
+    display: none;
+  }
+
+  /* Hide Actions column — user can tap row to navigate */
+  .pd-review-table .table th:nth-child(8),   /* Actions */
+  .pd-review-table .table td:nth-child(8) {
+    display: none;
+  }
+
+  /* Tighten table cell padding */
+  .pd-review-table .table th,
+  .pd-review-table .table td {
+    padding: 10px 8px;
+  }
+
+  /* Search input: full width */
+  .pd-search-input {
+    width: 100% !important;
+  }
+
+  .pd-filter-row {
+    gap: 6px;
+  }
+
+  /* Banner: stack text + button */
+  .pd-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

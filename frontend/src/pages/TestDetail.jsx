@@ -348,7 +348,7 @@ export default function TestDetail() {
     <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
 
       {/* ── Breadcrumb + toolbar ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+      <div className="td-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         {/* Breadcrumb: Project > Tests > Test Details (when project is known) */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text3)" }}>
           {project ? (
@@ -380,7 +380,7 @@ export default function TestDetail() {
         </div>
 
         {/* Action buttons */}
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="td-toolbar-actions" style={{ display: "flex", gap: 8 }}>
           {editing ? (
             <>
               <button className="btn btn-ghost btn-sm" onClick={cancelEditing} disabled={saving}>
@@ -897,7 +897,7 @@ export default function TestDetail() {
           )}
 
           {/* Recent Test Runs card */}
-          <div className="card" style={{ padding: 24 }}>
+          <div className="card td-runs-table" style={{ padding: 24 }}>
             <h2 style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 18, marginTop: 0 }}>
               Recent Test Runs
             </h2>
@@ -1199,7 +1199,7 @@ export default function TestDetail() {
           )}
 
           {/* Quick actions */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 4, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="td-sidebar-actions" style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 4, display: "flex", flexDirection: "column", gap: 8 }}>
             {test.reviewStatus !== "approved" && (
               <button
                 className="btn btn-sm"

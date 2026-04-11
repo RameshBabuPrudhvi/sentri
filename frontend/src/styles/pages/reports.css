@@ -1,0 +1,58 @@
+/**
+ * Reports — page-specific responsive styles
+ *
+ * The Reports page has a 1.3fr:1fr two-column grid (project breakdown + flaky/
+ * top-failing), a stat-grid (handled in utilities.css), a trend chart, and a
+ * run-history table.
+ *
+ * Class hooks added to Reports.jsx:
+ *   .rpt-two-col        — the two-column grid wrapper
+ *   .rpt-table           — scoping class on the run-history <table> card
+ *
+ * Layer: Pages (ITCSS) — import after tests.css in index.css
+ *
+ * Breakpoints:
+ *   900px — two-column grid → single column; table hides Passed/Failed cols
+ *   600px — table hides Total col; tighten padding
+ *   480px — table hides Date col; page header stacks
+ */
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Collapse the project-breakdown / flaky two-column grid to a single column */
+  .rpt-two-col {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Run-history table: hide Passed + Failed numeric columns — status badge is enough */
+  .rpt-table .table th:nth-child(3),   /* Passed */
+  .rpt-table .table td:nth-child(3),
+  .rpt-table .table th:nth-child(4),   /* Failed */
+  .rpt-table .table td:nth-child(4) {
+    display: none;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  /* Run-history table: also hide Total column */
+  .rpt-table .table th:nth-child(5),   /* Total */
+  .rpt-table .table td:nth-child(5) {
+    display: none;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Run-history table: hide Date column — status + project is enough on mobile */
+  .rpt-table .table th:nth-child(6),   /* Date */
+  .rpt-table .table td:nth-child(6) {
+    display: none;
+  }
+
+  /* Tighten table cell padding */
+  .rpt-table .table th,
+  .rpt-table .table td {
+    padding: 10px 8px;
+  }
+}

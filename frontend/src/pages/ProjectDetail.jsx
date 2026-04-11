@@ -440,7 +440,7 @@ export default function ProjectDetail() {
                 </div>
               )}
 
-              <div className="card">
+              <div className="card pd-review-table">
                 {filteredByReview.length === 0 ? (
                   <div className="pd-empty-sm">
                     No {reviewFilter !== "all" ? reviewFilter : ""} tests

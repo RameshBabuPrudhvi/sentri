@@ -142,7 +142,7 @@ export default function Projects() {
               onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--shadow)"}
               onMouseLeave={e => e.currentTarget.style.boxShadow = ""}
             >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+              <div className="proj-card-body" style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
 
                 {/* Icon */}
                 <div className="icon-box icon-box-accent">
@@ -160,7 +160,7 @@ export default function Projects() {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
+                  <div className="proj-url" style={{ fontSize: "0.75rem", color: "var(--text3)", fontFamily: "var(--font-mono)", marginBottom: 12 }}>
                     {p.url}
                     <a
                       href={p.url}
@@ -174,7 +174,7 @@ export default function Projects() {
                   </div>
 
                   {/* Stats row */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.6fr", gap: 16 }}>
+                  <div className="proj-stats-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.6fr", gap: 16 }}>
                     <div>
                       <div className="section-label" style={{ marginBottom: 3 }}>Tests</div>
                       <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text)" }}>
@@ -207,6 +207,7 @@ export default function Projects() {
 
                 {/* Quick actions */}
                 <div
+                  className="proj-actions"
                   style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}
                   onClick={e => e.stopPropagation()}
                 >

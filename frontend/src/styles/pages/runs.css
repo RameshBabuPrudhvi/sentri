@@ -1,0 +1,81 @@
+/**
+ * Runs — page-specific responsive styles
+ *
+ * The Runs page has a stat-grid (handled in utilities.css), a toolbar with
+ * search + icon-pill filter bar, and a table with 8 columns.
+ *
+ * Class hooks added to Runs.jsx:
+ *   .runs-toolbar    — the toolbar row (search + filters)
+ *   .runs-table      — scoping class on the table card
+ *
+ * Layer: Pages (ITCSS) — import after reports.css in index.css
+ *
+ * Breakpoints:
+ *   900px — table hides Progress + Duration columns; toolbar wraps
+ *   600px — table hides Run ID; toolbar stacks vertically
+ *   480px — table hides Project URL sub-line + Started col; tighten padding
+ */
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Toolbar: let filter pill bar wrap below search */
+  .runs-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Spacer pushes filters right on desktop — collapse so bar wraps */
+  .runs-toolbar-spacer {
+    display: none;
+  }
+
+  /* Table: hide Progress + Duration — status badge is sufficient */
+  .runs-table .table th:nth-child(5),   /* Progress */
+  .runs-table .table td:nth-child(5),
+  .runs-table .table th:nth-child(6),   /* Duration */
+  .runs-table .table td:nth-child(6) {
+    display: none;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  /* Toolbar: stack vertically */
+  .runs-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px !important;
+    gap: 8px;
+  }
+
+  /* Search box: full-width when stacked */
+  .runs-toolbar > div[style*="width: 220"] {
+    width: 100% !important;
+  }
+
+  /* Table: also hide Run ID */
+  .runs-table .table th:nth-child(1),   /* Run ID */
+  .runs-table .table td:nth-child(1) {
+    display: none;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Table: hide Started column */
+  .runs-table .table th:nth-child(7),   /* Started */
+  .runs-table .table td:nth-child(7) {
+    display: none;
+  }
+
+  /* Tighten table cell padding */
+  .runs-table .table th,
+  .runs-table .table td {
+    padding: 10px 8px;
+  }
+
+  /* Hide project URL sub-line in Project column */
+  .runs-table .table td:nth-child(2) div[style*="font-mono"] {
+    display: none;
+  }
+}

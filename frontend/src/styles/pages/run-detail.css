@@ -1,0 +1,64 @@
+/**
+ * RunDetail — page-specific responsive styles
+ *
+ * The RunDetail page has a task header with badges + action buttons, a meta row,
+ * a pass-rate bar, error banners, and a main content area that renders one of
+ * CrawlView / GenerateView / TestRunView (each has its own internal layout).
+ * The quality analytics section uses a 3-column grid.
+ *
+ * Class hooks added to RunDetail.jsx:
+ *   .rd-header        — the task header row (title + badges + buttons)
+ *   .rd-meta           — the meta info row below the header
+ *   .rd-analytics-grid — the 3-column quality analytics grid
+ *
+ * Layer: Pages (ITCSS) — import after runs.css in index.css
+ *
+ * Breakpoints:
+ *   900px — header wraps; analytics grid → 2 columns
+ *   600px — meta row wraps more aggressively
+ *   480px — analytics grid → single column; tighten padding
+ */
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Task header: let badges + buttons wrap below the title */
+  .rd-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Analytics grid: 3 → 2 columns */
+  .rd-analytics-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  /* Meta row: tighter wrapping */
+  .rd-meta {
+    gap: 10px !important;
+  }
+
+  /* Header action buttons: stack below title */
+  .rd-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Analytics grid: single column */
+  .rd-analytics-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Hide the agent tag in meta row — saves horizontal space */
+  .rd-meta .avatar,
+  .rd-meta [class*="AgentTag"] {
+    display: none;
+  }
+}

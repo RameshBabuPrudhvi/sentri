@@ -215,7 +215,7 @@ export default function Reports() {
           />
 
           {/* Two column: project breakdown + flaky / top failing */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
+          <div className="rpt-two-col" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, marginBottom: 16 }}>
 
             {/* Project breakdown */}
             <div className="card" style={{ padding: 22 }}>
@@ -338,7 +338,7 @@ export default function Reports() {
           </div>
 
           {/* Run history table */}
-          <div className="card">
+          <div className="card rpt-table">
             <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: "0.9rem" }}>
               Run History
               <span style={{ fontSize: "0.78rem", fontWeight: 400, color: "var(--text3)", marginLeft: 8 }}>

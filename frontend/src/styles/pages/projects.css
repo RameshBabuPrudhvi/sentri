@@ -1,0 +1,62 @@
+/**
+ * Projects (Applications) — page-specific responsive styles
+ *
+ * The Projects page renders project cards with a 4-column stats grid inside
+ * each card, plus quick-action buttons on the right side.
+ *
+ * Class hooks added to Applications.jsx:
+ *   .proj-card-body    — the flex row inside each project card
+ *   .proj-stats-grid   — the 4-column stats grid inside each card
+ *   .proj-actions      — the quick-action buttons column
+ *
+ * Layer: Pages (ITCSS) — import after run-detail.css in index.css
+ *
+ * Breakpoints:
+ *   900px — stats grid 4 → 2 columns; quick actions wrap
+ *   600px — card body stacks; actions become a horizontal row below
+ *   480px — stats grid → single column; hide project URL
+ */
+
+/* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
+@media (max-width: 900px) {
+  /* Stats grid inside project cards: 4 → 2 columns */
+  .proj-stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* Quick actions: hide the "Tests" button label, keep icons */
+  .proj-actions {
+    gap: 4px !important;
+  }
+}
+
+/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
+@media (max-width: 600px) {
+  /* Card body: stack icon + info + actions vertically */
+  .proj-card-body {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  /* Move actions to a horizontal row below the card content */
+  .proj-actions {
+    flex-direction: row !important;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
+@media (max-width: 480px) {
+  /* Stats grid: single column */
+  .proj-stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  /* Hide the project URL line — name is enough on mobile */
+  .proj-url {
+    display: none;
+  }
+}
