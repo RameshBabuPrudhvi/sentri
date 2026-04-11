@@ -73,6 +73,12 @@ export function getAllAsDict() {
  */
 export function getByTestId(testId) {
   const db = getDatabase();
+  // Ensure the strategyVersion column exists before querying — the ORDER BY
+  // clause references it, but the column is not in the initial schema (001).
+  // On databases where set() has never been called, the lazy migration in
+  // ensureStrategyVersionColumn() hasn't run yet and the query would crash
+  // with "no such column: strategyVersion".
+  ensureStrategyVersionColumn(db);
 
   // Strip the @vN suffix (if present) to derive the base test ID so we
   // can also query legacy keys stored before versioned scopes existed.
