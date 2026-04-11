@@ -21,6 +21,7 @@ import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 
@@ -261,6 +262,9 @@ PAGE CONTEXT:
 
 INSTRUCTIONS:
 ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
+
+SELF-HEALING RULES:
+${SELF_HEALING_PROMPT_RULES}
 
 Return ONLY valid JSON (no markdown):
 {

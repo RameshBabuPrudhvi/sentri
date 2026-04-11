@@ -256,9 +256,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
           await page.waitForTimeout(800);
         }
 
-        const healingHints = getHealingHistoryForTest(test.id);
+        const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
+        const healingHints = getHealingHistoryForTest(healingScopeId);
         const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
-        persistHealingEvents(test.id, codeResult.healingEvents);
+        persistHealingEvents(healingScopeId, codeResult.healingEvents);
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -299,7 +300,8 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
     result.error = formatTestError(err);
 
     // Persist healing events from the failed run
-    persistHealingEvents(test.id, err.__healingEvents);
+    const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
+    persistHealingEvents(healingScopeId, err.__healingEvents);
 
     // Screenshot the failure state
     try {

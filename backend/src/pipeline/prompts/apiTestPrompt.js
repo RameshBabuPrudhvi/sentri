@@ -15,6 +15,30 @@ import { isLocalProvider } from "../../aiProvider.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 import { PROMPT_VERSION } from "./outputSchema.js";
 
+function formatJsonExample(raw, maxChars = 1800) {
+  if (!raw || typeof raw !== "string") return raw || "";
+  if (raw.length <= maxChars) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return JSON.stringify(parsed.slice(0, 10), null, 2);
+    if (parsed && typeof parsed === "object") {
+      const compact = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        compact[k] = v;
+        const next = JSON.stringify(compact, null, 2);
+        if (next.length > maxChars) {
+          delete compact[k];
+          break;
+        }
+      }
+      return JSON.stringify(compact, null, 2);
+    }
+  } catch {
+    // non-JSON payload; fall through
+  }
+  return `${raw.slice(0, maxChars)}\n... [truncated]`;
+}
+
 /**
  * Build the system + user prompt for API test generation.
  *
@@ -69,10 +93,10 @@ PROMPT VERSION: ${PROMPT_VERSION}`;
       `    Example URL: ${ep.exampleUrls[0] || "N/A"}`,
     ];
     if (ep.requestBodyExample) {
-      lines.push(`    Request body: ${ep.requestBodyExample.slice(0, 500)}`);
+      lines.push(`    Request body: ${formatJsonExample(ep.requestBodyExample)}`);
     }
     if (ep.responseBodyExample) {
-      lines.push(`    Response body: ${ep.responseBodyExample.slice(0, 500)}`);
+      lines.push(`    Response body: ${formatJsonExample(ep.responseBodyExample)}`);
     }
     if (ep.pageUrls.length > 0) {
       lines.push(`    Triggered from: ${ep.pageUrls.join(", ")}`);

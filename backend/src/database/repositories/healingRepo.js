@@ -56,11 +56,16 @@ export function getAllAsDict() {
  */
 export function getByTestId(testId) {
   const db = getDatabase();
-  const prefix = `${testId}::`;
-  const rows = db.prepare("SELECT * FROM healing_history WHERE key LIKE ?").all(`${prefix}%`);
+  const exactPrefix = `${testId}::`;
+  const versionedPrefix = `${testId}@v`;
+  const rows = db.prepare(
+    "SELECT * FROM healing_history WHERE key LIKE ? OR key LIKE ?"
+  ).all(`${exactPrefix}%`, `${versionedPrefix}%`);
   const result = {};
   for (const r of rows) {
-    result[r.key.slice(prefix.length)] = r;
+    const sepIdx = r.key.indexOf("::");
+    if (sepIdx < 0) continue;
+    result[r.key.slice(sepIdx + 2)] = r;
   }
   return result;
 }
@@ -72,9 +77,11 @@ export function getByTestId(testId) {
 export function deleteByTestIds(testIds) {
   const db = getDatabase();
   const stmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
+  const versionedStmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
   const txn = db.transaction(() => {
     for (const tid of testIds) {
       stmt.run(`${tid}::%`);
+      versionedStmt.run(`${tid}@v%::%`);
     }
   });
   txn();

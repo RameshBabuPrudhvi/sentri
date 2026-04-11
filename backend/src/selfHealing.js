@@ -78,6 +78,7 @@ export function getHealingHint(testId, action, label) {
   if (!testId || !action || typeof label !== "string") return -1;
   const key = `${testId}::${action}::${label}`;
   const entry = healingRepo.get(key);
+  if ((entry?.failCount || 0) >= HEALING_HINT_MAX_FAILS) return -1;
   return entry?.strategyIndex ?? -1;
 }
 
@@ -92,6 +93,7 @@ export function getHealingHistoryForTest(testId) {
   const result = {};
   for (const [shortKey, val] of Object.entries(entries)) {
     const idx = val.strategyIndex;
+    if ((val?.failCount || 0) >= HEALING_HINT_MAX_FAILS) continue;
     if (!Number.isInteger(idx) || idx < 0) continue;
     result[shortKey] = idx;
   }
@@ -105,6 +107,8 @@ export function getHealingHistoryForTest(testId) {
 const HEALING_ELEMENT_TIMEOUT = parseInt(process.env.HEALING_ELEMENT_TIMEOUT, 10) || 5000;
 const HEALING_RETRY_COUNT     = parseInt(process.env.HEALING_RETRY_COUNT, 10) || 3;
 const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) || 400;
+const HEALING_HINT_MAX_FAILS  = parseInt(process.env.HEALING_HINT_MAX_FAILS, 10) || 3;
+const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 10) || 1200;
 
 /**
  * Generate the self-healing runtime helper code as a string for injection
@@ -126,6 +130,7 @@ export function getSelfHealingHelperCode(healingHints) {
     const DEFAULT_TIMEOUT = ${HEALING_ELEMENT_TIMEOUT};
     const RETRY_COUNT = ${HEALING_RETRY_COUNT};
     const RETRY_DELAY = ${HEALING_RETRY_DELAY};
+    const FIRST_VISIBLE_WAIT_CAP = ${HEALING_VISIBLE_WAIT_CAP};
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     const looksLikeSelector = (value) => {
@@ -180,7 +185,8 @@ export function getSelfHealingHelperCode(healingHints) {
       // No element is visible yet — wait for the first one to appear.
       // This preserves the original timeout-based retry behaviour.
       const first = baseLocator.first();
-      await first.waitFor({ state: 'visible', timeout });
+      const waitTimeout = Math.min(timeout, FIRST_VISIBLE_WAIT_CAP);
+      await first.waitFor({ state: 'visible', timeout: waitTimeout });
       return first;
     }
 
@@ -413,6 +419,65 @@ export function getSelfHealingHelperCode(healingHints) {
       });
     }
 
+    async function safeSelect(page, labelOrText, value) {
+      if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
+        throw new Error('safeSelect: labelOrText argument is required (got ' + typeof labelOrText + ')');
+      }
+      const strValue = (value == null) ? '' : String(value);
+      const strategies = looksLikeSelector(labelOrText)
+        ? [p => p.locator(labelOrText)]
+        : [
+          p => p.getByLabel(labelOrText),
+          p => p.getByRole('combobox', { name: labelOrText }),
+          p => p.getByRole('listbox', { name: labelOrText }),
+          p => p.locator(\`select[aria-label*="\${labelOrText}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'select::' + labelOrText });
+        await ensureReady(el);
+        await el.selectOption(strValue);
+      });
+    }
+
+    async function safeCheck(page, labelOrText) {
+      if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
+        throw new Error('safeCheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
+      }
+      const strategies = looksLikeSelector(labelOrText)
+        ? [p => p.locator(labelOrText)]
+        : [
+          p => p.getByRole('checkbox', { name: labelOrText }),
+          p => p.getByLabel(labelOrText),
+          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'check::' + labelOrText });
+        await ensureReady(el);
+        await el.check();
+      });
+    }
+
+    async function safeUncheck(page, labelOrText) {
+      if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
+        throw new Error('safeUncheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
+      }
+      const strategies = looksLikeSelector(labelOrText)
+        ? [p => p.locator(labelOrText)]
+        : [
+          p => p.getByRole('checkbox', { name: labelOrText }),
+          p => p.getByLabel(labelOrText),
+          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+        ];
+
+      await retry(async () => {
+        const el = await findElement(page, strategies, { healingKey: 'uncheck::' + labelOrText });
+        await ensureReady(el);
+        await el.uncheck();
+      });
+    }
+
     // safeExpect — self-healing visibility assertions
     //
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
@@ -642,6 +707,34 @@ export function applyHealingTransforms(code) {
       /page\.locator\(['"`]([^'"`]+)['"`]\)\.fill\(([^)]+)\)/g,
       (match, sel, val) => looksLikeCssSelector(sel) ? match : `safeFill(page, '${esc(sel)}', ${val})`
     )
+    .replace(
+      /\bpage\.check\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeCheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /\bpage\.uncheck\(['"`]([^'"`]+)['"`]\)/g,
+      (match, arg) => looksLikeCssSelector(arg) ? match : `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.check\(\)/g,
+      (match, arg) => `safeCheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.uncheck\(\)/g,
+      (match, arg) => `safeUncheck(page, '${esc(arg)}')`
+    )
+    .replace(
+      /\bpage\.selectOption\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
+      (match, arg, val) => looksLikeCssSelector(arg) ? match : `safeSelect(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.selectOption\(([^)]+)\)/g,
+      (match, arg, val) => `safeSelect(page, '${esc(arg)}', ${val})`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.selectOption\(([^)]+)\)/g,
+      (match, sel, val) => looksLikeCssSelector(sel) ? match : `safeSelect(page, '${esc(sel)}', ${val})`
+    )
     // ── Assertion transforms ────────────────────────────────────────────────
     // Rewrite ALL role-based visibility assertions into safeExpect.
     // Covers every common ARIA role — not just the original 5.
@@ -715,6 +808,9 @@ INTERACTIONS — use these exclusively:
   ✓ await safeDblClick(page, text)         — for any double-click
   ✓ await safeHover(page, text)            — for any hover (menus, tooltips)
   ✓ await safeFill(page, label, value)     — for any input fill
+  ✓ await safeSelect(page, label, value)   — for any select/dropdown
+  ✓ await safeCheck(page, label)           — for checkbox/radio checked state
+  ✓ await safeUncheck(page, label)         — for checkbox/radio unchecked state
 
 VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
   ✓ await safeExpect(page, expect, text)           — assert any element is visible
@@ -758,7 +854,7 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ page.getByPlaceholder(...).fill(...)   ← already handled by safeFill
   ✗ page.getByTestId(...).fill(...)
 
-  Form controls (use safeFill or safeClick instead):
+  Form controls (use safeSelect/safeCheck/safeUncheck):
   ✗ page.check(...)
   ✗ page.uncheck(...)
   ✗ page.selectOption(...)

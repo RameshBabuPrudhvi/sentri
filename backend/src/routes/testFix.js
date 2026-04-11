@@ -67,6 +67,13 @@ function buildUserPrompt(test, failureResult, project) {
       failureResult.steps.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`));
       lines.push("");
     }
+
+    const dom = failureResult.domSnapshot;
+    if (dom && typeof dom === "string") {
+      lines.push("DOM snapshot excerpt (trimmed):");
+      lines.push(dom.slice(0, 2500));
+      lines.push("");
+    }
   }
 
   if (test.steps?.length) {
