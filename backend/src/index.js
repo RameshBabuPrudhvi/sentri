@@ -109,7 +109,7 @@ app.get("/health", (_req, res) => {
 // GET /health/ready — readiness: can the process serve traffic?
 // Returns 503 if any critical subsystem is unhealthy so load balancers
 // can stop routing requests to this instance rather than returning errors.
-app.get("/health/ready", (_req, res) => {
+app.get("/health/ready", async (_req, res) => {
   const checks = {};
   let allOk = true;
 
