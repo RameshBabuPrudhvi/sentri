@@ -1,24 +1,16 @@
 /**
  * @module tests/run-tests
- * @description Unified backend test runner for all test files.
+ * @description Unified frontend test runner with backend-aligned output.
  */
 
 import { spawnSync } from "node:child_process";
 
 const files = [
-  "tests/code-parsing.test.js",
-  "tests/self-healing.test.js",
-  "tests/pipeline.test.js",
-  "tests/api-flow.test.js",
-  "tests/integration-routes.test.js",
   "tests/utils.test.js",
+  "tests/more-utils.test.js",
+  "tests/api.integration.test.js",
   "tests/test-fix.test.js",
-  "tests/healing-transforms.test.js",
-  "tests/deduplicator.test.js",
-  "tests/assertion-enhancer.test.js",
-  "tests/test-validator.test.js",
-  "tests/feedback-loop.test.js",
-  "tests/pipeline-orchestrator.test.js",
+  "tests/command-palette.test.js",
 ];
 
 let passed = 0;
@@ -41,8 +33,8 @@ console.log("\n─────────────────────�
 console.log(`Results: ${passed} passed, ${failed} failed out of ${files.length} test files`);
 
 if (failed > 0) {
-  console.log("\n⚠️  Backend test run failed");
+  console.log("\n⚠️  Frontend test run failed");
   process.exit(1);
 }
 
-console.log("\n🎉 All backend tests passed!");
+console.log("\n🎉 All frontend tests passed!");
