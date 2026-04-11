@@ -503,6 +503,7 @@ export default function StepResultsView({ result, run, onBack }) {
 
       {/* ── Main split ──────────────────────────────────────────────────── */}
       <div
+        className="run-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "300px 1fr",
