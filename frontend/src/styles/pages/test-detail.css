@@ -207,11 +207,7 @@
     display: none;
   }
 
-  /* Tighten table cell padding */
-  .td-runs-table .table th,
-  .td-runs-table .table td {
-    padding: 10px 8px;
-  }
+  /* Table cell padding: handled by shared rule in utilities.css */
 
   /* Card padding: tighter on mobile */
   .td-layout .card {

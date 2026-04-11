@@ -93,11 +93,7 @@
     max-width: 100% !important;
   }
 
-  /* Tighten table cell padding */
-  .tests-table .table th,
-  .tests-table .table td {
-    padding: 10px 8px;
-  }
+  /* Table cell padding: handled by shared rule in utilities.css */
 
   /* Bulk bar: wrap action buttons */
   .tests-bulk-bar {

@@ -50,9 +50,5 @@
     display: none;
   }
 
-  /* Tighten table cell padding */
-  .rpt-table .table th,
-  .rpt-table .table td {
-    padding: 10px 8px;
-  }
+  /* Table cell padding: handled by shared rule in utilities.css */
 }

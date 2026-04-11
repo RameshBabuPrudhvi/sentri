@@ -255,11 +255,7 @@
     display: none;
   }
 
-  /* Tighten table cell padding */
-  .pd-review-table .table th,
-  .pd-review-table .table td {
-    padding: 10px 8px;
-  }
+  /* Table cell padding: handled by shared rule in utilities.css */
 
   /* Search input: full width */
   .pd-search-input {

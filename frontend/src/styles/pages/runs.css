@@ -68,11 +68,7 @@
     display: none;
   }
 
-  /* Tighten table cell padding */
-  .runs-table .table th,
-  .runs-table .table td {
-    padding: 10px 8px;
-  }
+  /* Table cell padding: handled by shared rule in utilities.css */
 
   /* Hide project URL sub-line in Project column */
   .runs-table .table td:nth-child(2) div[style*="font-mono"] {

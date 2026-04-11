@@ -91,6 +91,16 @@
   }
 }
 
+/* ── Table responsive: tighten cell padding on mobile ───────────────────────── */
+/* Shared rule — every page with a .table benefits from tighter padding on       */
+/* small screens. Page-specific column hiding still lives in pages/*.css.         */
+@media (max-width: 480px) {
+  .table th,
+  .table td {
+    padding: 10px 8px;
+  }
+}
+
 /* ── Flex ────────────────────────────────────────────────────────────────────── */
 .flex-between { display: flex; align-items: center; justify-content: space-between; }
 .flex-center  { display: flex; align-items: center; justify-content: center; }
