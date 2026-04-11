@@ -605,6 +605,170 @@ These items are not sprint-bounded — they should be addressed incrementally al
 
 ---
 
+### M-06 — Restructure frontend to feature-sliced architecture 🟡 High
+
+**Problem:** `frontend/src/components/` is a flat directory of ~35 files with no domain grouping. Run-execution views (`CrawlView`, `GenerateView`, `TestRunView`, `StepResultsView`, `LiveBrowserView`, `RunSidebar`, `ExecutionTimeline`, `PipelineCard`, `LLMStreamPanel`, `ActivityLogCard`), modals (`GenerateTestModal`, `CrawlProjectModal`, `RunRegressionModal`, `DeleteProjectModal`), charts (`PassFailChart`, `SparklineChart`, `StackedBar`, `PassRateBar`, `StatCard`), badges (`TestBadges`, `StatusBadge`, `AgentTag`), and layout chrome (`CommandPalette`, `ProviderBadge`, `OnboardingTour`) are all siblings. This makes the codebase hard to navigate, slows onboarding, and violates the principle of colocation by domain.
+
+**Note:** PR #70 already extracted `Sidebar`, `TopBar`, and `ThemeToggle` into `components/layout/`. This item completes the restructuring.
+
+**Target structure (Feature-Sliced / Domain-Grouped):**
+
+```
+frontend/src/
+├── app/                          # App shell — wiring only
+│   ├── App.jsx                   # Router + Suspense boundaries
+│   ├── routes.jsx                # Route definitions (extract from App.jsx)
+│   └── providers/
+│       └── AuthProvider.jsx      # Renamed from context/AuthContext.jsx
+│
+├── api/                          # API layer — split monolithic api.js
+│   ├── client.js                 # Base fetch wrapper (timeout, CSRF, 401 handling)
+│   ├── auth.js                   # Auth endpoints
+│   ├── projects.js               # Project CRUD + crawl/run triggers
+│   ├── tests.js                  # Test CRUD + review actions + export URLs
+│   ├── runs.js                   # Run endpoints
+│   └── reports.js                # Dashboard + reports
+│
+├── components/                   # Shared, domain-agnostic UI primitives
+│   ├── ui/                       # Atomic components
+│   │   ├── Tooltip.jsx
+│   │   ├── Collapsible.jsx
+│   │   ├── ModalShell.jsx
+│   │   ├── OutcomeBanner.jsx
+│   │   └── ExploreModePicker.jsx
+│   ├── charts/                   # Reusable data visualisation
+│   │   ├── PassFailChart.jsx
+│   │   ├── SparklineChart.jsx
+│   │   ├── StackedBar.jsx
+│   │   ├── PassRateBar.jsx
+│   │   └── StatCard.jsx
+│   ├── badges/                   # Status indicators
+│   │   ├── TestBadges.jsx
+│   │   ├── StatusBadge.jsx
+│   │   └── AgentTag.jsx
+│   └── layout/                   # App shell chrome (already started in PR #70)
+│       ├── Layout.jsx
+│       ├── Sidebar.jsx
+│       ├── TopBar.jsx
+│       ├── ThemeToggle.jsx
+│       ├── AppLogo.jsx
+│       ├── ProtectedRoute.jsx
+│       ├── CommandPalette.jsx
+│       ├── ProviderBadge.jsx
+│       └── OnboardingTour.jsx
+│
+├── features/                     # Domain features — each owns pages + components + hooks
+│   ├── auth/
+│   │   ├── pages/
+│   │   │   ├── Login.jsx
+│   │   │   └── ForgotPassword.jsx
+│   │   └── hooks/
+│   │       └── useAuth.js
+│   ├── dashboard/
+│   │   ├── pages/
+│   │   │   └── Dashboard.jsx
+│   │   └── components/
+│   │       └── TestDials.jsx
+│   ├── projects/
+│   │   ├── pages/
+│   │   │   ├── Applications.jsx
+│   │   │   ├── ProjectDetail.jsx
+│   │   │   └── NewProject.jsx
+│   │   ├── components/
+│   │   │   ├── ProjectHeader.jsx
+│   │   │   ├── RunsTab.jsx
+│   │   │   ├── TraceabilityTab.jsx
+│   │   │   ├── ActiveRunBanner.jsx
+│   │   │   ├── RunToast.jsx
+│   │   │   ├── CrawlProjectModal.jsx
+│   │   │   └── DeleteProjectModal.jsx
+│   │   └── hooks/
+│   │       ├── useProjectData.js
+│   │       └── useProjectRunMonitor.js
+│   ├── tests/
+│   │   ├── pages/
+│   │   │   ├── Tests.jsx
+│   │   │   └── TestDetail.jsx
+│   │   ├── components/
+│   │   │   ├── GenerateTestModal.jsx
+│   │   │   ├── DiffView.jsx
+│   │   │   └── AiFixPanel.jsx
+│   │   └── hooks/
+│   ├── runs/
+│   │   ├── pages/
+│   │   │   ├── Runs.jsx
+│   │   │   └── RunDetail.jsx
+│   │   ├── components/
+│   │   │   ├── CrawlView.jsx
+│   │   │   ├── GenerateView.jsx
+│   │   │   ├── TestRunView.jsx
+│   │   │   ├── StepResultsView.jsx
+│   │   │   ├── LiveBrowserView.jsx
+│   │   │   ├── OverlayCanvas.jsx
+│   │   │   ├── HealingTimeline.jsx
+│   │   │   ├── RunSidebar.jsx
+│   │   │   ├── ExecutionTimeline.jsx
+│   │   │   ├── PipelineCard.jsx
+│   │   │   ├── LLMStreamPanel.jsx
+│   │   │   ├── GenerationSuccessBanner.jsx
+│   │   │   ├── ActivityLogCard.jsx
+│   │   │   ├── SiteGraph.jsx
+│   │   │   └── RunRegressionModal.jsx
+│   │   └── hooks/
+│   │       ├── useRunSSE.js
+│   │       └── useLogBuffer.js
+│   ├── reports/
+│   │   └── pages/
+│   │       └── Reports.jsx
+│   ├── settings/
+│   │   └── pages/
+│   │       └── Settings.jsx
+│   ├── context/                  # "System Context" feature
+│   │   └── pages/
+│   │       └── Context.jsx
+│   └── ai/                       # AI chat / assistant
+│       └── components/
+│           └── AIChat.jsx
+│
+├── hooks/                        # Truly global hooks (not feature-specific)
+│   ├── usePageTitle.js
+│   └── useOnboarding.js
+│
+├── utils/                        # Pure utility functions (no React)
+│   ├── apiBase.js
+│   ├── csrf.js
+│   ├── fuzzyMatch.js
+│   ├── formatTestName.js
+│   ├── testTypeLabels.js
+│   ├── exportCsv.js
+│   ├── formatters.js
+│   └── pdfReportGenerator.js
+│
+└── styles/                       # Keep existing ITCSS — already well-organised
+    ├── tokens.css
+    ├── reset.css
+    ├── components.css
+    ├── utilities.css
+    ├── features/
+    └── pages/
+```
+
+**Key principles:**
+
+1. **Feature-sliced colocation** — each domain (`projects`, `tests`, `runs`, `auth`) owns its pages, components, and hooks together. When working on "runs", everything needed is in `features/runs/`.
+2. **Shared components split by concern** — `components/ui/`, `charts/`, `badges/`, `layout/` instead of 35 files flat. Rule: if used by 2+ features → `components/`. If used by one feature → `features/<that-feature>/components/`.
+3. **Split monolithic `api.js`** — the current ~380-line file covers auth, projects, tests, runs, reports, settings, chat, and SSE. Split into domain modules under `api/` with a shared `client.js` base.
+4. **`app/` for wiring** — `App.jsx`, route definitions, and global providers are app-level concerns, not features.
+5. **Keep ITCSS styles as-is** — the `styles/` directory is already well-layered; no change needed.
+
+**Migration strategy:** Move files incrementally (one feature at a time), updating imports as you go. Start with `runs/` (largest cluster, 15+ components) then `projects/`, `tests/`, `auth/`. Use IDE "move file + update imports" refactoring. Each feature migration is a single PR.
+
+**Files to change:** All `frontend/src/components/*.jsx`, `frontend/src/pages/*.jsx`, `frontend/src/hooks/*.js`, `frontend/src/api.js`, `frontend/src/App.jsx`, `frontend/src/context/AuthContext.jsx`
+
+**Effort:** L (incremental — 1 PR per feature domain) | **Source:** Audit
+
+---
+
 ## Summary
 
 | Sprint | Items | Key deliverable |
@@ -613,9 +777,9 @@ These items are not sprint-bounded — they should be addressed incrementally al
 | Sprint 2 (Weeks 4–6) | S2-01 through S2-04 | CI/CD integration, scheduling, alerts |
 | Sprint 3 (Weeks 7–10) | S3-01 through S3-08 | Test quality, coverage, trust loop |
 | Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
-| Ongoing | M-01 through M-05 | Infrastructure hardening |
+| Ongoing | M-01 through M-06 | Infrastructure hardening + frontend restructuring |
 
-**Total items:** 28 (12 completed)  
+**Total items:** 29 (12 completed)  
 **Completed:** S1-01 ✅, S1-02 ✅, S1-03 ✅, S1-04 ✅, S1-05 ✅, S1-06 ✅, S2-04 ✅, S3-01 ✅, S3-03 ✅, S3-05 ✅, S3-06 ✅, S3-07 ✅  
 **Critical blockers (must ship before team use):** None — all Sprint 1 items complete  
 **Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
