@@ -247,20 +247,29 @@ test("SELECTOR_ISSUE and URL_MISMATCH and TIMEOUT get priority='high'", () => {
   }
 });
 
-test("NAVIGATION_FAIL and ASSERTION_FAIL and UNKNOWN get priority='medium'", () => {
+test("NAVIGATION_FAIL and UNKNOWN get priority='medium'", () => {
   const mediumErrors = [
     { testId: "t1", status: "failed", error: "navigation failed: 503" },
-    { testId: "t2", status: "failed", error: "expect(received).toContainText(expected) received: 'x'" },
     { testId: "t3", status: "failed", error: "a completely unknown error" },
   ];
   const testMap = {
-    t1: makeTest("t1"), t2: makeTest("t2"), t3: makeTest("t3"),
+    t1: makeTest("t1"), t3: makeTest("t3"),
   };
   const { improvements } = analyzeRunResults(mediumErrors, testMap, {});
   for (const imp of improvements) {
     assert.equal(imp.priority, "medium",
       `${imp.failureCategory} should be medium priority, got ${imp.priority}`);
   }
+});
+
+test("ASSERTION_FAIL gets priority='high' (hard-coded values are prompt-quality issues)", () => {
+  const assertionErrors = [
+    { testId: "t1", status: "failed", error: "expect(received).toContainText(expected) received: 'x'" },
+  ];
+  const testMap = { t1: makeTest("t1") };
+  const { improvements } = analyzeRunResults(assertionErrors, testMap, {});
+  assert.equal(improvements[0].priority, "high",
+    `ASSERTION_FAIL should be high priority, got ${improvements[0].priority}`);
 });
 
 test("improvement object contains testId, test, failureCategory, errorMessage, priority", () => {

@@ -46,6 +46,7 @@ export function recordHealing(testId, action, label, strategyIndex) {
   const existing = healingRepo.get(key);
   healingRepo.set(key, {
     strategyIndex: idx,
+    strategyVersion: STRATEGY_VERSION,
     succeededAt: new Date().toISOString(),
     failCount: existing?.failCount || 0,
   });
@@ -79,6 +80,9 @@ export function getHealingHint(testId, action, label) {
   const key = `${testId}::${action}::${label}`;
   const entry = healingRepo.get(key);
   if ((entry?.failCount || 0) >= HEALING_HINT_MAX_FAILS) return -1;
+  // Ignore hints from a different strategy version — the strategyIndex
+  // may point to a different strategy after strategies were reordered.
+  if (entry?.strategyVersion != null && entry.strategyVersion !== STRATEGY_VERSION) return -1;
   return entry?.strategyIndex ?? -1;
 }
 
@@ -95,6 +99,8 @@ export function getHealingHistoryForTest(testId) {
     const idx = val.strategyIndex;
     if ((val?.failCount || 0) >= HEALING_HINT_MAX_FAILS) continue;
     if (!Number.isInteger(idx) || idx < 0) continue;
+    // Skip hints from a different strategy version
+    if (val.strategyVersion != null && val.strategyVersion !== STRATEGY_VERSION) continue;
     result[shortKey] = idx;
   }
   return result;
@@ -109,6 +115,12 @@ const HEALING_RETRY_COUNT     = parseInt(process.env.HEALING_RETRY_COUNT, 10) ||
 const HEALING_RETRY_DELAY     = parseInt(process.env.HEALING_RETRY_DELAY, 10) || 400;
 const HEALING_HINT_MAX_FAILS  = parseInt(process.env.HEALING_HINT_MAX_FAILS, 10) || 3;
 const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 10) || 1200;
+
+// Strategy version — bump this whenever the strategy waterfall order changes
+// (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
+// Healing hints recorded with a different version are ignored so stale
+// strategyIndex values don't point to the wrong strategy after an upgrade.
+const STRATEGY_VERSION = 2;
 
 /**
  * Generate the self-healing runtime helper code as a string for injection
@@ -176,7 +188,14 @@ export function getSelfHealingHelperCode(healingHints) {
       if (!baseLocator) {
         throw new Error('Strategy returned a null/undefined locator');
       }
+      // Fast path: check if any element is already visible without waiting.
+      // This avoids the expensive waitFor timeout for strategies that clearly
+      // don't match, reducing worst-case waterfall time significantly.
       const count = await baseLocator.count().catch(() => 0);
+      if (count === 0) {
+        // No elements at all — fail fast instead of waiting the full timeout.
+        throw new Error('No elements matched this strategy');
+      }
       for (let n = 0; n < count; n++) {
         const candidate = baseLocator.nth(n);
         const visible = await candidate.isVisible().catch(() => false);

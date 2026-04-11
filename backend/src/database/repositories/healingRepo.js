@@ -20,20 +20,31 @@ export function get(key) {
  * @param {string} key
  * @param {Object} entry — { strategyIndex, succeededAt, failCount }
  */
+// Lazy migration flag — ensures the strategyVersion column exists before first use.
+let _migrated = false;
+function ensureStrategyVersionColumn(db) {
+  if (_migrated) return;
+  try { db.prepare("ALTER TABLE healing_history ADD COLUMN strategyVersion INTEGER").run(); } catch { /* already exists */ }
+  _migrated = true;
+}
+
 export function set(key, entry) {
   const db = getDatabase();
+  ensureStrategyVersionColumn(db);
   db.prepare(`
-    INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount)
-    VALUES (@key, @strategyIndex, @succeededAt, @failCount)
+    INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount, strategyVersion)
+    VALUES (@key, @strategyIndex, @succeededAt, @failCount, @strategyVersion)
     ON CONFLICT(key) DO UPDATE SET
       strategyIndex = @strategyIndex,
       succeededAt = @succeededAt,
-      failCount = @failCount
+      failCount = @failCount,
+      strategyVersion = @strategyVersion
   `).run({
     key,
     strategyIndex: entry.strategyIndex ?? -1,
     succeededAt: entry.succeededAt || null,
     failCount: entry.failCount || 0,
+    strategyVersion: entry.strategyVersion ?? null,
   });
 }
 
