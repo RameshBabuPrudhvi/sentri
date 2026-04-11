@@ -33,12 +33,36 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 export const app = express();
 
+// Trust the first hop's X-Forwarded-For header (set by nginx / load balancer).
+// Without this, Express uses the raw socket IP instead of the real client IP,
+// making per-IP rate limiting ineffective behind a reverse proxy.
+// "1" = trust exactly one proxy hop — adjust if you have multiple hops.
+app.set("trust proxy", 1);
+
 // ─── Global middleware ────────────────────────────────────────────────────────
 
 // Security headers: X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.
-// CSP is relaxed for the SPA — tighten in production once asset hashes are known.
+// CSP is configured with a baseline policy that allows the SPA to function while
+// blocking inline script injection (XSS mitigation). Tighten further in production
+// by replacing 'unsafe-inline' with nonce-based or hash-based script allowlisting.
 app.use(helmet({
-  contentSecurityPolicy: false,       // SPA serves its own CSP via meta tag or nginx
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'", "'unsafe-inline'"],   // needed by Vite in dev; replace with nonces in prod
+      styleSrc:       ["'self'", "'unsafe-inline'"],   // inline styles used throughout the SPA
+      imgSrc:         ["'self'", "data:", "blob:"],    // data: for canvas favicons, blob: for screenshots
+      connectSrc:     ["'self'"],                      // API + SSE calls — same origin only
+      fontSrc:        ["'self'", "data:"],
+      frameSrc:       ["'self'"],                      // Playwright trace viewer iframes
+      workerSrc:      ["'self'", "blob:"],             // Web Workers for PDF generation
+      objectSrc:      ["'none'"],
+      baseUri:        ["'self'"],
+      formAction:     ["'self'"],
+      frameAncestors: ["'none'"],                      // prevents clickjacking
+      upgradeInsecureRequests: [],
+    },
+  },
   crossOriginEmbedderPolicy: false,   // required for Playwright trace viewer iframes
 }));
 

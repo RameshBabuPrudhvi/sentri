@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, Suspense, lazy } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Play, Edit2, RefreshCw, Download,
@@ -8,7 +8,12 @@ import {
   Link2, Tag, Clipboard, Wand2,
 } from "lucide-react";
 import { api } from "../api.js";
-import DiffView from "../components/DiffView.jsx";
+// Heavy components lazy-loaded — only fetched when the user actually needs them.
+// DiffView and AiFixPanel are only rendered on explicit user interaction (click to
+// show diff / click to open AI fix panel), so they are ideal lazy-load candidates.
+// This removes ~40KB from the initial TestDetail chunk.
+const DiffView    = lazy(() => import("../components/DiffView.jsx"));
+const AiFixPanel  = lazy(() => import("../components/AiFixPanel.jsx"));
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
@@ -17,7 +22,7 @@ import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
-import AiFixPanel from "../components/AiFixPanel.jsx";
+// AiFixPanel imported above via React.lazy()
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
@@ -171,8 +176,8 @@ export default function TestDetail() {
       if (codeEdited && editCode.trim()) {
         // User manually edited code — save it directly, skip AI regeneration
         payload.playwrightCode = editCode;
-      } else if (test.playwrightCode && stepsChanged) {
-        // Steps changed — request a code preview for review
+      } else if (test.playwrightCode) {
+        // Steps may have changed — request a code preview for review
         payload.previewCode = true;
       }
 
@@ -207,9 +212,7 @@ export default function TestDetail() {
       setTest(updated);
       setCodePreview(null);
     } catch (err) {
-      // Show the error as a dismissible warning — editError is only visible in
-      // edit mode, but we've already exited editing at this point.
-      setRegenWarning(err.message || "Failed to apply generated code.");
+      setEditError(err.message || "Failed to apply generated code.");
     } finally {
       setApplyingPreview(false);
     }
@@ -382,7 +385,7 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? "Saving…" : "Save Changes"}
+                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
               </button>
             </>
           ) : (
@@ -755,10 +758,12 @@ export default function TestDetail() {
                     {/* Diff panel — shown above source when "Show changes" is active */}
                     {showDiff && test.playwrightCodePrev && (
                       <div style={{ marginBottom: 16 }}>
-                        <DiffView
-                          before={test.playwrightCodePrev}
-                          after={test.playwrightCode}
-                        />
+                        <Suspense fallback={<div style={{ height: 60, background: "var(--bg2)", borderRadius: 6 }} />}>
+                          <DiffView
+                            before={test.playwrightCodePrev}
+                            after={test.playwrightCode}
+                          />
+                        </Suspense>
                       </div>
                     )}
                     {(test.steps || []).map((step, idx) => (
@@ -827,10 +832,12 @@ export default function TestDetail() {
                       <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                         Steps changes
                       </div>
-                      <DiffView
-                        before={prevSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
-                        after={(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
-                      />
+                      <Suspense fallback={<div style={{ height: 40, background: "var(--bg2)", borderRadius: 6 }} />}>
+                        <DiffView
+                          before={prevSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                          after={(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
+                        />
+                      </Suspense>
                     </div>
                   ) : null;
                   const bdd = isBddTest(test.steps);
@@ -973,7 +980,9 @@ export default function TestDetail() {
                 The AI updated the Playwright code to match your new steps. Review the diff below, then accept, edit, or discard.
               </div>
               <div style={{ padding: "12px 16px" }}>
-                <DiffView before={codePreview.originalCode || ""} after={codePreview.generatedCode} />
+                <Suspense fallback={<div style={{ height: 80, background: "var(--bg2)", borderRadius: 6 }} />}>
+                  <DiffView before={codePreview.originalCode || ""} after={codePreview.generatedCode} />
+                </Suspense>
               </div>
               <div style={{
                 display: "flex", gap: 8, padding: "12px 16px",
@@ -998,15 +1007,17 @@ export default function TestDetail() {
 
           {/* AI Fix Panel */}
           {showFixPanel && test.playwrightCode && (
-            <AiFixPanel
-              testId={testId}
-              originalCode={test.playwrightCode}
-              onApplied={(updated) => {
-                setTest(updated);
-                setShowFixPanel(false);
-              }}
-              onClose={() => setShowFixPanel(false)}
-            />
+            <Suspense fallback={<div style={{ height: 120, background: "var(--bg2)", borderRadius: 8, margin: "0 0 16px" }} />}>
+              <AiFixPanel
+                testId={testId}
+                originalCode={test.playwrightCode}
+                onApplied={(updated) => {
+                  setTest(updated);
+                  setShowFixPanel(false);
+                }}
+                onClose={() => setShowFixPanel(false)}
+              />
+            </Suspense>
           )}
 
           {/* Recent Test Runs card */}

@@ -38,15 +38,14 @@ import { exploreStates } from "./pipeline/stateExplorer.js";
 import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
+import { setStep } from "./utils/pipelineState.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog } from "./utils/logFormatter.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 
-function setStep(run, step) {
-  run.currentStep = step;
-  runRepo.update(run.id, { currentStep: step });
-  emitRunEvent(run.id, "snapshot", { run });
-}
+/**
+ * setStep is imported from utils/pipelineState.js — shared with pipelineOrchestrator.js.
+ */
 
 /**
  * Shared Steps 2 & 3: Element filtering + intent classification.

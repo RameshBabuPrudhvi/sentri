@@ -362,7 +362,7 @@ router.post("/register", async (req, res) => {
  * @returns {429} Rate limit exceeded (`Retry-After` header set).
  */
 router.post("/login", async (req, res) => {
-  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const ip = req.ip || "unknown";
   const rate = checkRateLimit("login", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
@@ -446,7 +446,7 @@ router.get("/me", requireAuth, (req, res) => {
  */
 router.post("/forgot-password", async (req, res) => {
   // Rate-limit to prevent token-flooding DoS (fills memory with reset tokens)
-  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const ip = req.ip || "unknown";
   const rate = checkRateLimit("forgotPassword", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);
@@ -486,8 +486,11 @@ router.post("/forgot-password", async (req, res) => {
   }
 
   const response = { message: genericMsg };
-  // In non-production, include the token in the response for testing
-  if (process.env.NODE_ENV !== "production") {
+  // Only expose the token in the response when explicitly opted-in.
+  // Using NODE_ENV!=="production" was unsafe: staging servers without the flag
+  // set would leak live reset tokens to any caller. ENABLE_DEV_RESET_TOKENS
+  // must be deliberately set — absence of a production flag is not sufficient.
+  if (process.env.ENABLE_DEV_RESET_TOKENS === "true") {
     response.resetToken = resetToken;
     response.resetUrl = resetUrl;
   }
@@ -507,7 +510,7 @@ router.post("/forgot-password", async (req, res) => {
  */
 router.post("/reset-password", async (req, res) => {
   // Rate-limit to prevent brute-force token guessing
-  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const ip = req.ip || "unknown";
   const rate = checkRateLimit("resetPassword", ip);
   if (!rate.allowed) {
     res.setHeader("Retry-After", rate.retryAfterSec);

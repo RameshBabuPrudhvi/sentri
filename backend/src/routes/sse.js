@@ -15,7 +15,6 @@
 import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
-import { runAbortControllers } from "../utils/runWithAbort.js";
 
 const router = Router();
 
@@ -55,18 +54,12 @@ export function emitRunEvent(runId, type, payload = {}) {
 // fallback exists because EventSource cannot send custom headers.
 router.get("/runs/:runId/events", (req, res) => {
   const { runId } = req.params;
-  const dbRun = runRepo.getById(runId);
-  if (!dbRun) return res.status(404).json({ error: "not found" });
+  const run = runRepo.getById(runId);
+  if (!run) return res.status(404).json({ error: "not found" });
 
   // Verify the run's project exists (future: check user ownership here)
-  const project = projectRepo.getById(dbRun.projectId);
+  const project = projectRepo.getById(run.projectId);
   if (!project) return res.status(404).json({ error: "project not found" });
-
-  // For running runs, prefer the live in-memory run object (held by runWithAbort)
-  // over the SQLite snapshot. The in-memory object has up-to-date logs, results,
-  // and pipeline state that may not have been flushed to SQLite yet.
-  const liveEntry = runAbortControllers.get(runId);
-  const run = (liveEntry?.run && liveEntry.run.status === "running") ? liveEntry.run : dbRun;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

@@ -16,17 +16,15 @@ import { validateTest } from "./testValidator.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
+import { setStep } from "../utils/pipelineState.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 
 /**
- * setStep — update the run's currentStep and broadcast a snapshot to SSE.
+ * setStep is now imported from utils/pipelineState.js — the single source of
+ * truth shared with crawler.js. Keeping this comment so reviewers know the
+ * function did not disappear, it moved.
  */
-function setStep(run, step) {
-  run.currentStep = step;
-  runRepo.update(run.id, { currentStep: step });
-  emitRunEvent(run.id, "snapshot", { run });
-}
 
 /**
  * Run the shared post-generation pipeline stages:

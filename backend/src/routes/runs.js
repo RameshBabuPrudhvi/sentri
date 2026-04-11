@@ -156,12 +156,8 @@ router.get("/projects/:id/runs", (req, res) => {
 });
 
 router.get("/runs/:runId", (req, res) => {
-  const dbRun = runRepo.getById(req.params.runId);
-  if (!dbRun) return res.status(404).json({ error: "not found" });
-  // For running runs, prefer the live in-memory run object which has
-  // up-to-date logs, results, and pipeline state not yet flushed to SQLite.
-  const liveEntry = runAbortControllers.get(req.params.runId);
-  const run = (liveEntry?.run && liveEntry.run.status === "running") ? liveEntry.run : dbRun;
+  const run = runRepo.getById(req.params.runId);
+  if (!run) return res.status(404).json({ error: "not found" });
   res.json(run);
 });
 

@@ -76,19 +76,9 @@ if (orphanCount > 0) {
 process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
 process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });
 
-// ─── Seed helper (dev / testing only) ─────────────────────────────────────────
-if (process.env.NODE_ENV !== "production") {
-  app.patch("/api/_seed/runs/:id", requireAuth, (req, res) => {
-    const runData = { ...req.body, id: req.params.id };
-    const existing = runRepo.getById(req.params.id);
-    if (existing) {
-      runRepo.save(runData);
-    } else {
-      runRepo.create(runData);
-    }
-    res.json({ ok: true, id: req.params.id });
-  });
-}
+// NOTE: The _seed/runs endpoint has been removed from this file.
+// If you need it for integration tests, mount it in your test setup file
+// directly on a test-only Express instance — never in this production entry point.
 
 // ─── Mount route modules ──────────────────────────────────────────────────────
 // Auth routes are public (login, register, OAuth callbacks)
@@ -106,8 +96,65 @@ app.use("/api", requireAuth, systemRouter);
 app.use("/api", requireAuth, chatRouter);
 app.use("/api", requireAuth, testFixRouter);
 
-// Health check (root-level, not under /api)
-app.get("/health", (req, res) => res.json({ ok: true }));
+// ─── Health probes (root-level, not under /api, no auth required) ────────────
+// GET /health  — liveness: is the process alive?
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    uptime: Math.floor(process.uptime()),
+    version: process.env.npm_package_version || "unknown",
+  });
+});
+
+// GET /health/ready — readiness: can the process serve traffic?
+// Returns 503 if any critical subsystem is unhealthy so load balancers
+// can stop routing requests to this instance rather than returning errors.
+app.get("/health/ready", (_req, res) => {
+  const checks = {};
+  let allOk = true;
+
+  // 1. SQLite ping
+  try {
+    const { getDatabase } = await import("./database/sqlite.js").catch(() => ({}));
+    if (getDatabase) {
+      getDatabase().prepare("SELECT 1").get();
+      checks.database = { ok: true };
+    } else {
+      checks.database = { ok: false, error: "db module unavailable" };
+      allOk = false;
+    }
+  } catch (err) {
+    checks.database = { ok: false, error: err.message };
+    allOk = false;
+  }
+
+  // 2. Memory guard — flag if heap is over 90% of available
+  try {
+    const mem = process.memoryUsage();
+    const heapMb = Math.round(mem.heapUsed / 1024 / 1024);
+    const totalMb = Math.round(mem.heapTotal / 1024 / 1024);
+    const pct = Math.round((mem.heapUsed / mem.heapTotal) * 100);
+    checks.memory = { ok: pct < 90, heapMb, totalMb, pct };
+    if (pct >= 90) allOk = false;
+  } catch (err) {
+    checks.memory = { ok: true }; // non-fatal if unavailable
+  }
+
+  // 3. Artifacts directory writable
+  try {
+    const { ARTIFACTS_DIR } = await import("./middleware/appSetup.js").catch(() => ({}));
+    if (ARTIFACTS_DIR) {
+      const fs = await import("fs");
+      fs.accessSync(ARTIFACTS_DIR, fs.constants.W_OK);
+      checks.artifacts = { ok: true };
+    }
+  } catch (err) {
+    checks.artifacts = { ok: false, error: err.message };
+    allOk = false;
+  }
+
+  res.status(allOk ? 200 : 503).json({ ok: allOk, checks });
+});
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;

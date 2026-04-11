@@ -30,13 +30,6 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
   useEffect(() => {
     if (!originalCode) return;
 
-    // Reset state for a clean slate when the effect re-runs
-    setStreaming(true);
-    setTokens("");
-    setFixedCode(null);
-    setExplanation(null);
-    setError(null);
-
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -97,8 +90,6 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
 
   // Guard: if the test has no Playwright code, show an informative message
   // instead of firing a fix request that will return a 400.
-  // NOTE: All hooks are declared above this guard so hook call order is
-  // identical on every render (React Rules of Hooks).
   if (!originalCode) {
     return (
       <div className="card" style={{ padding: 0, overflow: "hidden", border: "1px solid var(--accent)", borderRadius: 10 }}>
