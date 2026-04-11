@@ -212,7 +212,7 @@ export default function TestDetail() {
       setTest(updated);
       setCodePreview(null);
     } catch (err) {
-      setEditError(err.message || "Failed to apply generated code.");
+      setRegenWarning(err.message || "Failed to apply generated code.");
     } finally {
       setApplyingPreview(false);
     }

@@ -243,7 +243,7 @@ No imports, no explanation.`;
 
   const project = projectRepo.getById(test.projectId);
   logActivity({
-    type: stepsChanged && regenerateCode ? "test.regenerate" : "test.edit",
+    type: stepsChanged && (regenerateCode || previewCode) ? "test.regenerate" : "test.edit",
     projectId: test.projectId,
     projectName: project?.name || null,
     testId: test.id,

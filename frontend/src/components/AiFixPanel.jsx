@@ -30,6 +30,13 @@ export default function AiFixPanel({ testId, originalCode, onApplied, onClose })
   useEffect(() => {
     if (!originalCode) return;
 
+    // Reset state for a clean slate when the effect re-runs
+    setStreaming(true);
+    setTokens("");
+    setFixedCode(null);
+    setExplanation(null);
+    setError(null);
+
     const controller = new AbortController();
     abortRef.current = controller;
 
