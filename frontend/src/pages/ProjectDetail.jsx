@@ -19,6 +19,7 @@ import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
 import TraceabilityTab from "../components/project/TraceabilityTab.jsx";
 import ProjectHeader from "../components/project/ProjectHeader.jsx";
+import TablePagination from "../components/TablePagination.jsx";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;
@@ -546,17 +547,13 @@ export default function ProjectDetail() {
               </div>
 
               {/* Pagination */}
-              {reviewTotalPages > 1 && (
-                <div className="pd-pagination">
-                  <span className="text-xs text-muted">
-                    {filteredByReview.length} tests · page {reviewPage} of {reviewTotalPages}
-                  </span>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === 1} onClick={() => setReviewPage(p => p - 1)}>← Prev</button>
-                    <button className="btn btn-ghost btn-xs" disabled={reviewPage === reviewTotalPages} onClick={() => setReviewPage(p => p + 1)}>Next →</button>
-                  </div>
-                </div>
-              )}
+              <TablePagination
+                total={filteredByReview.length}
+                page={reviewPage}
+                totalPages={reviewTotalPages}
+                onPageChange={setReviewPage}
+                label="tests"
+              />
             </>
           )}
         </div>

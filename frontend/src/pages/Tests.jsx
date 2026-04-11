@@ -18,6 +18,7 @@ import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeL
 import { exportCsv } from "../utils/exportCsv.js";
 import { StatusBadge, ScenarioBadges } from "../components/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
+import TablePagination from "../components/TablePagination.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.
@@ -1010,17 +1011,13 @@ export default function Tests() {
             </table>
 
             {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="tests-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>
-                  {filtered.length} tests · page {page} of {totalPages}
-                </span>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button className="btn btn-ghost btn-xs" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-                  <button className="btn btn-ghost btn-xs" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next →</button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              total={filtered.length}
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              label="tests"
+            />
           </>
         )}
       </div>
