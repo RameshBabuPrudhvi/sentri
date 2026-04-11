@@ -20,20 +20,31 @@ export function get(key) {
  * @param {string} key
  * @param {Object} entry — { strategyIndex, succeededAt, failCount }
  */
+// Lazy migration flag — ensures the strategyVersion column exists before first use.
+let _migrated = false;
+function ensureStrategyVersionColumn(db) {
+  if (_migrated) return;
+  try { db.prepare("ALTER TABLE healing_history ADD COLUMN strategyVersion INTEGER").run(); } catch { /* already exists */ }
+  _migrated = true;
+}
+
 export function set(key, entry) {
   const db = getDatabase();
+  ensureStrategyVersionColumn(db);
   db.prepare(`
-    INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount)
-    VALUES (@key, @strategyIndex, @succeededAt, @failCount)
+    INSERT INTO healing_history (key, strategyIndex, succeededAt, failCount, strategyVersion)
+    VALUES (@key, @strategyIndex, @succeededAt, @failCount, @strategyVersion)
     ON CONFLICT(key) DO UPDATE SET
       strategyIndex = @strategyIndex,
       succeededAt = @succeededAt,
-      failCount = @failCount
+      failCount = @failCount,
+      strategyVersion = @strategyVersion
   `).run({
     key,
     strategyIndex: entry.strategyIndex ?? -1,
     succeededAt: entry.succeededAt || null,
     failCount: entry.failCount || 0,
+    strategyVersion: entry.strategyVersion ?? null,
   });
 }
 
@@ -51,16 +62,51 @@ export function getAllAsDict() {
 
 /**
  * Get all healing entries for a specific test (keys starting with "<testId>::").
- * @param {string} testId
+ *
+ * Accepts both raw test IDs (`"TC-1"`) and versioned scope IDs
+ * (`"TC-1@v2"`).  When a versioned scope is passed we also query the
+ * legacy (unversioned) prefix so that pre-existing healing entries
+ * remain readable after upgrading to versioned scopes.
+ *
+ * @param {string} testId — raw test ID or versioned scope ID
  * @returns {Object<string, Object>} Map of `"action::label"` → entry.
  */
 export function getByTestId(testId) {
   const db = getDatabase();
-  const prefix = `${testId}::`;
-  const rows = db.prepare("SELECT * FROM healing_history WHERE key LIKE ?").all(`${prefix}%`);
+  // Ensure the strategyVersion column exists before querying — the ORDER BY
+  // clause references it, but the column is not in the initial schema (001).
+  // On databases where set() has never been called, the lazy migration in
+  // ensureStrategyVersionColumn() hasn't run yet and the query would crash
+  // with "no such column: strategyVersion".
+  ensureStrategyVersionColumn(db);
+
+  // Strip the @vN suffix (if present) to derive the base test ID so we
+  // can also query legacy keys stored before versioned scopes existed.
+  const baseId = testId.replace(/@v\d+$/, "");
+
+  const patterns = [`${testId}::%`];
+  // When testId already contains @v, also query unversioned legacy keys
+  if (baseId !== testId) {
+    patterns.push(`${baseId}::%`);
+  }
+  // Also query any other versioned keys for this base ID
+  patterns.push(`${baseId}@v%::%`);
+
+  // Build a query with the right number of OR clauses
+  const uniquePatterns = [...new Set(patterns)];
+  const whereClauses = uniquePatterns.map(() => "key LIKE ?").join(" OR ");
+  // ORDER BY ensures that when multiple versions exist for the same
+  // action::label, the versioned entry (strategyVersion IS NOT NULL)
+  // is processed last and wins the collision in the flat result dict.
+  const rows = db.prepare(
+    `SELECT * FROM healing_history WHERE ${whereClauses} ORDER BY strategyVersion ASC NULLS FIRST`
+  ).all(...uniquePatterns);
+
   const result = {};
   for (const r of rows) {
-    result[r.key.slice(prefix.length)] = r;
+    const sepIdx = r.key.indexOf("::");
+    if (sepIdx < 0) continue;
+    result[r.key.slice(sepIdx + 2)] = r;
   }
   return result;
 }
@@ -75,6 +121,7 @@ export function deleteByTestIds(testIds) {
   const txn = db.transaction(() => {
     for (const tid of testIds) {
       stmt.run(`${tid}::%`);
+      stmt.run(`${tid}@v%::%`);
     }
   });
   txn();

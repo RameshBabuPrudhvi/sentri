@@ -8,12 +8,67 @@
  * directly and assert on status codes, response shapes, and headers.
  *
  * ### Exports
+ * - {@link formatJsonExample} — `(raw, maxChars?) → string`
  * - {@link buildApiTestPrompt} — `(endpoints, appUrl) → { system, user }`
  */
 
 import { isLocalProvider } from "../../aiProvider.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 import { PROMPT_VERSION } from "./outputSchema.js";
+
+/**
+ * Truncate a JSON request/response body example to fit within a token budget.
+ *
+ * For JSON arrays, incrementally includes elements until `maxChars` is reached.
+ * For JSON objects, incrementally includes keys. Always preserves at least one
+ * element/key so the shape is visible. Non-JSON payloads are sliced with a
+ * `[truncated]` marker.
+ *
+ * @param {string|*} raw           — raw body string (or falsy/non-string passthrough)
+ * @param {number}   [maxChars=1800] — approximate character budget
+ * @returns {string} Truncated JSON or sliced string
+ */
+export function formatJsonExample(raw, maxChars = 1800) {
+  if (!raw || typeof raw !== "string") return raw || "";
+  if (raw.length <= maxChars) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      // Incrementally include elements until we exceed maxChars
+      const compact = [];
+      for (const item of parsed) {
+        compact.push(item);
+        if (JSON.stringify(compact, null, 2).length > maxChars) {
+          compact.pop();
+          break;
+        }
+      }
+      // Always include at least one element so the shape is visible
+      if (compact.length === 0 && parsed.length > 0) compact.push(parsed[0]);
+      return JSON.stringify(compact, null, 2);
+    }
+    if (parsed && typeof parsed === "object") {
+      const compact = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        compact[k] = v;
+        const next = JSON.stringify(compact, null, 2);
+        if (next.length > maxChars) {
+          delete compact[k];
+          break;
+        }
+      }
+      // Always include at least one key so the shape is visible
+      if (Object.keys(compact).length === 0 && Object.keys(parsed).length > 0) {
+        const [firstKey, firstVal] = Object.entries(parsed)[0];
+        compact[firstKey] = firstVal;
+      }
+      return JSON.stringify(compact, null, 2);
+    }
+  } catch {
+    // non-JSON payload; fall through
+  }
+  return `${raw.slice(0, maxChars)}\n... [truncated]`;
+}
 
 /**
  * Build the system + user prompt for API test generation.
@@ -69,10 +124,10 @@ PROMPT VERSION: ${PROMPT_VERSION}`;
       `    Example URL: ${ep.exampleUrls[0] || "N/A"}`,
     ];
     if (ep.requestBodyExample) {
-      lines.push(`    Request body: ${ep.requestBodyExample.slice(0, 500)}`);
+      lines.push(`    Request body: ${formatJsonExample(ep.requestBodyExample)}`);
     }
     if (ep.responseBodyExample) {
-      lines.push(`    Response body: ${ep.responseBodyExample.slice(0, 500)}`);
+      lines.push(`    Response body: ${formatJsonExample(ep.responseBodyExample)}`);
     }
     if (ep.pageUrls.length > 0) {
       lines.push(`    Triggered from: ${ep.pageUrls.join(", ")}`);

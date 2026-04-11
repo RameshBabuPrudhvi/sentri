@@ -657,6 +657,138 @@ for (const role of INPUT_ROLES) {
   });
 }
 
+// ── 15. safeCheck transforms ──────────────────────────────────────────────────
+
+console.log("\n☑️  safeCheck transforms");
+
+test("page.check('text') → safeCheck", () => {
+  const out = applyHealingTransforms("await page.check('Accept terms')");
+  assert.equal(out, "await safeCheck(page, 'Accept terms')");
+});
+
+test("page.check('#css') — CSS selector not rewritten", () => {
+  const code = "await page.check('#terms-checkbox')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.getByLabel('x').check() → safeCheck", () => {
+  const out = applyHealingTransforms("await page.getByLabel('I agree').check()");
+  assert.equal(out, "await safeCheck(page, 'I agree')");
+});
+
+test("page.locator('text').check() with human text → safeCheck", () => {
+  const out = applyHealingTransforms("await page.locator('Newsletter').check()");
+  assert.equal(out, "await safeCheck(page, 'Newsletter')");
+});
+
+test("page.locator('#css').check() — CSS selector not rewritten", () => {
+  const code = "await page.locator('#newsletter-cb').check()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+// ── 16. safeUncheck transforms ────────────────────────────────────────────────
+
+console.log("\n🔲  safeUncheck transforms");
+
+test("page.uncheck('text') → safeUncheck", () => {
+  const out = applyHealingTransforms("await page.uncheck('Accept terms')");
+  assert.equal(out, "await safeUncheck(page, 'Accept terms')");
+});
+
+test("page.uncheck('#css') — CSS selector not rewritten", () => {
+  const code = "await page.uncheck('#terms-checkbox')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.getByLabel('x').uncheck() → safeUncheck", () => {
+  const out = applyHealingTransforms("await page.getByLabel('Subscribe').uncheck()");
+  assert.equal(out, "await safeUncheck(page, 'Subscribe')");
+});
+
+test("page.locator('text').uncheck() with human text → safeUncheck", () => {
+  const out = applyHealingTransforms("await page.locator('Notifications').uncheck()");
+  assert.equal(out, "await safeUncheck(page, 'Notifications')");
+});
+
+test("page.locator('#css').uncheck() — CSS selector not rewritten", () => {
+  const code = "await page.locator('#notify-cb').uncheck()";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+// ── 17. safeSelect transforms ─────────────────────────────────────────────────
+
+console.log("\n📋  safeSelect transforms");
+
+test("page.selectOption('text', val) → safeSelect", () => {
+  const out = applyHealingTransforms("await page.selectOption('Country', 'US')");
+  assert.equal(out, "await safeSelect(page, 'Country', 'US')");
+});
+
+test("page.selectOption('#css', val) — CSS selector not rewritten", () => {
+  const code = "await page.selectOption('#country-select', 'US')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+test("page.getByLabel('x').selectOption(val) → safeSelect", () => {
+  const out = applyHealingTransforms("await page.getByLabel('Language').selectOption('en')");
+  assert.equal(out, "await safeSelect(page, 'Language', 'en')");
+});
+
+test("page.locator('text').selectOption(val) with human text → safeSelect", () => {
+  const out = applyHealingTransforms("await page.locator('Currency').selectOption('USD')");
+  assert.equal(out, "await safeSelect(page, 'Currency', 'USD')");
+});
+
+test("page.locator('#css').selectOption(val) — CSS selector not rewritten", () => {
+  const code = "await page.locator('#currency-sel').selectOption('USD')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
+// ── 18. safeCheck/safeUncheck/safeSelect idempotency ─────────────────────────
+
+console.log("\n🔁  safeCheck/safeUncheck/safeSelect idempotency");
+
+test("already-transformed safeCheck is not double-transformed", () => {
+  const already = "await safeCheck(page, 'Terms');";
+  assert.equal(applyHealingTransforms(already), already);
+});
+
+test("already-transformed safeUncheck is not double-transformed", () => {
+  const already = "await safeUncheck(page, 'Terms');";
+  assert.equal(applyHealingTransforms(already), already);
+});
+
+test("already-transformed safeSelect is not double-transformed", () => {
+  const already = "await safeSelect(page, 'Country', 'US');";
+  assert.equal(applyHealingTransforms(already), already);
+});
+
+// ── 19. Multi-line with check/uncheck/select ─────────────────────────────────
+
+console.log("\n📋  Multi-line with check/uncheck/select");
+
+test("transforms check/uncheck/selectOption in a full test body", () => {
+  const code = [
+    "await page.goto('http://app.com/settings');",
+    "await page.check('Enable notifications');",
+    "await page.uncheck('Marketing emails');",
+    "await page.selectOption('Timezone', 'UTC');",
+    "await page.click('Save');",
+  ].join("\n");
+
+  const out = applyHealingTransforms(code);
+
+  assert.match(out, /safeCheck\(page, 'Enable notifications'\)/);
+  assert.match(out, /safeUncheck\(page, 'Marketing emails'\)/);
+  assert.match(out, /safeSelect\(page, 'Timezone', 'UTC'\)/);
+  assert.match(out, /safeClick\(page, 'Save'\)/);
+  assert.doesNotMatch(out, /\bpage\.check\(/);
+  assert.doesNotMatch(out, /\bpage\.uncheck\(/);
+  assert.doesNotMatch(out, /\bpage\.selectOption\(/);
+  // page.goto must survive untouched
+  assert.match(out, /page\.goto/);
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

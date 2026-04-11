@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { getSelfHealingHelperCode } from "../src/selfHealing.js";
+import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES } from "../src/selfHealing.js";
 
 function test(name, fn) {
   try {
@@ -55,6 +55,96 @@ test("findElement uses firstVisible inside tryStrategy to skip hidden elements",
   assert.match(helpers, /return await firstVisible\(locator, timeout\)/);
   // .first() should only appear inside firstVisible's fallback, not in findElement directly
   assert.doesNotMatch(helpers, /strategies\[(?:hintIdx|i)\]\(page\)\.first\(\)/);
+});
+
+// ── New runtime helpers: safeSelect, safeCheck, safeUncheck ──────────────────
+
+console.log("\n🆕 new runtime helpers");
+
+test("safeSelect function is defined in runtime code", () => {
+  assert.match(helpers, /async function safeSelect\(page, labelOrText, value\)/);
+});
+
+test("safeCheck function is defined in runtime code", () => {
+  assert.match(helpers, /async function safeCheck\(page, labelOrText\)/);
+});
+
+test("safeUncheck function is defined in runtime code", () => {
+  assert.match(helpers, /async function safeUncheck\(page, labelOrText\)/);
+});
+
+test("safeSelect uses combobox and listbox strategies", () => {
+  assert.match(helpers, /getByRole\('combobox', \{ name: labelOrText \}\)/);
+  assert.match(helpers, /getByRole\('listbox', \{ name: labelOrText \}\)/);
+});
+
+test("safeCheck uses checkbox role strategy", () => {
+  assert.match(helpers, /getByRole\('checkbox', \{ name: labelOrText \}\)/);
+});
+
+test("safeSelect preserves object/array values (no coercion)", () => {
+  // The runtime code should have the typeof value === 'object' passthrough
+  assert.match(helpers, /typeof value === 'object'/);
+});
+
+// ── FIRST_VISIBLE_WAIT_CAP constant ──────────────────────────────────────────
+
+console.log("\n⏱️  FIRST_VISIBLE_WAIT_CAP");
+
+test("FIRST_VISIBLE_WAIT_CAP constant is injected into runtime code", () => {
+  assert.match(helpers, /const FIRST_VISIBLE_WAIT_CAP = \d+/);
+});
+
+test("firstVisible uses Math.min with FIRST_VISIBLE_WAIT_CAP", () => {
+  assert.match(helpers, /Math\.min\(timeout, FIRST_VISIBLE_WAIT_CAP\)/);
+});
+
+// ── Healing hints injection ──────────────────────────────────────────────────
+
+console.log("\n📝 healing hints injection");
+
+test("getSelfHealingHelperCode injects provided hints as JSON", () => {
+  const withHints = getSelfHealingHelperCode({ "click::Submit": 2, "fill::Email": 0 });
+  assert.match(withHints, /"click::Submit":2/);
+  assert.match(withHints, /"fill::Email":0/);
+});
+
+test("getSelfHealingHelperCode handles null gracefully", () => {
+  const withNull = getSelfHealingHelperCode(null);
+  assert.match(withNull, /__healingHints = \{\}/);
+});
+
+test("getSelfHealingHelperCode handles array gracefully", () => {
+  const withArray = getSelfHealingHelperCode([1, 2, 3]);
+  assert.match(withArray, /__healingHints = \{\}/);
+});
+
+// ── SELF_HEALING_PROMPT_RULES content ────────────────────────────────────────
+
+console.log("\n📜 SELF_HEALING_PROMPT_RULES content");
+
+test("SELF_HEALING_PROMPT_RULES mentions safeSelect", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeSelect/);
+});
+
+test("SELF_HEALING_PROMPT_RULES mentions safeCheck", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeCheck/);
+});
+
+test("SELF_HEALING_PROMPT_RULES mentions safeUncheck", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeUncheck/);
+});
+
+test("SELF_HEALING_PROMPT_RULES lists page.check as forbidden", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /page\.check/);
+});
+
+test("SELF_HEALING_PROMPT_RULES lists page.selectOption as forbidden", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /page\.selectOption/);
+});
+
+test("SELF_HEALING_PROMPT_RULES lists page.locator().check as forbidden", () => {
+  assert.match(SELF_HEALING_PROMPT_RULES, /page\.locator\(\.\.\.\)\.check/);
 });
 
 if (process.exitCode) process.exit(1);

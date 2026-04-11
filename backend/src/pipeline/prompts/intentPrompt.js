@@ -134,7 +134,7 @@ STRICT RULES:
 1. ${testCountInstr} — must include BOTH positive AND negative scenarios
 2. Each test validates a REAL user goal or validates graceful failure handling
 3. CRITICAL: Every playwrightCode MUST start with: await page.goto('${snapshot.url}', { waitUntil: 'domcontentloaded', timeout: 30000 }); — use the EXACT URL above, never a placeholder
-4. Read the actual PAGE DATA above (title, headings, elements) and assert against REAL content from that page
+4. Read the actual PAGE DATA above (title, headings, elements) and assert against STRUCTURAL content from that page (headings, labels, button text, form fields). Do NOT hard-code dynamic values (usernames, dates, order IDs, counts, prices) — use regex patterns instead (see DYNAMIC CONTENT rules in system prompt)
 
 ${buildOutputSchemaBlock()}`;
 

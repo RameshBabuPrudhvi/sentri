@@ -1,0 +1,10 @@
+-- Migration 002: strategyVersion column on healing_history
+--
+-- This column is added lazily by healingRepo.ensureStrategyVersionColumn()
+-- (called from both set() and getByTestId()) because SQLite's ALTER TABLE
+-- ADD COLUMN does not support IF NOT EXISTS, making a pure-SQL migration
+-- unsafe on databases where the lazy migration already ran.
+--
+-- This file is intentionally a no-op so the migration number is reserved
+-- and the schema_migrations table documents that the column exists.
+-- The actual DDL lives in healingRepo.js:ensureStrategyVersionColumn().
