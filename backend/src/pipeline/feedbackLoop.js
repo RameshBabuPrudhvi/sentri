@@ -231,11 +231,15 @@ Fix by:
 - Adding await page.waitForLoadState('domcontentloaded') after page.goto()`,
 
     ASSERTION_FAIL: `The assertion failed - the actual value didn't match expected.
+This often happens because the test hard-coded a crawl-time value that changed at runtime.
 Fix by:
-- Using softer matchers: toContainText instead of toHaveText
-- Using regex patterns: /partial match/i
-- Adding proper wait before assertion
-- Asserting on what's actually present on the page`,
+- Using softer matchers: toContainText instead of toHaveText for any text that may vary
+- Using regex patterns for dynamic content: dates (/\\d{4}-\\d{2}-\\d{2}/), IDs (/Order #\\d+/), prices (/\\$[\\d,.]+/), UUIDs (/[a-f0-9-]{36}/)
+- For personalized text (e.g. "Welcome John"), assert only the static label: toContainText('Welcome')
+- For counts that change, use not.toHaveCount(0) instead of toHaveCount(N)
+- For toasts/notifications, use toContainText(/success|saved|created|updated|deleted/i)
+- Adding proper wait before assertion: await expect(locator).toContainText('expected', { timeout: 10000 })
+- Asserting on what's actually present on the page — check the error message for the "received" value`,
 
     UNKNOWN: `The test failed for an unknown reason.
 Rewrite more defensively:
@@ -290,7 +294,9 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
 
   // High-priority categories that should be auto-fixed — these are almost always
   // prompt-quality issues rather than real application bugs.
-  const HIGH_PRIORITY_CATEGORIES = new Set(["SELECTOR_ISSUE", "URL_MISMATCH", "TIMEOUT"]);
+  // ASSERTION_FAIL is included because hard-coded crawl-time values (dates, IDs,
+  // counts) are a prompt-quality issue, not a real application regression.
+  const HIGH_PRIORITY_CATEGORIES = new Set(["SELECTOR_ISSUE", "URL_MISMATCH", "TIMEOUT", "ASSERTION_FAIL"]);
 
   for (const result of runResults) {
     stats.total++;

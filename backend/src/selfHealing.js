@@ -259,12 +259,17 @@ export function getSelfHealingHelperCode(healingHints) {
     }
 
     async function ensureReady(locator) {
-      // All three steps are best-effort: if the element is momentarily detached
+      // All steps are best-effort: if the element is momentarily detached
       // or hidden, we still want to attempt scroll + attach before giving up.
       // The caller's retry loop will re-attempt the full sequence if needed.
       try { await locator.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT }); } catch {}
       try { await locator.scrollIntoViewIfNeeded(); } catch {}
       try { await locator.waitFor({ state: 'attached' }); } catch {}
+      // Brief DOM stability pause — gives SPAs time to finish re-rendering
+      // after the element appears. Without this, actions can fire while the
+      // DOM is still mutating (e.g. text changing from "Loading..." to real
+      // content), causing stale-element or wrong-value assertions.
+      try { await locator.page().waitForTimeout(100); } catch {}
     }
 
     async function safeClick(page, text) {

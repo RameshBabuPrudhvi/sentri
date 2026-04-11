@@ -40,11 +40,20 @@ export const ASSERTION_RULES = `
 - Every test MUST have at least 2 strong assertions that verify SPECIFIC VISIBLE CONTENT on the page (exact text, element count, field value) — not just that "a page loaded" or "an element exists".
 - STRONG assertions (preferred): toBeVisible() on elements found by specific text/role, toContainText('exact text'), toHaveValue('specific value'), toBeEnabled(), toHaveCount(N). Use toHaveURL() ONLY with a loose hostname-only regex (see STABILITY rule) — never with path or query patterns.
 - WEAK (forbidden): toBeTruthy(), toBeDefined(), toEqual(true).
-- In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state.`.trim();
+- In "playwrightCode", every expect() assertion must check something a user can SEE — a specific heading, a button label, form field content, a list item count, an error message, or a visible text string. Do NOT write assertions that only check "page loaded" or "element exists" without verifying its text or state.
+- DYNAMIC CONTENT: Page data from the crawl is a snapshot — values like usernames, order IDs, dates, counts, prices, and UUIDs WILL differ at runtime. NEVER hard-code dynamic values in assertions. Instead:
+  ✓ Dates:    toContainText(/\\d{4}-\\d{2}-\\d{2}/) or toContainText(/\\w+ \\d{1,2}, \\d{4}/)
+  ✓ IDs/UUIDs: toHaveAttribute('data-id', /[a-f0-9-]{36}/) or toContainText(/Order #\\d+/)
+  ✓ Counts:   expect(page.locator(...)).not.toHaveCount(0)  — NOT toHaveCount(5)
+  ✓ Prices:   toContainText(/\\$[\\d,.]+/)
+  ✓ Usernames/personalization: assert the LABEL is visible ("Welcome") not the dynamic value ("Welcome John")
+  ✓ Toasts/notifications: toContainText(/success|saved|created|updated|deleted/i) — NOT exact text
+  ✗ NEVER: toHaveText('Welcome John'), toContainText('Order #12345'), toHaveCount(5) on dynamic lists`.trim();
 
 export const STABILITY_RULES = `
 - URL ASSERTIONS: NEVER assert exact URLs or narrow regex patterns on the final URL after navigation. Real-world sites redirect unpredictably (CAPTCHAs, consent pages, geo-redirects, login walls, URL-encoded params). Instead: (a) PREFER asserting visible page CONTENT over toHaveURL(). (b) If you must check the URL, use the LOOSEST possible regex that only checks the hostname — e.g. await expect(page).toHaveURL(/example\\.com/i) — never match on path segments or query params. (c) For search flows, assert that results appeared on the page rather than checking the URL. (d) NEVER use toHaveURL() with a literal string — it will fail on any redirect, query param, or geo-variant of the URL. (e) NEVER add toHaveURL() as a final assertion after a search, filter, or form action — the URL will contain query params that make an exact match impossible.
-- After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites continuously fire background requests and never reach networkidle, causing a guaranteed 30s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content, use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.`.trim();
+- After every page.goto() use { waitUntil: 'domcontentloaded' } — NEVER use waitForLoadState('networkidle') as SPAs and e-commerce sites continuously fire background requests and never reach networkidle, causing a guaranteed 30s timeout. After clicking a button or link that causes navigation, use await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }), element.click()]). For asserting dynamic content, use await page.waitForSelector('selector', { timeout: 15000 }) before the expect() assertion.
+- ASYNC CONTENT & LOADING STATES: SPAs and dynamic pages often show loading spinners, skeleton screens, or "Loading..." text before real content appears. NEVER assert on content that may still be loading. Before asserting on async content: (a) Wait for the real content to appear: await page.waitForSelector('[data-loaded], .content:not(.loading)', { timeout: 15000 }).catch(() => {}); (b) Or wait for a loading indicator to disappear: await page.locator('.spinner, .loading, [aria-busy="true"]').waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {}); (c) Use Playwright's built-in auto-waiting by asserting with a timeout: await expect(page.locator('...')).toContainText('expected', { timeout: 10000 });`.trim();
 
 // ─── JSON output schema block ────────────────────────────────────────────────
 // Shared by all three prompt builders. The example values guide the LLM on
@@ -103,7 +112,7 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.1.0";
+export const PROMPT_VERSION = "2.2.0";
 
 export function buildSystemPrompt() {
   return `You are a senior QA automation engineer generating production-grade Playwright test suites.
