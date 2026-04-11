@@ -47,13 +47,16 @@ function extractCookie(res, name) {
   return null;
 }
 
-/** Shared CSRF token — captured once from the first server response. */
+/** Shared CSRF token — captured from the first server response that sets it. */
 let csrfToken = null;
 
 async function req(base, path, { method = "GET", token, body } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  if (csrfToken) {
+    headers["X-CSRF-Token"] = csrfToken;
+    headers.Cookie = (headers.Cookie ? headers.Cookie + "; " : "") + `_csrf=${csrfToken}`;
+  }
 
   const res = await fetch(`${base}${path}`, {
     method,
