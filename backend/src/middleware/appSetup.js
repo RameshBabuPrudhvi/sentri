@@ -145,10 +145,15 @@ export function csrfMiddleware(req, res, next) {
   let csrfToken = req.cookies[CSRF_COOKIE_NAME];
   if (!csrfToken) {
     csrfToken = crypto.randomBytes(32).toString("base64url");
-    const secure   = process.env.NODE_ENV === "production";
-    const maxAge   = 8 * 60 * 60; // matches JWT TTL
+    const secure = process.env.NODE_ENV === "production";
+    // Session cookie (no Max-Age / Expires) — lives until the browser is closed.
+    // This avoids a subtle bug where the CSRF cookie expires after a fixed TTL
+    // while the JWT is refreshed indefinitely by the frontend. With a session
+    // cookie the CSRF token can never expire before the auth session does.
+    // The CSRF token is not a secret — it's Non-HttpOnly by design so JS can
+    // read it for the double-submit header. A long-lived cookie is safe here.
     res.setHeader("Set-Cookie",
-      `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; Max-Age=${maxAge}; SameSite=Strict${secure ? "; Secure" : ""}`
+      `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; SameSite=Strict${secure ? "; Secure" : ""}`
     );
     req.cookies[CSRF_COOKIE_NAME] = csrfToken; // make it available for this request
   }
