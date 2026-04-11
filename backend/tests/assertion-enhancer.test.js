@@ -410,8 +410,9 @@ console.log("\n🗂️  Snapshot fallback — sourceUrl and pageTitle used when 
 test("uses test.sourceUrl as snapshot.url when snapshotsByUrl is empty", () => {
   const t = noAssertTest({ sourceUrl: "http://myapp.com/login" });
   const { tests: result } = enhanceTests([t], {}, {});
-  // The injected URL assertion uses a hostname-only regex (per STABILITY_RULES)
-  assert.match(result[0].playwrightCode, /myapp\.com/);
+  // The injected URL assertion uses a hostname-only regex (per STABILITY_RULES).
+  // The dot is escaped in the generated regex literal: /myapp\\.com/i
+  assert.match(result[0].playwrightCode, /myapp\\\.com/);
 });
 
 test("uses test.pageTitle as snapshot.title when snapshotsByUrl is empty", () => {
