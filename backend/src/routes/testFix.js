@@ -191,28 +191,26 @@ router.post("/tests/:testId/fix", async (req, res) => {
       streamOpts,
     );
 
-    // Clean the response — strip markdown fences if the model added them
-    fixedCode = fixedCode.trim()
-      .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
-      .replace(/\n?\s*```\s*$/i, "")
-      .trim();
-
     // Extract the "FIX: ..." explanation line the AI prepends (per system prompt).
-    // If the model didn't emit one, fall back to a line-count summary.
+    // This must happen BEFORE fence stripping: when the AI outputs
+    //   FIX: ...\n\n```js\ncode\n```
+    // the opening fence isn't at ^ while the FIX: line is still present, so
+    // stripping fences first would leave an orphaned "```javascript" line.
+    fixedCode = fixedCode.trim();
     let explanation = null;
     const fixLineMatch = fixedCode.match(/^FIX:\s*(.+?)(?:\n|$)/i);
     if (fixLineMatch) {
       explanation = fixLineMatch[1].trim();
       // Strip the FIX: line (and optional blank line) from the code body
       fixedCode = fixedCode.replace(/^FIX:\s*.+?(?:\n\n?|$)/i, "").trim();
-
-      // Re-run fence stripping: when the AI outputs "FIX: ...\n\n```js\ncode\n```",
-      // the first pass can't strip the opening fence because the FIX: line was at ^.
-      fixedCode = fixedCode
-        .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
-        .replace(/\n?\s*```\s*$/i, "")
-        .trim();
     }
+
+    // Clean the response — strip markdown fences if the model added them.
+    // Runs after FIX: extraction so the opening fence is always at ^.
+    fixedCode = fixedCode
+      .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
+      .replace(/\n?\s*```\s*$/i, "")
+      .trim();
 
     // Safety net: rewrite any raw Playwright calls the AI may have used back
     // to self-healing helpers (safeClick, safeFill, safeExpect). This ensures
