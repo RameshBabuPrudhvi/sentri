@@ -44,6 +44,11 @@ function formatJsonExample(raw, maxChars = 1800) {
           break;
         }
       }
+      // Always include at least one key so the shape is visible
+      if (Object.keys(compact).length === 0 && Object.keys(parsed).length > 0) {
+        const [firstKey, firstVal] = Object.entries(parsed)[0];
+        compact[firstKey] = firstVal;
+      }
       return JSON.stringify(compact, null, 2);
     }
   } catch {

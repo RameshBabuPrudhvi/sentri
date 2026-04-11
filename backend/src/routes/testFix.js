@@ -69,9 +69,13 @@ function buildUserPrompt(test, failureResult, project) {
     }
 
     const dom = failureResult.domSnapshot;
-    if (dom && typeof dom === "string") {
+    if (dom) {
       lines.push("DOM snapshot excerpt (trimmed):");
-      lines.push(dom.slice(0, 2500));
+      lines.push(
+        typeof dom === "string"
+          ? dom.slice(0, 2500)
+          : JSON.stringify(dom, null, 2).slice(0, 2500)
+      );
       lines.push("");
     }
   }
