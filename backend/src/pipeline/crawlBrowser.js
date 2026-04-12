@@ -130,14 +130,15 @@ export async function crawlPages(project, run, { signal } = {}) {
             // Recursively traverse all shadow roots in the document.
             // Returns a flat array of plain objects (must be serialisable across
             // the evaluate boundary — no DOM node references).
-            function queryShadowAll(selector, root = document) {
+            function queryShadowAll(selector, root = document, insideShadow = false) {
               const results = [];
-              // Walk every element in this root (including the root itself for custom elements)
+              // Walk every element in this root
               const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
               let node = walker.nextNode();
               while (node) {
-                // Check if this node itself matches
-                if (node.matches && node.matches(selector)) {
+                // Only collect matching elements when we are inside a shadow root —
+                // light DOM elements are already captured by takeSnapshot().
+                if (insideShadow && node.matches && node.matches(selector)) {
                   const rect = node.getBoundingClientRect();
                   results.push({
                     tag: node.tagName.toLowerCase(),
@@ -153,7 +154,7 @@ export async function crawlPages(project, run, { signal } = {}) {
                 }
                 // Recurse into this node's shadow root if it has one
                 if (node.shadowRoot) {
-                  const inner = queryShadowAll(selector, node.shadowRoot);
+                  const inner = queryShadowAll(selector, node.shadowRoot, true);
                   results.push(...inner);
                 }
                 node = walker.nextNode();

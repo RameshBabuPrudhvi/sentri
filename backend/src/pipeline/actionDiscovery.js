@@ -84,8 +84,13 @@ export function detectSignupIntent(snapshot, formActions) {
     const looksLikeLogin = LOGIN_INTENT_KEYWORDS.some(k => allText.includes(k));
     if (looksLikeLogin) return false;
 
-    // Positive check: require a third field that distinguishes signup from login
-    // (e.g. name, confirm password, username, phone, etc.)
+    // Positive check: require a distinguishing signal beyond email+password.
+    // A login form typically has exactly 1 password field; signup forms often
+    // have 2 (password + confirm password) or additional fields (name, etc.).
+    const passwordFields = formActions.filter(a => a.type === "fill" && (a.element?.type === "password" || (a.element?.placeholder || "").toLowerCase().includes("password")));
+    if (passwordFields.length >= 2) return true;
+
+    // Also check for non-email, non-password fields (name, username, phone, etc.)
     const extraFields = formActions.filter(a => a.type === "fill" && a.element?.type !== "email" && a.element?.type !== "password");
     if (extraFields.length > 0) return true;
   }
