@@ -7,7 +7,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { RefreshCw, Info, Link2 } from "lucide-react";
 import { testTypeBadgeClass, testTypeLabel } from "../../utils/testTypeLabels.js";
-import { StatusBadge, ReviewBadge } from "../TestBadges.jsx";
+import { StatusBadge, ReviewBadge } from "../shared/TestBadges.jsx";
 
 export default function TraceabilityTab({ traceability, traceLoading }) {
   const navigate = useNavigate();
