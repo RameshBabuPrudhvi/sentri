@@ -751,6 +751,36 @@ These items are not phase-bounded — they should be addressed incrementally alo
 
 ---
 
+## Competitive Gap Analysis
+
+How Sentri compares to industry-standard QA platforms as of this audit:
+
+| Capability | Sentri | Mabl | Testim | SmartBear | Playwright OSS |
+|---|---|---|---|---|---|
+| AI test generation | ✅ 8-stage pipeline | ✅ Auto-heal only | ✅ AI recorder | ❌ Manual | ❌ Manual |
+| Self-healing selectors | ✅ 6-strategy waterfall | ✅ ML-based | ✅ Smart locators | ❌ | ❌ |
+| Human review queue | ✅ Draft→Approve flow | ❌ | ❌ | ❌ | ❌ |
+| Visual regression | ❌ **Gap** | ✅ Native | ✅ Native | ✅ Native | Via plugins |
+| Cross-browser | ❌ Chromium only | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
+| Mobile/device emulation | ❌ **Gap** | ✅ | ✅ | ✅ | ✅ Native |
+| CI/CD integration | ❌ **Gap** | ✅ Native | ✅ Native | ✅ Native | ✅ CLI |
+| Scheduled runs | ❌ **Gap** | ✅ | ✅ | ✅ | Via CI cron |
+| Multi-tenancy / RBAC | ❌ **Gap** | ✅ | ✅ | ✅ | N/A |
+| Failure notifications | ❌ **Gap** | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
+| API testing | ✅ HAR-based generation | ✅ | ❌ | ✅ | ✅ Manual |
+| Parallel execution | ✅ 1–10 workers | ✅ Cloud | ✅ Cloud | ✅ Cloud | ✅ CLI sharding |
+| Standalone export | ❌ **Gap** | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A (is the format) |
+| NL test editing | ✅ AI chat + fix | ❌ | ❌ | ❌ | ❌ |
+| Self-hosted / private | ✅ Docker | ❌ SaaS only | ❌ SaaS only | Partial | ✅ |
+| Per-user audit trail | ✅ userId on activities | ✅ | ✅ | ✅ | N/A |
+| Rate limiting | ✅ Three-tier | ✅ | ✅ | ✅ | N/A |
+
+**Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM support + standalone Playwright export (planned). No competitor offers all of these together.
+
+**Critical competitive gaps to close (Phase 1–2):** CI/CD webhook, scheduled runs, cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
+
+---
+
 ## Summary
 
 | Phase | Items | Status | Key Deliverable |
@@ -764,8 +794,9 @@ These items are not phase-bounded — they should be addressed incrementally alo
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
 **Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-005, ENH-013, ENH-021 = **12 complete**
 **Critical blockers remaining:** ENH-007, 027, 030 (Phase 1) · ENH-001, 002, 003, 012 (Phase 2) = **7 blockers**
-**Highest adoption impact:** ENH-011/S2-01 (CI/CD), ENH-006/S2-02 (scheduling), ENH-003/S4-01 (multi-tenancy), S4-06 (monitoring mode)
-**Lowest effort / highest immediate value:** ENH-027, ENH-030, ENH-024, ENH-015, S4-09, S4-07
+**Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
+**Lowest effort / highest immediate value:** ENH-027, ENH-030, ENH-015, S4-09, S4-07
+**Next PR priorities (recommended order):** ENH-027 (Error Boundary, XS) → ENH-030 (Secrets scanning, XS) → ENH-007 (Artifact auth, M) → ENH-020 (Soft-delete, M) → ENH-010 (Pagination, M)
 
 ---
 
