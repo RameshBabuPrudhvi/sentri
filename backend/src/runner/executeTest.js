@@ -27,6 +27,7 @@ import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
+
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
 // When a test's last meaningful action is non-visual (assertion, wait, evaluate),
 // we skip the post-test screenshot / DOM snapshot / bounding-box capture. These

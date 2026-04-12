@@ -16,6 +16,7 @@ import path from "path";
 import fs from "fs";
 import { SHOTS_DIR } from "./config.js";
 
+
 /**
  * waitForStable(page, opts) → Promise<void>
  *

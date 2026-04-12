@@ -5,6 +5,7 @@ import { NotificationProvider } from "./context/NotificationContext.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Layout from "./components/Layout.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -37,28 +38,6 @@ const NotFound = () => (
   </div>
 );
 
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
-  render() {
-    if (this.state.error) {
-      return (
-        <div style={{ padding: "80px 40px", textAlign: "center", color: "var(--text2)", maxWidth: 500, margin: "0 auto" }}>
-          <div style={{ fontSize: "2.5rem", marginBottom: 16 }}>💥</div>
-          <div style={{ fontWeight: 700, fontSize: "1.2rem", color: "var(--text)", marginBottom: 8 }}>Something went wrong</div>
-          <div style={{ fontSize: "0.85rem", marginBottom: 24, lineHeight: 1.6 }}>
-            {this.state.error?.message || "An unexpected error occurred."}
-          </div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-            <button className="btn btn-primary" onClick={() => window.location.reload()}>Reload page</button>
-            <button className="btn btn-ghost" onClick={() => { window.location.href = import.meta.env.BASE_URL + "dashboard"; }}>Go to Dashboard</button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 export default function App() {
   return (

@@ -91,11 +91,21 @@ const _corsOrigins = corsOrigin === "*" ? [] : corsOrigin.split(",").map(o => o.
 /**
  * `true` when CORS_ORIGIN is set to a different origin than the backend.
  * In that case cookies must use `SameSite=None; Secure` to be sent cross-site.
+ *
+ * Compares against the backend's own origin (PORT-based), NOT APP_URL which is
+ * the frontend URL. For GitHub Pages + Render deployments, CORS_ORIGIN is the
+ * GitHub Pages URL and the backend runs on Render — these are always different
+ * origins, so cookies must use SameSite=None; Secure.
  * @type {boolean}
  */
 export const isCrossOrigin = _corsOrigins.length > 0 && (() => {
   try {
-    const backendOrigin = `${process.env.APP_URL || "http://localhost:3001"}`;
+    // Use RENDER_EXTERNAL_URL (set by Render) or build from PORT, not APP_URL
+    // which is the frontend URL and would incorrectly match CORS_ORIGIN.
+    const port = process.env.PORT || "3001";
+    const backendOrigin = process.env.RENDER_EXTERNAL_URL
+      || process.env.BACKEND_URL
+      || `http://localhost:${port}`;
     return _corsOrigins.some(o => new URL(o).origin !== new URL(backendOrigin).origin);
   } catch { return false; }
 })();
@@ -272,23 +282,131 @@ export const aiGenerationLimiter = rateLimit({
 // routes/runs.js and routes/tests.js via the exported limiters above.
 app.use("/api", generalApiLimiter);
 
+// ─── Artifact signing helpers ─────────────────────────────────────────────────
+// Screenshots, videos, and Playwright traces are served as static files.
+// <img>, <video>, and <a download> tags cannot send Authorization headers, so
+// we use short-lived HMAC-signed query-param tokens instead.
+//
+// Token format:  ?token=<hmac-sha256(artifactPath + exp, ARTIFACT_SECRET)>&exp=<unix-ms>
+// Default TTL:   1 hour (ARTIFACT_TOKEN_TTL_MS env var to override)
+//
+// ARTIFACT_SECRET must be set in production.  In development a random per-
+// process secret is derived so artifacts still work without configuration.
+// Generate a production value with:
+//   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+
+const ARTIFACT_SECRET = process.env.ARTIFACT_SECRET ||
+  (() => {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ARTIFACT_SECRET must be set in production. " +
+        "Generate one with: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\""
+      );
+    }
+    // Development fallback: stable per-process random — fine for local use.
+    return crypto.randomBytes(48).toString("hex");
+  })();
+
+const ARTIFACT_TOKEN_TTL_MS = parseInt(process.env.ARTIFACT_TOKEN_TTL_MS ?? "", 10) || 60 * 60 * 1000; // 1 hour
+
+/**
+ * Generate a short-lived HMAC-signed token for an artifact path.
+ *
+ * @param {string} artifactPath - The URL path, e.g. `/artifacts/screenshots/foo.png`
+ * @returns {string} The full artifact URL with `?token=…&exp=…` appended.
+ */
+export function signArtifactUrl(artifactPath) {
+  const exp = Date.now() + ARTIFACT_TOKEN_TTL_MS;
+  const mac = crypto
+    .createHmac("sha256", ARTIFACT_SECRET)
+    .update(`${artifactPath}:${exp}`)
+    .digest("base64url");
+  return `${artifactPath}?token=${mac}&exp=${exp}`;
+}
+
+/**
+ * Deep-clone a run object and sign all artifact paths so the frontend receives
+ * fresh, non-expired URLs.  Call this at **read time** (API responses, SSE
+ * events) — never persist signed URLs to the database.
+ *
+ * Handles: `run.tracePath`, `run.videoPath`, `run.videoSegments[]`,
+ *          `run.results[].screenshotPath`, `run.results[].videoPath`.
+ *
+ * @param {Object} run - The run object from the database.
+ * @returns {Object} A shallow clone with all artifact paths signed.
+ */
+export function signRunArtifacts(run) {
+  if (!run) return run;
+  const signed = { ...run };
+
+  if (signed.tracePath) signed.tracePath = signArtifactUrl(signed.tracePath);
+  if (signed.videoPath) signed.videoPath = signArtifactUrl(signed.videoPath);
+  if (Array.isArray(signed.videoSegments)) {
+    signed.videoSegments = signed.videoSegments.map(s => signArtifactUrl(s));
+  }
+  if (Array.isArray(signed.results)) {
+    signed.results = signed.results.map(r => {
+      const sr = { ...r };
+      if (sr.screenshotPath) sr.screenshotPath = signArtifactUrl(sr.screenshotPath);
+      if (sr.videoPath) sr.videoPath = signArtifactUrl(sr.videoPath);
+      return sr;
+    });
+  }
+  return signed;
+}
+
+/**
+ * Validate an incoming artifact request's `?token=` and `?exp=` query params.
+ * Returns `true` when the token is valid and not expired; `false` otherwise.
+ *
+ * @param {string} artifactPath - The URL path without query string.
+ * @param {string|undefined} token
+ * @param {string|undefined} exp
+ * @returns {boolean}
+ */
+function isValidArtifactToken(artifactPath, token, exp) {
+  if (!token || !exp) return false;
+  const expMs = parseInt(exp, 10);
+  if (isNaN(expMs) || Date.now() > expMs) return false;
+  const expected = crypto
+    .createHmac("sha256", ARTIFACT_SECRET)
+    .update(`${artifactPath}:${expMs}`)
+    .digest("base64url");
+  // Constant-time comparison to prevent timing attacks.
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  } catch {
+    // Buffers are different lengths — definitively invalid.
+    return false;
+  }
+}
+
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
-// NOTE: /artifacts is intentionally NOT behind requireAuth. Screenshots, videos,
-// and traces are referenced via <img>, <video>, and <a download> tags which
-// cannot send Authorization headers. To add auth, implement ?token= query param
-// validation here (same pattern as SSE/export endpoints) and update all frontend
-// artifact URLs to append the token. For now, artifact filenames contain random
-// run IDs which provide obscurity (not security).
+// Protected by HMAC-signed ?token= query params generated by signArtifactUrl().
+// <img>, <video>, and <a download> tags cannot send Authorization headers, so
+// the signed URL pattern is the correct approach for browser-native media tags.
+
 /**
  * Absolute path to the Playwright artifacts directory (screenshots, videos, traces).
  * @type {string}
  */
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
-app.use("/artifacts", express.static(ARTIFACTS_DIR, {
+
+app.use("/artifacts", (req, res, next) => {
+  const artifactPath = "/artifacts" + req.path;
+  const { token, exp } = req.query;
+
+  if (!isValidArtifactToken(artifactPath, token, exp)) {
+    return res.status(401).json({ error: "Invalid or expired artifact token." });
+  }
+  next();
+}, express.static(ARTIFACTS_DIR, {
   setHeaders(res, fp) {
     if (fp.endsWith(".webm")) res.setHeader("Content-Type", "video/webm");
     if (fp.endsWith(".zip"))  res.setHeader("Content-Type", "application/zip");
     if (fp.endsWith(".png"))  res.setHeader("Content-Type", "image/png");
     res.setHeader("Accept-Ranges", "bytes");
+    // Prevent browsers from caching artifact URLs — they contain expiring tokens.
+    res.setHeader("Cache-Control", "private, no-store");
   },
 }));

@@ -8,6 +8,7 @@
  * | `GET`    | `/api/activities`        | Activity log (filterable by type, project)  |
  * | `POST`   | `/api/test-connection`   | Verify a URL is reachable (SSRF-protected)  |
  * | `GET`    | `/api/system`            | Uptime, Node/Playwright versions, DB counts |
+ * | `POST`   | `/api/system/client-error` | Log a frontend crash report (from ErrorBoundary) |
  * | `DELETE` | `/api/data/runs`         | Clear all run history                       |
  * | `DELETE` | `/api/data/activities`   | Clear activity log                          |
  * | `DELETE` | `/api/data/healing`      | Clear self-healing history                  |
@@ -21,6 +22,7 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
 
@@ -142,6 +144,22 @@ router.get("/system", async (req, res) => {
     playwrightVersion,
     memoryMB:      Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
   });
+});
+
+// ─── Client error reporting ───────────────────────────────────────────────────
+// Receives crash reports from the frontend ErrorBoundary (componentDidCatch).
+// Logs the error server-side so crashes are visible in backend logs even when
+// the user doesn't report them. The endpoint intentionally does minimal work
+// and always returns 200 — it must never throw back to the already-crashed UI.
+
+router.post("/system/client-error", (req, res) => {
+  const { message, stack, componentStack, url } = req.body || {};
+  console.error(formatLogLine("error", null,
+    `[client-error] ${message || "Unknown error"} at ${url || "unknown URL"}` +
+    (stack ? `\n${stack}` : "") +
+    (componentStack ? `\nComponent stack:${componentStack}` : ""),
+  ));
+  res.json({ ok: true });
 });
 
 // ─── Data Management ──────────────────────────────────────────────────────────
