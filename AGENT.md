@@ -462,6 +462,22 @@ cd frontend && npm test
 
 ## Testing
 
+### Mandatory test requirements
+
+**Every PR that adds or modifies backend logic MUST include tests.** PRs without adequate test coverage will not be merged. The requirements are:
+
+| Change type | Required tests | Where |
+|---|---|---|
+| New repository module | Unit tests for every exported function | Dedicated `tests/<module>.test.js` file |
+| New shared utility (`utils/`) | Unit tests for all branches and edge cases | Dedicated file or added to `tests/utils.test.js` |
+| New API endpoint or changed endpoint behaviour | Integration test exercising the HTTP flow (status codes, response shape, auth, error cases) | `tests/api-flow.test.js` or a dedicated file |
+| Bug fix | Regression test that fails without the fix and passes with it | Closest existing test file or dedicated file |
+| New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly (e.g. 429 on excess, 403 on missing CSRF) | Dedicated file or `tests/auth-cookies.test.js` |
+| Security fix | Both a unit test for the fix mechanism AND an integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
+| Pipeline stage change | Unit tests in `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` | Existing pipeline test files |
+
+**Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
+
 ### Backend
 
 Tests live in `backend/tests/` and use Node's built-in `assert/strict` — no test framework. Run with:
@@ -478,9 +494,39 @@ node tests/security-hardening.test.js
 
 Or run all at once: `npm test` from `backend/`.
 
+#### Test file conventions
+
 - Each test file must include a final summary line showing pass/fail counts and exit with `process.exit(1)` on any failure.
 - Tests are synchronous where possible. Async tests must `await` all assertions before the test function returns.
 - Integration tests use a shared SQLite database file. Reset state between tests by calling `getDatabase().exec("DELETE FROM ...")` on each table and resetting counters. Seed test data using repository modules (`projectRepo.create(...)`, `testRepo.create(...)`, etc.) — never use `getDb()` for writes in tests.
+- **Unit tests** (repositories, utilities) use the synchronous `test(name, fn)` pattern — no HTTP server needed.
+- **Integration tests** (route handlers, auth flows) spin up the Express app on a random port via `app.listen(0)`, make real HTTP requests, and shut down in a `finally` block.
+
+#### What makes a good test
+
+```js
+// ✅ Unit test — tests one function, one behaviour, clear assertion
+test("claim() returns null for an already-used token", () => {
+  resetTokenRepo.create("tok-1", "U-1", futureExpiry);
+  resetTokenRepo.claim("tok-1");                        // first claim succeeds
+  assert.equal(resetTokenRepo.claim("tok-1"), null);    // second claim must fail
+});
+
+// ✅ Integration test — exercises the full HTTP path including auth
+out = await req(base, "/api/auth/reset-password", {
+  method: "POST",
+  body: { token: usedToken, newPassword: "New123!" },
+});
+assert.equal(out.res.status, 400, "Replaying a used token should fail");
+
+// ❌ No assertion — test always passes
+test("creates a token", () => {
+  resetTokenRepo.create("tok-1", "U-1", futureExpiry);
+});
+
+// ❌ Tests implementation detail instead of behaviour
+test("SQL query contains WHERE usedAt IS NULL", () => { … });
+```
 
 ### Frontend
 
@@ -877,3 +923,4 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
+- **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.
