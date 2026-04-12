@@ -253,6 +253,9 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **API Test Generation** | ✅ HAR capture during crawl → auto-generated Playwright `request` API contract tests |
 | **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
 | **Auto-Versioning** | ✅ Conventional Commits → auto semver bump, changelog promotion, GitHub Release |
+| **Artifact Auth** | ✅ HMAC-SHA256 signed expiring URLs for all artifact serving (screenshots, videos, traces) — requires `ARTIFACT_SECRET` in production |
+| **Secrets Scanning** | ✅ Gitleaks CI job gates every PR/push — blocks builds on accidentally committed secrets |
+| **Error Boundary** | ✅ Extracted `ErrorBoundary` component with server-side crash reporting and soft retry UI |
 | **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |
 | **Scheduling** | ⬜ Add cron-based auto-runs via `node-cron` |

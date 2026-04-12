@@ -377,7 +377,7 @@ res.flushHeaders();
 
 ### Component Patterns
 
-- Functional components only. Class components exist only in `App.jsx` (`ErrorBoundary`) for React's mandatory class API.
+- Functional components only. Class components exist only in `components/ErrorBoundary.jsx` for React's mandatory class API (`getDerivedStateFromError` / `componentDidCatch`).
 - Pages live in `src/pages/`, reusable UI in `src/components/`.
 - Domain-specific sub-components live in subdirectories, e.g. `src/components/project/`, `src/components/test/`.
 - Lazy-load all page-level components via `React.lazy()` + `Suspense` as shown in `App.jsx`.
@@ -412,9 +412,9 @@ The `api.js` `req()` wrapper sends `credentials: "include"` on every request so 
 
 ### Error Handling (Frontend)
 
-- The global `ErrorBoundary` in `App.jsx` catches render-time exceptions. Do not add additional top-level error boundaries unless isolating a specific widget.
+- The global `ErrorBoundary` (`components/ErrorBoundary.jsx`, imported by `App.jsx`) catches render-time exceptions and reports them to `/api/system/client-error`. It offers "Try again" (soft reset), "Reload page", and "Go to Dashboard" recovery actions. Do not add additional top-level error boundaries unless isolating a specific widget.
 - API errors should be caught in the calling component and displayed inline (e.g. a red banner or toast). Do not let errors propagate silently.
-- No external error tracking service (Sentry, etc.) is configured yet. All frontend errors are visible only in the browser console.
+- Frontend crash reports are posted to the backend via `componentDidCatch`. No external error tracking service (Sentry, etc.) is configured yet.
 
 ### Accessibility (a11y)
 
@@ -735,12 +735,13 @@ The following have been implemented and are no longer open:
 - **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
 - **DB-backed password reset tokens** ✅: Reset tokens are persisted in the `password_reset_tokens` SQLite table (migration 003) via `passwordResetTokenRepo`. Tokens survive server restarts, support multi-instance deployments, and use atomic `claim()` to prevent TOCTOU double-use. A `usedAt` column provides one-time-use enforcement with an audit trail.
 - **Per-user audit trail** ✅: Every activity log entry records `userId` and `userName` (migration 004). The `actor(req)` utility in `utils/actor.js` extracts identity from `req.authUser` (JWT payload includes `name`). Bulk approve/reject/restore actions log per-test entries with the acting user's identity.
+- **Artifact authentication** ✅: The `/artifacts` route is protected by HMAC-SHA256 signed `?token=&exp=` query-param tokens (1 hour TTL, configurable via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` is required in production; dev uses a random per-process secret. `signArtifactUrl()` in `middleware/appSetup.js` generates signed URLs; all artifact producers (screenshots, videos, traces) use it. `Cache-Control: private, no-store` prevents browsers from caching expiring URLs.
+- **Secrets scanning** ✅: Gitleaks runs on every PR and push to `main` via the `secrets` CI job (`.github/workflows/ci.yml`). Both `lint` and `build` jobs depend on it, gating the entire pipeline. Configuration in `.github/.gitleaks.toml` extends the default ruleset with allowlists for CI placeholders and `.env.example` files.
 
 ### Known Security Gaps (TODO)
 
 The following are **not yet implemented** but should be addressed before production:
 
-- **Artifact authentication**: The `/artifacts` static route is **not behind `requireAuth`**. Screenshots, videos, and traces are served publicly. Artifact filenames contain random run IDs which provide obscurity but not security. To add auth, implement `?token=` query param validation (same pattern as SSE/export endpoints) and update all frontend artifact URLs.
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
 - **Redis for rate limiting**: The global API rate limiters use `express-rate-limit`'s default in-memory store. In multi-instance deployments, replace with `rate-limit-redis` so limits are shared across processes.
 
@@ -773,6 +774,8 @@ The following are **not yet implemented** but should be addressed before product
 | `HEALING_VISIBLE_WAIT_CAP` | No | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
 | `ENABLE_DEV_RESET_TOKENS` | No | `false` | When `"true"`, forgot-password response includes the reset token (dev/test only) |
 | `MAX_CONVERSATION_TURNS` | No | `20` | Max user↔assistant turn pairs in chat context window (sliding window trims older turns) |
+| `ARTIFACT_SECRET` | Yes (prod) | random (dev) | HMAC-SHA256 key for signing artifact URLs. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `ARTIFACT_TOKEN_TTL_MS` | No | `3600000` (1 hr) | Lifetime of signed artifact URL tokens (ms) |
 
 ---
 
