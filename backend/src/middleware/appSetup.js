@@ -91,11 +91,21 @@ const _corsOrigins = corsOrigin === "*" ? [] : corsOrigin.split(",").map(o => o.
 /**
  * `true` when CORS_ORIGIN is set to a different origin than the backend.
  * In that case cookies must use `SameSite=None; Secure` to be sent cross-site.
+ *
+ * Compares against the backend's own origin (PORT-based), NOT APP_URL which is
+ * the frontend URL. For GitHub Pages + Render deployments, CORS_ORIGIN is the
+ * GitHub Pages URL and the backend runs on Render — these are always different
+ * origins, so cookies must use SameSite=None; Secure.
  * @type {boolean}
  */
 export const isCrossOrigin = _corsOrigins.length > 0 && (() => {
   try {
-    const backendOrigin = `${process.env.APP_URL || "http://localhost:3001"}`;
+    // Use RENDER_EXTERNAL_URL (set by Render) or build from PORT, not APP_URL
+    // which is the frontend URL and would incorrectly match CORS_ORIGIN.
+    const port = process.env.PORT || "3001";
+    const backendOrigin = process.env.RENDER_EXTERNAL_URL
+      || process.env.BACKEND_URL
+      || `http://localhost:${port}`;
     return _corsOrigins.some(o => new URL(o).origin !== new URL(backendOrigin).origin);
   } catch { return false; }
 })();
