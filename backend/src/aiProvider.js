@@ -21,6 +21,7 @@
  * - {@link getConfiguredKeys} — Masked key status for the Settings UI.
  * - {@link getSupportedProviders} — All provider names/models for the UI (derived from runtime config).
  * - {@link checkOllamaConnection} — Ollama connectivity check.
+ * - {@link loadKeysFromDatabase} — Restore all persisted keys from DB into the runtime cache (called at startup).
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -28,8 +29,12 @@ import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { throwIfAborted } from "./utils/abortHelper.js";
 import { formatLogLine } from "./utils/logFormatter.js";
+import * as apiKeyRepo from "./database/repositories/apiKeyRepo.js";
 
-// ── Runtime key store (set via /api/settings, survives until process restart) ─
+// ── Runtime key store ────────────────────────────────────────────────────────
+// In-memory cache populated at startup from the DB (via loadKeysFromDatabase)
+// and updated whenever /api/settings writes a new key. Keys are also persisted
+// to the `api_keys` DB table, so they survive server restarts.
 const runtimeKeys = {};
 
 // Ollama runtime config (settable via /api/settings for the local provider)
@@ -83,16 +88,32 @@ const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google"];
 
 /**
  * Set an AI provider API key at runtime (via Settings page).
+ * Persists the key to the database so it survives server restarts.
+ * Pass an empty string to clear the key both in-memory and in the DB.
+ *
  * @param {string} provider - `"anthropic"` | `"openai"` | `"google"`.
- * @param {string} key      - The API key string.
+ * @param {string} key      - The API key string, or `""` to deactivate.
  */
 export function setRuntimeKey(provider, key) {
   const envName = CLOUD_KEY_MAP[provider];
-  if (envName) runtimeKeys[envName] = key;
+  if (!envName) return;
+  runtimeKeys[envName] = key;
+  try {
+    if (key) {
+      apiKeyRepo.set(provider, key);
+    } else {
+      apiKeyRepo.remove(provider);
+    }
+  } catch (err) {
+    // DB unavailable during tests or before init — safe to ignore, in-memory cache still works.
+    console.error(formatLogLine("error", null, `[aiProvider] Failed to persist key for ${provider}: ${err.message}`));
+  }
 }
 
 /**
  * Configure Ollama runtime settings (via Settings page).
+ * Persists the config to the database so it survives server restarts.
+ *
  * @param {Object}  [opts]
  * @param {string}  [opts.baseUrl]  - Ollama server URL.
  * @param {string}  [opts.model]    - Model name (e.g. `"mistral:7b"`).
@@ -102,6 +123,15 @@ export function setRuntimeOllama({ baseUrl, model, disabled } = {}) {
   if (baseUrl  !== undefined) runtimeOllamaBaseUrl  = baseUrl;
   if (model    !== undefined) runtimeOllamaModel    = model;
   if (disabled !== undefined) runtimeOllamaDisabled = disabled;
+  try {
+    if (disabled) {
+      apiKeyRepo.remove("local");
+    } else if (runtimeOllamaBaseUrl || runtimeOllamaModel) {
+      apiKeyRepo.set("local", { baseUrl: runtimeOllamaBaseUrl, model: runtimeOllamaModel });
+    }
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[aiProvider] Failed to persist Ollama config: ${err.message}`));
+  }
 }
 
 function getKey(envName) {
@@ -252,6 +282,57 @@ function maskKey(key) {
   if (!key) return "";
   if (key.length <= 8) return "••••••••";
   return key.slice(0, 6) + "••••••••" + key.slice(-4);
+}
+
+// ── Database key persistence ──────────────────────────────────────────────────
+
+/**
+ * Restore all persisted API keys and Ollama config from the database into the
+ * runtime cache. Called once at server startup after the DB is initialised.
+ *
+ * Keys stored in the DB take precedence over the default detection logic only
+ * when no matching env var is already set — env vars remain the canonical
+ * override so Docker / K8s deployments are unaffected.
+ *
+ * @returns {number} The number of providers successfully loaded from the database.
+ */
+export function loadKeysFromDatabase() {
+  let loaded = 0;
+  try {
+    const entries = apiKeyRepo.getAll();
+    for (const { provider, value } of entries) {
+      if (provider === "local") {
+        // Restore Ollama config only when env vars are not already set.
+        const cfg = value;
+        if (cfg && typeof cfg === "object") {
+          if (!runtimeOllamaBaseUrl && !process.env.OLLAMA_BASE_URL) {
+            runtimeOllamaBaseUrl = cfg.baseUrl || "";
+          }
+          if (!runtimeOllamaModel && !process.env.OLLAMA_MODEL) {
+            runtimeOllamaModel = cfg.model || "";
+          }
+          runtimeOllamaDisabled = false;
+          loaded += 1;
+        }
+      } else {
+        const envName = CLOUD_KEY_MAP[provider];
+        if (!envName) continue;
+        // Only restore from DB when the env var is absent and cache is not already
+        // populated — env vars always win.
+        if (!process.env[envName] && !(envName in runtimeKeys)) {
+          runtimeKeys[envName] = String(value);
+          loaded += 1;
+        }
+      }
+    }
+    if (loaded > 0) {
+      console.log(formatLogLine("info", null, `[aiProvider] Restored ${loaded} provider key(s) from database`));
+    }
+  } catch (err) {
+    // Non-fatal: the server still works with env vars; log and continue.
+    console.error(formatLogLine("error", null, `[aiProvider] Failed to load keys from database: ${err.message}`));
+  }
+  return loaded;
 }
 
 // ── Ollama connectivity check ─────────────────────────────────────────────────

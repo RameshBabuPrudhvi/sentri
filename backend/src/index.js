@@ -23,6 +23,7 @@ import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
+import { loadKeysFromDatabase } from "./aiProvider.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -67,7 +68,10 @@ process.on("unhandledRejection", (reason) => {
 getDatabase();
 // 2. Migrate legacy sentri-db.json → SQLite (one-time, skips if already done)
 migrateFromJsonIfNeeded();
-// 3. Orphan recovery — mark any "running" runs from a previous crash as interrupted
+// 3. Restore persisted AI provider keys from the database into the runtime cache.
+//    Must run after DB init but before the first AI call.
+loadKeysFromDatabase();
+// 4. Orphan recovery — mark any "running" runs from a previous crash as interrupted
 const orphanCount = runRepo.markOrphansInterrupted();
 if (orphanCount > 0) {
   console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
