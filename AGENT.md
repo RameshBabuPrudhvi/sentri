@@ -441,7 +441,7 @@ CI runs automatically on every push to `main`/`develop` and on PRs to `main` via
 2. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
 3. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
 4. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
-5. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in both `package.json` files, promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
+5. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in all three `package.json` files (backend, frontend, docs), promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
 
 All four CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
 
@@ -838,7 +838,7 @@ Sentri uses **automatic semantic versioning** driven by [Conventional Commits](h
 3. **`.github/workflows/release.yml`** runs on push to `main`:
    - Scans commits since the last `v*` tag for `feat:`, `fix:`, `perf:`, `BREAKING CHANGE:`.
    - Determines the bump level (major / minor / patch). If no bumping prefix is found, the workflow exits — no release.
-   - Updates `version` in both `backend/package.json` and `frontend/package.json`.
+   - Updates `version` in `backend/package.json`, `frontend/package.json`, and `docs/package.json`.
    - Promotes `## [Unreleased]` in `docs/changelog.md` to `## [X.Y.Z] — YYYY-MM-DD` and adds a fresh `[Unreleased]` section.
    - Commits `chore(release): vX.Y.Z`, creates a `vX.Y.Z` git tag, and pushes.
    - Creates a **GitHub Release** with release notes extracted from the changelog.

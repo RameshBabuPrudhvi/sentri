@@ -42,8 +42,9 @@ jobs:
       - name: Determine next version from commits
         id: version
         run: |
-          # Get the latest tag (or default to v1.0.0 if none exists)
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          # Get the latest tag (or default to v0.0.0 if none exists so the
+          # first feat: commit produces v0.1.0, not v1.1.0)
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
           CURRENT="${LATEST_TAG#v}"
@@ -83,9 +84,10 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         run: |
           NEXT="${{ steps.version.outputs.next }}"
-          # Update both package.json files (no npm publish — just the version field)
+          # Update all package.json files (no npm publish — just the version field)
           cd backend  && npm version "$NEXT" --no-git-tag-version && cd ..
           cd frontend && npm version "$NEXT" --no-git-tag-version && cd ..
+          cd docs     && npm version "$NEXT" --no-git-tag-version && cd ..
 
       - name: Update changelog — promote Unreleased to version
         if: steps.version.outputs.skip != 'true'
@@ -112,7 +114,7 @@ jobs:
           NEXT="${{ steps.version.outputs.next }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json docs/changelog.md
+          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json docs/package.json docs/changelog.md
           git commit -m "chore(release): v$NEXT"
           git tag "v$NEXT"
           git push origin main --tags
