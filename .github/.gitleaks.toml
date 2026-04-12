@@ -1,0 +1,43 @@
+# .gitleaks.toml — Gitleaks secrets scanning configuration
+#
+# Scans every commit for accidentally committed secrets (API keys, JWT secrets,
+# OAuth credentials, etc.).  Run automatically by the CI "secrets" job on every
+# PR and push to main.
+#
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+
+title = "Sentri gitleaks config"
+
+[extend]
+# Extend the official gitleaks default ruleset so we inherit all built-in
+# detectors (AWS, GitHub, Anthropic, OpenAI, Google, etc.) without having
+# to re-declare them.
+useDefault = true
+
+# ─── Global allowlist ─────────────────────────────────────────────────────────
+# Patterns listed here are never flagged regardless of which rule matched them.
+# Add entries only for values that are intentionally public (CI placeholders,
+# .env.example dummy values, test fixtures).
+
+[allowlist]
+  description = "CI placeholders and .env.example dummy values"
+
+  # Allow the literal placeholder key used in CI smoke tests.
+  # This value is never a real secret — it is rejected by the Anthropic API.
+  regexes = [
+    "sk-ant-placeholder-for-ci",
+  ]
+
+  # .env.example documents variable names with empty or obviously-fake values.
+  # Allow the whole file so contributors can update it freely.
+  paths = [
+    "backend/.env.example",
+    "backend/.env.example.test",
+  ]
+
+  # Test fixtures and seed data may contain fake credentials for testing auth
+  # flows.  Scope the allowlist tightly to the tests directory.
+  # Uncomment and extend as needed:
+  # paths = [
+  #   "backend/tests/fixtures",
+  # ]

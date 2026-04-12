@@ -26,6 +26,7 @@ import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBo
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { signArtifactUrl } from "../middleware/appSetup.js";
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
 // When a test's last meaningful action is non-visual (assertion, wait, evaluate),
@@ -366,7 +367,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
         const videoName = `${runId}-step${stepIndex}.webm`;
         const dst = path.join(VIDEOS_DIR, videoName);
         fs.renameSync(src, dst);
-        result.videoPath = `/artifacts/videos/${videoName}`;
+        result.videoPath = signArtifactUrl(`/artifacts/videos/${videoName}`);
       }
       fs.rmSync(testVideoDir, { recursive: true, force: true });
     } catch (videoErr) {

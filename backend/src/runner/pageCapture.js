@@ -15,6 +15,7 @@
 import path from "path";
 import fs from "fs";
 import { SHOTS_DIR } from "./config.js";
+import { signArtifactUrl } from "../middleware/appSetup.js";
 
 /**
  * waitForStable(page, opts) → Promise<void>
@@ -147,7 +148,7 @@ export async function captureScreenshot(page, runId, stepIndex, { failed = false
   fs.writeFileSync(shotPath, buf);
   return {
     base64: buf.toString("base64"),
-    artifactPath: `/artifacts/screenshots/${shotName}`,
+    artifactPath: signArtifactUrl(`/artifacts/screenshots/${shotName}`),
   };
 }
 

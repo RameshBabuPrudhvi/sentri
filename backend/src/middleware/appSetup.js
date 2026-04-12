@@ -17,6 +17,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -201,23 +202,170 @@ export function csrfMiddleware(req, res, next) {
 
 app.use(csrfMiddleware);
 
+// ─── Global API rate limiting ─────────────────────────────────────────────────
+// Applies to ALL /api/* routes. Separate tighter buckets are defined below for
+// expensive operations (crawl, test run, AI generation) that consume significant
+// server or third-party AI API resources.
+//
+// Limits are intentionally generous for the general bucket (300 req / 15 min per
+// IP) to avoid false positives on legitimate power users, while the expensive
+// operation buckets are tight (5–30 req / hour per IP).
+//
+// In production, replace the default in-memory store with a Redis store:
+//   import { RedisStore } from "rate-limit-redis";
+//   store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) })
+
+/**
+ * General API rate limiter — 300 requests per 15 minutes per IP.
+ * Applied to all /api/* routes as a DoS / abuse baseline.
+ */
+const generalApiLimiter = rateLimit({
+  windowMs:         15 * 60 * 1000,   // 15 minutes
+  max:              300,               // 300 requests per window per IP
+  standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
+  legacyHeaders:    false,
+  skip:             (req) => req.method === "OPTIONS", // never block preflight
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Too many requests. Please slow down and try again shortly.",
+    });
+  },
+});
+
+/**
+ * Expensive operations limiter — 20 requests per hour per IP.
+ * Applied to: POST /api/projects/:id/crawl, POST /api/projects/:id/run,
+ *             POST /api/tests/:testId/run
+ * These endpoints launch a browser instance and consume AI API quota.
+ */
+export const expensiveOpLimiter = rateLimit({
+  windowMs:         60 * 60 * 1000,   // 1 hour
+  max:              20,               // 20 crawl/run triggers per hour per IP
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Rate limit reached for test runs. You can trigger up to 20 runs per hour. Please wait before starting another.",
+    });
+  },
+});
+
+/**
+ * AI generation limiter — 30 requests per hour per IP.
+ * Applied to: POST /api/projects/:id/tests/generate
+ * These endpoints make direct AI API calls (Claude / GPT / Gemini).
+ */
+export const aiGenerationLimiter = rateLimit({
+  windowMs:         60 * 60 * 1000,   // 1 hour
+  max:              30,               // 30 AI generation calls per hour per IP
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Rate limit reached for AI generation. You can trigger up to 30 AI requests per hour. Please wait before generating more tests.",
+    });
+  },
+});
+
+// Apply the general limiter to all /api/* routes.
+// The tighter per-operation limiters are applied at the route level in
+// routes/runs.js and routes/tests.js via the exported limiters above.
+app.use("/api", generalApiLimiter);
+
+// ─── Artifact signing helpers ─────────────────────────────────────────────────
+// Screenshots, videos, and Playwright traces are served as static files.
+// <img>, <video>, and <a download> tags cannot send Authorization headers, so
+// we use short-lived HMAC-signed query-param tokens instead.
+//
+// Token format:  ?token=<hmac-sha256(artifactPath + exp, ARTIFACT_SECRET)>&exp=<unix-ms>
+// Default TTL:   1 hour (ARTIFACT_TOKEN_TTL_MS env var to override)
+//
+// ARTIFACT_SECRET must be set in production.  In development a random per-
+// process secret is derived so artifacts still work without configuration.
+// Generate a production value with:
+//   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+
+const ARTIFACT_SECRET = process.env.ARTIFACT_SECRET ||
+  (() => {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "ARTIFACT_SECRET must be set in production. " +
+        "Generate one with: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\""
+      );
+    }
+    // Development fallback: stable per-process random — fine for local use.
+    return crypto.randomBytes(48).toString("hex");
+  })();
+
+const ARTIFACT_TOKEN_TTL_MS = parseInt(process.env.ARTIFACT_TOKEN_TTL_MS ?? "", 10) || 60 * 60 * 1000; // 1 hour
+
+/**
+ * Generate a short-lived HMAC-signed token for an artifact path.
+ *
+ * @param {string} artifactPath - The URL path, e.g. `/artifacts/screenshots/foo.png`
+ * @returns {string} The full artifact URL with `?token=…&exp=…` appended.
+ */
+export function signArtifactUrl(artifactPath) {
+  const exp = Date.now() + ARTIFACT_TOKEN_TTL_MS;
+  const mac = crypto
+    .createHmac("sha256", ARTIFACT_SECRET)
+    .update(`${artifactPath}:${exp}`)
+    .digest("base64url");
+  return `${artifactPath}?token=${mac}&exp=${exp}`;
+}
+
+/**
+ * Validate an incoming artifact request's `?token=` and `?exp=` query params.
+ * Returns `true` when the token is valid and not expired; `false` otherwise.
+ *
+ * @param {string} artifactPath - The URL path without query string.
+ * @param {string|undefined} token
+ * @param {string|undefined} exp
+ * @returns {boolean}
+ */
+function isValidArtifactToken(artifactPath, token, exp) {
+  if (!token || !exp) return false;
+  const expMs = parseInt(exp, 10);
+  if (isNaN(expMs) || Date.now() > expMs) return false;
+  const expected = crypto
+    .createHmac("sha256", ARTIFACT_SECRET)
+    .update(`${artifactPath}:${expMs}`)
+    .digest("base64url");
+  // Constant-time comparison to prevent timing attacks.
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  } catch {
+    // Buffers are different lengths — definitively invalid.
+    return false;
+  }
+}
+
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
-// NOTE: /artifacts is intentionally NOT behind requireAuth. Screenshots, videos,
-// and traces are referenced via <img>, <video>, and <a download> tags which
-// cannot send Authorization headers. To add auth, implement ?token= query param
-// validation here (same pattern as SSE/export endpoints) and update all frontend
-// artifact URLs to append the token. For now, artifact filenames contain random
-// run IDs which provide obscurity (not security).
+// Protected by HMAC-signed ?token= query params generated by signArtifactUrl().
+// <img>, <video>, and <a download> tags cannot send Authorization headers, so
+// the signed URL pattern is the correct approach for browser-native media tags.
+
 /**
  * Absolute path to the Playwright artifacts directory (screenshots, videos, traces).
  * @type {string}
  */
 export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
-app.use("/artifacts", express.static(ARTIFACTS_DIR, {
+
+app.use("/artifacts", (req, res, next) => {
+  const artifactPath = "/artifacts" + req.path;
+  const { token, exp } = req.query;
+
+  if (!isValidArtifactToken(artifactPath, token, exp)) {
+    return res.status(401).json({ error: "Invalid or expired artifact token." });
+  }
+  next();
+}, express.static(ARTIFACTS_DIR, {
   setHeaders(res, fp) {
     if (fp.endsWith(".webm")) res.setHeader("Content-Type", "video/webm");
     if (fp.endsWith(".zip"))  res.setHeader("Content-Type", "application/zip");
     if (fp.endsWith(".png"))  res.setHeader("Content-Type", "image/png");
     res.setHeader("Accept-Ranges", "bytes");
+    // Prevent browsers from caching artifact URLs — they contain expiring tokens.
+    res.setHeader("Cache-Control", "private, no-store");
   },
 }));
