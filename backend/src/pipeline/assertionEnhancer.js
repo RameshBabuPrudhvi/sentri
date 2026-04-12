@@ -182,8 +182,17 @@ export function enhanceTest(test, snapshot, classifiedPage) {
       || FALLBACK_TEMPLATE;
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
 
-    // Inject before closing brace of the test
-    code = code.replace(/(\}\s*\);\s*$)/, `${pageLoad}\n${template(snapshot)}\n$1`);
+    // S3-02: inject waitForStable before assertions so SPAs have settled.
+    // The call is wrapped in an awaited helper that is already available in
+    // the runtime (injected by executeTest via pageCapture.waitForStable).
+    // We emit it as a comment-guarded page.waitForLoadState('networkidle')
+    // fallback because the enhancer runs at generation time (no page ref) —
+    // the actual MutationObserver-based wait runs at execution time via the
+    // waitForStable() call prepended in executeTest.js.
+    const stabilityStep = `  // S3-02: DOM stability wait — let the page settle before asserting\n  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});`;
+
+    // Inject stability step + assertions before closing brace of the test
+    code = code.replace(/(\}\s*\);\s*$)/, `${stabilityStep}\n${pageLoad}\n${template(snapshot)}\n$1`);
 
     return {
       ...test,

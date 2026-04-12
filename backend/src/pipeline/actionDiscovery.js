@@ -32,6 +32,46 @@ const DESTRUCTIVE_KEYWORDS = [
   "unsubscribe", "deactivate", "close account",
 ];
 
+// S3-08: keywords that signal a signup / registration form requiring email
+// verification. Used by stateExplorer to decide whether to invoke the
+// DisposableEmail flow instead of plain form-filling.
+const SIGNUP_INTENT_KEYWORDS = [
+  "sign up", "signup", "register", "registration", "create account",
+  "create your account", "join", "get started", "open an account",
+];
+
+/**
+ * detectSignupIntent(snapshot, formActions) → boolean
+ *
+ * Returns true if the given form actions appear to belong to a
+ * signup/registration flow that will likely require email verification.
+ * Checks:
+ *   1. Submit/click button text on the form
+ *   2. Page title / heading text in the snapshot
+ *   3. Presence of both an email field AND a password field (strong signal)
+ *
+ * @param {object} snapshot     - Page snapshot from takeSnapshot
+ * @param {object[]} formActions - Action descriptors for a single form group
+ * @returns {boolean}
+ */
+export function detectSignupIntent(snapshot, formActions) {
+  // Signal 1: submit button text
+  const submitActions = formActions.filter(a => a.type === "submit" || a.type === "click");
+  const submitText = submitActions.map(a => (a.element?.text || "")).join(" ").toLowerCase();
+  if (SIGNUP_INTENT_KEYWORDS.some(k => submitText.includes(k))) return true;
+
+  // Signal 2: page title or h1/h2 heading
+  const pageText = `${snapshot?.title || ""} ${snapshot?.url || ""}`.toLowerCase();
+  if (SIGNUP_INTENT_KEYWORDS.some(k => pageText.includes(k))) return true;
+
+  // Signal 3: form contains BOTH an email field and a password field
+  const hasEmail    = formActions.some(a => a.type === "fill" && (a.element?.type === "email"    || (a.element?.placeholder || "").toLowerCase().includes("email")));
+  const hasPassword = formActions.some(a => a.type === "fill" && (a.element?.type === "password" || (a.element?.placeholder || "").toLowerCase().includes("password")));
+  if (hasEmail && hasPassword) return true;
+
+  return false;
+}
+
 // ── Test data generators ────────────────────────────────────────────────────
 
 const TEST_DATA = {

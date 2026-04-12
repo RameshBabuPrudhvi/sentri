@@ -75,9 +75,29 @@ function scoreElement(el) {
 }
 
 /**
+ * SHADOW_DOM_SELECTOR_PREFIX — prefix used to mark elements discovered inside
+ * shadow roots so downstream code (selfHealing.js, assertionEnhancer.js) knows
+ * to use a `pierce:` strategy when locating them.
+ */
+export const SHADOW_DOM_SELECTOR_PREFIX = "pierce:";
+
+/**
+ * isShadowElement(el) → boolean
+ * Returns true if this element was captured from inside a shadow root.
+ */
+export function isShadowElement(el) {
+  return Boolean(el._fromShadow);
+}
+
+/**
  * filterElements(elements) → filtered elements with intent hints
  *
- * @param {Array} elements - raw elements from DOM snapshot
+ * Handles both regular DOM elements and elements surfaced from shadow roots
+ * (marked with `_fromShadow: true` by crawlBrowser.js). Shadow-root elements
+ * are scored identically but tagged so the self-healing selector waterfall can
+ * apply a `pierce:` strategy.
+ *
+ * @param {Array} elements - raw elements from DOM snapshot (may include shadow-root elements)
  * @returns {Array} filtered, deduplicated, scored elements
  */
 export function filterElements(elements) {

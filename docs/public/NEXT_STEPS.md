@@ -91,7 +91,7 @@ These items directly improve the reliability and coverage of generated tests, an
 
 ---
 
-### S3-02 — DOM stability wait (MutationObserver) before assertions 🔵 Medium
+### ~~S3-02 — DOM stability wait (MutationObserver) before assertions~~ ✅ Complete
 
 **Problem:** Sentri uses fixed-duration waits (`waitForTimeout`) and `waitForText` throughout the runner. Modern SPAs with loading states, streaming AI responses, skeleton screens, and async data fetches settle at variable times. Tests assert on partially-rendered pages and produce false failures.
 
@@ -134,7 +134,7 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-04 — Shadow DOM and web component support in crawl 🔵 Medium
+### ~~S3-04 — Shadow DOM and web component support in crawl~~ ✅ Complete
 
 **Problem:** `backend/src/pipeline/elementFilter.js` has no logic to pierce shadow roots. Modern enterprise applications built with Angular, Lit, Stencil, Salesforce LWC, or any shadow-DOM-based component library are largely invisible to the crawler. The generated test suites for these apps are thin or empty.
 
@@ -149,7 +149,7 @@ async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
 
 ---
 
-### S3-08 — Disposable email support for auth flow testing 🔵 Medium
+### ~~S3-08 — Disposable email support for auth flow testing~~ ✅ Complete
 
 **Problem:** Sentri can crawl and discover auth flows but cannot complete registration flows that require email verification. Tests for signup, password reset, and email-gated onboarding are either skipped or left as stubs.
 

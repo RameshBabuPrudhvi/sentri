@@ -118,7 +118,84 @@ export async function crawlPages(project, run, { signal } = {}) {
         // takeSnapshot() now calls waitForLoadState('networkidle') internally,
         // so we no longer need the arbitrary 800ms static wait here.
 
+        // ── Shadow DOM: inject queryShadowAll helper and collect elements ──
+        // Modern enterprise apps (Angular, Lit, Stencil, Salesforce LWC) encapsulate
+        // UI inside shadow roots that are invisible to standard page.$$() queries.
+        // We inject a recursive helper once per page, call it with common interactive
+        // selectors, and attach any found elements to the snapshot so elementFilter.js
+        // can score and surface them alongside regular DOM elements.
+        let shadowElements = [];
+        try {
+          shadowElements = await page.evaluate(() => {
+            // Recursively traverse all shadow roots in the document.
+            // Returns a flat array of plain objects (must be serialisable across
+            // the evaluate boundary — no DOM node references).
+            function queryShadowAll(selector, root = document) {
+              const results = [];
+              // Walk every element in this root (including the root itself for custom elements)
+              const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+              let node = walker.nextNode();
+              while (node) {
+                // Check if this node itself matches
+                if (node.matches && node.matches(selector)) {
+                  const rect = node.getBoundingClientRect();
+                  results.push({
+                    tag: node.tagName.toLowerCase(),
+                    type: node.getAttribute("type") || "",
+                    text: (node.textContent || node.getAttribute("aria-label") || node.getAttribute("title") || "").trim().slice(0, 200),
+                    href: node.getAttribute("href") || "",
+                    role: node.getAttribute("role") || "",
+                    ariaLabel: node.getAttribute("aria-label") || "",
+                    placeholder: node.getAttribute("placeholder") || "",
+                    visible: rect.width > 0 && rect.height > 0,
+                    _fromShadow: true,
+                  });
+                }
+                // Recurse into this node's shadow root if it has one
+                if (node.shadowRoot) {
+                  const inner = queryShadowAll(selector, node.shadowRoot);
+                  results.push(...inner);
+                }
+                node = walker.nextNode();
+              }
+              return results;
+            }
+
+            // Selectors covering the interactive elements most likely to be
+            // test-worthy inside shadow DOM components
+            const SHADOW_INTERACTIVE_SELECTORS = [
+              "button",
+              "a[href]",
+              "input",
+              "textarea",
+              "select",
+              "[role='button']",
+              "[role='link']",
+              "[role='menuitem']",
+              "[role='tab']",
+              "[role='checkbox']",
+              "[role='radio']",
+              "[role='switch']",
+              "[role='textbox']",
+              "[role='searchbox']",
+              "[role='combobox']",
+            ].join(", ");
+
+            return queryShadowAll(SHADOW_INTERACTIVE_SELECTORS);
+          });
+        } catch (shadowErr) {
+          // Shadow DOM traversal is best-effort — never break the crawl
+          shadowElements = [];
+        }
+
         const snapshot = await takeSnapshot(page);
+
+        // Merge shadow elements into the snapshot's element list so they flow
+        // through elementFilter.js scoring alongside regular DOM elements.
+        if (shadowElements.length > 0) {
+          snapshot.elements = [...(snapshot.elements || []), ...shadowElements];
+          log(run, `🕸️  Shadow DOM: ${shadowElements.length} element(s) found inside shadow roots on ${url}`);
+        }
 
         const structureFP = fingerprintStructure(snapshot);
         if (crawlQueue.isStructureDuplicate(structureFP) && depth > 1) {
