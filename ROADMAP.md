@@ -177,7 +177,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-004 — Persist AI provider keys encrypted in the database 🟡 High
+### ENH-004 — Persist AI provider keys encrypted in the database ✅ Complete
 
 **Problem:** AI API keys set via the Settings page are stored only in a process-level `runtimeKeys` object in `aiProvider.js`. They are lost on every server restart. Users must re-enter their API keys after every deployment — this is not acceptable for a production tool.
 
