@@ -21,7 +21,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo, passwordResetTokenRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
@@ -111,6 +111,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
+| `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -306,7 +307,7 @@ Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
 - **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `logs`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -459,6 +460,8 @@ node tests/self-healing.test.js
 node tests/code-parsing.test.js
 node tests/api-flow.test.js
 node tests/auth-cookies.test.js
+node tests/password-reset-token.test.js
+node tests/security-hardening.test.js
 ```
 
 Or run all at once: `npm test` from `backend/`.
@@ -668,9 +671,12 @@ The following have been implemented and are no longer open:
 - **Cookie-based auth** ✅: JWTs are stored in `access_token` HttpOnly; Secure; SameSite=Strict cookies. A `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX. Tokens are never returned in response bodies or stored in localStorage.
 - **CSRF protection** ✅: Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. All mutating endpoints are validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints are exempt via `CSRF_EXEMPT_PATHS`.
 - **Session refresh** ✅: `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 minutes before expiry.
-- **Rate limiting** ✅: Per-endpoint rate limiters are configured in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
+- **Auth rate limiting** ✅: Per-endpoint rate limiters in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
+- **Global API rate limiting** ✅: Three-tier `express-rate-limit` in `middleware/appSetup.js` — general (300 req/15 min for all `/api/*`), expensive operations (20/hr for crawl/run), AI generation (30/hr for test generation). In-memory store; swap to Redis for horizontal scaling.
 - **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). Tighten `'unsafe-inline'` to nonce-based in production.
 - **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
+- **DB-backed password reset tokens** ✅: Reset tokens are persisted in the `password_reset_tokens` SQLite table (migration 003) via `passwordResetTokenRepo`. Tokens survive server restarts, support multi-instance deployments, and use atomic `claim()` to prevent TOCTOU double-use. A `usedAt` column provides one-time-use enforcement with an audit trail.
+- **Per-user audit trail** ✅: Every activity log entry records `userId` and `userName` (migration 004). The `actor(req)` utility in `utils/actor.js` extracts identity from `req.authUser` (JWT payload includes `name`). Bulk approve/reject/restore actions log per-test entries with the acting user's identity.
 
 ### Known Security Gaps (TODO)
 
@@ -678,6 +684,7 @@ The following are **not yet implemented** but should be addressed before product
 
 - **Artifact authentication**: The `/artifacts` static route is **not behind `requireAuth`**. Screenshots, videos, and traces are served publicly. Artifact filenames contain random run IDs which provide obscurity but not security. To add auth, implement `?token=` query param validation (same pattern as SSE/export endpoints) and update all frontend artifact URLs.
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
+- **Redis for rate limiting**: The global API rate limiters use `express-rate-limit`'s default in-memory store. In multi-instance deployments, replace with `rate-limit-redis` so limits are shared across processes.
 
 ---
 

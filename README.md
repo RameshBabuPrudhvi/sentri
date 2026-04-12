@@ -243,7 +243,7 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 |---|---|
 | **Authentication** | ✅ Built-in (email/password + GitHub/Google OAuth) |
 | **JWT Security** | ✅ Throws in production without `JWT_SECRET` |
-| **Rate Limiting** | ✅ 10 sign-in attempts per IP per 15 min |
+| **Rate Limiting** | ✅ Three-tier: general (300/15 min), auth (5–10/15 min), expensive ops (20/hr), AI generation (30/hr) |
 | **OAuth CSRF** | ✅ State parameter validated |
 | **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
 | **Parallel Execution** | ✅ 1–10 concurrent browser contexts per run (`PARALLEL_WORKERS` env or UI selector) |

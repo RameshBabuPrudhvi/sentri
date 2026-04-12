@@ -38,7 +38,16 @@ All errors return JSON with an `error` field:
 
 ### Rate Limiting
 
-The sign-in endpoint is rate-limited to **10 attempts per IP per 15 minutes**. When exceeded:
+Three tiers of rate limiting protect the API:
+
+| Tier | Scope | Limit | Applied to |
+|---|---|---|---|
+| **General** | All `/api/*` routes | 300 req / 15 min per IP | Every API request |
+| **Auth** | Login, forgot-password, reset-password | 5–10 req / 15 min per IP | Auth endpoints only |
+| **Expensive ops** | Crawl, test run | 20 req / hr per IP | `POST /api/projects/:id/crawl`, `/run`, `/tests/:id/run` |
+| **AI generation** | Test generation | 30 req / hr per IP | `POST /api/projects/:id/tests/generate` |
+
+When exceeded:
 
 ```
 HTTP 429 Too Many Requests
