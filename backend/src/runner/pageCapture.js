@@ -34,7 +34,7 @@ import { SHOTS_DIR } from "./config.js";
  *
  * Based on the Assrt `agent.ts` pattern referenced in NEXT_STEPS S3-02.
  *
- * @param {import('playwright').Page} page
+ * @param {Object} page  - Playwright Page instance
  * @param {object}  [opts]
  * @param {number}  [opts.timeoutSec=30]  - Maximum wait in seconds
  * @param {number}  [opts.stableSec=2]    - Quiet period required to declare stable

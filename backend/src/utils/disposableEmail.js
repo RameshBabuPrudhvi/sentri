@@ -204,7 +204,7 @@ export async function waitForOtp(mailbox) {
  *
  * Returns `true` if at least one input was filled successfully.
  *
- * @param {import('playwright').Page} page
+ * @param {Object} page  - Playwright Page instance
  * @param {string} otp
  * @returns {Promise<boolean>}
  */
@@ -281,8 +281,8 @@ export async function fillOtpFields(page, otp) {
  * Designed to be called from `executeFormGroup` in stateExplorer when the
  * form intent is detected as SIGNUP / REGISTRATION (see actionDiscovery.js).
  *
- * @param {import('playwright').Page} page
- * @param {Array<{selector: string, type: string, value?: string}>} formFields
+ * @param {Object} page  - Playwright Page instance
+ * @param {Array<Object>} formFields  - Field descriptors with selector, type, label, etc.
  * @param {object} run  - Mutable run record for SSE logging
  * @returns {Promise<{ email: string, otpFilled: boolean, linkFollowed: boolean }>}
  */
