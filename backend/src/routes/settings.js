@@ -18,7 +18,7 @@ import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkO
 // ─── Audit trail helper ──────────────────────────────────────────────────────
 // Extracts userId and userName from req.authUser (set by requireAuth middleware)
 // so every logActivity() call automatically records who performed the action.
-// Returns an object that can be spread into logActivity({ ...actor(req), ...actor(req), ... }).
+// Returns an object that can be spread into logActivity({ ...actor(req), ... }).
 function actor(req) {
   const u = req?.authUser;
   if (!u) return {};
