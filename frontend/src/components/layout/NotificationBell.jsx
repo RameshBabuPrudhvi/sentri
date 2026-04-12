@@ -9,7 +9,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CheckCircle2, XCircle, AlertTriangle, Sparkles, Trash2, CheckCheck } from "lucide-react";
-import { useNotifications } from "../context/NotificationContext.jsx";
+import { useNotifications } from "../../context/NotificationContext.jsx";
 
 /** Relative time label (e.g. "2m ago", "1h ago", "3d ago"). */
 function timeAgo(iso) {
