@@ -177,13 +177,13 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-004 — Persist AI provider keys encrypted in the database ✅ Complete
+### ~~ENH-004 — Persist AI provider keys encrypted in the database~~ ✅ Complete
 
 **Problem:** AI API keys set via the Settings page are stored only in a process-level `runtimeKeys` object in `aiProvider.js`. They are lost on every server restart. Users must re-enter their API keys after every deployment — this is not acceptable for a production tool.
 
 **Fix:** Create an `api_keys(provider, encryptedKey, updatedAt)` table. On `POST /api/settings`, write the encrypted key using the existing `encryptCredentials` utility. On `getKey()`, check the runtime cache first, then fall back to the DB. The runtime cache becomes a performance optimisation, not the source of truth.
 
-**Files to change:**
+**Implemented in:** PR #80
 - `backend/src/database/migrations/` — create `api_keys` table
 - `backend/src/aiProvider.js` — add DB fallback in `getKey()`
 - `backend/src/routes/settings.js` — persist to DB on key update
@@ -786,17 +786,17 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase | Items | Status | Key Deliverable |
 |-------|-------|--------|-----------------|
 | ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
-| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-005 ✅, ENH-007 ✅, ENH-013 ✅, ENH-021 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
+| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-013 ✅, ENH-021 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
 | Ongoing | MAINT-001 through MAINT-011 | 🔲 Backlog | Platform moat + infrastructure |
 
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-005, ENH-007, ENH-013, ENH-021, ENH-027, ENH-030 = **15 complete**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-013, ENH-021, ENH-027, ENH-030 = **16 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
 **Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
-**Next PR priorities (recommended order):** ENH-020 (Soft-delete, M) → ENH-010 (Pagination, M) → ENH-004 (Persist AI keys, M) → ENH-008 (Run logs table, M)
+**Next PR priorities (recommended order):** ENH-020 (Soft-delete, M) → ENH-010 (Pagination, M) → ENH-008 (Run logs table, M)
 
 ---
 
