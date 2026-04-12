@@ -771,11 +771,55 @@ The frontend follows a clear separation of concerns between pages:
 
 ## Versioning & Releases
 
-> **Status**: No formal release process exists yet.
-
-- Both packages are at `1.0.0`. Version bumps are manual.
-- A changelog is maintained at `docs/changelog.md`. Update the **Unreleased** section in every PR that adds user-visible features, fixes, or security changes.
+- Both packages are at `1.0.0`. Version bumps are manual and follow [Semantic Versioning](https://semver.org/).
 - Docker images are tagged `latest` on GHCR. When a tagging strategy is adopted, update `docker-compose.yml` to reference specific tags.
+
+### Changelog
+
+Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) standard. The changelog lives at `docs/changelog.md` and is published on the docs site.
+
+**Every PR that adds user-visible features, fixes, security changes, or breaking changes MUST update `docs/changelog.md`.**
+
+#### Format rules
+
+- Entries go under the `## [Unreleased]` section at the top of the file.
+- When a version is released, rename `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` and add a fresh `[Unreleased]` above it.
+- Group entries under these headings (omit empty groups):
+
+  | Heading | When to use |
+  |---|---|
+  | `### Added` | New features, new endpoints, new UI pages |
+  | `### Changed` | Behaviour changes to existing features (non-breaking) |
+  | `### Deprecated` | Features that will be removed in a future version |
+  | `### Removed` | Features or APIs that were removed |
+  | `### Fixed` | Bug fixes |
+  | `### Security` | Vulnerability patches, auth hardening, rate limiting changes |
+
+- Each entry is a single bullet point starting with the area in bold: `- **Auth**: ...`, `- **API**: ...`, `- **Tests**: ...`, `- **Dashboard**: ...`, etc.
+- Reference the PR number at the end: `(#78)`.
+- Write from the user's perspective — what changed for them, not internal refactoring details.
+
+#### Example
+
+```markdown
+## [Unreleased]
+
+### Added
+- **API**: Three-tier global rate limiting — 300 req/15 min general, 20/hr for crawl/run, 30/hr for AI generation (#78)
+
+### Fixed
+- **Auth**: Password reset tokens now survive server restarts (DB-backed via migration 003) (#78)
+
+### Security
+- **Auth**: Atomic token claim prevents concurrent replay of password reset tokens (TOCTOU fix) (#78)
+```
+
+#### What does NOT need a changelog entry
+
+- Internal refactors with no user-visible effect (e.g. extracting a shared utility)
+- Test-only changes
+- Documentation-only changes (unless they document a new feature)
+- CI/CD pipeline changes
 
 ---
 
@@ -800,3 +844,4 @@ The frontend follows a clear separation of concerns between pages:
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
+- **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
