@@ -61,8 +61,8 @@ function pickSignupFieldValue(fieldType, hints) {
   if (fieldType === "password" || hints.includes("password")) return SIGNUP_TEST_DATA.password;
   if (hints.includes("first name") || hints.includes("firstname")) return SIGNUP_TEST_DATA.first;
   if (hints.includes("last name") || hints.includes("lastname")) return SIGNUP_TEST_DATA.last;
-  if (hints.includes("name") || hints.includes("full name")) return SIGNUP_TEST_DATA.name;
   if (hints.includes("username") || hints.includes("user name")) return SIGNUP_TEST_DATA.username;
+  if (hints.includes("name") || hints.includes("full name")) return SIGNUP_TEST_DATA.name;
   if (fieldType === "tel" || hints.includes("phone")) return SIGNUP_TEST_DATA.phone;
   if (hints.includes("company") || hints.includes("organization")) return SIGNUP_TEST_DATA.company;
   // Generic text fallback for any other required field
