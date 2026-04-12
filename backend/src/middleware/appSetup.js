@@ -234,7 +234,8 @@ const generalApiLimiter = rateLimit({
 
 /**
  * Expensive operations limiter — 20 requests per hour per IP.
- * Applied to: POST /api/projects/:id/crawl, POST /api/projects/:id/run
+ * Applied to: POST /api/projects/:id/crawl, POST /api/projects/:id/run,
+ *             POST /api/tests/:testId/run
  * These endpoints launch a browser instance and consume AI API quota.
  */
 export const expensiveOpLimiter = rateLimit({

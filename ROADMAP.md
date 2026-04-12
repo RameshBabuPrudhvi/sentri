@@ -41,7 +41,7 @@
 **Problem:** Only auth routes (`/login`, `/forgot-password`, `/reset-password`) have rate limiting. Every other route — crawl trigger, run execution, AI test generation, bulk actions — is completely unprotected. An authenticated user with a valid session can trigger 100 simultaneous crawls (exhausting AI quota and all available memory) or spam test generation to produce thousands of AI calls at cost.
 
 **Fix:** Apply `express-rate-limit` globally to all `/api/*` routes with separate tighter buckets for expensive operations:
-- Global: 200 req / 15 min per IP
+- Global: 300 req / 15 min per IP
 - `POST /api/projects/:id/crawl` → 5 per user per hour
 - `POST /api/projects/:id/run` → 20 per user per hour
 - `POST /api/*/tests/generate` → 30 per user per hour
