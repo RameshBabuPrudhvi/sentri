@@ -286,7 +286,7 @@ const _purgeInterval = setInterval(() => {
   // DB: delete reset tokens older than their TTL (both used and unused)
   try {
     resetTokenRepo.deleteExpired();
-  } catch { /* non-fatal — stale tokens are rejected at lookup time anyway */ }
+  } catch (err) { console.error(formatLogLine("error", null, `[auth/purge] Failed to delete expired reset tokens: ${err.message}`)); }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
 
