@@ -1,213 +1,537 @@
-# Sentri — Implementation Plan
+# Sentri — Engineering Roadmap
 
-> **Purpose:** This document tracks all known issues, improvement opportunities, and new features for Sentri. It consolidates findings from the full codebase audit, the Assrt MCP cross-reference analysis, and competitive research against autonomous QA platforms (Mabl, Testim, QA Wolf, Reflect).
+> **Based on:** Full System Audit — April 2026 · `sentri_v2_2`
+> **Stack:** Node.js (ESM) · Express · SQLite → PostgreSQL · Playwright · React 18 · Vite
 >
-> Each item includes the affected files, effort estimate, and the source of the finding so contributors know exactly where to start.
+> This document translates the platform audit into a trackable sprint plan. All known security risks, reliability gaps, feature gaps, and competitive improvements are captured here with enough detail to start work immediately.
 
 ---
 
 ## How to use this document
 
-- Items are grouped into **Sprints** by priority and dependency order.
+- Items are grouped into **Phases** by priority and dependency order.
 - The **Effort** field is sized for a 2-engineer team: `XS` < 1 day, `S` 1–2 days, `M` 3–5 days, `L` 1–2 weeks, `XL` 2–4 weeks.
-- The **Source** field cites where the finding came from: `Audit` (internal codebase review), `Assrt` (pattern adopted from Assrt MCP), or `Competitive` (gap vs. Mabl/Testim/QA Wolf/Reflect).
-- Items marked `🔴 Blocker` must be resolved before any enterprise or team deployment.
+- The **Source** field cites where the finding came from: `Audit` (internal codebase review), `Competitive` (gap vs. Mabl/Testim/SmartBear/Playwright ecosystem).
+- Items marked `🔴 Blocker` must be resolved before any production or team deployment.
 - Items marked `🟡 High` should ship within the next two sprints.
 - Items marked `🔵 Medium` improve quality and coverage.
 - Items marked `🟢 Differentiator` build competitive moat and can be scheduled freely.
 
 ---
 
-## ~~Sprint 1 — Security & Stability~~ ✅ Complete
+## Phase Summary
 
-All 6 items shipped: S1-01 (vm sandbox), S1-02 (HttpOnly cookies), S1-03 (SQLite), S1-04 (retry backoff), S1-05 (crash isolation), S1-06 (CORS restriction).
+| Phase | Scope | Key Deliverable | Est. Duration |
+|-------|-------|-----------------|---------------|
+| ~~Phase 0 — Sprint 3 items~~ | Shadow DOM, DOM stability wait, Disposable email | Test quality & coverage | ✅ Complete |
+| Phase 1 — Production Hardening | Security, reliability, data integrity | Safe for real team use | 4–5 weeks |
+| Phase 2 — Team & Enterprise Foundation | Multi-tenancy, RBAC, CI/CD, queues | Sellable to companies | 8–10 weeks |
+| Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, ML healing | Competitive with Mabl/Testim | 10–12 weeks |
 
 ---
 
-## Sprint 2 — CI/CD, Alerts & Scheduling (Weeks 4–6)
+## Phase 1 — Production Hardening (Weeks 1–6)
 
-These features are required to compete with every major autonomous QA platform. Without them, Sentri cannot be integrated into any CI/CD pipeline and teams must poll the dashboard manually.
+*Goal: Make Sentri safe, stable, and scalable enough for real team use (5–20 users, 3–10 projects). These items address active security risks and known failure modes — none are optional.*
 
 ---
 
-### S2-01 — Webhook trigger endpoint + GitHub Actions integration 🟡 High
+### ENH-005 — Global API rate limiting 🔴 Blocker
 
-**Problem:** Tests can only be triggered manually from the UI. There is no programmatic trigger, so Sentri cannot be called from GitHub Actions, GitLab CI, CircleCI, Jenkins, or any other pipeline.
+**Problem:** Only auth routes (`/login`, `/forgot-password`, `/reset-password`) have rate limiting. Every other route — crawl trigger, run execution, AI test generation, bulk actions — is completely unprotected. An authenticated user with a valid session can trigger 100 simultaneous crawls (exhausting AI quota and all available memory) or spam test generation to produce thousands of AI calls at cost.
+
+**Fix:** Apply `express-rate-limit` globally to all `/api/*` routes with separate tighter buckets for expensive operations:
+- Global: 200 req / 15 min per IP
+- `POST /api/projects/:id/crawl` → 5 per user per hour
+- `POST /api/projects/:id/run` → 20 per user per hour
+- `POST /api/*/tests/generate` → 30 per user per hour
+
+Use a Redis store (`rate-limit-redis`) for distributed enforcement once Redis is added (ENH-002). Fall back to memory store until then.
+
+**Files to change:**
+- `backend/src/middleware/appSetup.js` — add global and per-route limiters
+
+**Effort:** S | **Source:** Audit
+
+---
+
+### ENH-007 — Authenticate artifact serving with signed URL tokens 🔴 Blocker
+
+**Problem:** Screenshots, videos, and Playwright traces are served from `/artifacts/` as public static files with no auth check. The comment in `appSetup.js` acknowledges this explicitly. Any person who guesses or obtains an artifact URL can view screenshots and videos of your users' applications — only URL obscurity protects them.
+
+**Fix:** Generate short-lived HMAC-signed tokens for all artifact URLs. Validate the token on the static file middleware before serving. `<img>` and `<video>` tags cannot send `Authorization` headers, so query-param token signing is the correct pattern here.
+
+Token format: `?token=<hmac-sha256(runId+path+exp, ARTIFACT_SECRET)>&exp=<unix timestamp>`
+
+**Files to change:**
+- `backend/src/middleware/appSetup.js` — add token-validation middleware before `express.static`
+- All places that generate artifact paths in `backend/src/runner/executeTest.js`, `backend/src/runner/pageCapture.js` — append signed token to artifact URLs
+- `backend/.env.example` — document `ARTIFACT_SECRET`
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-013 — Persist password reset tokens in the database 🔴 Blocker
+
+**Problem:** `passwordResetTokens` in `auth.js` is stored in a process-local `Map`. Tokens are lost on every server restart. In any multi-instance deployment, a reset link generated on instance A will fail verification on instance B. This is a silent, hard-to-diagnose bug.
+
+**Fix:** Move to a `password_reset_tokens(token, userId, expiresAt, usedAt)` table. Replace all Map operations with SQL INSERT / SELECT / UPDATE. Add a cleanup job (or `WHERE expiresAt < NOW()` filter) to prune expired tokens.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `003_password_reset_tokens.sql`
+- `backend/src/routes/auth.js` — replace Map operations with DB calls
+- New `backend/src/database/repositories/passwordResetRepo.js`
+
+**Effort:** S | **Source:** Audit
+
+---
+
+### ENH-027 — Add global React Error Boundary 🔴 Blocker
+
+**Problem:** There is no `ErrorBoundary` component wrapping routes. A single React rendering error anywhere in the component tree will crash the entire application and show a blank white screen with no recovery path.
+
+**Fix:** Implement a standard React class component with `componentDidCatch` and `getDerivedStateFromError`. Wrap the router in `main.jsx`. Show a friendly error message with a "Reload" button. Optionally report to a logging endpoint.
+
+**Files to change:**
+- New `frontend/src/components/ErrorBoundary.jsx`
+- `frontend/src/main.jsx` — wrap `<RouterProvider>` with `<ErrorBoundary>`
+
+**Effort:** XS | **Source:** Audit
+
+---
+
+### ENH-030 — Secrets scanning in CI pipeline 🔴 Blocker
+
+**Problem:** The CI workflow (`ci.yml`) does not run secrets scanning. AI API keys, JWT secrets, or OAuth credentials accidentally committed to the repository will not be detected. Given that the codebase stores `CREDENTIAL_SECRET`, `JWT_SECRET`, and `LLM_API_KEY` values, this is an active risk.
+
+**Fix:** Add `gitleaks/gitleaks-action@v2` as a CI step. Run on every PR and push to `main`. Configure `gitleaks.toml` with allowed patterns for test fixtures and generated `.env.example` values.
+
+**Files to change:**
+- `.github/workflows/ci.yml` — add secrets scanning step
+- New `.gitleaks.toml` — configure allowlist for test fixtures
+
+**Effort:** XS | **Source:** Audit
+
+---
+
+### ENH-021 — Add `userId` to activities for full audit trail 🟡 High
+
+**Problem:** The `activities` table has no `userId` column. It is impossible to know who performed which action — who deleted a test, who approved a run, who triggered a crawl. This is a compliance requirement for any enterprise customer and a basic operational need for team accountability.
+
+**Fix:** Migration adds `userId TEXT` and `userName TEXT` columns to `activities`. Update `logActivity()` to accept and store `userId` and `userName`. Pass `req.user.id` and `req.user.email` from all route handlers that call `logActivity`.
+
+**Files to change:**
+- `backend/src/database/migrations/` — alter `activities` table
+- `backend/src/utils/activityLogger.js` — add `userId`, `userName` params
+- All route files that call `logActivity` — pass `req.user`
+
+**Effort:** S | **Source:** Audit
+
+---
+
+### ENH-020 — Soft-delete for tests, projects, and runs 🟡 High
+
+**Problem:** `DELETE /api/data/runs` and all entity deletion endpoints permanently and irreversibly destroy data. There is no `deletedAt` timestamp, no recycle bin, and no recovery path. In a professional QA context, accidental deletion of a test suite or run history is a major UX and trust risk. The `DELETE /api/data/runs` endpoint in particular wipes ALL run history with no confirmation.
+
+**Fix:** Add `deletedAt TEXT` to all entity tables via migration. All `SELECT` queries gain `WHERE deletedAt IS NULL`. DELETE handlers set `deletedAt = datetime('now')` instead of removing the row. Add `GET /api/recycle-bin` and `POST /api/restore/:type/:id` routes. Add a Recycle Bin page in Settings.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `deletedAt` to `tests`, `projects`, `runs`
+- All repo files — update queries with soft-delete filter
+- All route DELETE handlers — convert to soft-delete
+- `frontend/src/pages/Settings.jsx` — add Recycle Bin tab
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-010 — Pagination on all list API endpoints 🟡 High
+
+**Problem:** `GET /api/tests`, `GET /api/runs`, `GET /api/projects`, and `GET /api/activities` return every record in the database with no `LIMIT`. A project with 1,000 tests will produce a response exceeding 5 MB, cause multi-second parse times in the browser, and will crash slower clients. All frontend filtering is done client-side using `useMemo` on the full dataset — this is a known failure mode, not a hypothetical.
+
+**Fix:** Add `?page=<n>&pageSize=<n>` query params to all list endpoints. Return `{ data: [], meta: { total, page, pageSize, hasMore } }`. Update frontend list components to handle paginated responses with a "Load more" or page control.
+
+**Files to change:**
+- All route GET handlers for list endpoints
+- All repo files — add `LIMIT`/`OFFSET` SQL params
+- `frontend/src/pages/Tests.jsx`, `frontend/src/pages/Runs.jsx`, `frontend/src/pages/Dashboard.jsx` — update to handle paginated responses
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-008 — Move `runs.logs` to a separate `run_logs` table 🟡 High
+
+**Problem:** Every call to `log(run, message)` in `runLogger.js` deserialises the entire `logs` JSON column, appends one entry, and re-serialises it. A crawl generating 200 log lines performs 200 read-modify-write cycles on a column that grows from 0 to ~20 KB. This is O(n²) in log volume. The `results`, `testQueue`, and `videoSegments` columns share the same pattern.
+
+**Fix:** Create a `run_logs(id, runId, seq, level, message, createdAt)` table. Update `log()`, `logWarn()`, `logSuccess()` to `INSERT` individual rows. SSE streaming reads from `run_logs` ordered by `seq`. The `runs` table retains only summary columns.
+
+**Files to change:**
+- `backend/src/database/migrations/` — create `run_logs` table
+- `backend/src/utils/runLogger.js` — replace JSON mutation with INSERT
+- `backend/src/database/repositories/runRepo.js` — update log queries
+- `backend/src/routes/runs.js` — update SSE log stream
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-004 — Persist AI provider keys encrypted in the database 🟡 High
+
+**Problem:** AI API keys set via the Settings page are stored only in a process-level `runtimeKeys` object in `aiProvider.js`. They are lost on every server restart. Users must re-enter their API keys after every deployment — this is not acceptable for a production tool.
+
+**Fix:** Create an `api_keys(provider, encryptedKey, updatedAt)` table. On `POST /api/settings`, write the encrypted key using the existing `encryptCredentials` utility. On `getKey()`, check the runtime cache first, then fall back to the DB. The runtime cache becomes a performance optimisation, not the source of truth.
+
+**Files to change:**
+- `backend/src/database/migrations/` — create `api_keys` table
+- `backend/src/aiProvider.js` — add DB fallback in `getKey()`
+- `backend/src/routes/settings.js` — persist to DB on key update
+- New `backend/src/database/repositories/apiKeyRepo.js`
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-024 — Frontend code splitting 🔵 Medium
+
+**Problem:** All page-level components are bundled into a single JavaScript file and shipped to the client on first load. There is no `React.lazy` / `Suspense` route splitting. As the app grows (57 KB `TestDetail.jsx`, 51 KB `Tests.jsx`), initial load time will degrade measurably on slower connections.
+
+**Fix:** Replace static page imports with `React.lazy(() => import('./pages/Page'))`. Add `<Suspense fallback={<PageSkeleton />}>` in the router. Split vendor bundles (recharts, lucide-react) into separate chunks via Vite `build.rollupOptions.output.manualChunks`.
+
+**Files to change:**
+- `frontend/src/main.jsx` or `frontend/src/App.jsx` — lazy-load all route components
+- `vite.config.js` — configure manual chunk splitting
+- New `frontend/src/components/PageSkeleton.jsx` — loading state for lazy routes
+
+**Effort:** S | **Source:** Audit
+
+---
+
+## Phase 2 — Team & Enterprise Foundation (Weeks 7–16)
+
+*Goal: Multi-user, multi-workspace, with integrations and durable job execution. Deployable as a team SaaS tool and sellable to companies.*
+
+---
+
+### ENH-001 — PostgreSQL support with SQLite fallback 🔴 Blocker
+
+**Problem:** SQLite is a single-file, single-writer database. It means no horizontal scaling, no read replicas, and permanent data loss if a Docker container is recreated without a persistent volume. WAL mode mitigates concurrent reads but does not solve write contention at scale. This is the most significant architectural constraint for any production deployment with multiple users.
+
+**Fix:** Introduce a `db-adapter` interface (`query`, `run`, `get`, `all`). Implement `sqlite-adapter.js` (current behaviour) and `postgres-adapter.js` (using `pg` + connection pooling). Select the adapter based on `DATABASE_URL` env var — if set and starts with `postgres://`, use PostgreSQL; otherwise fall back to SQLite. Update `migrationRunner.js` to support both SQL dialects.
+
+**Files to change:**
+- New `backend/src/database/adapters/sqlite-adapter.js`
+- New `backend/src/database/adapters/postgres-adapter.js`
+- `backend/src/database/sqlite.js` — refactor to adapter pattern
+- `backend/src/database/migrationRunner.js` — dialect-aware migration runner
+- `docker-compose.yml` — add PostgreSQL service
+- `backend/.env.example` — document `DATABASE_URL`
+
+**Effort:** XL | **Source:** Audit
+
+---
+
+### ENH-002 — Redis for rate limiting, token revocation, and SSE pub/sub 🔴 Blocker
+
+**Problem:** Three critical components are process-local and therefore broken in any multi-instance deployment: (1) `revokedTokens` Map — logged-out users can reuse tokens after a restart, (2) `express-rate-limit` memory store — rate limits reset on restart and are not shared across instances, (3) `runListeners` Map — SSE events emitted on instance A are never received by clients on instance B.
+
+**Fix:** Add `ioredis` as an infrastructure dependency. Replace the `revokedTokens` Map with Redis `SET jti EX <token_ttl>`. Replace the rate-limit memory store with `rate-limit-redis`. Replace direct SSE writes with a Redis pub/sub channel — the SSE route subscribes to `sentri:run:<runId>` and the event emitter publishes to it.
+
+**Files to change:**
+- New `backend/src/utils/redisClient.js` — shared ioredis client
+- `backend/src/routes/auth.js` — token revocation via Redis
+- `backend/src/middleware/appSetup.js` — Redis rate-limit store
+- `backend/src/routes/runs.js` (SSE) — Redis pub/sub subscriber
+- `backend/src/utils/runLogger.js` — publish events to Redis channel
+- `backend/.env.example` — document `REDIS_URL`
+
+**Effort:** L | **Source:** Audit
+
+---
+
+### ENH-003 — Multi-tenancy: workspace ownership on all entities 🔴 Blocker
+
+**Problem:** Every authenticated user sees every project, test, and run. There is no concept of a workspace, organisation, or team. `GET /api/tests` returns all tests in the database to any authenticated user. This is a hard blocker for any commercial use — companies need to isolate QA projects by team or product area, and must not see each other's test data.
+
+**Fix:** Add a `workspaces` table. Add `workspaceId TEXT NOT NULL` as a foreign key to `projects`, `tests`, `runs`, and `activities`. Add `workspaceId` to the JWT payload. Update `requireAuth` middleware to inject `req.workspaceId`. Add `WHERE workspaceId = ?` to all queries. Add workspace creation to the onboarding flow.
+
+**Files to change:**
+- `backend/src/database/migrations/` — create `workspaces` table; add `workspaceId` FKs
+- New `backend/src/database/repositories/workspaceRepo.js`
+- `backend/src/routes/auth.js` — include `workspaceId` in JWT
+- `backend/src/middleware/appSetup.js` — inject `req.workspaceId` in `requireAuth`
+- All route and repo files — scope all queries to `workspaceId`
+- `frontend/src/context/AuthContext.jsx` — expose `workspace` to the app
+
+**Effort:** L | **Source:** Audit
+
+---
+
+### ENH-012 — Role-based access control (Admin / QA Lead / Viewer) 🔴 Blocker
+
+**Problem:** All authenticated users have identical permissions. There is no concept of roles. Admin-only operations (settings management, data deletion, user management) are only protected on the server — the frontend shows the same UI to all users. For any team or enterprise deployment, role separation is a hard requirement.
+
+**Fix:** Add `role TEXT DEFAULT 'viewer'` to the `workspace_members` table: `admin`, `qa_lead`, `viewer`. Extend `requireAuth` to expose `req.userRole`. Add `requireRole('admin')` and `requireRole('qa_lead')` middleware. Gate destructive operations and settings behind role checks. Update frontend `ProtectedRoute` and action buttons to check role from `AuthContext`.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `role` to workspace/user tables
+- `backend/src/middleware/appSetup.js` — add `requireRole()` middleware
+- All route files for mutation operations — add role guards
+- `frontend/src/context/AuthContext.jsx` — expose `role`
+- `frontend/src/components/ProtectedRoute.jsx` — role-based route guarding
+- `frontend/src/pages/Settings.jsx` — add Members / Role management tab
+
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-009 — BullMQ job queue for run execution 🟡 High
+
+**Problem:** Run execution is started as a detached `async` operation (`runWithAbort`) directly on the HTTP request handler thread. If the process crashes mid-run, there is no durable execution state — work is lost permanently. There is no concurrency limit across projects — a user with 10 projects can start 10 simultaneous crawls. There is no retry, priority queue, or visibility into the job backlog.
+
+**Fix:** Replace `runWithAbort` fire-and-forget with a BullMQ `Queue.add()` call. Implement a `Worker` in `runWorker.js` that calls `crawlAndGenerateTests` or `runTests`. The worker process is separate from the HTTP process. Configure a global concurrency limit (e.g., `MAX_WORKERS=3`). Expose queue depth and active job count on the dashboard.
+
+**Files to change:**
+- `backend/src/routes/runs.js` — replace `runWithAbort` with `queue.add()`
+- New `backend/src/workers/runWorker.js` — BullMQ Worker implementation
+- New `backend/src/queue.js` — shared Queue definition
+- `backend/package.json` — add `bullmq`
+- `backend/.env.example` — document `MAX_WORKERS`
+
+**Effort:** L | **Source:** Audit
+
+---
+
+### ENH-011 — CI/CD webhook receiver + GitHub Actions integration 🟡 High
+
+**Problem:** There is no programmatic trigger for test runs. Sentri cannot be called from GitHub Actions, GitLab CI, CircleCI, Jenkins, or any other pipeline. The primary adoption trigger for any developer tool is "it fits into my existing workflow" — without CI/CD integration, Sentri will not be adopted by engineering teams.
 
 **Fix:**
 1. Add `POST /api/projects/:id/trigger` authenticated by a per-project secret token (stored hashed in the database, displayed once on creation).
 2. The endpoint creates a run, starts test execution asynchronously, and returns `{ runId, statusUrl }` immediately.
 3. Publish `sentri/run-tests` as a GitHub Action to the GitHub Marketplace. The action polls `/api/runs/:runId` until completion and sets a pass/fail exit code.
-4. Add a **Trigger** tab to ProjectDetail showing the token, a copy button, and example YAML snippets for GitHub Actions, GitLab CI, and cURL.
+4. Add a **Trigger** tab to `ProjectDetail` showing the token, a copy button, and example YAML snippets for GitHub Actions, GitLab CI, and cURL.
+5. Support an optional `callbackUrl` param for async result delivery to external systems.
 
 **Files to change:**
 - `backend/src/routes/runs.js` — add `POST /projects/:id/trigger`
 - `backend/src/routes/settings.js` — add `POST/DELETE /projects/:id/trigger-token`
-- `frontend/src/pages/ProjectDetail.jsx` — add Trigger tab
-- `.github/actions/run-tests/` — new directory, GitHub Action definition
+- New `backend/src/database/repositories/webhookTokenRepo.js`
+- `frontend/src/pages/ProjectDetail.jsx` — add Trigger tab with token + YAML snippets
+- New `.github/actions/run-tests/` — GitHub Action definition
+- `backend/.env.example` — document webhook token settings
 
-**Effort:** M | **Source:** Competitive
+**Effort:** M | **Source:** Competitive (S2-01)
 
 ---
 
-### S2-02 — Cron-based scheduled runs 🟡 High
+### ENH-006 — Test scheduling engine (cron) 🟡 High
 
-**Problem:** There is no way to schedule automated runs. Teams cannot run nightly regressions without keeping a browser tab open.
+**Problem:** There is no way to schedule automated test runs. Teams cannot run nightly regressions without keeping a browser tab open and manually clicking "Run". Testing in production requires automated regression runs on a schedule — without this, Sentri is a manual tool, not an autonomous one.
 
-**Fix:** Add a per-project schedule configuration (daily/weekly/custom cron expression) stored in the database. Use `node-cron` to fire scheduled runs as background jobs. Display the next scheduled run time in `ProjectHeader`. Add a schedule toggle to the project Settings tab.
+**Fix:** Add a `schedules(projectId, cronExpr, timezone, enabled, lastRunAt, nextRunAt)` table. Use `node-cron` to fire scheduled runs as background jobs. Display the next scheduled run time in `ProjectHeader`. Add a schedule toggle and CRON editor to the project Settings tab.
 
 **Files to change:**
-- `backend/src/scheduler.js` — new file, `node-cron` job manager
+- New `backend/src/scheduler.js` — `node-cron` job manager
 - `backend/src/index.js` — initialise scheduler on startup
 - `backend/src/routes/projects.js` — add `PATCH /projects/:id/schedule`
+- `backend/src/database/migrations/` — create `schedules` table
 - `frontend/src/components/project/ProjectHeader.jsx` — show next run time
-- `frontend/src/pages/Settings.jsx` (project settings section) — schedule config UI
+- `frontend/src/pages/Settings.jsx` — schedule config UI
 - `backend/package.json` — add `node-cron`
 
 **Effort:** M | **Source:** Competitive
 
 ---
 
-### S2-03 — Failure notifications (Slack, email, webhook) 🟡 High
+### ENH-017 — Slack / email / webhook failure notifications 🟡 High
 
-**Problem:** When a test run completes with failures there is no outbound notification. Teams must poll the dashboard. The README production checklist flags this as incomplete.
+**Problem:** When a test run completes with failures, there is no outbound notification. Teams must poll the dashboard. Combined with scheduling (ENH-006), this is the other half of "it runs automatically" — when something breaks, the team needs to know immediately without watching a screen.
 
-**Fix:** Add a per-project notification config: Slack incoming webhook URL, email recipients (via Resend or SendGrid), and a generic webhook URL. On run completion, if `run.failed > 0` or `run.status === "failed"`, fire all configured destinations. Slack payload should include pass/fail counts, failing test names, run duration, and a link to the run detail page.
+**Fix:** Add a per-project `notification_settings` table (Slack webhook URL, email recipients via Resend/SendGrid, generic webhook URL). On run completion, if `run.failed > 0`, fire all configured destinations. Slack payload includes pass/fail counts, failing test names, run duration, and a link to the run detail page.
 
 **Files to change:**
-- `backend/src/utils/notifications.js` — new file, Slack/email/webhook dispatch
+- New `backend/src/utils/notifications.js` — Slack/email/webhook dispatch
 - `backend/src/testRunner.js` — call `fireNotifications(run, project)` on completion
 - `backend/src/routes/projects.js` — add notification config endpoints
 - `frontend/src/pages/Settings.jsx` — notification config UI per project
 - `backend/.env.example` — document `RESEND_API_KEY` / `SENDGRID_API_KEY`
 
+**Effort:** M | **Source:** Competitive (S2-03) 🔵 Medium
+
+**Problem:** All data fetching uses manual `useEffect` + `useState` patterns with no cache, no background refresh, no optimistic updates, and no retry. `useProjectData` exports `invalidateProjectDataCache` which callers must manually invoke — multiple components fail to do so, producing stale UI after mutations. As the app grows, this pattern produces deeply nested prop chains and increasingly subtle stale-data bugs.
+
+**Fix:** Install `@tanstack/react-query`. Define query keys per entity. Wrap all `api.get()` calls in `useQuery`. Mutations use `useMutation` with `queryClient.invalidateQueries`. This eliminates manual cache invalidation, provides automatic background refetch, and gives free retry logic.
+
+**Files to change:**
+- `frontend/package.json` — add `@tanstack/react-query`
+- `frontend/src/main.jsx` — add `QueryClientProvider`
+- All `frontend/src/pages/*.jsx` — migrate `useEffect` fetches to `useQuery`
+- All `frontend/src/hooks/use*.js` — refactor to TanStack Query patterns
+
+**Effort:** L | **Source:** Audit
+
+---
+
+### ENH-023 — OpenAPI specification and Swagger UI 🔵 Medium
+
+**Problem:** There is no machine-readable API contract. This blocks CI/CD integration (cannot auto-generate a GitHub Actions step schema), external tooling (Postman collections), and third-party plugins. It also makes onboarding new engineers harder — the only documentation is JSDoc comments.
+
+**Fix:** Generate an OpenAPI 3.1 spec from existing JSDoc annotations using `swagger-jsdoc`. Serve it at `GET /api/openapi.json`. Mount `swagger-ui-express` at `/api/docs` for interactive exploration. Add Zod schemas for request validation that double as the OpenAPI schema source.
+
+**Files to change:**
+- New `backend/src/openapi.js` — spec assembly
+- `backend/src/index.js` — mount Swagger UI
+- `backend/package.json` — add `swagger-jsdoc`, `swagger-ui-express`
+
+**Effort:** M | **Source:** Audit
+
+---
+
+## Phase 3 — AI-Native Differentiation (Weeks 17–28)
+
+*Goal: Pull ahead of competitors with AI capabilities and advanced testing features. This phase builds the moat.*
+
+---
+
+### ENH-016 — Visual regression testing with baseline diffing 🟢 Differentiator
+
+**Problem:** Sentri detects functional failures (wrong text, broken navigation, missing elements) but not visual regressions — layout shifts, colour changes, component repositioning. Mabl and Testim both offer visual diffing natively. Screenshot capture already happens; the diff layer is the missing piece.
+
+**Fix:** On the first approved run for a test, capture a full-page screenshot as the baseline stored at `data/baselines/<testId>/step-<N>.png`. On subsequent runs, diff against the baseline using `pixelmatch`. Flag any region with pixel difference above `VISUAL_DIFF_THRESHOLD` (default 2%) as a `VISUAL_REGRESSION` failure type. Surface the diff overlay in `StepResultsView.jsx` as a toggleable before/after view. "Accept visual changes" updates the baseline.
+
+**Files to change:**
+- New `backend/src/runner/visualDiff.js` — `pixelmatch` wrapper
+- `backend/src/runner/executeTest.js` — capture and compare baseline
+- `backend/src/database/migrations/` — `baseline_screenshots` table
+- `backend/src/routes/runs.js` — serve diff images
+- `frontend/src/components/StepResultsView.jsx` — visual diff overlay component
+- `backend/package.json` — add `pixelmatch`, `pngjs`
+
+**Effort:** L | **Source:** Competitive
+
+---
+
+### ENH-014 — Cross-browser testing (Firefox, WebKit/Safari) 🟢 Differentiator
+
+**Problem:** Only Chromium is supported. Playwright natively supports Firefox and WebKit — this is a configuration and UI gap, not a technical limitation. Many enterprise customers require Safari compatibility testing, and it is a standard question in any QA platform evaluation.
+
+**Fix:** `launchBrowser(browserName)` accepts `'chromium'` | `'firefox'` | `'webkit'`. Add browser selector to the Run modal (`RunRegressionModal.jsx`). Test results include a `browser` field. Run detail page shows browser icon and name per result.
+
+**Files to change:**
+- `backend/src/runner/config.js` — parameterise `launchBrowser()`
+- `backend/src/testRunner.js` — pass `browserName` from run config
+- `frontend/src/components/RunRegressionModal.jsx` — add browser selector
+- `frontend/src/pages/RunDetail.jsx` — show browser per result
+
 **Effort:** M | **Source:** Competitive
 
 ---
 
-## Sprint 3 — Quality, Coverage & Trust (Weeks 7–10)
+### ENH-015 — Mobile viewport / device emulation 🟢 Differentiator
 
-These items directly improve the reliability and coverage of generated tests, and close the most visible gaps against competitors.
+**Problem:** There is no device emulation capability. Playwright ships with 50+ device profiles (`playwright.devices`) covering iPhone, Galaxy, iPad, and desktop variants. A single device selector toggle is high-value, low-effort, and a standard question in QA platform evaluations.
 
----
-
-### ~~S3-02 — DOM stability wait (MutationObserver) before assertions~~ ✅ Complete
-
-**Problem:** Sentri uses fixed-duration waits (`waitForTimeout`) and `waitForText` throughout the runner. Modern SPAs with loading states, streaming AI responses, skeleton screens, and async data fetches settle at variable times. Tests assert on partially-rendered pages and produce false failures.
-
-**Fix:** Inject a `waitForStable(page, options)` helper that installs a MutationObserver, polls until `stableSec` seconds pass with no DOM mutations, then disconnects cleanly. Call this before assertion-heavy steps.
-
-**Pattern from Assrt (`agent.ts`):**
-```javascript
-async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
-  await page.evaluate(() => {
-    window.__sentri_mutations = 0;
-    window.__sentri_observer = new MutationObserver(m => {
-      window.__sentri_mutations += m.length;
-    });
-    window.__sentri_observer.observe(document.body, {
-      childList: true, subtree: true, characterData: true
-    });
-  });
-  const start = Date.now();
-  let lastCount = -1, stableSince = Date.now();
-  while (Date.now() - start < timeoutSec * 1000) {
-    await new Promise(r => setTimeout(r, 500));
-    const count = await page.evaluate(() => window.__sentri_mutations);
-    if (count !== lastCount) { lastCount = count; stableSince = Date.now(); }
-    else if (Date.now() - stableSince >= stableSec * 1000) break;
-  }
-  await page.evaluate(() => {
-    window.__sentri_observer?.disconnect();
-    delete window.__sentri_mutations;
-    delete window.__sentri_observer;
-  });
-}
-```
+**Fix:** Accept a `device` parameter in run config. Map device name to `playwright.devices[name]` to get viewport dimensions and user agent. Apply via `browser.newContext({ ...devices[device] })`.
 
 **Files to change:**
-- `backend/src/runner/pageCapture.js` — add `waitForStable(page, opts)` export
-- `backend/src/runner/executeTest.js` — call `waitForStable` before assertion-heavy step groups
-- `backend/src/pipeline/assertionEnhancer.js` — inject `waitForStable` step before enhanced assertions
+- `backend/src/runner/config.js` — add device map lookup
+- `backend/src/runner/executeTest.js` — apply device context
+- `frontend/src/components/RunRegressionModal.jsx` — add device selector dropdown
 
-**Effort:** S | **Source:** Assrt
+**Effort:** S | **Source:** Competitive
 
 ---
 
-### ~~S3-04 — Shadow DOM and web component support in crawl~~ ✅ Complete
+### ENH-018 — Flaky test detection and reporting 🟢 Differentiator
 
-**Problem:** `backend/src/pipeline/elementFilter.js` has no logic to pierce shadow roots. Modern enterprise applications built with Angular, Lit, Stencil, Salesforce LWC, or any shadow-DOM-based component library are largely invisible to the crawler. The generated test suites for these apps are thin or empty.
+**Problem:** There is no mechanism to identify tests that alternate between passing and failing across runs. Flaky tests are a major QA pain point — they erode trust in the test suite and consume engineering time investigating non-reproducible failures. The data to detect them already exists in `runs.results` but is never surfaced.
 
-**Fix:** During the crawl browser session, inject a `queryShadowAll(selector)` helper that recursively traverses shadow roots. Update `elementFilter.js` to call this alongside the standard `page.$$()` query. For self-healing, add a `pierce:` selector strategy to the waterfall in `selfHealing.js`.
+**Fix:** After each run, compute a `flakyScore` (alternation rate over the last N runs) for each test and persist it to `tests.flakyScore`. Add a "Flaky Tests" panel to the dashboard showing the top 10 flakiest tests ranked by score. Tests above a threshold get a flaky badge in the test list.
 
 **Files to change:**
-- `backend/src/pipeline/elementFilter.js` — add shadow DOM traversal
-- `backend/src/pipeline/crawlBrowser.js` — inject `queryShadowAll` helper script
-- `backend/src/selfHealing.js` — add `pierce:` selector strategy to waterfall
+- New `backend/src/utils/flakyDetector.js` — compute flaky score from run history
+- `backend/src/testRunner.js` — call detector on run completion
+- `backend/src/database/migrations/` — add `flakyScore` to `tests`
+- `frontend/src/pages/Dashboard.jsx` — add Flaky Tests panel
+- `frontend/src/components/badges/TestBadges.jsx` — add flaky badge
 
-**Effort:** M | **Source:** Audit (competitive gap)
+**Effort:** M | **Source:** Competitive
 
 ---
 
-### ~~S3-08 — Disposable email support for auth flow testing~~ ✅ Complete
+### ENH-019 — Embedded Playwright trace viewer 🟢 Differentiator
 
-**Problem:** Sentri can crawl and discover auth flows but cannot complete registration flows that require email verification. Tests for signup, password reset, and email-gated onboarding are either skipped or left as stubs.
+**Problem:** Playwright traces are linked as `.zip` downloads that require a local Playwright Trace Viewer installation to open. This creates a significant friction point in the debugging workflow — most users will not bother. Mabl has an inline trace-style view; Sentri should too.
 
-**Fix:** Add a `DisposableEmail` utility module (adapted from Assrt's `email.ts`) using the temp-mail.io API. Expose it as a credential provider in `stateExplorer.js` — when the explorer encounters a signup form, it can create a temp email, fill the form, wait for the OTP, and complete the flow. Handle split OTP input fields via clipboard paste.
+**Fix:** Copy the Playwright trace viewer build (`@playwright/test/lib/trace/viewer/`) into `public/trace-viewer/`. Serve it at `/trace-viewer/`. From the run detail page, link to `/trace-viewer/?trace=<artifact-signed-url>` to open the trace inline in an iframe.
 
 **Files to change:**
-- `backend/src/utils/disposableEmail.js` — new file, temp-mail.io client + OTP extraction
-- `backend/src/pipeline/stateExplorer.js` — integrate temp email into form-filling logic
-- `backend/src/pipeline/actionDiscovery.js` — detect signup/registration form intent
+- `backend/src/middleware/appSetup.js` — serve trace viewer static files
+- `frontend/src/pages/RunDetail.jsx` — add "Open Trace" button linking to viewer
+- Build tooling to copy trace viewer assets on `npm install`
 
-**Effort:** S | **Source:** Assrt
-
----
-
-## Sprint 4 — Platform Moat (Weeks 11–16)
-
-These items build the features that separate Sentri from all other QA tools and justify it as a long-term platform investment.
+**Effort:** M | **Source:** Audit
 
 ---
 
-### S4-01 — Organisations and team RBAC 🟡 High
+### ENH-025 — Step-level timing waterfall 🔵 Medium
 
-**Problem:** All projects and users share one flat namespace. There is no organisation, workspace, or team scoping. Any authenticated user can list all tests and projects via `GET /api/tests`. This is a hard blocker for any enterprise sale or multi-team deployment.
+**Problem:** Test results show pass/fail per test but not a timeline of how long each step took within a test. Identifying slow steps (navigation wait, element search timeout, network call) requires reading raw logs. This is the most common debugging question: "where is my test slow?"
 
-**Fix:**
-1. Add an `organisations` table and an `org_id` foreign key to `projects`, `tests`, `runs`, and `activities`.
-2. Add `role` to the `users` table: `owner`, `admin`, `editor`, `viewer`.
-3. All route handlers must filter by `req.user.orgId`.
-4. Add organisation creation to the onboarding flow.
-5. Add a Members page under Settings for invite, role assignment, and removal.
+**Fix:** Inject timing hooks around each step execution in `codeExecutor.js`. Record `{ step, durationMs, startedAt }` for each step and store as `stepTimings` in the test result. Render as a horizontal bar (waterfall) chart in `StepResultsView.jsx`.
 
 **Files to change:**
-- `backend/src/database/schema.sql` — add `organisations`, `org_members` tables
-- `backend/src/database/repositories/orgRepo.js` — new repository module
-- `backend/src/routes/auth.js` — include `orgId` in JWT claims
-- `backend/src/middleware/appSetup.js` — add `requireRole(role)` middleware
-- All route files — scope all queries to `orgId`
-- `frontend/src/pages/Settings.jsx` — add Members tab
-- `frontend/src/context/AuthContext.jsx` — expose `org` and `role` to the app
+- `backend/src/runner/executeTest.js` — record step start/end timestamps
+- `backend/src/runner/codeExecutor.js` — inject timing instrumentation
+- `frontend/src/components/StepResultsView.jsx` — add waterfall chart
 
-**Effort:** XL | **Source:** Competitive
+**Effort:** M | **Source:** Audit
 
 ---
 
-### S4-02 — Visual regression testing with baseline diffing 🟢 Differentiator
+### ENH-028 — AI provider fallback chain on rate limits 🔵 Medium
 
-**Problem:** Sentri detects functional failures (wrong text, broken navigation, missing elements) but not visual regressions (layout shifts, colour changes, component positioning). Competitors including Mabl and Reflect offer visual diffing natively.
+**Problem:** If the primary AI provider returns a rate limit error, the pipeline fails after `LLM_MAX_RETRIES` attempts with no fallback. If Anthropic is temporarily rate-limited, all test generation stops — even if OpenAI or Ollama is available and configured. There is no circuit breaker.
 
-**Fix:** On the first approved run for a test, capture a full-page screenshot as the baseline (stored in `data/baselines/<testId>/step-<N>.png`). On subsequent runs, diff against the baseline using `pixelmatch`. Flag any region with pixel difference above a configurable threshold (`VISUAL_DIFF_THRESHOLD`, default 2%). Surface the diff overlay in `StepResultsView.jsx` as a togglable before/after view.
+**Fix:** In `generateText()`, catch rate limit errors (`isRateLimitError`) and automatically retry with the next configured provider in `CLOUD_DETECT_ORDER` before giving up. Log provider fallback events. Add a circuit breaker per provider that disables it for 5 minutes after 3 consecutive rate limit failures.
 
 **Files to change:**
-- `backend/src/runner/executeTest.js` — capture and store baseline, run diff
-- `backend/src/runner/visualDiff.js` — new file, `pixelmatch` wrapper
-- `backend/src/routes/runs.js` — serve diff images via a signed URL
-- `frontend/src/components/StepResultsView.jsx` — add visual diff overlay component
-- `backend/package.json` — add `pixelmatch`, `pngjs`
+- `backend/src/aiProvider.js` — add fallback chain and circuit breaker
+- `backend/src/pipeline/journeyGenerator.js` — surface fallback provider in logs
 
-**Effort:** L | **Source:** Competitive
+**Effort:** M | **Source:** Audit
+
+---
+
+### ENH-029 — Diff view for AI-regenerated test code 🔵 Medium
+
+**Problem:** When AI re-generates test code after a fix (feedback loop or manual regeneration), there is no diff view showing what changed. `playwrightCodePrev` is stored in the database but never surfaced in the UI. Engineers cannot tell what the AI changed without manually comparing two code blocks.
+
+**Fix:** Use the `diff` npm package to compute a unified diff between `playwrightCodePrev` and `playwrightCode`. Render with line-level green/red syntax highlighting. Add a "Changes" tab alongside the "Code" tab in `TestDetail.jsx`.
+
+**Files to change:**
+- `frontend/src/pages/TestDetail.jsx` — add Changes tab
+- New `frontend/src/components/DiffViewer.jsx` — diff rendering component
+- `frontend/package.json` — add `diff`
+
+**Effort:** S | **Source:** Audit
+
+---
+
+### ENH-026 — API versioning (`/api/v1/`) 🔵 Medium
+
+**Problem:** All routes are mounted at `/api/*` with no version prefix. Any breaking API change will immediately affect all consumers — CI/CD integrations, GitHub Actions, external webhooks. Without versioning, there is no safe migration path.
+
+**Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 301 redirects from `/api/*` to `/api/v1/*` for backward compatibility. Document the versioning policy in `README.md`.
+
+**Files to change:**
+- `backend/src/index.js` — change route mount path
+- `frontend/src/utils/apiBase.js` — update `API_BASE` constant
+- `backend/src/middleware/appSetup.js` — add backward-compatibility redirects
+
+**Effort:** S | **Source:** Audit
 
 ---
 
@@ -251,10 +575,10 @@ These items build the features that separate Sentri from all other QA tools and 
 1. Add `POST /api/integrations/jira` and `POST /api/integrations/linear` settings endpoints to store OAuth tokens and workspace config.
 2. On test run failure, auto-create a bug ticket (with screenshot, error message, and Playwright trace attached) via the Jira/Linear API.
 3. Sync the test pass/fail status back to the linked issue's status field.
-4. Add a Integrations tab to Settings.
+4. Add an Integrations tab to Settings.
 
 **Files to change:**
-- `backend/src/utils/integrations.js` — new file, Jira and Linear API clients
+- New `backend/src/utils/integrations.js` — Jira and Linear API clients
 - `backend/src/testRunner.js` — call `syncFailureToIssue(test, run)` on completion
 - `backend/src/routes/settings.js` — add integration config endpoints
 - `frontend/src/pages/Settings.jsx` — add Integrations tab
@@ -267,7 +591,7 @@ These items build the features that separate Sentri from all other QA tools and 
 
 **Problem:** Sentri is currently a triggered tool — it runs when instructed. The brand promise of "autonomous QA" implies it should also watch production continuously. No competitor outside enterprise tiers offers this for self-hosted deployments.
 
-**Fix:** Add a monitoring mode per project: run a configurable set of "smoke tests" on a schedule against the production URL. On failure, auto-trigger a re-run to distinguish a real regression from a transient flake (2 consecutive failures = real). Fire notifications (S2-03) on confirmed failures. Display a "Monitor" badge on the dashboard for projects in monitoring mode.
+**Fix:** Add a monitoring mode per project: run a configurable set of "smoke tests" on a schedule against the production URL. On failure, auto-trigger a re-run to distinguish a real regression from a transient flake (2 consecutive failures = real). Fire notifications (ENH-017) on confirmed failures. Display a "Monitor" badge on the dashboard for projects in monitoring mode.
 
 **Files to change:**
 - `backend/src/scheduler.js` — add monitoring job type alongside scheduled runs
@@ -286,7 +610,7 @@ These items build the features that separate Sentri from all other QA tools and 
 **Fix:** Add a PostHog telemetry module (adapted from Assrt's `telemetry.ts`). Track: crawl start/complete/fail, run start/complete/fail, test generation counts, provider used, test approval/rejection rate, healing events. Respect `DO_NOT_TRACK=1` and `SENTRI_TELEMETRY=0`. Hash machine IDs. Never log full URLs — domain only. Deduplicates daily events via a local file cache.
 
 **Files to change:**
-- `backend/src/utils/telemetry.js` — new file, PostHog wrapper with opt-out
+- New `backend/src/utils/telemetry.js` — PostHog wrapper with opt-out
 - `backend/src/crawler.js` — instrument crawl events
 - `backend/src/testRunner.js` — instrument run events
 - `backend/.env.example` — document `SENTRI_TELEMETRY=0`
@@ -327,240 +651,129 @@ These items build the features that separate Sentri from all other QA tools and 
 
 ---
 
-## Ongoing / Maintenance
-
-These items are not sprint-bounded — they should be addressed incrementally alongside feature work.
+These items are not phase-bounded — they should be addressed incrementally alongside feature work.
 
 ---
 
-### M-01 — Replace revoked token Map with Redis
+### MAINT-001 — Vision-based locator healing
 
-**Problem:** `backend/src/routes/auth.js` stores revoked JWTs in an in-memory Map. This means tokens are not truly revoked across process restarts or multiple instances. Now that SQLite is in place (S1-03 ✅), once Redis is available for BullMQ, move the revocation store there.
+**Problem:** The self-healing waterfall uses DOM selectors exclusively (ARIA roles, text content, CSS fallbacks). When the DOM structure changes drastically — a major redesign, a component library migration — all strategies can fail simultaneously. Mabl uses screenshot diff + CV-based element finding to heal across structural changes.
 
-**Files:** `backend/src/routes/auth.js` | **Effort:** XS | **Source:** Audit
-
----
-
-### M-02 — Add BullMQ job queue for crawl/run jobs
-
-**Problem:** Crawl and run jobs execute directly in the Express request handler thread. A long crawl blocks Node's event loop. After the SQLite migration (S1-03), move jobs to BullMQ + Redis for proper background processing, retry, and visibility.
-
-**Files:** `backend/src/routes/runs.js`, new `backend/src/workers/` directory | **Effort:** L | **Source:** Audit
+**Files:** `backend/src/selfHealing.js`, `backend/src/runner/executeTest.js` | **Effort:** XL | **Source:** Competitive
 
 ---
 
-### M-03 — Store screenshots and videos to S3/R2
+### MAINT-002 — Self-healing ML classifier
 
-**Problem:** Screenshots, videos, and traces are stored on local disk (`data/screenshots/`, `data/videos/`). In a multi-instance or Docker deployment, these are lost on container restart and cannot be shared across instances.
+**Problem:** The current healing waterfall is deterministic and rule-based. `STRATEGY_VERSION` invalidates all hints when strategies change. The healing history data in `healing_history` is collected but never fed back to improve the system. Training even a lightweight classifier (decision tree) on healing events to predict the best strategy would make healing faster and more reliable over time.
 
-**Files:** `backend/src/runner/pageCapture.js`, `backend/src/runner/screencast.js` | **Effort:** M | **Source:** Audit
+**Files:** `backend/src/selfHealing.js`, new `backend/src/ml/healingClassifier.js` | **Effort:** XL | **Source:** Audit
 
 ---
 
-### M-04 — Add cursor overlay to live browser view
+### MAINT-003 — Prompt A/B testing framework
 
-**Problem:** Sentri's live CDP screencast shows the browser but gives no visual indication of what the test is currently doing. Viewers cannot tell which element is about to be clicked.
+**Problem:** `promptVersion` is stored on tests but there is no system to compare prompt versions, run controlled experiments, or automatically promote better prompts. AI quality improvements are made by feel rather than by measurement.
+
+**Files:** `backend/src/pipeline/journeyGenerator.js`, new `backend/src/pipeline/promptEval.js` | **Effort:** L | **Source:** Audit
+
+---
+
+### MAINT-004 — Test data management (fixtures and factories)
+
+**Problem:** Tests that require specific data states (a logged-in user with specific records, a product with a specific price) have no supported setup/teardown mechanism. This limits the depth of flows Sentri can test autonomously.
+
+**Files:** New `backend/src/utils/testDataFactory.js`, `backend/src/pipeline/stateExplorer.js` | **Effort:** L | **Source:** Competitive
+
+---
+
+### MAINT-005 — BDD / Gherkin export format
+
+**Problem:** Enterprise teams using behaviour-driven development (Cucumber, SpecFlow) cannot use Sentri's output directly. SmartBear's BDD format is widely adopted in enterprise QA. Adding a Gherkin export alongside the existing Playwright and Zephyr/TestRail exports would broaden appeal.
+
+**Files:** New `backend/src/utils/exportFormats.js` (gherkin builder), `backend/src/routes/tests.js` | **Effort:** M | **Source:** Competitive
+
+---
+
+### MAINT-006 — Object storage for artifacts (S3/R2)
+
+**Problem:** Screenshots, videos, and traces are stored on local disk (`data/screenshots/`, `data/videos/`). In a Docker or multi-instance deployment, these are lost on container restart and cannot be shared across instances. This is a known issue acknowledged in the README production checklist.
+
+**Files:** `backend/src/runner/pageCapture.js`, `backend/src/runner/screencast.js`, new `backend/src/utils/objectStorage.js` | **Effort:** M | **Source:** Audit (M-03)
+
+---
+
+### MAINT-007 — MFA (TOTP / passkey) support
+
+**Problem:** There is no multi-factor authentication. For any enterprise customer, MFA is a compliance requirement (SOC 2, ISO 27001). This is a sales blocker for regulated industries.
+
+**Files:** `backend/src/routes/auth.js`, `frontend/src/pages/Login.jsx`, new MFA setup flow | **Effort:** L | **Source:** Audit
+
+---
+
+### MAINT-008 — Environments support (staging vs production)
+
+**Problem:** There is no concept of environments per project. Teams need to run the same test suite against `staging.myapp.com` and `myapp.com` separately, with per-environment run history and independent pass/fail status. Mabl's environments feature is a critical enterprise requirement.
+
+**Files:** New `environments` table, all run and project routes, frontend project config | **Effort:** L | **Source:** Competitive
+
+---
+
+### MAINT-009 — Cursor overlay on live browser view (M-04)
+
+**Problem:** Sentri's live CDP screencast shows the browser but gives no visual indication of what the test is currently doing. Viewers cannot tell which element is about to be clicked, filled, or asserted. This makes it hard to follow along during live runs.
 
 **Fix:** Port Assrt's `CURSOR_INJECT_SCRIPT` (animated cursor dot, click ripple, keystroke toast) into Sentri's runner. Inject via `page.evaluate()` after each navigation.
 
-**Files:** `backend/src/runner/executeTest.js`, `backend/src/runner/pageCapture.js` | **Effort:** S | **Source:** Assrt
+**Files:** `backend/src/runner/executeTest.js`, `backend/src/runner/pageCapture.js` | **Effort:** S | **Source:** Assrt (M-04)
 
 ---
 
-### M-05 — Semantic deduplication using embedding similarity
+### MAINT-010 — Semantic deduplication using embedding similarity (M-05)
 
-**Problem:** `backend/src/pipeline/deduplicator.js` uses exact string matching on test name + description. Renamed tests or slightly rephrased duplicates are not caught. Large test suites accumulate near-duplicate tests over time.
+**Problem:** `backend/src/pipeline/deduplicator.js` uses exact string matching on test name + description. Renamed tests or slightly rephrased duplicates are not caught. Large test suites accumulate near-duplicate tests over time, degrading run times and signal quality.
 
-**Files:** `backend/src/pipeline/deduplicator.js` | **Effort:** M | **Source:** Audit
+**Files:** `backend/src/pipeline/deduplicator.js` | **Effort:** M | **Source:** Audit (M-05)
 
 ---
 
-### M-06 — Restructure frontend to feature-sliced architecture 🟡 High
+### MAINT-011 — Restructure frontend to feature-sliced architecture (M-06) 🟡 High
 
-**Problem:** `frontend/src/components/` is a flat directory of ~35 files with no domain grouping. Run-execution views (`CrawlView`, `GenerateView`, `TestRunView`, `StepResultsView`, `LiveBrowserView`, `RunSidebar`, `ExecutionTimeline`, `PipelineCard`, `LLMStreamPanel`, `ActivityLogCard`), modals (`GenerateTestModal`, `CrawlProjectModal`, `RunRegressionModal`, `DeleteProjectModal`), charts (`PassFailChart`, `SparklineChart`, `StackedBar`, `PassRateBar`, `StatCard`), badges (`TestBadges`, `StatusBadge`, `AgentTag`), and layout chrome (`CommandPalette`, `ProviderBadge`, `OnboardingTour`) are all siblings. This makes the codebase hard to navigate, slows onboarding, and violates the principle of colocation by domain.
+**Problem:** `frontend/src/components/` is a flat directory of ~35 files with no domain grouping. Run views, modals, charts, badges, and layout chrome are all siblings. This makes the codebase hard to navigate, slows onboarding, and violates the principle of colocation by domain.
 
 **Note:** PR #70 already extracted `Sidebar`, `TopBar`, and `ThemeToggle` into `components/layout/`. This item completes the restructuring.
 
-**Target structure (Feature-Sliced / Domain-Grouped):**
-
-```
-frontend/src/
-├── app/                          # App shell — wiring only
-│   ├── App.jsx                   # Router + Suspense boundaries
-│   ├── routes.jsx                # Route definitions (extract from App.jsx)
-│   └── providers/
-│       └── AuthProvider.jsx      # Renamed from context/AuthContext.jsx
-│
-├── api/                          # API layer — split monolithic api.js
-│   ├── client.js                 # Base fetch wrapper (timeout, CSRF, 401 handling)
-│   ├── auth.js                   # Auth endpoints
-│   ├── projects.js               # Project CRUD + crawl/run triggers
-│   ├── tests.js                  # Test CRUD + review actions + export URLs
-│   ├── runs.js                   # Run endpoints
-│   └── reports.js                # Dashboard + reports
-│
-├── components/                   # Shared, domain-agnostic UI primitives
-│   ├── ui/                       # Atomic components
-│   │   ├── Tooltip.jsx
-│   │   ├── Collapsible.jsx
-│   │   ├── ModalShell.jsx
-│   │   ├── OutcomeBanner.jsx
-│   │   └── ExploreModePicker.jsx
-│   ├── charts/                   # Reusable data visualisation
-│   │   ├── PassFailChart.jsx
-│   │   ├── SparklineChart.jsx
-│   │   ├── StackedBar.jsx
-│   │   ├── PassRateBar.jsx
-│   │   └── StatCard.jsx
-│   ├── badges/                   # Status indicators
-│   │   ├── TestBadges.jsx
-│   │   ├── StatusBadge.jsx
-│   │   └── AgentTag.jsx
-│   └── layout/                   # App shell chrome (already started in PR #70)
-│       ├── Layout.jsx
-│       ├── Sidebar.jsx
-│       ├── TopBar.jsx
-│       ├── ThemeToggle.jsx
-│       ├── AppLogo.jsx
-│       ├── ProtectedRoute.jsx
-│       ├── CommandPalette.jsx
-│       ├── ProviderBadge.jsx
-│       └── OnboardingTour.jsx
-│
-├── features/                     # Domain features — each owns pages + components + hooks
-│   ├── auth/
-│   │   ├── pages/
-│   │   │   ├── Login.jsx
-│   │   │   └── ForgotPassword.jsx
-│   │   └── hooks/
-│   │       └── useAuth.js
-│   ├── dashboard/
-│   │   ├── pages/
-│   │   │   └── Dashboard.jsx
-│   │   └── components/
-│   │       └── TestDials.jsx
-│   ├── projects/
-│   │   ├── pages/
-│   │   │   ├── Applications.jsx
-│   │   │   ├── ProjectDetail.jsx
-│   │   │   └── NewProject.jsx
-│   │   ├── components/
-│   │   │   ├── ProjectHeader.jsx
-│   │   │   ├── RunsTab.jsx
-│   │   │   ├── TraceabilityTab.jsx
-│   │   │   ├── ActiveRunBanner.jsx
-│   │   │   ├── RunToast.jsx
-│   │   │   ├── CrawlProjectModal.jsx
-│   │   │   └── DeleteProjectModal.jsx
-│   │   └── hooks/
-│   │       ├── useProjectData.js
-│   │       └── useProjectRunMonitor.js
-│   ├── tests/
-│   │   ├── pages/
-│   │   │   ├── Tests.jsx
-│   │   │   └── TestDetail.jsx
-│   │   ├── components/
-│   │   │   ├── GenerateTestModal.jsx
-│   │   │   ├── DiffView.jsx
-│   │   │   └── AiFixPanel.jsx
-│   │   └── hooks/
-│   ├── runs/
-│   │   ├── pages/
-│   │   │   ├── Runs.jsx
-│   │   │   └── RunDetail.jsx
-│   │   ├── components/
-│   │   │   ├── CrawlView.jsx
-│   │   │   ├── GenerateView.jsx
-│   │   │   ├── TestRunView.jsx
-│   │   │   ├── StepResultsView.jsx
-│   │   │   ├── LiveBrowserView.jsx
-│   │   │   ├── OverlayCanvas.jsx
-│   │   │   ├── HealingTimeline.jsx
-│   │   │   ├── RunSidebar.jsx
-│   │   │   ├── ExecutionTimeline.jsx
-│   │   │   ├── PipelineCard.jsx
-│   │   │   ├── LLMStreamPanel.jsx
-│   │   │   ├── GenerationSuccessBanner.jsx
-│   │   │   ├── ActivityLogCard.jsx
-│   │   │   ├── SiteGraph.jsx
-│   │   │   └── RunRegressionModal.jsx
-│   │   └── hooks/
-│   │       ├── useRunSSE.js
-│   │       └── useLogBuffer.js
-│   ├── reports/
-│   │   └── pages/
-│   │       └── Reports.jsx
-│   ├── settings/
-│   │   └── pages/
-│   │       └── Settings.jsx
-│   ├── context/                  # "System Context" feature
-│   │   └── pages/
-│   │       └── Context.jsx
-│   └── ai/                       # AI chat / assistant
-│       └── components/
-│           └── AIChat.jsx
-│
-├── hooks/                        # Truly global hooks (not feature-specific)
-│   ├── usePageTitle.js
-│   └── useOnboarding.js
-│
-├── utils/                        # Pure utility functions (no React)
-│   ├── apiBase.js
-│   ├── csrf.js
-│   ├── fuzzyMatch.js
-│   ├── formatTestName.js
-│   ├── testTypeLabels.js
-│   ├── exportCsv.js
-│   ├── formatters.js
-│   └── pdfReportGenerator.js
-│
-└── styles/                       # Keep existing ITCSS — already well-organised
-    ├── tokens.css
-    ├── reset.css
-    ├── components.css
-    ├── utilities.css
-    ├── features/
-    └── pages/
-```
-
-**Key principles:**
-
-1. **Feature-sliced colocation** — each domain (`projects`, `tests`, `runs`, `auth`) owns its pages, components, and hooks together. When working on "runs", everything needed is in `features/runs/`.
-2. **Shared components split by concern** — `components/ui/`, `charts/`, `badges/`, `layout/` instead of 35 files flat. Rule: if used by 2+ features → `components/`. If used by one feature → `features/<that-feature>/components/`.
-3. **Split monolithic `api.js`** — the current ~380-line file covers auth, projects, tests, runs, reports, settings, chat, and SSE. Split into domain modules under `api/` with a shared `client.js` base.
-4. **`app/` for wiring** — `App.jsx`, route definitions, and global providers are app-level concerns, not features.
-5. **Keep ITCSS styles as-is** — the `styles/` directory is already well-layered; no change needed.
-
-**Migration strategy:** Move files incrementally (one feature at a time), updating imports as you go. Start with `runs/` (largest cluster, 15+ components) then `projects/`, `tests/`, `auth/`. Use IDE "move file + update imports" refactoring. Each feature migration is a single PR.
+**Target structure:** Feature-sliced / domain-grouped under `features/` (auth, dashboard, projects, tests, runs, reports, settings), with shared primitives under `components/ui/`, `charts/`, `badges/`, `layout/`. Split the monolithic `api.js` (~380 lines) into domain modules under `api/`. Each feature migration is a single PR — start with `runs/` (15+ components), then `projects/`, `tests/`, `auth/`.
 
 **Files to change:** All `frontend/src/components/*.jsx`, `frontend/src/pages/*.jsx`, `frontend/src/hooks/*.js`, `frontend/src/api.js`, `frontend/src/App.jsx`, `frontend/src/context/AuthContext.jsx`
 
-**Effort:** L (incremental — 1 PR per feature domain) | **Source:** Audit
+**Effort:** L (incremental — 1 PR per feature domain) | **Source:** Audit (M-06)
 
 ---
 
 ## Summary
 
-| Sprint | Items | Key deliverable |
-|--------|-------|----------------|
-| ~~Sprint 1~~ | ~~S1-01 through S1-06~~ | ✅ Complete — production-safe |
-| Sprint 2 (Weeks 4–6) | S2-01 through S2-03 | CI/CD integration, scheduling, alerts |
-| Sprint 3 (Weeks 7–10) | S3-02, S3-04, S3-08 | Test quality, coverage, trust loop |
-| Sprint 4 (Weeks 11–16) | S4-01 through S4-09 | Org/team, visual regression, export, monitoring |
-| Ongoing | M-01 through M-06 | Infrastructure hardening + frontend restructuring |
+| Phase | Items | Status | Key Deliverable |
+|-------|-------|--------|-----------------|
+| ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
+| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔲 Not started | Production-safe for real teams |
+| Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
+| Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
+| Ongoing | MAINT-001 through MAINT-011 | 🔲 Backlog | Platform moat + infrastructure |
 
-**Remaining items:** 17  
-**Critical blockers (must ship before team use):** None — all Sprint 1 items complete  
-**Highest competitive impact:** S2-01, S4-01, S4-03, S4-06  
-**Lowest effort / highest value (remaining quick wins):** S3-02, S4-09
+**Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3) = **9 complete**
+**Critical blockers remaining:** ENH-005, 007, 013, 027, 030 (Phase 1) · ENH-001, 002, 003, 012 (Phase 2) = **9 blockers**
+**Highest adoption impact:** ENH-011/S2-01 (CI/CD), ENH-006/S2-02 (scheduling), ENH-003/S4-01 (multi-tenancy), S4-06 (monitoring mode)
+**Lowest effort / highest immediate value:** ENH-005, ENH-027, ENH-030, ENH-024, ENH-015, S4-09, S4-07
 
 ---
 
 ## Contributing
 
 Before starting any item:
-1. Open a GitHub Issue referencing the item ID (e.g., `S1-01`)
-2. Assign yourself in the issue
-3. Create a branch named `feat/S1-01-sandbox-code-execution` or `fix/S1-03-sqlite-migration`
+1. Open a GitHub Issue referencing the item ID (e.g., `ENH-005`)
+2. Assign yourself and add to the current sprint milestone
+3. Create a branch named `feat/ENH-005-global-rate-limiting` or `fix/ENH-013-db-reset-tokens`
 4. Reference the issue in your PR description
-
+5. Update the status in this file (`🔲 Not started` → `🔄 In progress` → `✅ Complete`) in the same PR
