@@ -15,16 +15,7 @@
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
 import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
-// ─── Audit trail helper ──────────────────────────────────────────────────────
-// Extracts userId and userName from req.authUser (set by requireAuth middleware)
-// so every logActivity() call automatically records who performed the action.
-// Returns an object that can be spread into logActivity({ ...actor(req), ... }).
-function actor(req) {
-  const u = req?.authUser;
-  if (!u) return {};
-  return { userId: u.sub, userName: u.name || u.email || u.sub };
-}
-
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
