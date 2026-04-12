@@ -7,13 +7,13 @@ import { getDatabase } from "../sqlite.js";
 
 /**
  * Create an activity entry.
- * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt }
+ * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId?, userName? }
  */
 export function create(activity) {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt)
-    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt)
+    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName)
+    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName)
   `).run({
     id: activity.id,
     type: activity.type,
@@ -24,6 +24,8 @@ export function create(activity) {
     detail: activity.detail || null,
     status: activity.status || "completed",
     createdAt: activity.createdAt,
+    userId: activity.userId || null,
+    userName: activity.userName || null,
   });
 }
 

@@ -21,7 +21,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo, passwordResetTokenRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
@@ -111,6 +111,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
+| `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -205,9 +206,20 @@ const result = await doThing(name, {
 ### Git & Branching Conventions
 
 - **Branch naming**: `feature/<short-description>`, `fix/<short-description>`, `codex/<task-description>`.
-- **Commit messages**: Imperative mood, concise summary. Prefix with area when helpful: `backend: add chat SSE endpoint`, `frontend: fix dark mode token`.
+- **Commit messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) — the release workflow parses these to determine version bumps automatically. Use the format `<type>(<scope>): <description>`:
+
+  | Prefix | Version bump | Example |
+  |---|---|---|
+  | `feat:` | Minor (`0.x.0`) | `feat: add global API rate limiting` |
+  | `fix:` | Patch (`0.0.x`) | `fix: atomic token claim prevents TOCTOU race` |
+  | `perf:` | Patch | `perf: cache DB queries in dashboard endpoint` |
+  | `feat!:` or `BREAKING CHANGE:` in body | Major (`x.0.0`) | `feat!: replace JWT localStorage with HttpOnly cookies` |
+  | `docs:`, `test:`, `chore:`, `ci:`, `refactor:`, `style:` | No bump | `docs: update API reference for rate limiting` |
+
+  The **squash-merge commit message** (PR title) determines the version bump, so write PR titles as Conventional Commits.
+
 - **PR size**: Keep PRs focused — one feature or fix per PR. If a change touches >500 lines, consider splitting.
-- **Merge strategy**: Squash-merge to `main`. Keep the PR title as the squash commit message.
+- **Merge strategy**: Squash-merge to `main`. The PR title becomes the squash commit message — write it as a Conventional Commit (e.g. `feat: add global API rate limiting`).
 - **No force-pushes** to `main`. Feature branches may be rebased before merge.
 
 ---
@@ -306,7 +318,7 @@ Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
 - **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `logs`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -429,8 +441,9 @@ CI runs automatically on every push to `main`/`develop` and on PRs to `main` via
 2. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
 3. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
 4. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
+5. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in both `package.json` files, promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
 
-All four jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
+All four CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
 
 To run locally before pushing:
 
@@ -449,6 +462,22 @@ cd frontend && npm test
 
 ## Testing
 
+### Mandatory test requirements
+
+**Every PR that adds or modifies backend logic MUST include tests.** PRs without adequate test coverage will not be merged. The requirements are:
+
+| Change type | Required tests | Where |
+|---|---|---|
+| New repository module | Unit tests for every exported function | Dedicated `tests/<module>.test.js` file |
+| New shared utility (`utils/`) | Unit tests for all branches and edge cases | Dedicated file or added to `tests/utils.test.js` |
+| New API endpoint or changed endpoint behaviour | Integration test exercising the HTTP flow (status codes, response shape, auth, error cases) | `tests/api-flow.test.js` or a dedicated file |
+| Bug fix | Regression test that fails without the fix and passes with it | Closest existing test file or dedicated file |
+| New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly (e.g. 429 on excess, 403 on missing CSRF) | Dedicated file or `tests/auth-cookies.test.js` |
+| Security fix | Both a unit test for the fix mechanism AND an integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
+| Pipeline stage change | Unit tests in `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` | Existing pipeline test files |
+
+**Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
+
 ### Backend
 
 Tests live in `backend/tests/` and use Node's built-in `assert/strict` — no test framework. Run with:
@@ -459,13 +488,45 @@ node tests/self-healing.test.js
 node tests/code-parsing.test.js
 node tests/api-flow.test.js
 node tests/auth-cookies.test.js
+node tests/password-reset-token.test.js
+node tests/security-hardening.test.js
 ```
 
 Or run all at once: `npm test` from `backend/`.
 
+#### Test file conventions
+
 - Each test file must include a final summary line showing pass/fail counts and exit with `process.exit(1)` on any failure.
 - Tests are synchronous where possible. Async tests must `await` all assertions before the test function returns.
 - Integration tests use a shared SQLite database file. Reset state between tests by calling `getDatabase().exec("DELETE FROM ...")` on each table and resetting counters. Seed test data using repository modules (`projectRepo.create(...)`, `testRepo.create(...)`, etc.) — never use `getDb()` for writes in tests.
+- **Unit tests** (repositories, utilities) use the synchronous `test(name, fn)` pattern — no HTTP server needed.
+- **Integration tests** (route handlers, auth flows) spin up the Express app on a random port via `app.listen(0)`, make real HTTP requests, and shut down in a `finally` block.
+
+#### What makes a good test
+
+```js
+// ✅ Unit test — tests one function, one behaviour, clear assertion
+test("claim() returns null for an already-used token", () => {
+  resetTokenRepo.create("tok-1", "U-1", futureExpiry);
+  resetTokenRepo.claim("tok-1");                        // first claim succeeds
+  assert.equal(resetTokenRepo.claim("tok-1"), null);    // second claim must fail
+});
+
+// ✅ Integration test — exercises the full HTTP path including auth
+out = await req(base, "/api/auth/reset-password", {
+  method: "POST",
+  body: { token: usedToken, newPassword: "New123!" },
+});
+assert.equal(out.res.status, 400, "Replaying a used token should fail");
+
+// ❌ No assertion — test always passes
+test("creates a token", () => {
+  resetTokenRepo.create("tok-1", "U-1", futureExpiry);
+});
+
+// ❌ Tests implementation detail instead of behaviour
+test("SQL query contains WHERE usedAt IS NULL", () => { … });
+```
 
 ### Frontend
 
@@ -668,9 +729,12 @@ The following have been implemented and are no longer open:
 - **Cookie-based auth** ✅: JWTs are stored in `access_token` HttpOnly; Secure; SameSite=Strict cookies. A `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX. Tokens are never returned in response bodies or stored in localStorage.
 - **CSRF protection** ✅: Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. All mutating endpoints are validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints are exempt via `CSRF_EXEMPT_PATHS`.
 - **Session refresh** ✅: `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 minutes before expiry.
-- **Rate limiting** ✅: Per-endpoint rate limiters are configured in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
+- **Auth rate limiting** ✅: Per-endpoint rate limiters in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
+- **Global API rate limiting** ✅: Three-tier `express-rate-limit` in `middleware/appSetup.js` — general (300 req/15 min for all `/api/*`), expensive operations (20/hr for crawl/run), AI generation (30/hr for test generation). In-memory store; swap to Redis for horizontal scaling.
 - **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). Tighten `'unsafe-inline'` to nonce-based in production.
 - **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
+- **DB-backed password reset tokens** ✅: Reset tokens are persisted in the `password_reset_tokens` SQLite table (migration 003) via `passwordResetTokenRepo`. Tokens survive server restarts, support multi-instance deployments, and use atomic `claim()` to prevent TOCTOU double-use. A `usedAt` column provides one-time-use enforcement with an audit trail.
+- **Per-user audit trail** ✅: Every activity log entry records `userId` and `userName` (migration 004). The `actor(req)` utility in `utils/actor.js` extracts identity from `req.authUser` (JWT payload includes `name`). Bulk approve/reject/restore actions log per-test entries with the acting user's identity.
 
 ### Known Security Gaps (TODO)
 
@@ -678,6 +742,7 @@ The following are **not yet implemented** but should be addressed before product
 
 - **Artifact authentication**: The `/artifacts` static route is **not behind `requireAuth`**. Screenshots, videos, and traces are served publicly. Artifact filenames contain random run IDs which provide obscurity but not security. To add auth, implement `?token=` query param validation (same pattern as SSE/export endpoints) and update all frontend artifact URLs.
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
+- **Redis for rate limiting**: The global API rate limiters use `express-rate-limit`'s default in-memory store. In multi-instance deployments, replace with `rate-limit-redis` so limits are shared across processes.
 
 ---
 
@@ -764,11 +829,75 @@ The frontend follows a clear separation of concerns between pages:
 
 ## Versioning & Releases
 
-> **Status**: No formal release process exists yet.
+Sentri uses **automatic semantic versioning** driven by [Conventional Commits](https://www.conventionalcommits.org/).
 
-- Both packages are at `1.0.0`. Version bumps are manual.
-- A changelog is maintained at `docs/changelog.md`. Update the **Unreleased** section in every PR that adds user-visible features, fixes, or security changes.
-- Docker images are tagged `latest` on GHCR. When a tagging strategy is adopted, update `docker-compose.yml` to reference specific tags.
+### How it works
+
+1. **Developer** writes PR title as a Conventional Commit (e.g. `feat: add rate limiting`).
+2. **PR is squash-merged** to `main` — the PR title becomes the commit message.
+3. **`.github/workflows/release.yml`** runs on push to `main`:
+   - Scans commits since the last `v*` tag for `feat:`, `fix:`, `perf:`, `BREAKING CHANGE:`.
+   - Determines the bump level (major / minor / patch). If no bumping prefix is found, the workflow exits — no release.
+   - Updates `version` in both `backend/package.json` and `frontend/package.json`.
+   - Promotes `## [Unreleased]` in `docs/changelog.md` to `## [X.Y.Z] — YYYY-MM-DD` and adds a fresh `[Unreleased]` section.
+   - Commits `chore(release): vX.Y.Z`, creates a `vX.Y.Z` git tag, and pushes.
+   - Creates a **GitHub Release** with release notes extracted from the changelog.
+4. **`.github/workflows/cd.yml`** triggers on the new `v*` tag:
+   - Docker images are tagged with `X.Y.Z`, `X.Y`, `sha-<commit>`, and `latest`.
+   - GitHub Pages is deployed with the updated docs.
+
+### What you need to do in every PR
+
+1. Write the PR title as a Conventional Commit (`feat:`, `fix:`, etc.).
+2. Update `docs/changelog.md` under `## [Unreleased]` (see Changelog section below).
+3. That's it — versioning, tagging, and releases are fully automated.
+
+### Changelog
+
+Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) standard. The changelog lives at `docs/changelog.md` and is published on the docs site.
+
+**Every PR that adds user-visible features, fixes, security changes, or breaking changes MUST update `docs/changelog.md`.**
+
+#### Format rules
+
+- Entries go under the `## [Unreleased]` section at the top of the file.
+- When a version is released, rename `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD` and add a fresh `[Unreleased]` above it.
+- Group entries under these headings (omit empty groups):
+
+  | Heading | When to use |
+  |---|---|
+  | `### Added` | New features, new endpoints, new UI pages |
+  | `### Changed` | Behaviour changes to existing features (non-breaking) |
+  | `### Deprecated` | Features that will be removed in a future version |
+  | `### Removed` | Features or APIs that were removed |
+  | `### Fixed` | Bug fixes |
+  | `### Security` | Vulnerability patches, auth hardening, rate limiting changes |
+
+- Each entry is a single bullet point starting with the area in bold: `- **Auth**: ...`, `- **API**: ...`, `- **Tests**: ...`, `- **Dashboard**: ...`, etc.
+- Reference the PR number at the end: `(#78)`.
+- Write from the user's perspective — what changed for them, not internal refactoring details.
+
+#### Example
+
+```markdown
+## [Unreleased]
+
+### Added
+- **API**: Three-tier global rate limiting — 300 req/15 min general, 20/hr for crawl/run, 30/hr for AI generation (#78)
+
+### Fixed
+- **Auth**: Password reset tokens now survive server restarts (DB-backed via migration 003) (#78)
+
+### Security
+- **Auth**: Atomic token claim prevents concurrent replay of password reset tokens (TOCTOU fix) (#78)
+```
+
+#### What does NOT need a changelog entry
+
+- Internal refactors with no user-visible effect (e.g. extracting a shared utility)
+- Test-only changes
+- Documentation-only changes (unless they document a new feature)
+- CI/CD pipeline changes
 
 ---
 
@@ -793,3 +922,5 @@ The frontend follows a clear separation of concerns between pages:
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
+- **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
+- **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.

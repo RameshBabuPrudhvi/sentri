@@ -99,6 +99,47 @@ GET /api/auth/google/callback?code=<code>
 
 Exchanges a Google OAuth code for a user profile and sets auth cookies. Requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` env vars on the server.
 
+## Password Reset
+
+### Request Reset Token
+
+```
+POST /api/auth/forgot-password
+```
+
+**Body:**
+```json
+{ "email": "ada@example.com" }
+```
+
+**Response:** `200 OK` (always — prevents user enumeration)
+```json
+{ "message": "If an account with that email exists, a password reset link has been generated." }
+```
+
+Rate limited to **5 requests per IP per 15 minutes**. Tokens are persisted in the `password_reset_tokens` DB table (migration 003) and expire after **30 minutes**. Only the latest token per user is valid — requesting a new one invalidates prior tokens.
+
+### Reset Password
+
+```
+POST /api/auth/reset-password
+```
+
+**Body:**
+```json
+{
+  "token": "<reset-token-from-email>",
+  "newPassword": "min8chars"
+}
+```
+
+**Response:** `200 OK`
+```json
+{ "message": "Password has been reset successfully. You can now sign in." }
+```
+
+Returns `400` for invalid, expired, or already-used tokens. Tokens are one-time-use — claimed atomically to prevent concurrent replay.
+
 ## Token Format
 
 JWTs are signed with HS256 and expire after **8 hours**. Stored in the `access_token` HttpOnly cookie — never exposed to JavaScript. Payload:
@@ -107,12 +148,15 @@ JWTs are signed with HS256 and expire after **8 hours**. Stored in the `access_t
 {
   "sub": "user-uuid",
   "email": "ada@example.com",
+  "name": "Ada Lovelace",
   "role": "user",
   "jti": "unique-token-id",
   "iat": 1700000000,
   "exp": 1700028800
 }
 ```
+
+The `name` field is used by the audit trail system to record who performed each action (via the `actor()` utility).
 
 ## Auth Fallbacks
 

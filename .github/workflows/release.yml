@@ -1,0 +1,127 @@
+name: Release — Auto-version & Tag
+
+# Runs on every push to main. Reads commit messages since the last tag,
+# determines the next semantic version bump, updates package.json files
+# and the changelog, creates a git tag, and publishes a GitHub Release.
+#
+# Commit message convention (Conventional Commits):
+#   feat: ...     → minor bump (0.x.0)
+#   fix: ...      → patch bump (0.0.x)
+#   perf: ...     → patch bump
+#   BREAKING CHANGE: ... (in body/footer) → major bump (x.0.0)
+#   feat!: ...    → major bump (shorthand)
+#
+# Commits that don't match (docs:, test:, chore:, ci:, refactor:) are
+# skipped — no version bump, no release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Determine version & create release
+    runs-on: ubuntu-latest
+    # Skip if the push was made by this workflow (prevents infinite loop)
+    if: "!contains(github.event.head_commit.message, 'chore(release):')"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0       # Full history needed for tag comparison
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Determine next version from commits
+        id: version
+        run: |
+          # Get the latest tag (or default to v1.0.0 if none exists)
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+          CURRENT="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          # Scan commits since last tag for conventional commit prefixes
+          COMMITS=$(git log "$LATEST_TAG"..HEAD --pretty=format:"%s%n%b" 2>/dev/null || git log --pretty=format:"%s%n%b")
+
+          BUMP="none"
+          if echo "$COMMITS" | grep -qiE "BREAKING CHANGE:|^[a-z]+!:"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -qiE "^fix(\(.+\))?:|^perf(\(.+\))?:"; then
+            BUMP="patch"
+          fi
+
+          if [ "$BUMP" = "none" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No version-bumping commits found since $LATEST_TAG — skipping release."
+            exit 0
+          fi
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEXT="$MAJOR.$MINOR.$PATCH"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Bump: $BUMP → v$NEXT"
+
+      - name: Update package.json versions
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          # Update both package.json files (no npm publish — just the version field)
+          cd backend  && npm version "$NEXT" --no-git-tag-version && cd ..
+          cd frontend && npm version "$NEXT" --no-git-tag-version && cd ..
+
+      - name: Update changelog — promote Unreleased to version
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          DATE=$(date +%Y-%m-%d)
+          # Replace [Unreleased] heading with version + date, add fresh Unreleased above
+          sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$NEXT] — $DATE/" docs/changelog.md
+
+      - name: Build release notes from changelog
+        if: steps.version.outputs.skip != 'true'
+        id: notes
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          # Extract the section for this version from the changelog
+          # (everything between ## [X.Y.Z] and the next ## heading)
+          NOTES=$(awk "/^## \[$NEXT\]/{found=1; next} /^## \[/{if(found) exit} found{print}" docs/changelog.md)
+          # Write to file for the release step (handles multi-line safely)
+          echo "$NOTES" > /tmp/release-notes.md
+
+      - name: Commit version bump
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/package.json backend/package-lock.json frontend/package.json frontend/package-lock.json docs/changelog.md
+          git commit -m "chore(release): v$NEXT"
+          git tag "v$NEXT"
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.next }}
+          name: v${{ steps.version.outputs.next }}
+          body_path: /tmp/release-notes.md
+          generate_release_notes: false
