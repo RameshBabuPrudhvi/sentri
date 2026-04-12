@@ -23,7 +23,12 @@ import { formatLogLine } from "./logFormatter.js";
 // in-memory object the pipeline holds, preventing status overwrites.
 export const runAbortControllers = new Map();
 
-export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity }) {
+/**
+ * @param {Object}   [opts.actorInfo] - { userId, userName } from the triggering request.
+ *                                      Spread into the failure logActivity call so the
+ *                                      audit trail records who started the run.
+ */
+export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, actorInfo }) {
   const abortController = new AbortController();
   runAbortControllers.set(runId, { controller: abortController, run });
 
@@ -53,7 +58,7 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity })
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-      logActivity({ ...onFailActivity(err), status: "failed" });
+      logActivity({ ...onFailActivity(err), ...(actorInfo || {}), status: "failed" });
       emitRunEvent(runId, "done", { status: "failed" });
       runRepo.save(run); // persist failed status to SQLite
     });

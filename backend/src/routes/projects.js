@@ -21,6 +21,7 @@ import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
@@ -43,7 +44,7 @@ router.post("/", (req, res) => {
   };
   projectRepo.create(project);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "project.create", projectId: id, projectName: name,
     detail: `Project created — "${name}" (${url})`,
   });
@@ -109,7 +110,7 @@ router.delete("/:id", (req, res) => {
   // Delete the project itself
   projectRepo.deleteById(req.params.id);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,
     detail: `Project deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs removed)`,
   });

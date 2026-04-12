@@ -24,12 +24,14 @@ import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { classifyError } from "../utils/errorClassifier.js";
+import { expensiveOpLimiter } from "../middleware/appSetup.js";
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
-router.post("/projects/:id/crawl", async (req, res) => {
+router.post("/projects/:id/crawl", expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -65,7 +67,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   };
   runRepo.create(run);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "crawl.start", projectId: project.id, projectName: project.name,
     detail: `Crawl started for ${project.url}`, status: "running",
   });
@@ -73,7 +75,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
   runWithAbort(runId, run,
     (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
     {
-      onSuccess: () => logActivity({
+      onSuccess: () => logActivity({ ...actor(req),
         type: "crawl.complete", projectId: project.id, projectName: project.name,
         detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
       }),
@@ -81,6 +83,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
         type: "crawl.fail", projectId: project.id, projectName: project.name,
         detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
       }),
+      actorInfo: actor(req),
     },
   );
 
@@ -89,7 +92,7 @@ router.post("/projects/:id/crawl", async (req, res) => {
 
 // ─── Run Tests ────────────────────────────────────────────────────────────────
 
-router.post("/projects/:id/run", async (req, res) => {
+router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -126,7 +129,7 @@ router.post("/projects/:id/run", async (req, res) => {
   };
   runRepo.create(run);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
     detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
@@ -134,7 +137,7 @@ router.post("/projects/:id/run", async (req, res) => {
   runWithAbort(runId, run,
     (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
     {
-      onSuccess: () => logActivity({
+      onSuccess: () => logActivity({ ...actor(req),
         type: "test_run.complete", projectId: project.id, projectName: project.name,
         detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
       }),
@@ -142,6 +145,7 @@ router.post("/projects/:id/run", async (req, res) => {
         type: "test_run.fail", projectId: project.id, projectName: project.name,
         detail: `Test run failed: ${classifyError(err, "run").message}`,
       }),
+      actorInfo: actor(req),
     },
   );
 
@@ -193,7 +197,7 @@ router.post("/runs/:runId/abort", (req, res) => {
   });
 
   const project = projectRepo.getById(run.projectId);
-  logActivity({
+  logActivity({ ...actor(req),
     type: `${run.type === "test_run" || run.type === "run" ? "test_run" : run.type}.abort`,
     projectId: run.projectId,
     projectName: project?.name || null,

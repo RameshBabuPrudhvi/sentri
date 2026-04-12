@@ -38,6 +38,8 @@ import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
@@ -248,7 +250,7 @@ No imports, no explanation.`;
   testRepo.update(test.id, updates);
 
   const project = projectRepo.getById(test.projectId);
-  logActivity({
+  logActivity({ ...actor(req),
     type: stepsChanged && (regenerateCode || previewCode) ? "test.regenerate" : "test.edit",
     projectId: test.projectId,
     projectName: project?.name || null,
@@ -312,7 +314,7 @@ router.post("/projects/:id/tests", (req, res) => {
 
   testRepo.create(test);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.create", projectId: project.id, projectName: project.name,
     testId, testName: test.name,
     detail: `Manual test created — "${test.name}"`,
@@ -326,7 +328,7 @@ router.delete("/projects/:id/tests/:testId", (req, res) => {
   if (!test || test.projectId !== req.params.id)
     return res.status(404).json({ error: "not found" });
   const project = projectRepo.getById(req.params.id);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
     testId: req.params.testId, testName: test.name,
     detail: `Test deleted — "${test.name}"`,
@@ -337,7 +339,7 @@ router.delete("/projects/:id/tests/:testId", (req, res) => {
 
 // ─── AI-powered test generation (pipeline-based) ──────────────────────────────
 
-router.post("/projects/:id/tests/generate", async (req, res) => {
+router.post("/projects/:id/tests/generate", aiGenerationLimiter, async (req, res) => {
   const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "project not found" });
 
@@ -411,7 +413,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
     },
   };
   runRepo.create(run);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.generate", projectId: project.id, projectName: project.name,
     detail: `Test generation pipeline started for "${cleanName}"`, status: "running",
   });
@@ -427,7 +429,7 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
       signal,
     }),
     {
-      onSuccess: (createdTestIds) => logActivity({
+      onSuccess: (createdTestIds) => logActivity({ ...actor(req),
         type: "test.generate", projectId: project.id, projectName: project.name,
         detail: `Test generation completed — ${createdTestIds.length} test(s) created for "${cleanName}"`,
       }),
@@ -435,12 +437,13 @@ router.post("/projects/:id/tests/generate", async (req, res) => {
         type: "test.generate", projectId: project.id, projectName: project.name,
         detail: `Test generation failed for "${cleanName}" — ${classifyError(err, "crawl").message}`,
       }),
+      actorInfo: actor(req),
     },
   );
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
-router.post("/tests/:testId/run", async (req, res) => {
+router.post("/tests/:testId/run", expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 
@@ -462,7 +465,7 @@ router.post("/tests/:testId/run", async (req, res) => {
     testQueue: [{ id: test.id, name: test.name, steps: test.steps || [] }],
   };
   runRepo.create(run);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
     testId: test.id, testName: test.name,
     detail: `Single test run started — "${test.name}"`, status: "running",
@@ -471,7 +474,7 @@ router.post("/tests/:testId/run", async (req, res) => {
   runWithAbort(runId, run,
     (signal) => runTests(project, [test], run, { signal }),
     {
-      onSuccess: () => logActivity({
+      onSuccess: () => logActivity({ ...actor(req),
         type: "test_run.complete", projectId: project.id, projectName: project.name,
         testId: test.id, testName: test.name,
         detail: `Single test completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
@@ -481,6 +484,7 @@ router.post("/tests/:testId/run", async (req, res) => {
         testId: test.id, testName: test.name,
         detail: `Test run failed for "${test.name}" — ${classifyError(err, "run").message}`,
       }),
+      actorInfo: actor(req),
     },
   );
 
@@ -496,7 +500,7 @@ router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
   const reviewedAt = new Date().toISOString();
   testRepo.update(test.id, { reviewStatus: "approved", reviewedAt });
   const project = projectRepo.getById(req.params.id);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.approve", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
@@ -511,7 +515,7 @@ router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
   const reviewedAt = new Date().toISOString();
   testRepo.update(test.id, { reviewStatus: "rejected", reviewedAt });
   const project = projectRepo.getById(req.params.id);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.reject", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
@@ -525,7 +529,7 @@ router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
     return res.status(404).json({ error: "not found" });
   testRepo.update(test.id, { reviewStatus: "draft", reviewedAt: null });
   const project = projectRepo.getById(req.params.id);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.restore", projectId: req.params.id, projectName: project?.name || null,
     testId: test.id, testName: test.name,
     detail: `Test restored to draft — "${test.name}"`,
@@ -551,7 +555,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
     });
     if (deleted.length) {
       const project = projectRepo.getById(req.params.id);
-      logActivity({
+      logActivity({ ...actor(req),
         type: "test.bulk_delete", projectId: req.params.id, projectName: project?.name || null,
         detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
       });
@@ -566,13 +570,13 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
   if (updated.length) {
     const project = projectRepo.getById(req.params.id);
     for (const test of updated) {
-      logActivity({
+      logActivity({ ...actor(req),
         type: `test.${action}`, projectId: req.params.id, projectName: project?.name || null,
         testId: test.id, testName: test.name,
         detail: `Test ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "restored to draft"} (bulk) — "${test.name}"`,
       });
     }
-    logActivity({
+    logActivity({ ...actor(req),
       type: `test.bulk_${action}`, projectId: req.params.id, projectName: project?.name || null,
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });

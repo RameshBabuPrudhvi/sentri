@@ -19,6 +19,7 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
@@ -297,7 +298,7 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
   testRepo.update(test.id, updates);
 
   const project = projectRepo.getById(test.projectId);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.ai_fix",
     projectId: test.projectId,
     projectName: project?.name || null,

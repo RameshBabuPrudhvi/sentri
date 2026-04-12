@@ -243,20 +243,24 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 |---|---|
 | **Authentication** | ✅ Built-in (email/password + GitHub/Google OAuth) |
 | **JWT Security** | ✅ Throws in production without `JWT_SECRET` |
-| **Rate Limiting** | ✅ 10 sign-in attempts per IP per 15 min |
+| **Rate Limiting** | ✅ Three-tier: general (300/15 min), auth (5–10/15 min), expensive ops (20/hr), AI generation (30/hr) |
 | **OAuth CSRF** | ✅ State parameter validated |
-| **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
+| **Token Storage** | ✅ JWT in HttpOnly; Secure; SameSite=Strict cookie + CSRF double-submit protection |
+| **Password Reset** | ✅ DB-backed tokens with atomic one-time claim (TOCTOU-safe) |
+| **Audit Trail** | ✅ Per-user `userId`/`userName` on every activity log entry |
+| **Database** | ✅ SQLite (better-sqlite3) with WAL mode, migration runner, auto-migrates from legacy JSON |
 | **Parallel Execution** | ✅ 1–10 concurrent browser contexts per run (`PARALLEL_WORKERS` env or UI selector) |
 | **API Test Generation** | ✅ HAR capture during crawl → auto-generated Playwright `request` API contract tests |
-| **Database** | ✅ SQLite (better-sqlite3) with WAL mode — auto-migrates from legacy JSON on first startup |
+| **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
+| **Auto-Versioning** | ✅ Conventional Commits → auto semver bump, changelog promotion, GitHub Release |
 | **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |
-| **CORS** | ⬜ Restrict origins in `backend/src/middleware/appSetup.js` |
-| **Token Storage** | ✅ JWT in HttpOnly; Secure; SameSite=Strict cookie + CSRF double-submit protection |
 | **Scheduling** | ⬜ Add cron-based auto-runs via `node-cron` |
 | **Notifications** | ⬜ Send Slack/email alerts on test failures |
 | **Multi-tenancy** | ⬜ Add workspace/organisation scoping |
 | **CI/CD Integration** | ⬜ Expose a run trigger webhook for GitHub Actions / GitLab CI |
+| **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (Playwright-native) |
+| **Visual Regression** | ⬜ Baseline screenshot diffing with `pixelmatch` |
 
 ---
 

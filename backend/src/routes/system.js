@@ -20,6 +20,7 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { actor } from "../utils/actor.js";
 
 const router = Router();
 
@@ -147,7 +148,7 @@ router.get("/system", async (req, res) => {
 
 router.delete("/data/runs", (req, res) => {
   const count = runRepo.clearAll();
-  logActivity({ type: "settings.update", detail: `Cleared ${count} run(s)` });
+  logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
 
@@ -158,7 +159,7 @@ router.delete("/data/activities", (req, res) => {
 
 router.delete("/data/healing", (req, res) => {
   const count = healingRepo.clearAll();
-  logActivity({ type: "settings.update", detail: `Cleared ${count} healing history entries` });
+  logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} healing history entries` });
   res.json({ ok: true, cleared: count });
 });
 
