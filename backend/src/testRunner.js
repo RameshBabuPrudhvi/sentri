@@ -38,7 +38,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
-import { signArtifactUrl } from "./middleware/appSetup.js";
+
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -231,7 +231,7 @@ export async function runTests(project, tests, run, { parallelWorkers, signal } 
     if (traceContext) {
       try {
         await traceContext.tracing.stop({ path: tracePath });
-        run.tracePath = signArtifactUrl(`/artifacts/traces/${runId}.zip`);
+        run.tracePath = `/artifacts/traces/${runId}.zip`;
         log(run, `📊 Trace saved`);
       } catch (e) {
         logWarn(run, `Trace save failed: ${e.message}`);

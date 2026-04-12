@@ -325,6 +325,37 @@ export function signArtifactUrl(artifactPath) {
 }
 
 /**
+ * Deep-clone a run object and sign all artifact paths so the frontend receives
+ * fresh, non-expired URLs.  Call this at **read time** (API responses, SSE
+ * events) — never persist signed URLs to the database.
+ *
+ * Handles: `run.tracePath`, `run.videoPath`, `run.videoSegments[]`,
+ *          `run.results[].screenshotPath`, `run.results[].videoPath`.
+ *
+ * @param {Object} run - The run object from the database.
+ * @returns {Object} A shallow clone with all artifact paths signed.
+ */
+export function signRunArtifacts(run) {
+  if (!run) return run;
+  const signed = { ...run };
+
+  if (signed.tracePath) signed.tracePath = signArtifactUrl(signed.tracePath);
+  if (signed.videoPath) signed.videoPath = signArtifactUrl(signed.videoPath);
+  if (Array.isArray(signed.videoSegments)) {
+    signed.videoSegments = signed.videoSegments.map(s => signArtifactUrl(s));
+  }
+  if (Array.isArray(signed.results)) {
+    signed.results = signed.results.map(r => {
+      const sr = { ...r };
+      if (sr.screenshotPath) sr.screenshotPath = signArtifactUrl(sr.screenshotPath);
+      if (sr.videoPath) sr.videoPath = signArtifactUrl(sr.videoPath);
+      return sr;
+    });
+  }
+  return signed;
+}
+
+/**
  * Validate an incoming artifact request's `?token=` and `?exp=` query params.
  * Returns `true` when the token is valid and not expired; `false` otherwise.
  *

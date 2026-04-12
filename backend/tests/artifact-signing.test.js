@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
-import { app, ARTIFACTS_DIR, signArtifactUrl } from "../src/middleware/appSetup.js";
+import { app, ARTIFACTS_DIR, signArtifactUrl, signRunArtifacts } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import systemRouter from "../src/routes/system.js";
 import { getDatabase } from "../src/database/sqlite.js";
@@ -118,6 +118,40 @@ async function main() {
     const pastExp = Date.now() - 60000; // 1 minute ago
     res = await fetch(`${base}${artifactPath}?token=${token}&exp=${pastExp}`);
     assert.equal(res.status, 401, "Expired token should return 401");
+
+    // ── signRunArtifacts() signs all artifact paths at read time ────────────
+
+    const fakeRun = {
+      id: "run-123",
+      tracePath: "/artifacts/traces/run-123.zip",
+      videoPath: "/artifacts/videos/run-123-step0.webm",
+      videoSegments: [
+        "/artifacts/videos/run-123-step0.webm",
+        "/artifacts/videos/run-123-step1.webm",
+      ],
+      results: [
+        { testId: "t1", screenshotPath: "/artifacts/screenshots/run-123-step0.png", videoPath: "/artifacts/videos/run-123-step0.webm" },
+        { testId: "t2", screenshotPath: null, videoPath: null },
+      ],
+    };
+    const signedRun = signRunArtifacts(fakeRun);
+
+    // Original run should be unchanged (no mutation)
+    assert.ok(!fakeRun.tracePath.includes("?token="), "Original run.tracePath should not be signed");
+
+    // Signed run should have tokens on all artifact paths
+    assert.ok(signedRun.tracePath.includes("?token="), "signedRun.tracePath should be signed");
+    assert.ok(signedRun.videoPath.includes("?token="), "signedRun.videoPath should be signed");
+    assert.ok(signedRun.videoSegments[0].includes("?token="), "signedRun.videoSegments[0] should be signed");
+    assert.ok(signedRun.videoSegments[1].includes("?token="), "signedRun.videoSegments[1] should be signed");
+    assert.ok(signedRun.results[0].screenshotPath.includes("?token="), "signedRun.results[0].screenshotPath should be signed");
+    assert.ok(signedRun.results[0].videoPath.includes("?token="), "signedRun.results[0].videoPath should be signed");
+    // Null paths should remain null
+    assert.equal(signedRun.results[1].screenshotPath, null, "Null screenshotPath should stay null");
+    assert.equal(signedRun.results[1].videoPath, null, "Null videoPath should stay null");
+
+    // signRunArtifacts(null) should pass through
+    assert.equal(signRunArtifacts(null), null, "signRunArtifacts(null) should return null");
 
     // ── POST /api/system/client-error ────────────────────────────────────────
     // This endpoint requires auth, so register + login first

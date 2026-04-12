@@ -24,7 +24,7 @@ import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { classifyError } from "../utils/errorClassifier.js";
-import { expensiveOpLimiter } from "../middleware/appSetup.js";
+import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { actor } from "../utils/actor.js";
 
 const router = Router();
@@ -156,13 +156,13 @@ router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
 
 router.get("/projects/:id/runs", (req, res) => {
   const runs = runRepo.getByProjectId(req.params.id);
-  res.json(runs);
+  res.json(runs.map(signRunArtifacts));
 });
 
 router.get("/runs/:runId", (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });
-  res.json(run);
+  res.json(signRunArtifacts(run));
 });
 
 // ─── Abort a running task ─────────────────────────────────────────────────────
