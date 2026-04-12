@@ -33,10 +33,27 @@ function test(name, fn) {
   }
 }
 
+/** All test user IDs used below — must exist in `users` to satisfy the FK constraint. */
+const TEST_USERS = ["U-1", "U-2", "U-3", "U-4", "U-5", "U-6", "U-7", "U-8", "U-A", "U-B"];
+
+function seedTestUsers() {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    "INSERT OR IGNORE INTO users (id, name, email, passwordHash, role, createdAt, updatedAt) VALUES (?, ?, ?, NULL, 'user', ?, ?)"
+  );
+  for (const id of TEST_USERS) {
+    insert.run(id, `Test ${id}`, `${id.toLowerCase()}@test.local`, now, now);
+  }
+}
+
 function resetTokenTable() {
   const db = getDatabase();
   db.exec("DELETE FROM password_reset_tokens");
 }
+
+// Seed users once before all tests (FK constraint requires them to exist).
+seedTestUsers();
 
 // ─── passwordResetTokenRepo ──────────────────────────────────────────────────
 
