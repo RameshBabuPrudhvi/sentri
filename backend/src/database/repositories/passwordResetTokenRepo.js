@@ -19,13 +19,16 @@ import { getDatabase } from "../sqlite.js";
 export function create(token, userId, expiresAt) {
   const db = getDatabase();
   const now = new Date().toISOString();
-  db.prepare(
-    "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
-  ).run(userId);
-  db.prepare(
-    "INSERT INTO password_reset_tokens (token, userId, expiresAt, usedAt, createdAt)"
-    + " VALUES (?, ?, ?, NULL, ?)"
-  ).run(token, userId, expiresAt, now);
+  const txn = db.transaction(() => {
+    db.prepare(
+      "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
+    ).run(userId);
+    db.prepare(
+      "INSERT INTO password_reset_tokens (token, userId, expiresAt, usedAt, createdAt)"
+      + " VALUES (?, ?, ?, NULL, ?)"
+    ).run(token, userId, expiresAt, now);
+  });
+  txn();
 }
 
 /**
