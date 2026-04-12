@@ -36,7 +36,7 @@
 
 ---
 
-### ENH-005 — Global API rate limiting 🔴 Blocker
+### ~~ENH-005 — Global API rate limiting~~ ✅ Complete
 
 **Problem:** Only auth routes (`/login`, `/forgot-password`, `/reset-password`) have rate limiting. Every other route — crawl trigger, run execution, AI test generation, bulk actions — is completely unprotected. An authenticated user with a valid session can trigger 100 simultaneous crawls (exhausting AI quota and all available memory) or spam test generation to produce thousands of AI calls at cost.
 
@@ -72,7 +72,7 @@ Token format: `?token=<hmac-sha256(runId+path+exp, ARTIFACT_SECRET)>&exp=<unix t
 
 ---
 
-### ENH-013 — Persist password reset tokens in the database 🔴 Blocker
+### ~~ENH-013 — Persist password reset tokens in the database~~ ✅ Complete
 
 **Problem:** `passwordResetTokens` in `auth.js` is stored in a process-local `Map`. Tokens are lost on every server restart. In any multi-instance deployment, a reset link generated on instance A will fail verification on instance B. This is a silent, hard-to-diagnose bug.
 
@@ -115,7 +115,7 @@ Token format: `?token=<hmac-sha256(runId+path+exp, ARTIFACT_SECRET)>&exp=<unix t
 
 ---
 
-### ENH-021 — Add `userId` to activities for full audit trail 🟡 High
+### ~~ENH-021 — Add `userId` to activities for full audit trail~~ ✅ Complete
 
 **Problem:** The `activities` table has no `userId` column. It is impossible to know who performed which action — who deleted a test, who approved a run, who triggered a crawl. This is a compliance requirement for any enterprise customer and a basic operational need for team accountability.
 
@@ -756,16 +756,16 @@ These items are not phase-bounded — they should be addressed incrementally alo
 | Phase | Items | Status | Key Deliverable |
 |-------|-------|--------|-----------------|
 | ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
-| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔲 Not started | Production-safe for real teams |
+| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-005 ✅, ENH-013 ✅, ENH-021 ✅) | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
 | Ongoing | MAINT-001 through MAINT-011 | 🔲 Backlog | Platform moat + infrastructure |
 
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3) = **9 complete**
-**Critical blockers remaining:** ENH-005, 007, 013, 027, 030 (Phase 1) · ENH-001, 002, 003, 012 (Phase 2) = **9 blockers**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-005, ENH-013, ENH-021 = **12 complete**
+**Critical blockers remaining:** ENH-007, 027, 030 (Phase 1) · ENH-001, 002, 003, 012 (Phase 2) = **7 blockers**
 **Highest adoption impact:** ENH-011/S2-01 (CI/CD), ENH-006/S2-02 (scheduling), ENH-003/S4-01 (multi-tenancy), S4-06 (monitoring mode)
-**Lowest effort / highest immediate value:** ENH-005, ENH-027, ENH-030, ENH-024, ENH-015, S4-09, S4-07
+**Lowest effort / highest immediate value:** ENH-027, ENH-030, ENH-024, ENH-015, S4-09, S4-07
 
 ---
 

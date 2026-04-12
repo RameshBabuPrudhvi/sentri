@@ -17,7 +17,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { rateLimit, ipKeyGenerator } from "express-rate-limit";
+import { rateLimit } from "express-rate-limit";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -224,7 +224,6 @@ const generalApiLimiter = rateLimit({
   max:              300,               // 300 requests per window per IP
   standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
   legacyHeaders:    false,
-  keyGenerator:     ipKeyGenerator,
   skip:             (req) => req.method === "OPTIONS", // never block preflight
   handler: (_req, res) => {
     res.status(429).json({
@@ -243,7 +242,6 @@ export const expensiveOpLimiter = rateLimit({
   max:              20,               // 20 crawl/run triggers per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
-  keyGenerator:     ipKeyGenerator,
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for test runs. You can trigger up to 20 runs per hour. Please wait before starting another.",
@@ -261,7 +259,6 @@ export const aiGenerationLimiter = rateLimit({
   max:              30,               // 30 AI generation calls per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
-  keyGenerator:     ipKeyGenerator,
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for AI generation. You can trigger up to 30 AI requests per hour. Please wait before generating more tests.",
