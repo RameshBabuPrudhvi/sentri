@@ -22,6 +22,8 @@ const files = [
   "tests/feedback-loop.test.js",
   "tests/pipeline-orchestrator.test.js",
   "tests/chat-window.test.js",
+  "tests/password-reset-token.test.js",
+  "tests/security-hardening.test.js",
 ];
 
 let passed = 0;
