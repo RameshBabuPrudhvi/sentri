@@ -40,6 +40,13 @@ const SIGNUP_INTENT_KEYWORDS = [
   "create your account", "join", "get started", "open an account",
 ];
 
+// Keywords that indicate a login form — used as a negative signal to prevent
+// Signal 3 (email+password heuristic) from misclassifying login forms as signup.
+const LOGIN_INTENT_KEYWORDS = [
+  "sign in", "signin", "log in", "login", "forgot password",
+  "reset password", "remember me",
+];
+
 /**
  * detectSignupIntent(snapshot, formActions) → boolean
  *
@@ -64,10 +71,24 @@ export function detectSignupIntent(snapshot, formActions) {
   const pageText = `${snapshot?.title || ""} ${snapshot?.url || ""}`.toLowerCase();
   if (SIGNUP_INTENT_KEYWORDS.some(k => pageText.includes(k))) return true;
 
-  // Signal 3: form contains BOTH an email field and a password field
+  // Signal 3: form contains BOTH an email field and a password field, BUT
+  // does NOT look like a login form. Plain email+password is ambiguous — login
+  // forms are the most common form with both fields. We require either:
+  //   (a) no login keywords present, AND
+  //   (b) a third distinguishing field (name, confirm password, etc.)
   const hasEmail    = formActions.some(a => a.type === "fill" && (a.element?.type === "email"    || (a.element?.placeholder || "").toLowerCase().includes("email")));
   const hasPassword = formActions.some(a => a.type === "fill" && (a.element?.type === "password" || (a.element?.placeholder || "").toLowerCase().includes("password")));
-  if (hasEmail && hasPassword) return true;
+  if (hasEmail && hasPassword) {
+    // Negative check: if submit text or page text contains login keywords, skip
+    const allText = `${submitText} ${pageText}`;
+    const looksLikeLogin = LOGIN_INTENT_KEYWORDS.some(k => allText.includes(k));
+    if (looksLikeLogin) return false;
+
+    // Positive check: require a third field that distinguishes signup from login
+    // (e.g. name, confirm password, username, phone, etc.)
+    const extraFields = formActions.filter(a => a.type === "fill" && a.element?.type !== "email" && a.element?.type !== "password");
+    if (extraFields.length > 0) return true;
+  }
 
   return false;
 }

@@ -28,7 +28,7 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 import { takeSnapshot } from "./pageSnapshot.js";
 import { fingerprintState, statesEqual } from "./stateFingerprint.js";
 import { discoverActions, detectSignupIntent } from "./actionDiscovery.js";
-import { fillEmailVerificationFlow } from "../utils/disposableEmail.js";
+import { fillEmailVerificationFlow, waitForVerification, dispose } from "../utils/disposableEmail.js";
 import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPattern } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
@@ -350,9 +350,11 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         // verification, delegate to the DisposableEmail flow instead of the
         // standard form filler. This lets Sentri complete flows that would
         // otherwise be blocked by an email verification step.
+        let executedActions = [];
         const currentSnapshot = ctx.snapshotsByFp.get(currentFp);
         if (detectSignupIntent(currentSnapshot, formActions)) {
           log(run, `   📧 Signup form detected — using disposable email flow`);
+          let mailbox = null;
           try {
             // Build field descriptors for the helper from the form's fill actions
             const fields = formActions
@@ -365,34 +367,45 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
                 ariaLabel:   a.element?.ariaLabel || "",
               }));
 
-            const { email, otpFilled, linkFollowed } = await fillEmailVerificationFlow(page, fields, run);
-            if (email) {
-              log(run, `   ✉️  Disposable email used: ${email} (otp=${otpFilled}, link=${linkFollowed})`);
+            // Step 1: Fill all form fields (email + password + others)
+            const result = await fillEmailVerificationFlow(page, fields, run);
+            mailbox = result.mailbox;
+            if (result.email) {
+              log(run, `   ✉️  Disposable email used: ${result.email}`);
             }
-            // After the email flow, attempt to submit the form using the
-            // remaining actions (e.g. submit button click)
+            // Track fill actions as executed
+            executedActions.push(...formActions.filter(a => a.type === "fill"));
+
+            // Step 2: Submit the form FIRST (verification email is sent after submit)
             const submitActions = formActions.filter(a => a.type === "submit" || a.type === "click");
             for (const act of submitActions) {
-              await executeAction(page, act, limits.actionTimeout).catch(() => {});
+              if (await executeAction(page, act, limits.actionTimeout)) {
+                executedActions.push(act);
+              }
             }
             await waitForSettle(page, limits.actionTimeout);
+
+            // Step 3: Now poll for OTP / verification link (after form is submitted)
+            const { otpFilled, linkFollowed } = await waitForVerification(page, mailbox);
+            if (otpFilled || linkFollowed) {
+              log(run, `   ✅ Verification completed (otp=${otpFilled}, link=${linkFollowed})`);
+            }
           } catch (emailErr) {
             log(run, `   ⚠️  Disposable email flow failed: ${emailErr.message} — falling back to standard fill`);
-            // Fall through to standard form execution below
-            const executed = await executeFormGroup(page, formActions, limits.actionTimeout);
+            // Fall through to standard form execution
+            executedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
             await waitForSettle(page, limits.actionTimeout);
-            void executed; // used below
+          } finally {
+            if (mailbox) await dispose(mailbox).catch(() => {});
           }
         } else {
-          const executed = await executeFormGroup(page, formActions, limits.actionTimeout);
+          executedActions = await executeFormGroup(page, formActions, limits.actionTimeout);
           await waitForSettle(page, limits.actionTimeout);
-          void executed;
         }
 
         // Always attempt to capture state after the form interaction,
         // regardless of which code path above was taken.
-        const formInteractionHappened = true;
-        if (formInteractionHappened) {
+        if (executedActions.length > 0) {
           // Guard: reject cross-origin navigation or bot detection pages
           if (!isSameOriginAndValid(page.url(), ctx.resolvedOrigin)) {
             log(run, `   ⏭️  Form navigated off-origin → ${page.url()} — restoring`);
@@ -402,12 +415,8 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           try {
             const { fp: resultFp, isNovel } = await captureState(page, ctx);
             if (!statesEqual(resultFp, currentFp)) {
-              // Record an edge for each form action that contributed to the
-              // state change. In the disposable-email path we don't have the
-              // return value of executeFormGroup, so we use formActions as the
-              // representative set — the state explorer only needs the action
-              // descriptors to build the flow graph, not confirmation of success.
-              for (const act of formActions) ctx.edges.push({ fromFp: currentFp, action: act, toFp: resultFp });
+              // Record an edge only for actions that were actually executed
+              for (const act of executedActions) ctx.edges.push({ fromFp: currentFp, action: act, toFp: resultFp });
               if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
             }
           } catch (err) { logWarn(run, `   Snapshot failed after form: ${err.message}`); }

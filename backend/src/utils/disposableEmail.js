@@ -39,6 +39,37 @@ const API_KEY     = process.env.TEMP_MAIL_API_KEY    || "";
 const OTP_TIMEOUT = parseInt(process.env.DISPOSABLE_EMAIL_TIMEOUT, 10) || 60_000;
 const POLL_MS     = parseInt(process.env.DISPOSABLE_EMAIL_POLL_MS,  10) || 3_000;
 
+// ── Test data for non-email signup fields ────────────────────────────────────
+// Mirrors the hint-based logic in actionDiscovery.js generateTestData() so that
+// password, name, and other required fields are filled during the signup flow.
+const SIGNUP_TEST_PASSWORD = "SentriTest123!";
+const SIGNUP_TEST_DATA = {
+  password: SIGNUP_TEST_PASSWORD,
+  name:     "Jane Doe",
+  first:    "Jane",
+  last:     "Doe",
+  username: "sentri-tester",
+  phone:    "+1234567890",
+  company:  "Sentri Corp",
+};
+
+/**
+ * Pick a test value for a non-email signup field based on its type and hints.
+ * Returns null if no match is found (field will be skipped).
+ */
+function pickSignupFieldValue(fieldType, hints) {
+  if (fieldType === "password" || hints.includes("password")) return SIGNUP_TEST_DATA.password;
+  if (hints.includes("first name") || hints.includes("firstname")) return SIGNUP_TEST_DATA.first;
+  if (hints.includes("last name") || hints.includes("lastname")) return SIGNUP_TEST_DATA.last;
+  if (hints.includes("name") || hints.includes("full name")) return SIGNUP_TEST_DATA.name;
+  if (hints.includes("username") || hints.includes("user name")) return SIGNUP_TEST_DATA.username;
+  if (fieldType === "tel" || hints.includes("phone")) return SIGNUP_TEST_DATA.phone;
+  if (hints.includes("company") || hints.includes("organization")) return SIGNUP_TEST_DATA.company;
+  // Generic text fallback for any other required field
+  if (fieldType === "text") return "Sentri test input";
+  return null;
+}
+
 // ── Regex patterns for OTP / verification link extraction ────────────────────
 
 /** Matches 4–8 digit numeric OTPs (most common format) */
@@ -266,60 +297,93 @@ export async function fillOtpFields(page, otp) {
 // ── High-level helper for stateExplorer ──────────────────────────────────────
 
 /**
- * fillEmailVerificationFlow(page, formFields, run) → { email: string, completed: boolean }
+ * fillSignupFields(page, formFields, mailboxAddress) → void
+ *
+ * Fills all form fields for a signup form: the email field gets the
+ * disposable address, and other fields (password, name, etc.) get
+ * realistic test data via `pickSignupFieldValue`.
+ *
+ * @param {Object} page  - Playwright Page instance
+ * @param {Array<Object>} formFields  - Field descriptors with selector, type, label, etc.
+ * @param {string} mailboxAddress  - Disposable email address to use
+ */
+async function fillSignupFields(page, formFields, mailboxAddress) {
+  for (const field of formFields) {
+    const fieldType = (field.type || "").toLowerCase();
+    const hints     = `${field.label || ""} ${field.placeholder || ""} ${field.ariaLabel || ""}`.toLowerCase();
+
+    let value = null;
+    if (fieldType === "email" || hints.includes("email")) {
+      value = mailboxAddress;
+    } else {
+      value = pickSignupFieldValue(fieldType, hints);
+    }
+
+    if (value && field.selector) {
+      try {
+        const el = page.locator(field.selector).first();
+        await el.fill(value);
+      } catch { /* element may have shifted — skip */ }
+    }
+  }
+}
+
+/**
+ * fillEmailVerificationFlow(page, formFields, run) → { email, mailbox, otpFilled, linkFollowed }
  *
  * High-level helper called by `stateExplorer.js` when it encounters a
  * signup/registration form. Orchestrates the full flow:
  *
  * 1. Creates a disposable mailbox.
- * 2. Fills the email field with the temp address (and password if present).
- * 3. Submits the form.
- * 4. Polls the inbox for a verification OTP or link.
- * 5. Clicks the verification link or fills the OTP field.
- * 6. Returns the address and whether verification was completed.
+ * 2. Fills ALL form fields — email with the temp address, password and
+ *    other required fields with generated test data.
+ * 3. Returns the mailbox so the caller can submit the form first, then
+ *    call `waitForVerification` to poll for OTP/link.
  *
- * Designed to be called from `executeFormGroup` in stateExplorer when the
- * form intent is detected as SIGNUP / REGISTRATION (see actionDiscovery.js).
+ * The caller is responsible for:
+ *   - Submitting the form (clicking submit button) after this returns
+ *   - Calling `waitForVerification(page, mailbox)` to poll for OTP/link
+ *   - Calling `dispose(mailbox)` when done
  *
  * @param {Object} page  - Playwright Page instance
  * @param {Array<Object>} formFields  - Field descriptors with selector, type, label, etc.
  * @param {object} run  - Mutable run record for SSE logging
- * @returns {Promise<{ email: string, otpFilled: boolean, linkFollowed: boolean }>}
+ * @returns {Promise<{ email: string, mailbox: object }>}
  */
 export async function fillEmailVerificationFlow(page, formFields, run) {
   const mailbox = await createMailbox();
-  let otpFilled     = false;
-  let linkFollowed  = false;
 
-  try {
-    // Fill the email field with the disposable address
-    for (const field of formFields) {
-      const fieldType = (field.type || "").toLowerCase();
-      const hints     = `${field.label || ""} ${field.placeholder || ""} ${field.ariaLabel || ""}`.toLowerCase();
+  // Fill all form fields — email with disposable address, others with test data
+  await fillSignupFields(page, formFields, mailbox.address);
 
-      if (fieldType === "email" || hints.includes("email")) {
-        try {
-          const el = page.locator(field.selector).first();
-          await el.fill(mailbox.address);
-        } catch { /* element may have shifted — skip */ }
-      }
-    }
+  return { email: mailbox.address, mailbox };
+}
 
-    // Poll for OTP / verification link
-    const { otp, link } = await waitForOtp(mailbox);
+/**
+ * waitForVerification(page, mailbox) → { otpFilled, linkFollowed }
+ *
+ * Polls the disposable mailbox for a verification OTP or link, then
+ * fills the OTP or follows the link on the page. Should be called
+ * AFTER the signup form has been submitted.
+ *
+ * @param {Object} page  - Playwright Page instance
+ * @param {object} mailbox  - Mailbox object from fillEmailVerificationFlow
+ * @returns {Promise<{ otpFilled: boolean, linkFollowed: boolean }>}
+ */
+export async function waitForVerification(page, mailbox) {
+  let otpFilled    = false;
+  let linkFollowed = false;
 
-    if (link) {
-      try {
-        await page.goto(link, { waitUntil: "domcontentloaded", timeout: 15_000 });
-        linkFollowed = true;
-      } catch { /* link may have expired */ }
-    } else if (otp) {
-      otpFilled = await fillOtpFields(page, otp);
-    }
-  } finally {
-    // Clean up regardless of outcome
-    await dispose(mailbox).catch(() => {});
+  const { otp, link } = await waitForOtp(mailbox);
+
+  if (link) {
+    try {
+      await page.goto(link, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      linkFollowed = true;
+    } catch { /* link may have expired */ }
+  } else if (otp) {
+    otpFilled = await fillOtpFields(page, otp);
   }
 
-  return { email: mailbox.address, otpFilled, linkFollowed };
+  return { otpFilled, linkFollowed };
 }
