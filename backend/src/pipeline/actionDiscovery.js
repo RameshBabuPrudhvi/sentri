@@ -91,7 +91,16 @@ export function detectSignupIntent(snapshot, formActions) {
     if (passwordFields.length >= 2) return true;
 
     // Also check for non-email, non-password fields (name, username, phone, etc.)
-    const extraFields = formActions.filter(a => a.type === "fill" && a.element?.type !== "email" && a.element?.type !== "password");
+    // Must exclude fields detected as email/password by BOTH type AND placeholder,
+    // since hasEmail/hasPassword above also match via placeholder hints.
+    const extraFields = formActions.filter(a => {
+      if (a.type !== "fill") return false;
+      const elType = (a.element?.type || "").toLowerCase();
+      const elPlaceholder = (a.element?.placeholder || "").toLowerCase();
+      if (elType === "email" || elPlaceholder.includes("email")) return false;
+      if (elType === "password" || elPlaceholder.includes("password")) return false;
+      return true;
+    });
     if (extraFields.length > 0) return true;
   }
 
