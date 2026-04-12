@@ -32,6 +32,81 @@ const DESTRUCTIVE_KEYWORDS = [
   "unsubscribe", "deactivate", "close account",
 ];
 
+// S3-08: keywords that signal a signup / registration form requiring email
+// verification. Used by stateExplorer to decide whether to invoke the
+// DisposableEmail flow instead of plain form-filling.
+const SIGNUP_INTENT_KEYWORDS = [
+  "sign up", "signup", "register", "registration", "create account",
+  "create your account", "join", "get started", "open an account",
+];
+
+// Keywords that indicate a login form — used as a negative signal to prevent
+// Signal 3 (email+password heuristic) from misclassifying login forms as signup.
+const LOGIN_INTENT_KEYWORDS = [
+  "sign in", "signin", "log in", "login", "forgot password",
+  "reset password", "remember me",
+];
+
+/**
+ * detectSignupIntent(snapshot, formActions) → boolean
+ *
+ * Returns true if the given form actions appear to belong to a
+ * signup/registration flow that will likely require email verification.
+ * Checks:
+ *   1. Submit/click button text on the form
+ *   2. Page title / heading text in the snapshot
+ *   3. Presence of both an email field AND a password field (strong signal)
+ *
+ * @param {object} snapshot     - Page snapshot from takeSnapshot
+ * @param {object[]} formActions - Action descriptors for a single form group
+ * @returns {boolean}
+ */
+export function detectSignupIntent(snapshot, formActions) {
+  // Signal 1: submit button text
+  const submitActions = formActions.filter(a => a.type === "submit" || a.type === "click");
+  const submitText = submitActions.map(a => (a.element?.text || "")).join(" ").toLowerCase();
+  if (SIGNUP_INTENT_KEYWORDS.some(k => submitText.includes(k))) return true;
+
+  // Signal 2: page title or h1/h2 heading
+  const pageText = `${snapshot?.title || ""} ${snapshot?.url || ""}`.toLowerCase();
+  if (SIGNUP_INTENT_KEYWORDS.some(k => pageText.includes(k))) return true;
+
+  // Signal 3: form contains BOTH an email field and a password field, BUT
+  // does NOT look like a login form. Plain email+password is ambiguous — login
+  // forms are the most common form with both fields. We require either:
+  //   (a) no login keywords present, AND
+  //   (b) a third distinguishing field (name, confirm password, etc.)
+  const hasEmail    = formActions.some(a => a.type === "fill" && (a.element?.type === "email"    || (a.element?.placeholder || "").toLowerCase().includes("email")));
+  const hasPassword = formActions.some(a => a.type === "fill" && (a.element?.type === "password" || (a.element?.placeholder || "").toLowerCase().includes("password")));
+  if (hasEmail && hasPassword) {
+    // Negative check: if submit text or page text contains login keywords, skip
+    const allText = `${submitText} ${pageText}`;
+    const looksLikeLogin = LOGIN_INTENT_KEYWORDS.some(k => allText.includes(k));
+    if (looksLikeLogin) return false;
+
+    // Positive check: require a distinguishing signal beyond email+password.
+    // A login form typically has exactly 1 password field; signup forms often
+    // have 2 (password + confirm password) or additional fields (name, etc.).
+    const passwordFields = formActions.filter(a => a.type === "fill" && (a.element?.type === "password" || (a.element?.placeholder || "").toLowerCase().includes("password")));
+    if (passwordFields.length >= 2) return true;
+
+    // Also check for non-email, non-password fields (name, username, phone, etc.)
+    // Must exclude fields detected as email/password by BOTH type AND placeholder,
+    // since hasEmail/hasPassword above also match via placeholder hints.
+    const extraFields = formActions.filter(a => {
+      if (a.type !== "fill") return false;
+      const elType = (a.element?.type || "").toLowerCase();
+      const elPlaceholder = (a.element?.placeholder || "").toLowerCase();
+      if (elType === "email" || elPlaceholder.includes("email")) return false;
+      if (elType === "password" || elPlaceholder.includes("password")) return false;
+      return true;
+    });
+    if (extraFields.length > 0) return true;
+  }
+
+  return false;
+}
+
 // ── Test data generators ────────────────────────────────────────────────────
 
 const TEST_DATA = {

@@ -10,8 +10,8 @@
     "docs:watch": "nodemon --watch src -e js --exec 'npm run docs'"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@google/generative-ai": "^0.21.0",
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@google/generative-ai": "^0.24.0",
     "acorn": "^8.14.0",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",

@@ -22,7 +22,7 @@ import { getHealingHistoryForTest } from "../selfHealing.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -281,6 +281,14 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
         const url = page.url();
         if (!url.startsWith("http")) throw new Error("Invalid URL after navigation");
       }
+
+      // S3-02: Wait for DOM to settle before capturing artifacts or asserting.
+      // SPAs, streaming responses, and skeleton screens mutate the DOM
+      // unpredictably after the last interaction. waitForStable() uses a
+      // MutationObserver to detect when the page has gone quiet for 2 s,
+      // preventing screenshots and assertions from running on half-rendered UIs.
+      // On timeout (30 s) it returns gracefully — the test can still pass.
+      await waitForStable(page);
 
       // Capture artifacts on success.
       // Skip screenshot / DOM snapshot / bounding boxes when the test ends

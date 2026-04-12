@@ -6,6 +6,7 @@
  * execution function stays focused on orchestration.
  *
  * Exports:
+ *   waitForStable(page, opts)        — S3-02: MutationObserver DOM stability wait
  *   captureDomSnapshot(page)
  *   captureScreenshot(page, runId, stepIndex, { failed })
  *   captureBoundingBoxes(page)
@@ -16,7 +17,87 @@ import fs from "fs";
 import { SHOTS_DIR } from "./config.js";
 
 /**
- * captureDomSnapshot(page) → object | null
+ * waitForStable(page, opts) → Promise<void>
+ *
+ * S3-02 — DOM stability wait using MutationObserver.
+ *
+ * Modern SPAs (React, Vue, Angular, Next.js) and apps with streaming AI
+ * responses, skeleton screens, or async data fetches settle at variable
+ * times. Using a fixed `waitForTimeout` causes tests to assert on
+ * partially-rendered pages, producing false failures.
+ *
+ * This helper installs a MutationObserver on `document.body` that counts
+ * every DOM mutation. It polls until `stableSec` consecutive seconds pass
+ * with no new mutations (or `timeoutSec` is reached), then disconnects
+ * cleanly. The observer and mutation counter are stored on `window` so
+ * they survive across evaluate() calls and can be cleaned up reliably.
+ *
+ * Based on the Assrt `agent.ts` pattern referenced in NEXT_STEPS S3-02.
+ *
+ * @param {Object} page  - Playwright Page instance
+ * @param {object}  [opts]
+ * @param {number}  [opts.timeoutSec=30]  - Maximum wait in seconds
+ * @param {number}  [opts.stableSec=2]    - Quiet period required to declare stable
+ * @returns {Promise<void>}
+ */
+export async function waitForStable(page, { timeoutSec = 30, stableSec = 2 } = {}) {
+  // Install the MutationObserver in the page context. Stored on window so
+  // subsequent evaluate() calls can read the counter and clean up.
+  await page.evaluate(() => {
+    // Guard: if a previous waitForStable call was interrupted, disconnect it
+    // first so we don't accumulate multiple observers.
+    if (window.__sentri_observer) {
+      try { window.__sentri_observer.disconnect(); } catch {}
+    }
+    window.__sentri_mutations = 0;
+    window.__sentri_observer = new MutationObserver(mutations => {
+      window.__sentri_mutations += mutations.length;
+    });
+    window.__sentri_observer.observe(document.body, {
+      childList:     true,
+      subtree:       true,
+      characterData: true,
+      attributes:    true,
+    });
+  }).catch(() => {
+    // If evaluate fails (page navigating, closed) — swallow and continue.
+    // The caller's own timeout / test runner will handle truly broken pages.
+  });
+
+  const start = Date.now();
+  let lastCount = -1;
+  let stableSince = Date.now();
+
+  while (Date.now() - start < timeoutSec * 1000) {
+    await new Promise(r => setTimeout(r, 500));
+
+    let count = lastCount;
+    try {
+      count = await page.evaluate(() => window.__sentri_mutations ?? -1);
+    } catch {
+      // Page closed or navigated mid-poll — treat as stable and exit
+      break;
+    }
+
+    if (count !== lastCount) {
+      // DOM is still mutating — reset the stability clock
+      lastCount = count;
+      stableSince = Date.now();
+    } else if (Date.now() - stableSince >= stableSec * 1000) {
+      // No mutations for stableSec seconds — DOM has settled
+      break;
+    }
+  }
+
+  // Always disconnect and clean up, even on timeout
+  await page.evaluate(() => {
+    try { window.__sentri_observer?.disconnect(); } catch {}
+    delete window.__sentri_observer;
+    delete window.__sentri_mutations;
+  }).catch(() => {});
+}
+
+/**
  *
  * Serialises a shallow representation of the current DOM (max depth 4)
  * for debugging and AI context.  Returns null on any failure.

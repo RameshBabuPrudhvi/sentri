@@ -160,6 +160,20 @@ export function getSelfHealingHelperCode(healingHints) {
     // Accumulates healing events during this run for the runner to persist.
     const __healingEvents = [];
 
+    // pierce: selector prefix — used for elements discovered inside shadow roots.
+    // Playwright's CSS engine supports ">>" to pierce shadow DOM, and its built-in
+    // "pierce/" prefix resolves through shadow boundaries. We normalise to the
+    // Playwright css:pierce engine syntax here.
+    function buildPierceLocator(page, selector) {
+      // Strip our internal "pierce:" prefix if present before building the locator.
+      const rawSelector = selector.startsWith('pierce:') ? selector.slice(7) : selector;
+      // Playwright supports piercing shadow DOM via the css engine with the
+      // ":shadow" pseudo or via ">> css=" chains. The most broadly compatible
+      // approach is page.locator('css=selector') with Playwright's built-in
+      // pierce support for shadow-including descendant combinators.
+      return page.locator(\`css=\${rawSelector}\`);
+    }
+
     async function retry(fn, retries = RETRY_COUNT, delay = RETRY_DELAY) {
       let lastError;
       for (let i = 0; i < retries; i++) {
@@ -316,6 +330,11 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.getByText(text),
           p => p.locator(\`[aria-label*="\${text}"]\`),
           p => p.locator(\`[title*="\${text}"]\`),
+          // pierce: strategy — finds elements inside shadow DOM roots that the
+          // standard locators above cannot reach (Angular, Lit, Stencil, LWC).
+          // Only attempt when text looks like a CSS selector; human-readable
+          // text like "Sign in" produces invalid css= locators.
+          ...(looksLikeSelector(text) ? [p => buildPierceLocator(p, text)] : []),
         ];
 
       const healingKey = 'click::' + text;
@@ -429,6 +448,9 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.locator(\`input[aria-label*="\${labelOrPlaceholder}"]\`),
           p => p.locator(\`textarea[aria-label*="\${labelOrPlaceholder}"]\`),
           p => p.locator(\`input[title*="\${labelOrPlaceholder}"]\`),
+          // pierce: strategy — reaches input elements inside shadow DOM roots.
+          // Only attempt when text looks like a CSS selector.
+          ...(looksLikeSelector(labelOrPlaceholder) ? [p => onlyFillable(buildPierceLocator(p, labelOrPlaceholder))] : []),
         ];
 
       const healingKey = 'fill::' + labelOrPlaceholder;
@@ -721,6 +743,9 @@ export function getSelfHealingHelperCode(healingHints) {
               p => p.getByText(text),
               p => p.getByLabel(text),
               p => p.locator(\`[aria-label*="\${text}"]\`),
+              // pierce: strategy — asserts visibility of elements inside shadow roots.
+              // Only attempt when text looks like a CSS selector.
+              ...(looksLikeSelector(text) ? [p => buildPierceLocator(p, text)] : []),
             ]),
         ];
 
