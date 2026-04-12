@@ -7,7 +7,7 @@ import {
   Compass,
 } from "lucide-react";
 import { api } from "../api.js";
-import { invalidateConfigCache } from "../components/ProviderBadge.jsx";
+import { invalidateConfigCache } from "../components/layout/ProviderBadge.jsx";
 import { resetOnboarding, emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 

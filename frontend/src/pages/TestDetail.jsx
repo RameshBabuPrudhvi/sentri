@@ -12,19 +12,19 @@ import { api } from "../api.js";
 // DiffView and AiFixPanel are only rendered on explicit user interaction (click to
 // show diff / click to open AI fix panel), so they are ideal lazy-load candidates.
 // This removes ~40KB from the initial TestDetail chunk.
-const DiffView    = lazy(() => import("../components/DiffView.jsx"));
-const AiFixPanel  = lazy(() => import("../components/AiFixPanel.jsx"));
+const DiffView    = lazy(() => import("../components/ai/DiffView.jsx"));
+const AiFixPanel  = lazy(() => import("../components/ai/AiFixPanel.jsx"));
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
-import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
 import { fmtDate, fmtDateTime } from "../utils/formatters.js";
 import highlightCode from "../utils/highlightCode.js";
 import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
 import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
 import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
-import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
+import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {

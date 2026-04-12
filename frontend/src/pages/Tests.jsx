@@ -8,17 +8,17 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
-import GenerateTestModal from "../components/GenerateTestModal.jsx";
-import CrawlProjectModal from "../components/CrawlProjectModal.jsx";
-import AgentTag from "../components/AgentTag.jsx";
-import RunRegressionModal from "../components/RunRegressionModal.jsx";
-import ModalShell from "../components/ModalShell.jsx";
+import GenerateTestModal from "../components/generate/GenerateTestModal.jsx";
+import CrawlProjectModal from "../components/crawl/CrawlProjectModal.jsx";
+import AgentTag from "../components/shared/AgentTag.jsx";
+import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
+import ModalShell from "../components/shared/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
-import { StatusBadge, ScenarioBadges } from "../components/TestBadges.jsx";
+import { StatusBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
-import TablePagination from "../components/TablePagination.jsx";
+import TablePagination from "../components/shared/TablePagination.jsx";
 
 // Exclude "All" sentinel entries — reset is handled by clicking an active filter
 // or the explicit clear-all button in the bar.

@@ -3,10 +3,10 @@ import { Map, List } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
 import useLogBuffer from "../hooks/useLogBuffer.js";
-import PipelineCard from "./PipelineCard.jsx";
-import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
-import ActivityLogCard from "./ActivityLogCard.jsx";
-import RunSidebar from "./RunSidebar.jsx";
+import PipelineCard from "../run/PipelineCard.jsx";
+import GenerationSuccessBanner from "../generate/GenerationSuccessBanner.jsx";
+import ActivityLogCard from "../run/ActivityLogCard.jsx";
+import RunSidebar from "../run/RunSidebar.jsx";
 
 // Each stage maps to a 1-based step index set authoritatively by the
 // backend via run.currentStep. No fragile log-string scraping needed.

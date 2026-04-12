@@ -6,11 +6,11 @@ import {
   RotateCcw, Info,
 } from "lucide-react";
 import { api } from "../api.js";
-import AgentTag from "../components/AgentTag.jsx";
-import ModalShell from "../components/ModalShell.jsx";
+import AgentTag from "../components/shared/AgentTag.jsx";
+import ModalShell from "../components/shared/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
-import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/TestBadges.jsx";
+import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import useProjectRunMonitor from "../hooks/useProjectRunMonitor.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
@@ -19,7 +19,7 @@ import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
 import TraceabilityTab from "../components/project/TraceabilityTab.jsx";
 import ProjectHeader from "../components/project/ProjectHeader.jsx";
-import TablePagination from "../components/TablePagination.jsx";
+import TablePagination from "../components/shared/TablePagination.jsx";
 
 function ConfBar({ score }) {
   if (score == null) return <span style={{ color: "var(--text3)", fontSize: "0.73rem" }}>—</span>;

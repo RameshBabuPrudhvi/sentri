@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, BookOpen, ExternalLink } from "lucide-react";
-import AppLogo from "../AppLogo.jsx";
+import AppLogo from "./AppLogo.jsx";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },

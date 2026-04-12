@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import AppLogo from "../components/AppLogo.jsx";
+import AppLogo from "../components/layout/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/apiBase.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import "../styles/pages/login.css";
