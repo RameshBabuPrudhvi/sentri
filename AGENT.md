@@ -206,9 +206,20 @@ const result = await doThing(name, {
 ### Git & Branching Conventions
 
 - **Branch naming**: `feature/<short-description>`, `fix/<short-description>`, `codex/<task-description>`.
-- **Commit messages**: Imperative mood, concise summary. Prefix with area when helpful: `backend: add chat SSE endpoint`, `frontend: fix dark mode token`.
+- **Commit messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) — the release workflow parses these to determine version bumps automatically. Use the format `<type>(<scope>): <description>`:
+
+  | Prefix | Version bump | Example |
+  |---|---|---|
+  | `feat:` | Minor (`0.x.0`) | `feat: add global API rate limiting` |
+  | `fix:` | Patch (`0.0.x`) | `fix: atomic token claim prevents TOCTOU race` |
+  | `perf:` | Patch | `perf: cache DB queries in dashboard endpoint` |
+  | `feat!:` or `BREAKING CHANGE:` in body | Major (`x.0.0`) | `feat!: replace JWT localStorage with HttpOnly cookies` |
+  | `docs:`, `test:`, `chore:`, `ci:`, `refactor:`, `style:` | No bump | `docs: update API reference for rate limiting` |
+
+  The **squash-merge commit message** (PR title) determines the version bump, so write PR titles as Conventional Commits.
+
 - **PR size**: Keep PRs focused — one feature or fix per PR. If a change touches >500 lines, consider splitting.
-- **Merge strategy**: Squash-merge to `main`. Keep the PR title as the squash commit message.
+- **Merge strategy**: Squash-merge to `main`. The PR title becomes the squash commit message — write it as a Conventional Commit (e.g. `feat: add global API rate limiting`).
 - **No force-pushes** to `main`. Feature branches may be rebased before merge.
 
 ---
@@ -430,8 +441,9 @@ CI runs automatically on every push to `main`/`develop` and on PRs to `main` via
 2. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
 3. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
 4. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
+5. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in both `package.json` files, promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
 
-All four jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
+All four CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
 
 To run locally before pushing:
 
@@ -771,8 +783,28 @@ The frontend follows a clear separation of concerns between pages:
 
 ## Versioning & Releases
 
-- Both packages are at `1.0.0`. Version bumps are manual and follow [Semantic Versioning](https://semver.org/).
-- Docker images are tagged `latest` on GHCR. When a tagging strategy is adopted, update `docker-compose.yml` to reference specific tags.
+Sentri uses **automatic semantic versioning** driven by [Conventional Commits](https://www.conventionalcommits.org/).
+
+### How it works
+
+1. **Developer** writes PR title as a Conventional Commit (e.g. `feat: add rate limiting`).
+2. **PR is squash-merged** to `main` — the PR title becomes the commit message.
+3. **`.github/workflows/release.yml`** runs on push to `main`:
+   - Scans commits since the last `v*` tag for `feat:`, `fix:`, `perf:`, `BREAKING CHANGE:`.
+   - Determines the bump level (major / minor / patch). If no bumping prefix is found, the workflow exits — no release.
+   - Updates `version` in both `backend/package.json` and `frontend/package.json`.
+   - Promotes `## [Unreleased]` in `docs/changelog.md` to `## [X.Y.Z] — YYYY-MM-DD` and adds a fresh `[Unreleased]` section.
+   - Commits `chore(release): vX.Y.Z`, creates a `vX.Y.Z` git tag, and pushes.
+   - Creates a **GitHub Release** with release notes extracted from the changelog.
+4. **`.github/workflows/cd.yml`** triggers on the new `v*` tag:
+   - Docker images are tagged with `X.Y.Z`, `X.Y`, `sha-<commit>`, and `latest`.
+   - GitHub Pages is deployed with the updated docs.
+
+### What you need to do in every PR
+
+1. Write the PR title as a Conventional Commit (`feat:`, `fix:`, etc.).
+2. Update `docs/changelog.md` under `## [Unreleased]` (see Changelog section below).
+3. That's it — versioning, tagging, and releases are fully automated.
 
 ### Changelog
 
