@@ -23,7 +23,7 @@ import {
   Briefcase, Layers, Settings, Sparkles, Plus, Play, ArrowRight,
   Command, ChevronRight, Hash,
 } from "lucide-react";
-import fuzzyMatch from "../utils/fuzzyMatch.js";
+import fuzzyMatch from "../../utils/fuzzyMatch.js";
 
 // ── Highlight matched ranges ──────────────────────────────────────────────────
 function HighlightedText({ text, ranges }) {

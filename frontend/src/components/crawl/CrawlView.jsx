@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Map, List } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
-import useLogBuffer from "../hooks/useLogBuffer.js";
+import useLogBuffer from "../../hooks/useLogBuffer.js";
 import PipelineCard from "../run/PipelineCard.jsx";
 import GenerationSuccessBanner from "../generate/GenerationSuccessBanner.jsx";
 import ActivityLogCard from "../run/ActivityLogCard.jsx";

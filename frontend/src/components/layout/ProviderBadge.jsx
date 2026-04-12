@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brain, ChevronDown, AlertTriangle, Check, RefreshCw, Settings } from "lucide-react";
-import { api } from "../api.js";
+import { api } from "../../api.js";
 
 // ── Simple module-level cache (no in-flight dedup to avoid stale-closure bugs) ─
 let _configCache   = null;

@@ -14,12 +14,12 @@ import {
   OPTION_TOGGLES,
   PROFILE_OPTIONS,
   DEFAULT_CONFIG,
-} from "../config/testDialsConfig.js";
+} from "../../config/testDialsConfig.js";
 import {
   loadSavedConfig,
   saveConfig,
   countActiveDials,
-} from "../utils/testDialsStorage.js";
+} from "../../utils/testDialsStorage.js";
 import Collapsible from "./Collapsible.jsx";
 import Tooltip from "./Tooltip.jsx";
 

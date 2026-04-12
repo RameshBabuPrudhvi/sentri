@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
-import { api } from "../api.js";
-import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
+import { api } from "../../api.js";
+import { invalidateProjectDataCache } from "../../hooks/useProjectData.js";
 import ModalShell from "./ModalShell.jsx";
 
 /**

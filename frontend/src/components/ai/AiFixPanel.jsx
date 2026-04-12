@@ -13,7 +13,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Wand2, Check, X, RefreshCw, AlertTriangle } from "lucide-react";
-import { api } from "../api.js";
+import { api } from "../../api.js";
 import DiffView from "./DiffView.jsx";
 
 export default function AiFixPanel({ testId, originalCode, onApplied, onClose }) {

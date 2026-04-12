@@ -1,7 +1,7 @@
 import React from "react";
 import { Outlet } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour.jsx";
-import useOnboarding from "../hooks/useOnboarding.js";
+import useOnboarding from "../../hooks/useOnboarding.js";
 import AIChat from "../ai/AIChat.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import Sidebar from "./Sidebar.jsx";

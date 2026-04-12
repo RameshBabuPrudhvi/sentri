@@ -4,7 +4,7 @@ import {
   EXPLORE_MODE_OPTIONS,
   EXPLORER_INTENSITY_PRESETS,
   EXPLORER_TUNING,
-} from "../config/testDialsConfig.js";
+} from "../../config/testDialsConfig.js";
 
 /**
  * Shared explore-mode picker used by CrawlProjectModal and GenerateTestModal.
