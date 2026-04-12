@@ -21,6 +21,16 @@ import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
+// ─── Audit trail helper ──────────────────────────────────────────────────────
+// Extracts userId and userName from req.authUser (set by requireAuth middleware)
+// so every logActivity() call automatically records who performed the action.
+// Returns an object that can be spread into logActivity({ ...actor(req), ...actor(req), ... }).
+function actor(req) {
+  const u = req?.authUser;
+  if (!u) return {};
+  return { userId: u.sub, userName: u.name || u.email || u.sub };
+}
+
 
 const router = Router();
 
@@ -43,7 +53,7 @@ router.post("/", (req, res) => {
   };
   projectRepo.create(project);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "project.create", projectId: id, projectName: name,
     detail: `Project created — "${name}" (${url})`,
   });
@@ -109,7 +119,7 @@ router.delete("/:id", (req, res) => {
   // Delete the project itself
   projectRepo.deleteById(req.params.id);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,
     detail: `Project deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs removed)`,
   });

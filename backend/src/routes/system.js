@@ -20,6 +20,16 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
+// ─── Audit trail helper ──────────────────────────────────────────────────────
+// Extracts userId and userName from req.authUser (set by requireAuth middleware)
+// so every logActivity() call automatically records who performed the action.
+// Returns an object that can be spread into logActivity({ ...actor(req), ...actor(req), ... }).
+function actor(req) {
+  const u = req?.authUser;
+  if (!u) return {};
+  return { userId: u.sub, userName: u.name || u.email || u.sub };
+}
+
 
 const router = Router();
 
@@ -147,7 +157,7 @@ router.get("/system", async (req, res) => {
 
 router.delete("/data/runs", (req, res) => {
   const count = runRepo.clearAll();
-  logActivity({ type: "settings.update", detail: `Cleared ${count} run(s)` });
+  logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
 
@@ -158,7 +168,7 @@ router.delete("/data/activities", (req, res) => {
 
 router.delete("/data/healing", (req, res) => {
   const count = healingRepo.clearAll();
-  logActivity({ type: "settings.update", detail: `Cleared ${count} healing history entries` });
+  logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} healing history entries` });
   res.json({ ok: true, cleared: count });
 });
 

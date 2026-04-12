@@ -19,6 +19,16 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
+// ─── Audit trail helper ──────────────────────────────────────────────────────
+// Extracts userId and userName from req.authUser (set by requireAuth middleware)
+// so every logActivity() call automatically records who performed the action.
+// Returns an object that can be spread into logActivity({ ...actor(req), ...actor(req), ... }).
+function actor(req) {
+  const u = req?.authUser;
+  if (!u) return {};
+  return { userId: u.sub, userName: u.name || u.email || u.sub };
+}
+
 
 const router = Router();
 
@@ -297,7 +307,7 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
   testRepo.update(test.id, updates);
 
   const project = projectRepo.getById(test.projectId);
-  logActivity({
+  logActivity({ ...actor(req),
     type: "test.ai_fix",
     projectId: test.projectId,
     projectName: project?.name || null,

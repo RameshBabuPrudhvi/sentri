@@ -17,6 +17,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -200,6 +201,78 @@ export function csrfMiddleware(req, res, next) {
 }
 
 app.use(csrfMiddleware);
+
+// ─── Global API rate limiting ─────────────────────────────────────────────────
+// Applies to ALL /api/* routes. Separate tighter buckets are defined below for
+// expensive operations (crawl, test run, AI generation) that consume significant
+// server or third-party AI API resources.
+//
+// Limits are intentionally generous for the general bucket (300 req / 15 min per
+// IP) to avoid false positives on legitimate power users, while the expensive
+// operation buckets are tight (5–30 req / hour per IP).
+//
+// In production, replace the default in-memory store with a Redis store:
+//   import { RedisStore } from "rate-limit-redis";
+//   store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) })
+
+/**
+ * General API rate limiter — 300 requests per 15 minutes per IP.
+ * Applied to all /api/* routes as a DoS / abuse baseline.
+ */
+const generalApiLimiter = rateLimit({
+  windowMs:         15 * 60 * 1000,   // 15 minutes
+  max:              300,               // 300 requests per window per IP
+  standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
+  legacyHeaders:    false,
+  keyGenerator:     ipKeyGenerator,
+  skip:             (req) => req.method === "OPTIONS", // never block preflight
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Too many requests. Please slow down and try again shortly.",
+    });
+  },
+});
+
+/**
+ * Expensive operations limiter — 20 requests per hour per IP.
+ * Applied to: POST /api/projects/:id/crawl, POST /api/projects/:id/run
+ * These endpoints launch a browser instance and consume AI API quota.
+ */
+export const expensiveOpLimiter = rateLimit({
+  windowMs:         60 * 60 * 1000,   // 1 hour
+  max:              20,               // 20 crawl/run triggers per hour per IP
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  keyGenerator:     ipKeyGenerator,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Rate limit reached for test runs. You can trigger up to 20 runs per hour. Please wait before starting another.",
+    });
+  },
+});
+
+/**
+ * AI generation limiter — 30 requests per hour per IP.
+ * Applied to: POST /api/projects/:id/tests/generate, POST /api/tests/:id/run
+ * These endpoints make direct AI API calls (Claude / GPT / Gemini).
+ */
+export const aiGenerationLimiter = rateLimit({
+  windowMs:         60 * 60 * 1000,   // 1 hour
+  max:              30,               // 30 AI generation calls per hour per IP
+  standardHeaders:  "draft-7",
+  legacyHeaders:    false,
+  keyGenerator:     ipKeyGenerator,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Rate limit reached for AI generation. You can trigger up to 30 AI requests per hour. Please wait before generating more tests.",
+    });
+  },
+});
+
+// Apply the general limiter to all /api/* routes.
+// The tighter per-operation limiters are applied at the route level in
+// routes/runs.js and routes/tests.js via the exported limiters above.
+app.use("/api", generalApiLimiter);
 
 // ─── Serve Playwright artifacts ───────────────────────────────────────────────
 // NOTE: /artifacts is intentionally NOT behind requireAuth. Screenshots, videos,

@@ -15,6 +15,16 @@
 import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
 import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
+// ─── Audit trail helper ──────────────────────────────────────────────────────
+// Extracts userId and userName from req.authUser (set by requireAuth middleware)
+// so every logActivity() call automatically records who performed the action.
+// Returns an object that can be spread into logActivity({ ...actor(req), ...actor(req), ... }).
+function actor(req) {
+  const u = req?.authUser;
+  if (!u) return {};
+  return { userId: u.sub, userName: u.name || u.email || u.sub };
+}
+
 
 const router = Router();
 
@@ -54,7 +64,7 @@ router.post("/settings", (req, res) => {
       return res.status(400).json({ error: `No saved key for "${provider}". Add a key in Settings first.` });
     }
     setActiveProvider(provider);
-    logActivity({ type: "settings.update", detail: `Switched active provider to ${getProviderMeta()?.name || provider}` });
+    logActivity({ ...actor(req), type: "settings.update", detail: `Switched active provider to ${getProviderMeta()?.name || provider}` });
     return res.json({
       ok: true,
       provider,
@@ -83,7 +93,7 @@ router.post("/settings", (req, res) => {
     }
     setRuntimeOllama({ baseUrl: (baseUrl || "").trim(), model: (model || "").trim(), disabled: false });
     setActiveProvider("local");
-    logActivity({ type: "settings.update", detail: "Ollama (local) provider configured" });
+    logActivity({ ...actor(req), type: "settings.update", detail: "Ollama (local) provider configured" });
     return res.json({
       ok: true,
       provider: "local",
@@ -100,7 +110,7 @@ router.post("/settings", (req, res) => {
   // Pin this provider as the active one after saving a new key
   setActiveProvider(provider);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "settings.update",
     detail: `API key configured for ${getProviderMeta()?.name || provider}`,
   });
@@ -133,7 +143,7 @@ router.delete("/settings/:provider", (req, res) => {
   // Only clear the active-provider override if it was pointing to the deleted provider
   if (wasActive === provider) setActiveProvider(null);
 
-  logActivity({
+  logActivity({ ...actor(req),
     type: "settings.update",
     detail: `Provider "${provider}" deactivated`,
   });

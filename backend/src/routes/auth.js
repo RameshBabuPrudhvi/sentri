@@ -22,7 +22,8 @@
  *   so the frontend can proactively warn before expiry without ever touching the JWT
  * - JWT signed with HS256, 8-hour expiry
  * - Rate limiting: separate per-endpoint buckets (login: 10, forgot/reset: 5 per IP per 15 min)
- * - Revoked tokens kept in an in-memory Map (production: use Redis)
+ * - Revoked tokens kept in an in-memory Map (production: use Redis — see ENH-002)
+ * - Password reset tokens persisted in DB table `password_reset_tokens` (migration 003)
  * - Input validation and sanitisation on every endpoint
  * - OAuth state parameter validated on the frontend to prevent CSRF
  * - CSRF double-submit cookie protection on all mutating endpoints (via appSetup.js)
@@ -35,6 +36,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as userRepo from "../database/repositories/userRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 
@@ -235,9 +237,9 @@ function getJwtSecret() {
 // Token revocation list (logout): { jti → expiry_timestamp }
 const revokedTokens = new Map();
 
-// Password reset tokens: { token → { userId, expiresAt } }
-const resetTokens = new Map();
-const RESET_TOKEN_TTL = 30 * 60 * 1000; // 30 minutes
+// Password reset tokens are stored in the `password_reset_tokens` DB table
+// (migration 003). The token TTL is enforced by the `expiresAt` column.
+const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 // Rate limiters — separate buckets per endpoint category so flooding
 // one endpoint (e.g. forgot-password) doesn't lock out login.
@@ -271,17 +273,23 @@ function checkRateLimit(bucket, ip) {
   return { allowed: true };
 }
 
-// Purge expired revoked tokens and reset tokens periodically.
-// .unref() so this timer doesn't keep the process alive (e.g. during tests).
+// Purge expired in-memory revoked tokens and stale DB reset tokens periodically.
+// revokedTokens is still in-memory (Redis is the production fix — see ENH-002).
+// DB reset tokens are pruned here too so the table stays small.
+// .unref() prevents this timer from keeping the process alive during tests.
 const _purgeInterval = setInterval(() => {
+  // In-memory: remove revoked JTIs whose JWT has already expired naturally
   const now = Date.now() / 1000;
   for (const [jti, exp] of revokedTokens) {
     if (exp < now) revokedTokens.delete(jti);
   }
-  const nowMs = Date.now();
-  for (const [tok, entry] of resetTokens) {
-    if (entry.expiresAt < nowMs) resetTokens.delete(tok);
-  }
+  // DB: delete reset tokens older than their TTL (both used and unused)
+  try {
+    const db = getDatabase();
+    db.prepare(
+      "DELETE FROM password_reset_tokens WHERE expiresAt < ?"
+    ).run(new Date().toISOString());
+  } catch { /* non-fatal — stale tokens are rejected at lookup time anyway */ }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
 
@@ -565,12 +573,25 @@ router.post("/forgot-password", async (req, res) => {
     return res.json({ message: genericMsg });
   }
 
-  // Generate a cryptographically random reset token
+  // Generate a cryptographically random reset token and persist it to the DB.
+  // Storing tokens in the DB (migration 003) means they survive server restarts
+  // and work correctly across multiple API instances.
   const resetToken = crypto.randomBytes(32).toString("base64url");
-  resetTokens.set(resetToken, {
-    userId: user.id,
-    expiresAt: Date.now() + RESET_TOKEN_TTL,
-  });
+  const tokenExpiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+  try {
+    const db = getDatabase();
+    // Invalidate any existing unused tokens for this user before creating a new one
+    db.prepare(
+      "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
+    ).run(user.id);
+    db.prepare(
+      "INSERT INTO password_reset_tokens (token, userId, expiresAt, usedAt, createdAt)"
+      + " VALUES (?, ?, ?, NULL, ?)"
+    ).run(resetToken, user.id, tokenExpiresAt, new Date().toISOString());
+  } catch (dbErr) {
+    console.error(formatLogLine("error", null, `[auth/forgot-password] DB error: ${dbErr.message}`));
+    return res.status(500).json({ error: "Failed to generate reset token. Please try again." });
+  }
 
   // In production: send email with resetUrl. For now, log + return in dev.
   const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -626,16 +647,24 @@ router.post("/reset-password", async (req, res) => {
     return res.status(400).json({ error: "Password is too long." });
   }
 
-  const entry = resetTokens.get(token);
-  if (!entry || entry.expiresAt < Date.now()) {
-    // Clean up expired token
-    if (entry) resetTokens.delete(token);
+  // Look up the token in the DB — reject if missing, expired, or already used.
+  let entry;
+  try {
+    const db = getDatabase();
+    entry = db.prepare(
+      "SELECT * FROM password_reset_tokens WHERE token = ?"
+    ).get(token);
+  } catch (dbErr) {
+    console.error(formatLogLine("error", null, `[auth/reset-password] DB lookup error: ${dbErr.message}`));
+    return res.status(500).json({ error: "Server error. Please try again." });
+  }
+
+  if (!entry || entry.usedAt !== null || new Date(entry.expiresAt) < new Date()) {
     return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
   }
 
   const user = userRepo.getById(entry.userId);
   if (!user) {
-    resetTokens.delete(token);
     return res.status(400).json({ error: "Account not found." });
   }
 
@@ -643,12 +672,19 @@ router.post("/reset-password", async (req, res) => {
   const newHash = await hashPassword(newPassword);
   userRepo.update(user.id, { passwordHash: newHash, updatedAt: new Date().toISOString() });
 
-  // Invalidate the used token (one-time use)
-  resetTokens.delete(token);
-
-  // Also invalidate all other reset tokens for this user
-  for (const [tok, e] of resetTokens) {
-    if (e.userId === user.id) resetTokens.delete(tok);
+  // Mark this token as used (audit trail) and invalidate all other unused
+  // tokens for this user so old reset links cannot be replayed.
+  try {
+    const db = getDatabase();
+    db.prepare(
+      "UPDATE password_reset_tokens SET usedAt = ? WHERE token = ?"
+    ).run(new Date().toISOString(), token);
+    db.prepare(
+      "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
+    ).run(entry.userId);
+  } catch (dbErr) {
+    // Non-fatal — password was already changed; just log the cleanup failure.
+    console.error(formatLogLine("error", null, `[auth/reset-password] Token cleanup error: ${dbErr.message}`));
   }
 
   if (process.env.NODE_ENV !== "production") {
