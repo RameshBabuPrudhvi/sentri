@@ -437,13 +437,14 @@ The `api.js` `req()` wrapper sends `credentials: "include"` on every request so 
 
 CI runs automatically on every push to `main`/`develop` and on PRs to `main` via `.github/workflows/ci.yml`. The pipeline includes:
 
-1. **Backend** — `npm install` → syntax check (`node --check`) → `npm test` → JSDoc generation → live smoke test (starts server, registers user, verifies cookie-based auth + CSRF on authenticated endpoints).
-2. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
-3. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
-4. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
-5. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in all three `package.json` files (backend, frontend, docs), promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
+1. **Secrets** — Gitleaks scan (full git history) gates all subsequent jobs. Blocks builds on accidentally committed API keys, JWT secrets, or credentials.
+2. **Backend** — `npm install` → syntax check (`node --check`) → `npm test` → JSDoc generation → live smoke test (starts server, registers user, verifies cookie-based auth + CSRF on authenticated endpoints).
+3. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
+4. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
+5. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
+6. **Release** (`.github/workflows/release.yml`, `main` only) — Parses Conventional Commit messages, auto-bumps version in all three `package.json` files (backend, frontend, docs), promotes `[Unreleased]` in changelog, creates a git tag + GitHub Release. See Versioning & Releases for details.
 
-All four CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
+All five CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
 
 To run locally before pushing:
 
@@ -490,6 +491,7 @@ node tests/api-flow.test.js
 node tests/auth-cookies.test.js
 node tests/password-reset-token.test.js
 node tests/security-hardening.test.js
+node tests/artifact-signing.test.js
 ```
 
 Or run all at once: `npm test` from `backend/`.

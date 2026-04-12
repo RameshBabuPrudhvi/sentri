@@ -181,7 +181,7 @@ The backend exposes a RESTful JSON API on port `3001`. Key endpoint groups:
 | **Runs** | `GET /api/runs/:id`, `/events`, `POST /abort` | Results, SSE stream, abort |
 | **Auth** | `POST /api/auth/register`, `/login`, `/logout` | Email/password + OAuth |
 | **Settings** | `GET/POST/DELETE /api/settings` | AI provider config, Ollama status |
-| **System** | `GET /api/dashboard`, `/system`, `/activities` | Analytics, info, data management |
+| **System** | `GET /api/dashboard`, `/system`, `/activities`, `POST /system/client-error` | Analytics, info, data management, client crash reports |
 
 > 📖 Full API documentation with request/response examples and code samples: **[API Reference →](https://rameshbabuprudhvi.github.io/sentri/docs/api/)**
 
