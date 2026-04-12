@@ -6,7 +6,7 @@
  */
 
 /**
- * @param {import("express").Request} req
+ * @param {Object} req - Express request with `authUser` set by requireAuth.
  * @returns {{ userId: string, userName: string } | {}}
  */
 export function actor(req) {

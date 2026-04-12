@@ -36,7 +36,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as userRepo from "../database/repositories/userRepo.js";
-import { getDatabase } from "../database/sqlite.js";
+import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 
@@ -130,7 +130,7 @@ async function verifyPassword(password, stored) {
 /**
  * Sign a JWT with HS256 using only Node.js `crypto` (no external library).
  *
- * @param   {Object} payload      - Claims to include (e.g. `{ sub, email, role, jti }`).
+ * @param   {Object} payload      - Claims to include (e.g. `{ sub, email, name, role, jti }`).
  * @param   {string} secret       - HMAC secret (32+ chars recommended).
  * @param   {number} [expiresInSec=28800] - Token lifetime in seconds (default 8 hours).
  * @returns {string}                The signed JWT string (`header.payload.signature`).
@@ -285,10 +285,7 @@ const _purgeInterval = setInterval(() => {
   }
   // DB: delete reset tokens older than their TTL (both used and unused)
   try {
-    const db = getDatabase();
-    db.prepare(
-      "DELETE FROM password_reset_tokens WHERE expiresAt < ?"
-    ).run(new Date().toISOString());
+    resetTokenRepo.deleteExpired();
   } catch { /* non-fatal — stale tokens are rejected at lookup time anyway */ }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
@@ -456,7 +453,7 @@ router.post("/login", async (req, res) => {
     }
 
     const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
     setAuthCookie(res, token, exp);
@@ -525,7 +522,7 @@ router.post("/refresh", requireAuth, (req, res) => {
 
   // Issue a fresh token with a new JTI
   const jti   = crypto.randomUUID();
-  const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+  const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
   const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
   setAuthCookie(res, token, exp);
 
@@ -579,15 +576,8 @@ router.post("/forgot-password", async (req, res) => {
   const resetToken = crypto.randomBytes(32).toString("base64url");
   const tokenExpiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
   try {
-    const db = getDatabase();
     // Invalidate any existing unused tokens for this user before creating a new one
-    db.prepare(
-      "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
-    ).run(user.id);
-    db.prepare(
-      "INSERT INTO password_reset_tokens (token, userId, expiresAt, usedAt, createdAt)"
-      + " VALUES (?, ?, ?, NULL, ?)"
-    ).run(resetToken, user.id, tokenExpiresAt, new Date().toISOString());
+    resetTokenRepo.create(resetToken, user.id, tokenExpiresAt);
   } catch (dbErr) {
     console.error(formatLogLine("error", null, `[auth/forgot-password] DB error: ${dbErr.message}`));
     return res.status(500).json({ error: "Failed to generate reset token. Please try again." });
@@ -647,19 +637,17 @@ router.post("/reset-password", async (req, res) => {
     return res.status(400).json({ error: "Password is too long." });
   }
 
-  // Look up the token in the DB — reject if missing, expired, or already used.
+  // Atomically claim the token — marks it as used in a single UPDATE so two
+  // concurrent requests with the same token cannot both succeed (TOCTOU fix).
   let entry;
   try {
-    const db = getDatabase();
-    entry = db.prepare(
-      "SELECT * FROM password_reset_tokens WHERE token = ?"
-    ).get(token);
+    entry = resetTokenRepo.claim(token);
   } catch (dbErr) {
-    console.error(formatLogLine("error", null, `[auth/reset-password] DB lookup error: ${dbErr.message}`));
+    console.error(formatLogLine("error", null, `[auth/reset-password] DB error: ${dbErr.message}`));
     return res.status(500).json({ error: "Server error. Please try again." });
   }
 
-  if (!entry || entry.usedAt !== null || new Date(entry.expiresAt) < new Date()) {
+  if (!entry) {
     return res.status(400).json({ error: "Invalid or expired reset token. Please request a new one." });
   }
 
@@ -672,16 +660,10 @@ router.post("/reset-password", async (req, res) => {
   const newHash = await hashPassword(newPassword);
   userRepo.update(user.id, { passwordHash: newHash, updatedAt: new Date().toISOString() });
 
-  // Mark this token as used (audit trail) and invalidate all other unused
-  // tokens for this user so old reset links cannot be replayed.
+  // Invalidate all other unused tokens for this user so old reset links
+  // cannot be replayed. The current token is already marked as used by claim().
   try {
-    const db = getDatabase();
-    db.prepare(
-      "UPDATE password_reset_tokens SET usedAt = ? WHERE token = ?"
-    ).run(new Date().toISOString(), token);
-    db.prepare(
-      "DELETE FROM password_reset_tokens WHERE userId = ? AND usedAt IS NULL"
-    ).run(entry.userId);
+    resetTokenRepo.deleteUnusedByUserId(entry.userId);
   } catch (dbErr) {
     // Non-fatal — password was already changed; just log the cleanup failure.
     console.error(formatLogLine("error", null, `[auth/reset-password] Token cleanup error: ${dbErr.message}`));
@@ -755,7 +737,7 @@ router.get("/github/callback", async (req, res) => {
     });
 
     const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
 
@@ -822,7 +804,7 @@ router.get("/google/callback", async (req, res) => {
     });
 
     const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, role: user.role, jti }, getJwtSecret());
+    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
 

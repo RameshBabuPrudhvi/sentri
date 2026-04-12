@@ -38,7 +38,7 @@ import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { aiGenerationLimiter } from "../middleware/appSetup.js";
+import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
 import { actor } from "../utils/actor.js";
 
 const router = Router();
@@ -443,7 +443,7 @@ router.post("/projects/:id/tests/generate", aiGenerationLimiter, async (req, res
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
-router.post("/tests/:testId/run", aiGenerationLimiter, async (req, res) => {
+router.post("/tests/:testId/run", expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 

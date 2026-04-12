@@ -251,7 +251,7 @@ export const expensiveOpLimiter = rateLimit({
 
 /**
  * AI generation limiter — 30 requests per hour per IP.
- * Applied to: POST /api/projects/:id/tests/generate, POST /api/tests/:id/run
+ * Applied to: POST /api/projects/:id/tests/generate
  * These endpoints make direct AI API calls (Claude / GPT / Gemini).
  */
 export const aiGenerationLimiter = rateLimit({
