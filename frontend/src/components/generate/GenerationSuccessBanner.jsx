@@ -1,7 +1,7 @@
 import React from "react";
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import OutcomeBanner from "./run/OutcomeBanner.jsx";
+import OutcomeBanner from "../run/OutcomeBanner.jsx";
 
 /**
  * GenerationSuccessBanner — shown after a crawl or generate run finishes
