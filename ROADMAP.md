@@ -737,17 +737,18 @@ These items are not phase-bounded — they should be addressed incrementally alo
 
 ---
 
-### MAINT-011 — Restructure frontend to feature-sliced architecture (M-06) 🟡 High
+### ~~MAINT-011 — Restructure frontend to feature-sliced architecture (M-06)~~ ✅ Complete
 
-**Problem:** `frontend/src/components/` is a flat directory of ~35 files with no domain grouping. Run views, modals, charts, badges, and layout chrome are all siblings. This makes the codebase hard to navigate, slows onboarding, and violates the principle of colocation by domain.
+**Problem:** `frontend/src/components/` was a flat directory of ~35 files with no domain grouping. Run views, modals, charts, badges, and layout chrome were all siblings. This made the codebase hard to navigate, slowed onboarding, and violated the principle of colocation by domain.
 
-**Note:** PR #70 already extracted `Sidebar`, `TopBar`, and `ThemeToggle` into `components/layout/`. This item completes the restructuring.
+**Implemented in:** PR #81
+- Moved 35 components from flat `components/` into 7 feature-based subdirectories: `ai/`, `charts/`, `crawl/`, `generate/`, `layout/`, `run/`, `shared/`
+- Added barrel `index.js` per folder for clean imports
+- Updated all import paths across pages, components, hooks, and existing subdirectories (`project/`, `test/`)
+- Removed deprecated `CompletionCTA.jsx` stub
+- No component logic, props, or behavior modified
 
-**Target structure:** Feature-sliced / domain-grouped under `features/` (auth, dashboard, projects, tests, runs, reports, settings), with shared primitives under `components/ui/`, `charts/`, `badges/`, `layout/`. Split the monolithic `api.js` (~380 lines) into domain modules under `api/`. Each feature migration is a single PR — start with `runs/` (15+ components), then `projects/`, `tests/`, `auth/`.
-
-**Files to change:** All `frontend/src/components/*.jsx`, `frontend/src/pages/*.jsx`, `frontend/src/hooks/*.js`, `frontend/src/api.js`, `frontend/src/App.jsx`, `frontend/src/context/AuthContext.jsx`
-
-**Effort:** L (incremental — 1 PR per feature domain) | **Source:** Audit (M-06)
+**Effort:** L | **Source:** Audit (M-06)
 
 ---
 
