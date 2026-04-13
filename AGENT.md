@@ -160,6 +160,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
 | `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
 | `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
+| `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
 | `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
@@ -639,9 +640,12 @@ When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
 | File | Role |
 |---|---|
 | `backend/src/routes/chat.js` | SSE endpoint, system prompt, `buildWorkspaceContext()`, `buildEntityContext()` |
-| `frontend/src/components/AIChat.jsx` | Chat panel UI, markdown renderer, streaming display |
+| `frontend/src/components/ai/AIChat.jsx` | Chat modal panel UI, streaming display |
+| `frontend/src/pages/ChatHistory.jsx` | Full-page chat at `/chat` — session CRUD, export, persistent history |
+| `frontend/src/utils/markdown.js` | Shared `escapeHtml()` + `renderMarkdown()` used by both chat UIs |
 | `frontend/src/api.js` → `api.chat()` | SSE stream parser with 401 handling |
-| `frontend/src/styles/features/chat.css` | All chat UI styles (`.chat-*` namespace) |
+| `frontend/src/styles/features/chat.css` | Modal chat styles (`.chat-*` namespace) |
+| `frontend/src/styles/pages/chat-history.css` | Full-page chat styles (`.ch-*` namespace) |
 
 ### Sliding context window
 
@@ -652,7 +656,7 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 - **Adding new context**: Add to `buildWorkspaceContext()` or `buildEntityContext()` in `backend/src/routes/chat.js`. Keep output compact — every token costs money.
 - **Adding new entity types**: Add a regex pattern + DB lookup in `buildEntityContext()`. Follow the existing pattern: match IDs, cap results, truncate long fields.
 - **Changing the system prompt**: Edit `BASE_SYSTEM_PROMPT` in `backend/src/routes/chat.js`. The workspace/entity context is appended automatically — don't hardcode data in the base prompt.
-- **Frontend changes**: All chat styles go in `frontend/src/styles/features/chat.css`. The markdown renderer in `AIChat.jsx` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS.
+- **Frontend changes**: Modal chat styles go in `frontend/src/styles/features/chat.css` (`.chat-*`); full-page chat styles go in `frontend/src/styles/pages/chat-history.css` (`.ch-*`). The shared markdown renderer in `frontend/src/utils/markdown.js` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS. Both `AIChat.jsx` and `ChatHistory.jsx` import `renderMarkdown` from this shared module.
 
 ---
 
@@ -812,7 +816,7 @@ The following are **not yet implemented** but should be addressed before product
 
 1. Create `frontend/src/pages/MyPage.jsx`.
 2. Lazy-import it in `App.jsx` and add a `<Route>` inside the `<Layout>` wrapper.
-3. Add a `<NavLink>` to `frontend/src/components/Layout.jsx` if it appears in the sidebar.
+3. Add a `<NavLink>` to `frontend/src/components/layout/Sidebar.jsx` if it appears in the sidebar.
 4. Create a corresponding CSS file in `frontend/src/styles/pages/my-page.css` and import it from the component.
 
 ### Page Responsibilities (UX Architecture)
@@ -826,6 +830,7 @@ The frontend follows a clear separation of concerns between pages:
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
+| **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |
 | **Settings** | AI provider & system config | API keys, Ollama, system info |
 
 **Important**: Crawl and test generation are **only** triggered from the Tests page (via `CrawlProjectModal` and `GenerateTestModal`). The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls. This avoids duplicating creation flows across pages.

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Chat**: Full-page AI Chat History at `/chat` with session management — create, rename, delete, and search conversations persisted in localStorage (capped at 50 sessions per user) (#83)
+- **Chat**: Export chat sessions as Markdown or JSON from the topbar menu (#83)
+- **Chat**: "Open full chat page" button in the AI Chat modal navigates to `/chat` (#83)
+- **Nav**: "AI Chat" entry added to the sidebar navigation (#83)
+
+### Changed
+- **Chat**: Markdown renderer (`escapeHtml`, `renderMarkdown`) extracted from `AIChat.jsx` into shared `frontend/src/utils/markdown.js` — both the modal chat and full-page chat now use the same renderer (#83)
+- **Chat**: Chat session storage is scoped by authenticated user ID to prevent cross-account data leakage (#83)
+
 ## [1.2.0] — 2026-04-13
 
 ### Added
