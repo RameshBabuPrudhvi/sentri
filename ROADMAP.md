@@ -94,7 +94,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Fix:** Implement a standard React class component with `componentDidCatch` and `getDerivedStateFromError`. Wrap the router in `App.jsx`. Show a friendly error message with "Try again", "Reload page", and "Go to Dashboard" buttons. Report crashes to `/api/system/client-error`.
 
 **Implemented in:** PR #79
-- New `frontend/src/components/ErrorBoundary.jsx` — extracted from inline class in `App.jsx`; adds `componentDidCatch` with server-side crash reporting and soft-reset "Try again" button
+- New `frontend/src/components/layout/ErrorBoundary.jsx` — extracted from inline class in `App.jsx`; adds `componentDidCatch` with server-side crash reporting and soft-reset "Try again" button
 - `frontend/src/App.jsx` — imports `ErrorBoundary` from the new component
 
 **Effort:** XS | **Source:** Audit
@@ -279,7 +279,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/middleware/appSetup.js` — add `requireRole()` middleware
 - All route files for mutation operations — add role guards
 - `frontend/src/context/AuthContext.jsx` — expose `role`
-- `frontend/src/components/ProtectedRoute.jsx` — role-based route guarding
+- `frontend/src/components/layout/ProtectedRoute.jsx` — role-based route guarding
 - `frontend/src/pages/Settings.jsx` — add Members / Role management tab
 
 **Effort:** M | **Source:** Audit
@@ -406,7 +406,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/runner/executeTest.js` — capture and compare baseline
 - `backend/src/database/migrations/` — `baseline_screenshots` table
 - `backend/src/routes/runs.js` — serve diff images
-- `frontend/src/components/StepResultsView.jsx` — visual diff overlay component
+- `frontend/src/components/run/StepResultsView.jsx` — visual diff overlay component
 - `backend/package.json` — add `pixelmatch`, `pngjs`
 
 **Effort:** L | **Source:** Competitive
@@ -422,7 +422,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Files to change:**
 - `backend/src/runner/config.js` — parameterise `launchBrowser()`
 - `backend/src/testRunner.js` — pass `browserName` from run config
-- `frontend/src/components/RunRegressionModal.jsx` — add browser selector
+- `frontend/src/components/run/RunRegressionModal.jsx` — add browser selector
 - `frontend/src/pages/RunDetail.jsx` — show browser per result
 
 **Effort:** M | **Source:** Competitive
@@ -438,7 +438,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Files to change:**
 - `backend/src/runner/config.js` — add device map lookup
 - `backend/src/runner/executeTest.js` — apply device context
-- `frontend/src/components/RunRegressionModal.jsx` — add device selector dropdown
+- `frontend/src/components/run/RunRegressionModal.jsx` — add device selector dropdown
 
 **Effort:** S | **Source:** Competitive
 
@@ -455,7 +455,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/testRunner.js` — call detector on run completion
 - `backend/src/database/migrations/` — add `flakyScore` to `tests`
 - `frontend/src/pages/Dashboard.jsx` — add Flaky Tests panel
-- `frontend/src/components/badges/TestBadges.jsx` — add flaky badge
+- `frontend/src/components/shared/TestBadges.jsx` — add flaky badge
 
 **Effort:** M | **Source:** Competitive
 
@@ -485,7 +485,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Files to change:**
 - `backend/src/runner/executeTest.js` — record step start/end timestamps
 - `backend/src/runner/codeExecutor.js` — inject timing instrumentation
-- `frontend/src/components/StepResultsView.jsx` — add waterfall chart
+- `frontend/src/components/run/StepResultsView.jsx` — add waterfall chart
 
 **Effort:** M | **Source:** Audit
 
@@ -513,7 +513,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 **Files to change:**
 - `frontend/src/pages/TestDetail.jsx` — add Changes tab
-- New `frontend/src/components/DiffViewer.jsx` — diff rendering component
+- New `frontend/src/components/ai/DiffViewer.jsx` — diff rendering component
 - `frontend/package.json` — add `diff`
 
 **Effort:** S | **Source:** Audit
@@ -631,7 +631,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/routes/projects.js` — add profile CRUD endpoints
 - `backend/src/pipeline/stateExplorer.js` — accept `profileId` param
 - `frontend/src/pages/ProjectDetail.jsx` — add credential profiles panel
-- `frontend/src/components/TestDials.jsx` — connect `multi_role` dial to profile selector
+- `frontend/src/components/shared/TestDials.jsx` — connect `multi_role` dial to profile selector
 
 **Effort:** M | **Source:** Competitive (unique to Sentri)
 
@@ -644,7 +644,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Fix:** For each node in the site graph (`SiteGraph.jsx`), compute a "test density" score: 0 approved tests = red, 1–2 = amber, 3+ = green. Overlay the score as a coloured ring on each node. Add a legend. This makes gaps immediately visible without reading a table.
 
 **Files to change:**
-- `frontend/src/components/SiteGraph.jsx` — add density score computation and colour ring
+- `frontend/src/components/crawl/SiteGraph.jsx` — add density score computation and colour ring
 - `backend/src/routes/dashboard.js` — add `testsByUrl` to the dashboard API response
 
 **Effort:** S | **Source:** Competitive
