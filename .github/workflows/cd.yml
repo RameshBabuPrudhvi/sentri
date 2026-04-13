@@ -6,7 +6,7 @@ name: CD — Deploy Pages & Push Images
 
 on:
   push:
-    branches: [main,develop]
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
