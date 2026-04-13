@@ -1,3 +1,4 @@
+/** @module components/run — Run execution, live views, and result components. */
 export { default as RunSidebar } from "./RunSidebar.jsx";
 export { default as RunRegressionModal } from "./RunRegressionModal.jsx";
 export { default as LiveBrowserView } from "./LiveBrowserView.jsx";

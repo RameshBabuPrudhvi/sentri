@@ -1,3 +1,4 @@
+/** @module components/layout — App shell, navigation, and auth guards. */
 export { default as Layout } from "./Layout.jsx";
 export { default as AppLogo } from "./AppLogo.jsx";
 export { default as CommandPalette } from "./CommandPalette.jsx";

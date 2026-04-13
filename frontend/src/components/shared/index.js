@@ -1,3 +1,4 @@
+/** @module components/shared — Generic reusable UI primitives. */
 export { default as ModalShell } from "./ModalShell.jsx";
 export { default as StatCard } from "./StatCard.jsx";
 export { default as Tooltip } from "./Tooltip.jsx";

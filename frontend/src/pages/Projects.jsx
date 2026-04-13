@@ -1,3 +1,10 @@
+/**
+ * @module pages/Projects
+ * @description Project listing page — shows all registered web applications
+ * with test counts, pass rates, and quick actions. Renamed from
+ * Applications.jsx to align with the sidebar label and route path.
+ */
+
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {

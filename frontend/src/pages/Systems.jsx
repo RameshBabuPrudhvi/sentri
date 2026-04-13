@@ -1,3 +1,10 @@
+/**
+ * @module pages/Systems
+ * @description System overview page — AI provider status, application
+ * environments, and crawl context. Renamed from Context.jsx to align
+ * with the sidebar label and route path.
+ */
+
 import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
