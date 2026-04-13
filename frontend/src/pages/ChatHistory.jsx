@@ -20,25 +20,30 @@ import {
   Edit3, FileText, FileJson, ChevronRight,
 } from "lucide-react";
 import { api } from "../api.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import "../styles/pages/chat-history.css";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const STORAGE_KEY = "sentri_chat_sessions";
+const STORAGE_KEY_PREFIX = "sentri_chat_sessions";
 const MAX_SESSIONS = 50;
 
 // ── Persistence helpers ───────────────────────────────────────────────────────
-function loadSessions() {
+function storageKey(userId) {
+  return userId ? `${STORAGE_KEY_PREFIX}_${userId}` : STORAGE_KEY_PREFIX;
+}
+
+function loadSessions(userId) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(userId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveSessions(sessions) {
+function saveSessions(sessions, userId) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.slice(0, MAX_SESSIONS)));
+    localStorage.setItem(storageKey(userId), JSON.stringify(sessions.slice(0, MAX_SESSIONS)));
   } catch { /* quota exceeded — fail silently */ }
 }
 
@@ -318,8 +323,17 @@ function SessionItem({ session, active, onSelect, onRename, onDelete }) {
 
 // ── Main ChatHistory page ─────────────────────────────────────────────────────
 export default function ChatHistory() {
-  const [sessions,       setSessions]       = useState(() => loadSessions());
-  const [activeId,       setActiveId]       = useState(() => loadSessions()[0]?.id ?? null);
+  const { user }  = useAuth();
+  const userId     = user?.id ?? null;
+
+  const [sessions,       setSessions]       = useState(() => {
+    const s = loadSessions(userId);
+    return s;
+  });
+  const [activeId,       setActiveId]       = useState(() => {
+    const s = loadSessions(userId);
+    return s[0]?.id ?? null;
+  });
   const [input,          setInput]          = useState("");
   const [loading,        setLoading]        = useState(false);
   const [search,         setSearch]         = useState("");
@@ -333,8 +347,15 @@ export default function ChatHistory() {
   const abortRef       = useRef(null);
   const renameInputRef = useRef(null);
 
+  // Reload sessions when user changes (login/logout)
+  useEffect(() => {
+    const s = loadSessions(userId);
+    setSessions(s);
+    setActiveId(s[0]?.id ?? null);
+  }, [userId]);
+
   // Persist on every change
-  useEffect(() => { saveSessions(sessions); }, [sessions]);
+  useEffect(() => { saveSessions(sessions, userId); }, [sessions, userId]);
 
   // Scroll to bottom
   useEffect(() => {
@@ -388,10 +409,10 @@ export default function ChatHistory() {
   }
 
   function startRename(id) {
-    const s = sessions.find(s => s.id === id);
-    if (!s) return;
+    const found = sessions.find(s => s.id === id);
+    if (!found) return;
     setRenamingId(id);
-    setRenameValue(s.title);
+    setRenameValue(found.title);
   }
 
   function commitRename() {
@@ -418,21 +439,25 @@ export default function ChatHistory() {
     const userMsg = { role: "user", content, id: Date.now() };
     const replyId = Date.now() + 1;
 
-    setSessions(prev => prev.map(s => {
-      if (s.id !== sid) return s;
-      const msgs = [...s.messages, userMsg, { role: "assistant", content: "", id: replyId }];
-      return { ...s, messages: msgs, updatedAt: Date.now() };
-    }));
+    // Build history for API from the latest state (avoids stale closure)
+    let history;
+    setSessions(prev => {
+      const session = prev.find(s => s.id === sid);
+      history = (session?.messages ?? [])
+        .filter(m => m.role === "user" || m.role === "assistant")
+        .concat(userMsg)
+        .map(({ role, content }) => ({ role, content }));
+
+      return prev.map(s => {
+        if (s.id !== sid) return s;
+        const msgs = [...s.messages, userMsg, { role: "assistant", content: "", id: replyId }];
+        return { ...s, messages: msgs, updatedAt: Date.now() };
+      });
+    });
     setLoading(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
-
-    // Build history for API (exclude transient error msgs)
-    const history = (sessions.find(s => s.id === sid)?.messages ?? [])
-      .filter(m => m.role === "user" || m.role === "assistant")
-      .concat(userMsg)
-      .map(({ role, content }) => ({ role, content }));
 
     try {
       await api.chat(
@@ -494,7 +519,7 @@ export default function ChatHistory() {
 
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [input, loading, sessions, activeId]);
+  }, [input, loading, activeId]);
 
   function stopGeneration() { abortRef.current?.abort(); }
 
