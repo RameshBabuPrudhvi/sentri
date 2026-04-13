@@ -15,7 +15,7 @@ const NewProject = lazy(() => import("./pages/NewProject.jsx"));
 const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
-const Projects = lazy(() => import("./pages/Applications.jsx"));
+const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
 const Systems = lazy(() => import("./pages/Systems.jsx"));
