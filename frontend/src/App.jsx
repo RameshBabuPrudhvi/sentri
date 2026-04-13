@@ -6,6 +6,7 @@ import { ThemeProvider } from "./context/ThemeContext.jsx";
 import ProtectedRoute from "./components/layout/ProtectedRoute.jsx";
 import Layout from "./components/layout/Layout.jsx";
 import ErrorBoundary from "./components/layout/ErrorBoundary.jsx";
+import PageSkeleton from "./components/layout/PageSkeleton.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -19,14 +20,9 @@ const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
 const Systems = lazy(() => import("./pages/Systems.jsx"));
-const ChatHistory = lazy(() => import("./pages/ChatHistory.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
 
-const RouteLoading = () => (
-  <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
-    Loading…
-  </div>
-);
+// Page loading skeleton is imported from PageSkeleton.jsx
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -47,7 +43,7 @@ export default function App() {
       <AuthProvider>
         <NotificationProvider>
         <ErrorBoundary>
-          <Suspense fallback={<RouteLoading />}>
+          <Suspense fallback={<PageSkeleton />}>
             <Routes>
               {/* Public */}
               <Route path="/login" element={<Login />} />
@@ -71,7 +67,6 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />
-                <Route path="/chat" element={<ChatHistory />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>

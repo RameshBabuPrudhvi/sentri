@@ -130,7 +130,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-020 — Soft-delete for tests, projects, and runs 🟡 High
+### ~~ENH-020 — Soft-delete for tests, projects, and runs~~ ✅ Complete
 
 **Problem:** `DELETE /api/data/runs` and all entity deletion endpoints permanently and irreversibly destroy data. There is no `deletedAt` timestamp, no recycle bin, and no recovery path. In a professional QA context, accidental deletion of a test suite or run history is a major UX and trust risk. The `DELETE /api/data/runs` endpoint in particular wipes ALL run history with no confirmation.
 
@@ -146,7 +146,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-010 — Pagination on all list API endpoints 🟡 High
+### ~~ENH-010 — Pagination on all list API endpoints~~ ✅ Complete
 
 **Problem:** `GET /api/tests`, `GET /api/runs`, `GET /api/projects`, and `GET /api/activities` return every record in the database with no `LIMIT`. A project with 1,000 tests will produce a response exceeding 5 MB, cause multi-second parse times in the browser, and will crash slower clients. All frontend filtering is done client-side using `useMemo` on the full dataset — this is a known failure mode, not a hypothetical.
 
@@ -193,7 +193,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-024 — Frontend code splitting 🔵 Medium
+### ~~ENH-024 — Frontend code splitting~~ ✅ Complete
 
 **Problem:** All page-level components are bundled into a single JavaScript file and shipped to the client on first load. There is no `React.lazy` / `Suspense` route splitting. As the app grows (57 KB `TestDetail.jsx`, 51 KB `Tests.jsx`), initial load time will degrade measurably on slower connections.
 
@@ -787,7 +787,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase | Items | Status | Key Deliverable |
 |-------|-------|--------|-----------------|
 | ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
-| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-013 ✅, ENH-021 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
+| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-010 ✅, ENH-013 ✅, ENH-020 ✅, ENH-021 ✅, ENH-024 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
 | Ongoing | MAINT-001 through MAINT-011 | 🔲 Backlog | Platform moat + infrastructure |
@@ -797,7 +797,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
 **Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
-**Next PR priorities (recommended order):** ENH-020 (Soft-delete, M) → ENH-010 (Pagination, M) → ENH-008 (Run logs table, M)
+**Next PR priorities (recommended order):** ENH-008 (Run logs table, M) → ENH-011 (CI/CD webhook, M) → ENH-006 (Scheduling, M)
 
 ---
 

@@ -15,11 +15,9 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X, Send, Square, Bot, User, Sparkles, Trash2, Copy, Check,
   Maximize2, Minimize2, Bug, TestTube, Shield, BarChart2,
-  Zap, Terminal, ExternalLink,
+  Zap, Terminal,
 } from "lucide-react";
 import { api } from "../../api.js";
-import { useNavigate } from "react-router-dom";
-import { renderMarkdown } from "../../utils/markdown.js";
 
 // ── Suggested prompts shown on the welcome screen ────────────────────────────
 const SUGGESTIONS = [
@@ -31,6 +29,52 @@ const SUGGESTIONS = [
   { icon: Terminal,  label: "Write Playwright script",  text: "Write a Playwright script to test a multi-step checkout process." },
 ];
 
+// ── Lightweight markdown renderer ─────────────────────────────────────────────
+// Security: escapes ALL text before applying markdown transforms so any HTML
+// in AI responses (e.g. <script>, <img onerror=…>) is neutralised before
+// reaching dangerouslySetInnerHTML. Code blocks are extracted first, escaped
+// separately, and restored via placeholders after the markdown pass.
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderMarkdown(text) {
+  // 1. Extract fenced code blocks → placeholders (already escaped)
+  const codeBlocks = [];
+  text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre data-lang="${lang || ""}"><code>${escapeHtml(code.trim())}</code></pre>`);
+    return `\x00CODE${idx}\x00`;
+  });
+
+  // 2. Extract inline code → placeholders (already escaped)
+  text = text.replace(/`([^`]+)`/g, (_, c) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<code>${escapeHtml(c)}</code>`);
+    return `\x00CODE${idx}\x00`;
+  });
+
+  // 3. Escape everything else — prevents XSS from AI-generated HTML
+  text = escapeHtml(text);
+
+  // 4. Apply markdown transforms on the now-safe text
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/\*([^*]+)\*/g,     "<em>$1</em>");
+  text = text.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  text = text.replace(/^## (.+)$/gm,  "<h2>$1</h2>");
+  text = text.replace(/^# (.+)$/gm,   "<h1>$1</h1>");
+  text = text.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+  text = text.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+  text = text.split(/\n\n+/).map(p =>
+    p.startsWith("<") ? p : `<p>${p.replace(/\n/g, "<br>")}</p>`
+  ).join("");
+
+  // 5. Restore code block placeholders
+  text = text.replace(/\x00CODE(\d+)\x00/g, (_, idx) => codeBlocks[idx]);
+  return text;
+}
+
 // ── MessageBubble ─────────────────────────────────────────────────────────────
 function MessageBubble({ msg }) {
   const [copied, setCopied] = useState(false);
@@ -39,7 +83,7 @@ function MessageBubble({ msg }) {
     navigator.clipboard.writeText(msg.content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable (e.g. non-HTTPS) */ });
+    });
   }
 
   const isUser  = msg.role === "user";
@@ -122,7 +166,6 @@ function WelcomeScreen({ onSuggest }) {
 
 // ── AIChat ────────────────────────────────────────────────────────────────────
 export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
-  const navigate = useNavigate();
   const [messages,  setMessages]  = useState([]);
   const [input,     setInput]     = useState("");
   const [loading,   setLoading]   = useState(false);
@@ -256,13 +299,6 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
                 <Trash2 size={14} />
               </button>
             )}
-            <button
-              className="chat-icon-btn"
-              onClick={() => { onClose(); navigate("/chat"); }}
-              title="Open full chat page"
-            >
-              <ExternalLink size={14} />
-            </button>
             <button
               className="chat-icon-btn"
               onClick={() => setExpanded(v => !v)}

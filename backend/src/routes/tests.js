@@ -46,10 +46,18 @@ const router = Router();
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/tests", (req, res) => {
+  const { page, pageSize } = req.query;
+  if (page !== undefined || pageSize !== undefined) {
+    return res.json(testRepo.getByProjectIdPaged(req.params.id, page, pageSize));
+  }
   res.json(testRepo.getByProjectId(req.params.id));
 });
 
 router.get("/tests", (req, res) => {
+  const { page, pageSize } = req.query;
+  if (page !== undefined || pageSize !== undefined) {
+    return res.json(testRepo.getAllPaged(page, pageSize));
+  }
   res.json(testRepo.getAll());
 });
 
@@ -331,7 +339,7 @@ router.delete("/projects/:id/tests/:testId", (req, res) => {
   logActivity({ ...actor(req),
     type: "test.delete", projectId: req.params.id, projectName: project?.name || null,
     testId: req.params.testId, testName: test.name,
-    detail: `Test deleted — "${test.name}"`,
+    detail: `Test moved to recycle bin — "${test.name}"`,
   });
   testRepo.deleteById(req.params.testId);
   res.json({ ok: true });
@@ -557,7 +565,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
       const project = projectRepo.getById(req.params.id);
       logActivity({ ...actor(req),
         type: "test.bulk_delete", projectId: req.params.id, projectName: project?.name || null,
-        detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""}`,
+        detail: `Bulk delete — ${deleted.length} test${deleted.length !== 1 ? "s" : ""} moved to recycle bin`,
       });
     }
     return res.json({ deleted: deleted.length, tests: deleted });

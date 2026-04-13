@@ -4,25 +4,43 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: process.env.GITHUB_PAGES === "true" ? "/sentri/" : "/",
+
+  build: {
+    rollupOptions: {
+      output: {
+        // Split large vendor libraries into separate cacheable chunks so that
+        // app code changes don't bust the vendor cache (and vice versa).
+        manualChunks: {
+          // React ecosystem — changes infrequently
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          // Charting library — large and self-contained
+          "vendor-recharts": ["recharts"],
+          // Icon library — large tree before shaking
+          "vendor-icons": ["lucide-react"],
+          // PDF generation utility
+          "vendor-pdf": ["jspdf", "html2canvas"],
+        },
+      },
+    },
+    // Emit a warning when any single chunk exceeds 600 kB (Vite default is 500 kB)
+    chunkSizeWarningLimit: 600,
+  },
+
   server: {
     port: 3000,
     proxy: {
       // SSE endpoints are long-lived streams — disable proxy timeouts so
       // http-proxy doesn't kill them after 60 s, causing ECONNRESET on the
       // frontend and a reconnect loop in useRunSSE.
-      // Scoped to /events suffix so non-SSE run endpoints (GET /api/runs/:id,
-      // POST /api/runs/:id/abort) still use the normal 60 s timeout from /api.
       "/api/runs/": {
         target: "http://localhost:3001",
         changeOrigin: true,
         timeout: 60000,
         proxyTimeout: 60000,
         configure: (proxy) => {
-          // Disable timeouts only for SSE event streams
           proxy.on("proxyReq", (proxyReq, req) => {
             if (req.url?.includes("/events")) {
               proxyReq.socket?.setTimeout(0);
-              // Also set the response socket timeout when available
               req.res?.setTimeout(0);
             }
           });

@@ -40,6 +40,7 @@ import authRouter from "./routes/auth.js";
 import { requireAuth } from "./routes/auth.js";
 import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
+import recycleBinRouter from "./routes/recycleBin.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -99,6 +100,7 @@ app.use("/api", requireAuth, settingsRouter);
 app.use("/api", requireAuth, systemRouter);
 app.use("/api", requireAuth, chatRouter);
 app.use("/api", requireAuth, testFixRouter);
+app.use("/api", requireAuth, recycleBinRouter);
 
 // ─── Health probes (root-level, not under /api, no auth required) ────────────
 // GET /health  — liveness: is the process alive?

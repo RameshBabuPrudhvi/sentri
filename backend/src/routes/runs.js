@@ -155,6 +155,11 @@ router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
 // ─── Run listing ──────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/runs", (req, res) => {
+  const { page, pageSize } = req.query;
+  if (page !== undefined || pageSize !== undefined) {
+    const result = runRepo.getByProjectIdPaged(req.params.id, page, pageSize);
+    return res.json({ ...result, data: result.data.map(signRunArtifacts) });
+  }
   const runs = runRepo.getByProjectId(req.params.id);
   res.json(runs.map(signRunArtifacts));
 });

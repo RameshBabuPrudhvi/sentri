@@ -276,6 +276,15 @@ export const api = {
   /** @returns {Promise<{cleared: number}>} Clear self-healing history. */
   clearHealing:    () => req("DELETE", "/data/healing"),
 
+  // ── Recycle bin ──────────────────────────────────────────────────────────────
+
+  /** @returns {Promise<{projects: Object[], tests: Object[], runs: Object[]}>} All soft-deleted entities. */
+  getRecycleBin:   () => req("GET",    "/recycle-bin"),
+  /** @param {"project"|"test"|"run"} type @param {string} id @returns {Promise<{ok: boolean}>} */
+  restoreItem:     (type, id) => req("POST",   `/restore/${type}/${id}`),
+  /** @param {"project"|"test"|"run"} type @param {string} id @returns {Promise<{ok: boolean}>} */
+  purgeItem:       (type, id) => req("DELETE", `/purge/${type}/${id}`),
+
   // ── AI Test Fix ──────────────────────────────────────────────────────────────
 
   /**

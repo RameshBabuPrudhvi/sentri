@@ -1,6 +1,10 @@
 /**
  * @module database/repositories/projectRepo
  * @description Project CRUD backed by SQLite.
+ *
+ * All read queries filter `WHERE deletedAt IS NULL` by default.
+ * Hard deletes are replaced with soft-deletes: `deletedAt = datetime('now')`.
+ * Use {@link getDeletedAll} / {@link restore} for recycle-bin operations.
  */
 
 import { getDatabase } from "../sqlite.js";
@@ -28,16 +32,16 @@ function projectToRow(p) {
 }
 
 /**
- * Get all projects.
+ * Get all non-deleted projects.
  * @returns {Object[]}
  */
 export function getAll() {
   const db = getDatabase();
-  return db.prepare("SELECT * FROM projects").all().map(rowToProject);
+  return db.prepare("SELECT * FROM projects WHERE deletedAt IS NULL").all().map(rowToProject);
 }
 
 /**
- * Get all projects as a dictionary keyed by ID.
+ * Get all non-deleted projects as a dictionary keyed by ID.
  * @returns {Object<string, Object>}
  */
 export function getAllAsDict() {
@@ -48,13 +52,24 @@ export function getAllAsDict() {
 }
 
 /**
- * Get a project by ID.
+ * Get a project by ID (including soft-deleted — needed for restore and audit).
+ * Most callers should use {@link getById} which excludes deleted items.
+ * @param {string} id
+ * @returns {Object|undefined}
+ */
+export function getByIdIncludeDeleted(id) {
+  const db = getDatabase();
+  return rowToProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
+}
+
+/**
+ * Get a non-deleted project by ID.
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getById(id) {
   const db = getDatabase();
-  return rowToProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
+  return rowToProject(db.prepare("SELECT * FROM projects WHERE id = ? AND deletedAt IS NULL").get(id));
 }
 
 /**
@@ -94,21 +109,50 @@ export function update(id, fields) {
 }
 
 /**
- * Count total projects.
+ * Count total non-deleted projects.
  * @returns {number}
  */
 export function count() {
   const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM projects").get().cnt;
+  return db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE deletedAt IS NULL").get().cnt;
 }
 
 /**
- * Delete a project by ID.
- * Cascade deletes (tests, runs, activities, healing) are handled by the caller
- * or by ON DELETE CASCADE foreign keys.
+ * Soft-delete a project by ID.
+ * The row is retained in the database and visible via {@link getDeletedAll}.
+ * Cascade soft-deletes for tests and runs are handled by the caller.
  * @param {string} id
  */
 export function deleteById(id) {
   const db = getDatabase();
+  db.prepare("UPDATE projects SET deletedAt = datetime('now') WHERE id = ?").run(id);
+}
+
+/**
+ * Hard-delete a project by ID (permanent — use only for purge operations).
+ * @param {string} id
+ */
+export function hardDeleteById(id) {
+  const db = getDatabase();
   db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+}
+
+/**
+ * Get all soft-deleted projects (recycle bin).
+ * @returns {Object[]}
+ */
+export function getDeletedAll() {
+  const db = getDatabase();
+  return db.prepare("SELECT * FROM projects WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC").all().map(rowToProject);
+}
+
+/**
+ * Restore a soft-deleted project (clear deletedAt).
+ * @param {string} id
+ * @returns {boolean} Whether the project was found and restored.
+ */
+export function restore(id) {
+  const db = getDatabase();
+  const info = db.prepare("UPDATE projects SET deletedAt = NULL WHERE id = ?").run(id);
+  return info.changes > 0;
 }
