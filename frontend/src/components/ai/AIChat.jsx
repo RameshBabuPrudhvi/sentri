@@ -15,9 +15,10 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X, Send, Square, Bot, User, Sparkles, Trash2, Copy, Check,
   Maximize2, Minimize2, Bug, TestTube, Shield, BarChart2,
-  Zap, Terminal,
+  Zap, Terminal, ExternalLink,
 } from "lucide-react";
 import { api } from "../../api.js";
+import { useNavigate } from "react-router-dom";
 
 // ── Suggested prompts shown on the welcome screen ────────────────────────────
 const SUGGESTIONS = [
@@ -166,6 +167,7 @@ function WelcomeScreen({ onSuggest }) {
 
 // ── AIChat ────────────────────────────────────────────────────────────────────
 export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
+  const navigate = useNavigate();
   const [messages,  setMessages]  = useState([]);
   const [input,     setInput]     = useState("");
   const [loading,   setLoading]   = useState(false);
@@ -299,6 +301,13 @@ export default function AIChat({ isOpen, onClose, initialQuery = "" }) {
                 <Trash2 size={14} />
               </button>
             )}
+            <button
+              className="chat-icon-btn"
+              onClick={() => { onClose(); navigate("/chat"); }}
+              title="Open full chat page"
+            >
+              <ExternalLink size={14} />
+            </button>
             <button
               className="chat-icon-btn"
               onClick={() => setExpanded(v => !v)}
