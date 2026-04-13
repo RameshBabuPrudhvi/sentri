@@ -70,7 +70,6 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />
-                <Route path="/applications" element={<Navigate to="/projects" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>
