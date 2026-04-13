@@ -6,7 +6,7 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Ban } from "lucide-react";
-import TablePagination, { PAGE_SIZE } from "../TablePagination.jsx";
+import TablePagination, { PAGE_SIZE } from "../shared/TablePagination.jsx";
 
 export default function RunsTab({ runs }) {
   const navigate = useNavigate();

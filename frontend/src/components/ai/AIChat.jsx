@@ -17,7 +17,7 @@ import {
   Maximize2, Minimize2, Bug, TestTube, Shield, BarChart2,
   Zap, Terminal,
 } from "lucide-react";
-import { api } from "../api.js";
+import { api } from "../../api.js";
 
 // ── Suggested prompts shown on the welcome screen ────────────────────────────
 const SUGGESTIONS = [

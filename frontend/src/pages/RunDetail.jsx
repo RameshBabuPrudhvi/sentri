@@ -20,10 +20,10 @@ import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
 
-import CrawlView from "../components/CrawlView";
-import GenerateView from "../components/GenerateView";
-import TestRunView from "../components/TestRunView";
-import AgentTag from "../components/AgentTag.jsx";
+import CrawlView from "../components/crawl/CrawlView";
+import GenerateView from "../components/generate/GenerateView";
+import TestRunView from "../components/run/TestRunView";
+import AgentTag from "../components/shared/AgentTag.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

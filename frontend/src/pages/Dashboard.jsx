@@ -8,12 +8,12 @@ import {
 import { api } from "../api.js";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
-import AgentTag from "../components/AgentTag.jsx";
-import StatCard from "../components/StatCard.jsx";
-import PassFailChart from "../components/PassFailChart.jsx";
-import SparklineChart from "../components/SparklineChart.jsx";
-import StackedBar from "../components/StackedBar.jsx";
-import AppLogo from "../components/AppLogo.jsx";
+import AgentTag from "../components/shared/AgentTag.jsx";
+import StatCard from "../components/shared/StatCard.jsx";
+import PassFailChart from "../components/charts/PassFailChart.jsx";
+import SparklineChart from "../components/charts/SparklineChart.jsx";
+import StackedBar from "../components/charts/StackedBar.jsx";
+import AppLogo from "../components/layout/AppLogo.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

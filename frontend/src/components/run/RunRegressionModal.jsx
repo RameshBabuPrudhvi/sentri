@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Play, X, RefreshCw } from "lucide-react";
-import { api } from "../api.js";
-import ModalShell from "./ModalShell.jsx";
+import { api } from "../../api.js";
+import ModalShell from "../shared/ModalShell.jsx";
 
 /**
  * Shared modal for running regression tests for a project.

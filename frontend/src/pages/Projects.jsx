@@ -1,3 +1,10 @@
+/**
+ * @module pages/Projects
+ * @description Project listing page — shows all registered web applications
+ * with test counts, pass rates, and quick actions. Renamed from
+ * Applications.jsx to align with the sidebar label and route path.
+ */
+
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -6,8 +13,8 @@ import {
 } from "lucide-react";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData";
 import { fmtRelativeDate } from "../utils/formatters";
-import PassRateBar from "../components/PassRateBar";
-import DeleteProjectModal from "../components/DeleteProjectModal.jsx";
+import PassRateBar from "../components/charts/PassRateBar";
+import DeleteProjectModal from "../components/shared/DeleteProjectModal.jsx";
 import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 

@@ -1,11 +1,11 @@
 import React from "react";
-import LLMStreamPanel from "./LLMStreamPanel.jsx";
-import useLogBuffer from "../hooks/useLogBuffer.js";
-import PipelineCard from "./PipelineCard.jsx";
+import LLMStreamPanel from "../ai/LLMStreamPanel.jsx";
+import useLogBuffer from "../../hooks/useLogBuffer.js";
+import PipelineCard from "../run/PipelineCard.jsx";
 import GenerationSuccessBanner from "./GenerationSuccessBanner.jsx";
-import ActivityLogCard from "./ActivityLogCard.jsx";
-import RunSidebar from "./RunSidebar.jsx";
-import { cleanTestName } from "../utils/formatTestName.js";
+import ActivityLogCard from "../run/ActivityLogCard.jsx";
+import RunSidebar from "../run/RunSidebar.jsx";
+import { cleanTestName } from "../../utils/formatTestName.js";
 
 // Pipeline stages for AI Generate flow.
 // Steps 1 & 2 (Crawl & Filter) are skipped — user provides test name + description directly.

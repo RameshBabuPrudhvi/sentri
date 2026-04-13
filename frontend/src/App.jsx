@@ -3,9 +3,9 @@ import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { NotificationProvider } from "./context/NotificationContext.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
-import ProtectedRoute from "./components/ProtectedRoute.jsx";
-import Layout from "./components/Layout.jsx";
-import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import ProtectedRoute from "./components/layout/ProtectedRoute.jsx";
+import Layout from "./components/layout/Layout.jsx";
+import ErrorBoundary from "./components/layout/ErrorBoundary.jsx";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -15,10 +15,10 @@ const NewProject = lazy(() => import("./pages/NewProject.jsx"));
 const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
-const Projects = lazy(() => import("./pages/Applications.jsx"));
+const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
-const Context = lazy(() => import("./pages/Context.jsx"));
+const Systems = lazy(() => import("./pages/Systems.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
 
 const RouteLoading = () => (
@@ -69,8 +69,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
-                <Route path="/context" element={<Context />} />
-                <Route path="/applications" element={<Navigate to="/projects" replace />} />
+                <Route path="/system" element={<Systems />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>

@@ -1,3 +1,10 @@
+/**
+ * @module pages/Systems
+ * @description System overview page — AI provider status, application
+ * environments, and crawl context. Renamed from Context.jsx to align
+ * with the sidebar label and route path.
+ */
+
 import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -36,7 +43,7 @@ function InfoRow({ label, children }) {
   );
 }
 
-export default function Context() {
+export default function Systems() {
   usePageTitle("System");
   //  useProjectData batches all project/run/test fetches in one pass (no N+1)
   const { projects, allTests, allRuns, loading } = useProjectData();
@@ -76,7 +83,7 @@ export default function Context() {
 
       {/* Header */}
       <div className="mb-lg">
-        <h1 className="page-title">Context</h1>
+        <h1 className="page-title">System</h1>
         <p className="page-subtitle">
           Environment configuration, AI provider status, and crawl context for your applications
         </p>

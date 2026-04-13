@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, X, RefreshCw, Clock } from "lucide-react";
-import { api } from "../api.js";
-import ModalShell from "./ModalShell.jsx";
-import ExploreModePicker from "./ExploreModePicker.jsx";
-import { loadSavedConfig } from "../utils/testDialsStorage.js";
+import { api } from "../../api.js";
+import ModalShell from "../shared/ModalShell.jsx";
+import ExploreModePicker from "../generate/ExploreModePicker.jsx";
+import { loadSavedConfig } from "../../utils/testDialsStorage.js";
 
 /**
  * Modal for crawling a project from the Tests page.

@@ -7,10 +7,10 @@ import {
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
-import StatusBadge from "../components/StatusBadge";
-import RunRegressionModal from "../components/RunRegressionModal.jsx";
+import StatusBadge from "../components/shared/StatusBadge";
+import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
-import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
+import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
 // ── Filter definitions (mirrors Tests.jsx icon-pill pattern) ──────────────────
 

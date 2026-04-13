@@ -7,12 +7,12 @@ import {
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { fmtShortDate, fmtRelativeDate, passRateColor } from "../utils/formatters";
-import StatCard from "../components/StatCard";
-import StatusBadge from "../components/StatusBadge";
-import PassFailChart from "../components/PassFailChart";
-import PassRateBar from "../components/PassRateBar";
+import StatCard from "../components/shared/StatCard";
+import StatusBadge from "../components/shared/StatusBadge";
+import PassFailChart from "../components/charts/PassFailChart";
+import PassRateBar from "../components/charts/PassRateBar";
 import usePageTitle from "../hooks/usePageTitle.js";
-import TablePagination, { PAGE_SIZE } from "../components/TablePagination.jsx";
+import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
 function downloadCSV(runs, projectNames) {
   const header = ["Run ID","Project","Type","Status","Passed","Failed","Total","Started","Duration"];

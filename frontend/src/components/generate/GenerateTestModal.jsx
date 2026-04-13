@@ -12,10 +12,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, Clock, X, Paperclip, Trash2 } from "lucide-react";
-import { api } from "../api.js";
-import ModalShell from "./ModalShell.jsx";
-import TestDials from "./TestDials.jsx";
-import { countActiveDials, loadSavedConfig } from "../utils/testDialsStorage.js";
+import { api } from "../../api.js";
+import ModalShell from "../shared/ModalShell.jsx";
+import TestDials from "../shared/TestDials.jsx";
+import { countActiveDials, loadSavedConfig } from "../../utils/testDialsStorage.js";
 import ExploreModePicker from "./ExploreModePicker.jsx";
 
 const ACCEPTED_EXTENSIONS = ".txt,.md,.csv,.json,.xml,.html,.yml,.yaml,.feature,.gherkin";

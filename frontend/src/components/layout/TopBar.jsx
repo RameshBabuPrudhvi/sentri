@@ -1,8 +1,8 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Search, LogOut, ChevronDown, BookOpen, ExternalLink, Sparkles } from "lucide-react";
-import ProviderBadge from "../ProviderBadge.jsx";
-import NotificationBell from "../NotificationBell.jsx";
+import ProviderBadge from "./ProviderBadge.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 

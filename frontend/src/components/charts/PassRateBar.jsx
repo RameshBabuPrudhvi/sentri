@@ -1,5 +1,5 @@
 import React from "react";
-import { passRateColor } from "../utils/formatters";
+import { passRateColor } from "../../utils/formatters";
 
 /**
  * Horizontal pass-rate bar with percentage label.

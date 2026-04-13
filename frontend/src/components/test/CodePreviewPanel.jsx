@@ -9,7 +9,7 @@
 import React, { Suspense, lazy } from "react";
 import { RefreshCw, CheckCircle2, Edit2, X } from "lucide-react";
 
-const DiffView = lazy(() => import("../DiffView.jsx"));
+const DiffView = lazy(() => import("../ai/DiffView.jsx"));
 
 /**
  * @param {Object}   props

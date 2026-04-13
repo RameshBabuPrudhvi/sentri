@@ -17,8 +17,8 @@ import {
 } from "lucide-react";
 import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
-import { cleanTestName } from "../utils/formatTestName.js";
-import { fmtMs, fmtBytes } from "../utils/formatters.js";
+import { cleanTestName } from "../../utils/formatTestName.js";
+import { fmtMs, fmtBytes } from "../../utils/formatters.js";
 
 // ─── Infer per-step status from the overall test result ──────────────────────
 //

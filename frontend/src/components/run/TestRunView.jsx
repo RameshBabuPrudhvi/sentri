@@ -11,14 +11,14 @@ import {
   Play,
   ExternalLink,
 } from "lucide-react";
-import { api } from "../api.js";
+import { api } from "../../api.js";
 // StepResultsView is 55KB — lazy-loaded since it only renders when a user
 // drills into a specific test result, never on initial run view render.
 const StepResultsView = lazy(() => import("./StepResultsView"));
 import LiveBrowserView from "./LiveBrowserView";
 import ExecutionTimeline from "./ExecutionTimeline";
 import OutcomeBanner from "./OutcomeBanner.jsx";
-import { cleanTestName } from "../utils/formatTestName.js";
+import { cleanTestName } from "../../utils/formatTestName.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
