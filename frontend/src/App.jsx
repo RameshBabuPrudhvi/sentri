@@ -18,7 +18,7 @@ const Settings = lazy(() => import("./pages/Settings.jsx"));
 const Projects = lazy(() => import("./pages/Applications.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
-const Context = lazy(() => import("./pages/Context.jsx"));
+const Systems = lazy(() => import("./pages/Systems.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
 
 const RouteLoading = () => (
@@ -69,7 +69,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
-                <Route path="/context" element={<Context />} />
+                <Route path="/system" element={<Systems />} />
                 <Route path="/applications" element={<Navigate to="/projects" replace />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

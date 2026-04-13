@@ -9,7 +9,7 @@ const NAV = [
   { to: "/tests",     icon: FlaskConical,    label: "Tests",     tour: "tour-tests"     },
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
   { to: "/runs",      icon: Briefcase,       label: "Runs"      },
-  { to: "/context",   icon: Layers,          label: "System"    },
+  { to: "/system",    icon: Layers,          label: "System"    },
 ];
 
 export default function Sidebar({ open }) {

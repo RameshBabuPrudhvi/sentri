@@ -48,7 +48,7 @@ function useCommands() {
     { id: "nav-tests",       group: "Navigation", label: "Go to Tests",      icon: FlaskConical,    keywords: "test cases suite",         action: () => navigate("/tests") },
     { id: "nav-reports",     group: "Navigation", label: "Go to Reports",    icon: BarChart2,       keywords: "analytics charts",         action: () => navigate("/reports") },
     { id: "nav-runs",        group: "Navigation", label: "Go to Runs",       icon: Briefcase,       keywords: "executions history",       action: () => navigate("/runs") },
-    { id: "nav-system",      group: "Navigation", label: "Go to System",     icon: Layers,          keywords: "context info",             action: () => navigate("/context") },
+    { id: "nav-system",      group: "Navigation", label: "Go to System",     icon: Layers,          keywords: "system info",              action: () => navigate("/system") },
     { id: "nav-settings",    group: "Navigation", label: "Go to Settings",   icon: Settings,        keywords: "config api keys provider", action: () => navigate("/settings") },
     { id: "act-new-project", group: "Actions",    label: "Create New Project", icon: Plus, keywords: "add application",    action: () => navigate("/projects/new") },
     { id: "act-new-test",    group: "Actions",    label: "Generate Test",      icon: Play, keywords: "create ai generate", action: () => navigate("/tests") },
