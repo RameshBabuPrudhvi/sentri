@@ -12,7 +12,7 @@
  */
 
 import React, {
-  useState, useRef, useEffect, useCallback, useMemo,
+  useState, useRef, useEffect, useCallback, useMemo, memo,
 } from "react";
 import {
   Bot, User, Send, Square, Sparkles, Plus, Trash2, Download,
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { api } from "../api.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { renderMarkdown } from "../utils/markdown.js";
 import "../styles/pages/chat-history.css";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -64,38 +65,6 @@ function autoTitle(messages) {
   return text.length > 48 ? text.slice(0, 48).trimEnd() + "…" : text;
 }
 
-// ── HTML escape + markdown renderer (same as AIChat.jsx) ─────────────────────
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function renderMarkdown(text) {
-  const codeBlocks = [];
-  text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
-    const idx = codeBlocks.length;
-    codeBlocks.push(`<pre data-lang="${lang || ""}"><code>${escapeHtml(code.trim())}</code></pre>`);
-    return `\x00CODE${idx}\x00`;
-  });
-  text = text.replace(/`([^`]+)`/g, (_, c) => {
-    const idx = codeBlocks.length;
-    codeBlocks.push(`<code>${escapeHtml(c)}</code>`);
-    return `\x00CODE${idx}\x00`;
-  });
-  text = escapeHtml(text);
-  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  text = text.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-  text = text.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-  text = text.replace(/^# (.+)$/gm, "<h1>$1</h1>");
-  text = text.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
-  text = text.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
-  text = text.split(/\n\n+/).map(p =>
-    p.startsWith("<") ? p : `<p>${p.replace(/\n/g, "<br>")}</p>`
-  ).join("");
-  text = text.replace(/\x00CODE(\d+)\x00/g, (_, idx) => codeBlocks[idx]);
-  return text;
-}
-
 // ── Export helpers ────────────────────────────────────────────────────────────
 function exportAsMarkdown(session) {
   const lines = [`# ${session.title}`, `_${new Date(session.createdAt).toLocaleString()}_`, ""];
@@ -134,7 +103,7 @@ function safeFilename(title) {
 }
 
 // ── TypingIndicator ───────────────────────────────────────────────────────────
-function TypingIndicator() {
+const TypingIndicator = memo(function TypingIndicator() {
   return (
     <div className="ch-message">
       <div className="ch-avatar ch-avatar--ai"><Bot size={14} color="#fff" /></div>
@@ -145,7 +114,7 @@ function TypingIndicator() {
       </div>
     </div>
   );
-}
+});
 
 // ── MessageBubble ─────────────────────────────────────────────────────────────
 function MessageBubble({ msg }) {
@@ -155,7 +124,7 @@ function MessageBubble({ msg }) {
     navigator.clipboard.writeText(msg.content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    }).catch(() => { /* clipboard unavailable (e.g. non-HTTPS) */ });
   }
 
   const isUser  = msg.role === "user";
@@ -198,7 +167,7 @@ const PROMPTS = [
   "Review my test strategy for a SaaS app",
 ];
 
-function WelcomeScreen({ onPrompt }) {
+const WelcomeScreen = memo(function WelcomeScreen({ onPrompt }) {
   return (
     <div className="ch-welcome">
       <div className="ch-welcome__glow" />
@@ -215,7 +184,7 @@ function WelcomeScreen({ onPrompt }) {
       </div>
     </div>
   );
-}
+});
 
 // ── ExportMenu ────────────────────────────────────────────────────────────────
 function ExportMenu({ session, onClose }) {
@@ -355,10 +324,12 @@ export default function ChatHistory() {
   // Persist on every change
   useEffect(() => { saveSessions(sessions, userId); }, [sessions, userId]);
 
-  // Scroll to bottom
+  // Scroll to bottom (scoped to active session's message count to avoid
+  // firing on renames, deletes of other sessions, search changes, etc.)
+  const activeMsgCount = activeSession?.messages.length ?? 0;
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [sessions, loading, activeId]);
+  }, [activeMsgCount, loading, activeId]);
 
   // Focus input when switching sessions
   useEffect(() => {
@@ -396,14 +367,16 @@ export default function ChatHistory() {
     setActiveId(id);
     setInput("");
     abortRef.current?.abort();
+    // Auto-close sidebar on mobile so the chat area is visible
+    if (window.innerWidth <= 768) setSidebarOpen(false);
   }
 
   function deleteSession(id) {
-    setSessions(prev => {
-      const next = prev.filter(s => s.id !== id);
-      if (activeId === id) setActiveId(next[0]?.id ?? null);
-      return next;
-    });
+    setSessions(prev => prev.filter(s => s.id !== id));
+    if (activeId === id) {
+      const remaining = sessionsRef.current.filter(s => s.id !== id);
+      setActiveId(remaining[0]?.id ?? null);
+    }
   }
 
   function startRename(id) {
@@ -557,6 +530,8 @@ export default function ChatHistory() {
             <button
               style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex" }}
               onClick={() => setSearch("")}
+              aria-label="Clear search"
+              title="Clear search"
             >
               <X size={12} />
             </button>
