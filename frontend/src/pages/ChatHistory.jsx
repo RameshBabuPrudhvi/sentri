@@ -324,6 +324,20 @@ export default function ChatHistory() {
   // Persist on every change
   useEffect(() => { saveSessions(sessions, userId); }, [sessions, userId]);
 
+  const activeSession = useMemo(
+    () => sessions.find(s => s.id === activeId) ?? null,
+    [sessions, activeId],
+  );
+
+  const filteredSessions = useMemo(() => {
+    if (!search.trim()) return sessions;
+    const q = search.toLowerCase();
+    return sessions.filter(s =>
+      s.title.toLowerCase().includes(q) ||
+      s.messages.some(m => m.content?.toLowerCase().includes(q))
+    );
+  }, [sessions, search]);
+
   // Scroll to bottom (scoped to active session's message count to avoid
   // firing on renames, deletes of other sessions, search changes, etc.)
   const activeMsgCount = activeSession?.messages.length ?? 0;
@@ -340,20 +354,6 @@ export default function ChatHistory() {
   useEffect(() => {
     if (renamingId) setTimeout(() => renameInputRef.current?.focus(), 50);
   }, [renamingId]);
-
-  const activeSession = useMemo(
-    () => sessions.find(s => s.id === activeId) ?? null,
-    [sessions, activeId],
-  );
-
-  const filteredSessions = useMemo(() => {
-    if (!search.trim()) return sessions;
-    const q = search.toLowerCase();
-    return sessions.filter(s =>
-      s.title.toLowerCase().includes(q) ||
-      s.messages.some(m => m.content?.toLowerCase().includes(q))
-    );
-  }, [sessions, search]);
 
   // ── Session CRUD ────────────────────────────────────────────────────────────
   function newSession() {
