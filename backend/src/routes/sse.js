@@ -15,6 +15,7 @@
 import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
 
 const router = Router();
 
@@ -68,7 +69,8 @@ router.get("/runs/:runId/events", (req, res) => {
   res.flushHeaders();
 
   // Send current snapshot immediately so the client has something to render
-  res.write(`data: ${JSON.stringify({ type: "snapshot", run })}\n\n`);
+  const signedRun = signRunArtifacts(run);
+  res.write(`data: ${JSON.stringify({ type: "snapshot", run: signedRun })}\n\n`);
 
   // If already done (completed, failed, aborted, interrupted), send snapshot +
   // done event and close immediately. This handles SSE reconnections that

@@ -38,7 +38,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
-
+import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -172,11 +172,14 @@ export async function runTests(project, tests, run, { parallelWorkers, signal } 
 
     // Emit result event (without the heavy base64 screenshot)
     const { screenshot: _ss, ...resultLean } = result;
-    emitRunEvent(run.id, "result", { result: resultLean });
+    const signedResult = { ...resultLean };
+    if (signedResult.screenshotPath) signedResult.screenshotPath = signArtifactUrl(signedResult.screenshotPath);
+    if (signedResult.videoPath) signedResult.videoPath = signArtifactUrl(signedResult.videoPath);
+    emitRunEvent(run.id, "result", { result: signedResult });
     if (result.screenshotPath) {
       emitRunEvent(run.id, "screenshot", {
         testId: test.id,
-        screenshotPath: result.screenshotPath,
+        screenshotPath: signArtifactUrl(result.screenshotPath),
       });
     }
 
@@ -194,7 +197,7 @@ export async function runTests(project, tests, run, { parallelWorkers, signal } 
     // updates in real time (especially important during parallel execution
     // where multiple results arrive in quick succession).
     if (!isRunAborted(run, signal)) {
-      emitRunEvent(run.id, "snapshot", { run });
+      emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(run) });
     }
   }
 
@@ -267,7 +270,7 @@ export async function runTests(project, tests, run, { parallelWorkers, signal } 
   // (processResult already emits per-result snapshots, but this ensures the
   // frontend has the final state even if the last result's snapshot was lost.)
   if (!isRunAborted(run, signal)) {
-    emitRunEvent(run.id, "snapshot", { run });
+    emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(run) });
   }
 
   // ── Feedback loop: auto-regenerate high-priority failing tests ──────────
