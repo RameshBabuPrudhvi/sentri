@@ -125,7 +125,11 @@ export function AuthProvider({ children }) {
 
   // ── Mount: verify session via /api/auth/me ────────────────────────────────
   useEffect(() => {
-    if (!isCookieSessionValid()) {
+    // If the cookie is readable and shows an expired session, skip the server
+    // call — we know the session is dead. If the cookie is unreadable (returns 0,
+    // e.g. cross-origin deployments), fall through to the server call since the
+    // HttpOnly auth cookie may still be valid.
+    if (readExpCookie() !== 0 && !isCookieSessionValid()) {
       doLogout(false);
       setLoading(false);
       return;

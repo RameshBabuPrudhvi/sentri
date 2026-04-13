@@ -78,6 +78,12 @@ router.post("/restore/:type/:id", (req, res) => {
     }
   } else if (type === "test") {
     const test = testRepo.getByIdIncludeDeleted(id);
+    if (test) {
+      const parentProject = projectRepo.getById(test.projectId);
+      if (!parentProject) {
+        return res.status(409).json({ error: "Parent project is deleted — restore the project first" });
+      }
+    }
     restored = testRepo.restore(id);
     if (restored) {
       logActivity({ ...actor(req),
@@ -86,6 +92,13 @@ router.post("/restore/:type/:id", (req, res) => {
       });
     }
   } else if (type === "run") {
+    const run = runRepo.getByIdIncludeDeleted(id);
+    if (run) {
+      const parentProject = projectRepo.getById(run.projectId);
+      if (!parentProject) {
+        return res.status(409).json({ error: "Parent project is deleted — restore the project first" });
+      }
+    }
     restored = runRepo.restore(id);
     if (restored) {
       logActivity({ ...actor(req),

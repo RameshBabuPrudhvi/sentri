@@ -401,7 +401,7 @@ export function markOrphansInterrupted() {
 export function getDeletedByProjectId(projectId) {
   const db = getDatabase();
   return db.prepare(
-    `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC`
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC`
   ).all(projectId).map(row => {
     if (row.feedbackLoop) {
       try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
@@ -419,7 +419,7 @@ export function getDeletedByProjectId(projectId) {
 export function getDeletedAll() {
   const db = getDatabase();
   return db.prepare(
-    `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC`
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC`
   ).all().map(row => {
     if (row.feedbackLoop) {
       try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
