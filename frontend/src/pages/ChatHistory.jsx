@@ -326,14 +326,8 @@ export default function ChatHistory() {
   const { user }  = useAuth();
   const userId     = user?.id ?? null;
 
-  const [sessions,       setSessions]       = useState(() => {
-    const s = loadSessions(userId);
-    return s;
-  });
-  const [activeId,       setActiveId]       = useState(() => {
-    const s = loadSessions(userId);
-    return s[0]?.id ?? null;
-  });
+  const [sessions,       setSessions]       = useState(() => loadSessions(userId));
+  const [activeId,       setActiveId]       = useState(() => loadSessions(userId)[0]?.id ?? null);
   const [input,          setInput]          = useState("");
   const [loading,        setLoading]        = useState(false);
   const [search,         setSearch]         = useState("");
@@ -346,6 +340,7 @@ export default function ChatHistory() {
   const inputRef       = useRef(null);
   const abortRef       = useRef(null);
   const renameInputRef = useRef(null);
+  const sessionsRef    = useRef(sessions);
 
   // Reload sessions when user changes (login/logout)
   useEffect(() => {
@@ -353,6 +348,9 @@ export default function ChatHistory() {
     setSessions(s);
     setActiveId(s[0]?.id ?? null);
   }, [userId]);
+
+  // Keep ref in sync for use in sendMessage
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // Persist on every change
   useEffect(() => { saveSessions(sessions, userId); }, [sessions, userId]);
@@ -439,21 +437,19 @@ export default function ChatHistory() {
     const userMsg = { role: "user", content, id: Date.now() };
     const replyId = Date.now() + 1;
 
-    // Build history for API from the latest state (avoids stale closure)
-    let history;
-    setSessions(prev => {
-      const session = prev.find(s => s.id === sid);
-      history = (session?.messages ?? [])
-        .filter(m => m.role === "user" || m.role === "assistant")
-        .concat(userMsg)
-        .map(({ role, content }) => ({ role, content }));
+    // Build history for API from the ref (avoids stale closure without
+    // relying on setSessions updater being synchronous)
+    const currentSession = sessionsRef.current.find(s => s.id === sid);
+    const history = (currentSession?.messages ?? [])
+      .filter(m => m.role === "user" || m.role === "assistant")
+      .concat(userMsg)
+      .map(({ role, content }) => ({ role, content }));
 
-      return prev.map(s => {
-        if (s.id !== sid) return s;
-        const msgs = [...s.messages, userMsg, { role: "assistant", content: "", id: replyId }];
-        return { ...s, messages: msgs, updatedAt: Date.now() };
-      });
-    });
+    setSessions(prev => prev.map(s => {
+      if (s.id !== sid) return s;
+      const msgs = [...s.messages, userMsg, { role: "assistant", content: "", id: replyId }];
+      return { ...s, messages: msgs, updatedAt: Date.now() };
+    }));
     setLoading(true);
 
     const controller = new AbortController();
