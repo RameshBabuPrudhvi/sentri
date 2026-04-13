@@ -38,7 +38,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
-import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
+import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
