@@ -12,6 +12,8 @@
  */
 
 import React from "react";
+import { getCsrfToken } from "../../utils/csrf.js";
+import { API_BASE } from "../../utils/apiBase.js";
 
 /**
  * @typedef {Object} ErrorBoundaryState
@@ -57,9 +59,12 @@ export default class ErrorBoundary extends React.Component {
     // the user doesn't report them. Failures are silently swallowed so
     // the error boundary itself never throws.
     try {
-      fetch("/api/system/client-error", {
+      fetch("${API_BASE}/api/system/client-error", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": getCsrfToken()
+        },
         credentials: "include",
         body: JSON.stringify({
           message: error?.message ?? String(error),
