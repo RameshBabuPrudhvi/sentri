@@ -4,7 +4,10 @@
  * Pure function — no external dependencies beyond the shared type enum.
  *
  * Exports:
- *   validateTest(test, projectUrl) → string[]  (empty = valid)
+ *   validateTest(test, projectUrl)     → string[]  (empty = valid)
+ *   validateLocators(code)             → string[]
+ *   validateActions(code)              → string[]
+ *   validateAssertions(code)           → string[]
  */
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
@@ -12,6 +15,306 @@ import { extractTestBody, stripPlaywrightImports, patchNetworkIdle, repairBroken
 import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
+
+// ---------------------------------------------------------------------------
+// Defect #2 — Action method whitelist
+// ---------------------------------------------------------------------------
+
+/**
+ * Complete whitelist of Playwright API methods that Sentri-generated tests
+ * are expected to call. Any method call on `page`, `locator()`, or `expect()`
+ * that is NOT in this set is flagged as an invalid action.
+ *
+ * Grouped for readability; the Set is what drives validation.
+ */
+const VALID_PAGE_ACTIONS = new Set([
+  // Navigation
+  "goto", "goBack", "goForward", "reload", "close", "waitForURL",
+  // Interaction
+  "click", "dblclick", "fill", "type", "press", "pressSequentially",
+  "hover", "focus", "blur", "tap", "check", "uncheck", "selectOption",
+  "dispatchEvent", "dragAndDrop", "setInputFiles",
+  // Waiting
+  "waitForLoadState", "waitForNavigation", "waitForSelector",
+  "waitForFunction", "waitForTimeout", "waitForRequest", "waitForResponse",
+  // Extraction
+  "textContent", "getAttribute", "innerHTML", "innerText", "inputValue",
+  "isChecked", "isDisabled", "isEditable", "isEnabled", "isHidden", "isVisible",
+  // Locators (return locator objects, not results)
+  "locator", "getByRole", "getByLabel", "getByText", "getByPlaceholder",
+  "getByAltText", "getByTitle", "getByTestId", "frameLocator",
+  // Locator terminal actions (called on locator, not page)
+  "count", "nth", "first", "last", "filter", "all",
+  "screenshot", "scrollIntoViewIfNeeded", "selectText",
+  // Expect (assertion builder)
+  "expect",
+  // API / request context (for api tests)
+  "newContext", "get", "post", "put", "patch", "delete", "fetch",
+  // Misc
+  "evaluate", "evaluateHandle", "addInitScript",
+  "keyboard", "mouse", "touchscreen",
+  "on", "once",
+]);
+
+/**
+ * Pattern that matches any method call on page/locator/expect in Playwright code.
+ * Captures: the receiver expression + the method name.
+ *   e.g.  page.clicks(...)  →  method = "clicks"
+ *         locator.fillup()  →  method = "fillup"
+ */
+const ACTION_CALL_RE = /(?:page|locator|frame|context|request)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+
+/**
+ * validateActions(code) → string[]
+ *
+ * Scans all method calls on `page`, `locator`, `frame`, `context`, and
+ * `request` and flags any that are not in VALID_PAGE_ACTIONS.
+ *
+ * Resolves defect #2 — catches typos like `.clicks()`, `.fillIn()`, `.toHavURL()`.
+ *
+ * @param {string} code - Playwright test code
+ * @returns {string[]} Array of issue strings (empty = all actions valid)
+ */
+export function validateActions(code) {
+  if (!code) return [];
+  const issues = [];
+  const seen = new Set();
+  let m;
+  ACTION_CALL_RE.lastIndex = 0;
+  while ((m = ACTION_CALL_RE.exec(code)) !== null) {
+    const method = m[1];
+    if (!VALID_PAGE_ACTIONS.has(method) && !seen.has(method)) {
+      seen.add(method);
+      issues.push(`invalid Playwright method ".${method}()" — not a recognised API`);
+    }
+  }
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Defect #3 — Assertion chain validation
+// ---------------------------------------------------------------------------
+
+/**
+ * All Playwright matcher names (with and without "not." prefix).
+ * Source: https://playwright.dev/docs/api/class-locatorassertions
+ */
+const VALID_MATCHERS = new Set([
+  // Page assertions
+  "toHaveURL", "toHaveTitle",
+  // Locator assertions
+  "toBeAttached", "toBeChecked", "toBeDisabled", "toBeEditable",
+  "toBeEmpty", "toBeEnabled", "toBeFocused", "toBeHidden", "toBeInViewport",
+  "toBeVisible", "toContainText", "toHaveAccessibleDescription",
+  "toHaveAccessibleName", "toHaveAttribute", "toHaveClass", "toHaveCount",
+  "toHaveCSS", "toHaveId", "toHaveJSProperty", "toHaveRole",
+  "toHaveScreenshot", "toHaveText", "toHaveValue", "toHaveValues",
+  // Generic
+  "toBe", "toEqual", "toBeTruthy", "toBeFalsy", "toBeDefined",
+  "toBeNull", "toBeUndefined", "toBeNaN", "toBeGreaterThan",
+  "toBeGreaterThanOrEqual", "toBeLessThan", "toBeLessThanOrEqual",
+  "toContain", "toMatch", "toMatchObject", "toHaveLength", "toThrow",
+  // Snapshot
+  "toMatchSnapshot",
+]);
+
+/**
+ * Matches the full assertion chain after expect():
+ *   expect(page).toHaveURL(...)
+ *   expect(locator).not.toBeVisible()
+ *   expect(value).toBe(...)
+ *
+ * Groups:
+ *   [1] target expression inside expect(...)
+ *   [2] optional ".not" negation
+ *   [3] matcher name
+ */
+const ASSERTION_RE = /expect\s*\(\s*([^)]+?)\s*\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+
+/**
+ * Matchers that must NOT be used with .not because the negated form is
+ * logically redundant or always-passes (Playwright warns/errors on these).
+ */
+const NO_NEGATE_MATCHERS = new Set([
+  "toBeHidden",   // .not.toBeHidden() === toBeVisible() — use the positive form
+  "toBeDisabled", // .not.toBeDisabled() === toBeEnabled()
+  "toBeFalsy",    // .not.toBeFalsy() is confusing — use toBeTruthy()
+  "toBeNull",     // .not.toBeNull() rarely meaningful in Playwright context
+]);
+
+/**
+ * validateAssertions(code) → string[]
+ *
+ * Validates every expect() call in the code:
+ *   - Matcher must be a known Playwright method (catches typos like toHavURL)
+ *   - .not must not be paired with logically-redundant matchers
+ *
+ * Resolves defect #3.
+ *
+ * @param {string} code
+ * @returns {string[]}
+ */
+export function validateAssertions(code) {
+  if (!code) return [];
+  const issues = [];
+  const seenMatchers = new Set();
+  let m;
+  ASSERTION_RE.lastIndex = 0;
+  while ((m = ASSERTION_RE.exec(code)) !== null) {
+    const matcher = m[3];
+    const isNegated = Boolean(m[2]);
+
+    if (!VALID_MATCHERS.has(matcher) && !seenMatchers.has(matcher)) {
+      seenMatchers.add(matcher);
+      issues.push(`unknown assertion matcher ".${matcher}()" — check for typos (e.g. toHavURL → toHaveURL)`);
+    }
+
+    if (isNegated && NO_NEGATE_MATCHERS.has(matcher)) {
+      issues.push(
+        `.not.${matcher}() is logically redundant — use the positive counterpart instead`
+      );
+    }
+  }
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Defect #1 — Locator validation
+// ---------------------------------------------------------------------------
+
+/**
+ * CSS pseudo-classes that are valid in a browser context.
+ * Any other :<word> pseudo is flagged as suspicious.
+ */
+const VALID_CSS_PSEUDOS = new Set([
+  "root", "nth-child", "nth-of-type", "nth-last-child", "nth-last-of-type",
+  "first-child", "last-child", "first-of-type", "last-of-type",
+  "only-child", "only-of-type", "not", "is", "where", "has",
+  "hover", "focus", "focus-within", "focus-visible", "active", "visited",
+  "checked", "disabled", "enabled", "placeholder", "empty", "target",
+  "link", "any-link", "local-link", "scope", "matches",
+  // Playwright-specific
+  "visible", "hidden", "text", "has-text", "above", "below", "near",
+  "left-of", "right-of",
+]);
+
+/**
+ * Captures CSS selector arguments passed to .locator(), .querySelector*,
+ * or .waitForSelector().
+ */
+const CSS_LOCATOR_RE = /(?:locator|querySelector|waitForSelector|waitForSelectorAll)\s*\(\s*["'`]([^"'`]+)["'`]/g;
+
+/**
+ * Captures XPath strings (detected by leading // or (// patterns).
+ */
+const XPATH_LOCATOR_RE = /(?:locator|querySelector|waitForSelector)\s*\(\s*["'`]((?:\/\/|\(\/\/))[^"'`]+)["'`]/g;
+
+/**
+ * Validates a CSS selector string for obvious structural errors.
+ * Not a full CSS parser — catches the most common AI mistakes.
+ *
+ * @param {string} selector
+ * @returns {string|null} Error description or null if OK
+ */
+function checkCssSelector(selector) {
+  // Unclosed brackets
+  const openSquare = (selector.match(/\[/g) || []).length;
+  const closeSquare = (selector.match(/\]/g) || []).length;
+  if (openSquare !== closeSquare) {
+    return `CSS selector has unbalanced brackets: "${selector}"`;
+  }
+  const openParen = (selector.match(/\(/g) || []).length;
+  const closeParen = (selector.match(/\)/g) || []).length;
+  if (openParen !== closeParen) {
+    return `CSS selector has unbalanced parentheses: "${selector}"`;
+  }
+
+  // Unknown pseudo-class
+  const pseudoMatch = selector.match(/:([a-zA-Z-]+)/g);
+  if (pseudoMatch) {
+    for (const pseudo of pseudoMatch) {
+      const name = pseudo.slice(1).toLowerCase().replace(/^:/, "");
+      if (!VALID_CSS_PSEUDOS.has(name)) {
+        return `CSS selector uses unknown pseudo-class ":${name}" in "${selector}"`;
+      }
+    }
+  }
+
+  // Overly deep selector (> 6 combinators is a code smell)
+  const depth = (selector.match(/\s*[>+~\s]\s*/g) || []).length;
+  if (depth > 6) {
+    return `CSS selector is overly specific (${depth} combinators) — consider a stable locator like getByRole or data-testid: "${selector}"`;
+  }
+
+  return null;
+}
+
+/**
+ * Validates an XPath string for common structural errors.
+ *
+ * @param {string} xpath
+ * @returns {string|null}
+ */
+function checkXPath(xpath) {
+  // Balanced brackets
+  const openSquare = (xpath.match(/\[/g) || []).length;
+  const closeSquare = (xpath.match(/\]/g) || []).length;
+  if (openSquare !== closeSquare) {
+    return `XPath has unbalanced brackets: "${xpath}"`;
+  }
+  const openParen = (xpath.match(/\(/g) || []).length;
+  const closeParen = (xpath.match(/\)/g) || []).length;
+  if (openParen !== closeParen) {
+    return `XPath has unbalanced parentheses: "${xpath}"`;
+  }
+
+  // Invalid axis shorthand — AI sometimes writes "//div//[@id]" (double slash before @)
+  if (/\/\/\[@/.test(xpath)) {
+    return `XPath has invalid syntax "//[@" — should be "//*[@" or "//element[@": "${xpath}"`;
+  }
+
+  // Overly deep path (> 8 steps is a fragile locator)
+  const steps = (xpath.match(/\//g) || []).length;
+  if (steps > 8) {
+    return `XPath is overly specific (${steps} path steps) — consider a stable locator: "${xpath}"`;
+  }
+
+  return null;
+}
+
+/**
+ * validateLocators(code) → string[]
+ *
+ * Extracts all CSS and XPath locator strings from the code and validates each.
+ * Resolves defect #1.
+ *
+ * @param {string} code
+ * @returns {string[]}
+ */
+export function validateLocators(code) {
+  if (!code) return [];
+  const issues = [];
+
+  // CSS selectors
+  let m;
+  CSS_LOCATOR_RE.lastIndex = 0;
+  while ((m = CSS_LOCATOR_RE.exec(code)) !== null) {
+    const selector = m[1];
+    if (selector.startsWith("//") || selector.startsWith("(//")) continue; // XPath, handled below
+    const err = checkCssSelector(selector);
+    if (err) issues.push(err);
+  }
+
+  // XPath
+  XPATH_LOCATOR_RE.lastIndex = 0;
+  while ((m = XPATH_LOCATOR_RE.exec(code)) !== null) {
+    const err = checkXPath(m[1]);
+    if (err) issues.push(err);
+  }
+
+  return issues;
+}
 
 /**
  * Validate a single AI-generated test object.
@@ -88,6 +391,14 @@ export function validateTest(test, projectUrl) {
       // Wrap in async function so `await` is valid at the top level
       const wrapped = `(async () => {\n${codeToCheck}\n})();`;
       parse(wrapped, { ecmaVersion: 2022, sourceType: "script" });
+
+      // Deep validation — locators, action methods, assertion chains
+      // (defects #1, #2, #3 from issue #57)
+      // Only run after syntax is confirmed valid so we're not parsing
+      // malformed code with regexes and generating misleading errors.
+      issues.push(...validateLocators(codeToCheck));
+      issues.push(...validateActions(codeToCheck));
+      issues.push(...validateAssertions(codeToCheck));
     } catch (syntaxErr) {
       const loc = syntaxErr.loc ? ` (line ${syntaxErr.loc.line}, col ${syntaxErr.loc.column})` : "";
       issues.push(`playwrightCode has syntax error${loc}: ${syntaxErr.message}`);

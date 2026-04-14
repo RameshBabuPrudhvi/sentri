@@ -760,6 +760,21 @@ These items are not phase-bounded — they should be addressed incrementally alo
 
 ---
 
+### ~~MAINT-012 — Deep test validation (locator, action, assertion) (M-07)~~ ✅ Complete
+
+**Problem:** `backend/src/pipeline/testValidator.js` only checked basic structure (URL presence + step count). AI-generated tests containing invalid CSS selectors, typo'd Playwright API calls (`.clicks()`, `.toHavURL()`), or logically-redundant `.not` chains passed validation and failed at runtime.
+
+**Implemented in:** PR #57
+- Added `validateLocators(code)` — checks CSS selectors for unbalanced brackets, unknown pseudo-classes, and excessive depth (> 6 combinators); checks XPath for unbalanced brackets, invalid `//[@` syntax, and excessive depth (> 8 steps)
+- Added `validateActions(code)` — whitelists all valid Playwright API methods on `page`/`locator`/`frame`/`context`/`request`; flags any call not in the whitelist (e.g. `.clicks()`, `.fillIn()`)
+- Added `validateAssertions(code)` — validates every `expect()` chain against the full Playwright matcher set; flags typos (`toHavURL` → `toHaveURL`) and logically-redundant `.not` pairs (`.not.toBeHidden()`, `.not.toBeDisabled()`)
+- Deep passes only run after Acorn confirms syntactic validity — no false positives from parsing malformed code
+- All three new validators are exported for unit testing with `VALID_PAGE_ACTIONS` and `VALID_MATCHERS` sets exported for whitelist extension
+
+**Files:** `backend/src/pipeline/testValidator.js` | **Effort:** M | **Source:** Issue #57
+
+---
+
 ## Competitive Gap Analysis
 
 How Sentri compares to industry-standard QA platforms as of this audit:
@@ -798,10 +813,10 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-010 ✅, ENH-013 ✅, ENH-020 ✅, ENH-021 ✅, ENH-024 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
-| Ongoing | MAINT-001 through MAINT-011 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅) | Platform moat + infrastructure |
+| Ongoing | MAINT-001 through MAINT-012 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅, MAINT-012 ✅) | Platform moat + infrastructure |
 
-**Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-010, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010 = **20 complete**
+**Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 12 maintenance items = **59 tracked items**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-010, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **21 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
 **Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07

@@ -550,7 +550,7 @@ Stage 3  intentClassifier.js    Classify element intent; build user journeys
 Stage 4  journeyGenerator.js    Generate test plans (PLAN phase, avoids token truncation)
 Stage 5  deduplicator.js        4-layer dedup: structural hash → fuzzy name → semantic TF-IDF → description
 Stage 6  assertionEnhancer.js   Strengthen weak/missing assertions using page context
-Stage 7  testValidator.js       Reject malformed, placeholder, or navigation-only tests
+Stage 7  testValidator.js       Structural + locator + action method + assertion chain validation
 Stage 8  testPersistence.js     Write validated tests to DB as "draft" status
 ```
 
@@ -570,6 +570,23 @@ Stages 5–7 are shared between `generateSingleTest` and `crawlAndGenerateTests`
 Exported constants `FUZZY_NAME_THRESHOLD` and `SEMANTIC_SIMILARITY_THRESHOLD` let tests override thresholds without editing production code. The TF-IDF stop-word list is intentionally conservative: it strips common English words and generic QA verbs so domain-specific nouns (feature names, form field names, page routes) carry the signal.
 
 **Performance note:** Layers 3 and 4 are O(n²) over the post-layer-1 set. This is acceptable for typical batch sizes (< 200 tests) but should be revisited if batches routinely exceed 1 000.
+
+---
+
+### Stage 7 — Validator detail
+
+`testValidator.js` runs four validation passes in sequence. All collected issues are returned; the pipeline rejects any test with at least one issue.
+
+| Pass | Function | What it catches | Defect |
+|------|----------|-----------------|--------|
+| Structural | (inline in `validateTest`) | Missing name/steps, placeholder URLs, missing `async`, missing `page.goto` | existing |
+| Locator | `validateLocators(code)` | Unbalanced CSS brackets, unknown pseudo-classes, overly-deep selectors, malformed XPath (`//[@`) | #1 |
+| Action | `validateActions(code)` | Method calls on `page`/`locator`/`frame`/`request` not in the Playwright API whitelist (e.g. `.clicks()`, `.fillIn()`) | #2 |
+| Assertion | `validateAssertions(code)` | Matcher typos in `expect()` chains (e.g. `toHavURL`), logically-redundant `.not.toBeHidden()` | #3 |
+
+Deep validation (passes 2–4) only runs **after** Acorn confirms the code is syntactically valid, so regex passes never operate on malformed code.
+
+**Extending the whitelists:** add entries to `VALID_PAGE_ACTIONS` or `VALID_MATCHERS` in `testValidator.js` when Playwright releases new APIs. Do not inline these sets into other files.
 
 ---
 
