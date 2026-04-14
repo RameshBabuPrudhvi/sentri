@@ -135,24 +135,45 @@ export function runMigrations(db) {
 
     const applyMigration = db.transaction(() => {
       // SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN.
-      // To keep migration files idempotent we split the SQL on semicolons
-      // and execute each statement individually, silently ignoring
-      // "duplicate column name" errors from ADD COLUMN on tables that
-      // already have the column (e.g. when 001 was updated in-place and
-      // a later migration re-adds the same column for older databases).
-      const statements = sql
-        .split(";")
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-      for (const stmt of statements) {
-        try {
-          db.exec(stmt);
-        } catch (err) {
-          const isDupCol = err.message && err.message.includes("duplicate column name");
-          if (isDupCol) {
-            // Column already exists — safe to ignore
-            continue;
+      // If the migration contains ALTER TABLE ADD COLUMN for a column that
+      // already exists (e.g. 002 re-adds columns that 001 already created
+      // on fresh databases), we fall back to statement-by-statement execution
+      // and silently skip "duplicate column name" errors.
+      try {
+        db.exec(sql);
+      } catch (err) {
+        if (err.message && err.message.includes("duplicate column name")) {
+          // Re-execute statement by statement, skipping duplicate columns.
+          // We use a regex to split on semicolons that are NOT inside
+          // parentheses (to avoid breaking CREATE TABLE bodies).
+          const statements = [];
+          let depth = 0;
+          let current = "";
+          for (const ch of sql) {
+            if (ch === "(") depth++;
+            else if (ch === ")") depth--;
+            if (ch === ";" && depth === 0) {
+              const trimmed = current.trim();
+              if (trimmed.length > 0) statements.push(trimmed);
+              current = "";
+            } else {
+              current += ch;
+            }
           }
+          const last = current.trim();
+          if (last.length > 0) statements.push(last);
+
+          for (const stmt of statements) {
+            try {
+              db.exec(stmt);
+            } catch (stmtErr) {
+              if (stmtErr.message && stmtErr.message.includes("duplicate column name")) {
+                continue;
+              }
+              throw stmtErr;
+            }
+          }
+        } else {
           throw err;
         }
       }
