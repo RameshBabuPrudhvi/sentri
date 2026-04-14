@@ -17,6 +17,7 @@
  * | `PATCH`  | `/api/projects/:id/tests/:testId/reject`      | Reject                              |
  * | `PATCH`  | `/api/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
  * | `POST`   | `/api/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
+ * | `GET`    | `/api/projects/:id/tests/counts`              | Per-status test counts              |
  * | `GET`    | `/api/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
  * | `GET`    | `/api/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
  * | `GET`    | `/api/projects/:id/tests/traceability`        | Traceability matrix                 |
@@ -590,6 +591,14 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
     });
   }
   res.json({ updated: updated.length, tests: updated });
+});
+
+// ─── Test counts (lightweight — no row data, just per-status totals) ──────────
+
+router.get("/projects/:id/tests/counts", (req, res) => {
+  const counts = testRepo.countByReviewStatus(req.params.id);
+  const total = counts.draft + counts.approved + counts.rejected;
+  res.json({ ...counts, total });
 });
 
 // ─── Export endpoints — enterprise test management integration ────────────────

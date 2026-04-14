@@ -44,6 +44,7 @@ export default function ProjectDetail() {
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
   const [testsMeta, setTestsMeta]         = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
+  const [testCounts, setTestCounts]       = useState({ draft: 0, approved: 0, rejected: 0, total: 0 });
   const [runs, setRuns]                   = useState([]);
   const [runsMeta, setRunsMeta]           = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [activeRun, setActiveRun]         = useState(null);
@@ -115,14 +116,16 @@ export default function ProjectDetail() {
 
   const refresh = useCallback(async () => {
     try {
-      const [p, tRes, rRes] = await Promise.all([
+      const [p, tRes, rRes, counts] = await Promise.all([
         api.getProject(id),
         api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE),
         api.getRunsPaged(id, runsPageRef.current, PAGE_SIZE),
+        api.getTestCounts(id),
       ]);
       setProject(p);
       setTests(tRes.data); setTestsMeta(tRes.meta);
       setRuns(rRes.data);  setRunsMeta(rRes.meta);
+      setTestCounts(counts);
       // Clamp pages so they don't point past the last page after
       // a review action removes tests from the current filter view.
       setReviewPage(prev => {
@@ -285,7 +288,7 @@ export default function ProjectDetail() {
 
   // Server-side pagination — tests are already a single page from the API.
   // Client-side filtering (review status, category, search) applies to the current page.
-  const reviewTotalPages = Math.max(1, Math.ceil(testsMeta.total / PAGE_SIZE));
+  const reviewTotalPages = Math.max(1, Math.ceil(testCounts.total / PAGE_SIZE));
   const pagedReview = filteredByReview;
 
   const passed = approvedTests.filter(t => t.lastResult === "passed").length;
@@ -316,12 +319,17 @@ export default function ProjectDetail() {
         project={project}
         projectId={id}
         tests={tests}
-        totalTests={testsMeta.total}
+        totalTests={testCounts.total}
         parallelWorkers={parallelWorkers}
         onWorkersChange={setParallelWorkers}
         actionLoading={actionLoading}
         onRun={doRun}
-        stats={{ draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed }}
+        stats={{
+          draftTests: { length: testCounts.draft },
+          approvedTests: { length: testCounts.approved },
+          rejectedTests: { length: testCounts.rejected },
+          apiTests, uiTests, passed, failed,
+        }}
       />
 
       {/* Active run banner — now the primary CTA to view run, tab stays put */}
@@ -341,11 +349,11 @@ export default function ProjectDetail() {
       />
 
       {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
-      {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
+      {testCounts.draft > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
         <div className="pd-banner pd-banner--amber">
           <Info size={14} color="var(--amber)" className="shrink-0" />
           <span className="pd-banner-text-amber">
-            <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
+            <strong>{testCounts.draft} test{testCounts.draft !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
           </span>
           <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
             Review drafts <ArrowRight size={11} />
@@ -356,13 +364,13 @@ export default function ProjectDetail() {
       {/* Tabs */}
       <div className="pd-tab-bar">
         {[
-          ["review", `Tests (${testsMeta.total})`],
+          ["review", `Tests (${testCounts.total})`],
           ["runs",   `Runs (${runsMeta.total})`],
           ["traceability", "Traceability"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
-            {key === "review" && draftTests.length > 0 && (
-              <span className="pd-tab-badge">{draftTests.length}</span>
+            {key === "review" && testCounts.draft > 0 && (
+              <span className="pd-tab-badge">{testCounts.draft}</span>
             )}
             {label}
           </button>
@@ -389,7 +397,7 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {testsMeta.total === 0 ? (
+          {testCounts.total === 0 ? (
             <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
@@ -403,10 +411,10 @@ export default function ProjectDetail() {
               {/* Filter + search row */}
               <div className="pd-filter-row">
                 {[
-                  ["draft",    `Draft (${draftTests.length})`,       "var(--amber)"],
-                  ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
-                  ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
-                  ["all",      `All (${testsMeta.total})`,           "var(--text2)"],
+                  ["draft",    `Draft (${testCounts.draft})`,       "var(--amber)"],
+                  ["approved", `Approved (${testCounts.approved})`, "var(--green)"],
+                  ["rejected", `Rejected (${testCounts.rejected})`, "var(--red)"  ],
+                  ["all",      `All (${testCounts.total})`,         "var(--text2)"],
                 ].map(([key, label, color]) => (
                   <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }}
                     className="pd-filter-pill"
@@ -572,7 +580,7 @@ export default function ProjectDetail() {
 
               {/* Pagination — server-side, changing page triggers refresh */}
               <TablePagination
-                total={testsMeta.total}
+                total={testCounts.total}
                 page={reviewPage}
                 totalPages={reviewTotalPages}
                 onPageChange={setReviewPage}

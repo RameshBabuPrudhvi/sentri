@@ -145,6 +145,12 @@ export const api = {
    */
   getTestsPaged: (id, page = 1, pageSize = 10) =>
     req("GET", `/projects/${id}/tests?page=${page}&pageSize=${pageSize}`),
+  /**
+   * Get per-status test counts for a project (lightweight — no row data).
+   * @param {string} id - Project ID.
+   * @returns {Promise<{draft: number, approved: number, rejected: number, total: number}>}
+   */
+  getTestCounts: (id) => req("GET", `/projects/${id}/tests/counts`),
   /** @returns {Promise<Array>} All tests across all projects. */
   getAllTests:   ()                  => req("GET",    "/tests"),
   /** @param {string} testId */
