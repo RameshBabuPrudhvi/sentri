@@ -137,14 +137,23 @@ export const api = {
   /** @param {string} id - Project ID. Returns tests for that project. */
   getTests:     (id)                => req("GET",    `/projects/${id}/tests`),
   /**
-   * Get tests for a project with server-side pagination.
+   * Get tests for a project with server-side pagination and optional filters.
    * @param {string} id       - Project ID.
    * @param {number} [page=1]
    * @param {number} [pageSize=10]
+   * @param {Object} [filters]
+   * @param {string} [filters.reviewStatus] - "draft", "approved", "rejected", or "all".
+   * @param {string} [filters.category]     - "api", "ui", or "all".
+   * @param {string} [filters.search]       - Free-text search.
    * @returns {Promise<{data: Object[], meta: {total: number, page: number, pageSize: number, hasMore: boolean}}>}
    */
-  getTestsPaged: (id, page = 1, pageSize = 10) =>
-    req("GET", `/projects/${id}/tests?page=${page}&pageSize=${pageSize}`),
+  getTestsPaged: (id, page = 1, pageSize = 10, filters = {}) => {
+    const params = new URLSearchParams({ page, pageSize });
+    if (filters.reviewStatus && filters.reviewStatus !== "all") params.set("reviewStatus", filters.reviewStatus);
+    if (filters.category && filters.category !== "all") params.set("category", filters.category);
+    if (filters.search) params.set("search", filters.search);
+    return req("GET", `/projects/${id}/tests?${params}`);
+  },
   /**
    * Get per-status test counts for a project (lightweight — no row data).
    * @param {string} id - Project ID.

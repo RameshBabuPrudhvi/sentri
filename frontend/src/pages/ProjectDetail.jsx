@@ -55,6 +55,7 @@ export default function ProjectDetail() {
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "ui" | "api"
+  const [searchInput, setSearchInput]     = useState("");
   const [search, setSearch]               = useState("");
   const [selected, setSelected]           = useState(new Set());
   const [reviewPage, setReviewPage]         = useState(1);
@@ -67,6 +68,15 @@ export default function ProjectDetail() {
   const [traceability, setTraceability]     = useState(null);
   const [traceLoading, setTraceLoading]     = useState(false);
   const { addNotification } = useNotifications();
+
+  // ── Debounce search input → search state (300ms) ───────────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setReviewPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // ── Highlight recently created tests ──────────────────────────────────────
   // Any test created within the last 5 minutes is "new" — works regardless of
@@ -106,19 +116,30 @@ export default function ProjectDetail() {
     setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
   };
 
-  // Use refs so the fetch callback always reads the latest page values
+  // Use refs so the fetch callback always reads the latest page / filter values
   // without needing them in the dependency array (which would cause an
   // infinite loop when the clamp logic adjusts the page after fetch).
-  const reviewPageRef = useRef(reviewPage);
-  const runsPageRef   = useRef(runsPage);
+  const reviewPageRef    = useRef(reviewPage);
+  const runsPageRef      = useRef(runsPage);
+  const reviewFilterRef  = useRef(reviewFilter);
+  const categoryFilterRef = useRef(categoryFilter);
+  const searchRef        = useRef(search);
   useEffect(() => { reviewPageRef.current = reviewPage; }, [reviewPage]);
   useEffect(() => { runsPageRef.current = runsPage; }, [runsPage]);
+  useEffect(() => { reviewFilterRef.current = reviewFilter; }, [reviewFilter]);
+  useEffect(() => { categoryFilterRef.current = categoryFilter; }, [categoryFilter]);
+  useEffect(() => { searchRef.current = search; }, [search]);
 
   const refresh = useCallback(async () => {
     try {
+      const filters = {};
+      if (reviewFilterRef.current && reviewFilterRef.current !== "all") filters.reviewStatus = reviewFilterRef.current;
+      if (categoryFilterRef.current && categoryFilterRef.current !== "all") filters.category = categoryFilterRef.current;
+      if (searchRef.current) filters.search = searchRef.current;
+
       const [p, tRes, rRes, counts] = await Promise.all([
         api.getProject(id),
-        api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE),
+        api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE, filters),
         api.getRunsPaged(id, runsPageRef.current, PAGE_SIZE),
         api.getTestCounts(id),
       ]);
@@ -141,8 +162,8 @@ export default function ProjectDetail() {
     }
   }, [id]);
 
-  // Re-fetch when page changes (separate effect to avoid loop with clamp).
-  useEffect(() => { refresh(); }, [reviewPage, runsPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-fetch when page or filters change (separate effect to avoid loop with clamp).
+  useEffect(() => { refresh(); }, [reviewPage, runsPage, reviewFilter, categoryFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
@@ -259,33 +280,11 @@ export default function ProjectDetail() {
     setSelected(checked ? new Set(ids) : new Set());
   }
 
-  // Category filter helper — still needed for client-side filtering of the current page
-  const isApiTest     = t => t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described";
-
-  const filteredByReview = tests.filter(t => {
-    const statusOk =
-      reviewFilter === "all"   ? true :
-      reviewFilter === "draft" ? (!t.reviewStatus || t.reviewStatus === "draft") :
-                                  t.reviewStatus === reviewFilter;
-    const categoryOk =
-      categoryFilter === "all" ? true :
-      categoryFilter === "api" ? isApiTest(t) :
-      categoryFilter === "ui"  ? !isApiTest(t) : true;
-    const searchOk = !search ||
-      t.name?.toLowerCase().includes(search.toLowerCase()) ||
-      t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
-    return statusOk && categoryOk && searchOk;
-  }).sort((a, b) => {
-    // Newest first — so tests from the latest generation run appear at the top
-    const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return db - da;
-  });
-
-  // Server-side pagination — tests are already a single page from the API.
-  // Client-side filtering (review status, category, search) applies to the current page.
-  const reviewTotalPages = Math.max(1, Math.ceil(testCounts.total / PAGE_SIZE));
-  const pagedReview = filteredByReview;
+  // Server-side pagination and filtering — tests are already filtered and paged
+  // by the API. The `testsMeta.total` reflects the filtered count.
+  const filteredByReview = tests;
+  const reviewTotalPages = Math.max(1, Math.ceil(testsMeta.total / PAGE_SIZE));
+  const pagedReview = tests;
 
   if (loading) return (
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -440,7 +439,7 @@ export default function ProjectDetail() {
                 <div className="flex-1" />
                 <div className="pd-search-wrap">
                   <Search size={12} color="var(--text3)" className="pd-search-icon" />
-                  <input className="input pd-search-input" value={search} onChange={e => { setSearch(e.target.value); setReviewPage(1); }}
+                  <input className="input pd-search-input" value={searchInput} onChange={e => setSearchInput(e.target.value)}
                     placeholder="Search tests..." />
                 </div>
               </div>
@@ -576,7 +575,7 @@ export default function ProjectDetail() {
 
               {/* Pagination — server-side, changing page triggers refresh */}
               <TablePagination
-                total={testCounts.total}
+                total={testsMeta.total}
                 page={reviewPage}
                 totalPages={reviewTotalPages}
                 onPageChange={setReviewPage}

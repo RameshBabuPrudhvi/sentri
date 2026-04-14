@@ -47,9 +47,13 @@ const router = Router();
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/tests", (req, res) => {
-  const { page, pageSize } = req.query;
+  const { page, pageSize, reviewStatus, category, search } = req.query;
   if (page !== undefined || pageSize !== undefined) {
-    return res.json(testRepo.getByProjectIdPaged(req.params.id, page, pageSize));
+    const filters = {};
+    if (reviewStatus && reviewStatus !== "all") filters.reviewStatus = reviewStatus;
+    if (category && category !== "all") filters.category = category;
+    if (search) filters.search = search;
+    return res.json(testRepo.getByProjectIdPaged(req.params.id, page, pageSize, filters));
   }
   res.json(testRepo.getByProjectId(req.params.id));
 });

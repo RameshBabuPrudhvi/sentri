@@ -113,21 +113,43 @@ export function getByProjectId(projectId) {
 }
 
 /**
- * Get non-deleted tests for a project with pagination.
+ * Get non-deleted tests for a project with pagination and optional filters.
  * @param {string}        projectId
  * @param {number|string} [page=1]
  * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @param {Object}        [filters]
+ * @param {string}        [filters.reviewStatus] — "draft", "approved", "rejected", or undefined for all.
+ * @param {string}        [filters.category]     — "api", "ui", or undefined for all.
+ * @param {string}        [filters.search]       — free-text search against name and sourceUrl.
  * @returns {PagedResult}
  */
-export function getByProjectIdPaged(projectId, page, pageSize) {
+export function getByProjectIdPaged(projectId, page, pageSize, filters = {}) {
   const db = getDatabase();
   const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
-  const total = db.prepare(
-    "SELECT COUNT(*) as cnt FROM tests WHERE projectId = ? AND deletedAt IS NULL"
-  ).get(projectId).cnt;
+
+  const conditions = ["projectId = ?", "deletedAt IS NULL"];
+  const params = [projectId];
+
+  if (filters.reviewStatus) {
+    conditions.push("reviewStatus = ?");
+    params.push(filters.reviewStatus);
+  }
+  if (filters.category === "api") {
+    conditions.push("generatedFrom IN ('api_har_capture', 'api_user_described')");
+  } else if (filters.category === "ui") {
+    conditions.push("(generatedFrom IS NULL OR generatedFrom NOT IN ('api_har_capture', 'api_user_described'))");
+  }
+  if (filters.search) {
+    conditions.push("(name LIKE ? OR sourceUrl LIKE ?)");
+    const like = `%${filters.search}%`;
+    params.push(like, like);
+  }
+
+  const where = conditions.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) as cnt FROM tests WHERE ${where}`).get(...params).cnt;
   const data = db.prepare(
-    "SELECT * FROM tests WHERE projectId = ? AND deletedAt IS NULL ORDER BY createdAt DESC LIMIT ? OFFSET ?"
-  ).all(projectId, ps, offset).map(rowToTest);
+    `SELECT * FROM tests WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`
+  ).all(...params, ps, offset).map(rowToTest);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
