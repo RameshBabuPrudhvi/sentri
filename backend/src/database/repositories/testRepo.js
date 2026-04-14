@@ -335,7 +335,7 @@ export function getDeletedAll() {
  */
 export function restore(id) {
   const db = getDatabase();
-  const info = db.prepare("UPDATE tests SET deletedAt = NULL WHERE id = ?").run(id);
+  const info = db.prepare("UPDATE tests SET deletedAt = NULL WHERE id = ? AND deletedAt IS NOT NULL").run(id);
   return info.changes > 0;
 }
 

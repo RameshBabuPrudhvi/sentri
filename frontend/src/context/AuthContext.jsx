@@ -81,7 +81,12 @@ export function AuthProvider({ children }) {
   const scheduleRefresh = useCallback(function schedule() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     const ms = msUntilRefresh();
-    if (ms === null) return;
+    if (ms === null) {
+      // Cross-origin: token_exp cookie may be unreadable (third-party cookie
+      // restrictions). Fall back to a fixed interval so the session stays alive.
+      refreshTimerRef.current = setTimeout(schedule, 55 * 60 * 1000);
+      return;
+    }
     refreshTimerRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/auth/refresh`, {
