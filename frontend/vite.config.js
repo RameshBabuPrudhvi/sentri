@@ -17,8 +17,6 @@ export default defineConfig({
           "vendor-recharts": ["recharts"],
           // Icon library — large tree before shaking
           "vendor-icons": ["lucide-react"],
-          // PDF generation utility
-          "vendor-pdf": ["jspdf", "html2canvas"],
         },
       },
     },
