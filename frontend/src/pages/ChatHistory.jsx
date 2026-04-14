@@ -374,6 +374,7 @@ export default function ChatHistory() {
   function deleteSession(id) {
     setSessions(prev => prev.filter(s => s.id !== id));
     if (activeId === id) {
+      abortRef.current?.abort();
       const remaining = sessionsRef.current.filter(s => s.id !== id);
       setActiveId(remaining[0]?.id ?? null);
     }
@@ -460,8 +461,10 @@ export default function ChatHistory() {
       if (err.name !== "AbortError") {
         let errorMsg = (err.message || "An unexpected error occurred.").replace(/^\[\d+\]\s*/, "");
         const lower = errorMsg.toLowerCase();
-        if (lower.includes("failed to fetch") || lower.includes("networkerror")) {
+        if (lower.includes("failed to fetch") || lower.includes("fetch failed") || lower.includes("networkerror") || lower.includes("network error")) {
           errorMsg = "Connection lost. Check that the AI provider is configured in Settings.";
+        } else if (lower.includes("session expired")) {
+          errorMsg = "Your session has expired. Please sign in again.";
         }
         setSessions(prev => prev.map(s => {
           if (s.id !== sid) return s;

@@ -374,5 +374,5 @@
     var(--surface-raised, var(--surface)) 75%
   );
   background-size: 1200px 100%;
-  animation: shimmer 1.4s infinite linear;
+  animation: shimmer-bar 1.4s infinite linear;
 }
