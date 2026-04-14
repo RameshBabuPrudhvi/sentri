@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **API**: `POST /api/restore/:type/:id` — restores a soft-deleted entity; project restores cascade to tests and runs that were deleted at the same time (individually-deleted items are preserved in the recycle bin) (ENH-020)
 - **API**: `DELETE /api/purge/:type/:id` — permanently and irreversibly deletes a soft-deleted entity (ENH-020)
 - **API**: Pagination on `GET /api/projects/:id/tests`, `GET /api/tests`, and `GET /api/projects/:id/runs` — pass `?page=N&pageSize=N` to receive `{ data, meta: { total, page, pageSize, hasMore } }` instead of an unbounded list. Default page size is 10, configurable via `DEFAULT_PAGE_SIZE` in `backend/src/utils/pagination.js` (ENH-010)
+- **API**: `GET /api/projects/:id/tests/counts` — lightweight endpoint returning per-status test counts (`{ draft, approved, rejected, total }`) without fetching row data; used by the Project Detail page for accurate filter pills, tab badges, and Run button state across all pages (ENH-010)
 - **Frontend**: Project Detail page now uses server-side pagination for both tests and runs tabs — only the current page is fetched from the backend instead of the entire dataset (ENH-010)
 - **Frontend**: Vendor bundle splitting in Vite config — react/react-dom/react-router, recharts, lucide-react, and jspdf are emitted as separate cacheable chunks, reducing initial app bundle size (ENH-024)
 - **Frontend**: `PageSkeleton` shimmer component used as the `<Suspense>` fallback for all lazily-loaded routes — replaces the plain Loading… text with an animated skeleton that matches the page layout (ENH-024)
@@ -27,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Data**: Project cascade-restore (`POST /api/restore/project/:id`) now only restores tests and runs that were deleted at the same time as the project — items individually deleted before the project are left in the recycle bin (ENH-020)
 - **Data**: Cascade soft-delete (`DELETE /api/projects/:id`) is now wrapped in a SQLite transaction so all entities get the same `deletedAt` timestamp — prevents cascade-restore from missing children due to second-boundary crossing (ENH-020)
 - **Frontend**: Recycle Bin error state is now cleared on reload and before restore/purge actions — previously errors were sticky and never dismissed (ENH-020)
+- **Frontend**: Project Detail filter pills, tab badges, Run button count, and header stats now use server-side totals from `GET /api/projects/:id/tests/counts` — previously these were computed from only the current page of tests, showing incorrect counts with server-side pagination (ENH-010)
+- **Frontend**: Paginated runs listing now includes `pipelineStats` in the lean column set — the "tests generated" count for generate-type runs was showing "—" because `pipelineStats` was excluded from the paginated query (ENH-010)
+- **Frontend**: Clipboard copy in AI Chat modal restored `.catch()` handler — prevents unhandled promise rejection on non-HTTPS or when clipboard permission is denied
 
 ### Changed
 - **Data**: `DELETE /api/projects/:id` now performs a soft-delete cascade — tests and runs are moved to the Recycle Bin rather than permanently erased; restore the project to recover everything (ENH-020)
@@ -35,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chat**: Chat session storage is scoped by authenticated user ID to prevent cross-account data leakage (#83)
 
 ### Removed
-- **Nav**: AI Chat sidebar link and `/chat` route removed — the AI chat modal (`⌘K`) remains available from any page
+- **Nav**: AI Chat sidebar link and `/chat` route disconnected — the AI chat modal (`⌘K`) remains available from any page; `ChatHistory.jsx` and `chat-history.css` are preserved on disk for future re-enablement
 
 ## [1.2.0] — 2026-04-13
 
