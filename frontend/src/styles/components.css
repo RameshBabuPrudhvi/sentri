@@ -361,7 +361,7 @@
 }
 
 /* ── PageSkeleton shimmer ─────────────────────────────────────────────────── */
-@keyframes shimmer {
+@keyframes shimmer-bar {
   0%   { background-position: -600px 0; }
   100% { background-position:  600px 0; }
 }
