@@ -372,6 +372,7 @@ export default function ProjectDetail() {
           ["review", `Tests (${testCounts.total})`],
           ["runs",   `Runs (${runsMeta.total})`],
           ["traceability", "Traceability"],
+          ["trigger", "Trigger"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
             {key === "review" && testCounts.draft > 0 && (
@@ -609,6 +610,11 @@ export default function ProjectDetail() {
       {/* ── TRACEABILITY TAB ── */}
       {tab === "traceability" && (
         <TraceabilityTab traceability={traceability} traceLoading={traceLoading} />
+      )}
+
+      {/* ── TRIGGER TAB ── */}
+      {tab === "trigger" && (
+        <TriggerTab projectId={id} projectUrl={project?.url} />
       )}
 
       <RunToast msg={toast.msg} type={toast.type} visible={toast.visible} onViewRun={toast.showLink} runId={toast.runId} />

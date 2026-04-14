@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **API**: Dedicated `run_logs` table replaces O(n²) JSON read-modify-write on `runs.logs` — each log line is now a single INSERT row; readers get stable ordering via monotonic `seq` counter (ENH-008) (#86)
+- **API**: CI/CD webhook trigger endpoint `POST /api/projects/:id/trigger` — token-authenticated (Bearer), returns `202 Accepted` with `{ runId, statusUrl }` for polling; supports optional `callbackUrl` for completion notification (ENH-011) (#86)
+- **API**: Per-project trigger token management — `POST /api/projects/:id/trigger-tokens` (create, returns plaintext once), `GET /api/projects/:id/trigger-tokens` (list, no hashes), `DELETE /api/projects/:id/trigger-tokens/:tid` (revoke) (ENH-011) (#86)
+- **Security**: Trigger tokens are stored as SHA-256 hashes — plaintext is shown exactly once at creation and never persisted (ENH-011) (#86)
+- **Frontend**: "Trigger" tab on Project Detail page — create/revoke tokens, one-time plaintext reveal banner, copy-to-clipboard integration snippets for GitHub Actions, GitLab CI, and cURL (ENH-011) (#86)
+
+### Changed
+- **Data**: Run log lines are now persisted in the `run_logs` table instead of the `runs.logs` JSON column — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically so callers see no API change (ENH-008) (#86)
+
 ## [1.3.0] — 2026-04-14
 
 ### Added
