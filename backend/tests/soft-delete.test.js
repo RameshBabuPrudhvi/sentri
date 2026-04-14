@@ -9,7 +9,7 @@ import { getDatabase } from "../src/database/sqlite.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as testRepo from "../src/database/repositories/testRepo.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
-import { parsePagination } from "../src/database/repositories/testRepo.js";
+import { parsePagination } from "../src/utils/pagination.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

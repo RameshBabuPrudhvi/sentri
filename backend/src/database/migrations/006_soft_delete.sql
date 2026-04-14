@@ -17,8 +17,3 @@ ALTER TABLE runs     ADD COLUMN deletedAt TEXT;
 CREATE INDEX IF NOT EXISTS idx_tests_deletedAt    ON tests(deletedAt);
 CREATE INDEX IF NOT EXISTS idx_projects_deletedAt ON projects(deletedAt);
 CREATE INDEX IF NOT EXISTS idx_runs_deletedAt     ON runs(deletedAt);
-
--- Counter for recycle-bin items (optional convenience, seeded to 0)
-INSERT OR IGNORE INTO counters(name, value) VALUES ('deleted_test', 0);
-INSERT OR IGNORE INTO counters(name, value) VALUES ('deleted_project', 0);
-INSERT OR IGNORE INTO counters(name, value) VALUES ('deleted_run', 0);

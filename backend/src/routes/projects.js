@@ -9,9 +9,6 @@
  * | `GET`    | `/api/projects`              | List all non-deleted projects                          |
  * | `GET`    | `/api/projects/:id`          | Get a single project                                   |
  * | `DELETE` | `/api/projects/:id`          | Soft-delete project + cascade soft-delete its data     |
- * | `GET`    | `/api/recycle-bin`           | List all soft-deleted entities                         |
- * | `POST`   | `/api/restore/:type/:id`     | Restore a soft-deleted entity                          |
- * | `DELETE` | `/api/purge/:type/:id`       | Permanently delete a soft-deleted entity               |
  */
 
 import { Router } from "express";
@@ -20,6 +17,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
@@ -80,17 +78,17 @@ router.delete("/:id", (req, res) => {
     });
   }
 
-  // Soft-delete the project FIRST so its deletedAt timestamp is the earliest.
-  // The cascade-restore in recycleBin.js uses `restoreByProjectIdAfter(id,
-  // project.deletedAt)` with a >= comparison — deleting children after the
-  // project guarantees their timestamps are >= the project's, so they are
-  // correctly included in the cascade-restore.
-  projectRepo.deleteById(req.params.id);
-
-  // Cascade soft-delete: tests and runs move to the recycle bin.
-  // Healing history and activities are kept for audit trail.
-  const testIds = testRepo.deleteByProjectId(req.params.id);
-  const runIds  = runRepo.deleteByProjectId(req.params.id);
+  // Wrap the cascade soft-delete in a transaction so all three tables get the
+  // same `datetime('now')` value.  This guarantees the cascade-restore in
+  // recycleBin.js (which uses `deletedAt >= project.deletedAt`) never misses
+  // children due to a second-boundary crossing between separate statements.
+  const db = getDatabase();
+  let testIds, runIds;
+  db.transaction(() => {
+    projectRepo.deleteById(req.params.id);
+    testIds = testRepo.deleteByProjectId(req.params.id);
+    runIds  = runRepo.deleteByProjectId(req.params.id);
+  })();
 
   logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,

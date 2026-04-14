@@ -528,6 +528,70 @@ const SETTINGS_TABS = [
 ];
 
 
+// ── Recycle Bin helpers ────────────────────────────────────────────────────────
+
+function fmtDeletedDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function RecycleBinSection({ title, icon, items, type, nameKey = "name", subKey = null, busy, onRestore, onPurge }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div>
+      <div className="text-xs text-muted font-semi" style={{ marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        {icon} {title} ({items.length})
+      </div>
+      <div className="flex-col gap-xs">
+        {items.map(item => {
+          const key = `${type}:${item.id}`;
+          const busyState = busy[key];
+          return (
+            <div key={item.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
+              <div className="flex-1" style={{ minWidth: 0 }}>
+                <div className="text-sm font-semi" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {item[nameKey] || item.id}
+                </div>
+                {subKey && item[subKey] && (
+                  <div className="text-xs text-muted" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item[subKey]}
+                  </div>
+                )}
+                <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  Deleted {fmtDeletedDate(item.deletedAt)}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  disabled={!!busyState}
+                  onClick={() => onRestore(type, item.id)}
+                  title="Restore"
+                  aria-label={`Restore ${item[nameKey] || item.id}`}
+                >
+                  {busyState === "restore" ? <RefreshCw size={11} className="spin" /> : <RotateCcw size={11} />}
+                  Restore
+                </button>
+                <button
+                  className="btn btn-danger btn-xs"
+                  disabled={!!busyState}
+                  onClick={() => onPurge(type, item.id, item[nameKey] || item.id)}
+                  title="Permanently delete"
+                  aria-label={`Permanently delete ${item[nameKey] || item.id}`}
+                >
+                  {busyState === "purge" ? <RefreshCw size={11} className="spin" /> : <Trash2 size={11} />}
+                  Purge
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Recycle Bin tab ───────────────────────────────────────────────────────────
 function RecycleBinTab() {
   const [data, setData]         = useState(null);
@@ -537,6 +601,7 @@ function RecycleBinTab() {
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const result = await api.getRecycleBin();
       setData(result);
@@ -550,6 +615,7 @@ function RecycleBinTab() {
   useEffect(() => { load(); }, []);
 
   async function handleRestore(type, id) {
+    setError(null);
     setBusy(b => ({ ...b, [`${type}:${id}`]: "restore" }));
     try {
       await api.restoreItem(type, id);
@@ -563,6 +629,7 @@ function RecycleBinTab() {
 
   async function handlePurge(type, id, name) {
     if (!window.confirm(`Permanently delete "${name}"? This cannot be undone.`)) return;
+    setError(null);
     setBusy(b => ({ ...b, [`${type}:${id}`]: "purge" }));
     try {
       await api.purgeItem(type, id);
@@ -572,12 +639,6 @@ function RecycleBinTab() {
     } finally {
       setBusy(b => { const n = { ...b }; delete n[`${type}:${id}`]; return n; });
     }
-  }
-
-  function fmtDate(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
   const total = data ? (data.projects.length + data.tests.length + data.runs.length) : 0;
@@ -593,60 +654,6 @@ function RecycleBinTab() {
       <AlertCircle size={15} /> {error}
     </div>
   );
-
-  function RecycleBinSection({ title, icon, items, type, nameKey = "name", subKey = null }) {
-    if (!items || items.length === 0) return null;
-    return (
-      <div>
-        <div className="text-xs text-muted font-semi" style={{ marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          {icon} {title} ({items.length})
-        </div>
-        <div className="flex-col gap-xs">
-          {items.map(item => {
-            const key = `${type}:${item.id}`;
-            const busyState = busy[key];
-            return (
-              <div key={item.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
-                <div className="flex-1" style={{ minWidth: 0 }}>
-                  <div className="text-sm font-semi" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {item[nameKey] || item.id}
-                  </div>
-                  {subKey && item[subKey] && (
-                    <div className="text-xs text-muted" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {item[subKey]}
-                    </div>
-                  )}
-                  <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-                    Deleted {fmtDate(item.deletedAt)}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button
-                    className="btn btn-ghost btn-xs"
-                    disabled={!!busyState}
-                    onClick={() => handleRestore(type, item.id)}
-                    title="Restore"
-                  >
-                    {busyState === "restore" ? <RefreshCw size={11} className="spin" /> : <RotateCcw size={11} />}
-                    Restore
-                  </button>
-                  <button
-                    className="btn btn-danger btn-xs"
-                    disabled={!!busyState}
-                    onClick={() => handlePurge(type, item.id, item[nameKey] || item.id)}
-                    title="Permanently delete"
-                  >
-                    {busyState === "purge" ? <RefreshCw size={11} className="spin" /> : <Trash2 size={11} />}
-                    Purge
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex-col gap-lg">
@@ -672,6 +679,9 @@ function RecycleBinTab() {
             type="project"
             nameKey="name"
             subKey="url"
+            busy={busy}
+            onRestore={handleRestore}
+            onPurge={handlePurge}
           />
           <RecycleBinSection
             title="Tests"
@@ -680,6 +690,9 @@ function RecycleBinTab() {
             type="test"
             nameKey="name"
             subKey="description"
+            busy={busy}
+            onRestore={handleRestore}
+            onPurge={handlePurge}
           />
           <RecycleBinSection
             title="Runs"
@@ -688,6 +701,9 @@ function RecycleBinTab() {
             type="run"
             nameKey="id"
             subKey="type"
+            busy={busy}
+            onRestore={handleRestore}
+            onPurge={handlePurge}
           />
         </div>
       )}

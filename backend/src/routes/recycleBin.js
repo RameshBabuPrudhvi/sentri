@@ -27,11 +27,13 @@ const router = Router();
 /**
  * GET /api/recycle-bin
  * Returns all soft-deleted entities grouped by type, newest first.
+ * Capped at 200 items per type to prevent unbounded responses.
  */
 router.get("/recycle-bin", (req, res) => {
-  const projects = projectRepo.getDeletedAll().map(sanitiseProjectForClient);
-  const tests    = testRepo.getDeletedAll();
-  const runs     = runRepo.getDeletedAll();
+  const LIMIT = 200;
+  const projects = projectRepo.getDeletedAll().slice(0, LIMIT).map(sanitiseProjectForClient);
+  const tests    = testRepo.getDeletedAll().slice(0, LIMIT);
+  const runs     = runRepo.getDeletedAll().slice(0, LIMIT);
   res.json({ projects, tests, runs });
 });
 

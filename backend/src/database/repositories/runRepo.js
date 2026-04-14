@@ -15,7 +15,7 @@
  */
 
 import { getDatabase } from "../sqlite.js";
-import { parsePagination } from "./testRepo.js";
+import { parsePagination } from "../../utils/pagination.js";
 
 export { parsePagination };
 
@@ -73,6 +73,20 @@ const LEAN_COLS = [
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop`;
 
+/**
+ * Parse the feedbackLoop JSON column on a lean row (in-place).
+ * @param {Object} row
+ * @returns {Object} The same row with feedbackLoop deserialized.
+ */
+function parseFeedbackLoop(row) {
+  if (row.feedbackLoop) {
+    try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
+  } else {
+    row.feedbackLoop = null;
+  }
+  return row;
+}
+
 // ─── Read queries (non-deleted) ───────────────────────────────────────────────
 
 /**
@@ -105,21 +119,14 @@ export function getAllAsDict() {
  */
 export function getAllLean() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL`).all().map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL`).all().map(parseFeedbackLoop);
 }
 
 /**
  * Get all non-deleted runs with lean columns, paginated.
  * @param {number|string} [page=1]
  * @param {number|string} [pageSize=50]
- * @returns {{ data: Object[], meta: import("./testRepo.js").PageMeta }}
+ * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
  */
 export function getAllLeanPaged(page, pageSize) {
   const db = getDatabase();
@@ -127,14 +134,7 @@ export function getAllLeanPaged(page, pageSize) {
   const total = db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
   const data = db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
-  ).all(ps, offset).map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  ).all(ps, offset).map(parseFeedbackLoop);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
@@ -150,12 +150,7 @@ export function getAllWithResults() {
     } else {
       row.results = [];
     }
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
+    return parseFeedbackLoop(row);
   });
 }
 
@@ -173,10 +168,14 @@ export function getByProjectId(projectId) {
 
 /**
  * Get non-deleted runs for a project with lean columns, paginated.
+ *
+ * Default pageSize is 20 (lower than the global default of 50) because run
+ * rows include feedbackLoop JSON and are heavier than test rows.
+ *
  * @param {string}        projectId
  * @param {number|string} [page=1]
  * @param {number|string} [pageSize=20]
- * @returns {{ data: Object[], meta: import("./testRepo.js").PageMeta }}
+ * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
  */
 export function getByProjectIdPaged(projectId, page, pageSize) {
   const db = getDatabase();
@@ -186,14 +185,7 @@ export function getByProjectIdPaged(projectId, page, pageSize) {
   ).get(projectId).cnt;
   const data = db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE projectId = ? AND deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
-  ).all(projectId, ps, offset).map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  ).all(projectId, ps, offset).map(parseFeedbackLoop);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
@@ -338,25 +330,13 @@ export function count() {
 }
 
 /**
- * Soft-delete all non-deleted runs (moves them to the recycle bin).
- * @returns {number} Number of runs soft-deleted.
- */
-export function clearAll() {
-  const db = getDatabase();
-  const cnt = db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
-  db.prepare("UPDATE runs SET deletedAt = datetime('now') WHERE deletedAt IS NULL").run();
-  return cnt;
-}
-
-/**
  * Hard-delete all runs (permanent — used by the admin "Clear Runs" data management action).
  * @returns {number} Number of runs permanently removed.
  */
 export function hardClearAll() {
   const db = getDatabase();
-  const cnt = db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
-  db.prepare("DELETE FROM runs").run();
-  return cnt;
+  const info = db.prepare("DELETE FROM runs").run();
+  return info.changes;
 }
 
 /**
@@ -413,14 +393,7 @@ export function getDeletedByProjectId(projectId) {
   const db = getDatabase();
   return db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC`
-  ).all(projectId).map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  ).all(projectId).map(parseFeedbackLoop);
 }
 
 /**
@@ -431,14 +404,7 @@ export function getDeletedAll() {
   const db = getDatabase();
   return db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC`
-  ).all().map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  ).all().map(parseFeedbackLoop);
 }
 
 /**

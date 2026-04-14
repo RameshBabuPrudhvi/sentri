@@ -37,7 +37,7 @@ export default function PageSkeleton() {
 
       {/* Tab bar skeleton */}
       <div style={{ display: "flex", gap: 8, marginBottom: 28 }}>
-        {[80, 90, 60, 72].map((w, i) => (
+        {["10%", "12%", "8%", "9%"].map((w, i) => (
           <ShimmerBar key={i} width={w} height={32} radius={8} />
         ))}
       </div>
