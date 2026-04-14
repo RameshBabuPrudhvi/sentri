@@ -267,7 +267,29 @@ export function getSelfHealingHelperCode(healingHints) {
         }
       }
 
-      // All strategies failed
+      // ── Scroll-retry: elements below the fold (e.g. footer links) ────────
+      // Some elements exist in the DOM but are off-screen. isVisible() returns
+      // false for them and waitFor({ state: 'visible' }) times out because
+      // nobody scrolls to them. Before giving up, scroll to the bottom of the
+      // page and retry the full waterfall once. This handles footer links,
+      // lazy-loaded sections, and "load more" content on any website.
+      try {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.waitForTimeout(500); // let lazy content render
+        for (let i = 0; i < strategies.length; i++) {
+          try {
+            const locator = await tryStrategy(strategies[i], page, timeout);
+            if (hintKey) {
+              __healingEvents.push({ key: hintKey, strategyIndex: i, healed: true });
+            }
+            return locator;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      } catch { /* scroll failed — page may be closed */ }
+
+      // All strategies failed (even after scroll-retry)
       if (hintKey) {
         __healingEvents.push({ key: hintKey, strategyIndex: -1, healed: false, failed: true });
       }
