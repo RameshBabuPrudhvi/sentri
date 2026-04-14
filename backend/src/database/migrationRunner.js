@@ -134,7 +134,28 @@ export function runMigrations(db) {
     const start = Date.now();
 
     const applyMigration = db.transaction(() => {
-      db.exec(sql);
+      // SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN.
+      // To keep migration files idempotent we split the SQL on semicolons
+      // and execute each statement individually, silently ignoring
+      // "duplicate column name" errors from ADD COLUMN on tables that
+      // already have the column (e.g. when 001 was updated in-place and
+      // a later migration re-adds the same column for older databases).
+      const statements = sql
+        .split(";")
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+      for (const stmt of statements) {
+        try {
+          db.exec(stmt);
+        } catch (err) {
+          const isDupCol = err.message && err.message.includes("duplicate column name");
+          if (isDupCol) {
+            // Column already exists — safe to ignore
+            continue;
+          }
+          throw err;
+        }
+      }
       db.prepare(
         "INSERT INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
       ).run(migration.version, hash, new Date().toISOString(), Date.now() - start);

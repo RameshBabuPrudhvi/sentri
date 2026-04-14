@@ -2,20 +2,10 @@
 --
 -- For databases created before the deletedAt columns were added to
 -- 001_initial_schema.sql, this migration adds the missing columns and
--- indexes.  All statements are idempotent — safe to run on new databases
--- where 001 already includes these columns.
---
--- SQLite's ALTER TABLE ADD COLUMN does not support IF NOT EXISTS, so we
--- guard each ALTER with a sub-select against pragma_table_info().
-
--- ── projects.deletedAt ────────────────────────────────────────────────────────
--- SQLite trick: the ALTER fails if the column already exists, so we wrap
--- each in a no-op SELECT guard.  Unfortunately SQLite doesn't support
--- procedural IF, so we use the INSERT-OR-IGNORE-into-temp approach:
--- Actually, the simplest safe approach is to attempt the ALTER and let the
--- migration runner handle it.  Since 001 on new DBs already has the column,
--- and this file only runs on DBs that applied the OLD 001, the column is
--- guaranteed to be missing here.
+-- indexes.  On new databases where 001 already includes these columns,
+-- the migration runner silently ignores "duplicate column name" errors
+-- from ALTER TABLE ADD COLUMN (SQLite has no IF NOT EXISTS for ALTER).
+-- CREATE TABLE / CREATE INDEX use IF NOT EXISTS and are always safe.
 
 ALTER TABLE projects   ADD COLUMN deletedAt TEXT;
 ALTER TABLE tests      ADD COLUMN deletedAt TEXT;
