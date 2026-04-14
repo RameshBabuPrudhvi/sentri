@@ -366,6 +366,83 @@ test("getByProjectIdPaged respects soft-delete", () => {
   assert.equal(result.meta.total, 0, "paged total should be 0 after soft-delete");
 });
 
+// ─── runRepo.hardClearAll ─────────────────────────────────────────────────────
+
+console.log("\n🧪 runRepo — hardClearAll");
+
+test("hardClearAll permanently removes all runs (live and soft-deleted)", () => {
+  const p = makeProject();
+  projectRepo.create(p);
+  const r1 = makeRun(p.id);
+  const r2 = makeRun(p.id);
+  runRepo.create(r1);
+  runRepo.create(r2);
+  // Soft-delete one to verify hard clear removes both live and deleted
+  const db = getDatabase();
+  db.prepare("UPDATE runs SET deletedAt = datetime('now') WHERE id = ?").run(r1.id);
+  const cleared = runRepo.hardClearAll();
+  assert.ok(cleared >= 2, "should report at least 2 cleared");
+  assert.equal(runRepo.getByIdIncludeDeleted(r1.id), undefined, "soft-deleted r1 should be gone");
+  assert.equal(runRepo.getByIdIncludeDeleted(r2.id), undefined, "live r2 should be gone");
+});
+
+// ─── testRepo.restoreByProjectIdAfter ─────────────────────────────────────────
+
+console.log("\n🧪 testRepo — restoreByProjectIdAfter");
+
+test("restoreByProjectIdAfter skips tests deleted before the given timestamp", () => {
+  const p = makeProject();
+  projectRepo.create(p);
+  const tEarly = makeTest(p.id);
+  const tLate = makeTest(p.id);
+  testRepo.create(tEarly);
+  testRepo.create(tLate);
+
+  // Manually set distinct deletedAt timestamps so the test is deterministic
+  const db = getDatabase();
+  db.prepare("UPDATE tests SET deletedAt = '2020-01-01T00:00:00Z' WHERE id = ?").run(tEarly.id);
+  db.prepare("UPDATE tests SET deletedAt = '2025-06-01T00:00:00Z' WHERE id = ?").run(tLate.id);
+
+  // Restore only items deleted at or after 2025-06-01
+  const count = testRepo.restoreByProjectIdAfter(p.id, "2025-06-01T00:00:00Z");
+  assert.equal(count, 1, "should restore exactly 1 test");
+  assert.ok(testRepo.getById(tLate.id), "tLate should be restored");
+  assert.equal(testRepo.getById(tEarly.id), undefined, "tEarly should still be deleted");
+});
+
+test("restoreByProjectIdAfter returns 0 when no tests match", () => {
+  const p = makeProject();
+  projectRepo.create(p);
+  const t = makeTest(p.id);
+  testRepo.create(t);
+  const db = getDatabase();
+  db.prepare("UPDATE tests SET deletedAt = '2020-01-01T00:00:00Z' WHERE id = ?").run(t.id);
+  const count = testRepo.restoreByProjectIdAfter(p.id, "2025-01-01T00:00:00Z");
+  assert.equal(count, 0, "should restore 0 tests when all are before the threshold");
+});
+
+// ─── runRepo.restoreByProjectIdAfter ──────────────────────────────────────────
+
+console.log("\n🧪 runRepo — restoreByProjectIdAfter");
+
+test("restoreByProjectIdAfter skips runs deleted before the given timestamp", () => {
+  const p = makeProject();
+  projectRepo.create(p);
+  const rEarly = makeRun(p.id);
+  const rLate = makeRun(p.id);
+  runRepo.create(rEarly);
+  runRepo.create(rLate);
+
+  const db = getDatabase();
+  db.prepare("UPDATE runs SET deletedAt = '2020-01-01T00:00:00Z' WHERE id = ?").run(rEarly.id);
+  db.prepare("UPDATE runs SET deletedAt = '2025-06-01T00:00:00Z' WHERE id = ?").run(rLate.id);
+
+  const count = runRepo.restoreByProjectIdAfter(p.id, "2025-06-01T00:00:00Z");
+  assert.equal(count, 1, "should restore exactly 1 run");
+  assert.ok(runRepo.getById(rLate.id), "rLate should be restored");
+  assert.equal(runRepo.getById(rEarly.id), undefined, "rEarly should still be deleted");
+});
+
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`\n  ${passed} passed, ${failed} failed`);

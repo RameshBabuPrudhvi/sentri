@@ -206,6 +206,40 @@ async function main() {
     assert.ok(rb.tests.find(t => t.id === ctid), "cascaded test in recycle bin");
   });
 
+  console.log("\n🧪 Recycle bin — scoped cascade-restore");
+
+  await test("restoring a project does NOT restore individually-deleted tests", async () => {
+    // Setup: project with 2 tests
+    const scid = "PRJ-RB-003";
+    const stid1 = "TC-RB-010";
+    const stid2 = "TC-RB-011";
+    projectRepo.create({ id: scid, name: "Scoped Project", url: "https://scoped.test", createdAt: new Date().toISOString(), status: "idle" });
+    testRepo.create({ id: stid1, projectId: scid, name: "Individually Deleted", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
+    testRepo.create({ id: stid2, projectId: scid, name: "Cascade Deleted", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
+
+    // Step 1: Individually delete stid1 with an earlier timestamp
+    const db = getDatabase();
+    db.prepare("UPDATE tests SET deletedAt = '2020-01-01T00:00:00Z' WHERE id = ?").run(stid1);
+
+    // Step 2: Delete the project (cascades stid2)
+    const { res: delRes } = await req(base, `/api/projects/${scid}`, { method: "DELETE", token });
+    assert.equal(delRes.status, 200);
+
+    // Step 3: Restore the project
+    const { res: restoreRes, json: restoreJson } = await req(base, `/api/restore/project/${scid}`, { method: "POST", token });
+    assert.equal(restoreRes.status, 200, `expected 200, got ${restoreRes.status}: ${restoreJson.error}`);
+
+    // stid2 (cascade-deleted) should be restored
+    const t2 = testRepo.getById(stid2);
+    assert.ok(t2, "cascade-deleted test should be restored");
+
+    // stid1 (individually deleted earlier) should still be in recycle bin
+    const t1 = testRepo.getById(stid1);
+    assert.equal(t1, undefined, "individually-deleted test should NOT be restored");
+    const t1Deleted = testRepo.getByIdIncludeDeleted(stid1);
+    assert.ok(t1Deleted?.deletedAt, "individually-deleted test should still have deletedAt set");
+  });
+
   server.close();
 
   console.log(`\n  ${passed} passed, ${failed} failed`);

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Data**: Soft-delete for tests, projects, and runs — DELETE operations now move entities to a Recycle Bin instead of permanently destroying data. Accidentally deleted tests, projects, and run history can be recovered (ENH-020)
 - **Data**: Recycle Bin page in Settings — lists all soft-deleted projects, tests, and runs grouped by type, with Restore and Purge actions per item (ENH-020)
 - **API**: `GET /api/recycle-bin` — returns all soft-deleted entities grouped by type (ENH-020)
-- **API**: `POST /api/restore/:type/:id` — restores a soft-deleted entity; project restores cascade to its tests and runs (ENH-020)
+- **API**: `POST /api/restore/:type/:id` — restores a soft-deleted entity; project restores cascade to tests and runs that were deleted at the same time (individually-deleted items are preserved in the recycle bin) (ENH-020)
 - **API**: `DELETE /api/purge/:type/:id` — permanently and irreversibly deletes a soft-deleted entity (ENH-020)
 - **API**: Pagination on `GET /api/projects/:id/tests`, `GET /api/tests`, and `GET /api/projects/:id/runs` — pass `?page=N&pageSize=N` to receive `{ data, meta: { total, page, pageSize, hasMore } }` instead of an unbounded list (ENH-010)
 - **Frontend**: Vendor bundle splitting in Vite config — react/react-dom/react-router, recharts, lucide-react, and jspdf are emitted as separate cacheable chunks, reducing initial app bundle size (ENH-024)
@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chat**: Export chat sessions as Markdown or JSON from the topbar menu (#83)
 - **Chat**: "Open full chat page" button in the AI Chat modal navigates to `/chat` (#83)
 - **Nav**: "AI Chat" entry added to the sidebar navigation (#83)
+
+### Fixed
+- **Data**: `DELETE /api/data/runs` (admin "Clear all run history") now permanently removes runs instead of soft-deleting them into the recycle bin — the admin data management action is intended for permanent cleanup, not recoverable deletion (ENH-020)
+- **Data**: Project cascade-restore (`POST /api/restore/project/:id`) now only restores tests and runs that were deleted at the same time as the project — items individually deleted before the project are left in the recycle bin (ENH-020)
 
 ### Changed
 - **Data**: `DELETE /api/projects/:id` now performs a soft-delete cascade — tests and runs are moved to the Recycle Bin rather than permanently erased; restore the project to recover everything (ENH-020)
