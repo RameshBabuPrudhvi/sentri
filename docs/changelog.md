@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-04-14
+
 ### Added
 - **Data**: Soft-delete for tests, projects, and runs — DELETE operations now move entities to a Recycle Bin instead of permanently destroying data. Accidentally deleted tests, projects, and run history can be recovered (ENH-020)
 - **Data**: Recycle Bin page in Settings — lists all soft-deleted projects, tests, and runs grouped by type, with Restore and Purge actions per item (ENH-020)
