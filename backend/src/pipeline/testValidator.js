@@ -208,7 +208,7 @@ const CSS_LOCATOR_RE = /(?:locator|querySelector|waitForSelector|waitForSelector
 /**
  * Captures XPath strings (detected by leading // or (// patterns).
  */
-const XPATH_LOCATOR_RE = /(?:locator|querySelector|waitForSelector)\s*\(\s*["'`]((?:\/\/|\(\/\/))[^"'`]+)["'`]/g;
+const XPATH_LOCATOR_RE = /(?:locator|querySelector|waitForSelector)\s*\(\s*["'`]((?:\/\/|\(\/\/)[^"'`]+)["'`]/g;
 
 /**
  * Validates a CSS selector string for obvious structural errors.

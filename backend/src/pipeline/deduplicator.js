@@ -394,11 +394,16 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // Layer 4 — semantic TF-IDF similarity (defects #1, #2)
     // Guard with sourceUrl so tests on different pages that share vocabulary
     // (e.g. "form validation" on login vs signup) are not falsely deduplicated.
-    const semanticMatch = existingTests.find(e =>
-      e.sourceUrl === t.sourceUrl &&
-      semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
-    );
-    if (semanticMatch) return false;
+    // Also require the normalized name to be long enough (≥ 15 chars, consistent
+    // with Layers 2 and 3) — short names produce tiny TF-IDF vectors where a
+    // single shared term yields cosine ≈ 1.0, causing false positives.
+    if (normName.length >= 15) {
+      const semanticMatch = existingTests.find(e =>
+        e.sourceUrl === t.sourceUrl &&
+        semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
+      );
+      if (semanticMatch) return false;
+    }
 
     return true;
   });
