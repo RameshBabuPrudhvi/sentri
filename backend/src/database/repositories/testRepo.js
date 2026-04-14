@@ -84,8 +84,10 @@ const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
  * @returns {{ page: number, pageSize: number, offset: number }}
  */
 export function parsePagination(page, pageSize) {
-  const p  = Math.max(1, parseInt(page, 10) || 1);
-  const ps = Math.min(200, Math.max(1, parseInt(pageSize, 10) || 50));
+  const rawP  = parseInt(page, 10);
+  const rawPS = parseInt(pageSize, 10);
+  const p  = Math.max(1, Number.isFinite(rawP) ? rawP : 1);
+  const ps = Math.min(200, Math.max(1, Number.isFinite(rawPS) ? rawPS : 50));
   return { page: p, pageSize: ps, offset: (p - 1) * ps };
 }
 
