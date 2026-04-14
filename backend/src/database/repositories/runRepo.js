@@ -338,13 +338,24 @@ export function count() {
 }
 
 /**
- * Soft-delete all non-deleted runs (used by the "clear history" admin action).
+ * Soft-delete all non-deleted runs (moves them to the recycle bin).
  * @returns {number} Number of runs soft-deleted.
  */
 export function clearAll() {
   const db = getDatabase();
   const cnt = db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
   db.prepare("UPDATE runs SET deletedAt = datetime('now') WHERE deletedAt IS NULL").run();
+  return cnt;
+}
+
+/**
+ * Hard-delete all runs (permanent — used by the admin "Clear Runs" data management action).
+ * @returns {number} Number of runs permanently removed.
+ */
+export function hardClearAll() {
+  const db = getDatabase();
+  const cnt = db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
+  db.prepare("DELETE FROM runs").run();
   return cnt;
 }
 
@@ -448,4 +459,20 @@ export function restore(id) {
   const db = getDatabase();
   const info = db.prepare("UPDATE runs SET deletedAt = NULL WHERE id = ? AND deletedAt IS NOT NULL").run(id);
   return info.changes > 0;
+}
+
+/**
+ * Restore soft-deleted runs for a project that were deleted at or after a
+ * given timestamp. Used by project cascade-restore to avoid restoring items
+ * that were individually deleted before the project.
+ * @param {string} projectId
+ * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
+ * @returns {number} Number of runs restored.
+ */
+export function restoreByProjectIdAfter(projectId, deletedAfter) {
+  const db = getDatabase();
+  const info = db.prepare(
+    "UPDATE runs SET deletedAt = NULL WHERE projectId = ? AND deletedAt IS NOT NULL AND deletedAt >= ?"
+  ).run(projectId, deletedAfter);
+  return info.changes;
 }

@@ -44,11 +44,17 @@ router.post("/restore/:type/:id", (req, res) => {
   let restored = false;
 
   if (type === "project") {
+    // Capture the project's deletedAt before restoring so we can scope the
+    // cascade to only children deleted at the same time (or later).  Items
+    // individually deleted *before* the project are left in the recycle bin.
+    const projectBefore = projectRepo.getByIdIncludeDeleted(id);
     restored = projectRepo.restore(id);
     if (restored) {
-      // Cascade-restore all tests and runs that belong to this project.
-      testRepo.getDeletedByProjectId(id).forEach(t => testRepo.restore(t.id));
-      runRepo.getDeletedByProjectId(id).forEach(r => runRepo.restore(r.id));
+      const deletedAt = projectBefore?.deletedAt;
+      if (deletedAt) {
+        testRepo.restoreByProjectIdAfter(id, deletedAt);
+        runRepo.restoreByProjectIdAfter(id, deletedAt);
+      }
       const proj = projectRepo.getById(id);
       logActivity({ ...actor(req),
         type: "project.restore", projectId: id, projectName: proj?.name,

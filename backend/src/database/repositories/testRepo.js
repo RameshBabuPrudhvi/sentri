@@ -341,6 +341,22 @@ export function restore(id) {
   return info.changes > 0;
 }
 
+/**
+ * Restore soft-deleted tests for a project that were deleted at or after a
+ * given timestamp. Used by project cascade-restore to avoid restoring items
+ * that were individually deleted before the project.
+ * @param {string} projectId
+ * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
+ * @returns {number} Number of tests restored.
+ */
+export function restoreByProjectIdAfter(projectId, deletedAfter) {
+  const db = getDatabase();
+  const info = db.prepare(
+    "UPDATE tests SET deletedAt = NULL WHERE projectId = ? AND deletedAt IS NOT NULL AND deletedAt >= ?"
+  ).run(projectId, deletedAfter);
+  return info.changes;
+}
+
 // ─── Counts ───────────────────────────────────────────────────────────────────
 
 /**

@@ -165,7 +165,7 @@ router.post("/system/client-error", (req, res) => {
 // ─── Data Management ──────────────────────────────────────────────────────────
 
 router.delete("/data/runs", (req, res) => {
-  const count = runRepo.clearAll();
+  const count = runRepo.hardClearAll();
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
