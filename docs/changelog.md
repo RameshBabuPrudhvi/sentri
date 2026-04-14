@@ -38,9 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chat**: Markdown renderer (`escapeHtml`, `renderMarkdown`) extracted from `AIChat.jsx` into shared `frontend/src/utils/markdown.js` — both the modal chat and full-page chat now use the same renderer (#83)
 - **Chat**: Chat session storage is scoped by authenticated user ID to prevent cross-account data leakage (#83)
 
-### Removed
-- **Nav**: AI Chat sidebar link and `/chat` route disconnected — the AI chat modal (`⌘K`) remains available from any page; `ChatHistory.jsx` and `chat-history.css` are preserved on disk for future re-enablement
-
 ## [1.2.0] — 2026-04-13
 
 ### Added

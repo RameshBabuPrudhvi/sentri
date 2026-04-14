@@ -643,11 +643,11 @@ When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
 |---|---|
 | `backend/src/routes/chat.js` | SSE endpoint, system prompt, `buildWorkspaceContext()`, `buildEntityContext()` |
 | `frontend/src/components/ai/AIChat.jsx` | Chat modal panel UI, streaming display |
-| `frontend/src/pages/ChatHistory.jsx` | Full-page chat — session CRUD, export, persistent history (route currently disconnected; file exists but is not routed) |
+| `frontend/src/pages/ChatHistory.jsx` | Full-page chat at `/chat` — session CRUD, export, persistent history |
 | `frontend/src/utils/markdown.js` | Shared `escapeHtml()` + `renderMarkdown()` used by both chat UIs |
 | `frontend/src/api.js` → `api.chat()` | SSE stream parser with 401 handling |
 | `frontend/src/styles/features/chat.css` | Modal chat styles (`.chat-*` namespace) |
-| `frontend/src/styles/pages/chat-history.css` | Full-page chat styles (`.ch-*` namespace; currently unused — CSS import removed) |
+| `frontend/src/styles/pages/chat-history.css` | Full-page chat styles (`.ch-*` namespace) |
 
 ### Sliding context window
 
@@ -658,7 +658,7 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 - **Adding new context**: Add to `buildWorkspaceContext()` or `buildEntityContext()` in `backend/src/routes/chat.js`. Keep output compact — every token costs money.
 - **Adding new entity types**: Add a regex pattern + DB lookup in `buildEntityContext()`. Follow the existing pattern: match IDs, cap results, truncate long fields.
 - **Changing the system prompt**: Edit `BASE_SYSTEM_PROMPT` in `backend/src/routes/chat.js`. The workspace/entity context is appended automatically — don't hardcode data in the base prompt.
-- **Frontend changes**: Modal chat styles go in `frontend/src/styles/features/chat.css` (`.chat-*`); full-page chat styles go in `frontend/src/styles/pages/chat-history.css` (`.ch-*`). The shared markdown renderer in `frontend/src/utils/markdown.js` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS. Both `AIChat.jsx` and `ChatHistory.jsx` import `renderMarkdown` from this shared module. Note: the `/chat` route is currently disconnected (not in `App.jsx`) but the files still exist.
+- **Frontend changes**: Modal chat styles go in `frontend/src/styles/features/chat.css` (`.chat-*`); full-page chat styles go in `frontend/src/styles/pages/chat-history.css` (`.ch-*`). The shared markdown renderer in `frontend/src/utils/markdown.js` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS. Both `AIChat.jsx` and `ChatHistory.jsx` import `renderMarkdown` from this shared module.
 
 ---
 
@@ -857,7 +857,7 @@ The frontend follows a clear separation of concerns between pages:
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
-| **ChatHistory** (`/chat`) | Full-page AI chat with session history (route currently disconnected) | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |
+| **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |
 | **Settings** | AI provider & system config | API keys, Ollama, system info, Recycle Bin (restore/purge deleted items) |
 
 **Important**: Crawl and test generation are **only** triggered from the Tests page (via `CrawlProjectModal` and `GenerateTestModal`). The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls. This avoids duplicating creation flows across pages.

@@ -21,8 +21,7 @@ const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
 const Systems = lazy(() => import("./pages/Systems.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
-
-// Page loading skeleton is imported from PageSkeleton.jsx
+const ChatHistory = lazy(() => import("./pages/ChatHistory.jsx"));
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -67,6 +66,7 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />
+                <Route path="/chat" element={<ChatHistory />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>

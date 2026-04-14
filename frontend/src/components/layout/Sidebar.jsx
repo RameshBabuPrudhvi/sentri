@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, BookOpen, ExternalLink } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Settings, BookOpen, ExternalLink, MessageSquare } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
   { to: "/runs",      icon: Briefcase,       label: "Runs"      },
   { to: "/system",    icon: Layers,          label: "System"    },
+  { to: "/chat",      icon: MessageSquare,   label: "AI Chat"   },
 ];
 
 export default function Sidebar({ open }) {
