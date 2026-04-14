@@ -169,9 +169,27 @@ function buildPageLoadAssertion(url, title) {
  * enhanceTest(test, snapshot, classifiedPage) → enhanced test
  *
  * Adds or strengthens assertions in a generated test based on context.
+ *
+ * Fast-path: if the test already has strong assertions AND a page-load
+ * assertion (toHaveURL or toHaveTitle), skip all enhancement work and
+ * return immediately. On re-crawls of a well-covered application this
+ * eliminates string manipulation for the majority of tests.
  */
 export function enhanceTest(test, snapshot, classifiedPage) {
   let code = test.playwrightCode || "";
+
+  // ── Fast-path: already fully enhanced ────────────────────────────────────
+  // A test qualifies only when it has at least one strong assertion AND a
+  // page-load anchor (toHaveURL or toHaveTitle). Both conditions must hold
+  // because hasStrongAssertions() matches toBeVisible/toHaveText etc. which
+  // do not verify navigation — the page-load check is the separate gate that
+  // the third branch below would add if missing.
+  if (
+    hasStrongAssertions(code) &&
+    (code.includes("toHaveURL") || code.includes("toHaveTitle"))
+  ) {
+    return { ...test, _assertionEnhanced: false };
+  }
 
   // If no assertions at all — inject based on intent or type
   if (hasNoAssertions(code)) {

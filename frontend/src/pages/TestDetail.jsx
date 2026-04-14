@@ -1020,6 +1020,42 @@ export default function TestDetail() {
             <StatusBadge result={test.lastResult} />
           </InfoRow>
 
+          {/* Quality score — computed by the deduplicator's scoreTest() (0–100).
+              Only shown when the value is present; tests generated before this
+              field was introduced have null and are silently skipped. */}
+          {typeof test.qualityScore === "number" && (
+            <InfoRow
+              label="Quality score"
+              icon={null}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+                <span
+                  className={`badge ${
+                    test.qualityScore >= 70 ? "badge-green" :
+                    test.qualityScore >= 40 ? "badge-amber" : "badge-red"
+                  }`}
+                  title="AI-computed quality score (0–100). Rewards strong assertions, stable selectors, and meaningful test names. Penalises weak or missing assertions."
+                  style={{ fontFamily: "var(--font-mono)", fontWeight: 700, minWidth: 32, justifyContent: "center" }}
+                >
+                  {test.qualityScore}
+                </span>
+                <div
+                  title={`${test.qualityScore} / 100`}
+                  style={{ flex: 1, height: 4, background: "var(--bg3)", borderRadius: 99, overflow: "hidden" }}
+                >
+                  <div style={{
+                    height: "100%",
+                    width: `${test.qualityScore}%`,
+                    background: test.qualityScore >= 70 ? "var(--green)" :
+                                test.qualityScore >= 40 ? "var(--amber)" : "var(--red)",
+                    borderRadius: 99,
+                    transition: "width 0.4s ease",
+                  }} />
+                </div>
+              </div>
+            </InfoRow>
+          )}
+
           {/* Author */}
           <InfoRow label="Author">
             <AvatarChip name={author} />

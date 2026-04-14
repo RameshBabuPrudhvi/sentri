@@ -24,46 +24,65 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
+//
+// Priority-ordered array of [category, patterns] tuples.
+//
+// Order matters: the first matching category wins. Using an ordered array (not
+// a plain object) makes the priority explicit and stable — Object.entries
+// iteration order is implementation-defined and can vary across V8 versions.
+//
+// Priority rationale:
+//   1. SELECTOR_ISSUE  — checked first because "waiting for locator … timeout
+//      30 000 ms exceeded" matches both SELECTOR_ISSUE and TIMEOUT. A locator
+//      failure is the root cause; the timeout is the symptom. Reporting the
+//      root cause produces more actionable self-healing hints.
+//   2. URL_MISMATCH    — specific navigation-result error; distinct from a
+//      general navigation failure.
+//   3. NAVIGATION_FAIL — network / goto errors.
+//   4. ASSERTION_FAIL  — generic expect() mismatch (lower specificity than the
+//      above, so checked after them).
+//   5. TIMEOUT         — catch-all for any remaining timeout messages that were
+//      not already classified as a selector or navigation issue.
 
-const FAILURE_PATTERNS = {
-  SELECTOR_ISSUE: [
+const FAILURE_PATTERNS = [
+  ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,
     /no elements found/i,
     /waiting for locator/i,
     /element handle is not attached/i,
     /strict mode violation/i,
-  ],
-  URL_MISMATCH: [
+  ]],
+  ["URL_MISMATCH", [
     /url mismatch/i,
     /redirected to unexpected url/i,
     /page\.url\(\).*not.*match/i,
     /expect\(received\)\.toHaveURL\(expected\)/i,
     /toHaveURL.*received/i,
-  ],
-  NAVIGATION_FAIL: [
+  ]],
+  ["NAVIGATION_FAIL", [
     /net::ERR/i,
     /page.goto/i,
     /navigation failed/i,
     /timeout.*navigation/i,
     /ERR_NAME_NOT_RESOLVED/i,
-  ],
-  TIMEOUT: [
-    /timeout \d+ms exceeded/i,
-    /waiting for.*timeout/i,
-    /Test timeout/i,
-  ],
-  ASSERTION_FAIL: [
+  ]],
+  ["ASSERTION_FAIL", [
     /expect.*received/i,
     /toHave.*expected/i,
     /toBeVisible.*expected/i,
     /matcher error/i,
-  ],
-};
+  ]],
+  ["TIMEOUT", [
+    /timeout \d+ms exceeded/i,
+    /waiting for.*timeout/i,
+    /Test timeout/i,
+  ]],
+];
 
 export function classifyFailure(errorMessage) {
   if (!errorMessage) return "UNKNOWN";
-  for (const [category, patterns] of Object.entries(FAILURE_PATTERNS)) {
+  for (const [category, patterns] of FAILURE_PATTERNS) {
     if (patterns.some(p => p.test(errorMessage))) return category;
   }
   return "UNKNOWN";

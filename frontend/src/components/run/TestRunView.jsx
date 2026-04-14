@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, Suspense, lazy } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   CheckCircle2,
   XCircle,
@@ -77,7 +77,20 @@ function TestCaseRow({ result, caseIndex, isSelected, onSelect, onDrillDown }) {
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`}
+            {result.testId ? (
+              <Link
+                to={`/tests/${result.testId}`}
+                onClick={(e) => e.stopPropagation()}
+                title="Open test detail"
+                style={{ color: "inherit", textDecoration: "none" }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "inherit"; }}
+              >
+                {cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`}
+              </Link>
+            ) : (
+              cleanTestName(result.testName || result.name) || `Test Case ${caseIndex + 1}`
+            )}
           </div>
           {steps.length > 0 && (
             <div style={{ fontSize: "0.67rem", color: "var(--text3)", marginTop: 1 }}>

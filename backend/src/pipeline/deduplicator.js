@@ -4,17 +4,26 @@
  * Uses structural hashing of test steps and playwright code fingerprints.
  */
 
+import { createHash } from "node:crypto";
+
 /**
- * Simple deterministic hash — no crypto dependency needed
+ * fingerprintHash(str) → 16-char hex string (64-bit FNV-1a via SHA-256 truncation)
+ *
+ * Replaces the previous 32-bit djb2 implementation. A 32-bit hash has a
+ * ~1-in-4-billion collision rate per pair, which becomes non-negligible once a
+ * project reaches ~1 000 tests (~500 k pairs). This implementation uses the
+ * first 8 bytes of SHA-256 (64 bits), reducing the per-pair collision
+ * probability to ~1-in-18-quintillion — safe at any realistic test suite size.
+ *
+ * Uses Node's built-in `node:crypto` (no new dependency). Synchronous
+ * `createHash` is used rather than `crypto.subtle.digest` so the function
+ * stays synchronous and callers require no changes.
+ *
+ * @param {string} str - Input string to hash.
+ * @returns {string} 16-character lowercase hex fingerprint.
  */
-function simpleHash(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit int
-  }
-  return Math.abs(hash).toString(36);
+function fingerprintHash(str) {
+  return createHash("sha256").update(str).digest("hex").slice(0, 16);
 }
 
 /**
@@ -49,7 +58,7 @@ export function hashTest(test) {
     .join("|");
 
   const signature = playwrightActions || stepsSignature || normalizeText(test.name);
-  return simpleHash(signature);
+  return fingerprintHash(signature);
 }
 
 /**
