@@ -214,9 +214,18 @@ export function getByProjectIdPaged(projectId, page, pageSize) {
  */
 export function getById(id) {
   const db = getDatabase();
-  const run = rowToRun(db.prepare("SELECT * FROM runs WHERE id = ? AND deletedAt IS NULL").get(id));
-  if (!run) return undefined;
-  run.logs = runLogRepo.getMessagesByRunId(id);
+  const row = db.prepare("SELECT * FROM runs WHERE id = ? AND deletedAt IS NULL").get(id);
+  if (!row) return undefined;
+  const run = rowToRun(row);
+  // Hydrate logs from run_logs table (ENH-008).  Fall back to the legacy
+  // runs.logs JSON column for runs created before migration 002 that still
+  // have their log history stored inline.
+  const newLogs = runLogRepo.getMessagesByRunId(id);
+  if (newLogs.length > 0) {
+    run.logs = newLogs;
+  } else if (row.logs) {
+    try { run.logs = JSON.parse(row.logs); } catch { /* keep [] from rowToRun */ }
+  }
   return run;
 }
 
@@ -228,9 +237,16 @@ export function getById(id) {
  */
 export function getByIdIncludeDeleted(id) {
   const db = getDatabase();
-  const run = rowToRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id));
-  if (!run) return undefined;
-  run.logs = runLogRepo.getMessagesByRunId(id);
+  const row = db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
+  if (!row) return undefined;
+  const run = rowToRun(row);
+  // Same legacy fallback as getById — see comment above.
+  const newLogs = runLogRepo.getMessagesByRunId(id);
+  if (newLogs.length > 0) {
+    run.logs = newLogs;
+  } else if (row.logs) {
+    try { run.logs = JSON.parse(row.logs); } catch { /* keep [] from rowToRun */ }
+  }
   return run;
 }
 

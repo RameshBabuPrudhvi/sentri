@@ -291,6 +291,13 @@ router.delete("/projects/:id/trigger-tokens/:tid", (req, res) => {
   const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
 
+  // Verify the token belongs to this project before deleting (prevent
+  // cross-project deletion via sequential WH-N ID guessing).
+  const tokens = webhookTokenRepo.getByProjectId(project.id);
+  if (!tokens.some((t) => t.id === req.params.tid)) {
+    return res.status(404).json({ error: "token not found" });
+  }
+
   const deleted = webhookTokenRepo.deleteById(req.params.tid);
   if (!deleted) return res.status(404).json({ error: "token not found" });
 
