@@ -17,6 +17,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
@@ -88,6 +89,9 @@ router.delete("/:id", (req, res) => {
     projectRepo.deleteById(req.params.id);
     testIds = testRepo.deleteByProjectId(req.params.id);
     runIds  = runRepo.deleteByProjectId(req.params.id);
+    // Trigger tokens are not soft-deleted — they are always hard-deleted
+    // immediately since they are security credentials, not recoverable data.
+    webhookTokenRepo.deleteByProjectId(req.params.id);
   })();
 
   logActivity({ ...actor(req),
