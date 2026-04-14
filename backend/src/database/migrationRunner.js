@@ -101,12 +101,10 @@ export function runMigrations(db) {
   const applied = getAppliedMigrations(db);
   const all = discoverMigrations();
 
-  // Detect already-applied migrations whose file has changed since it was
-  // applied. When this happens, re-apply the file so that new idempotent
-  // statements (CREATE TABLE/INDEX IF NOT EXISTS, ALTER TABLE ADD COLUMN)
-  // bring the schema up to date. This supports the consolidation pattern
-  // where incremental migrations are folded back into 001_initial_schema.sql.
-  const reapply = [];
+  // Validate checksums of already-applied migrations — detect tampered files.
+  // A changed migration file means the DB schema may be inconsistent with
+  // what the code expects. Warn loudly but don't crash (the change may be
+  // intentional, e.g. a comment fix).
   for (const migration of all) {
     const existingChecksum = applied.get(migration.version);
     if (existingChecksum && existingChecksum !== "") {
@@ -114,15 +112,15 @@ export function runMigrations(db) {
       const currentChecksum = checksum(sql);
       if (existingChecksum !== currentChecksum) {
         console.warn(formatLogLine("warn", null,
-          `[migrations] ⚠️  ${migration.version} file changed — re-applying ` +
-          `(old checksum ${existingChecksum}, new ${currentChecksum})`
+          `[migrations] ⚠️  ${migration.version} file changed after it was applied ` +
+          `(expected checksum ${existingChecksum}, got ${currentChecksum}). ` +
+          `This may indicate an inconsistent schema.`
         ));
-        reapply.push(migration);
       }
     }
   }
 
-  const pending = all.filter(m => !applied.has(m.version)).concat(reapply);
+  const pending = all.filter(m => !applied.has(m.version));
 
   if (pending.length === 0) {
     return { applied: [], skipped: all.length };
@@ -136,51 +134,9 @@ export function runMigrations(db) {
     const start = Date.now();
 
     const applyMigration = db.transaction(() => {
-      // SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN.
-      // If the migration contains ALTER TABLE ADD COLUMN for a column that
-      // already exists (e.g. 002 re-adds columns that 001 already created
-      // on fresh databases), we fall back to statement-by-statement execution
-      // and silently skip "duplicate column name" errors.
-      try {
-        db.exec(sql);
-      } catch (err) {
-        if (err.message && err.message.includes("duplicate column name")) {
-          // Re-execute statement by statement, skipping duplicate columns.
-          // We use a regex to split on semicolons that are NOT inside
-          // parentheses (to avoid breaking CREATE TABLE bodies).
-          const statements = [];
-          let depth = 0;
-          let current = "";
-          for (const ch of sql) {
-            if (ch === "(") depth++;
-            else if (ch === ")") depth--;
-            if (ch === ";" && depth === 0) {
-              const trimmed = current.trim();
-              if (trimmed.length > 0) statements.push(trimmed);
-              current = "";
-            } else {
-              current += ch;
-            }
-          }
-          const last = current.trim();
-          if (last.length > 0) statements.push(last);
-
-          for (const stmt of statements) {
-            try {
-              db.exec(stmt);
-            } catch (stmtErr) {
-              if (stmtErr.message && stmtErr.message.includes("duplicate column name")) {
-                continue;
-              }
-              throw stmtErr;
-            }
-          }
-        } else {
-          throw err;
-        }
-      }
+      db.exec(sql);
       db.prepare(
-        "INSERT OR REPLACE INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
+        "INSERT INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
       ).run(migration.version, hash, new Date().toISOString(), Date.now() - start);
     });
 
