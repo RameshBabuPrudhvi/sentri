@@ -11,13 +11,6 @@
  * only the numeric expiry timestamp. This file reads that cookie to drive proactive
  * refresh and session-expiry warnings without ever touching the actual JWT.
  *
- * **Cross-origin note:** In cross-origin deployments (e.g. GitHub Pages + Render)
- * the `token_exp` cookie may not be readable via `document.cookie` because browsers
- * treat it as a third-party cookie. When the hint cookie is unavailable we fall
- * through to the `/api/auth/me` server call (the HttpOnly auth cookie is still sent
- * with `credentials: "include"`) and use a fixed-interval refresh instead of the
- * cookie-based proactive refresh.
- *
  * All API requests send `credentials: "include"` so the browser automatically
  * attaches the HttpOnly cookie on every fetch — no manual header injection needed.
  *
@@ -41,13 +34,6 @@ const EXP_COOKIE = "token_exp";
 /** Proactive refresh fires this many ms before the token actually expires. */
 const REFRESH_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
-/**
- * Fallback refresh interval when the `token_exp` cookie is not readable
- * (cross-origin deployments where the browser hides third-party cookies from JS).
- * Refresh every 55 minutes — well within the 8-hour JWT TTL.
- */
-const CROSS_ORIGIN_REFRESH_MS = 55 * 60 * 1000;
-
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 function readCookie(name) {
@@ -68,17 +54,6 @@ function isCookieSessionValid() {
   const exp = readExpCookie();
   if (!exp) return false;
   return exp * 1000 > Date.now() + 30_000;
-}
-
-/**
- * Returns `true` when the `token_exp` hint cookie is not readable at all.
- * This happens in cross-origin deployments where the browser blocks JS access
- * to cookies set by a different origin. The HttpOnly auth cookie is still sent
- * via `credentials: "include"`, so the session may still be valid — we just
- * can't read the expiry hint client-side.
- */
-function isExpCookieMissing() {
-  return readExpCookie() === 0;
 }
 
 function msUntilRefresh() {
@@ -105,12 +80,13 @@ export function AuthProvider({ children }) {
   // ── Proactive refresh scheduler ──────────────────────────────────────────
   const scheduleRefresh = useCallback(function schedule() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-
-    // Determine delay: use cookie-based timing when available, otherwise
-    // fall back to a fixed interval for cross-origin deployments where the
-    // token_exp cookie is not readable via document.cookie.
-    const ms = msUntilRefresh() ?? CROSS_ORIGIN_REFRESH_MS;
-
+    const ms = msUntilRefresh();
+    if (ms === null) {
+      // Cross-origin: token_exp cookie may be unreadable (third-party cookie
+      // restrictions). Fall back to a fixed interval so the session stays alive.
+      refreshTimerRef.current = setTimeout(schedule, 55 * 60 * 1000);
+      return;
+    }
     refreshTimerRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/auth/refresh`, {
@@ -153,22 +129,16 @@ export function AuthProvider({ children }) {
   }
 
   // ── Mount: verify session via /api/auth/me ────────────────────────────────
-  // Always call /api/auth/me to validate the session server-side.
-  // In same-origin setups the token_exp cookie lets us skip the call when
-  // we know the session has expired. In cross-origin setups the cookie may
-  // not be readable (third-party cookie restrictions), so we must always
-  // fall through to the server call — the HttpOnly auth cookie is still
-  // sent with credentials: "include".
   useEffect(() => {
-    // If the exp cookie IS readable and shows an expired session, skip the
-    // network call — we know the session is dead.
-    if (!isExpCookieMissing() && !isCookieSessionValid()) {
+    // If the cookie is readable and shows an expired session, skip the server
+    // call — we know the session is dead. If the cookie is unreadable (returns 0,
+    // e.g. cross-origin deployments), fall through to the server call since the
+    // HttpOnly auth cookie may still be valid.
+    if (readExpCookie() !== 0 && !isCookieSessionValid()) {
       doLogout(false);
       setLoading(false);
       return;
     }
-    // Either the cookie confirms a valid session, or the cookie is missing
-    // (cross-origin) — in both cases, verify with the server.
     fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(data => {

@@ -136,6 +136,30 @@ export const api = {
   // ── Tests ───────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns tests for that project. */
   getTests:     (id)                => req("GET",    `/projects/${id}/tests`),
+  /**
+   * Get tests for a project with server-side pagination and optional filters.
+   * @param {string} id       - Project ID.
+   * @param {number} [page=1]
+   * @param {number} [pageSize=10]
+   * @param {Object} [filters]
+   * @param {string} [filters.reviewStatus] - "draft", "approved", "rejected", or "all".
+   * @param {string} [filters.category]     - "api", "ui", or "all".
+   * @param {string} [filters.search]       - Free-text search.
+   * @returns {Promise<{data: Object[], meta: {total: number, page: number, pageSize: number, hasMore: boolean}}>}
+   */
+  getTestsPaged: (id, page = 1, pageSize = 10, filters = {}) => {
+    const params = new URLSearchParams({ page, pageSize });
+    if (filters.reviewStatus && filters.reviewStatus !== "all") params.set("reviewStatus", filters.reviewStatus);
+    if (filters.category && filters.category !== "all") params.set("category", filters.category);
+    if (filters.search) params.set("search", filters.search);
+    return req("GET", `/projects/${id}/tests?${params}`);
+  },
+  /**
+   * Get per-status test counts for a project (lightweight — no row data).
+   * @param {string} id - Project ID.
+   * @returns {Promise<{draft: number, approved: number, rejected: number, total: number}>}
+   */
+  getTestCounts: (id) => req("GET", `/projects/${id}/tests/counts`),
   /** @returns {Promise<Array>} All tests across all projects. */
   getAllTests:   ()                  => req("GET",    "/tests"),
   /** @param {string} testId */
@@ -176,6 +200,15 @@ export const api = {
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
   getRuns:   (id)    => req("GET", `/projects/${id}/runs`),
+  /**
+   * Get runs for a project with server-side pagination.
+   * @param {string} id       - Project ID.
+   * @param {number} [page=1]
+   * @param {number} [pageSize=10]
+   * @returns {Promise<{data: Object[], meta: {total: number, page: number, pageSize: number, hasMore: boolean}}>}
+   */
+  getRunsPaged: (id, page = 1, pageSize = 10) =>
+    req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
@@ -275,6 +308,15 @@ export const api = {
   clearActivities: () => req("DELETE", "/data/activities"),
   /** @returns {Promise<{cleared: number}>} Clear self-healing history. */
   clearHealing:    () => req("DELETE", "/data/healing"),
+
+  // ── Recycle bin ──────────────────────────────────────────────────────────────
+
+  /** @returns {Promise<{projects: Object[], tests: Object[], runs: Object[]}>} All soft-deleted entities. */
+  getRecycleBin:   () => req("GET",    "/recycle-bin"),
+  /** @param {"project"|"test"|"run"} type @param {string} id @returns {Promise<{ok: boolean}>} */
+  restoreItem:     (type, id) => req("POST",   `/restore/${type}/${id}`),
+  /** @param {"project"|"test"|"run"} type @param {string} id @returns {Promise<{ok: boolean}>} */
+  purgeItem:       (type, id) => req("DELETE", `/purge/${type}/${id}`),
 
   // ── AI Test Fix ──────────────────────────────────────────────────────────────
 

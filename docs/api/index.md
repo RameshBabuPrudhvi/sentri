@@ -23,7 +23,7 @@ Authorization: Bearer <jwt-token>
 | [Projects](/api/projects) | Create, list, get, delete projects |
 | [Tests](/api/tests) | CRUD, generate, review (approve/reject/restore), bulk actions |
 | [Runs](/api/runs) | Execute tests, get results, SSE event stream, abort |
-| [Settings](/api/settings) | AI provider config, Ollama status, system info |
+| [Settings](/api/settings) | AI provider config, Ollama status, system info, recycle bin, data management |
 | [Authentication](/api/auth) | Register, sign in, OAuth (GitHub/Google), token management |
 
 ## Common Patterns

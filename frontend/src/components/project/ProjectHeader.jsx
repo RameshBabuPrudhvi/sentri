@@ -21,7 +21,8 @@ import { api } from "../../api.js";
  * @param {Object} props
  * @param {Object} props.project - { name, url }
  * @param {string} props.projectId
- * @param {Object[]} props.tests - All tests for stat counts.
+ * @param {Object[]} props.tests - Current page of tests (used for export dropdown items).
+ * @param {number} props.totalTests - Server-side total test count across all pages.
  * @param {number} props.parallelWorkers - Current parallel worker count.
  * @param {Function} props.onWorkersChange - Called with new worker count.
  * @param {string|null} props.actionLoading - "run" | null
@@ -29,7 +30,7 @@ import { api } from "../../api.js";
  * @param {Object} props.stats - { draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed }
  */
 export default function ProjectHeader({
-  project, projectId, tests,
+  project, projectId, tests, totalTests,
   parallelWorkers, onWorkersChange,
   actionLoading, onRun,
   stats,
@@ -86,7 +87,7 @@ export default function ProjectHeader({
 
           {/* ── Row 2: Export dropdown ── */}
           <div className="pd-header-row">
-            {tests.length > 0 && (
+            {totalTests > 0 && (
               <div style={{ position: "relative" }}>
                 <button
                   className="btn btn-ghost btn-xs"
@@ -100,7 +101,7 @@ export default function ProjectHeader({
                     <div className="pd-popover-backdrop" onClick={() => setShowExportMenu(false)} />
                     <div className="pd-dropdown" style={{ top: "calc(100% + 4px)", right: 0 }}>
                       <div className="pd-dropdown-heading">
-                        Export all {tests.length} tests
+                        Export all {totalTests} tests
                       </div>
                       {[
                         { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import", format: "zephyr" },
@@ -137,7 +138,7 @@ export default function ProjectHeader({
         </div>
       </div>
 
-      {tests.length > 0 && (
+      {totalTests > 0 && (
         <div className="pd-stats">
           {[
             { label: "Draft",    val: draftTests.length,    color: "var(--amber)" },

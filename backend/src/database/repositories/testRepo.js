@@ -4,9 +4,20 @@
  *
  * JSON columns: steps, tags (arrays stored as JSON strings).
  * Boolean columns: isJourneyTest, assertionEnhanced, isApiTest (stored as 0/1).
+ *
+ * All read queries filter `WHERE deletedAt IS NULL` by default.
+ * Hard deletes are replaced with soft-deletes: `deletedAt = datetime('now')`.
+ * Use {@link getDeletedByProjectId} / {@link restore} for recycle-bin operations.
+ *
+ * ### Pagination
+ * {@link getByProjectIdPaged} and {@link getAllPaged} return
+ * `{ data: Test[], meta: { total, page, pageSize, hasMore } }`.
  */
 
 import { getDatabase } from "../sqlite.js";
+import { parsePagination } from "../../utils/pagination.js";
+
+export { parsePagination };
 
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
@@ -31,12 +42,10 @@ function testToRow(t, { fillDefaults = false } = {}) {
     if (Array.isArray(row[f])) row[f] = JSON.stringify(row[f]);
     else if (f in row && row[f] == null) row[f] = fillDefaults ? "[]" : row[f];
     else if (!(f in row) && fillDefaults) row[f] = "[]";
-    // If field is not in row and not filling defaults, leave it absent
   }
   for (const f of BOOL_FIELDS) {
     if (typeof row[f] === "boolean") row[f] = row[f] ? 1 : 0;
     else if (f in row && row[f] == null) row[f] = null;
-    // If field is not in row, leave it absent
   }
   return row;
 }
@@ -55,17 +64,35 @@ const INSERT_COLS = [
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
   VALUES (${INSERT_COLS.map(c => "@" + c).join(", ")})`;
 
+// ─── Read queries ─────────────────────────────────────────────────────────────
+
 /**
- * Get all tests.
+ * Get all non-deleted tests.
  * @returns {Object[]}
  */
 export function getAll() {
   const db = getDatabase();
-  return db.prepare("SELECT * FROM tests").all().map(rowToTest);
+  return db.prepare("SELECT * FROM tests WHERE deletedAt IS NULL").all().map(rowToTest);
 }
 
 /**
- * Get all tests as a dictionary keyed by ID.
+ * Get all non-deleted tests with pagination.
+ * @param {number|string} [page=1]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @returns {PagedResult}
+ */
+export function getAllPaged(page, pageSize) {
+  const db = getDatabase();
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
+  const total = db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE deletedAt IS NULL").get().cnt;
+  const data  = db.prepare(
+    "SELECT * FROM tests WHERE deletedAt IS NULL ORDER BY createdAt DESC LIMIT ? OFFSET ?"
+  ).all(ps, offset).map(rowToTest);
+  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
+}
+
+/**
+ * Get all non-deleted tests as a dictionary keyed by ID.
  * @returns {Object<string, Object>}
  */
 export function getAllAsDict() {
@@ -76,24 +103,77 @@ export function getAllAsDict() {
 }
 
 /**
- * Get tests for a specific project.
+ * Get non-deleted tests for a specific project.
  * @param {string} projectId
  * @returns {Object[]}
  */
 export function getByProjectId(projectId) {
   const db = getDatabase();
-  return db.prepare("SELECT * FROM tests WHERE projectId = ?").all(projectId).map(rowToTest);
+  return db.prepare("SELECT * FROM tests WHERE projectId = ? AND deletedAt IS NULL").all(projectId).map(rowToTest);
 }
 
 /**
- * Get a test by ID.
+ * Get non-deleted tests for a project with pagination and optional filters.
+ * @param {string}        projectId
+ * @param {number|string} [page=1]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @param {Object}        [filters]
+ * @param {string}        [filters.reviewStatus] — "draft", "approved", "rejected", or undefined for all.
+ * @param {string}        [filters.category]     — "api", "ui", or undefined for all.
+ * @param {string}        [filters.search]       — free-text search against name and sourceUrl.
+ * @returns {PagedResult}
+ */
+export function getByProjectIdPaged(projectId, page, pageSize, filters = {}) {
+  const db = getDatabase();
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
+
+  const conditions = ["projectId = ?", "deletedAt IS NULL"];
+  const params = [projectId];
+
+  if (filters.reviewStatus) {
+    conditions.push("reviewStatus = ?");
+    params.push(filters.reviewStatus);
+  }
+  if (filters.category === "api") {
+    conditions.push("generatedFrom IN ('api_har_capture', 'api_user_described')");
+  } else if (filters.category === "ui") {
+    conditions.push("(generatedFrom IS NULL OR generatedFrom NOT IN ('api_har_capture', 'api_user_described'))");
+  }
+  if (filters.search) {
+    conditions.push("(name LIKE ? OR sourceUrl LIKE ?)");
+    const like = `%${filters.search}%`;
+    params.push(like, like);
+  }
+
+  const where = conditions.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) as cnt FROM tests WHERE ${where}`).get(...params).cnt;
+  const data = db.prepare(
+    `SELECT * FROM tests WHERE ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`
+  ).all(...params, ps, offset).map(rowToTest);
+  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
+}
+
+/**
+ * Get a non-deleted test by ID.
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getById(id) {
   const db = getDatabase();
+  return rowToTest(db.prepare("SELECT * FROM tests WHERE id = ? AND deletedAt IS NULL").get(id));
+}
+
+/**
+ * Get a test by ID including soft-deleted (needed for restore operations).
+ * @param {string} id
+ * @returns {Object|undefined}
+ */
+export function getByIdIncludeDeleted(id) {
+  const db = getDatabase();
   return rowToTest(db.prepare("SELECT * FROM tests WHERE id = ?").get(id));
 }
+
+// ─── Write operations ─────────────────────────────────────────────────────────
 
 /**
  * Create a test.
@@ -102,7 +182,6 @@ export function getById(id) {
 export function create(test) {
   const db = getDatabase();
   const row = testToRow(test, { fillDefaults: true });
-  // Fill in defaults for any missing columns
   const params = {};
   for (const col of INSERT_COLS) {
     params[col] = row[col] !== undefined ? row[col] : null;
@@ -119,14 +198,14 @@ export function create(test) {
   db.prepare(INSERT_SQL).run(params);
 }
 
+// Set of valid column names for filtering unknown properties in update().
+const VALID_COLS = new Set(INSERT_COLS);
+
 /**
  * Update specific fields on a test.
  * @param {string} id
  * @param {Object} fields — Partial test fields to update.
  */
-// Set of valid column names for filtering unknown properties in update().
-const VALID_COLS = new Set(INSERT_COLS);
-
 export function update(id, fields) {
   const db = getDatabase();
   const row = testToRow(fields);
@@ -134,8 +213,6 @@ export function update(id, fields) {
   const params = { id };
   for (const [key, val] of Object.entries(row)) {
     if (key === "id") continue;
-    // Skip properties that are not actual table columns (e.g. _regenerated,
-    // _quality, _generatedFrom) to prevent SQLite "no column" errors.
     if (!VALID_COLS.has(key)) continue;
     sets.push(`${key} = @${key}`);
     params[key] = val;
@@ -145,20 +222,48 @@ export function update(id, fields) {
 }
 
 /**
- * Delete a test by ID.
+ * Soft-delete a test by ID (sets deletedAt to now).
  * @param {string} id
  */
 export function deleteById(id) {
+  const db = getDatabase();
+  db.prepare("UPDATE tests SET deletedAt = datetime('now') WHERE id = ? AND deletedAt IS NULL").run(id);
+}
+
+/**
+ * Hard-delete a test by ID (permanent — use only for purge operations).
+ * @param {string} id
+ */
+export function hardDeleteById(id) {
   const db = getDatabase();
   db.prepare("DELETE FROM tests WHERE id = ?").run(id);
 }
 
 /**
- * Delete all tests for a project.
+ * Soft-delete all tests for a project.
+ * Returns IDs of the tests that were just soft-deleted (excludes already-deleted).
  * @param {string} projectId
- * @returns {string[]} IDs of deleted tests.
+ * @returns {string[]} IDs of newly soft-deleted tests.
  */
 export function deleteByProjectId(projectId) {
+  const db = getDatabase();
+  const ids = db.prepare(
+    "SELECT id FROM tests WHERE projectId = ? AND deletedAt IS NULL"
+  ).all(projectId).map(r => r.id);
+  if (ids.length > 0) {
+    db.prepare(
+      "UPDATE tests SET deletedAt = datetime('now') WHERE projectId = ? AND deletedAt IS NULL"
+    ).run(projectId);
+  }
+  return ids;
+}
+
+/**
+ * Hard-delete all tests for a project (permanent — for project purge).
+ * @param {string} projectId
+ * @returns {string[]} IDs of all deleted tests.
+ */
+export function hardDeleteByProjectId(projectId) {
   const db = getDatabase();
   const ids = db.prepare("SELECT id FROM tests WHERE projectId = ?").all(projectId).map(r => r.id);
   if (ids.length > 0) {
@@ -169,9 +274,10 @@ export function deleteByProjectId(projectId) {
 
 /**
  * Bulk update review status for a list of test IDs within a project.
- * @param {string[]} testIds
- * @param {string} projectId
- * @param {string} reviewStatus
+ * Only applies to non-deleted tests.
+ * @param {string[]}    testIds
+ * @param {string}      projectId
+ * @param {string}      reviewStatus
  * @param {string|null} reviewedAt
  * @returns {Object[]} Updated test objects.
  */
@@ -179,7 +285,7 @@ export function bulkUpdateReviewStatus(testIds, projectId, reviewStatus, reviewe
   const db = getDatabase();
   const updated = [];
   const stmt = db.prepare(
-    "UPDATE tests SET reviewStatus = ?, reviewedAt = ? WHERE id = ? AND projectId = ?"
+    "UPDATE tests SET reviewStatus = ?, reviewedAt = ? WHERE id = ? AND projectId = ? AND deletedAt IS NULL"
   );
   const txn = db.transaction(() => {
     for (const tid of testIds) {
@@ -194,46 +300,115 @@ export function bulkUpdateReviewStatus(testIds, projectId, reviewStatus, reviewe
   return updated;
 }
 
+// ─── Recycle bin ─────────────────────────────────────────────────────────────
+
 /**
- * Count total tests.
+ * Get soft-deleted tests for a project (recycle bin view).
+ * @param {string} projectId
+ * @returns {Object[]}
+ */
+export function getDeletedByProjectId(projectId) {
+  const db = getDatabase();
+  return db.prepare(
+    "SELECT * FROM tests WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC"
+  ).all(projectId).map(rowToTest);
+}
+
+/**
+ * Get all soft-deleted tests across all projects.
+ * @returns {Object[]}
+ */
+export function getDeletedAll() {
+  const db = getDatabase();
+  return db.prepare(
+    "SELECT * FROM tests WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC"
+  ).all().map(rowToTest);
+}
+
+/**
+ * Restore a soft-deleted test (clears deletedAt).
+ * @param {string} id
+ * @returns {boolean} Whether the test was found and restored.
+ */
+export function restore(id) {
+  const db = getDatabase();
+  const info = db.prepare("UPDATE tests SET deletedAt = NULL WHERE id = ? AND deletedAt IS NOT NULL").run(id);
+  return info.changes > 0;
+}
+
+/**
+ * Restore soft-deleted tests for a project that were deleted at or after a
+ * given timestamp. Used by project cascade-restore to avoid restoring items
+ * that were individually deleted before the project.
+ * @param {string} projectId
+ * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
+ * @returns {number} Number of tests restored.
+ */
+export function restoreByProjectIdAfter(projectId, deletedAfter) {
+  const db = getDatabase();
+  const info = db.prepare(
+    "UPDATE tests SET deletedAt = NULL WHERE projectId = ? AND deletedAt IS NOT NULL AND deletedAt >= ?"
+  ).run(projectId, deletedAfter);
+  return info.changes;
+}
+
+// ─── Counts ───────────────────────────────────────────────────────────────────
+
+/**
+ * Count total non-deleted tests.
  * @returns {number}
  */
 export function count() {
   const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests").get().cnt;
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE deletedAt IS NULL").get().cnt;
 }
 
 /**
- * Count approved tests.
+ * Count approved non-deleted tests.
  * @returns {number}
  */
 export function countApproved() {
   const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'approved'").get().cnt;
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'approved' AND deletedAt IS NULL").get().cnt;
 }
 
 /**
- * Count draft tests.
+ * Count draft non-deleted tests.
  * @returns {number}
  */
 export function countDraft() {
   const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'draft'").get().cnt;
+  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'draft' AND deletedAt IS NULL").get().cnt;
 }
 
 /**
- * Count tests by review status for a project.
+ * Count tests by review status for a project (non-deleted only).
+ * Also returns last-result breakdown (passed/failed) for approved tests
+ * and category breakdown (api/ui) across all statuses — so the frontend
+ * can display accurate stats without fetching all rows.
  * @param {string} projectId
- * @returns {{ draft: number, approved: number, rejected: number }}
+ * @returns {{ draft: number, approved: number, rejected: number, passed: number, failed: number, api: number, ui: number }}
  */
 export function countByReviewStatus(projectId) {
   const db = getDatabase();
-  const rows = db.prepare(
-    "SELECT reviewStatus, COUNT(*) as cnt FROM tests WHERE projectId = ? GROUP BY reviewStatus"
-  ).all(projectId);
-  const counts = { draft: 0, approved: 0, rejected: 0 };
-  for (const r of rows) {
-    if (r.reviewStatus in counts) counts[r.reviewStatus] = r.cnt;
-  }
-  return counts;
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN reviewStatus = 'draft'    THEN 1 ELSE 0 END) AS draft,
+      SUM(CASE WHEN reviewStatus = 'approved' THEN 1 ELSE 0 END) AS approved,
+      SUM(CASE WHEN reviewStatus = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+      SUM(CASE WHEN reviewStatus = 'approved' AND lastResult = 'passed' THEN 1 ELSE 0 END) AS passed,
+      SUM(CASE WHEN reviewStatus = 'approved' AND lastResult = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN generatedFrom IN ('api_har_capture', 'api_user_described') THEN 1 ELSE 0 END) AS api
+    FROM tests
+    WHERE projectId = ? AND deletedAt IS NULL
+  `).get(projectId);
+  return {
+    draft:    row.draft    || 0,
+    approved: row.approved || 0,
+    rejected: row.rejected || 0,
+    passed:   row.passed   || 0,
+    failed:   row.failed   || 0,
+    api:      row.api      || 0,
+    ui:       (row.draft || 0) + (row.approved || 0) + (row.rejected || 0) - (row.api || 0),
+  };
 }

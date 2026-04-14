@@ -25,6 +25,8 @@ const files = [
   "tests/password-reset-token.test.js",
   "tests/security-hardening.test.js",
   "tests/artifact-signing.test.js",
+  "tests/soft-delete.test.js",
+  "tests/recycle-bin.test.js",
 ];
 
 let passed = 0;

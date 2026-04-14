@@ -3,10 +3,21 @@
  * @description Run CRUD backed by SQLite.
  *
  * JSON columns: logs, tests, results, testQueue, generateInput, promptAudit,
- * pipelineStats, feedbackLoop, videoSegments.
+ * pipelineStats, feedbackLoop, videoSegments, qualityAnalytics.
+ *
+ * All read queries filter `WHERE deletedAt IS NULL` by default.
+ * Hard deletes are replaced with soft-deletes: `deletedAt = datetime('now')`.
+ * Use {@link getDeletedByProjectId} / {@link restore} for recycle-bin operations.
+ *
+ * ### Pagination
+ * {@link getByProjectIdPaged} and {@link getAllLeanPaged} return
+ * `{ data: Run[], meta: { total, page, pageSize, hasMore } }`.
  */
 
 import { getDatabase } from "../sqlite.js";
+import { parsePagination } from "../../utils/pagination.js";
+
+export { parsePagination };
 
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
@@ -52,19 +63,50 @@ const INSERT_COLS = [
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
   VALUES (${INSERT_COLS.map(c => "@" + c).join(", ")})`;
 
+// ─── Lean column sets (skip heavy JSON) ───────────────────────────────────────
+
+const LEAN_COLS = [
+  "id", "projectId", "type", "status", "startedAt", "finishedAt",
+  "duration", "error", "errorCategory", "passed", "failed", "total",
+  "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
+].join(", ");
+
+const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;
+
 /**
- * Get all runs (full deserialization — expensive for large datasets).
- * Prefer getAllLean() for dashboard/listing endpoints that don't need
- * heavy JSON columns (logs, results, testQueue, etc.).
+ * Parse the lightweight JSON columns (feedbackLoop, pipelineStats) on a lean
+ * row in-place.  Both are small objects — safe to include in listing queries.
+ * @param {Object} row
+ * @returns {Object} The same row with JSON columns deserialized.
+ */
+function parseLeanJson(row) {
+  if (row.feedbackLoop) {
+    try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
+  } else {
+    row.feedbackLoop = null;
+  }
+  if (row.pipelineStats) {
+    try { row.pipelineStats = JSON.parse(row.pipelineStats); } catch { row.pipelineStats = null; }
+  } else {
+    row.pipelineStats = null;
+  }
+  return row;
+}
+
+// ─── Read queries (non-deleted) ───────────────────────────────────────────────
+
+/**
+ * Get all non-deleted runs (full deserialization — expensive for large datasets).
+ * Prefer {@link getAllLean} for listing endpoints that don't need heavy columns.
  * @returns {Object[]}
  */
 export function getAll() {
   const db = getDatabase();
-  return db.prepare("SELECT * FROM runs").all().map(rowToRun);
+  return db.prepare("SELECT * FROM runs WHERE deletedAt IS NULL").all().map(rowToRun);
 }
 
 /**
- * Get all runs as a dictionary keyed by ID.
+ * Get all non-deleted runs as a dictionary keyed by ID.
  * @returns {Object<string, Object>}
  */
 export function getAllAsDict() {
@@ -74,78 +116,103 @@ export function getAllAsDict() {
   return dict;
 }
 
-// ─── Lean queries (skip heavy JSON columns) ───────────────────────────────────
-
-const LEAN_COLS = [
-  "id", "projectId", "type", "status", "startedAt", "finishedAt",
-  "duration", "error", "errorCategory", "passed", "failed", "total",
-  "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
-].join(", ");
-
-const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop`;
-
 /**
- * Get all runs with only lightweight scalar columns.
+ * Get all non-deleted runs with lightweight columns.
  * Skips logs, results, tests, testQueue, generateInput, promptAudit,
- * pipelineStats, videoSegments, qualityAnalytics — which can be huge.
- * ~10-50× faster than getAll() for projects with many runs.
+ * videoSegments, qualityAnalytics — which can be huge.
+ * Includes feedbackLoop and pipelineStats (small JSON objects needed by UI).
+ * ~10-50x faster than getAll() for projects with many runs.
  * @returns {Object[]}
  */
 export function getAllLean() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs`).all().map(row => {
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
-  });
+  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL`).all().map(parseLeanJson);
 }
 
 /**
- * Get all runs with results + feedbackLoop columns (for failure/analytics).
- * Parses only results and feedbackLoop JSON — skips logs, testQueue, etc.
+ * Get all non-deleted runs with lean columns, paginated.
+ * @param {number|string} [page=1]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
+ */
+export function getAllLeanPaged(page, pageSize) {
+  const db = getDatabase();
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
+  const total = db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
+  const data = db.prepare(
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
+  ).all(ps, offset).map(parseLeanJson);
+  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
+}
+
+/**
+ * Get all non-deleted runs with results + feedbackLoop columns (for failure/analytics).
  * @returns {Object[]}
  */
 export function getAllWithResults() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs`).all().map(row => {
+  return db.prepare(`SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs WHERE deletedAt IS NULL`).all().map(row => {
     if (row.results) {
       try { row.results = JSON.parse(row.results); } catch { row.results = []; }
     } else {
       row.results = [];
     }
-    if (row.feedbackLoop) {
-      try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
-    } else {
-      row.feedbackLoop = null;
-    }
-    return row;
+    return parseLeanJson(row);
   });
 }
 
 /**
- * Get runs for a specific project, sorted by startedAt descending.
+ * Get non-deleted runs for a specific project, sorted by startedAt descending.
  * @param {string} projectId
  * @returns {Object[]}
  */
 export function getByProjectId(projectId) {
   const db = getDatabase();
   return db.prepare(
-    "SELECT * FROM runs WHERE projectId = ? ORDER BY startedAt DESC"
+    "SELECT * FROM runs WHERE projectId = ? AND deletedAt IS NULL ORDER BY startedAt DESC"
   ).all(projectId).map(rowToRun);
 }
 
 /**
- * Get a run by ID.
+ * Get non-deleted runs for a project with lean columns, paginated.
+ * @param {string}        projectId
+ * @param {number|string} [page=1]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
+ */
+export function getByProjectIdPaged(projectId, page, pageSize) {
+  const db = getDatabase();
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
+  const total = db.prepare(
+    "SELECT COUNT(*) as cnt FROM runs WHERE projectId = ? AND deletedAt IS NULL"
+  ).get(projectId).cnt;
+  const data = db.prepare(
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE projectId = ? AND deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
+  ).all(projectId, ps, offset).map(parseLeanJson);
+  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
+}
+
+/**
+ * Get a non-deleted run by ID.
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getById(id) {
   const db = getDatabase();
+  return rowToRun(db.prepare("SELECT * FROM runs WHERE id = ? AND deletedAt IS NULL").get(id));
+}
+
+/**
+ * Get a run by ID including soft-deleted (for restore and abort operations).
+ * @param {string} id
+ * @returns {Object|undefined}
+ */
+export function getByIdIncludeDeleted(id) {
+  const db = getDatabase();
   return rowToRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id));
 }
+
+// ─── Write operations ─────────────────────────────────────────────────────────
 
 /**
  * Create a run.
@@ -195,8 +262,6 @@ export function update(id, fields) {
  * Pipeline code accumulates non-column properties on the run object
  * (e.g. snapshots, pages, testsGenerated). These are filtered out so
  * the generated SQL only references actual table columns.
- * Note: rateLimitError, qualityAnalytics, and currentStep ARE columns
- * and are correctly persisted.
  *
  * @param {Object} run — Full run object with `id`.
  */
@@ -210,8 +275,8 @@ export function save(run) {
 }
 
 /**
- * Find an active run for a project (status = "running").
- * @param {string} projectId
+ * Find an active (non-deleted, non-finished) run for a project.
+ * @param {string}   projectId
  * @param {string[]} [types] — Run types to check (default: crawl, test_run, generate).
  * @returns {Object|undefined}
  */
@@ -221,17 +286,35 @@ export function findActiveByProjectId(projectId, types) {
   const placeholders = typeList.map(() => "?").join(", ");
   return rowToRun(
     db.prepare(
-      `SELECT * FROM runs WHERE projectId = ? AND status = 'running' AND type IN (${placeholders}) LIMIT 1`
+      `SELECT * FROM runs WHERE projectId = ? AND status = 'running' AND type IN (${placeholders}) AND deletedAt IS NULL LIMIT 1`
     ).get(projectId, ...typeList)
   );
 }
 
 /**
- * Delete all runs for a project.
+ * Soft-delete all runs for a project.
  * @param {string} projectId
- * @returns {string[]} IDs of deleted runs.
+ * @returns {string[]} IDs of newly soft-deleted runs.
  */
 export function deleteByProjectId(projectId) {
+  const db = getDatabase();
+  const ids = db.prepare(
+    "SELECT id FROM runs WHERE projectId = ? AND deletedAt IS NULL"
+  ).all(projectId).map(r => r.id);
+  if (ids.length > 0) {
+    db.prepare(
+      "UPDATE runs SET deletedAt = datetime('now') WHERE projectId = ? AND deletedAt IS NULL"
+    ).run(projectId);
+  }
+  return ids;
+}
+
+/**
+ * Hard-delete all runs for a project (permanent — for project purge).
+ * @param {string} projectId
+ * @returns {string[]} IDs of all deleted runs.
+ */
+export function hardDeleteByProjectId(projectId) {
   const db = getDatabase();
   const ids = db.prepare("SELECT id FROM runs WHERE projectId = ?").all(projectId).map(r => r.id);
   if (ids.length > 0) {
@@ -241,27 +324,26 @@ export function deleteByProjectId(projectId) {
 }
 
 /**
- * Count total runs.
+ * Count total non-deleted runs.
  * @returns {number}
  */
 export function count() {
   const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
+  return db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
 }
 
 /**
- * Delete all runs.
- * @returns {number} Number of deleted rows.
+ * Hard-delete all runs (permanent — used by the admin "Clear Runs" data management action).
+ * @returns {number} Number of runs permanently removed.
  */
-export function clearAll() {
+export function hardClearAll() {
   const db = getDatabase();
-  const count = db.prepare("SELECT COUNT(*) as cnt FROM runs").get().cnt;
-  db.prepare("DELETE FROM runs").run();
-  return count;
+  const info = db.prepare("DELETE FROM runs").run();
+  return info.changes;
 }
 
 /**
- * Find the most recent run result for a specific test ID.
+ * Find the most recent non-deleted run result for a specific test ID.
  *
  * Uses a LIKE pre-filter on the JSON results column to narrow down candidate
  * rows, then parses and searches in JS. Only selects id, startedAt, results
@@ -274,7 +356,7 @@ export function findLatestResultForTest(testId) {
   const db = getDatabase();
   const rows = db.prepare(
     `SELECT id, startedAt, results FROM runs
-     WHERE results LIKE ? AND results != '[]'
+     WHERE results LIKE ? AND results != '[]' AND deletedAt IS NULL
      ORDER BY startedAt DESC LIMIT 20`
   ).all(`%${testId}%`);
 
@@ -289,7 +371,7 @@ export function findLatestResultForTest(testId) {
 }
 
 /**
- * Mark all "running" runs as "interrupted" (orphan recovery on startup).
+ * Mark all "running" non-deleted runs as "interrupted" (orphan recovery on startup).
  * @returns {number} Number of runs marked.
  */
 export function markOrphansInterrupted() {
@@ -298,7 +380,68 @@ export function markOrphansInterrupted() {
   const info = db.prepare(
     `UPDATE runs SET status = 'interrupted', finishedAt = COALESCE(finishedAt, ?),
      error = 'Server restarted while run was in progress'
-     WHERE status = 'running'`
+     WHERE status = 'running' AND deletedAt IS NULL`
   ).run(now);
+  return info.changes;
+}
+
+// ─── Recycle bin ─────────────────────────────────────────────────────────────
+
+/**
+ * Get soft-deleted runs for a project.
+ * @param {string} projectId
+ * @returns {Object[]}
+ */
+export function getDeletedByProjectId(projectId) {
+  const db = getDatabase();
+  return db.prepare(
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC`
+  ).all(projectId).map(parseLeanJson);
+}
+
+/**
+ * Get all soft-deleted runs.
+ * @returns {Object[]}
+ */
+export function getDeletedAll() {
+  const db = getDatabase();
+  return db.prepare(
+    `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC`
+  ).all().map(parseLeanJson);
+}
+
+/**
+ * Hard-delete a run by ID (permanent — use only for purge operations).
+ * @param {string} id
+ */
+export function hardDeleteById(id) {
+  const db = getDatabase();
+  db.prepare("DELETE FROM runs WHERE id = ?").run(id);
+}
+
+/**
+ * Restore a soft-deleted run (clears deletedAt).
+ * @param {string} id
+ * @returns {boolean} Whether the run was found and restored.
+ */
+export function restore(id) {
+  const db = getDatabase();
+  const info = db.prepare("UPDATE runs SET deletedAt = NULL WHERE id = ? AND deletedAt IS NOT NULL").run(id);
+  return info.changes > 0;
+}
+
+/**
+ * Restore soft-deleted runs for a project that were deleted at or after a
+ * given timestamp. Used by project cascade-restore to avoid restoring items
+ * that were individually deleted before the project.
+ * @param {string} projectId
+ * @param {string} deletedAfter — ISO timestamp (inclusive lower bound).
+ * @returns {number} Number of runs restored.
+ */
+export function restoreByProjectIdAfter(projectId, deletedAfter) {
+  const db = getDatabase();
+  const info = db.prepare(
+    "UPDATE runs SET deletedAt = NULL WHERE projectId = ? AND deletedAt IS NOT NULL AND deletedAt >= ?"
+  ).run(projectId, deletedAfter);
   return info.changes;
 }

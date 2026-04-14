@@ -9,8 +9,8 @@ const NAV = [
   { to: "/tests",     icon: FlaskConical,    label: "Tests",     tour: "tour-tests"     },
   { to: "/reports",   icon: BarChart2,       label: "Reports"   },
   { to: "/runs",      icon: Briefcase,       label: "Runs"      },
-  { to: "/chat",      icon: MessageSquare,   label: "AI Chat"   },
   { to: "/system",    icon: Layers,          label: "System"    },
+  { to: "/chat",      icon: MessageSquare,   label: "AI Chat"   },
 ];
 
 export default function Sidebar({ open }) {

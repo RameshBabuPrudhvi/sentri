@@ -3,12 +3,12 @@
  * @description Project CRUD routes. Mounted at `/api/projects`.
  *
  * ### Endpoints
- * | Method   | Path                | Description                                     |
- * |----------|---------------------|-------------------------------------------------|
- * | `POST`   | `/api/projects`     | Create a project                                |
- * | `GET`    | `/api/projects`     | List all projects                               |
- * | `GET`    | `/api/projects/:id` | Get a single project                            |
- * | `DELETE` | `/api/projects/:id` | Delete project + all tests, runs, and history   |
+ * | Method   | Path                         | Description                                            |
+ * |----------|------------------------------|--------------------------------------------------------|
+ * | `POST`   | `/api/projects`              | Create a project                                       |
+ * | `GET`    | `/api/projects`              | List all non-deleted projects                          |
+ * | `GET`    | `/api/projects/:id`          | Get a single project                                   |
+ * | `DELETE` | `/api/projects/:id`          | Soft-delete project + cascade soft-delete its data     |
  */
 
 import { Router } from "express";
@@ -17,13 +17,17 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
 import { actor } from "../utils/actor.js";
+import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 
 const router = Router();
+
+// ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 router.post("/", (req, res) => {
   const validationErr = validateProjectPayload(req.body);
@@ -52,27 +56,6 @@ router.post("/", (req, res) => {
   res.status(201).json(sanitiseProjectForClient(project));
 });
 
-/**
- * Strip encrypted credential values from a project before sending to the client.
- * Only returns whether auth is configured, not the actual secrets.
- * @param {Object} project
- * @returns {Object}
- * @private
- */
-function sanitiseProjectForClient(project) {
-  if (!project) return project;
-  const { credentials, ...rest } = project;
-  return {
-    ...rest,
-    credentials: credentials ? {
-      usernameSelector: credentials.usernameSelector || "",
-      passwordSelector: credentials.passwordSelector || "",
-      submitSelector: credentials.submitSelector || "",
-      _hasAuth: true,
-    } : null,
-  };
-}
-
 router.get("/", (req, res) => {
   res.json(projectRepo.getAll().map(sanitiseProjectForClient));
 });
@@ -87,7 +70,7 @@ router.delete("/:id", (req, res) => {
   const project = projectRepo.getById(req.params.id);
   if (!project) return res.status(404).json({ error: "not found" });
 
-  // Refuse deletion while async operations are in progress to prevent orphaned data
+  // Refuse soft-deletion while async operations are in progress
   const activeRun = runRepo.findActiveByProjectId(req.params.id);
   if (activeRun) {
     return res.status(409).json({
@@ -95,24 +78,21 @@ router.delete("/:id", (req, res) => {
     });
   }
 
-  // Delete associated tests and their healing history
-  const testIds = testRepo.deleteByProjectId(req.params.id);
-  if (testIds.length > 0) {
-    healingRepo.deleteByTestIds(testIds);
-  }
-
-  // Delete associated runs
-  const runIds = runRepo.deleteByProjectId(req.params.id);
-
-  // Delete associated activities
-  activityRepo.deleteByProjectId(req.params.id);
-
-  // Delete the project itself
-  projectRepo.deleteById(req.params.id);
+  // Wrap the cascade soft-delete in a transaction so all three tables get the
+  // same `datetime('now')` value.  This guarantees the cascade-restore in
+  // recycleBin.js (which uses `deletedAt >= project.deletedAt`) never misses
+  // children due to a second-boundary crossing between separate statements.
+  const db = getDatabase();
+  let testIds, runIds;
+  db.transaction(() => {
+    projectRepo.deleteById(req.params.id);
+    testIds = testRepo.deleteByProjectId(req.params.id);
+    runIds  = runRepo.deleteByProjectId(req.params.id);
+  })();
 
   logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,
-    detail: `Project deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs removed)`,
+    detail: `Project soft-deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs moved to recycle bin)`,
   });
 
   res.json({ ok: true, deletedTests: testIds.length, deletedRuns: runIds.length });
