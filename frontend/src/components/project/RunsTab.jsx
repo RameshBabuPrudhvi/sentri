@@ -1,6 +1,10 @@
 /**
  * @module components/project/RunsTab
- * @description Runs table tab for ProjectDetail — lists all crawl/generate/test runs.
+ * @description Runs table tab for ProjectDetail — lists crawl/generate/test runs.
+ *
+ * Supports both legacy (full array) and server-side pagination modes:
+ * - Legacy: pass `runs` array only — client-side pagination.
+ * - Server: pass `runs`, `meta`, `page`, `onPageChange` — server-driven.
  */
 
 import React, { useState, useMemo } from "react";
@@ -8,18 +12,24 @@ import { useNavigate } from "react-router-dom";
 import { ArrowRight, Ban } from "lucide-react";
 import TablePagination, { PAGE_SIZE } from "../shared/TablePagination.jsx";
 
-export default function RunsTab({ runs }) {
+export default function RunsTab({ runs, meta, page: controlledPage, onPageChange }) {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
+  const [localPage, setLocalPage] = useState(1);
+
+  // Server-side pagination when meta is provided; otherwise client-side.
+  const isServerPaged = !!meta;
+  const page = isServerPaged ? controlledPage : localPage;
+  const setPage = isServerPaged ? onPageChange : setLocalPage;
 
   const sorted = useMemo(() =>
     [...runs].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)),
   [runs]);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalItems = isServerPaged ? meta.total : sorted.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const paged = isServerPaged ? sorted : sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  if (runs.length === 0) {
+  if (totalItems === 0) {
     return (
       <div className="card">
         <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>No runs yet</div>
@@ -90,7 +100,7 @@ export default function RunsTab({ runs }) {
         </tbody>
       </table>
       <TablePagination
-        total={sorted.length}
+        total={totalItems}
         page={page}
         totalPages={totalPages}
         onPageChange={setPage}

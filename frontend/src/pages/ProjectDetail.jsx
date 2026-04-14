@@ -43,7 +43,9 @@ export default function ProjectDetail() {
 
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
+  const [testsMeta, setTestsMeta]         = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [runs, setRuns]                   = useState([]);
+  const [runsMeta, setRunsMeta]           = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [activeRun, setActiveRun]         = useState(null);
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
   const [loading, setLoading]             = useState(true);
@@ -54,8 +56,9 @@ export default function ProjectDetail() {
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "ui" | "api"
   const [search, setSearch]               = useState("");
   const [selected, setSelected]           = useState(new Set());
-  const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
+  const [reviewPage, setReviewPage]         = useState(1);
   const PAGE_SIZE = 10;
+  const [runsPage, setRunsPage]           = useState(1);
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);
@@ -104,12 +107,22 @@ export default function ProjectDetail() {
 
   const refresh = useCallback(async () => {
     try {
-      const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
-      setProject(p); setTests(t); setRuns(r);
+      const [p, tRes, rRes] = await Promise.all([
+        api.getProject(id),
+        api.getTestsPaged(id, reviewPage, PAGE_SIZE),
+        api.getRunsPaged(id, runsPage, PAGE_SIZE),
+      ]);
+      setProject(p);
+      setTests(tRes.data); setTestsMeta(tRes.meta);
+      setRuns(rRes.data);  setRunsMeta(rRes.meta);
       // Clamp reviewPage so it doesn't point past the last page after
       // a review action removes tests from the current filter view.
       setReviewPage(prev => {
-        const total = Math.max(1, Math.ceil(t.length / PAGE_SIZE));
+        const total = Math.max(1, Math.ceil(tRes.meta.total / PAGE_SIZE));
+        return prev > total ? total : prev;
+      });
+      setRunsPage(prev => {
+        const total = Math.max(1, Math.ceil(rRes.meta.total / PAGE_SIZE));
         return prev > total ? total : prev;
       });
     } catch (err) {
@@ -117,7 +130,7 @@ export default function ProjectDetail() {
       // Don't wipe existing state on transient errors — only set project to null
       // on initial load (when project was never fetched successfully).
     }
-  }, [id]);
+  }, [id, reviewPage, runsPage]);
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
@@ -261,9 +274,10 @@ export default function ProjectDetail() {
     return db - da;
   });
 
-  // Paginate review tab (50 per page)
-  const reviewTotalPages = Math.max(1, Math.ceil(filteredByReview.length / PAGE_SIZE));
-  const pagedReview = filteredByReview.slice((reviewPage - 1) * PAGE_SIZE, reviewPage * PAGE_SIZE);
+  // Server-side pagination — tests are already a single page from the API.
+  // Client-side filtering (review status, category, search) applies to the current page.
+  const reviewTotalPages = Math.max(1, Math.ceil(testsMeta.total / PAGE_SIZE));
+  const pagedReview = filteredByReview;
 
   const passed = approvedTests.filter(t => t.lastResult === "passed").length;
   const failed = approvedTests.filter(t => t.lastResult === "failed").length;
@@ -332,8 +346,8 @@ export default function ProjectDetail() {
       {/* Tabs */}
       <div className="pd-tab-bar">
         {[
-          ["review", `Tests (${tests.length})`],
-          ["runs",   `Runs (${runs.length})`],
+          ["review", `Tests (${testsMeta.total})`],
+          ["runs",   `Runs (${runsMeta.total})`],
           ["traceability", "Traceability"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
@@ -365,7 +379,7 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {tests.length === 0 ? (
+          {testsMeta.total === 0 ? (
             <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
@@ -382,7 +396,7 @@ export default function ProjectDetail() {
                   ["draft",    `Draft (${draftTests.length})`,       "var(--amber)"],
                   ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
                   ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
-                  ["all",      `All (${tests.length})`,              "var(--text2)"],
+                  ["all",      `All (${testsMeta.total})`,           "var(--text2)"],
                 ].map(([key, label, color]) => (
                   <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }}
                     className="pd-filter-pill"
@@ -546,9 +560,9 @@ export default function ProjectDetail() {
                 )}
               </div>
 
-              {/* Pagination */}
+              {/* Pagination — server-side, changing page triggers refresh */}
               <TablePagination
-                total={filteredByReview.length}
+                total={testsMeta.total}
                 page={reviewPage}
                 totalPages={reviewTotalPages}
                 onPageChange={setReviewPage}
@@ -560,7 +574,14 @@ export default function ProjectDetail() {
       )}
 
       {/* ── RUNS TAB ── */}
-      {tab === "runs" && <RunsTab runs={runs} />}
+      {tab === "runs" && (
+        <RunsTab
+          runs={runs}
+          meta={runsMeta}
+          page={runsPage}
+          onPageChange={setRunsPage}
+        />
+      )}
 
       {/* ── TRACEABILITY TAB ── */}
       {tab === "traceability" && (

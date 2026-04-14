@@ -136,6 +136,15 @@ export const api = {
   // ── Tests ───────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns tests for that project. */
   getTests:     (id)                => req("GET",    `/projects/${id}/tests`),
+  /**
+   * Get tests for a project with server-side pagination.
+   * @param {string} id       - Project ID.
+   * @param {number} [page=1]
+   * @param {number} [pageSize=10]
+   * @returns {Promise<{data: Object[], meta: {total: number, page: number, pageSize: number, hasMore: boolean}}>}
+   */
+  getTestsPaged: (id, page = 1, pageSize = 10) =>
+    req("GET", `/projects/${id}/tests?page=${page}&pageSize=${pageSize}`),
   /** @returns {Promise<Array>} All tests across all projects. */
   getAllTests:   ()                  => req("GET",    "/tests"),
   /** @param {string} testId */
@@ -176,6 +185,15 @@ export const api = {
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
   getRuns:   (id)    => req("GET", `/projects/${id}/runs`),
+  /**
+   * Get runs for a project with server-side pagination.
+   * @param {string} id       - Project ID.
+   * @param {number} [page=1]
+   * @param {number} [pageSize=10]
+   * @returns {Promise<{data: Object[], meta: {total: number, page: number, pageSize: number, hasMore: boolean}}>}
+   */
+  getRunsPaged: (id, page = 1, pageSize = 10) =>
+    req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
