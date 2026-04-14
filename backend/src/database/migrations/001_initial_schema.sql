@@ -27,8 +27,10 @@ CREATE TABLE IF NOT EXISTS projects (
   url         TEXT NOT NULL DEFAULT '',
   credentials TEXT,              -- JSON blob (encrypted)
   status      TEXT NOT NULL DEFAULT 'idle',
-  createdAt   TEXT NOT NULL
+  createdAt   TEXT NOT NULL,
+  deletedAt   TEXT                          -- soft-delete timestamp (NULL = live)
 );
+CREATE INDEX IF NOT EXISTS idx_projects_deletedAt ON projects(deletedAt);
 
 CREATE TABLE IF NOT EXISTS tests (
   id                  TEXT PRIMARY KEY,  -- "TC-1"
@@ -62,10 +64,12 @@ CREATE TABLE IF NOT EXISTS tests (
   codeRegeneratedAt   TEXT,
   aiFixAppliedAt      TEXT,
   codeVersion         INTEGER DEFAULT 0,
+  deletedAt           TEXT,                           -- soft-delete timestamp (NULL = live)
   FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_tests_projectId ON tests(projectId);
 CREATE INDEX IF NOT EXISTS idx_tests_reviewStatus ON tests(reviewStatus);
+CREATE INDEX IF NOT EXISTS idx_tests_deletedAt ON tests(deletedAt);
 
 CREATE TABLE IF NOT EXISTS runs (
   id              TEXT PRIMARY KEY,  -- "RUN-1"
@@ -96,10 +100,12 @@ CREATE TABLE IF NOT EXISTS runs (
   currentStep     INTEGER DEFAULT 0,                 -- pipeline progress (1-8)
   rateLimitError  TEXT,                              -- rate limit error message (if any)
   qualityAnalytics TEXT,                             -- JSON object (feedback loop analytics)
+  deletedAt       TEXT,                              -- soft-delete timestamp (NULL = live)
   FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_runs_projectId ON runs(projectId);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_deletedAt ON runs(deletedAt);
 -- Compound index for the common findActiveByProjectId query:
 -- SELECT * FROM runs WHERE projectId = ? AND status = 'running'
 -- Without this, SQLite does an index intersection of the two single-column
