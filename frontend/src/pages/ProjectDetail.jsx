@@ -44,7 +44,7 @@ export default function ProjectDetail() {
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
   const [testsMeta, setTestsMeta]         = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
-  const [testCounts, setTestCounts]       = useState({ draft: 0, approved: 0, rejected: 0, total: 0 });
+  const [testCounts, setTestCounts]       = useState({ draft: 0, approved: 0, rejected: 0, total: 0, passed: 0, failed: 0, api: 0, ui: 0 });
   const [runs, setRuns]                   = useState([]);
   const [runsMeta, setRunsMeta]           = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [activeRun, setActiveRun]         = useState(null);
@@ -259,12 +259,8 @@ export default function ProjectDetail() {
     setSelected(checked ? new Set(ids) : new Set());
   }
 
-  const draftTests    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft");
-  const approvedTests = tests.filter(t => t.reviewStatus === "approved");
-  const rejectedTests = tests.filter(t => t.reviewStatus === "rejected");
+  // Category filter helper — still needed for client-side filtering of the current page
   const isApiTest     = t => t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described";
-  const apiTests      = tests.filter(isApiTest);
-  const uiTests       = tests.filter(t => !isApiTest(t));
 
   const filteredByReview = tests.filter(t => {
     const statusOk =
@@ -290,9 +286,6 @@ export default function ProjectDetail() {
   // Client-side filtering (review status, category, search) applies to the current page.
   const reviewTotalPages = Math.max(1, Math.ceil(testCounts.total / PAGE_SIZE));
   const pagedReview = filteredByReview;
-
-  const passed = approvedTests.filter(t => t.lastResult === "passed").length;
-  const failed = approvedTests.filter(t => t.lastResult === "failed").length;
 
   if (loading) return (
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -328,7 +321,10 @@ export default function ProjectDetail() {
           draftTests: { length: testCounts.draft },
           approvedTests: { length: testCounts.approved },
           rejectedTests: { length: testCounts.rejected },
-          apiTests, uiTests, passed, failed,
+          apiTests: { length: testCounts.api ?? 0 },
+          uiTests: { length: testCounts.ui ?? 0 },
+          passed: testCounts.passed ?? 0,
+          failed: testCounts.failed ?? 0,
         }}
       />
 
@@ -424,12 +420,12 @@ export default function ProjectDetail() {
                     }}>{label}</button>
                 ))}
 
-                {apiTests.length > 0 && (
+                {(testCounts.api ?? 0) > 0 && (
                   <>
                     <div className="pd-filter-divider" />
                     {[
-                      ["ui",  `UI (${uiTests.length})`,   "#7c3aed"],
-                      ["api", `🌐 API (${apiTests.length})`, "#2563eb"],
+                      ["ui",  `UI (${testCounts.ui ?? 0})`,   "#7c3aed"],
+                      ["api", `🌐 API (${testCounts.api ?? 0})`, "#2563eb"],
                     ].map(([key, label, color]) => (
                       <button key={key} onClick={() => { setCategoryFilter(categoryFilter === key ? "all" : key); setSelected(new Set()); setReviewPage(1); }}
                         className="pd-filter-pill"

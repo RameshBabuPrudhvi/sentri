@@ -597,8 +597,7 @@ router.post("/projects/:id/tests/bulk", (req, res) => {
 
 router.get("/projects/:id/tests/counts", (req, res) => {
   const counts = testRepo.countByReviewStatus(req.params.id);
-  const total = counts.draft + counts.approved + counts.rejected;
-  res.json({ ...counts, total });
+  res.json({ ...counts, total: counts.draft + counts.approved + counts.rejected });
 });
 
 // ─── Export endpoints — enterprise test management integration ────────────────

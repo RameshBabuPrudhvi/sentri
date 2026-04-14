@@ -361,17 +361,32 @@ export function countDraft() {
 
 /**
  * Count tests by review status for a project (non-deleted only).
+ * Also returns last-result breakdown (passed/failed) for approved tests
+ * and category breakdown (api/ui) across all statuses — so the frontend
+ * can display accurate stats without fetching all rows.
  * @param {string} projectId
- * @returns {{ draft: number, approved: number, rejected: number }}
+ * @returns {{ draft: number, approved: number, rejected: number, passed: number, failed: number, api: number, ui: number }}
  */
 export function countByReviewStatus(projectId) {
   const db = getDatabase();
-  const rows = db.prepare(
-    "SELECT reviewStatus, COUNT(*) as cnt FROM tests WHERE projectId = ? AND deletedAt IS NULL GROUP BY reviewStatus"
-  ).all(projectId);
-  const counts = { draft: 0, approved: 0, rejected: 0 };
-  for (const r of rows) {
-    if (r.reviewStatus in counts) counts[r.reviewStatus] = r.cnt;
-  }
-  return counts;
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN reviewStatus = 'draft'    THEN 1 ELSE 0 END) AS draft,
+      SUM(CASE WHEN reviewStatus = 'approved' THEN 1 ELSE 0 END) AS approved,
+      SUM(CASE WHEN reviewStatus = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+      SUM(CASE WHEN reviewStatus = 'approved' AND lastResult = 'passed' THEN 1 ELSE 0 END) AS passed,
+      SUM(CASE WHEN reviewStatus = 'approved' AND lastResult = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN generatedFrom IN ('api_har_capture', 'api_user_described') THEN 1 ELSE 0 END) AS api
+    FROM tests
+    WHERE projectId = ? AND deletedAt IS NULL
+  `).get(projectId);
+  return {
+    draft:    row.draft    || 0,
+    approved: row.approved || 0,
+    rejected: row.rejected || 0,
+    passed:   row.passed   || 0,
+    failed:   row.failed   || 0,
+    api:      row.api      || 0,
+    ui:       (row.draft || 0) + (row.approved || 0) + (row.rejected || 0) - (row.api || 0),
+  };
 }
