@@ -125,7 +125,7 @@ export function getAllLean() {
 /**
  * Get all non-deleted runs with lean columns, paginated.
  * @param {number|string} [page=1]
- * @param {number|string} [pageSize=50]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
  * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
  */
 export function getAllLeanPaged(page, pageSize) {
@@ -168,18 +168,14 @@ export function getByProjectId(projectId) {
 
 /**
  * Get non-deleted runs for a project with lean columns, paginated.
- *
- * Default pageSize is 20 (lower than the global default of 50) because run
- * rows include feedbackLoop JSON and are heavier than test rows.
- *
  * @param {string}        projectId
  * @param {number|string} [page=1]
- * @param {number|string} [pageSize=20]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
  * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
  */
 export function getByProjectIdPaged(projectId, page, pageSize) {
   const db = getDatabase();
-  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize ?? 20);
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
   const total = db.prepare(
     "SELECT COUNT(*) as cnt FROM runs WHERE projectId = ? AND deletedAt IS NULL"
   ).get(projectId).cnt;

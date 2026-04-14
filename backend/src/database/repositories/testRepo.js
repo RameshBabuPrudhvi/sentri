@@ -78,7 +78,7 @@ export function getAll() {
 /**
  * Get all non-deleted tests with pagination.
  * @param {number|string} [page=1]
- * @param {number|string} [pageSize=50]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
  * @returns {PagedResult}
  */
 export function getAllPaged(page, pageSize) {
@@ -116,7 +116,7 @@ export function getByProjectId(projectId) {
  * Get non-deleted tests for a project with pagination.
  * @param {string}        projectId
  * @param {number|string} [page=1]
- * @param {number|string} [pageSize=50]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
  * @returns {PagedResult}
  */
 export function getByProjectIdPaged(projectId, page, pageSize) {

@@ -9,7 +9,7 @@ import { getDatabase } from "../src/database/sqlite.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as testRepo from "../src/database/repositories/testRepo.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
-import { parsePagination } from "../src/utils/pagination.js";
+import { parsePagination, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../src/utils/pagination.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,10 +90,15 @@ resetDb();
 
 console.log("\n🧪 parsePagination");
 
-test("defaults to page=1, pageSize=50", () => {
+test("exports configurable DEFAULT_PAGE_SIZE and MAX_PAGE_SIZE constants", () => {
+  assert.equal(DEFAULT_PAGE_SIZE, 10);
+  assert.equal(MAX_PAGE_SIZE, 200);
+});
+
+test("defaults to page=1, pageSize=DEFAULT_PAGE_SIZE (10)", () => {
   const r = parsePagination(undefined, undefined);
   assert.equal(r.page, 1);
-  assert.equal(r.pageSize, 50);
+  assert.equal(r.pageSize, 10);
   assert.equal(r.offset, 0);
 });
 
@@ -122,7 +127,7 @@ test("clamps pageSize to minimum 1", () => {
 test("non-numeric strings fall back to defaults", () => {
   const r = parsePagination("abc", "xyz");
   assert.equal(r.page, 1);
-  assert.equal(r.pageSize, 50);
+  assert.equal(r.pageSize, 10);
 });
 
 // ─── projectRepo soft-delete ──────────────────────────────────────────────────
