@@ -381,15 +381,21 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     }
 
     // Layer 3 — fuzzy name match (defect #3)
-    if (normName.length >= 10) {
+    // Guard with sourceUrl (consistent with Layer 2) so tests targeting
+    // different pages with similar names are not falsely deduplicated.
+    if (normName.length >= 15) {
       const fuzzyMatch = existingTests.find(e =>
+        e.sourceUrl === t.sourceUrl &&
         fuzzyNameSimilarity(normName, normalizeText(e.name)) >= FUZZY_NAME_THRESHOLD
       );
       if (fuzzyMatch) return false;
     }
 
     // Layer 4 — semantic TF-IDF similarity (defects #1, #2)
+    // Guard with sourceUrl so tests on different pages that share vocabulary
+    // (e.g. "form validation" on login vs signup) are not falsely deduplicated.
     const semanticMatch = existingTests.find(e =>
+      e.sourceUrl === t.sourceUrl &&
       semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
     );
     if (semanticMatch) return false;

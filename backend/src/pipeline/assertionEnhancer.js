@@ -180,12 +180,16 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // ── Fast-path: already fully enhanced ────────────────────────────────────
   // A test qualifies only when it has at least one strong assertion AND a
-  // page-load anchor (toHaveURL or toHaveTitle). Both conditions must hold
-  // because hasStrongAssertions() matches toBeVisible/toHaveText etc. which
-  // do not verify navigation — the page-load check is the separate gate that
-  // the third branch below would add if missing.
+  // page-load anchor (toHaveURL or toHaveTitle) AND at least one expect()
+  // call. All three conditions must hold because:
+  //   - hasStrongAssertions() uses bare regexes that can match inside
+  //     comments or string literals, so !hasNoAssertions() gates on real
+  //     expect() calls;
+  //   - toBeVisible/toHaveText etc. do not verify navigation — the
+  //     page-load check is the separate gate.
   if (
     hasStrongAssertions(code) &&
+    !hasNoAssertions(code) &&
     (code.includes("toHaveURL") || code.includes("toHaveTitle"))
   ) {
     return { ...test, _assertionEnhanced: false };
