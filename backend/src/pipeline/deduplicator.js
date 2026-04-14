@@ -324,7 +324,13 @@ export function deduplicateTests(tests) {
       }
 
       // Layer 3 — semantic TF-IDF (defects #1, #2)
-      if (semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD) {
+      // Guard with name length (consistent with deduplicateAcrossRuns Layer 4)
+      // — short names produce tiny TF-IDF vectors where a single shared term
+      // yields cosine ≈ 1.0, causing false positives.
+      if (
+        normCandName.length >= 15 &&
+        semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
+      ) {
         if (candidate._quality > kept._quality) {
           retained.splice(retained.indexOf(kept), 1, candidate);
         }

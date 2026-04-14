@@ -37,9 +37,11 @@ const VALID_PAGE_ACTIONS = new Set([
   // Waiting
   "waitForLoadState", "waitForNavigation", "waitForSelector",
   "waitForFunction", "waitForTimeout", "waitForRequest", "waitForResponse",
+  "waitForEvent",
   // Extraction
   "textContent", "getAttribute", "innerHTML", "innerText", "inputValue",
   "isChecked", "isDisabled", "isEditable", "isEnabled", "isHidden", "isVisible",
+  "url", "title", "content",
   // Locators (return locator objects, not results)
   "locator", "getByRole", "getByLabel", "getByText", "getByPlaceholder",
   "getByAltText", "getByTitle", "getByTestId", "frameLocator",
@@ -159,6 +161,14 @@ const NO_NEGATE_MATCHERS = new Set([
  * @param {string} code
  * @returns {string[]}
  */
+/**
+ * Promise-chain methods that can appear after an expect() assertion chain
+ * but are NOT assertion matchers. The greedy ASSERTION_RE can capture these
+ * when `.catch(() => {})` or `.then(...)` follows an expect chain (e.g.
+ * `expect(loc).toContainText(/x/).catch(() => {})`). Skip them silently.
+ */
+const PROMISE_CHAIN_METHODS = new Set(["catch", "then", "finally"]);
+
 export function validateAssertions(code) {
   if (!code) return [];
   const issues = [];
@@ -168,6 +178,9 @@ export function validateAssertions(code) {
   while ((m = ASSERTION_RE.exec(code)) !== null) {
     const matcher = m[3];
     const isNegated = Boolean(m[2]);
+
+    // Skip promise-chain methods that the greedy regex can over-match
+    if (PROMISE_CHAIN_METHODS.has(matcher)) continue;
 
     if (!VALID_MATCHERS.has(matcher) && !seenMatchers.has(matcher)) {
       seenMatchers.add(matcher);
