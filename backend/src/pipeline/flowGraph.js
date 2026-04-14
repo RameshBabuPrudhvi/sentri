@@ -243,16 +243,26 @@ export function flowToJourney(flow, snapshotsByFp) {
     }
   }
 
-  // Build the observed action sequence for the enhanced prompt
+  // Build the observed action sequence for the enhanced prompt.
+  // Include ARIA role, data-testid, aria-label, and the best selector so the
+  // AI can generate targeted Playwright code instead of guessing from text
+  // labels alone (which fail when the label is ambiguous or non-unique).
   const observedActions = flow.path.map(edge => {
     const snap = snapshotsByFp.get(edge.fromFp);
     const act = edge.action;
+    const el = act?.element;
     return {
       onPage: snap?.url || "unknown",
       actionType: act?.type || "navigate",
-      target: act?.element?.text || act?.element?.label || act?.element?.placeholder || "",
+      target: el?.text || el?.label || el?.placeholder || "",
       value: act?.value || null,
       resultPage: snapshotsByFp.get(edge.toFp)?.url || "unknown",
+      // Selector hints — give the AI concrete locator info so it doesn't
+      // have to guess from ambiguous text labels.
+      role: el?.role || "",
+      testId: el?.testId || "",
+      ariaLabel: el?.ariaLabel || "",
+      selector: (act?.selectors && act.selectors[0]) || "",
     };
   });
 

@@ -39,6 +39,14 @@ function buildObservedActionsBlock(observedActions) {
     } else {
       desc += `, performed ${act.actionType} on "${act.target}"`;
     }
+    // Append selector hints so the AI can write targeted Playwright code
+    // instead of guessing from ambiguous text labels alone.
+    const hints = [];
+    if (act.role)      hints.push(`role="${act.role}"`);
+    if (act.testId)    hints.push(`data-testid="${act.testId}"`);
+    if (act.ariaLabel) hints.push(`aria-label="${act.ariaLabel}"`);
+    if (act.selector)  hints.push(`selector: ${act.selector}`);
+    if (hints.length > 0) desc += `  [${hints.join(", ")}]`;
     if (act.resultPage && act.resultPage !== act.onPage) {
       desc += ` → navigated to ${act.resultPage}`;
     }
@@ -51,6 +59,8 @@ ${steps}
 
 IMPORTANT: Use the observed actions above as the basis for the POSITIVE test path.
 The AI saw these actions succeed in a real browser. Reproduce them faithfully in playwrightCode.
+When a step includes selector hints (role, data-testid, aria-label, selector), prefer those
+over guessing from the text label — they were verified to resolve during exploration.
 For NEGATIVE tests, vary the inputs (empty fields, wrong values) but use the same selectors/elements.`;
 }
 
