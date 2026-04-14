@@ -161,17 +161,18 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-008 — Move `runs.logs` to a separate `run_logs` table 🟡 High
+### ~~ENH-008 — Move `runs.logs` to a separate `run_logs` table~~ ✅ Complete
 
 **Problem:** Every call to `log(run, message)` in `runLogger.js` deserialises the entire `logs` JSON column, appends one entry, and re-serialises it. A crawl generating 200 log lines performs 200 read-modify-write cycles on a column that grows from 0 to ~20 KB. This is O(n²) in log volume. The `results`, `testQueue`, and `videoSegments` columns share the same pattern.
 
 **Fix:** Create a `run_logs(id, runId, seq, level, message, createdAt)` table. Update `log()`, `logWarn()`, `logSuccess()` to `INSERT` individual rows. SSE streaming reads from `run_logs` ordered by `seq`. The `runs` table retains only summary columns.
 
-**Files to change:**
-- `backend/src/database/migrations/` — create `run_logs` table
-- `backend/src/utils/runLogger.js` — replace JSON mutation with INSERT
-- `backend/src/database/repositories/runRepo.js` — update log queries
-- `backend/src/routes/runs.js` — update SSE log stream
+**Implemented in:** PR #86
+- `backend/src/database/migrations/002_run_logs_table.sql` — new `run_logs` table with indexes on `runId` and `(runId, seq)`
+- `backend/src/database/repositories/runLogRepo.js` — append-only data-access layer with in-process seq counter cache
+- `backend/src/utils/runLogger.js` — each `log()`/`logWarn()`/`logError()` now does a single INSERT via `runLogRepo.appendLog()`
+- `backend/src/database/repositories/runRepo.js` — `logs` removed from JSON_FIELDS; `getById()` hydrates from `run_logs`; purge paths cascade into `run_logs`
+- `backend/src/routes/sse.js` — SSE snapshot hydrates logs from `run_logs`
 
 **Effort:** M | **Source:** Audit
 
@@ -303,7 +304,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-011 — CI/CD webhook receiver + GitHub Actions integration 🟡 High
+### ~~ENH-011 — CI/CD webhook receiver + GitHub Actions integration~~ ✅ Complete
 
 **Problem:** There is no programmatic trigger for test runs. Sentri cannot be called from GitHub Actions, GitLab CI, CircleCI, Jenkins, or any other pipeline. The primary adoption trigger for any developer tool is "it fits into my existing workflow" — without CI/CD integration, Sentri will not be adopted by engineering teams.
 
@@ -314,13 +315,16 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 4. Add a **Trigger** tab to `ProjectDetail` showing the token, a copy button, and example YAML snippets for GitHub Actions, GitLab CI, and cURL.
 5. Support an optional `callbackUrl` param for async result delivery to external systems.
 
-**Files to change:**
-- `backend/src/routes/runs.js` — add `POST /projects/:id/trigger`
-- `backend/src/routes/settings.js` — add `POST/DELETE /projects/:id/trigger-token`
-- New `backend/src/database/repositories/webhookTokenRepo.js`
-- `frontend/src/pages/ProjectDetail.jsx` — add Trigger tab with token + YAML snippets
-- New `.github/actions/run-tests/` — GitHub Action definition
-- `backend/.env.example` — document webhook token settings
+**Implemented in:** PR #86
+- `backend/src/database/migrations/003_webhook_tokens.sql` — `webhook_tokens` table with SHA-256 hashed tokens, unique index on `tokenHash`
+- `backend/src/database/repositories/webhookTokenRepo.js` — CRUD + `hashToken()`, `generateToken()`, `findByHash()`, `touch()`
+- `backend/src/routes/trigger.js` — `POST /api/projects/:id/trigger` with Bearer token auth (no JWT), 202 Accepted, optional `callbackUrl`
+- `backend/src/routes/runs.js` — token management endpoints: `GET/POST /trigger-tokens`, `DELETE /trigger-tokens/:tid`
+- `backend/src/utils/idGenerator.js` — `generateWebhookTokenId()` → `WH-1`, `WH-2`, …
+- `backend/src/routes/projects.js`, `backend/src/routes/recycleBin.js` — cascade-delete tokens on project delete/purge
+- `frontend/src/components/project/TriggerTab.jsx` — token management UI, one-time reveal, CI snippet generators
+- `frontend/src/pages/ProjectDetail.jsx` — "Trigger" tab wired into tab bar
+- `frontend/src/api.js` — `getTriggerTokens()`, `createTriggerToken()`, `deleteTriggerToken()`
 
 **Effort:** M | **Source:** Competitive (S2-01)
 
@@ -787,7 +791,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Visual regression | ❌ **Gap** | ✅ Native | ✅ Native | ✅ Native | Via plugins |
 | Cross-browser | ❌ Chromium only | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile/device emulation | ❌ **Gap** | ✅ | ✅ | ✅ | ✅ Native |
-| CI/CD integration | ❌ **Gap** | ✅ Native | ✅ Native | ✅ Native | ✅ CLI |
+| CI/CD integration | ✅ Webhook trigger + token auth | ✅ Native | ✅ Native | ✅ Native | ✅ CLI |
 | Scheduled runs | ❌ **Gap** | ✅ | ✅ | ✅ | Via CI cron |
 | Multi-tenancy / RBAC | ❌ **Gap** | ✅ | ✅ | ✅ | N/A |
 | Failure notifications | ❌ **Gap** | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
@@ -801,7 +805,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM support + standalone Playwright export (planned). No competitor offers all of these together.
 
-**Critical competitive gaps to close (Phase 1–2):** CI/CD webhook, scheduled runs, cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
+**Critical competitive gaps to close (Phase 2–3):** Scheduled runs, cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
 
 ---
 
@@ -810,17 +814,17 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase | Items | Status | Key Deliverable |
 |-------|-------|--------|-----------------|
 | ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
-| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-010 ✅, ENH-013 ✅, ENH-020 ✅, ENH-021 ✅, ENH-024 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
-| Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
+| Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | ✅ Complete | Production-safe for real teams |
+| Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔄 In progress (ENH-011 ✅) | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
 | Ongoing | MAINT-001 through MAINT-012 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅, MAINT-012 ✅) | Platform moat + infrastructure |
 
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 12 maintenance items = **59 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-010, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **21 complete**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-008, ENH-010, ENH-011, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **23 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
-**Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
+**Highest adoption impact:** ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
-**Next PR priorities (recommended order):** ENH-008 (Run logs table, M) → ENH-011 (CI/CD webhook, M) → ENH-006 (Scheduling, M)
+**Next PR priorities (recommended order):** ENH-006 (Scheduling, M) → ENH-009 (BullMQ job queue, L) → ENH-001 (PostgreSQL, XL)
 
 ---
 
