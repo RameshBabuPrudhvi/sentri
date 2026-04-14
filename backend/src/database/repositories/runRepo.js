@@ -71,18 +71,24 @@ const LEAN_COLS = [
   "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
 ].join(", ");
 
-const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop`;
+const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;
 
 /**
- * Parse the feedbackLoop JSON column on a lean row (in-place).
+ * Parse the lightweight JSON columns (feedbackLoop, pipelineStats) on a lean
+ * row in-place.  Both are small objects — safe to include in listing queries.
  * @param {Object} row
- * @returns {Object} The same row with feedbackLoop deserialized.
+ * @returns {Object} The same row with JSON columns deserialized.
  */
-function parseFeedbackLoop(row) {
+function parseLeanJson(row) {
   if (row.feedbackLoop) {
     try { row.feedbackLoop = JSON.parse(row.feedbackLoop); } catch { row.feedbackLoop = null; }
   } else {
     row.feedbackLoop = null;
+  }
+  if (row.pipelineStats) {
+    try { row.pipelineStats = JSON.parse(row.pipelineStats); } catch { row.pipelineStats = null; }
+  } else {
+    row.pipelineStats = null;
   }
   return row;
 }
@@ -111,15 +117,16 @@ export function getAllAsDict() {
 }
 
 /**
- * Get all non-deleted runs with only lightweight scalar columns.
+ * Get all non-deleted runs with lightweight columns.
  * Skips logs, results, tests, testQueue, generateInput, promptAudit,
- * pipelineStats, videoSegments, qualityAnalytics — which can be huge.
+ * videoSegments, qualityAnalytics — which can be huge.
+ * Includes feedbackLoop and pipelineStats (small JSON objects needed by UI).
  * ~10-50x faster than getAll() for projects with many runs.
  * @returns {Object[]}
  */
 export function getAllLean() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL`).all().map(parseFeedbackLoop);
+  return db.prepare(`SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL`).all().map(parseLeanJson);
 }
 
 /**
@@ -134,7 +141,7 @@ export function getAllLeanPaged(page, pageSize) {
   const total = db.prepare("SELECT COUNT(*) as cnt FROM runs WHERE deletedAt IS NULL").get().cnt;
   const data = db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
-  ).all(ps, offset).map(parseFeedbackLoop);
+  ).all(ps, offset).map(parseLeanJson);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
@@ -150,7 +157,7 @@ export function getAllWithResults() {
     } else {
       row.results = [];
     }
-    return parseFeedbackLoop(row);
+    return parseLeanJson(row);
   });
 }
 
@@ -181,7 +188,7 @@ export function getByProjectIdPaged(projectId, page, pageSize) {
   ).get(projectId).cnt;
   const data = db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS} FROM runs WHERE projectId = ? AND deletedAt IS NULL ORDER BY startedAt DESC LIMIT ? OFFSET ?`
-  ).all(projectId, ps, offset).map(parseFeedbackLoop);
+  ).all(projectId, ps, offset).map(parseLeanJson);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
@@ -389,7 +396,7 @@ export function getDeletedByProjectId(projectId) {
   const db = getDatabase();
   return db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE projectId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC`
-  ).all(projectId).map(parseFeedbackLoop);
+  ).all(projectId).map(parseLeanJson);
 }
 
 /**
@@ -400,7 +407,7 @@ export function getDeletedAll() {
   const db = getDatabase();
   return db.prepare(
     `SELECT ${LEAN_WITH_FEEDBACK_COLS}, deletedAt FROM runs WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC`
-  ).all().map(parseFeedbackLoop);
+  ).all().map(parseLeanJson);
 }
 
 /**
