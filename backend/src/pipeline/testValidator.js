@@ -224,13 +224,21 @@ const VALID_CSS_PSEUDOS = new Set([
 /**
  * Captures CSS selector arguments passed to .locator(), .querySelector*,
  * or .waitForSelector().
+ *
+ * Three alternations handle the three JS string delimiters so that a
+ * quote character different from the outer delimiter (e.g. `"` inside a
+ * `'`-delimited string) does not prematurely terminate the capture.
+ * Without this, selectors like `'button[type="submit"]'` or XPaths like
+ * `'//div[@id="main"]'` would be truncated at the inner `"`.
  */
-const CSS_LOCATOR_RE = /(?:locator|querySelector|waitForSelector|waitForSelectorAll)\s*\(\s*["'`]([^"'`]+)["'`]/g;
+const CSS_LOCATOR_RE = /(?:locator|querySelector|waitForSelector|waitForSelectorAll)\s*\(\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`)/g;
 
 /**
  * Captures XPath strings (detected by leading // or (// patterns).
+ *
+ * Same three-alternation strategy as CSS_LOCATOR_RE above.
  */
-const XPATH_LOCATOR_RE = /(?:locator|querySelector|waitForSelector)\s*\(\s*["'`]((?:\/\/|\(\/\/)[^"'`]+)["'`]/g;
+const XPATH_LOCATOR_RE = /(?:locator|querySelector|waitForSelector)\s*\(\s*(?:"((?:\/\/|\(\/\/)[^"]+)"|'((?:\/\/|\(\/\/)[^']+)'|`((?:\/\/|\(\/\/)[^`]+)`)/g;
 
 /**
  * Validates a CSS selector string for obvious structural errors.
@@ -322,7 +330,7 @@ export function validateLocators(code) {
   let m;
   CSS_LOCATOR_RE.lastIndex = 0;
   while ((m = CSS_LOCATOR_RE.exec(code)) !== null) {
-    const selector = m[1];
+    const selector = m[1] || m[2] || m[3];
     if (selector.startsWith("//") || selector.startsWith("(//")) continue; // XPath, handled below
     const err = checkCssSelector(selector);
     if (err) issues.push(err);
@@ -331,7 +339,7 @@ export function validateLocators(code) {
   // XPath
   XPATH_LOCATOR_RE.lastIndex = 0;
   while ((m = XPATH_LOCATOR_RE.exec(code)) !== null) {
-    const err = checkXPath(m[1]);
+    const err = checkXPath(m[1] || m[2] || m[3]);
     if (err) issues.push(err);
   }
 

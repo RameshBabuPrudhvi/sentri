@@ -145,6 +145,7 @@ function buildTfIdfVector(text) {
  */
 export function cosineSimilarity(vecA, vecB) {
   if (vecA.size === 0 || vecB.size === 0) return 0;
+  if (vecA === vecB) return 1;
   let dot = 0;
   for (const [term, w] of vecA) {
     if (vecB.has(term)) dot += w * vecB.get(term);
