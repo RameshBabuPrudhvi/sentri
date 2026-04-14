@@ -162,8 +162,13 @@ export default function ProjectDetail() {
     }
   }, [id]);
 
-  // Re-fetch when page or filters change (separate effect to avoid loop with clamp).
-  useEffect(() => { refresh(); }, [reviewPage, runsPage, reviewFilter, categoryFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-fetch when page or filters change. Skip the initial mount — the
+  // next effect handles that with the loading flag.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return; }
+    refresh();
+  }, [reviewPage, runsPage, reviewFilter, categoryFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
