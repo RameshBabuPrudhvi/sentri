@@ -101,10 +101,12 @@ export function runMigrations(db) {
   const applied = getAppliedMigrations(db);
   const all = discoverMigrations();
 
-  // Validate checksums of already-applied migrations — detect tampered files.
-  // A changed migration file means the DB schema may be inconsistent with
-  // what the code expects. Warn loudly but don't crash (the change may be
-  // intentional, e.g. a comment fix).
+  // Detect already-applied migrations whose file has changed since it was
+  // applied. When this happens, re-apply the file so that new idempotent
+  // statements (CREATE TABLE/INDEX IF NOT EXISTS, ALTER TABLE ADD COLUMN)
+  // bring the schema up to date. This supports the consolidation pattern
+  // where incremental migrations are folded back into 001_initial_schema.sql.
+  const reapply = [];
   for (const migration of all) {
     const existingChecksum = applied.get(migration.version);
     if (existingChecksum && existingChecksum !== "") {
@@ -112,15 +114,15 @@ export function runMigrations(db) {
       const currentChecksum = checksum(sql);
       if (existingChecksum !== currentChecksum) {
         console.warn(formatLogLine("warn", null,
-          `[migrations] ⚠️  ${migration.version} file changed after it was applied ` +
-          `(expected checksum ${existingChecksum}, got ${currentChecksum}). ` +
-          `This may indicate an inconsistent schema.`
+          `[migrations] ⚠️  ${migration.version} file changed — re-applying ` +
+          `(old checksum ${existingChecksum}, new ${currentChecksum})`
         ));
+        reapply.push(migration);
       }
     }
   }
 
-  const pending = all.filter(m => !applied.has(m.version));
+  const pending = all.filter(m => !applied.has(m.version)).concat(reapply);
 
   if (pending.length === 0) {
     return { applied: [], skipped: all.length };
@@ -178,7 +180,7 @@ export function runMigrations(db) {
         }
       }
       db.prepare(
-        "INSERT INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
+        "INSERT OR REPLACE INTO schema_migrations (version, checksum, appliedAt, durationMs) VALUES (?, ?, ?, ?)"
       ).run(migration.version, hash, new Date().toISOString(), Date.now() - start);
     });
 
