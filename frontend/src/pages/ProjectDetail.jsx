@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Trash2, ArrowRight,
@@ -105,17 +105,25 @@ export default function ProjectDetail() {
     setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
   };
 
+  // Use refs so the fetch callback always reads the latest page values
+  // without needing them in the dependency array (which would cause an
+  // infinite loop when the clamp logic adjusts the page after fetch).
+  const reviewPageRef = useRef(reviewPage);
+  const runsPageRef   = useRef(runsPage);
+  useEffect(() => { reviewPageRef.current = reviewPage; }, [reviewPage]);
+  useEffect(() => { runsPageRef.current = runsPage; }, [runsPage]);
+
   const refresh = useCallback(async () => {
     try {
       const [p, tRes, rRes] = await Promise.all([
         api.getProject(id),
-        api.getTestsPaged(id, reviewPage, PAGE_SIZE),
-        api.getRunsPaged(id, runsPage, PAGE_SIZE),
+        api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE),
+        api.getRunsPaged(id, runsPageRef.current, PAGE_SIZE),
       ]);
       setProject(p);
       setTests(tRes.data); setTestsMeta(tRes.meta);
       setRuns(rRes.data);  setRunsMeta(rRes.meta);
-      // Clamp reviewPage so it doesn't point past the last page after
+      // Clamp pages so they don't point past the last page after
       // a review action removes tests from the current filter view.
       setReviewPage(prev => {
         const total = Math.max(1, Math.ceil(tRes.meta.total / PAGE_SIZE));
@@ -127,10 +135,11 @@ export default function ProjectDetail() {
       });
     } catch (err) {
       console.error("ProjectDetail refresh error:", err);
-      // Don't wipe existing state on transient errors — only set project to null
-      // on initial load (when project was never fetched successfully).
     }
-  }, [id, reviewPage, runsPage]);
+  }, [id]);
+
+  // Re-fetch when page changes (separate effect to avoid loop with clamp).
+  useEffect(() => { refresh(); }, [reviewPage, runsPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
@@ -307,6 +316,7 @@ export default function ProjectDetail() {
         project={project}
         projectId={id}
         tests={tests}
+        totalTests={testsMeta.total}
         parallelWorkers={parallelWorkers}
         onWorkersChange={setParallelWorkers}
         actionLoading={actionLoading}

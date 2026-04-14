@@ -38,7 +38,7 @@ function MessageBubble({ msg }) {
     navigator.clipboard.writeText(msg.content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    }).catch(() => { /* clipboard unavailable (e.g. non-HTTPS) */ });
   }
 
   const isUser  = msg.role === "user";
