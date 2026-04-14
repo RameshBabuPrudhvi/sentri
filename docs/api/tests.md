@@ -9,10 +9,23 @@ GET /api/projects/:id/tests
 Returns non-deleted tests for the project. Supports optional pagination:
 
 ```
-GET /api/projects/:id/tests?page=1&pageSize=20
+GET /api/projects/:id/tests?page=1&pageSize=10
 ```
 
-When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible).
+When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible). Default `pageSize` is 10 (max 200).
+
+**Optional filters** (only apply when paginated):
+
+| Param | Values | Description |
+|---|---|---|
+| `reviewStatus` | `draft`, `approved`, `rejected` | Filter by review status |
+| `category` | `api`, `ui` | Filter by test category |
+| `search` | free text | Search against test name and source URL |
+
+Example with filters:
+```
+GET /api/projects/:id/tests?page=1&pageSize=10&reviewStatus=draft&category=ui&search=login
+```
 
 ## List All Tests
 
@@ -108,6 +121,28 @@ POST /api/projects/:id/tests/bulk
 ```
 
 The `"delete"` action soft-deletes tests (moves them to the Recycle Bin).
+
+## Test Counts
+
+```
+GET /api/projects/:id/tests/counts
+```
+
+Lightweight endpoint returning per-status test counts without fetching row data. Used by the frontend for filter pills, tab badges, and stats.
+
+**Response:**
+```json
+{
+  "draft": 5,
+  "approved": 12,
+  "rejected": 2,
+  "passed": 10,
+  "failed": 2,
+  "api": 3,
+  "ui": 16,
+  "total": 19
+}
+```
 
 ## Export
 

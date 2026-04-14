@@ -20,9 +20,9 @@ Authorization: Bearer <jwt-token>
 
 | Section | Description |
 |---|---|
-| [Projects](/api/projects) | Create, list, get, delete projects |
-| [Tests](/api/tests) | CRUD, generate, review (approve/reject/restore), bulk actions |
-| [Runs](/api/runs) | Execute tests, get results, SSE event stream, abort |
+| [Projects](/api/projects) | Create, list, get, soft-delete projects |
+| [Tests](/api/tests) | CRUD, generate, review (approve/reject/restore), bulk actions, counts, pagination |
+| [Runs](/api/runs) | Execute tests, get results, SSE event stream, abort, pagination |
 | [Settings](/api/settings) | AI provider config, Ollama status, system info, recycle bin, data management |
 | [Authentication](/api/auth) | Register, sign in, OAuth (GitHub/Google), token management |
 

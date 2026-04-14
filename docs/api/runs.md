@@ -42,10 +42,10 @@ GET /api/projects/:id/runs
 Returns non-deleted runs sorted newest-first. Supports optional pagination:
 
 ```
-GET /api/projects/:id/runs?page=1&pageSize=20
+GET /api/projects/:id/runs?page=1&pageSize=10
 ```
 
-When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible). Default `pageSize` is 20 for runs.
+When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible). Default `pageSize` is 10 (max 200).
 
 ## Get Run Detail
 

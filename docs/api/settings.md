@@ -108,4 +108,4 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 - Restoring a **project** cascade-restores its tests and runs that were deleted at the same time. Items individually deleted before the project are left in the recycle bin.
 - Restoring a **test** or **run** whose parent project is deleted returns `409` — restore the project first.
 
-**Pagination** is supported on list endpoints via `?page=N&pageSize=N` query params. When present, the response shape is `{ data: [], meta: { total, page, pageSize, hasMore } }` instead of a flat array.
+**Note:** The recycle bin endpoint returns all soft-deleted items (capped at 200 per type) without pagination. For paginated listing of live entities, see the [Tests](/api/tests) and [Runs](/api/runs) API docs.
