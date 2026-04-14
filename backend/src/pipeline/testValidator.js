@@ -123,13 +123,18 @@ const VALID_MATCHERS = new Set([
  *   expect(page).toHaveURL(...)
  *   expect(locator).not.toBeVisible()
  *   expect(value).toBe(...)
+ *   expect(page.locator('...').first()).toBeVisible()
+ *
+ * Uses greedy `.+` so the regex backtracks from the last `)` on the
+ * line, correctly handling nested parentheses inside the expect()
+ * expression (e.g. `.locator(...).first()`).
  *
  * Groups:
  *   [1] target expression inside expect(...)
  *   [2] optional ".not" negation
  *   [3] matcher name
  */
-const ASSERTION_RE = /expect\s*\(\s*([^)]+?)\s*\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ASSERTION_RE = /expect\s*\((.+)\)\s*(\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * Matchers that must NOT be used with .not because the negated form is
