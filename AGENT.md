@@ -548,13 +548,28 @@ Stage 1  pageSnapshot.js        Capture DOM snapshot + classify page intent
 Stage 2  elementFilter.js       Filter interactive elements (remove noise, socials, etc.)
 Stage 3  intentClassifier.js    Classify element intent; build user journeys
 Stage 4  journeyGenerator.js    Generate test plans (PLAN phase, avoids token truncation)
-Stage 5  deduplicator.js        Hash+score dedup within batch and across existing tests
+Stage 5  deduplicator.js        4-layer dedup: structural hash → fuzzy name → semantic TF-IDF → description
 Stage 6  assertionEnhancer.js   Strengthen weak/missing assertions using page context
 Stage 7  testValidator.js       Reject malformed, placeholder, or navigation-only tests
 Stage 8  testPersistence.js     Write validated tests to DB as "draft" status
 ```
 
 Stages 5–7 are shared between `generateSingleTest` and `crawlAndGenerateTests` via `pipelineOrchestrator.js`. Any change to these stages must go through that module — do not duplicate the logic.
+
+### Stage 5 — Deduplicator detail
+
+`deduplicator.js` runs four layers in order; a test is eliminated the moment any layer matches:
+
+| Layer | Mechanism | Threshold | Defect resolved |
+|-------|-----------|-----------|-----------------|
+| 1 | Structural hash (SHA-256 of Playwright actions + description) | exact | #4 (description now included) |
+| 2 | Normalised name + same `sourceUrl` | exact, length ≥ 15 chars | existing |
+| 3 | Fuzzy name — Levenshtein similarity | ≥ 0.80 | #3 (paraphrased names) |
+| 4 | Semantic TF-IDF cosine — name + description + steps | ≥ 0.65 | #1, #2 (semantic duplicates) |
+
+Exported constants `FUZZY_NAME_THRESHOLD` and `SEMANTIC_SIMILARITY_THRESHOLD` let tests override thresholds without editing production code. The TF-IDF stop-word list is intentionally conservative: it strips common English words and generic QA verbs so domain-specific nouns (feature names, form field names, page routes) carry the signal.
+
+**Performance note:** Layers 3 and 4 are O(n²) over the post-layer-1 set. This is acceptable for typical batch sizes (< 200 tests) but should be revisited if batches routinely exceed 1 000.
 
 ---
 

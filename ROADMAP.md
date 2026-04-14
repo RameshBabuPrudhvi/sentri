@@ -729,9 +729,17 @@ These items are not phase-bounded — they should be addressed incrementally alo
 
 ---
 
-### MAINT-010 — Semantic deduplication using embedding similarity (M-05)
+### ~~MAINT-010 — Semantic deduplication using embedding similarity (M-05)~~ ✅ Complete
 
 **Problem:** `backend/src/pipeline/deduplicator.js` uses exact string matching on test name + description. Renamed tests or slightly rephrased duplicates are not caught. Large test suites accumulate near-duplicate tests over time, degrading run times and signal quality.
+
+**Implemented in:** PR #55
+- Added `levenshteinDistance()` + `fuzzyNameSimilarity()` — catches paraphrased test names (≥ 0.80 similarity threshold)
+- Added `buildTfIdfVector()` + `cosineSimilarity()` + `semanticSimilarity()` — catches semantic duplicates across name + description + steps (≥ 0.65 cosine threshold)
+- `hashTest()` now includes `description` field in fingerprint — tests with identical code but different descriptions are correctly grouped
+- `deduplicateTests()` and `deduplicateAcrossRuns()` both run 4-layer strategy: structural hash → normalized name → fuzzy name → semantic TF-IDF
+- Thresholds exported as `FUZZY_NAME_THRESHOLD` and `SEMANTIC_SIMILARITY_THRESHOLD` for testability
+- No new dependencies — pure JS + Node built-in `node:crypto`
 
 **Files:** `backend/src/pipeline/deduplicator.js` | **Effort:** M | **Source:** Audit (M-05)
 
@@ -790,10 +798,10 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | 🔄 In progress (ENH-004 ✅, ENH-005 ✅, ENH-007 ✅, ENH-010 ✅, ENH-013 ✅, ENH-020 ✅, ENH-021 ✅, ENH-024 ✅, ENH-027 ✅, ENH-030 ✅) | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔲 Not started | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
-| Ongoing | MAINT-001 through MAINT-011 | 🔲 Backlog | Platform moat + infrastructure |
+| Ongoing | MAINT-001 through MAINT-011 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅) | Platform moat + infrastructure |
 
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 11 maintenance items = **58 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-010, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030 = **19 complete**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-010, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010 = **20 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
 **Highest adoption impact:** ENH-011 (CI/CD), ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
