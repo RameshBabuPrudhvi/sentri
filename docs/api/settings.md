@@ -90,6 +90,22 @@ GET /api/dashboard
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `DELETE` | `/api/data/runs` | Clear all run history |
+| `DELETE` | `/api/data/runs` | Permanently clear all run history |
 | `DELETE` | `/api/data/activities` | Clear activity log |
 | `DELETE` | `/api/data/healing` | Clear self-healing history |
+
+## Recycle Bin
+
+Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) rather than permanently removed. Use these endpoints to browse, restore, or permanently purge deleted items.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/recycle-bin` | List all soft-deleted entities grouped by type |
+| `POST` | `/api/restore/:type/:id` | Restore a soft-deleted entity (`type`: `project`, `test`, or `run`) |
+| `DELETE` | `/api/purge/:type/:id` | Permanently delete a soft-deleted entity |
+
+**Restore behavior:**
+- Restoring a **project** cascade-restores its tests and runs that were deleted at the same time. Items individually deleted before the project are left in the recycle bin.
+- Restoring a **test** or **run** whose parent project is deleted returns `409` — restore the project first.
+
+**Note:** The recycle bin endpoint returns all soft-deleted items (capped at 200 per type) without pagination. For paginated listing of live entities, see the [Tests](/api/tests) and [Runs](/api/runs) API docs.

@@ -359,3 +359,20 @@
     border-radius: 8px;
   }
 }
+
+/* ── PageSkeleton shimmer ─────────────────────────────────────────────────── */
+@keyframes shimmer-bar {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised, var(--surface)) 25%,
+    var(--border)                          50%,
+    var(--surface-raised, var(--surface)) 75%
+  );
+  background-size: 1200px 100%;
+  animation: shimmer-bar 1.4s infinite linear;
+}

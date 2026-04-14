@@ -81,7 +81,12 @@ export function AuthProvider({ children }) {
   const scheduleRefresh = useCallback(function schedule() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     const ms = msUntilRefresh();
-    if (ms === null) return;
+    if (ms === null) {
+      // Cross-origin: token_exp cookie may be unreadable (third-party cookie
+      // restrictions). Fall back to a fixed interval so the session stays alive.
+      refreshTimerRef.current = setTimeout(schedule, 55 * 60 * 1000);
+      return;
+    }
     refreshTimerRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/auth/refresh`, {
@@ -125,7 +130,11 @@ export function AuthProvider({ children }) {
 
   // ── Mount: verify session via /api/auth/me ────────────────────────────────
   useEffect(() => {
-    if (!isCookieSessionValid()) {
+    // If the cookie is readable and shows an expired session, skip the server
+    // call — we know the session is dead. If the cookie is unreadable (returns 0,
+    // e.g. cross-origin deployments), fall through to the server call since the
+    // HttpOnly auth cookie may still be valid.
+    if (readExpCookie() !== 0 && !isCookieSessionValid()) {
       doLogout(false);
       setLoading(false);
       return;

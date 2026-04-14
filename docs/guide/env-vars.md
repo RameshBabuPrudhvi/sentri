@@ -1,34 +1,70 @@
 # Environment Variables
 
+Complete reference for all backend and frontend env vars.
+Only `JWT_SECRET` and one AI provider key are required to get started — everything else has sensible defaults.
+
 ## Backend (`backend/.env`)
+
+### AI Provider
 
 | Variable | Default | Description |
 |---|---|---|
 | `AI_PROVIDER` | auto-detect | Force: `anthropic`, `openai`, `google`, or `local` |
 | `ANTHROPIC_API_KEY` | — | [console.anthropic.com](https://console.anthropic.com) |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Override Anthropic model |
 | `OPENAI_API_KEY` | — | [platform.openai.com](https://platform.openai.com/api-keys) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Override OpenAI model |
 | `GOOGLE_API_KEY` | — | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| `GOOGLE_MODEL` | `gemini-2.5-flash` | Override Google model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `mistral:7b` | Model name for local inference |
-| `OLLAMA_MAX_PREDICT` | `4096` | Max token output cap |
-| `OLLAMA_TIMEOUT_MS` | `120000` | Timeout for Ollama calls |
-| `JWT_SECRET` | random (dev) | **Required in production.** 32+ char secret for signing JWTs |
-| `NODE_ENV` | — | Set to `production` for production deployments |
-| `PORT` | `3001` | Backend server port |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
-| `LOG_JSON` | `false` | Emit structured JSON logs |
+| `OLLAMA_MAX_PREDICT` | `4096` | Max output tokens for Ollama |
+| `OLLAMA_TIMEOUT_MS` | `120000` | Timeout for Ollama calls (ms) |
 
-## Test Execution
+### LLM Retry & Tokens
 
 | Variable | Default | Description |
 |---|---|---|
-| `BROWSER_HEADLESS` | `true` | Set `false` to see the browser window during test runs |
+| `LLM_MAX_RETRIES` | `3` | Retry count for rate-limited AI calls |
+| `LLM_BASE_DELAY_MS` | `2000` | Base delay for exponential backoff (ms) |
+| `LLM_MAX_BACKOFF_MS` | `30000` | Max backoff delay (ms) |
+| `LLM_MAX_TOKENS` | `16384` | Max output tokens per AI call |
+
+### Server
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3001` | Backend server port |
+| `NODE_ENV` | — | Set to `production` for production deployments |
+| `DB_PATH` | `data/sentri.db` | SQLite database file path |
+| `CORS_ORIGIN` | `*` | Frontend origin(s) for CORS, comma-separated. **Required in production** |
+
+### Auth & Security
+
+| Variable | Default | Description |
+|---|---|---|
+| `JWT_SECRET` | random (dev) | **Required in production.** 32+ char secret for signing JWTs |
+| `CREDENTIAL_SECRET` | falls back to `JWT_SECRET` | Encryption secret for project credentials |
+| `ARTIFACT_SECRET` | random (dev) | **Required in production.** Signs artifact URLs (screenshots, videos) |
+| `ARTIFACT_TOKEN_TTL_MS` | `3600000` | Artifact URL token TTL (ms) |
+| `APP_URL` | `http://localhost:3000` | Frontend base URL (used for OAuth redirects) |
+| `APP_BASE_PATH` | `/` | Frontend base path prefix (e.g. `/sentri` for GitHub Pages) |
+| `BACKEND_URL` | auto-detect | Backend URL override for cross-origin cookie detection |
+
+### Test Execution
+
+| Variable | Default | Description |
+|---|---|---|
+| `BROWSER_HEADLESS` | `true` | Set `false` to see the browser window |
 | `VIEWPORT_WIDTH` | `1280` | Browser viewport width (px) |
 | `VIEWPORT_HEIGHT` | `720` | Browser viewport height (px) |
 | `NAVIGATION_TIMEOUT` | `30000` | Timeout for `page.goto()` calls (ms) |
-| `PARALLEL_WORKERS` | `1` | Default number of tests to run concurrently (1–10). Override per-run from the ⚡ selector in the UI or via `parallelWorkers` in the API `dialsConfig`. Each worker uses an isolated `BrowserContext` within a shared Chromium process |
+| `API_TEST_TIMEOUT` | `30000` | Per-API-test timeout (ms) |
+| `BROWSER_TEST_TIMEOUT` | `120000` | Per-browser-test timeout guard (ms) |
+| `PARALLEL_WORKERS` | `1` | Concurrent browser contexts (1–10). Override per-run from UI |
+| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | — | Custom Chromium executable path |
 
-## Crawler
+### Crawler
 
 | Variable | Default | Description |
 |---|---|---|
@@ -36,24 +72,31 @@
 | `CRAWL_MAX_DEPTH` | `3` | Maximum link-follow depth from the start URL |
 | `CRAWL_NETWORKIDLE_TIMEOUT` | `5000` | Timeout (ms) for networkidle wait after page load |
 
-## Self-Healing
+### Self-Healing
 
 | Variable | Default | Description |
 |---|---|---|
-| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy in the waterfall (ms) |
+| `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms) |
 | `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
 | `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
 
-## Frontend (build-time)
+### AI Chat
 
 | Variable | Default | Description |
 |---|---|---|
-| `VITE_API_URL` | `""` (same origin) | Backend URL for cross-origin deploys |
-| `GITHUB_PAGES` | — | Set to `true` to use `/sentri/` base path |
-| `VITE_GITHUB_CLIENT_ID` | — | GitHub OAuth client ID |
-| `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
+| `MAX_CONVERSATION_TURNS` | `20` | Max turn pairs kept in chat context |
+| `AI_CLASSIFY_THRESHOLD` | `40` | Confidence threshold for AI-assisted intent classification (0–100) |
 
-## OAuth (backend)
+### Logging
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| `LOG_DATE_FORMAT` | `iso` | `iso`, `utc`, `local`, or `epoch` |
+| `LOG_TIMEZONE` | system | IANA timezone for `local` format |
+| `LOG_JSON` | `false` | Emit structured JSON logs |
+
+### OAuth
 
 | Variable | Description |
 |---|---|
@@ -62,3 +105,12 @@
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | Override Google OAuth redirect URI |
+
+## Frontend (build-time)
+
+| Variable | Default | Description |
+|---|---|---|
+| `VITE_API_URL` | `""` (same origin) | Backend URL for cross-origin deploys |
+| `GITHUB_PAGES` | — | Set to `true` to use `/sentri/` base path |
+| `VITE_GITHUB_CLIENT_ID` | — | GitHub OAuth client ID (passed to frontend) |
+| `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID (passed to frontend) |

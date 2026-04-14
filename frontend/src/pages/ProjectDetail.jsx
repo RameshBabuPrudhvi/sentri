@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Trash2, ArrowRight,
@@ -43,7 +43,10 @@ export default function ProjectDetail() {
 
   const [project, setProject]             = useState(null);
   const [tests, setTests]                 = useState([]);
+  const [testsMeta, setTestsMeta]         = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
+  const [testCounts, setTestCounts]       = useState({ draft: 0, approved: 0, rejected: 0, total: 0, passed: 0, failed: 0, api: 0, ui: 0 });
   const [runs, setRuns]                   = useState([]);
+  const [runsMeta, setRunsMeta]           = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [activeRun, setActiveRun]         = useState(null);
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
   const [loading, setLoading]             = useState(true);
@@ -52,10 +55,12 @@ export default function ProjectDetail() {
   const [tab, setTab]                     = useState("review");
   const [reviewFilter, setReviewFilter]   = useState("draft");
   const [categoryFilter, setCategoryFilter] = useState("all"); // "all" | "ui" | "api"
+  const [searchInput, setSearchInput]     = useState("");
   const [search, setSearch]               = useState("");
   const [selected, setSelected]           = useState(new Set());
-  const [reviewPage, setReviewPage]         = useState(1);  // Fix #21
+  const [reviewPage, setReviewPage]         = useState(1);
   const PAGE_SIZE = 10;
+  const [runsPage, setRunsPage]           = useState(1);
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);
@@ -63,6 +68,15 @@ export default function ProjectDetail() {
   const [traceability, setTraceability]     = useState(null);
   const [traceLoading, setTraceLoading]     = useState(false);
   const { addNotification } = useNotifications();
+
+  // ── Debounce search input → search state (300ms) ───────────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setReviewPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // ── Highlight recently created tests ──────────────────────────────────────
   // Any test created within the last 5 minutes is "new" — works regardless of
@@ -102,22 +116,59 @@ export default function ProjectDetail() {
     setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
   };
 
+  // Use refs so the fetch callback always reads the latest page / filter values
+  // without needing them in the dependency array (which would cause an
+  // infinite loop when the clamp logic adjusts the page after fetch).
+  const reviewPageRef    = useRef(reviewPage);
+  const runsPageRef      = useRef(runsPage);
+  const reviewFilterRef  = useRef(reviewFilter);
+  const categoryFilterRef = useRef(categoryFilter);
+  const searchRef        = useRef(search);
+  useEffect(() => { reviewPageRef.current = reviewPage; }, [reviewPage]);
+  useEffect(() => { runsPageRef.current = runsPage; }, [runsPage]);
+  useEffect(() => { reviewFilterRef.current = reviewFilter; }, [reviewFilter]);
+  useEffect(() => { categoryFilterRef.current = categoryFilter; }, [categoryFilter]);
+  useEffect(() => { searchRef.current = search; }, [search]);
+
   const refresh = useCallback(async () => {
     try {
-      const [p, t, r] = await Promise.all([api.getProject(id), api.getTests(id), api.getRuns(id)]);
-      setProject(p); setTests(t); setRuns(r);
-      // Clamp reviewPage so it doesn't point past the last page after
+      const filters = {};
+      if (reviewFilterRef.current && reviewFilterRef.current !== "all") filters.reviewStatus = reviewFilterRef.current;
+      if (categoryFilterRef.current && categoryFilterRef.current !== "all") filters.category = categoryFilterRef.current;
+      if (searchRef.current) filters.search = searchRef.current;
+
+      const [p, tRes, rRes, counts] = await Promise.all([
+        api.getProject(id),
+        api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE, filters),
+        api.getRunsPaged(id, runsPageRef.current, PAGE_SIZE),
+        api.getTestCounts(id),
+      ]);
+      setProject(p);
+      setTests(tRes.data); setTestsMeta(tRes.meta);
+      setRuns(rRes.data);  setRunsMeta(rRes.meta);
+      setTestCounts(counts);
+      // Clamp pages so they don't point past the last page after
       // a review action removes tests from the current filter view.
       setReviewPage(prev => {
-        const total = Math.max(1, Math.ceil(t.length / PAGE_SIZE));
+        const total = Math.max(1, Math.ceil(tRes.meta.total / PAGE_SIZE));
+        return prev > total ? total : prev;
+      });
+      setRunsPage(prev => {
+        const total = Math.max(1, Math.ceil(rRes.meta.total / PAGE_SIZE));
         return prev > total ? total : prev;
       });
     } catch (err) {
       console.error("ProjectDetail refresh error:", err);
-      // Don't wipe existing state on transient errors — only set project to null
-      // on initial load (when project was never fetched successfully).
     }
   }, [id]);
+
+  // Re-fetch when page or filters change. Skip the initial mount — the
+  // next effect handles that with the loading flag.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return; }
+    refresh();
+  }, [reviewPage, runsPage, reviewFilter, categoryFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
 
@@ -234,39 +285,11 @@ export default function ProjectDetail() {
     setSelected(checked ? new Set(ids) : new Set());
   }
 
-  const draftTests    = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft");
-  const approvedTests = tests.filter(t => t.reviewStatus === "approved");
-  const rejectedTests = tests.filter(t => t.reviewStatus === "rejected");
-  const isApiTest     = t => t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described";
-  const apiTests      = tests.filter(isApiTest);
-  const uiTests       = tests.filter(t => !isApiTest(t));
-
-  const filteredByReview = tests.filter(t => {
-    const statusOk =
-      reviewFilter === "all"   ? true :
-      reviewFilter === "draft" ? (!t.reviewStatus || t.reviewStatus === "draft") :
-                                  t.reviewStatus === reviewFilter;
-    const categoryOk =
-      categoryFilter === "all" ? true :
-      categoryFilter === "api" ? isApiTest(t) :
-      categoryFilter === "ui"  ? !isApiTest(t) : true;
-    const searchOk = !search ||
-      t.name?.toLowerCase().includes(search.toLowerCase()) ||
-      t.sourceUrl?.toLowerCase().includes(search.toLowerCase());
-    return statusOk && categoryOk && searchOk;
-  }).sort((a, b) => {
-    // Newest first — so tests from the latest generation run appear at the top
-    const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return db - da;
-  });
-
-  // Paginate review tab (50 per page)
-  const reviewTotalPages = Math.max(1, Math.ceil(filteredByReview.length / PAGE_SIZE));
-  const pagedReview = filteredByReview.slice((reviewPage - 1) * PAGE_SIZE, reviewPage * PAGE_SIZE);
-
-  const passed = approvedTests.filter(t => t.lastResult === "passed").length;
-  const failed = approvedTests.filter(t => t.lastResult === "failed").length;
+  // Server-side pagination and filtering — tests are already filtered and paged
+  // by the API. The `testsMeta.total` reflects the filtered count.
+  const filteredByReview = tests;
+  const reviewTotalPages = Math.max(1, Math.ceil(testsMeta.total / PAGE_SIZE));
+  const pagedReview = tests;
 
   if (loading) return (
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -282,8 +305,12 @@ export default function ProjectDetail() {
     </div>
   );
 
-  // Build dynamic bulk button labels based on selection scope
-  const bulkScope = selected.size > 0 ? `${selected.size} selected` : `all ${filteredByReview.length} draft${filteredByReview.length !== 1 ? "s" : ""}`;
+  // Build dynamic bulk button labels based on selection scope.
+  // With server-side pagination, filteredByReview is only the current page —
+  // say "N visible" (not "all N") to avoid implying cross-page scope.
+  const bulkScope = selected.size > 0
+    ? `${selected.size} selected`
+    : `${filteredByReview.length} visible`;
 
   return (
     <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -293,11 +320,20 @@ export default function ProjectDetail() {
         project={project}
         projectId={id}
         tests={tests}
+        totalTests={testCounts.total}
         parallelWorkers={parallelWorkers}
         onWorkersChange={setParallelWorkers}
         actionLoading={actionLoading}
         onRun={doRun}
-        stats={{ draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed }}
+        stats={{
+          draftTests: { length: testCounts.draft },
+          approvedTests: { length: testCounts.approved },
+          rejectedTests: { length: testCounts.rejected },
+          apiTests: { length: testCounts.api ?? 0 },
+          uiTests: { length: testCounts.ui ?? 0 },
+          passed: testCounts.passed ?? 0,
+          failed: testCounts.failed ?? 0,
+        }}
       />
 
       {/* Active run banner — now the primary CTA to view run, tab stays put */}
@@ -317,11 +353,11 @@ export default function ProjectDetail() {
       />
 
       {/* Draft-pending reminder — only show on Runs tab or when viewing non-draft filter */}
-      {draftTests.length > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
+      {testCounts.draft > 0 && (tab === "runs" || (tab === "review" && reviewFilter !== "draft")) && (
         <div className="pd-banner pd-banner--amber">
           <Info size={14} color="var(--amber)" className="shrink-0" />
           <span className="pd-banner-text-amber">
-            <strong>{draftTests.length} test{draftTests.length !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
+            <strong>{testCounts.draft} test{testCounts.draft !== 1 ? "s" : ""}</strong> pending review — approve to add to regression.
           </span>
           <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => { setTab("review"); setReviewFilter("draft"); }}>
             Review drafts <ArrowRight size={11} />
@@ -332,13 +368,13 @@ export default function ProjectDetail() {
       {/* Tabs */}
       <div className="pd-tab-bar">
         {[
-          ["review", `Tests (${tests.length})`],
-          ["runs",   `Runs (${runs.length})`],
+          ["review", `Tests (${testCounts.total})`],
+          ["runs",   `Runs (${runsMeta.total})`],
           ["traceability", "Traceability"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
-            {key === "review" && draftTests.length > 0 && (
-              <span className="pd-tab-badge">{draftTests.length}</span>
+            {key === "review" && testCounts.draft > 0 && (
+              <span className="pd-tab-badge">{testCounts.draft}</span>
             )}
             {label}
           </button>
@@ -365,7 +401,7 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {tests.length === 0 ? (
+          {testCounts.total === 0 ? (
             <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
@@ -379,10 +415,10 @@ export default function ProjectDetail() {
               {/* Filter + search row */}
               <div className="pd-filter-row">
                 {[
-                  ["draft",    `Draft (${draftTests.length})`,       "var(--amber)"],
-                  ["approved", `Approved (${approvedTests.length})`, "var(--green)"],
-                  ["rejected", `Rejected (${rejectedTests.length})`, "var(--red)"  ],
-                  ["all",      `All (${tests.length})`,              "var(--text2)"],
+                  ["draft",    `Draft (${testCounts.draft})`,       "var(--amber)"],
+                  ["approved", `Approved (${testCounts.approved})`, "var(--green)"],
+                  ["rejected", `Rejected (${testCounts.rejected})`, "var(--red)"  ],
+                  ["all",      `All (${testCounts.total})`,         "var(--text2)"],
                 ].map(([key, label, color]) => (
                   <button key={key} onClick={() => { setReviewFilter(key); setSelected(new Set()); setReviewPage(1); }}
                     className="pd-filter-pill"
@@ -392,12 +428,12 @@ export default function ProjectDetail() {
                     }}>{label}</button>
                 ))}
 
-                {apiTests.length > 0 && (
+                {(testCounts.api ?? 0) > 0 && (
                   <>
                     <div className="pd-filter-divider" />
                     {[
-                      ["ui",  `UI (${uiTests.length})`,   "#7c3aed"],
-                      ["api", `🌐 API (${apiTests.length})`, "#2563eb"],
+                      ["ui",  `UI (${testCounts.ui ?? 0})`,   "#7c3aed"],
+                      ["api", `🌐 API (${testCounts.api ?? 0})`, "#2563eb"],
                     ].map(([key, label, color]) => (
                       <button key={key} onClick={() => { setCategoryFilter(categoryFilter === key ? "all" : key); setSelected(new Set()); setReviewPage(1); }}
                         className="pd-filter-pill"
@@ -412,7 +448,7 @@ export default function ProjectDetail() {
                 <div className="flex-1" />
                 <div className="pd-search-wrap">
                   <Search size={12} color="var(--text3)" className="pd-search-icon" />
-                  <input className="input pd-search-input" value={search} onChange={e => { setSearch(e.target.value); setReviewPage(1); }}
+                  <input className="input pd-search-input" value={searchInput} onChange={e => setSearchInput(e.target.value)}
                     placeholder="Search tests..." />
                 </div>
               </div>
@@ -546,9 +582,9 @@ export default function ProjectDetail() {
                 )}
               </div>
 
-              {/* Pagination */}
+              {/* Pagination — server-side, changing page triggers refresh */}
               <TablePagination
-                total={filteredByReview.length}
+                total={testsMeta.total}
                 page={reviewPage}
                 totalPages={reviewTotalPages}
                 onPageChange={setReviewPage}
@@ -560,7 +596,14 @@ export default function ProjectDetail() {
       )}
 
       {/* ── RUNS TAB ── */}
-      {tab === "runs" && <RunsTab runs={runs} />}
+      {tab === "runs" && (
+        <RunsTab
+          runs={runs}
+          meta={runsMeta}
+          page={runsPage}
+          onPageChange={setRunsPage}
+        />
+      )}
 
       {/* ── TRACEABILITY TAB ── */}
       {tab === "traceability" && (
@@ -574,7 +617,7 @@ export default function ProjectDetail() {
         <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
           <div className="pd-confirm-title">Confirm bulk action</div>
           <div className="pd-confirm-body">
-            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
+            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> on this page{bulkConfirm.action === "delete" ? ". They will be moved to the recycle bin." : ". This cannot be undone easily."}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>

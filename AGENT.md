@@ -27,7 +27,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
     middleware/            Express middleware (appSetup, CORS, Helmet)
-    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat)
+    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
     utils/                 ID generator, logging, abort helpers, encryption, validation
@@ -112,6 +112,8 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
+| `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
+| `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -160,6 +162,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
 | `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
 | `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
+| `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
 | `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
@@ -639,9 +642,12 @@ When the user types "Why is **TC-15** failing in **RUN-42**?", the backend:
 | File | Role |
 |---|---|
 | `backend/src/routes/chat.js` | SSE endpoint, system prompt, `buildWorkspaceContext()`, `buildEntityContext()` |
-| `frontend/src/components/AIChat.jsx` | Chat panel UI, markdown renderer, streaming display |
+| `frontend/src/components/ai/AIChat.jsx` | Chat modal panel UI, streaming display |
+| `frontend/src/pages/ChatHistory.jsx` | Full-page chat at `/chat` — session CRUD, export, persistent history |
+| `frontend/src/utils/markdown.js` | Shared `escapeHtml()` + `renderMarkdown()` used by both chat UIs |
 | `frontend/src/api.js` → `api.chat()` | SSE stream parser with 401 handling |
-| `frontend/src/styles/features/chat.css` | All chat UI styles (`.chat-*` namespace) |
+| `frontend/src/styles/features/chat.css` | Modal chat styles (`.chat-*` namespace) |
+| `frontend/src/styles/pages/chat-history.css` | Full-page chat styles (`.ch-*` namespace) |
 
 ### Sliding context window
 
@@ -652,7 +658,7 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 - **Adding new context**: Add to `buildWorkspaceContext()` or `buildEntityContext()` in `backend/src/routes/chat.js`. Keep output compact — every token costs money.
 - **Adding new entity types**: Add a regex pattern + DB lookup in `buildEntityContext()`. Follow the existing pattern: match IDs, cap results, truncate long fields.
 - **Changing the system prompt**: Edit `BASE_SYSTEM_PROMPT` in `backend/src/routes/chat.js`. The workspace/entity context is appended automatically — don't hardcode data in the base prompt.
-- **Frontend changes**: All chat styles go in `frontend/src/styles/features/chat.css`. The markdown renderer in `AIChat.jsx` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS.
+- **Frontend changes**: Modal chat styles go in `frontend/src/styles/features/chat.css` (`.chat-*`); full-page chat styles go in `frontend/src/styles/pages/chat-history.css` (`.ch-*`). The shared markdown renderer in `frontend/src/utils/markdown.js` escapes all non-code text before applying transforms — maintain this pattern to prevent XSS. Both `AIChat.jsx` and `ChatHistory.jsx` import `renderMarkdown` from this shared module.
 
 ---
 
@@ -679,6 +685,31 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 
 The backend exposes `GET /health` (unauthenticated) returning `{ ok: true }`. Docker Compose uses this for container health checks (`docker-compose.yml` — interval 10s, 5 retries, 20s start period). The frontend container depends on `backend: condition: service_healthy` to ensure the API is ready before nginx starts proxying.
 
+### Cross-Origin Deployment (GitHub Pages + Render)
+
+The primary deployment model is **cross-origin**: the frontend SPA is hosted on GitHub Pages (`https://<user>.github.io/sentri/`) and the backend runs on Render (`https://sentri-api.onrender.com`). These are different origins, which has several implications:
+
+**Required environment variables:**
+
+| Variable | Set on | Example |
+|---|---|---|
+| `CORS_ORIGIN` | Backend (Render) | `https://<user>.github.io` |
+| `VITE_API_URL` | Frontend build (GitHub Pages) | `https://sentri-api.onrender.com` |
+| `GITHUB_PAGES` | Frontend build | `true` (sets Vite `base: "/sentri/"`) |
+
+**Cookie behavior:**
+- `isCrossOrigin` in `middleware/appSetup.js` detects cross-origin mode at startup by comparing `CORS_ORIGIN` against the backend's own origin.
+- When cross-origin, all cookies use `SameSite=None; Secure` instead of `SameSite=Strict` — required by browsers for cross-site cookie sending.
+- The `token_exp` hint cookie may be unreadable by frontend JS (third-party cookie restrictions). `AuthContext.jsx` handles this by falling back to a 55-minute fixed-interval refresh when `readExpCookie()` returns 0.
+- The HttpOnly `access_token` cookie is still sent via `credentials: "include"` on every fetch — browsers allow this even when JS can't read the cookie.
+
+**When adding new features, verify cross-origin compatibility:**
+- All `fetch()` calls must include `credentials: "include"` (handled by `api.js`'s `req()` wrapper and `AuthContext`'s `authFetch()`).
+- New cookies must use `cookieSameSite()` from `appSetup.js` — never hardcode `SameSite=Strict`.
+- New CSP `connect-src` entries may need the backend origin added for cross-origin deployments.
+- SSE endpoints (`EventSource`) must be created with `{ withCredentials: true }` to send cookies cross-origin (see `useRunSSE.js`).
+- Download URLs that bypass `fetch()` (e.g. `<a href>` for CSV exports) must include the auth token as a query param or use a signed URL pattern (see `signArtifactUrl()`).
+
 ### Local Development (without Docker)
 
 ```bash
@@ -689,7 +720,7 @@ cd backend && npm install && npm run dev
 cd frontend && npm install && npm run dev
 ```
 
-The Vite dev server proxies `/api/*` to `http://localhost:3001` automatically.
+The Vite dev server proxies `/api/*` to `http://localhost:3001` automatically. In local dev, everything is same-origin — no cross-origin cookie issues.
 
 ---
 
@@ -812,7 +843,7 @@ The following are **not yet implemented** but should be addressed before product
 
 1. Create `frontend/src/pages/MyPage.jsx`.
 2. Lazy-import it in `App.jsx` and add a `<Route>` inside the `<Layout>` wrapper.
-3. Add a `<NavLink>` to `frontend/src/components/Layout.jsx` if it appears in the sidebar.
+3. Add a `<NavLink>` to `frontend/src/components/layout/Sidebar.jsx` if it appears in the sidebar.
 4. Create a corresponding CSS file in `frontend/src/styles/pages/my-page.css` and import it from the component.
 
 ### Page Responsibilities (UX Architecture)
@@ -826,7 +857,8 @@ The frontend follows a clear separation of concerns between pages:
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
-| **Settings** | AI provider & system config | API keys, Ollama, system info |
+| **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |
+| **Settings** | AI provider & system config | API keys, Ollama, system info, Recycle Bin (restore/purge deleted items) |
 
 **Important**: Crawl and test generation are **only** triggered from the Tests page (via `CrawlProjectModal` and `GenerateTestModal`). The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls. This avoids duplicating creation flows across pages.
 
@@ -925,6 +957,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not omit `X-Accel-Buffering: no`** on SSE endpoints — nginx will buffer the stream and break real-time delivery.
 - **Do not add large dependencies** without justification. Check bundle size impact for frontend packages and document the rationale in the PR.
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
+- **Do not hardcode `SameSite=Strict` on cookies.** Always use `cookieSameSite()` from `middleware/appSetup.js` — the production deployment is cross-origin (GitHub Pages + Render) and requires `SameSite=None; Secure`.
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
