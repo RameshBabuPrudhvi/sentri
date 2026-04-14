@@ -300,8 +300,12 @@ export default function ProjectDetail() {
     </div>
   );
 
-  // Build dynamic bulk button labels based on selection scope
-  const bulkScope = selected.size > 0 ? `${selected.size} selected` : `all ${filteredByReview.length} draft${filteredByReview.length !== 1 ? "s" : ""}`;
+  // Build dynamic bulk button labels based on selection scope.
+  // With server-side pagination, filteredByReview is only the current page —
+  // say "N visible" (not "all N") to avoid implying cross-page scope.
+  const bulkScope = selected.size > 0
+    ? `${selected.size} selected`
+    : `${filteredByReview.length} visible`;
 
   return (
     <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
@@ -608,7 +612,7 @@ export default function ProjectDetail() {
         <ModalShell onClose={() => setBulkConfirm(null)} width="min(420px, 95vw)" style={{ padding: "28px 32px" }}>
           <div className="pd-confirm-title">Confirm bulk action</div>
           <div className="pd-confirm-body">
-            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong>{bulkConfirm.action === "delete" ? ". This cannot be undone." : " (all visible tests). This cannot be undone easily."}
+            You are about to <strong>{bulkConfirm.action}</strong> <strong>{bulkConfirm.ids.length} tests</strong> on this page{bulkConfirm.action === "delete" ? ". They will be moved to the recycle bin." : ". This cannot be undone easily."}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button className="btn btn-ghost btn-sm" onClick={() => setBulkConfirm(null)}>Cancel</button>
