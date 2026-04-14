@@ -38,7 +38,7 @@ GET /api/projects/:id
 DELETE /api/projects/:id
 ```
 
-Deletes the project and **all** its tests, runs, and healing history.
+Soft-deletes the project and cascade soft-deletes all its tests and runs. Items are moved to the Recycle Bin and can be restored via `POST /api/restore/project/:id`. Healing history and activities are preserved for audit trail. Returns 409 if a crawl or test run is in progress.
 
 ## Start a Crawl
 

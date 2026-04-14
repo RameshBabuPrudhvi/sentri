@@ -69,6 +69,8 @@ PATCH /api/tests/:testId
 DELETE /api/projects/:id/tests/:testId
 ```
 
+Soft-deletes the test (moves it to the Recycle Bin). Restore via `POST /api/restore/test/:testId`.
+
 ## Run a Single Test
 
 ```

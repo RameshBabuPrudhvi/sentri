@@ -27,7 +27,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
     middleware/            Express middleware (appSetup, CORS, Helmet)
-    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat)
+    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
     utils/                 ID generator, logging, abort helpers, encryption, validation
@@ -112,6 +112,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
+| `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -831,7 +832,7 @@ The frontend follows a clear separation of concerns between pages:
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
 | **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |
-| **Settings** | AI provider & system config | API keys, Ollama, system info |
+| **Settings** | AI provider & system config | API keys, Ollama, system info, Recycle Bin (restore/purge deleted items) |
 
 **Important**: Crawl and test generation are **only** triggered from the Tests page (via `CrawlProjectModal` and `GenerateTestModal`). The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls. This avoids duplicating creation flows across pages.
 

@@ -90,6 +90,22 @@ GET /api/dashboard
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `DELETE` | `/api/data/runs` | Clear all run history |
+| `DELETE` | `/api/data/runs` | Permanently clear all run history |
 | `DELETE` | `/api/data/activities` | Clear activity log |
 | `DELETE` | `/api/data/healing` | Clear self-healing history |
+
+## Recycle Bin
+
+Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) rather than permanently removed. Use these endpoints to browse, restore, or permanently purge deleted items.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/recycle-bin` | List all soft-deleted entities grouped by type |
+| `POST` | `/api/restore/:type/:id` | Restore a soft-deleted entity (`type`: `project`, `test`, or `run`) |
+| `DELETE` | `/api/purge/:type/:id` | Permanently delete a soft-deleted entity |
+
+**Restore behavior:**
+- Restoring a **project** cascade-restores its tests and runs that were deleted at the same time. Items individually deleted before the project are left in the recycle bin.
+- Restoring a **test** or **run** whose parent project is deleted returns `409` — restore the project first.
+
+**Pagination** is supported on list endpoints via `?page=N&pageSize=N` query params. When present, the response shape is `{ data: [], meta: { total, page, pageSize, hasMore } }` instead of a flat array.
