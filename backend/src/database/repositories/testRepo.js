@@ -223,7 +223,7 @@ export function update(id, fields) {
     params[key] = val;
   }
   if (sets.length === 0) return;
-  db.prepare(`UPDATE tests SET ${sets.join(", ")} WHERE id = @id AND deletedAt IS NULL`).run(params);
+  db.prepare(`UPDATE tests SET ${sets.join(", ")} WHERE id = @id`).run(params);
 }
 
 /**

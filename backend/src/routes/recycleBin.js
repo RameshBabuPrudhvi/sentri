@@ -11,7 +11,6 @@
  */
 
 import { Router } from "express";
-import { getDatabase } from "../database/sqlite.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
@@ -19,29 +18,9 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
+import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 
 const router = Router();
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Strip encrypted credential values before returning projects to client.
- * @param {Object} project
- * @returns {Object}
- */
-function sanitiseProjectForClient(project) {
-  if (!project) return project;
-  const { credentials, ...rest } = project;
-  return {
-    ...rest,
-    credentials: credentials ? {
-      usernameSelector: credentials.usernameSelector || "",
-      passwordSelector: credentials.passwordSelector || "",
-      submitSelector: credentials.submitSelector || "",
-      _hasAuth: true,
-    } : null,
-  };
-}
 
 // ─── Recycle bin ─────────────────────────────────────────────────────────────
 
@@ -151,7 +130,7 @@ router.delete("/purge/:type/:id", (req, res) => {
     if (!run || !run.deletedAt) {
       return res.status(404).json({ error: "not found in recycle bin" });
     }
-    getDatabase().prepare("DELETE FROM runs WHERE id = ?").run(id);
+    runRepo.hardDeleteById(id);
     logActivity({ ...actor(req),
       type: "run.purge", detail: `Run ${id} permanently purged`,
     });

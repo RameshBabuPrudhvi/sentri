@@ -25,30 +25,9 @@ import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
 import { actor } from "../utils/actor.js";
+import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 
 const router = Router();
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Strip encrypted credential values from a project before sending to the client.
- * Only returns whether auth is configured, not the actual secrets.
- * @param {Object} project
- * @returns {Object}
- */
-function sanitiseProjectForClient(project) {
-  if (!project) return project;
-  const { credentials, ...rest } = project;
-  return {
-    ...rest,
-    credentials: credentials ? {
-      usernameSelector: credentials.usernameSelector || "",
-      passwordSelector: credentials.passwordSelector || "",
-      submitSelector: credentials.submitSelector || "",
-      _hasAuth: true,
-    } : null,
-  };
-}
 
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 

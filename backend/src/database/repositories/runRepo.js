@@ -431,6 +431,15 @@ export function getDeletedAll() {
 }
 
 /**
+ * Hard-delete a run by ID (permanent — use only for purge operations).
+ * @param {string} id
+ */
+export function hardDeleteById(id) {
+  const db = getDatabase();
+  db.prepare("DELETE FROM runs WHERE id = ?").run(id);
+}
+
+/**
  * Restore a soft-deleted run (clears deletedAt).
  * @param {string} id
  * @returns {boolean} Whether the run was found and restored.
