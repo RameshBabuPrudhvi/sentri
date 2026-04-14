@@ -99,8 +99,8 @@ async function main() {
   const email = "rb-test@recycle-bin-test.com";
   const password = "RbTest1234!";
   await req(base, "/api/auth/register", { method: "POST", body: { name: "RB Test", email, password } });
-  const { json: loginJson } = await req(base, "/api/auth/login", { method: "POST", body: { email, password } });
-  const token = loginJson.token;
+  const { res: loginRes } = await req(base, "/api/auth/login", { method: "POST", body: { email, password } });
+  const token = extractCookie(loginRes, "access_token");
   assert.ok(token, "should receive auth token");
 
   // ── Create shared test data directly via repos (fast, no HTTP overhead) ──

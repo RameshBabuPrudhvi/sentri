@@ -133,7 +133,7 @@ export function getAllLean() {
  * Get all non-deleted runs with lean columns, paginated.
  * @param {number|string} [page=1]
  * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
- * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
+ * @returns {{ data: Object[], meta: { total: number, page: number, pageSize: number, hasMore: boolean } }}
  */
 export function getAllLeanPaged(page, pageSize) {
   const db = getDatabase();
@@ -178,7 +178,7 @@ export function getByProjectId(projectId) {
  * @param {string}        projectId
  * @param {number|string} [page=1]
  * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
- * @returns {{ data: Object[], meta: import("../../utils/pagination.js").PageMeta }}
+ * @returns {{ data: Object[], meta: { total: number, page: number, pageSize: number, hasMore: boolean } }}
  */
 export function getByProjectIdPaged(projectId, page, pageSize) {
   const db = getDatabase();
