@@ -430,6 +430,78 @@ test("uses full snapshot from snapshotsByUrl when available (takes priority over
   assert.match(result[0].playwrightCode, /Snapshot Title/);
 });
 
+// ── 10. Fast-path: already fully enhanced tests ──────────────────────────────
+
+console.log("\n⚡  Fast-path — skip enhancement for fully enhanced tests");
+
+test("fast-path: strong assertions + toHaveURL → _assertionEnhanced: false (no work done)", () => {
+  const t = strongWithUrlTest();
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, false);
+  // Code should be unchanged
+  assert.equal(r.playwrightCode, t.playwrightCode);
+});
+
+test("fast-path: strong assertions + toHaveTitle → _assertionEnhanced: false", () => {
+  const t = {
+    name: "Strong test with title",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page).toHaveTitle('My App');",
+      "  await expect(page.getByText('Welcome')).toBeVisible();",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, false);
+});
+
+test("fast-path does NOT trigger when strong assertions exist but no page-load assertion", () => {
+  const t = {
+    name: "Visible but no URL check",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.getByText('Welcome')).toBeVisible();",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  // Should be enhanced (page-load assertion added), not fast-pathed
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "added_page_load_assertion");
+});
+
+test("fast-path does NOT trigger when no expect() calls exist (comment mentions toHaveURL)", () => {
+  const t = {
+    name: "Commented test",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  // TODO: add toHaveURL and toBeVisible assertions",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  // hasNoAssertions check should prevent fast-path
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "no_assertions");
+});
+
+test("fast-path does NOT trigger for tests with only weak assertions", () => {
+  const t = weakAssertTest();
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true);
+  assert.equal(r._enhancementReason, "weak_assertions_replaced");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

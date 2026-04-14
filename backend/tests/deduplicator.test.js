@@ -421,6 +421,173 @@ test("does not mutate the input arrays", () => {
   assert.equal(newTests.length, lenBefore, "Input array should not be mutated");
 });
 
+// ── 5. New exported helpers: fuzzyNameSimilarity, cosineSimilarity, semanticSimilarity ──
+
+import {
+  fuzzyNameSimilarity,
+  cosineSimilarity,
+  semanticSimilarity,
+  FUZZY_NAME_THRESHOLD,
+  SEMANTIC_SIMILARITY_THRESHOLD,
+} from "../src/pipeline/deduplicator.js";
+
+console.log("\n🔤  fuzzyNameSimilarity — Levenshtein-based name matching");
+
+test("identical strings → 1.0", () => {
+  assert.equal(fuzzyNameSimilarity("hello world", "hello world"), 1);
+});
+
+test("completely different strings → low similarity", () => {
+  assert.ok(fuzzyNameSimilarity("abcdefghij", "zyxwvutsrq") < 0.3);
+});
+
+test("empty first string → 0", () => {
+  assert.equal(fuzzyNameSimilarity("", "hello"), 0);
+});
+
+test("empty second string → 0", () => {
+  assert.equal(fuzzyNameSimilarity("hello", ""), 0);
+});
+
+test("both empty → 0 (falsy guard)", () => {
+  assert.equal(fuzzyNameSimilarity("", ""), 0);
+});
+
+test("null inputs → 0", () => {
+  assert.equal(fuzzyNameSimilarity(null, "hello"), 0);
+  assert.equal(fuzzyNameSimilarity("hello", null), 0);
+});
+
+test("similar names above threshold (≥ 0.80)", () => {
+  const sim = fuzzyNameSimilarity(
+    "verify login form validation",
+    "verify login form validations"
+  );
+  assert.ok(sim >= FUZZY_NAME_THRESHOLD, `Expected ≥ ${FUZZY_NAME_THRESHOLD}, got ${sim}`);
+});
+
+test("different names below threshold (< 0.80)", () => {
+  const sim = fuzzyNameSimilarity(
+    "verify login form validation",
+    "verify checkout cart totals"
+  );
+  assert.ok(sim < FUZZY_NAME_THRESHOLD, `Expected < ${FUZZY_NAME_THRESHOLD}, got ${sim}`);
+});
+
+console.log("\n📐  cosineSimilarity — sparse TF vector comparison");
+
+test("identical vectors → 1.0", () => {
+  const v = new Map([["login", 2], ["form", 1]]);
+  assert.equal(cosineSimilarity(v, v), 1);
+});
+
+test("disjoint vectors → 0.0", () => {
+  const a = new Map([["login", 1]]);
+  const b = new Map([["checkout", 1]]);
+  assert.equal(cosineSimilarity(a, b), 0);
+});
+
+test("empty vector → 0.0", () => {
+  const a = new Map();
+  const b = new Map([["login", 1]]);
+  assert.equal(cosineSimilarity(a, b), 0);
+  assert.equal(cosineSimilarity(b, a), 0);
+});
+
+test("partially overlapping vectors → between 0 and 1", () => {
+  const a = new Map([["login", 1], ["form", 1]]);
+  const b = new Map([["login", 1], ["cart", 1]]);
+  const sim = cosineSimilarity(a, b);
+  assert.ok(sim > 0 && sim < 1, `Expected 0 < sim < 1, got ${sim}`);
+});
+
+console.log("\n🧠  semanticSimilarity — full test object comparison");
+
+test("identical tests → 1.0", () => {
+  const t = { name: "Verify login form validation errors", steps: ["Go to login", "Submit empty form"] };
+  assert.equal(semanticSimilarity(t, t), 1);
+});
+
+test("completely different tests → low similarity", () => {
+  const a = { name: "Verify login form validation errors", steps: ["Go to login", "Submit empty form"] };
+  const b = { name: "Verify checkout cart totals calculation", steps: ["Add items to cart", "Check total"] };
+  const sim = semanticSimilarity(a, b);
+  assert.ok(sim < SEMANTIC_SIMILARITY_THRESHOLD, `Expected < ${SEMANTIC_SIMILARITY_THRESHOLD}, got ${sim}`);
+});
+
+test("tests with empty fields → 0 (no crash)", () => {
+  const a = { name: "", steps: [] };
+  const b = { name: "", steps: [] };
+  assert.equal(semanticSimilarity(a, b), 0);
+});
+
+console.log("\n📏  Exported thresholds are correct values");
+
+test("FUZZY_NAME_THRESHOLD is 0.80", () => {
+  assert.equal(FUZZY_NAME_THRESHOLD, 0.80);
+});
+
+test("SEMANTIC_SIMILARITY_THRESHOLD is 0.65", () => {
+  assert.equal(SEMANTIC_SIMILARITY_THRESHOLD, 0.65);
+});
+
+// ── 6. deduplicateTests — sourceUrl guard prevents cross-page false positives ─
+
+console.log("\n🌐  deduplicateTests — sourceUrl guard for fuzzy/semantic layers");
+
+test("fuzzy name layer: same name, different sourceUrl → both retained", () => {
+  const t1 = {
+    name: "Verify form validation errors displayed correctly",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Submit empty form"],
+    sourceUrl: "http://shop.com/login",
+  };
+  const t2 = {
+    name: "Verify form validation errors displayed correctly",
+    playwrightCode: "await page.goto('/signup');\nawait expect(page).toHaveURL('/signup');",
+    steps: ["Go to signup", "Submit empty form"],
+    sourceUrl: "http://shop.com/signup",
+  };
+  const { unique } = deduplicateTests([t1, t2]);
+  assert.equal(unique.length, 2, "Tests on different pages with same name should both be retained");
+});
+
+test("fuzzy name layer: similar name, same sourceUrl → deduplicated", () => {
+  const t1 = {
+    name: "Verify login form validation errors displayed",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Submit empty form"],
+    sourceUrl: "http://shop.com/login",
+  };
+  const t2 = {
+    name: "Verify login form validation error displayed",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveTitle('Login');",
+    steps: ["Go to login", "Submit form"],
+    sourceUrl: "http://shop.com/login",
+  };
+  const { unique } = deduplicateTests([t1, t2]);
+  assert.equal(unique.length, 1, "Similar names on same page should be deduplicated");
+});
+
+test("semantic layer: similar vocabulary, different sourceUrl → both retained", () => {
+  const t1 = {
+    name: "Verify login form validation errors show correctly on page",
+    description: "Tests that login form shows validation errors",
+    playwrightCode: "await page.goto('/login');\nawait expect(page).toHaveURL('/login');",
+    steps: ["Go to login", "Submit empty form", "Check errors"],
+    sourceUrl: "http://shop.com/login",
+  };
+  const t2 = {
+    name: "Verify signup form validation errors show correctly on page",
+    description: "Tests that signup form shows validation errors",
+    playwrightCode: "await page.goto('/signup');\nawait expect(page).toHaveURL('/signup');",
+    steps: ["Go to signup", "Submit empty form", "Check errors"],
+    sourceUrl: "http://shop.com/signup",
+  };
+  const { unique } = deduplicateTests([t1, t2]);
+  assert.equal(unique.length, 2, "Semantically similar tests on different pages should both be retained");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

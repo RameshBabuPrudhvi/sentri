@@ -482,6 +482,171 @@ test("missing async AND placeholder URL both appear in one call", () => {
   assert.ok(issues.some(i => i.includes("example.com")));
 });
 
+// ── 11. validateLocators — CSS and XPath validation ──────────────────────────
+
+import { validateLocators, validateActions, validateAssertions } from "../src/pipeline/testValidator.js";
+
+console.log("\n🔍  validateLocators — CSS and XPath structural checks");
+
+test("valid CSS selector produces no issues", () => {
+  const code = `page.locator('div.container > button.submit')`;
+  assert.equal(validateLocators(code).length, 0);
+});
+
+test("unbalanced CSS brackets detected", () => {
+  const code = `page.locator('input[name="email"')`;
+  const issues = validateLocators(code);
+  assert.ok(issues.some(i => i.includes("unbalanced brackets")),
+    `Expected unbalanced brackets issue, got: ${JSON.stringify(issues)}`);
+});
+
+test("unknown CSS pseudo-class detected", () => {
+  const code = `page.locator('input:foobar')`;
+  const issues = validateLocators(code);
+  assert.ok(issues.some(i => i.includes("unknown pseudo-class")),
+    `Expected unknown pseudo issue, got: ${JSON.stringify(issues)}`);
+});
+
+test("standard form pseudo-classes are accepted", () => {
+  const pseudos = ["required", "optional", "valid", "invalid", "read-only",
+    "read-write", "placeholder-shown", "indeterminate", "default", "defined"];
+  for (const pseudo of pseudos) {
+    const code = `page.locator('input:${pseudo}')`;
+    const issues = validateLocators(code);
+    assert.equal(issues.filter(i => i.includes("unknown pseudo-class")).length, 0,
+      `:${pseudo} should be accepted but was flagged`);
+  }
+});
+
+test("overly deep CSS selector (> 6 combinators) flagged", () => {
+  const code = `page.locator('div > div > div > div > div > div > div > span')`;
+  const issues = validateLocators(code);
+  assert.ok(issues.some(i => i.includes("overly specific")),
+    `Expected overly specific issue, got: ${JSON.stringify(issues)}`);
+});
+
+test("valid XPath produces no issues", () => {
+  const code = `page.locator('//div[@id="main"]//button')`;
+  assert.equal(validateLocators(code).length, 0);
+});
+
+test("XPath with unbalanced brackets detected", () => {
+  const code = `page.locator('//div[@id="main"')`;
+  const issues = validateLocators(code);
+  assert.ok(issues.some(i => i.includes("unbalanced")),
+    `Expected unbalanced issue, got: ${JSON.stringify(issues)}`);
+});
+
+test("XPath with invalid //[@ syntax detected", () => {
+  const code = `page.locator('//div//[@id="main"]')`;
+  const issues = validateLocators(code);
+  assert.ok(issues.some(i => i.includes("//[@")),
+    `Expected //[@ syntax issue, got: ${JSON.stringify(issues)}`);
+});
+
+test("empty code produces no issues", () => {
+  assert.equal(validateLocators("").length, 0);
+  assert.equal(validateLocators(null).length, 0);
+});
+
+// ── 12. validateActions — Playwright method whitelist ─────────────────────────
+
+console.log("\n⚡  validateActions — method whitelist checks");
+
+test("valid Playwright methods produce no issues", () => {
+  const code = [
+    "await page.goto('/login');",
+    "await page.fill('#email', 'test@test.com');",
+    "await page.click('button');",
+    "await page.waitForSelector('.loaded');",
+    "await context.waitForEvent('page');",
+  ].join("\n");
+  assert.equal(validateActions(code).length, 0);
+});
+
+test("typo method .clicks() flagged", () => {
+  const code = `await page.clicks('button');`;
+  const issues = validateActions(code);
+  assert.ok(issues.some(i => i.includes(".clicks()")),
+    `Expected .clicks() to be flagged, got: ${JSON.stringify(issues)}`);
+});
+
+test("typo method .fillIn() flagged", () => {
+  const code = `await page.fillIn('#email', 'x');`;
+  const issues = validateActions(code);
+  assert.ok(issues.some(i => i.includes(".fillIn()")),
+    `Expected .fillIn() to be flagged, got: ${JSON.stringify(issues)}`);
+});
+
+test("waitForEvent is accepted (not flagged)", () => {
+  const code = `await page.waitForEvent('download');`;
+  assert.equal(validateActions(code).length, 0);
+});
+
+test("each invalid method is only reported once", () => {
+  const code = `await page.clicks('a');\nawait page.clicks('b');`;
+  const issues = validateActions(code);
+  assert.equal(issues.filter(i => i.includes(".clicks()")).length, 1);
+});
+
+test("empty code produces no issues", () => {
+  assert.equal(validateActions("").length, 0);
+  assert.equal(validateActions(null).length, 0);
+});
+
+// ── 13. validateAssertions — matcher validation ──────────────────────────────
+
+console.log("\n✅  validateAssertions — assertion chain checks");
+
+test("valid matchers produce no issues", () => {
+  const code = [
+    "await expect(page).toHaveURL('/dash');",
+    "await expect(page).toHaveTitle('App');",
+    "await expect(page.locator('h1')).toBeVisible();",
+    "await expect(page.locator('.count')).toHaveText('5');",
+  ].join("\n");
+  assert.equal(validateAssertions(code).length, 0);
+});
+
+test("typo matcher .toHavURL() flagged", () => {
+  const code = `await expect(page).toHavURL('/dash');`;
+  const issues = validateAssertions(code);
+  assert.ok(issues.some(i => i.includes(".toHavURL()")),
+    `Expected .toHavURL() to be flagged, got: ${JSON.stringify(issues)}`);
+});
+
+test(".not.toBeHidden() flagged as logically redundant", () => {
+  const code = `await expect(page.locator('h1')).not.toBeHidden();`;
+  const issues = validateAssertions(code);
+  assert.ok(issues.some(i => i.includes(".not.toBeHidden()")),
+    `Expected .not.toBeHidden() to be flagged, got: ${JSON.stringify(issues)}`);
+});
+
+test(".not.toBeDisabled() flagged as logically redundant", () => {
+  const code = `await expect(page.locator('btn')).not.toBeDisabled();`;
+  const issues = validateAssertions(code);
+  assert.ok(issues.some(i => i.includes(".not.toBeDisabled()")),
+    `Expected .not.toBeDisabled() to be flagged, got: ${JSON.stringify(issues)}`);
+});
+
+test("promise chain methods (.catch, .then, .finally) are skipped", () => {
+  const code = `await expect(page.locator('h1').first()).toContainText(/x/i).catch(() => {});`;
+  const issues = validateAssertions(code);
+  assert.equal(issues.filter(i => i.includes(".catch()")).length, 0,
+    `.catch() should not be flagged as unknown matcher`);
+});
+
+test("nested parentheses in expect() are handled", () => {
+  const code = `await expect(page.locator('button').first()).toBeVisible();`;
+  const issues = validateAssertions(code);
+  assert.equal(issues.length, 0, `Should handle nested parens without issues`);
+});
+
+test("empty code produces no issues", () => {
+  assert.equal(validateAssertions("").length, 0);
+  assert.equal(validateAssertions(null).length, 0);
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

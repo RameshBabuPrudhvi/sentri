@@ -517,6 +517,47 @@ test("'warning' with 'passed' but no 'failed' → not flaky", () => {
   assert.equal(detectFlakiness(["passed","warning"]), false);
 });
 
+// ── 5. FAILURE_PATTERNS priority ordering (array refactor) ───────────────────
+
+console.log("\n🏅  FAILURE_PATTERNS priority — ordered array ensures correct classification");
+
+test("SELECTOR_ISSUE beats TIMEOUT: 'waiting for locator ... timeout 30000ms exceeded'", () => {
+  // This error matches both SELECTOR_ISSUE (/waiting for locator/i) and
+  // TIMEOUT (/timeout \d+ms exceeded/i). SELECTOR_ISSUE must win because
+  // the locator failure is the root cause; the timeout is the symptom.
+  const error = "waiting for locator('.submit-btn') to be visible: timeout 30000ms exceeded";
+  assert.equal(classifyFailure(error), "SELECTOR_ISSUE");
+});
+
+test("SELECTOR_ISSUE beats TIMEOUT: 'locator not found ... timeout exceeded'", () => {
+  const error = "locator('#missing') not found, timeout 5000ms exceeded";
+  assert.equal(classifyFailure(error), "SELECTOR_ISSUE");
+});
+
+test("ASSERTION_FAIL beats TIMEOUT: 'expect(received).toBeVisible timeout 30000ms exceeded'", () => {
+  // ASSERTION_FAIL (/expect.*received/i) is checked before TIMEOUT
+  const error = "expect(received).toBeVisible(expected): timeout 30000ms exceeded, received: hidden";
+  assert.equal(classifyFailure(error), "ASSERTION_FAIL");
+});
+
+test("URL_MISMATCH beats ASSERTION_FAIL: 'expect(received).toHaveURL(expected)'", () => {
+  // URL_MISMATCH has /expect\(received\)\.toHaveURL\(expected\)/i which is more
+  // specific than ASSERTION_FAIL's /expect.*received/i
+  const error = "expect(received).toHaveURL(expected)\n  received: '/login'\n  expected: '/dashboard'";
+  assert.equal(classifyFailure(error), "URL_MISMATCH");
+});
+
+test("NAVIGATION_FAIL beats TIMEOUT: 'timeout 30000ms waiting for navigation'", () => {
+  // NAVIGATION_FAIL has /timeout.*navigation/i which matches before TIMEOUT
+  const error = "timeout 30000ms waiting for navigation to /dashboard";
+  assert.equal(classifyFailure(error), "NAVIGATION_FAIL");
+});
+
+test("pure TIMEOUT still classified correctly when no other category matches", () => {
+  const error = "Test timeout of 60000ms exceeded.";
+  assert.equal(classifyFailure(error), "TIMEOUT");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

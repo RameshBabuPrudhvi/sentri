@@ -311,8 +311,12 @@ export function deduplicateTests(tests) {
 
     for (const kept of retained) {
       // Layer 2 — fuzzy name (defect #3)
+      // Guard with sourceUrl (consistent with deduplicateAcrossRuns Layer 3)
+      // so tests targeting different pages with similar names are not falsely
+      // deduplicated within the same batch.
       if (
         normCandName.length >= 10 &&
+        candidate.sourceUrl === kept.sourceUrl &&
         fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
       ) {
         // Keep the higher-quality test
@@ -327,8 +331,11 @@ export function deduplicateTests(tests) {
       // Guard with name length (consistent with deduplicateAcrossRuns Layer 4)
       // — short names produce tiny TF-IDF vectors where a single shared term
       // yields cosine ≈ 1.0, causing false positives.
+      // Guard with sourceUrl so tests on different pages that share vocabulary
+      // are not falsely deduplicated.
       if (
         normCandName.length >= 15 &&
+        candidate.sourceUrl === kept.sourceUrl &&
         semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
       ) {
         if (candidate._quality > kept._quality) {

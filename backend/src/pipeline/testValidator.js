@@ -212,6 +212,10 @@ const VALID_CSS_PSEUDOS = new Set([
   "hover", "focus", "focus-within", "focus-visible", "active", "visited",
   "checked", "disabled", "enabled", "placeholder", "empty", "target",
   "link", "any-link", "local-link", "scope", "matches",
+  // Form-related pseudo-classes (commonly used in form validation tests)
+  "required", "optional", "valid", "invalid", "read-only", "read-write",
+  "placeholder-shown", "indeterminate", "default", "defined",
+  "in-range", "out-of-range",
   // Playwright-specific
   "visible", "hidden", "text", "has-text", "above", "below", "near",
   "left-of", "right-of",
