@@ -372,7 +372,6 @@ export default function ChatHistory() {
   }
 
   function deleteSession(id) {
-  function deleteSession(id) {
     setSessions(prev => prev.filter(s => s.id !== id));
     if (activeId === id) {
       abortRef.current?.abort();
