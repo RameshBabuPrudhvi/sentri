@@ -121,17 +121,38 @@ CREATE TABLE IF NOT EXISTS activities (
   testName    TEXT,
   detail      TEXT,
   status      TEXT NOT NULL DEFAULT 'completed',
-  createdAt   TEXT NOT NULL
+  createdAt   TEXT NOT NULL,
+  userId      TEXT,                                   -- user who performed the action (NULL for system)
+  userName    TEXT                                     -- display name snapshot
 );
 CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(type);
 CREATE INDEX IF NOT EXISTS idx_activities_projectId ON activities(projectId);
 CREATE INDEX IF NOT EXISTS idx_activities_createdAt ON activities(createdAt);
+CREATE INDEX IF NOT EXISTS idx_activities_userId ON activities(userId);
 
 CREATE TABLE IF NOT EXISTS healing_history (
-  key           TEXT PRIMARY KEY,  -- "<testId>::<action>::<label>"
-  strategyIndex INTEGER NOT NULL DEFAULT -1,
-  succeededAt   TEXT,
-  failCount     INTEGER NOT NULL DEFAULT 0
+  key              TEXT PRIMARY KEY,  -- "<testId>::<action>::<label>"
+  strategyIndex    INTEGER NOT NULL DEFAULT -1,
+  succeededAt      TEXT,
+  failCount        INTEGER NOT NULL DEFAULT 0,
+  strategyVersion  INTEGER                            -- versioned healing scope
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  token     TEXT PRIMARY KEY,          -- 32-byte cryptographically random base64url string
+  userId    TEXT NOT NULL,             -- references users(id)
+  expiresAt TEXT NOT NULL,             -- ISO 8601; checked on every verification
+  usedAt    TEXT,                      -- NULL = unused; set on successful password reset
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_prt_userId    ON password_reset_tokens(userId);
+CREATE INDEX IF NOT EXISTS idx_prt_expiresAt ON password_reset_tokens(expiresAt);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  provider    TEXT PRIMARY KEY,   -- 'anthropic' | 'openai' | 'google' | 'local'
+  value       TEXT NOT NULL,      -- AES-256-GCM encrypted key (cloud) or JSON config (local)
+  updatedAt   TEXT NOT NULL       -- ISO 8601 timestamp of last write
 );
 
 CREATE TABLE IF NOT EXISTS counters (
