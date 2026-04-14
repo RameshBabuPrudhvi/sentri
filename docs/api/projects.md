@@ -24,7 +24,7 @@ POST /api/projects
 GET /api/projects
 ```
 
-Returns an array of all projects.
+Returns an array of all non-deleted projects.
 
 ## Get a Project
 
