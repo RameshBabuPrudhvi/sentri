@@ -2,8 +2,12 @@
  * @module database/repositories/runRepo
  * @description Run CRUD backed by SQLite.
  *
- * JSON columns: logs, tests, results, testQueue, generateInput, promptAudit,
+ * JSON columns: tests, results, testQueue, generateInput, promptAudit,
  * pipelineStats, feedbackLoop, videoSegments, qualityAnalytics.
+ *
+ * Log lines are stored in the `run_logs` table (ENH-008) — not in a
+ * `logs` JSON column.  {@link getById} hydrates `run.logs` from
+ * `run_logs` automatically so callers see no API change.
  *
  * All read queries filter `WHERE deletedAt IS NULL` by default.
  * Hard deletes are replaced with soft-deletes: `deletedAt = datetime('now')`.
@@ -16,13 +20,17 @@
 
 import { getDatabase } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
+import * as runLogRepo from "./runLogRepo.js";
 
 export { parsePagination };
 
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
+// `logs` is intentionally excluded — log lines live in the `run_logs` table
+// (ENH-008).  The `runs` table still has a `logs` column for backwards
+// compatibility with existing databases, but all new writes bypass it.
 const JSON_FIELDS = [
-  "logs", "tests", "results", "testQueue", "generateInput",
+  "tests", "results", "testQueue", "generateInput",
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
   "qualityAnalytics",
 ];
@@ -33,11 +41,14 @@ function rowToRun(row) {
   for (const f of JSON_FIELDS) {
     if (obj[f]) {
       try { obj[f] = JSON.parse(obj[f]); }
-      catch { obj[f] = f === "logs" || f === "tests" || f === "results" || f === "videoSegments" ? [] : null; }
+      catch { obj[f] = f === "tests" || f === "results" || f === "videoSegments" ? [] : null; }
     } else {
-      obj[f] = f === "logs" || f === "tests" || f === "results" || f === "videoSegments" ? [] : null;
+      obj[f] = f === "tests" || f === "results" || f === "videoSegments" ? [] : null;
     }
   }
+  // Always initialise logs as an empty array; callers that need the full
+  // log history should call getById() which hydrates from run_logs.
+  if (!Array.isArray(obj.logs)) obj.logs = [];
   return obj;
 }
 
@@ -48,6 +59,9 @@ function runToRow(r) {
       row[f] = JSON.stringify(row[f]);
     }
   }
+  // Never serialise the in-memory logs array back to the runs table —
+  // log lines are stored in run_logs exclusively.
+  delete row.logs;
   return row;
 }
 
@@ -55,7 +69,7 @@ const INSERT_COLS = [
   "id", "projectId", "type", "status", "startedAt", "finishedAt",
   "duration", "error", "errorCategory", "passed", "failed", "total",
   "pagesFound", "parallelWorkers", "tracePath", "videoPath", "videoSegments",
-  "logs", "tests", "results", "testQueue", "generateInput", "promptAudit",
+  "tests", "results", "testQueue", "generateInput", "promptAudit",
   "pipelineStats", "feedbackLoop", "currentStep",
   "rateLimitError", "qualityAnalytics",
 ];
@@ -194,28 +208,38 @@ export function getByProjectIdPaged(projectId, page, pageSize) {
 
 /**
  * Get a non-deleted run by ID.
+ * Hydrates `run.logs` from the `run_logs` table (ENH-008).
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getById(id) {
   const db = getDatabase();
-  return rowToRun(db.prepare("SELECT * FROM runs WHERE id = ? AND deletedAt IS NULL").get(id));
+  const run = rowToRun(db.prepare("SELECT * FROM runs WHERE id = ? AND deletedAt IS NULL").get(id));
+  if (!run) return undefined;
+  run.logs = runLogRepo.getMessagesByRunId(id);
+  return run;
 }
 
 /**
  * Get a run by ID including soft-deleted (for restore and abort operations).
+ * Hydrates `run.logs` from the `run_logs` table (ENH-008).
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getByIdIncludeDeleted(id) {
   const db = getDatabase();
-  return rowToRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id));
+  const run = rowToRun(db.prepare("SELECT * FROM runs WHERE id = ?").get(id));
+  if (!run) return undefined;
+  run.logs = runLogRepo.getMessagesByRunId(id);
+  return run;
 }
 
 // ─── Write operations ─────────────────────────────────────────────────────────
 
 /**
  * Create a run.
+ * Note: `run.logs` is intentionally not written to `runs.logs` — log lines
+ * are persisted via {@link runLogRepo.appendLog} in runLogger.js (ENH-008).
  * @param {Object} run
  */
 export function create(run) {
@@ -225,7 +249,6 @@ export function create(run) {
   for (const col of INSERT_COLS) {
     params[col] = row[col] !== undefined ? row[col] : null;
   }
-  if (params.logs == null) params.logs = "[]";
   if (params.tests == null) params.tests = "[]";
   if (params.results == null) params.results = "[]";
   db.prepare(INSERT_SQL).run(params);
@@ -311,6 +334,7 @@ export function deleteByProjectId(projectId) {
 
 /**
  * Hard-delete all runs for a project (permanent — for project purge).
+ * Also purges all associated log rows from `run_logs`.
  * @param {string} projectId
  * @returns {string[]} IDs of all deleted runs.
  */
@@ -318,6 +342,7 @@ export function hardDeleteByProjectId(projectId) {
   const db = getDatabase();
   const ids = db.prepare("SELECT id FROM runs WHERE projectId = ?").all(projectId).map(r => r.id);
   if (ids.length > 0) {
+    runLogRepo.deleteByRunIds(ids);
     db.prepare("DELETE FROM runs WHERE projectId = ?").run(projectId);
   }
   return ids;
@@ -334,10 +359,12 @@ export function count() {
 
 /**
  * Hard-delete all runs (permanent — used by the admin "Clear Runs" data management action).
+ * Also purges all rows from `run_logs`.
  * @returns {number} Number of runs permanently removed.
  */
 export function hardClearAll() {
   const db = getDatabase();
+  db.prepare("DELETE FROM run_logs").run();
   const info = db.prepare("DELETE FROM runs").run();
   return info.changes;
 }
@@ -412,10 +439,12 @@ export function getDeletedAll() {
 
 /**
  * Hard-delete a run by ID (permanent — use only for purge operations).
+ * Also purges all associated log rows from `run_logs`.
  * @param {string} id
  */
 export function hardDeleteById(id) {
   const db = getDatabase();
+  runLogRepo.deleteByRunId(id);
   db.prepare("DELETE FROM runs WHERE id = ?").run(id);
 }
 
