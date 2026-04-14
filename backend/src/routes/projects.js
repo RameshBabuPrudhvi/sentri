@@ -80,12 +80,17 @@ router.delete("/:id", (req, res) => {
     });
   }
 
+  // Soft-delete the project FIRST so its deletedAt timestamp is the earliest.
+  // The cascade-restore in recycleBin.js uses `restoreByProjectIdAfter(id,
+  // project.deletedAt)` with a >= comparison — deleting children after the
+  // project guarantees their timestamps are >= the project's, so they are
+  // correctly included in the cascade-restore.
+  projectRepo.deleteById(req.params.id);
+
   // Cascade soft-delete: tests and runs move to the recycle bin.
   // Healing history and activities are kept for audit trail.
   const testIds = testRepo.deleteByProjectId(req.params.id);
   const runIds  = runRepo.deleteByProjectId(req.params.id);
-
-  projectRepo.deleteById(req.params.id);
 
   logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,
