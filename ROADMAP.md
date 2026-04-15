@@ -168,7 +168,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Fix:** Create a `run_logs(id, runId, seq, level, message, createdAt)` table. Update `log()`, `logWarn()`, `logSuccess()` to `INSERT` individual rows. SSE streaming reads from `run_logs` ordered by `seq`. The `runs` table retains only summary columns.
 
 **Implemented in:** PR #86
-- `backend/src/database/migrations/002_run_logs_table.sql` — new `run_logs` table with indexes on `runId` and `(runId, seq)`
+- `backend/src/database/migrations/002_run_logs_table.sql` — new `run_logs`, `webhook_tokens`, and `schedules` tables (consolidated migration for ENH-008 + ENH-011 + ENH-006)
 - `backend/src/database/repositories/runLogRepo.js` — append-only data-access layer with in-process seq counter cache
 - `backend/src/utils/runLogger.js` — each `log()`/`logWarn()`/`logError()` now does a single INSERT via `runLogRepo.appendLog()`
 - `backend/src/database/repositories/runRepo.js` — `logs` removed from JSON_FIELDS; `getById()` hydrates from `run_logs`; purge paths cascade into `run_logs`
@@ -316,7 +316,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 5. Support an optional `callbackUrl` param for async result delivery to external systems.
 
 **Implemented in:** PR #86
-- `backend/src/database/migrations/003_webhook_tokens.sql` — `webhook_tokens` table with SHA-256 hashed tokens, unique index on `tokenHash`
+- `backend/src/database/migrations/002_run_logs_table.sql` — `webhook_tokens` table with SHA-256 hashed tokens, unique index on `tokenHash` (consolidated migration)
 - `backend/src/database/repositories/webhookTokenRepo.js` — CRUD + `hashToken()`, `generateToken()`, `findByHash()`, `touch()`
 - `backend/src/routes/trigger.js` — `POST /api/projects/:id/trigger` with Bearer token auth (no JWT), 202 Accepted, optional `callbackUrl`
 - `backend/src/routes/runs.js` — token management endpoints: `GET/POST /trigger-tokens`, `DELETE /trigger-tokens/:tid`
@@ -341,7 +341,7 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 **Fix:** Add a `schedules(projectId, cronExpr, timezone, enabled, lastRunAt, nextRunAt)` table. Use `node-cron` to fire scheduled runs as background jobs. Display the next scheduled run time in `ProjectHeader`. Add a schedule toggle and CRON editor to the project Settings tab.
 
 **Implemented in:** PR #86
-- `backend/src/database/migrations/003_schedules.sql` — `schedules` table with `cronExpr`, `timezone`, `enabled`, `lastRunAt`, `nextRunAt`; UNIQUE constraint on `projectId`; seeded `schedule` counter for `SCH-N` IDs
+- `backend/src/database/migrations/002_run_logs_table.sql` — `schedules` table with `cronExpr`, `timezone`, `enabled`, `lastRunAt`, `nextRunAt`; UNIQUE constraint on `projectId`; seeded `schedule` counter for `SCH-N` IDs (consolidated migration)
 - `backend/src/database/repositories/scheduleRepo.js` — CRUD: `getByProjectId()`, `getAllEnabled()`, `upsert()`, `setEnabled()`, `updateRunTimes()`, `deleteByProjectId()`
 - `backend/src/scheduler.js` — `node-cron` task manager with `initScheduler()`, `reloadSchedule()`, `stopSchedule()`, `getNextRunAt()`; fires scheduled runs identically to `POST /projects/:id/run`
 - `backend/src/routes/projects.js` — `GET/PATCH/DELETE /projects/:id/schedule` endpoints with cron validation
