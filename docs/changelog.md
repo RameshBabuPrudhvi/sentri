@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Frontend**: Dedicated Automation page (`/automation`) — cross-project hub for CI/CD trigger tokens and scheduled runs (future), with per-project expandable accordion cards, shared integration snippets with project selector, and deep-link support via `?project=PRJ-X` (ENH-011) (#86)
 - **Frontend**: "⚡ Automation" quick-link in ProjectHeader navigates to the Automation page with the current project pre-expanded (#86)
 - **Nav**: "Automation" entry added to the sidebar navigation with ⚡ icon (#86)
+- **Automation**: Cron-based test scheduling engine (ENH-006) — configure automated regression runs per project via a 5-field cron expression and IANA timezone; schedules survive server restarts and are hot-reloaded on save without a process restart (#ENH-006)
+- **Automation**: `ScheduleManager` component — inline cron editor with preset picker (hourly, daily, weekly, etc.), timezone selector, enable/disable toggle, and next-run time display; lives inside the per-project Automation card (#ENH-006)
+- **API**: `GET /api/projects/:id/schedule` — returns the current schedule or null (#ENH-006)
+- **API**: `PATCH /api/projects/:id/schedule` — creates or updates a project's cron schedule; validates the 5-field expression server-side (#ENH-006)
+- **API**: `DELETE /api/projects/:id/schedule` — removes the cron schedule and cancels the running task (#ENH-006)
+- **DB**: `schedules` table migration (003) — stores `cronExpr`, `timezone`, `enabled`, `lastRunAt`, `nextRunAt` per project; seeded with a `schedule` counter for `SCH-N` IDs (#ENH-006)
+- **ProjectHeader**: Next scheduled run time badge — shows "in Xm/Xh/Xd" when an active schedule exists, linking awareness into the project detail page (#ENH-006)
 
 ### Fixed
 - **API**: `callbackUrl` webhook now fires on **any** terminal state (completed, failed, aborted) — previously it only fired on success, leaving CI pipelines unnotified on failure; payload now includes `error` field (#86)
