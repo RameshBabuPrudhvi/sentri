@@ -111,13 +111,17 @@ test("handles combined list+range field like '1-5,10'", () => {
   assert.ok(new Date(result) > new Date());
 });
 
-test("handles start/step field like '5/10' for minutes", () => {
-  // "5/10 * * * *" means minutes 5, 15, 25, 35, 45, 55
+test("start/step field like '5/10' returns null (not supported by node-cron v3)", () => {
+  // node-cron v3 only supports */n step syntax, not start/step like "5/10".
+  // cron.validate() rejects it at the gate, so getNextRunAt returns null.
+  // This is consistent across the entire system:
+  //   - PATCH /schedule API also uses cron.validate() and returns 400
+  //   - armTask() refuses to arm expressions that fail cron.validate()
+  //   - cron.schedule() would also reject it at runtime
+  //   - Frontend ScheduleManager presets and validator only accept */n
+  // The matchesAtom handler for start/step (scheduler.js:81-83) is dead code.
   const result = getNextRunAt("5/10 * * * *", "UTC");
-  assert.ok(result !== null, "should find a match for start/step field");
-  const d = new Date(result);
-  const min = d.getMinutes();
-  assert.ok(min >= 5 && (min - 5) % 10 === 0, "minute should match 5/10 pattern, got " + min);
+  assert.equal(result, null, "node-cron v3 does not support start/step syntax");
 });
 
 test("handles range+step field like '0-30/5' for minutes", () => {
