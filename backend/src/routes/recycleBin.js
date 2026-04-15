@@ -16,6 +16,9 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
+import * as scheduleRepo from "../database/repositories/scheduleRepo.js";
+import { stopSchedule } from "../scheduler.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
 import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
@@ -117,6 +120,9 @@ router.delete("/purge/:type/:id", (req, res) => {
     if (testIds.length > 0) healingRepo.deleteByTestIds(testIds);
     runRepo.hardDeleteByProjectId(id);
     activityRepo.deleteByProjectId(id);
+    webhookTokenRepo.deleteByProjectId(id);
+    scheduleRepo.deleteByProjectId(id);
+    stopSchedule(id);
     projectRepo.hardDeleteById(id);
     logActivity({ ...actor(req),
       type: "project.purge", projectId: id, projectName: project.name,

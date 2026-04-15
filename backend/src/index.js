@@ -24,6 +24,7 @@ import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
+import { initScheduler } from "./scheduler.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -32,6 +33,7 @@ import { app } from "./middleware/appSetup.js";
 import projectsRouter from "./routes/projects.js";
 import testsRouter from "./routes/tests.js";
 import runsRouter from "./routes/runs.js";
+import triggerRouter from "./routes/trigger.js";
 import sseRouter from "./routes/sse.js";
 import dashboardRouter from "./routes/dashboard.js";
 import settingsRouter from "./routes/settings.js";
@@ -77,6 +79,9 @@ const orphanCount = runRepo.markOrphansInterrupted();
 if (orphanCount > 0) {
   console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
 }
+// 5. Initialise cron-based test scheduler (ENH-006)
+//    Must run after DB init so scheduleRepo can read the schedules table.
+initScheduler();
 // Graceful shutdown — close SQLite connection
 process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
 process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });
@@ -89,6 +94,10 @@ process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });
 // Auth routes are public (login, register, OAuth callbacks)
 app.use("/api/auth", authRouter);
 
+// CI/CD trigger endpoint (/api/projects/:id/trigger) uses its own token-based
+// auth — it must be mounted WITHOUT requireAuth so CI pipelines can call it
+// with a project token rather than a user JWT.
+app.use("/api", triggerRouter);
 
 // All other API routes require a valid JWT token
 app.use("/api/projects", requireAuth, projectsRouter);

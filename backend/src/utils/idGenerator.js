@@ -50,6 +50,22 @@ export function generateActivityId(_db) {
 }
 
 /**
+ * generateWebhookTokenId() → "WH-1", "WH-2", …
+ * Used for per-project CI/CD trigger tokens (ENH-011).
+ */
+export function generateWebhookTokenId() {
+  return `WH-${counterRepo.next("webhook")}`;
+}
+
+/**
+ * generateScheduleId() → "SCH-1", "SCH-2", …
+ * Used for project cron schedules (ENH-006).
+ */
+export function generateScheduleId() {
+  return `SCH-${counterRepo.next("schedule")}`;
+}
+
+/**
  * No-op — counters are now managed by the SQLite `counters` table.
  * Kept for backward compatibility so existing callers don't break.
  * The migration script (database/migrate.js) seeds the counters table

@@ -21,13 +21,13 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, activityRepo, healingRepo, passwordResetTokenRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, webhookTokenRepo, scheduleRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
     middleware/            Express middleware (appSetup, CORS, Helmet)
-    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin)
+    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin, trigger)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
     utils/                 ID generator, logging, abort helpers, encryption, validation
@@ -107,7 +107,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `abortHelper.js` | `throwIfAborted(signal)`, `isRunAborted()`, `finalizeRunIfNotAborted()` | Every pipeline/runner stage with I/O |
 | `runLogger.js` | `log()`, `logWarn()`, `logError()`, `logSuccess()`, `emitRunEvent()` | All run-level logging and SSE |
 | `errorClassifier.js` | `classifyError(err, context)`, `ERROR_CATEGORY` | Converting raw errors to user-friendly messages (runs, chat, activity logs) |
-| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()` | Creating new domain objects |
+| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()`, `generateWebhookTokenId()`, `generateScheduleId()` | Creating new domain objects |
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
@@ -299,7 +299,7 @@ console.error(`API key: ${apiKey}`);
 - 4xx errors return `{ error: string }` with a descriptive message.
 - 5xx errors return `{ error: "Internal server error" }` — never leak stack traces to the client.
 - Validate all user-supplied input at the route boundary using `utils/validate.js` before touching the DB.
-- All routes except `/api/auth/*` and `/health` require `requireAuth` middleware.
+- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware. The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use their own per-project Bearer token authentication (ENH-011).
 
 ```js
 // ✅ Route pattern — use repository modules for DB access
@@ -321,8 +321,8 @@ Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
 - **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo` — each in `backend/src/database/repositories/`.
-- **JSON columns**: `steps`, `tags`, `logs`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
+- **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
 - **Auto-migration**: On first startup, if `data/sentri-db.json` exists and SQLite is empty, `database/migrate.js` imports all data in a single transaction and renames the JSON file to `.migrated`.
@@ -382,7 +382,7 @@ res.flushHeaders();
 
 - Functional components only. Class components exist only in `components/ErrorBoundary.jsx` for React's mandatory class API (`getDerivedStateFromError` / `componentDidCatch`).
 - Pages live in `src/pages/`, reusable UI in `src/components/`.
-- Domain-specific sub-components live in subdirectories, e.g. `src/components/project/`, `src/components/test/`.
+- Domain-specific sub-components live in subdirectories, e.g. `src/components/project/`, `src/components/test/`, `src/components/automation/`.
 - Lazy-load all page-level components via `React.lazy()` + `Suspense` as shown in `App.jsx`.
 
 ### State & Data Fetching
@@ -887,6 +887,7 @@ The frontend follows a clear separation of concerns between pages:
 | **Dashboard** | Read-only analytics hub | Pass rate, trends, defects, recent activity |
 | **Tests** (`Tests.jsx`) | **Central command centre** for all test creation | Crawl a project, Generate from story, Run regression, Review drafts |
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
+| **Automation** (`/automation`) | Cross-project automation hub | CI/CD trigger tokens, scheduled runs (ENH-006), integration snippets; deep-link via `?project=PRJ-X` |
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
 | **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |

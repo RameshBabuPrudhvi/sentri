@@ -15,6 +15,7 @@
 import { Router } from "express";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
 
 const router = Router();
@@ -68,8 +69,15 @@ router.get("/runs/:runId/events", (req, res) => {
   res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
   res.flushHeaders();
 
-  // Send current snapshot immediately so the client has something to render
-  const signedRun = signRunArtifacts(run);
+  // Send current snapshot immediately so the client has something to render.
+  // Logs are hydrated from the run_logs table (ENH-008) rather than the
+  // legacy runs.logs JSON column — getById() already does this, but we
+  // re-fetch here to ensure we have the latest rows even if the run object
+  // was cached before recent appends.
+  const signedRun = signRunArtifacts({
+    ...run,
+    logs: runLogRepo.getMessagesByRunId(run.id),
+  });
   res.write(`data: ${JSON.stringify({ type: "snapshot", run: signedRun })}\n\n`);
 
   // If already done (completed, failed, aborted, interrupted), send snapshot +

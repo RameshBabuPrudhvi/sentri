@@ -60,6 +60,8 @@
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,110,245,0.1); }
 .input::placeholder { color: var(--text3); }
+.input.input-error { border-color: var(--red); }
+.input.input-error:focus { border-color: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
 
 /* ── Tables ─────────────────────────────────────────────────────────────────── */
 .table { width: 100%; border-collapse: collapse; }

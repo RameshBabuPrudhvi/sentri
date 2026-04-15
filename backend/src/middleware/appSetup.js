@@ -202,6 +202,9 @@ export function csrfMiddleware(req, res, next) {
   // Step 2: Validate the header on mutating requests.
   if (CSRF_SAFE_METHODS.has(req.method)) return next();
   if (CSRF_EXEMPT_PATHS.has(req.path)) return next();
+  // The CI/CD trigger endpoint uses its own Bearer token auth (not cookies),
+  // so CSRF protection is unnecessary and would block CI pipelines.
+  if (/^\/api\/projects\/[^/]+\/trigger$/.test(req.path)) return next();
 
   const headerToken = req.headers[CSRF_HEADER_NAME];
   if (!headerToken || headerToken !== csrfToken) {

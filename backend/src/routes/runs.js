@@ -1,22 +1,28 @@
 /**
  * @module routes/runs
- * @description Run routes — crawl, test execution, abort, and listing. Mounted at `/api`.
+ * @description Run routes — crawl, test execution, abort, listing, and CI/CD triggers.
+ * Mounted at `/api`.
  *
  * ### Endpoints
- * | Method | Path                         | Description                        |
- * |--------|------------------------------|------------------------------------|
- * | `POST` | `/api/projects/:id/crawl`    | Start crawl + AI test generation   |
- * | `POST` | `/api/projects/:id/run`      | Execute all approved tests         |
- * | `GET`  | `/api/projects/:id/runs`     | List runs for a project            |
- * | `GET`  | `/api/runs/:runId`           | Get run detail                     |
- * | `POST` | `/api/runs/:runId/abort`     | Abort a running crawl or test run  |
+ * | Method   | Path                                     | Description                         |
+ * |----------|------------------------------------------|-------------------------------------|
+ * | `POST`   | `/api/projects/:id/crawl`                | Start crawl + AI test generation    |
+ * | `POST`   | `/api/projects/:id/run`                  | Execute all approved tests          |
+ * | `GET`    | `/api/projects/:id/runs`                 | List runs for a project             |
+ * | `GET`    | `/api/runs/:runId`                       | Get run detail                      |
+ * | `POST`   | `/api/runs/:runId/abort`                 | Abort a running crawl or test run   |
+ * | `POST`   | `/api/projects/:id/trigger`              | CI/CD token-authenticated test run  |
+ * | `GET`    | `/api/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
+ * | `POST`   | `/api/projects/:id/trigger-tokens`       | Create a new trigger token          |
+ * | `DELETE` | `/api/projects/:id/trigger-tokens/:tid`  | Revoke a trigger token              |
  */
 
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
-import { generateRunId } from "../utils/idGenerator.js";
+import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
+import { generateRunId, generateWebhookTokenId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
 import { emitRunEvent } from "./sse.js";
@@ -220,6 +226,86 @@ router.post("/runs/:runId/abort", (req, res) => {
     failed: countsSource.failed ?? undefined,
     total: countsSource.total ?? undefined,
     testsGenerated: countsSource.testsGenerated ?? undefined,
+  });
+
+  res.json({ ok: true });
+});
+
+// ─── CI/CD Trigger token management ──────────────────────────────────────────
+// These endpoints are JWT-protected (mounted under requireAuth in index.js).
+// The actual trigger endpoint (POST /projects/:id/trigger) lives in trigger.js
+// and is mounted without requireAuth so CI pipelines can call it with just a
+// project token.
+
+/**
+ * GET /api/projects/:id/trigger-tokens
+ * List all trigger tokens for a project (hashes never returned).
+ */
+router.get("/projects/:id/trigger-tokens", (req, res) => {
+  const project = projectRepo.getById(req.params.id);
+  if (!project) return res.status(404).json({ error: "not found" });
+  res.json(webhookTokenRepo.getByProjectId(project.id));
+});
+
+/**
+ * POST /api/projects/:id/trigger-tokens
+ * Create a new trigger token for a project.
+ * Returns the plaintext token exactly once — it is never retrievable again.
+ *
+ * Body: `{ label?: string }`
+ * Response `201`: `{ id, token, label, createdAt }`
+ */
+router.post("/projects/:id/trigger-tokens", (req, res) => {
+  const project = projectRepo.getById(req.params.id);
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  const label = typeof req.body?.label === "string"
+    ? req.body.label.trim().slice(0, 120)
+    : null;
+
+  const plaintext = webhookTokenRepo.generateToken();
+  const id = generateWebhookTokenId();
+
+  webhookTokenRepo.create({
+    id,
+    projectId: project.id,
+    tokenHash: webhookTokenRepo.hashToken(plaintext),
+    label,
+  });
+
+  logActivity({ ...actor(req),
+    type: "project.trigger_token_create",
+    projectId: project.id,
+    projectName: project.name,
+    detail: `CI/CD trigger token created${label ? ` (${label})` : ""}`,
+  });
+
+  res.status(201).json({ id, token: plaintext, label, createdAt: new Date().toISOString() });
+});
+
+/**
+ * DELETE /api/projects/:id/trigger-tokens/:tid
+ * Revoke (permanently delete) a trigger token.
+ */
+router.delete("/projects/:id/trigger-tokens/:tid", (req, res) => {
+  const project = projectRepo.getById(req.params.id);
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  // Verify the token belongs to this project before deleting (prevent
+  // cross-project deletion via sequential WH-N ID guessing).
+  const tokens = webhookTokenRepo.getByProjectId(project.id);
+  if (!tokens.some((t) => t.id === req.params.tid)) {
+    return res.status(404).json({ error: "token not found" });
+  }
+
+  const deleted = webhookTokenRepo.deleteById(req.params.tid);
+  if (!deleted) return res.status(404).json({ error: "token not found" });
+
+  logActivity({ ...actor(req),
+    type: "project.trigger_token_delete",
+    projectId: project.id,
+    projectName: project.name,
+    detail: "CI/CD trigger token revoked",
   });
 
   res.json({ ok: true });

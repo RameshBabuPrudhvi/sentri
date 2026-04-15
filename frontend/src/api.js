@@ -214,6 +214,48 @@ export const api = {
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),
 
+  // ── CI/CD Trigger tokens ─────────────────────────────────────────────────
+  /**
+   * List all trigger tokens for a project.
+   * @param {string} projectId
+   * @returns {Promise<Array<{id: string, label: string|null, createdAt: string, lastUsedAt: string|null}>>}
+   */
+  getTriggerTokens: (projectId) => req("GET", `/projects/${projectId}/trigger-tokens`),
+  /**
+   * Create a new trigger token. Returns the plaintext token exactly once.
+   * @param {string}  projectId
+   * @param {Object}  [body]         - `{ label?: string }`
+   * @returns {Promise<{id: string, token: string, label: string|null, createdAt: string}>}
+   */
+  createTriggerToken: (projectId, body) => req("POST", `/projects/${projectId}/trigger-tokens`, body),
+  /**
+   * Revoke (permanently delete) a trigger token.
+   * @param {string} projectId
+   * @param {string} tokenId
+   */
+  deleteTriggerToken: (projectId, tokenId) => req("DELETE", `/projects/${projectId}/trigger-tokens/${tokenId}`),
+
+  // ── Schedules (ENH-006) ─────────────────────────────────────────────────────
+  /**
+   * Get the cron schedule for a project, or null if none exists.
+   * @param {string} projectId
+   * @returns {Promise<{schedule: Object|null}>}
+   */
+  getSchedule: (projectId) => req("GET", `/projects/${projectId}/schedule`),
+  /**
+   * Create or update the cron schedule for a project.
+   * @param {string} projectId
+   * @param {{ cronExpr: string, timezone: string, enabled: boolean }} body
+   * @returns {Promise<{ok: boolean, schedule: Object}>}
+   */
+  upsertSchedule: (projectId, body) => req("PATCH", `/projects/${projectId}/schedule`, body),
+  /**
+   * Remove the cron schedule for a project.
+   * @param {string} projectId
+   * @returns {Promise<{ok: boolean}>}
+   */
+  deleteSchedule: (projectId) => req("DELETE", `/projects/${projectId}/schedule`),
+
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
