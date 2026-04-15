@@ -18,6 +18,7 @@
 
 import { Router } from "express";
 import { URL } from "url";
+import dns from "node:dns";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
@@ -31,7 +32,11 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
-// Block requests to private/reserved IP ranges and cloud metadata endpoints.
+// Two-layer defence:
+//   1. validateCallbackUrl() — synchronous string checks + async DNS resolution
+//      to block domains that resolve to private/reserved IPs.
+//   2. safeFetchCallback() — fires the actual POST with `redirect: "error"` to
+//      prevent open-redirect bypasses (302 → http://169.254.169.254/…).
 
 /** @type {Array<[number, number, number]>} [baseIp, mask, bits] for IPv4 */
 const PRIVATE_IPV4_RANGES = [
@@ -71,11 +76,15 @@ function isPrivateIp(ip) {
 
 /**
  * Validate a callbackUrl for SSRF safety.
- * Returns null if valid, or an error message string if invalid.
+ *
+ * Performs synchronous string checks (protocol, known private hostnames,
+ * literal private IPs) and then resolves the hostname via DNS to catch
+ * domains that point to private/reserved addresses (e.g. evil.com → 169.254.169.254).
+ *
  * @param {string} raw
- * @returns {string|null}
+ * @returns {Promise<string|null>} null if valid, or an error message string.
  */
-function validateCallbackUrl(raw) {
+async function validateCallbackUrl(raw) {
   let parsed;
   try { parsed = new URL(raw); } catch { return "callbackUrl is not a valid URL."; }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
@@ -89,7 +98,59 @@ function validateCallbackUrl(raw) {
   if (isPrivateIp(host)) {
     return "callbackUrl must not target a private or reserved IP address.";
   }
+
+  // Resolve DNS to catch domains pointing to private IPs (e.g. evil.com → 10.0.0.1).
+  // Skip resolution for bare IP addresses — already checked above.
+  if (ipv4ToInt(host) === null && !host.includes(":")) {
+    try {
+      const { address } = await dns.promises.lookup(host);
+      if (isPrivateIp(address)) {
+        return "callbackUrl resolves to a private or reserved IP address.";
+      }
+    } catch {
+      return "callbackUrl hostname could not be resolved.";
+    }
+  }
+
   return null; // valid
+}
+
+/**
+ * Fire the callbackUrl POST with SSRF-safe fetch options.
+ *
+ * - `redirect: "error"` prevents the server from following 302 redirects to
+ *   private IPs (open-redirect bypass).
+ * - Re-resolves DNS at fetch time to mitigate DNS rebinding (where the domain
+ *   changes resolution between validateCallbackUrl and the actual fetch).
+ * - Best-effort: errors are silently caught so a failing callback never
+ *   affects the run outcome.
+ *
+ * @param {string} url      - The validated callbackUrl.
+ * @param {string} payload  - JSON string body.
+ */
+async function safeFetchCallback(url, payload) {
+  // Re-resolve DNS at fetch time to mitigate DNS rebinding attacks.
+  const parsed = new URL(url);
+  const host = parsed.hostname.toLowerCase();
+  if (ipv4ToInt(host) === null && !host.includes(":")) {
+    try {
+      const { address } = await dns.promises.lookup(host);
+      if (isPrivateIp(address)) return; // silently abort — DNS rebinding detected
+    } catch {
+      return; // hostname no longer resolves — abort
+    }
+  }
+
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+    signal: AbortSignal.timeout(10_000),
+    // Prevent open-redirect bypass: a 302 to http://169.254.169.254/…
+    // would bypass hostname validation. "error" makes fetch() reject on
+    // any redirect response instead of following it.
+    redirect: "error",
+  });
 }
 
 const router = Router();
@@ -180,9 +241,10 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
   // ── 5. Extract optional config ───────────────────────────────────────
   const { dialsConfig, callbackUrl } = req.body || {};
 
-  // Validate callbackUrl up-front so we return 400 before starting the run.
+  // Validate callbackUrl up-front (including DNS resolution) so we return
+  // 400 before starting the run.
   if (callbackUrl && typeof callbackUrl === "string") {
-    const urlErr = validateCallbackUrl(callbackUrl);
+    const urlErr = await validateCallbackUrl(callbackUrl);
     if (urlErr) return res.status(400).json({ error: urlErr });
   }
 
@@ -237,6 +299,8 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
       }),
       // Fire optional callback URL with run summary on ANY terminal state
       // (completed, failed, aborted) so CI pipelines always get notified.
+      // Uses safeFetchCallback which re-resolves DNS (mitigates rebinding)
+      // and blocks redirects (mitigates open-redirect SSRF bypass).
       onComplete: (finishedRun) => {
         if (!callbackUrl || typeof callbackUrl !== "string") return;
         const payload = JSON.stringify({
@@ -247,12 +311,8 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
           total: finishedRun.total,
           error: finishedRun.error || null,
         });
-        fetch(callbackUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-          signal: AbortSignal.timeout(10_000),
-        }).catch(() => { /* best-effort — never fails the run */ });
+        safeFetchCallback(callbackUrl, payload)
+          .catch(() => { /* best-effort — never fails the run */ });
       },
     },
   );

@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **API**: `callbackUrl` webhook now fires on **any** terminal state (completed, failed, aborted) — previously it only fired on success, leaving CI pipelines unnotified on failure; payload now includes `error` field (#86)
 
+### Security
+- **API**: SSRF protection for `callbackUrl` hardened with DNS resolution — domains pointing to private/reserved IPs (e.g. `evil.com → 169.254.169.254`) are now blocked at validation time via `dns.promises.lookup()`; fetch uses `redirect: "error"` to prevent open-redirect bypasses; DNS is re-resolved at fetch time to mitigate rebinding attacks (#86)
+
 ### Changed
 - **Data**: Run log lines are now persisted in the `run_logs` table instead of the `runs.logs` JSON column — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically so callers see no API change (ENH-008) (#86)
 
