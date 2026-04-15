@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, Globe, ExternalLink, Zap, Clock } from "lucide-react";
 import TokenManager from "./TokenManager.jsx";
+import ScheduleManager from "./ScheduleManager.jsx";
 
 export default function ProjectAutomationCard({ project, defaultExpanded = false }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -65,19 +66,13 @@ export default function ProjectAutomationCard({ project, defaultExpanded = false
             <TokenManager projectId={project.id} />
           </div>
 
-          {/* ── Scheduled Runs (placeholder for ENH-006) ─────────────── */}
+          {/* ── Scheduled Runs (ENH-006) ──────────────────────────────── */}
           <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <Clock size={13} color="var(--text3)" />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Clock size={13} color="var(--accent)" />
               <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--text)" }}>Scheduled Runs</span>
             </div>
-            <div style={{
-              padding: "16px 18px", background: "var(--bg2)", borderRadius: "var(--radius)",
-              border: "1px dashed var(--border)", color: "var(--text3)", fontSize: "0.82rem",
-              textAlign: "center",
-            }}>
-              Scheduled runs coming soon — configure cron-based automated regression runs.
-            </div>
+            <ScheduleManager projectId={project.id} />
           </div>
 
         </div>

@@ -24,6 +24,7 @@ import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
+import { initScheduler } from "./scheduler.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -78,6 +79,9 @@ const orphanCount = runRepo.markOrphansInterrupted();
 if (orphanCount > 0) {
   console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
 }
+// 5. Initialise cron-based test scheduler (ENH-006)
+//    Must run after DB init so scheduleRepo can read the schedules table.
+initScheduler();
 // Graceful shutdown — close SQLite connection
 process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
 process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });

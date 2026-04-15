@@ -820,12 +820,12 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 |-------|-------|--------|-----------------|
 | ~~Phase 0 — Sprint 3~~ | S3-02, S3-04, S3-08 | ✅ Complete | Test quality, Shadow DOM, Disposable email |
 | Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | ✅ Complete | Production-safe for real teams |
-| Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔄 In progress (ENH-011 ✅) | Sellable to companies |
+| Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔄 In progress (ENH-011 ✅, ENH-006 ✅) | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
 | Ongoing | MAINT-001 through MAINT-012 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅, MAINT-012 ✅) | Platform moat + infrastructure |
 
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 12 maintenance items = **59 tracked items**
-**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-007, ENH-008, ENH-010, ENH-011, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **23 complete**
+**Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-006, ENH-007, ENH-008, ENH-010, ENH-011, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **24 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
 **Highest adoption impact:** ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07

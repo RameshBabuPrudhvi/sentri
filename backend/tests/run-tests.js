@@ -29,6 +29,7 @@ const files = [
   "tests/recycle-bin.test.js",
   "tests/run-logs.test.js",
   "tests/webhook-token.test.js",
+  "tests/scheduler.test.js",
 ];
 
 let passed = 0;

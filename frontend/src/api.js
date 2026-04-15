@@ -235,6 +235,27 @@ export const api = {
    */
   deleteTriggerToken: (projectId, tokenId) => req("DELETE", `/projects/${projectId}/trigger-tokens/${tokenId}`),
 
+  // ── Schedules (ENH-006) ─────────────────────────────────────────────────────
+  /**
+   * Get the cron schedule for a project, or null if none exists.
+   * @param {string} projectId
+   * @returns {Promise<{schedule: Object|null}>}
+   */
+  getSchedule: (projectId) => req("GET", `/projects/${projectId}/schedule`),
+  /**
+   * Create or update the cron schedule for a project.
+   * @param {string} projectId
+   * @param {{ cronExpr: string, timezone: string, enabled: boolean }} body
+   * @returns {Promise<{ok: boolean, schedule: Object}>}
+   */
+  upsertSchedule: (projectId, body) => req("PATCH", `/projects/${projectId}/schedule`, body),
+  /**
+   * Remove the cron schedule for a project.
+   * @param {string} projectId
+   * @returns {Promise<{ok: boolean}>}
+   */
+  deleteSchedule: (projectId) => req("DELETE", `/projects/${projectId}/schedule`),
+
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
