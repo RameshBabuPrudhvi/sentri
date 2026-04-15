@@ -20,6 +20,7 @@ const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
 const Systems = lazy(() => import("./pages/Systems.jsx"));
+const Automation = lazy(() => import("./pages/Automation.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
 const ChatHistory = lazy(() => import("./pages/ChatHistory.jsx"));
 
@@ -66,6 +67,7 @@ export default function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />
+                <Route path="/automation" element={<Automation />} />
                 <Route path="/chat" element={<ChatHistory />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

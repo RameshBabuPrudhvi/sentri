@@ -12,7 +12,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Play, RefreshCw, Globe, Download, ChevronDown, Sparkles, ArrowRight,
+  Play, RefreshCw, Globe, Download, ChevronDown, Sparkles, ArrowRight, Zap,
 } from "lucide-react";
 import { PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
 import { api } from "../../api.js";
@@ -55,6 +55,14 @@ export default function ProjectHeader({
         <div className="pd-header-actions">
           {/* ── Row 1: Generate link + workers + Run button ── */}
           <div className="pd-header-row">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate(`/automation?project=${projectId}`)}
+              style={{ gap: 6 }}
+            >
+              <Zap size={13} />
+              Automation
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => navigate("/tests")}
