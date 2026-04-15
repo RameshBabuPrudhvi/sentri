@@ -99,10 +99,10 @@ function curlSnippet(projectId, apiBase) {
 
 function Snippet({ label, code }) {
   return (
-    <div className="trigger-snippet">
-      <div className="trigger-snippet-label">{label}</div>
+    <div className="auto-snippet">
+      <div className="auto-snippet__label">{label}</div>
       <pre>{code}</pre>
-      <div className="trigger-snippet-copy">
+      <div className="auto-snippet__copy">
         <CopyButton text={code} />
       </div>
     </div>

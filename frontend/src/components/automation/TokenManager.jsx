@@ -41,16 +41,16 @@ function fmtDate(iso) {
 
 function TokenReveal({ token, onDismiss }) {
   return (
-    <div className="trigger-token-reveal">
-      <div className="trigger-token-reveal-label">
+    <div className="auto-token-reveal">
+      <div className="auto-token-reveal__label">
         ✅ Token created — copy it now, it will not be shown again
       </div>
-      <div className="trigger-token-value">{token}</div>
-      <div className="trigger-token-reveal-actions">
+      <div className="auto-token-reveal__value">{token}</div>
+      <div className="auto-token-reveal__actions">
         <CopyButton text={token} className="btn btn-sm" />
         <button className="btn btn-ghost btn-sm" onClick={onDismiss}>Dismiss</button>
       </div>
-      <div className="trigger-token-reveal-warning">
+      <div className="auto-token-reveal__warning">
         ⚠️ Store this token securely (e.g. as a CI secret). It cannot be retrieved after dismissal.
       </div>
     </div>
@@ -147,9 +147,9 @@ export default function TokenManager({ projectId }) {
 
       {/* Token list */}
       {loading ? (
-        <div className="trigger-token-empty">Loading…</div>
+        <div className="auto-token-empty">Loading…</div>
       ) : tokens.length === 0 ? (
-        <div className="trigger-token-empty">
+        <div className="auto-token-empty">
           No tokens yet — create one above to enable CI/CD triggers.
         </div>
       ) : (
