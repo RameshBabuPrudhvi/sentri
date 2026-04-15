@@ -382,7 +382,7 @@ res.flushHeaders();
 
 - Functional components only. Class components exist only in `components/ErrorBoundary.jsx` for React's mandatory class API (`getDerivedStateFromError` / `componentDidCatch`).
 - Pages live in `src/pages/`, reusable UI in `src/components/`.
-- Domain-specific sub-components live in subdirectories, e.g. `src/components/project/`, `src/components/test/`.
+- Domain-specific sub-components live in subdirectories, e.g. `src/components/project/`, `src/components/test/`, `src/components/automation/`.
 - Lazy-load all page-level components via `React.lazy()` + `Suspense` as shown in `App.jsx`.
 
 ### State & Data Fetching
@@ -887,6 +887,7 @@ The frontend follows a clear separation of concerns between pages:
 | **Dashboard** | Read-only analytics hub | Pass rate, trends, defects, recent activity |
 | **Tests** (`Tests.jsx`) | **Central command centre** for all test creation | Crawl a project, Generate from story, Run regression, Review drafts |
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject this project's tests, export, traceability |
+| **Automation** (`/automation`) | Cross-project automation hub | CI/CD trigger tokens, scheduled runs (ENH-006), integration snippets; deep-link via `?project=PRJ-X` |
 | **Projects** | Project list & creation | Create/delete projects |
 | **Runs** / **RunDetail** | Run history & live execution view | View logs, results, abort |
 | **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export (Markdown/JSON), persistent localStorage per user |

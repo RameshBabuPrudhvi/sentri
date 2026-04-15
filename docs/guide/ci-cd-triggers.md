@@ -4,14 +4,14 @@ Sentri can be triggered directly from your CI/CD pipeline so regression tests ru
 
 ## How It Works
 
-1. **Create a trigger token** — one per project, from the **Trigger** tab in Project Detail.
+1. **Create a trigger token** — one per project, from the **Automation** page (sidebar → Automation, or ⚡ button in ProjectHeader).
 2. **`POST /api/projects/:id/trigger`** with the token as a Bearer header — returns `202 Accepted` immediately with `{ runId, statusUrl }`.
 3. **Poll `statusUrl`** until `status` is no longer `"running"`.
 4. Optionally pass a `callbackUrl` in the request body to receive a POST with the run summary when it finishes.
 
 ## Creating a Token
 
-Navigate to your project → **Trigger** tab → **New token**.
+Navigate to **Automation** in the sidebar → expand your project card → **New token**. You can also reach this from any project's detail page via the ⚡ **Automation** button in the header.
 
 The plaintext token is shown **exactly once**. Copy it and store it as a CI secret (e.g. `SENTRI_TOKEN`). Only the SHA-256 hash is stored in the database — the plaintext cannot be retrieved again.
 

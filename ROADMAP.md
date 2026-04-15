@@ -322,8 +322,12 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/routes/runs.js` — token management endpoints: `GET/POST /trigger-tokens`, `DELETE /trigger-tokens/:tid`
 - `backend/src/utils/idGenerator.js` — `generateWebhookTokenId()` → `WH-1`, `WH-2`, …
 - `backend/src/routes/projects.js`, `backend/src/routes/recycleBin.js` — cascade-delete tokens on project delete/purge
-- `frontend/src/components/project/TriggerTab.jsx` — token management UI, one-time reveal, CI snippet generators
-- `frontend/src/pages/ProjectDetail.jsx` — "Trigger" tab wired into tab bar
+- `frontend/src/components/automation/TokenManager.jsx` — per-project token CRUD, one-time reveal banner (extracted from TriggerTab)
+- `frontend/src/components/automation/ProjectAutomationCard.jsx` — expandable per-project card (tokens + schedule placeholder)
+- `frontend/src/components/automation/IntegrationSnippets.jsx` — shared CI snippet section with project selector
+- `frontend/src/pages/Automation.jsx` — dedicated Automation page replacing the Trigger tab on ProjectDetail
+- `frontend/src/components/layout/Sidebar.jsx` — "Automation" nav item added
+- `frontend/src/components/project/ProjectHeader.jsx` — "⚡ Automation" quick-link to `/automation?project=PRJ-X`
 - `frontend/src/api.js` — `getTriggerTokens()`, `createTriggerToken()`, `deleteTriggerToken()`
 
 **Effort:** M | **Source:** Competitive (S2-01)
@@ -341,8 +345,9 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 - `backend/src/index.js` — initialise scheduler on startup
 - `backend/src/routes/projects.js` — add `PATCH /projects/:id/schedule`
 - `backend/src/database/migrations/` — create `schedules` table
+- `frontend/src/components/automation/ProjectAutomationCard.jsx` — replace schedule placeholder with `ScheduleManager` component
+- New `frontend/src/components/automation/ScheduleManager.jsx` — cron editor, timezone picker, enable/disable toggle
 - `frontend/src/components/project/ProjectHeader.jsx` — show next run time
-- `frontend/src/pages/Settings.jsx` — schedule config UI
 - `backend/package.json` — add `node-cron`
 
 **Effort:** M | **Source:** Competitive
