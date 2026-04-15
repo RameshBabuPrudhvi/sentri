@@ -63,6 +63,19 @@ function ipv4ToInt(ip) {
 function isPrivateIp(ip) {
   // IPv6 loopback
   if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true;
+
+  // Native IPv6 private/reserved ranges (checked before IPv4-mapped extraction)
+  // Normalise to lowercase for prefix comparison.
+  const lower = ip.toLowerCase();
+  // fc00::/7 — unique local addresses (includes fd00::/8)
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  // fe80::/10 — link-local
+  if (lower.startsWith("fe80")) return true;
+  // ff00::/8 — multicast
+  if (lower.startsWith("ff")) return true;
+  // :: — unspecified address
+  if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
+
   // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
   const v4match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   const v4 = v4match ? v4match[1] : ip;
@@ -219,7 +232,24 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
     return res.status(403).json({ error: "Token does not belong to this project." });
   }
 
-  // ── 3. Guard: no concurrent run ───────────────────────────────────────
+  // ── 3. Extract and validate optional config (async) ────────────────
+  // callbackUrl validation includes DNS resolution, so it must happen
+  // BEFORE the synchronous concurrent-run guard to avoid a TOCTOU race
+  // (an await between the guard and runRepo.create would let a second
+  // request slip through).
+  const { dialsConfig, callbackUrl } = req.body || {};
+
+  if (callbackUrl && typeof callbackUrl === "string") {
+    const urlErr = await validateCallbackUrl(callbackUrl);
+    if (urlErr) return res.status(400).json({ error: urlErr });
+  }
+
+  const validatedDials = resolveDialsConfig(dialsConfig);
+  const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
+
+  // ── 4. Guard: no concurrent run ───────────────────────────────────────
+  // From here to runRepo.create() the code is fully synchronous, so no
+  // other request can interleave and pass the same guard.
   const existingRun = runRepo.findActiveByProjectId(project.id);
   if (existingRun) {
     return res.status(409).json({
@@ -228,7 +258,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
     });
   }
 
-  // ── 4. Guard: approved tests must exist ──────────────────────────────
+  // ── 5. Guard: approved tests must exist ──────────────────────────────
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
   if (!allTests.length) {
@@ -237,19 +267,6 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
   if (!tests.length) {
     return res.status(400).json({ error: "No approved tests — review generated tests before triggering." });
   }
-
-  // ── 5. Extract optional config ───────────────────────────────────────
-  const { dialsConfig, callbackUrl } = req.body || {};
-
-  // Validate callbackUrl up-front (including DNS resolution) so we return
-  // 400 before starting the run.
-  if (callbackUrl && typeof callbackUrl === "string") {
-    const urlErr = await validateCallbackUrl(callbackUrl);
-    if (urlErr) return res.status(400).json({ error: urlErr });
-  }
-
-  const validatedDials = resolveDialsConfig(dialsConfig);
-  const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
 
   // ── 6. Create and start the run ──────────────────────────────────────
   const runId = generateRunId();
