@@ -8,12 +8,13 @@
  * section at the bottom provides copy-to-clipboard CI examples.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Zap, FolderOpen } from "lucide-react";
 import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import ProjectAutomationCard from "../components/automation/ProjectAutomationCard.jsx";
+import IntegrationCards from "../components/automation/IntegrationCards.jsx";
 import IntegrationSnippets from "../components/automation/IntegrationSnippets.jsx";
 
 export default function Automation() {
@@ -22,6 +23,12 @@ export default function Automation() {
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading]   = useState(true);
+
+  const snippetsRef = useRef(null);
+
+  const scrollToSnippets = useCallback(() => {
+    snippetsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   // Optional ?project=PRJ-1 param to auto-expand a specific project
   const focusProjectId = searchParams.get("project");
@@ -78,11 +85,16 @@ export default function Automation() {
             />
           ))}
 
+          {/* Integrations card grid */}
+          <IntegrationCards onScrollToSnippets={scrollToSnippets} />
+
           {/* Shared integration snippets */}
-          <IntegrationSnippets
-            projects={projects}
-            defaultProjectId={focusProjectId || projects[0]?.id}
-          />
+          <div ref={snippetsRef}>
+            <IntegrationSnippets
+              projects={projects}
+              defaultProjectId={focusProjectId || projects[0]?.id}
+            />
+          </div>
         </div>
       )}
     </div>
