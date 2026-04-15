@@ -62,7 +62,7 @@ function isPrivateIp(ip) {
   const v4match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   const v4 = v4match ? v4match[1] : ip;
   const num = ipv4ToInt(v4);
-  if (num === null) return true; // non-IPv4 that we can't validate → block
+  if (num === null) return false; // not an IP address — hostname validation is handled by the caller
   for (const [base, mask] of PRIVATE_IPV4_RANGES) {
     if ((num & mask) === base) return true;
   }

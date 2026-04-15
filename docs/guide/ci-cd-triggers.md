@@ -87,7 +87,9 @@ jobs:
         run: |
           status_url="${{ steps.trigger.outputs.status_url }}"
           for i in $(seq 1 60); do
-            status=$(curl -sf "$status_url" | jq -r .status)
+            status=$(curl -sf \
+              -H "Authorization: Bearer ${{ secrets.SENTRI_TOKEN }}" \
+              "$status_url" | jq -r .status)
             echo "Run status: $status"
             [ "$status" != "running" ] && break
             sleep 10
@@ -109,7 +111,9 @@ sentri:
         "https://your-sentri-instance.com/api/projects/PRJ-1/trigger")
       STATUS_URL=$(echo $response | jq -r .statusUrl)
       for i in $(seq 1 60); do
-        STATUS=$(curl -sf "$STATUS_URL" | jq -r .status)
+        STATUS=$(curl -sf \
+          -H "Authorization: Bearer $SENTRI_TOKEN" \
+          "$STATUS_URL" | jq -r .status)
         echo "Run status: $STATUS"
         [ "$STATUS" != "running" ] && break
         sleep 10
