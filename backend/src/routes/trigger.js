@@ -64,17 +64,21 @@ function isPrivateIp(ip) {
   // IPv6 loopback
   if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true;
 
-  // Native IPv6 private/reserved ranges (checked before IPv4-mapped extraction)
-  // Normalise to lowercase for prefix comparison.
-  const lower = ip.toLowerCase();
-  // fc00::/7 — unique local addresses (includes fd00::/8)
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-  // fe80::/10 — link-local
-  if (lower.startsWith("fe80")) return true;
-  // ff00::/8 — multicast
-  if (lower.startsWith("ff")) return true;
-  // :: — unspecified address
-  if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
+  // Only check IPv6 prefix ranges when the input is actually an IPv6 address
+  // (contains a colon).  Without this guard, hostnames like "fdic.gov",
+  // "fcbarcelona.com", or "ffmpeg.org" would be falsely rejected because
+  // their first characters match IPv6 private-range prefixes.
+  if (ip.includes(":")) {
+    const lower = ip.toLowerCase();
+    // fc00::/7 — unique local addresses (includes fd00::/8)
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    // fe80::/10 — link-local
+    if (lower.startsWith("fe80")) return true;
+    // ff00::/8 — multicast
+    if (lower.startsWith("ff")) return true;
+    // :: — unspecified address
+    if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
+  }
 
   // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
   const v4match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
