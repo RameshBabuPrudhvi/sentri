@@ -20,7 +20,7 @@ Authorization: Bearer <jwt-token>
 
 | Section | Description |
 |---|---|
-| [Projects](/api/projects) | Create, list, get, soft-delete projects, CI/CD trigger, trigger token management |
+| [Projects](/api/projects) | Create, list, get, soft-delete projects, CI/CD trigger, trigger token management, cron schedules |
 | [Tests](/api/tests) | CRUD, generate, review (approve/reject/restore), bulk actions, counts, pagination |
 | [Runs](/api/runs) | Execute tests, get results, SSE event stream, abort, pagination |
 | [Settings](/api/settings) | AI provider config, Ollama status, system info, recycle bin, data management |

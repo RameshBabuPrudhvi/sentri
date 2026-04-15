@@ -84,10 +84,10 @@ Token-authenticated endpoint for CI/CD pipelines. Starts a test run using the pr
 
 **Response `202 Accepted`:**
 ```json
-{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/runs/RUN-42" }
+{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/projects/PRJ-1/trigger/runs/RUN-42" }
 ```
 
-Poll `statusUrl` until `status` is no longer `"running"`. If `callbackUrl` is provided, Sentri POSTs a JSON summary on any terminal state (`completed`, `failed`, or `aborted`) — best-effort, 10s timeout. The payload includes `error: null | string` so CI pipelines can distinguish success from failure.
+Poll `statusUrl` with the same Bearer token until `status` is no longer `"running"`. If `callbackUrl` is provided, Sentri POSTs a JSON summary on any terminal state (`completed`, `failed`, or `aborted`) — best-effort, 10s timeout. The payload includes `error: null | string` so CI pipelines can distinguish success from failure.
 
 | Error | Reason |
 |---|---|
@@ -140,3 +140,57 @@ DELETE /api/projects/:id/trigger-tokens/:tid
 ```
 
 Permanently deletes the token. CI pipelines using it will fail immediately.
+
+## Get Schedule
+
+```
+GET /api/projects/:id/schedule
+```
+
+Returns the current cron schedule for a project, or `null` if none exists.
+
+**Response:**
+```json
+{ "schedule": { "id": "SCH-1", "projectId": "PRJ-1", "cronExpr": "0 9 * * 1", "timezone": "UTC", "enabled": true, "lastRunAt": null, "nextRunAt": "2026-04-21T09:00:00.000Z", "createdAt": "...", "updatedAt": "..." } }
+```
+
+## Create or Update Schedule
+
+```
+PATCH /api/projects/:id/schedule
+```
+
+**Body:**
+```json
+{
+  "cronExpr": "0 9 * * 1",
+  "timezone": "America/New_York",
+  "enabled": true
+}
+```
+
+- `cronExpr` — 5-field cron expression (required). 6-field (with seconds) is rejected.
+- `timezone` — IANA timezone name (default `"UTC"`).
+- `enabled` — Whether the schedule is active (default `true`).
+
+**Response:**
+```json
+{ "ok": true, "schedule": { ... } }
+```
+
+| Error | Reason |
+|---|---|
+| 400 | Missing or invalid `cronExpr`, or 6-field expression |
+| 404 | Project not found |
+
+## Delete Schedule
+
+```
+DELETE /api/projects/:id/schedule
+```
+
+Removes the cron schedule and cancels the running cron task.
+
+| Error | Reason |
+|---|---|
+| 404 | Project not found, or no schedule exists |

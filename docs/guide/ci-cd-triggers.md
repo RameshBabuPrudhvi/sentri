@@ -45,7 +45,7 @@ Content-Type: application/json
 **Response `202 Accepted`:**
 
 ```json
-{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/runs/RUN-42" }
+{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/projects/PRJ-1/trigger/runs/RUN-42" }
 ```
 
 ### Error Codes
