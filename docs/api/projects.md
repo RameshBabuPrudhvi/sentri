@@ -87,7 +87,7 @@ Token-authenticated endpoint for CI/CD pipelines. Starts a test run using the pr
 { "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/runs/RUN-42" }
 ```
 
-Poll `statusUrl` until `status` is no longer `"running"`. If `callbackUrl` is provided, Sentri POSTs a summary when the run finishes (best-effort, 10s timeout).
+Poll `statusUrl` until `status` is no longer `"running"`. If `callbackUrl` is provided, Sentri POSTs a JSON summary on any terminal state (`completed`, `failed`, or `aborted`) — best-effort, 10s timeout. The payload includes `error: null | string` so CI pipelines can distinguish success from failure.
 
 | Error | Reason |
 |---|---|

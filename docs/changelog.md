@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Frontend**: "⚡ Automation" quick-link in ProjectHeader navigates to the Automation page with the current project pre-expanded (#86)
 - **Nav**: "Automation" entry added to the sidebar navigation with ⚡ icon (#86)
 
+### Fixed
+- **API**: `callbackUrl` webhook now fires on **any** terminal state (completed, failed, aborted) — previously it only fired on success, leaving CI pipelines unnotified on failure; payload now includes `error` field (#86)
+
 ### Changed
 - **Data**: Run log lines are now persisted in the `run_logs` table instead of the `runs.logs` JSON column — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically so callers see no API change (ENH-008) (#86)
 

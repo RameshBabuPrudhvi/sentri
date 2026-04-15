@@ -140,7 +140,7 @@ Pass `callbackUrl` in the trigger request body to receive a POST when the run fi
 }
 ```
 
-Sentri will POST a JSON summary (best-effort, 10s timeout):
+Sentri will POST a JSON summary on **any terminal state** (completed, failed, or aborted) — best-effort, 10s timeout:
 
 ```json
 {
@@ -148,9 +148,12 @@ Sentri will POST a JSON summary (best-effort, 10s timeout):
   "status": "completed",
   "passed": 15,
   "failed": 0,
-  "total": 15
+  "total": 15,
+  "error": null
 }
 ```
+
+On failure, `status` will be `"failed"` and `error` will contain a human-readable message. On abort, `status` will be `"aborted"`.
 
 ## Security Notes
 

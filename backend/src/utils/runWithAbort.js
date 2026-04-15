@@ -24,11 +24,16 @@ import { formatLogLine } from "./logFormatter.js";
 export const runAbortControllers = new Map();
 
 /**
- * @param {Object}   [opts.actorInfo] - { userId, userName } from the triggering request.
- *                                      Spread into the failure logActivity call so the
- *                                      audit trail records who started the run.
+ * @param {Object}   [opts.actorInfo]   - { userId, userName } from the triggering request.
+ *                                        Spread into the failure logActivity call so the
+ *                                        audit trail records who started the run.
+ * @param {Function} [opts.onComplete]  - Called after the run reaches any terminal state
+ *                                        (completed, failed, or aborted). Receives the
+ *                                        run object so callers can inspect final status.
+ *                                        Errors thrown by onComplete are silently caught
+ *                                        to avoid masking the original run outcome.
  */
-export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, actorInfo }) {
+export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, actorInfo, onComplete }) {
   const abortController = new AbortController();
   runAbortControllers.set(runId, { controller: abortController, run });
 
@@ -61,5 +66,11 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, a
       logActivity({ ...onFailActivity(err), ...(actorInfo || {}), status: "failed" });
       emitRunEvent(runId, "done", { status: "failed" });
       runRepo.save(run); // persist failed status to SQLite
+    })
+    .finally(() => {
+      // Fire onComplete for any terminal state (completed, failed, aborted).
+      // Errors are silently caught so a failing callback never masks the
+      // original run outcome or breaks the pipeline cleanup.
+      try { onComplete?.(run); } catch { /* best-effort */ }
     });
 }

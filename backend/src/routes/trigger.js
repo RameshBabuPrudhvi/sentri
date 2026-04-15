@@ -228,22 +228,6 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
           projectName: project.name,
           detail: `CI/CD run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
-        // Fire optional callback URL with run summary (best-effort)
-        if (callbackUrl && typeof callbackUrl === "string") {
-          const body = JSON.stringify({
-            runId,
-            status: run.status,
-            passed: run.passed,
-            failed: run.failed,
-            total: run.total,
-          });
-          fetch(callbackUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body,
-            signal: AbortSignal.timeout(10_000),
-          }).catch(() => { /* best-effort — never fails the run */ });
-        }
       },
       onFailActivity: (err) => ({
         type: "test_run.fail",
@@ -251,6 +235,25 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
         projectName: project.name,
         detail: `CI/CD run failed: ${classifyError(err, "run").message}`,
       }),
+      // Fire optional callback URL with run summary on ANY terminal state
+      // (completed, failed, aborted) so CI pipelines always get notified.
+      onComplete: (finishedRun) => {
+        if (!callbackUrl || typeof callbackUrl !== "string") return;
+        const payload = JSON.stringify({
+          runId,
+          status: finishedRun.status,
+          passed: finishedRun.passed,
+          failed: finishedRun.failed,
+          total: finishedRun.total,
+          error: finishedRun.error || null,
+        });
+        fetch(callbackUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          signal: AbortSignal.timeout(10_000),
+        }).catch(() => { /* best-effort — never fails the run */ });
+      },
     },
   );
 
