@@ -334,21 +334,23 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
-### ENH-006 — Test scheduling engine (cron) 🟡 High
+### ~~ENH-006 — Test scheduling engine (cron)~~ ✅ Complete
 
 **Problem:** There is no way to schedule automated test runs. Teams cannot run nightly regressions without keeping a browser tab open and manually clicking "Run". Testing in production requires automated regression runs on a schedule — without this, Sentri is a manual tool, not an autonomous one.
 
 **Fix:** Add a `schedules(projectId, cronExpr, timezone, enabled, lastRunAt, nextRunAt)` table. Use `node-cron` to fire scheduled runs as background jobs. Display the next scheduled run time in `ProjectHeader`. Add a schedule toggle and CRON editor to the project Settings tab.
 
-**Files to change:**
-- New `backend/src/scheduler.js` — `node-cron` job manager
-- `backend/src/index.js` — initialise scheduler on startup
-- `backend/src/routes/projects.js` — add `PATCH /projects/:id/schedule`
-- `backend/src/database/migrations/` — create `schedules` table
-- `frontend/src/components/automation/ProjectAutomationCard.jsx` — replace schedule placeholder with `ScheduleManager` component
-- New `frontend/src/components/automation/ScheduleManager.jsx` — cron editor, timezone picker, enable/disable toggle
-- `frontend/src/components/project/ProjectHeader.jsx` — show next run time
-- `backend/package.json` — add `node-cron`
+**Implemented in:** PR #86
+- `backend/src/database/migrations/003_schedules.sql` — `schedules` table with `cronExpr`, `timezone`, `enabled`, `lastRunAt`, `nextRunAt`; UNIQUE constraint on `projectId`; seeded `schedule` counter for `SCH-N` IDs
+- `backend/src/database/repositories/scheduleRepo.js` — CRUD: `getByProjectId()`, `getAllEnabled()`, `upsert()`, `setEnabled()`, `updateRunTimes()`, `deleteByProjectId()`
+- `backend/src/scheduler.js` — `node-cron` task manager with `initScheduler()`, `reloadSchedule()`, `stopSchedule()`, `getNextRunAt()`; fires scheduled runs identically to `POST /projects/:id/run`
+- `backend/src/routes/projects.js` — `GET/PATCH/DELETE /projects/:id/schedule` endpoints with cron validation
+- `backend/src/routes/recycleBin.js` — cascade-delete schedules and stop tasks on project purge
+- `frontend/src/components/automation/ScheduleManager.jsx` — cron editor, preset picker, timezone selector, enable/disable toggle
+- `frontend/src/components/automation/ProjectAutomationCard.jsx` — `ScheduleManager` integrated into per-project card
+- `frontend/src/components/project/ProjectHeader.jsx` — next scheduled run time badge
+- `backend/src/utils/idGenerator.js` — `generateScheduleId()` → `SCH-1`, `SCH-2`, …
+- `backend/package.json` — added `node-cron`
 
 **Effort:** M | **Source:** Competitive
 
@@ -797,7 +799,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Cross-browser | ❌ Chromium only | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile/device emulation | ❌ **Gap** | ✅ | ✅ | ✅ | ✅ Native |
 | CI/CD integration | ✅ Webhook trigger + token auth | ✅ Native | ✅ Native | ✅ Native | ✅ CLI |
-| Scheduled runs | ❌ **Gap** | ✅ | ✅ | ✅ | Via CI cron |
+| Scheduled runs | ✅ Cron scheduler + timezone | ✅ | ✅ | ✅ | Via CI cron |
 | Multi-tenancy / RBAC | ❌ **Gap** | ✅ | ✅ | ✅ | N/A |
 | Failure notifications | ❌ **Gap** | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 | API testing | ✅ HAR-based generation | ✅ | ❌ | ✅ | ✅ Manual |
@@ -810,7 +812,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM support + standalone Playwright export (planned). No competitor offers all of these together.
 
-**Critical competitive gaps to close (Phase 2–3):** Scheduled runs, cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
+**Critical competitive gaps to close (Phase 2–3):** Cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
 
 ---
 
@@ -827,9 +829,9 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 **Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 12 maintenance items = **59 tracked items**
 **Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-006, ENH-007, ENH-008, ENH-010, ENH-011, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **24 complete**
 **Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
-**Highest adoption impact:** ENH-006 (scheduling), ENH-003 (multi-tenancy), S4-06 (monitoring mode)
+**Highest adoption impact:** ENH-003 (multi-tenancy), S4-06 (monitoring mode), ENH-017 (failure notifications)
 **Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
-**Next PR priorities (recommended order):** ENH-006 (Scheduling, M) → ENH-009 (BullMQ job queue, L) → ENH-001 (PostgreSQL, XL)
+**Next PR priorities (recommended order):** ENH-009 (BullMQ job queue, L) → ENH-001 (PostgreSQL, XL) → ENH-003 (Multi-tenancy, L)
 
 ---
 
