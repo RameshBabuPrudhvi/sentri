@@ -98,7 +98,11 @@ router.delete("/:id", (req, res) => {
     // Trigger tokens are not soft-deleted — they are always hard-deleted
     // immediately since they are security credentials, not recoverable data.
     webhookTokenRepo.deleteByProjectId(req.params.id);
+    // Stop any armed cron task so the scheduler doesn't keep firing for a
+    // soft-deleted project (which would log repeated warnings every interval).
+    scheduleRepo.deleteByProjectId(req.params.id);
   })();
+  stopSchedule(req.params.id);
 
   logActivity({ ...actor(req),
     type: "project.delete", projectId: req.params.id, projectName: project.name,
@@ -148,6 +152,14 @@ router.patch("/:id/schedule", (req, res) => {
   // but we only expose the standard 5-field format to users.
   if (cronExpr.trim().split(/\s+/).length !== 5) {
     return res.status(400).json({ error: "cronExpr must be a standard 5-field expression (minute hour dom month dow)" });
+  }
+
+  // Validate timezone — an invalid IANA name would throw a RangeError in
+  // toLocaleString (used by getNextRunAt) and crash with a 500.
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    return res.status(400).json({ error: `Invalid timezone: "${timezone}"` });
   }
 
   const existing = scheduleRepo.getByProjectId(req.params.id);

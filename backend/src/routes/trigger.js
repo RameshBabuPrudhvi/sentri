@@ -114,11 +114,23 @@ async function validateCallbackUrl(raw) {
 
   // Resolve DNS to catch domains pointing to private IPs (e.g. evil.com → 10.0.0.1).
   // Skip resolution for bare IP addresses — already checked above.
+  // Use dns.resolve4/resolve6 to check ALL addresses (not just the first one
+  // returned by lookup) — a domain with a safe A record but a private AAAA
+  // record would bypass a single-address check.
   if (ipv4ToInt(host) === null && !host.includes(":")) {
     try {
-      const { address } = await dns.promises.lookup(host);
-      if (isPrivateIp(address)) {
-        return "callbackUrl resolves to a private or reserved IP address.";
+      const [v4addrs, v6addrs] = await Promise.all([
+        dns.promises.resolve4(host).catch(() => []),
+        dns.promises.resolve6(host).catch(() => []),
+      ]);
+      const allAddrs = [...v4addrs, ...v6addrs];
+      if (allAddrs.length === 0) {
+        return "callbackUrl hostname could not be resolved.";
+      }
+      for (const addr of allAddrs) {
+        if (isPrivateIp(addr)) {
+          return "callbackUrl resolves to a private or reserved IP address.";
+        }
       }
     } catch {
       return "callbackUrl hostname could not be resolved.";
@@ -143,12 +155,21 @@ async function validateCallbackUrl(raw) {
  */
 async function safeFetchCallback(url, payload) {
   // Re-resolve DNS at fetch time to mitigate DNS rebinding attacks.
+  // Check all resolved addresses (both A and AAAA) to prevent bypass
+  // via a safe A record paired with a private AAAA record.
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase();
   if (ipv4ToInt(host) === null && !host.includes(":")) {
     try {
-      const { address } = await dns.promises.lookup(host);
-      if (isPrivateIp(address)) return; // silently abort — DNS rebinding detected
+      const [v4addrs, v6addrs] = await Promise.all([
+        dns.promises.resolve4(host).catch(() => []),
+        dns.promises.resolve6(host).catch(() => []),
+      ]);
+      const allAddrs = [...v4addrs, ...v6addrs];
+      if (allAddrs.length === 0) return; // hostname no longer resolves — abort
+      for (const addr of allAddrs) {
+        if (isPrivateIp(addr)) return; // silently abort — DNS rebinding detected
+      }
     } catch {
       return; // hostname no longer resolves — abort
     }

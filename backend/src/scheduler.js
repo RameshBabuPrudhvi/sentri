@@ -64,34 +64,40 @@ export function getNextRunAt(cronExpr, timezone = "UTC") {
   const [minuteField, hourField, domField, monthField, dowField] = parts;
 
   /**
-   * Check if value matches a cron field.
-   * Supports: "*", "step (slash n)", "a,b,c", "a-b", and plain numbers.
-   * @param {string} field
-   * @param {number} value
-   * @param {number} min
-   * @param {number} max
-   * @returns {boolean}
+   * Check if a single atomic cron token matches the given value.
+   * An atom is one of: "*", a plain number, a range "a-b", or any of
+   * those followed by "/step".
    */
-  function matches(field, value, min, max) {
-    if (field === "*") return true;
-    // Step: */n or min-max/n
-    if (field.includes("/")) {
-      const [range, step] = field.split("/");
+  function matchesAtom(atom, value, min, max) {
+    // Step: */n, a-b/n, or plain/n
+    if (atom.includes("/")) {
+      const [range, step] = atom.split("/");
       const stepN = parseInt(step, 10);
       if (range === "*") return (value - min) % stepN === 0;
-      const [lo, hi] = range.split("-").map(Number);
-      return value >= lo && value <= (hi || lo) && (value - lo) % stepN === 0;
-    }
-    // List: a,b,c
-    if (field.includes(",")) {
-      return field.split(",").some(v => parseInt(v, 10) === value);
+      if (range.includes("-")) {
+        const [lo, hi] = range.split("-").map(Number);
+        return value >= lo && value <= hi && (value - lo) % stepN === 0;
+      }
+      // plain start/step (e.g. "5/2") — start at lo, step through max
+      const lo = parseInt(range, 10);
+      return value >= lo && value <= max && (value - lo) % stepN === 0;
     }
     // Range: a-b
-    if (field.includes("-")) {
-      const [lo, hi] = field.split("-").map(Number);
+    if (atom.includes("-")) {
+      const [lo, hi] = atom.split("-").map(Number);
       return value >= lo && value <= hi;
     }
-    return parseInt(field, 10) === value;
+    return parseInt(atom, 10) === value;
+  }
+
+  function matches(field, value, min, max) {
+    if (field === "*") return true;
+    // List: split on commas and delegate each element to matchesAtom
+    // This correctly handles combined list+range like "1-5,10-15"
+    if (field.includes(",")) {
+      return field.split(",").some(atom => matchesAtom(atom, value, min, max));
+    }
+    return matchesAtom(field, value, min, max);
   }
 
   // Start from the next full minute
@@ -267,9 +273,14 @@ function armTask(schedule) {
 export function initScheduler() {
   const schedules = scheduleRepo.getAllEnabled();
   for (const s of schedules) {
-    armTask(s);
+    try {
+      armTask(s);
+    } catch (err) {
+      console.error(formatLogLine("error", null,
+        `[scheduler] Failed to arm task for project ${s.projectId}: ${err.message} — skipping`));
+    }
   }
-  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${schedules.length} active schedule(s)`));
+  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded)`));
 }
 
 /**

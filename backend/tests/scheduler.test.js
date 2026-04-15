@@ -102,6 +102,30 @@ test("both UTC and America/New_York return valid future ISO strings", () => {
   assert.ok(new Date(ny)  > new Date());
 });
 
+// ── Combined list+range and start/step parsing ──────────────────────────────
+
+test("handles combined list+range field like '1-5,10'", () => {
+  // "0 9 * * 1-5,0" means weekdays + Sunday at 9 AM
+  const result = getNextRunAt("0 9 * * 1-5,0", "UTC");
+  assert.ok(result !== null, "should find a match for list+range field");
+  assert.ok(new Date(result) > new Date());
+});
+
+test("handles start/step field like '5/10' for minutes", () => {
+  // "5/10 * * * *" means minutes 5, 15, 25, 35, 45, 55
+  const result = getNextRunAt("5/10 * * * *", "UTC");
+  assert.ok(result !== null, "should find a match for start/step field");
+  const d = new Date(result);
+  const min = d.getMinutes();
+  assert.ok(min >= 5 && (min - 5) % 10 === 0, "minute should match 5/10 pattern, got " + min);
+});
+
+test("handles range+step field like '0-30/5' for minutes", () => {
+  // "0-30/5 * * * *" means minutes 0, 5, 10, 15, 20, 25, 30
+  const result = getNextRunAt("0-30/5 * * * *", "UTC");
+  assert.ok(result !== null, "should find a match for range+step field");
+});
+
 // ── Sections 2-3: DB-dependent tests ─────────────────────────────────────────
 
 let dbAvailable = false;
@@ -286,6 +310,13 @@ if (dbAvailable) {
     const { res, body } = await apiReq("/projects/" + projectId + "/schedule", { method: "PATCH", body: { cronExpr: "0 * * * * *" } });
     assert.equal(res.status, 400);
     assert.ok(body.error);
+  });
+
+  await test("PATCH 400 for invalid timezone", async () => {
+    const { res, body } = await apiReq("/projects/" + projectId + "/schedule", { method: "PATCH", body: { cronExpr: "0 9 * * 1", timezone: "Fake/Zone" } });
+    assert.equal(res.status, 400, "Expected 400 got " + res.status);
+    assert.ok(body.error);
+    assert.ok(body.error.includes("timezone"), "error should mention timezone");
   });
 
   await test("DELETE removes the schedule", async () => {
