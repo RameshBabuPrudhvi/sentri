@@ -362,6 +362,58 @@
   }
 }
 
+/* ── Trigger token reveal ───────────────────────────────────────────────────── */
+.trigger-token-reveal {
+  background: var(--green-bg); border: 1px solid #86efac;
+  border-radius: var(--radius-lg); padding: 18px 22px;
+  margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.trigger-token-reveal-label {
+  font-weight: 700; font-size: 0.88rem; color: #14532d;
+}
+.trigger-token-value {
+  font-family: var(--font-mono); font-size: 0.78rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px;
+  word-break: break-all; line-height: 1.6;
+  color: var(--text); user-select: all;
+}
+.trigger-token-reveal-actions {
+  display: flex; gap: 8px; align-items: center;
+}
+.trigger-token-reveal-warning {
+  font-size: 0.78rem; color: #92400e; line-height: 1.5;
+}
+
+/* ── Trigger token empty state ─────────────────────────────────────────────── */
+.trigger-token-empty {
+  padding: 20px 16px; text-align: center;
+  font-size: 0.85rem; color: var(--text3);
+  background: var(--bg2); border-radius: var(--radius);
+  border: 1px dashed var(--border);
+}
+
+/* ── Integration snippets ──────────────────────────────────────────────────── */
+.trigger-snippet {
+  position: relative; background: var(--bg2);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden;
+}
+.trigger-snippet-label {
+  font-size: 0.75rem; font-weight: 700; color: var(--text2);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.trigger-snippet pre {
+  margin: 0; padding: 14px; font-family: var(--font-mono);
+  font-size: 0.76rem; line-height: 1.7; color: var(--text);
+  overflow-x: auto; white-space: pre;
+}
+.trigger-snippet-copy {
+  position: absolute; top: 6px; right: 8px;
+}
+
 /* ── PageSkeleton shimmer ─────────────────────────────────────────────────── */
 @keyframes shimmer-bar {
   0%   { background-position: -600px 0; }
