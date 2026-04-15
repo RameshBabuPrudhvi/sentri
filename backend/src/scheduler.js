@@ -37,7 +37,7 @@ import { formatLogLine } from "./utils/logFormatter.js";
 
 // ─── Task registry ─────────────────────────────────────────────────────────────
 // Maps projectId → node-cron ScheduledTask
-/** @type {Map<string, import("node-cron").ScheduledTask>} */
+/** @type {Map<string, Object>} projectId → node-cron ScheduledTask */
 const tasks = new Map();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ function cancelTask(projectId) {
  * If the schedule is disabled or has an invalid cron expression, the task
  * is cancelled and removed.
  *
- * @param {import("./database/repositories/scheduleRepo.js").Schedule} schedule
+ * @param {Object} schedule - Schedule row from scheduleRepo
  */
 function armTask(schedule) {
   cancelTask(schedule.projectId);

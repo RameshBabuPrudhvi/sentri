@@ -38,7 +38,7 @@ import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js"
 //   2. safeFetchCallback() — fires the actual POST with `redirect: "error"` to
 //      prevent open-redirect bypasses (302 → http://169.254.169.254/…).
 
-/** @type {Array<[number, number, number]>} [baseIp, mask, bits] for IPv4 */
+/** @type {Array<Array<number>>} [baseIp, mask, bits] for IPv4 */
 const PRIVATE_IPV4_RANGES = [
   // 10.0.0.0/8
   [0x0A000000, 0xFF000000, 8],
@@ -229,8 +229,8 @@ const router = Router();
  * | 409  | Another run already in progress                |
  * | 429  | Rate limit exceeded (expensiveOpLimiter)       |
  *
- * @param {import("express").Request}  req
- * @param {import("express").Response} res
+ * @param {Object}  req - Express request
+ * @param {Object} res - Express response
  */
 router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
   // ── 1. Authenticate with trigger token ──────────────────────────────────
@@ -376,8 +376,8 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
  * Uses the same Bearer token auth as POST /trigger so CI pipelines can
  * poll for run completion without a JWT.
  *
- * @param {import("express").Request}  req
- * @param {import("express").Response} res
+ * @param {Object}  req - Express request
+ * @param {Object} res - Express response
  */
 router.get("/projects/:id/trigger/runs/:runId", (req, res) => {
   // ── Authenticate with trigger token ──────────────────────────────────
