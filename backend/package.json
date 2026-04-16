@@ -24,6 +24,10 @@
     "playwright": "^1.50.1",
     "uuid": "^11.0.5"
   },
+  "optionalDependencies": {
+    "pg": "^8.13.0",
+    "pg-native": "^3.2.0"
+  },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "jsdoc": "^4.0.4"

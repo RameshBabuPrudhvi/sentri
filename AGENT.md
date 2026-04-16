@@ -366,7 +366,14 @@ The CSRF middleware in `appSetup.js` skips validation when no `access_token` coo
 
 ### Database
 
-Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data/sentri.db`.
+Sentri supports **SQLite** (default, via `better-sqlite3`) and **PostgreSQL** (via `pg` + `pg-native`). The backend is selected by the `DATABASE_URL` environment variable:
+
+| `DATABASE_URL` | Backend | Adapter |
+|---|---|---|
+| Not set | SQLite (WAL mode, `data/sentri.db`) | `adapters/sqlite-adapter.js` |
+| `postgres://…` | PostgreSQL (connection pool) | `adapters/postgres-adapter.js` |
+
+Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `pragma`, `close`, `dialect`) so all repository modules work unchanged. The adapter is selected at startup by `database/sqlite.js` (the module name is kept for backward compatibility).
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
@@ -873,6 +880,8 @@ The following are **not yet implemented** but should be addressed before product
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | No | `mistral:7b` | Ollama model name |
 | `JWT_SECRET` | Yes (prod) | — | HS256 signing key |
+| `DATABASE_URL` | No | — | PostgreSQL connection string (`postgres://…`). When set, uses PostgreSQL instead of SQLite. Requires `pg` + `pg-native`. |
+| `PG_POOL_SIZE` | No | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
 | `PORT` | No | `3001` | Backend HTTP port |
 | `CORS_ORIGIN` | No | `*` | Allowed frontend origin(s), comma-separated |
 | `PARALLEL_WORKERS` | No | `1` | Default test parallelism |

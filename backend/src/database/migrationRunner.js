@@ -30,7 +30,10 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { formatLogLine } from "../utils/logFormatter.js";
+
+const _require = createRequire(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__dirname, "migrations");
@@ -108,11 +111,26 @@ function discoverMigrations() {
  * that transaction is rolled back and the error is thrown — subsequent
  * migrations are NOT attempted.
  *
- * @param {Object} db — better-sqlite3 Database instance.
+ * @param {Object} db — Database adapter instance (SQLite or PostgreSQL).
  * @returns {{ applied: string[], skipped: number }}
  */
 export function runMigrations(db) {
   ensureMigrationsTable(db);
+
+  // Lazy-load translateSql only when running against PostgreSQL.
+  // This avoids importing the postgres-adapter module (and its pg dependency)
+  // when using SQLite.
+  let translateSql = null;
+  if (db.dialect === "postgres") {
+    try {
+      const mod = await_import_postgres_adapter();
+      translateSql = mod.translateSql;
+    } catch (err) {
+      console.warn(formatLogLine("warn", null,
+        `[migrations] Could not load translateSql from postgres-adapter: ${err.message}`
+      ));
+    }
+  }
 
   const applied = getAppliedMigrations(db);
   const all = discoverMigrations();
@@ -145,9 +163,14 @@ export function runMigrations(db) {
   const results = [];
 
   for (const migration of pending) {
-    const sql = fs.readFileSync(migration.filePath, "utf-8");
-    const hash = checksum(sql);
+    const rawSql = fs.readFileSync(migration.filePath, "utf-8");
+    const hash = checksum(rawSql);
     const start = Date.now();
+
+    // Translate SQLite-specific SQL to PostgreSQL when needed.
+    // The checksum is always computed on the raw (untranslated) SQL so it
+    // stays consistent regardless of which dialect applies the migration.
+    const sql = translateSql ? translateSql(rawSql) : rawSql;
 
     const applyMigration = db.transaction(() => {
       db.exec(sql);
@@ -168,4 +191,18 @@ export function runMigrations(db) {
   }
 
   return { applied: results, skipped: all.length - pending.length };
+}
+
+// ─── Lazy import helper ───────────────────────────────────────────────────────
+
+/**
+ * Lazy-load the postgres-adapter module for its translateSql function.
+ * Uses createRequire so the import is synchronous and doesn't fail when
+ * pg/pg-native are not installed (the module is only loaded when dialect
+ * is "postgres", which means those deps are available).
+ *
+ * @returns {{ translateSql: Function }}
+ */
+function await_import_postgres_adapter() {
+  return _require("./adapters/postgres-adapter.js");
 }

@@ -69,7 +69,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ─── DB init ──────────────────────────────────────────────────────────────────
-// 1. Open SQLite and apply schema
+// 1. Open database (SQLite or PostgreSQL) and apply schema migrations
 getDatabase();
 // 2. Migrate legacy sentri-db.json → SQLite (one-time, skips if already done)
 migrateFromJsonIfNeeded();
@@ -139,7 +139,7 @@ async function gracefulShutdown(signal) {
     runAbortControllers.clear();
   }
 
-  // 5. Close SQLite cleanly (WAL checkpoint)
+  // 5. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
   closeDatabase();
   console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
   process.exit(0);
@@ -190,7 +190,7 @@ app.get("/health/ready", async (_req, res) => {
   const checks = {};
   let allOk = true;
 
-  // 1. SQLite ping
+  // 1. Database ping (SQLite or PostgreSQL)
   try {
     const { getDatabase } = await import("./database/sqlite.js").catch(() => ({}));
     if (getDatabase) {

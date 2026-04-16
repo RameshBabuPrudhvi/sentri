@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DB**: Migration 003 — `verification_tokens` table and `emailVerified` column on `users`; existing users grandfathered as verified (SEC-001) (#87)
 - **Frontend**: Login page shows "verify your email" state with resend button when registration requires verification or login is blocked for unverified accounts (SEC-001) (#87)
 - **Backend**: `emailSender.js` utility — transactional email abstraction supporting Resend API, SMTP (via nodemailer), and console fallback for development (SEC-001) (#87)
+- **DB**: PostgreSQL support with SQLite fallback — set `DATABASE_URL=postgres://…` to use PostgreSQL instead of SQLite; both backends expose the same adapter interface so all repository modules work unchanged (INF-001) (#87)
+- **DB**: `sqlite-adapter.js` and `postgres-adapter.js` — database adapter modules implementing the unified `prepare`/`exec`/`transaction`/`pragma`/`close` interface (INF-001) (#87)
+- **DB**: Dialect-aware migration runner — automatically translates SQLite-specific SQL (AUTOINCREMENT, datetime, INSERT OR IGNORE/REPLACE, LIKE) to PostgreSQL when running against a PostgreSQL backend (INF-001) (#87)
+- **Docker**: Optional PostgreSQL service in `docker-compose.yml` — activate with `docker compose --profile postgres up` (INF-001) (#87)
 
 ### Security
 - **Auth**: Login blocked for unverified email accounts — returns `403` with `EMAIL_NOT_VERIFIED` code; prevents account spoofing via unclaimed email addresses (SEC-001) (#87)

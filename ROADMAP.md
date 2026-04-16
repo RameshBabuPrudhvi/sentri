@@ -132,7 +132,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-001 — PostgreSQL support with SQLite fallback 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** XL | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** XL | **Source:** Audit
 
 **Problem:** SQLite is a single-writer database. There is no horizontal scaling, no read replicas, and data loss is permanent if a container is recreated without a persistent volume. WAL mode helps concurrent reads but does not solve write contention at scale.
 

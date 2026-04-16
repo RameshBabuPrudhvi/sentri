@@ -5,6 +5,15 @@
 #
 # Frontend (nginx) proxies /api/* → backend:3001 automatically.
 # Open http://localhost:3000 in your browser.
+#
+# ─── Database (INF-001) ───────────────────────────────────────────────────────
+# By default Sentri uses SQLite (zero config, data in backend/data/sentri.db).
+# To use PostgreSQL instead, uncomment the `postgres` service below and set
+# DATABASE_URL on the backend service:
+#
+#   DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
+#
+# Then: docker compose --profile postgres up --build
 
 services:
   backend:
@@ -23,6 +32,8 @@ services:
       - NODE_ENV=production
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      # Uncomment to use PostgreSQL instead of SQLite:
+      # - DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -49,6 +60,32 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Optional PostgreSQL service (INF-001) ──────────────────────────────────
+  # Activate with: docker compose --profile postgres up
+  # Set DATABASE_URL on the backend service (see above).
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentri-postgres
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_USER: sentri
+      POSTGRES_PASSWORD: sentri
+      POSTGRES_DB: sentri
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentri"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 networks:
   default:
     name: sentri-network
+
+volumes:
+  pgdata:
