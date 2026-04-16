@@ -55,13 +55,13 @@ if (!PgNative) {
 // ─── SQL dialect translation ──────────────────────────────────────────────────
 
 /**
- * Convert SQLite-flavoured SQL to PostgreSQL.
+ * Translate a single SQL statement from SQLite dialect to PostgreSQL.
  *
- * @param {string} sql
- * @returns {string} PostgreSQL-compatible SQL
+ * @param {string} stmt — a single SQL statement (no trailing semicolons expected)
+ * @returns {string} PostgreSQL-compatible SQL statement
  */
-export function translateSql(sql) {
-  let out = sql;
+function translateSingleStatement(stmt) {
+  let out = stmt;
 
   // datetime('now') → NOW()
   out = out.replace(/datetime\('now'\)/gi, "NOW()");
@@ -73,7 +73,7 @@ export function translateSql(sql) {
   if (/INSERT\s+OR\s+IGNORE/i.test(out)) {
     out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, "INSERT INTO");
     if (!/ON\s+CONFLICT/i.test(out)) {
-      out = out.replace(/;?\s*$/, " ON CONFLICT DO NOTHING;");
+      out = out.trimEnd() + " ON CONFLICT DO NOTHING";
     }
   }
 
@@ -88,9 +88,9 @@ export function translateSql(sql) {
         const updateCols = cols.slice(1);
         if (updateCols.length > 0) {
           const setClauses = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
-          out = out.replace(/;\s*$/, "").trimEnd() + ` ON CONFLICT(${pk}) DO UPDATE SET ${setClauses};`;
+          out = out.trimEnd() + ` ON CONFLICT(${pk}) DO UPDATE SET ${setClauses}`;
         } else {
-          out = out.replace(/;\s*$/, "").trimEnd() + ` ON CONFLICT(${pk}) DO NOTHING;`;
+          out = out.trimEnd() + ` ON CONFLICT(${pk}) DO NOTHING`;
         }
       }
     }
@@ -100,6 +100,55 @@ export function translateSql(sql) {
   out = out.replace(/\bLIKE\b/g, "ILIKE");
 
   return out;
+}
+
+/**
+ * Convert SQLite-flavoured SQL to PostgreSQL.
+ *
+ * Splits multi-statement SQL on semicolons (respecting string literals),
+ * translates each statement individually, and rejoins. This ensures that
+ * INSERT OR IGNORE / INSERT OR REPLACE clauses each receive their own
+ * ON CONFLICT suffix rather than only the last statement.
+ *
+ * @param {string} sql
+ * @returns {string} PostgreSQL-compatible SQL
+ */
+export function translateSql(sql) {
+  // Split on semicolons that are NOT inside single-quoted string literals.
+  // This handles migration files with multiple statements.
+  const statements = [];
+  let current = "";
+  let inString = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'" && !inString) {
+      inString = true;
+      current += ch;
+    } else if (ch === "'" && inString) {
+      // Handle escaped single quotes ('')
+      if (i + 1 < sql.length && sql[i + 1] === "'") {
+        current += "''";
+        i++;
+      } else {
+        inString = false;
+        current += ch;
+      }
+    } else if (ch === ";" && !inString) {
+      const trimmed = current.trim();
+      if (trimmed) statements.push(trimmed);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  const lastTrimmed = current.trim();
+  if (lastTrimmed) statements.push(lastTrimmed);
+
+  if (statements.length === 0) return sql;
+
+  // Translate each statement individually and rejoin with semicolons.
+  return statements.map(s => translateSingleStatement(s)).join(";\n") + ";";
 }
 
 /**
@@ -308,14 +357,56 @@ export function createPostgresAdapter(opts = {}) {
 
     transaction(fn) {
       return function (...args) {
-        query("BEGIN");
+        if (nativeClient) {
+          // pg-native uses a single connection — BEGIN/COMMIT are on the same client.
+          query("BEGIN");
+          try {
+            const result = fn(...args);
+            query("COMMIT");
+            return result;
+          } catch (err) {
+            query("ROLLBACK");
+            throw err;
+          }
+        }
+
+        // Pool path: acquire a dedicated client so all statements within the
+        // transaction run on the same connection. pool.query() checks out and
+        // releases a connection per call, which would break transactional
+        // semantics (BEGIN on conn A, body on conn B, COMMIT on conn C).
+        let done = false;
+        let client = null;
+        let clientError = null;
+
+        pool.connect()
+          .then(c => { client = c; done = true; })
+          .catch(e => { clientError = e; done = true; });
+        deasyncLib.loopWhile(() => !done);
+        if (clientError) throw clientError;
+
+        /** Run a query on the dedicated transaction client. */
+        function txQuery(sql, values = []) {
+          let txDone = false;
+          let txResult = null;
+          let txError = null;
+          client.query(sql, values)
+            .then(r => { txResult = r; txDone = true; })
+            .catch(e => { txError = e; txDone = true; });
+          deasyncLib.loopWhile(() => !txDone);
+          if (txError) throw txError;
+          return { rows: txResult.rows, rowCount: txResult.rowCount || 0 };
+        }
+
+        txQuery("BEGIN");
         try {
           const result = fn(...args);
-          query("COMMIT");
+          txQuery("COMMIT");
           return result;
         } catch (err) {
-          query("ROLLBACK");
+          try { txQuery("ROLLBACK"); } catch { /* best-effort rollback */ }
           throw err;
+        } finally {
+          client.release();
         }
       };
     },

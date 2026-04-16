@@ -36,13 +36,13 @@ export function getAll() {
 
 /**
  * Create a user.
- * @param {Object} user — { id, name, email, passwordHash, role, avatar, createdAt, updatedAt }
+ * @param {Object} user — { id, name, email, passwordHash, role, avatar, createdAt, updatedAt, emailVerified }
  */
 export function create(user) {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO users (id, name, email, passwordHash, role, avatar, createdAt, updatedAt)
-    VALUES (@id, @name, @email, @passwordHash, @role, @avatar, @createdAt, @updatedAt)
+    INSERT INTO users (id, name, email, passwordHash, role, avatar, emailVerified, createdAt, updatedAt)
+    VALUES (@id, @name, @email, @passwordHash, @role, @avatar, @emailVerified, @createdAt, @updatedAt)
   `).run({
     id: user.id,
     name: user.name,
@@ -50,6 +50,7 @@ export function create(user) {
     passwordHash: user.passwordHash || null,
     role: user.role || "user",
     avatar: user.avatar || null,
+    emailVerified: user.emailVerified != null ? user.emailVerified : 1,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   });

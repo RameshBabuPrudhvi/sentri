@@ -29,6 +29,9 @@ export const runListeners = new Map();
 /** Redis channel prefix for run events. */
 const CHANNEL_PREFIX = "sentri:run:";
 
+/** Unique identifier for this server instance — used to skip self-echo from Redis. */
+const _instanceId = `inst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
 /**
  * emitRunEvent(runId, type, payload)
  *
@@ -38,13 +41,17 @@ const CHANNEL_PREFIX = "sentri:run:";
  * When Redis is available, the event is also published to a Redis channel
  * so other server instances can relay it to their connected SSE clients.
  * The local delivery happens first (instant), then Redis pub (async).
+ * The message includes an `_origin` field so the subscriber can skip
+ * messages published by this same instance (preventing duplicate delivery).
  */
 export function emitRunEvent(runId, type, payload = {}) {
   const data = JSON.stringify({ type, ...payload });
 
   // ── Publish to Redis so other instances can relay ──────────────────────
   if (isRedisAvailable()) {
-    redis.publish(`${CHANNEL_PREFIX}${runId}`, data).catch(() => {});
+    // Include _origin so the subscriber on this instance can skip self-echo.
+    const redisData = JSON.stringify({ type, ...payload, _origin: _instanceId });
+    redis.publish(`${CHANNEL_PREFIX}${runId}`, redisData).catch(() => {});
   }
 
   // ── Deliver to local SSE listeners ────────────────────────────────────
@@ -112,13 +119,20 @@ function _unsubscribeFromRun(runId) {
 }
 
 // Handle incoming messages from Redis — relay to local SSE clients.
+// Skip messages that originated from this instance to prevent duplicate
+// delivery (emitRunEvent already delivered locally before publishing).
 if (redisSub) {
   redisSub.on("message", (channel, message) => {
     if (!channel.startsWith(CHANNEL_PREFIX)) return;
     const runId = channel.slice(CHANNEL_PREFIX.length);
     try {
       const parsed = JSON.parse(message);
-      _deliverToLocal(runId, parsed.type, message);
+      // Skip self-echo: this instance already delivered the event locally.
+      if (parsed._origin === _instanceId) return;
+      // Strip _origin before forwarding to clients — it's an internal field.
+      const { _origin, ...clientPayload } = parsed;
+      const clientData = JSON.stringify(clientPayload);
+      _deliverToLocal(runId, parsed.type, clientData);
     } catch { /* malformed message — ignore */ }
   });
 }

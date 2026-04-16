@@ -32,7 +32,7 @@ import { fileURLToPath } from "url";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { redis, isRedisAvailable } from "../utils/redisClient.js";
+import { redis, redisSub, isRedisAvailable } from "../utils/redisClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -162,6 +162,9 @@ export function getJwtSecret() {
 /** In-memory fallback revocation list: { jti → expiry_timestamp_sec } */
 const _localRevokedTokens = new Map();
 
+/** Redis pub/sub channel for broadcasting revocations across instances. */
+const REVOKE_CHANNEL = "sentri:token:revoked";
+
 // Purge expired entries from the in-memory fallback every hour.
 // Only needed when Redis is not available — Redis handles TTL natively.
 const _purgeInterval = setInterval(() => {
@@ -173,10 +176,52 @@ const _purgeInterval = setInterval(() => {
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
 
+// Subscribe to the revocation broadcast channel so revocations from other
+// instances are reflected in this instance's local Map. This keeps has()
+// synchronous while ensuring cross-instance consistency.
+if (redisSub) {
+  redisSub.subscribe(REVOKE_CHANNEL).catch(err => {
+    console.warn(formatLogLine("warn", null, `[auth] Redis subscribe for revocations failed: ${err.message}`));
+  });
+  redisSub.on("message", (channel, message) => {
+    if (channel !== REVOKE_CHANNEL) return;
+    try {
+      const { jti, exp } = JSON.parse(message);
+      if (jti && exp) _localRevokedTokens.set(jti, exp);
+    } catch { /* malformed — ignore */ }
+  });
+}
+
+// On startup, pre-load recent revocations from Redis into the local Map
+// so tokens revoked before this instance started are still rejected.
+if (isRedisAvailable()) {
+  (async () => {
+    try {
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, "MATCH", "sentri:revoked:*", "COUNT", 100);
+        cursor = nextCursor;
+        for (const key of keys) {
+          const jti = key.slice("sentri:revoked:".length);
+          const ttl = await redis.ttl(key);
+          if (ttl > 0) {
+            _localRevokedTokens.set(jti, Math.floor(Date.now() / 1000) + ttl);
+          }
+        }
+      } while (cursor !== "0");
+    } catch (err) {
+      console.warn(formatLogLine("warn", null, `[auth] Failed to pre-load revocations from Redis: ${err.message}`));
+    }
+  })();
+}
+
 /**
  * Revoked tokens facade — `.set()` / `.has()` API matching the original Map
  * so all existing callers (auth.js logout, refresh) work without changes.
- * Delegates to Redis when available.
+ * Delegates to Redis when available. Cross-instance sync is handled by
+ * pub/sub — set() publishes to the REVOKE_CHANNEL so other instances
+ * update their local Maps, and has() always checks the local Map (fast,
+ * synchronous, and kept in sync by the subscriber).
  */
 export const revokedTokens = {
   set(jti, exp) {
@@ -184,6 +229,8 @@ export const revokedTokens = {
     if (isRedisAvailable()) {
       const ttl = Math.max(1, Math.ceil(exp - Date.now() / 1000));
       redis.set(`sentri:revoked:${jti}`, "1", "EX", ttl).catch(() => {});
+      // Broadcast to other instances so their local Maps are updated.
+      redis.publish(REVOKE_CHANNEL, JSON.stringify({ jti, exp })).catch(() => {});
     }
   },
   has(jti) {

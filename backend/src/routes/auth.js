@@ -300,17 +300,16 @@ router.post("/register", async (req, res) => {
     // SKIP_EMAIL_VERIFICATION=true bypasses this for dev/CI environments.
     const skipVerification = process.env.SKIP_EMAIL_VERIFICATION === "true";
 
-    const user = { id, name, email, passwordHash, role: "user", createdAt: now, updatedAt: now };
+    // Set emailVerified atomically at creation time — no separate UPDATE needed.
+    // This prevents a window where the user exists with emailVerified=1 if the
+    // update were to fail after the INSERT.
+    const user = { id, name, email, passwordHash, role: "user", emailVerified: skipVerification ? 1 : 0, createdAt: now, updatedAt: now };
     userRepo.create(user);
 
     if (skipVerification) {
       // Auto-verify: dev/CI mode — no email required
       return res.status(201).json({ message: "Account created successfully." });
     }
-
-    // Set emailVerified = 0 for new registrations (migration 003 defaults to 1
-    // for existing users, so we explicitly set 0 for new ones).
-    userRepo.update(id, { emailVerified: 0, updatedAt: now });
 
     // Generate and send verification email
     const verifyToken = crypto.randomBytes(32).toString("base64url");

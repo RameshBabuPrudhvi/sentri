@@ -26,15 +26,9 @@
  * - {@link getDatabaseDialect} — Returns `"sqlite"` or `"postgres"`.
  */
 
-import { createRequire } from "module";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { runMigrations } from "./migrationRunner.js";
 import { createSqliteAdapter } from "./adapters/sqlite-adapter.js";
-
-// Use createRequire for the PostgreSQL adapter since it has optional native
-// dependencies (pg-native, deasync) that should not cause import errors when
-// only SQLite is used.  The adapter module is loaded lazily on first use.
-const _require = createRequire(import.meta.url);
 
 /** @type {Object|null} Database adapter instance */
 let _db = null;
@@ -50,6 +44,16 @@ function detectDialect() {
     return "postgres";
   }
   return "sqlite";
+}
+
+// Eagerly load the PostgreSQL adapter module when DATABASE_URL indicates
+// PostgreSQL. Uses top-level await with dynamic import() so the ESM module
+// can be loaded on Node 20+ (require() of ESM throws ERR_REQUIRE_ESM on
+// Node < 22.12). The import only runs when PostgreSQL is actually configured,
+// so SQLite-only deployments never trigger it.
+let _pgAdapterModule = null;
+if (detectDialect() === "postgres") {
+  _pgAdapterModule = await import("./adapters/postgres-adapter.js");
 }
 
 /**
@@ -74,9 +78,9 @@ export function getDatabase() {
   const dialect = detectDialect();
 
   if (dialect === "postgres") {
-    // Lazy-load the PostgreSQL adapter to avoid import errors when pg/pg-native
-    // are not installed (the common case — most users run SQLite).
-    const { createPostgresAdapter } = _require("./adapters/postgres-adapter.js");
+    // Use the pre-loaded PostgreSQL adapter module (loaded via top-level await
+    // above). This avoids require() of ESM which fails on Node 20.
+    const { createPostgresAdapter } = _pgAdapterModule;
     _db = createPostgresAdapter();
   } else {
     _db = createSqliteAdapter();
@@ -85,7 +89,10 @@ export function getDatabase() {
   // Run versioned migrations (creates tables on first run, applies
   // incremental changes on subsequent runs). Each migration is tracked
   // in the schema_migrations table and only applied once.
-  const { applied } = runMigrations(_db);
+  // Pass translateSql from the pre-loaded module so the migration runner
+  // doesn't need to import the postgres adapter itself.
+  const migrationOpts = _pgAdapterModule ? { translateSql: _pgAdapterModule.translateSql } : {};
+  const { applied } = runMigrations(_db, migrationOpts);
   if (applied.length > 0) {
     console.log(formatLogLine("info", null, `[db] Applied ${applied.length} migration(s): ${applied.join(", ")}`));
   }

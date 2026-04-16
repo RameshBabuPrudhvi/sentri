@@ -14,6 +14,21 @@
 import { formatLogLine } from "./logFormatter.js";
 
 /**
+ * Escape HTML special characters to prevent injection in email templates.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * @typedef {Object} EmailPayload
  * @property {string}  to      - Recipient email address.
  * @property {string}  subject - Email subject line.
@@ -127,9 +142,10 @@ export async function sendVerificationEmail(email, token, userName) {
   const verifyUrl = `${appUrl}${basePath}/login?verify=${token}`;
 
   const subject = "Verify your Sentri account";
+  const safeName = escapeHtml(userName);
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-      <h2 style="margin: 0 0 16px; font-size: 20px; color: #0f172a;">Welcome to Sentri${userName ? `, ${userName}` : ""}!</h2>
+      <h2 style="margin: 0 0 16px; font-size: 20px; color: #0f172a;">Welcome to Sentri${safeName ? `, ${safeName}` : ""}!</h2>
       <p style="margin: 0 0 24px; font-size: 14px; color: #475569; line-height: 1.6;">
         Click the button below to verify your email address and activate your account.
         This link expires in 24 hours.
