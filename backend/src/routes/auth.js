@@ -32,20 +32,25 @@
 
 import express from "express";
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import * as userRepo from "../database/repositories/userRepo.js";
 import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
+import {
+  signJwt, getJwtSecret, revokedTokens,
+  requireUser, AUTH_COOKIE,
+} from "../middleware/authenticate.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * Backward-compatible alias.  All files that do
+ *   `import { requireAuth } from "./routes/auth.js"`
+ * continue to work — `requireUser` is the same JWT cookie → bearer → query
+ * middleware that `requireAuth` used to be.
+ */
+export const requireAuth = requireUser;
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
-/** JWT cookie name — HttpOnly so JS cannot read the token. */
-const AUTH_COOKIE     = "access_token";
 /** Expiry hint cookie — Non-HttpOnly so the frontend can read the `exp` timestamp. */
 const EXP_COOKIE      = "token_exp";
 /** JWT TTL in seconds (8 hours). Must match signJwt default. */
@@ -127,115 +132,8 @@ async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), derived);
 }
 
-/**
- * Sign a JWT with HS256 using only Node.js `crypto` (no external library).
- *
- * @param   {Object} payload      - Claims to include (e.g. `{ sub, email, name, role, jti }`).
- * @param   {string} secret       - HMAC secret (32+ chars recommended).
- * @param   {number} [expiresInSec=28800] - Token lifetime in seconds (default 8 hours).
- * @returns {string}                The signed JWT string (`header.payload.signature`).
- * @private
- */
-function signJwt(payload, secret, expiresInSec = 8 * 60 * 60) {
-  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const body   = Buffer.from(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + expiresInSec })).toString("base64url");
-  const sig    = crypto.createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
-  return `${header}.${body}.${sig}`;
-}
-
-/**
- * Verify and decode a JWT signed with HS256.
- * Returns the decoded payload if valid, or `null` if invalid/expired/malformed.
- * Uses constant-time signature comparison and explicit buffer length check.
- *
- * @param   {string}       token  - The JWT string to verify.
- * @param   {string}       secret - The HMAC secret used for signing.
- * @returns {Object|null}           Decoded payload, or `null` on failure.
- * @private
- */
-function verifyJwt(token, secret) {
-  try {
-    const parts = token?.split(".");
-    if (parts?.length !== 3) return null;
-    const [header, body, sig] = parts;
-    const expected = crypto.createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
-    const sigBuf = Buffer.from(sig);
-    const expBuf = Buffer.from(expected);
-    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) return null;
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString());
-    if (payload.exp < Math.floor(Date.now() / 1000)) return null;
-    return payload;
-  } catch { return null; }
-}
-
-/**
- * Cached JWT secret — resolved once on first call, reused for the process lifetime.
- * @type {string|null}
- * @private
- */
-let _cachedSecret = null;
-
-/**
- * Get the JWT signing secret.
- *
- * Resolution order:
- * 1. `JWT_SECRET` env var (required in production, recommended everywhere)
- * 2. Dev/test only: auto-generate a random 256-bit secret and persist it to
- *    `backend/data/.jwt-secret` so tokens survive server restarts. This file
- *    is gitignored and unique per checkout.
- *
- * @returns {string} The secret (always ≥ 32 chars).
- * @throws {Error} In production if `JWT_SECRET` is missing or too short.
- */
-function getJwtSecret() {
-  if (_cachedSecret) return _cachedSecret;
-
-  const envSecret = process.env.JWT_SECRET;
-  if (envSecret && envSecret.length >= 32) {
-    _cachedSecret = envSecret;
-    return _cachedSecret;
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("[auth] FATAL: JWT_SECRET is missing or too short. Set a 32+ char secret in .env for production.");
-  }
-
-  // Dev/test: auto-generate and persist a random secret so tokens survive restarts.
-  // Much safer than the old deterministic derivation from process.cwd().
-  const secretPath = path.join(__dirname, "..", "..", "data", ".jwt-secret");
-
-  try {
-    const existing = fs.readFileSync(secretPath, "utf-8").trim();
-    if (existing.length >= 32) {
-      _cachedSecret = existing;
-      console.warn(formatLogLine("warn", null, "Using auto-generated JWT secret from data/.jwt-secret. Set JWT_SECRET in .env for production."));
-      return _cachedSecret;
-    }
-  } catch { /* file doesn't exist yet */ }
-
-  // Generate a new random secret and persist it
-  const newSecret = crypto.randomBytes(32).toString("base64url");
-  try {
-    const dir = path.dirname(secretPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(secretPath, newSecret, "utf-8");
-    console.warn(formatLogLine("warn", null, "Generated new JWT secret → data/.jwt-secret. Set JWT_SECRET in .env for production."));
-  } catch (err) {
-    console.warn(formatLogLine("warn", null, `Could not persist JWT secret to disk: ${err.message}`));
-  }
-  _cachedSecret = newSecret;
-  return _cachedSecret;
-}
-
-// ─── In-memory stores ────────────────────────────────────────────────────────
-// TODO: Extract to `backend/src/utils/tokenStore.js` behind an interface:
-//   { revoke(jti, exp), isRevoked(jti), setResetToken(tok, data), getResetToken(tok) }
-// Default implementation: in-memory Map (current). Production: swap to Redis
-// via REDIS_URL env var. This enables horizontal scaling (multiple instances)
-// and survives server restarts without losing revoked tokens or reset tokens.
-
-// Token revocation list (logout): { jti → expiry_timestamp }
-const revokedTokens = new Map();
+// signJwt, verifyJwt, getJwtSecret, revokedTokens — imported from
+// middleware/authenticate.js above.  No duplicated implementations here.
 
 // Password reset tokens are stored in the `password_reset_tokens` DB table
 // (migration 003). The token TTL is enforced by the `expiresAt` column.
@@ -273,76 +171,18 @@ function checkRateLimit(bucket, ip) {
   return { allowed: true };
 }
 
-// Purge expired in-memory revoked tokens and stale DB reset tokens periodically.
-// revokedTokens is still in-memory (Redis is the production fix — see ENH-002).
-// DB reset tokens are pruned here too so the table stays small.
+// Purge expired DB reset tokens periodically.
+// In-memory revoked JWT purging is handled by middleware/authenticate.js.
 // .unref() prevents this timer from keeping the process alive during tests.
 const _purgeInterval = setInterval(() => {
-  // In-memory: remove revoked JTIs whose JWT has already expired naturally
-  const now = Date.now() / 1000;
-  for (const [jti, exp] of revokedTokens) {
-    if (exp < now) revokedTokens.delete(jti);
-  }
-  // DB: delete reset tokens older than their TTL (both used and unused)
   try {
     resetTokenRepo.deleteExpired();
   } catch (err) { console.error(formatLogLine("error", null, `[auth/purge] Failed to delete expired reset tokens: ${err.message}`)); }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
-
-/**
- * Express middleware that validates a JWT token.
- *
- * Checks for the token in this order:
- * 1. `Authorization: Bearer <token>` header (standard for JSON API calls)
- * 2. `?token=<jwt>` query parameter (fallback for SSE / EventSource which
- *    cannot send custom headers)
- *
- * On success, attaches the decoded payload to `req.authUser`.
- * On failure, responds with `401 Unauthorized`.
- *
- * @param {Object}   req  - Express request.
- * @param {Object}   res  - Express response.
- * @param {Function} next - Express next middleware.
- * @returns {void}
- *
- * @example
- * import { requireAuth } from "./routes/auth.js";
- * router.get("/protected", requireAuth, (req, res) => {
- *   res.json({ userId: req.authUser.sub });
- * });
- */
-export function requireAuth(req, res, next) {
-  // 1. Preferred: read JWT from the HttpOnly cookie (set by login/OAuth/refresh).
-  //    This is the primary auth mechanism — the token is never exposed to JS.
-  let token = req.cookies?.[AUTH_COOKIE] || null;
-
-  // 2. Fallback: Authorization: Bearer header (keeps backward compat for any
-  //    direct API consumers, test scripts, or the CI trigger endpoint).
-  if (!token) {
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7);
-  }
-
-  // 3. Last resort: ?token= query param (for EventSource / SSE which cannot
-  //    send custom headers or cookies in all environments).
-  if (!token && req.query.token) {
-    token = req.query.token;
-  }
-
-  if (!token) {
-    return res.status(401).json({ error: "Authentication required." });
-  }
-  const payload = verifyJwt(token, getJwtSecret());
-  if (!payload) return res.status(401).json({ error: "Invalid or expired token." });
-  if (payload.jti && revokedTokens.has(payload.jti)) {
-    return res.status(401).json({ error: "Token has been revoked. Please sign in again." });
-  }
-  req.authUser = payload;
-  next();
-}
+// requireAuth is exported above as an alias for requireUser from
+// middleware/authenticate.js — see the import block at the top of this file.
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
 

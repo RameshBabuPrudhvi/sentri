@@ -21,6 +21,7 @@ import { rateLimit } from "express-rate-limit";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import { AUTH_COOKIE } from "./authenticate.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -202,9 +203,14 @@ export function csrfMiddleware(req, res, next) {
   // Step 2: Validate the header on mutating requests.
   if (CSRF_SAFE_METHODS.has(req.method)) return next();
   if (CSRF_EXEMPT_PATHS.has(req.path)) return next();
-  // The CI/CD trigger endpoint uses its own Bearer token auth (not cookies),
-  // so CSRF protection is unnecessary and would block CI pipelines.
-  if (/^\/api\/projects\/[^/]+\/trigger$/.test(req.path)) return next();
+  // CSRF protection is only needed for cookie-based auth.  If the request
+  // has no auth cookie at all, it must be using a non-cookie strategy
+  // (Bearer token, trigger token, query param) which is immune to CSRF
+  // because the browser cannot attach those credentials to a cross-origin
+  // request.  This replaces the old manual regex carve-out for /trigger
+  // and automatically covers any future non-cookie auth strategies added
+  // to middleware/authenticate.js.
+  if (!req.cookies?.[AUTH_COOKIE]) return next();
 
   const headerToken = req.headers[CSRF_HEADER_NAME];
   if (!headerToken || headerToken !== csrfToken) {

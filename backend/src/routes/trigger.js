@@ -19,7 +19,6 @@
 import { Router } from "express";
 import { URL } from "url";
 import dns from "node:dns";
-import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
@@ -30,6 +29,7 @@ import { resolveDialsConfig } from "../testDials.js";
 import { runTests } from "../testRunner.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
+import { requireTrigger } from "../middleware/authenticate.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence:
@@ -193,48 +193,10 @@ async function safeFetchCallback(url, payload) {
 
 const router = Router();
 
-// ─── Shared trigger-token authentication middleware ───────────────────────────
-// Extracts Bearer token, validates hash, resolves project, and verifies
-// ownership. Sets req.triggerToken and req.triggerProject on success.
-
-/**
- * Middleware: authenticate a per-project trigger token from the Authorization
- * header and verify it belongs to the `:id` project in the URL.
- *
- * On success, sets:
- *   - `req.triggerToken`   — the token row from `webhook_tokens`
- *   - `req.triggerProject` — the project row from `projects`
- *
- * @param {Object} req
- * @param {Object} res
- * @param {Function} next
- */
-function requireTriggerToken(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Authorization: Bearer <token> header required." });
-  }
-  const plaintext = authHeader.slice(7).trim();
-  if (!plaintext) {
-    return res.status(401).json({ error: "Empty token." });
-  }
-
-  const tokenRow = webhookTokenRepo.findByHash(webhookTokenRepo.hashToken(plaintext));
-  if (!tokenRow) {
-    return res.status(401).json({ error: "Invalid trigger token." });
-  }
-
-  const project = projectRepo.getById(req.params.id);
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  if (tokenRow.projectId !== project.id) {
-    return res.status(403).json({ error: "Token does not belong to this project." });
-  }
-
-  req.triggerToken = tokenRow;
-  req.triggerProject = project;
-  next();
-}
+// Trigger-token authentication is handled by `requireTrigger` from
+// middleware/authenticate.js — the centralised strategy-pattern middleware.
+// It sets req.triggerToken and req.triggerProject on success, with
+// detailed error messages (401/403/404) on failure.
 
 /**
  * POST /api/projects/:id/trigger
@@ -275,7 +237,7 @@ function requireTriggerToken(req, res, next) {
  * @param {Object}  req - Express request
  * @param {Object} res - Express response
  */
-router.post("/projects/:id/trigger", expensiveOpLimiter, requireTriggerToken, async (req, res) => {
+router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (req, res) => {
   const { triggerToken: tokenRow, triggerProject: project } = req;
 
   // ── 3. Extract and validate optional config (async) ────────────────
@@ -404,7 +366,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTriggerToken, as
  * @param {Object}  req - Express request
  * @param {Object} res - Express response
  */
-router.get("/projects/:id/trigger/runs/:runId", requireTriggerToken, (req, res) => {
+router.get("/projects/:id/trigger/runs/:runId", requireTrigger, (req, res) => {
   const { triggerProject: project } = req;
 
   // ── Fetch run ──────────────────────────────────────────────────────
