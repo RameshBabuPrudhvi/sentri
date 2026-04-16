@@ -48,7 +48,7 @@ export function hasNoAssertions(playwrightCode) {
  * The `.+` is greedy so it backtracks from the last `)` on the line,
  * correctly handling nested parens like `expect(page.locator('x').first())`.
  */
-const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\(.+\).*\.(?:toHaveURL|toHaveTitle)\s*\(/;
+const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\(.+\).*\.(?:toHaveURL|toHaveTitle)\s*\(/s;
 
 // ── Assertion templates ──────────────────────────────────────────────────────
 // Two tiers of templates:

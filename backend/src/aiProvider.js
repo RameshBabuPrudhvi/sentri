@@ -612,9 +612,13 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
 
   if (provider === "anthropic") {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-    try {
-      return await withRetry(async () => {
+    // composeSignal is created inside each retry attempt so that a per-call
+    // timeout on attempt N does not leave the signal permanently aborted for
+    // subsequent attempts.  The external (user-abort) signal is still checked
+    // across all attempts — only the timeout is per-attempt.
+    return await withRetry(async () => {
+      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+      try {
         const params = {
           model: buildProviderMeta().anthropic.model,
           max_tokens: tokens,
@@ -624,15 +628,15 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         if (system) params.system = system;
         const msg = await client.messages.create(params, { signal: composedSignal });
         return msg.content[0].text;
-      }, "Anthropic");
-    } finally { cleanup(); }
+      } finally { cleanup(); }
+    }, "Anthropic");
   }
 
   if (provider === "openai") {
     const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-    try {
-      return await withRetry(async () => {
+    return await withRetry(async () => {
+      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+      try {
         const messages = [];
         if (system) messages.push({ role: "system", content: system });
         messages.push({ role: "user", content: user });
@@ -644,15 +648,15 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         if (useJson) params.response_format = { type: "json_object" };
         const res = await client.chat.completions.create(params, { signal: composedSignal });
         return res.choices[0].message.content;
-      }, "OpenAI");
-    } finally { cleanup(); }
+      } finally { cleanup(); }
+    }, "OpenAI");
   }
 
   if (provider === "google") {
     const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
-    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
-    try {
-      return await withRetry(async () => {
+    return await withRetry(async () => {
+      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+      try {
         const generationConfig = { maxOutputTokens: tokens };
         if (useJson) generationConfig.responseMimeType = "application/json";
         const modelConfig = {
@@ -664,8 +668,8 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         const model = genAI.getGenerativeModel(modelConfig);
         const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: user }] }] }, { signal: composedSignal });
         return result.response.text();
-      }, "Google Gemini");
-    } finally { cleanup(); }
+      } finally { cleanup(); }
+    }, "Google Gemini");
   }
 
   if (provider === "local") {
