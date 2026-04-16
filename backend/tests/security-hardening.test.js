@@ -84,6 +84,9 @@ async function main() {
   // Enable dev reset tokens so the forgot-password response includes the token
   const origEnv = process.env.ENABLE_DEV_RESET_TOKENS;
   process.env.ENABLE_DEV_RESET_TOKENS = "true";
+  // Skip email verification so test users can log in immediately
+  const origSkipVerify = process.env.SKIP_EMAIL_VERIFICATION;
+  process.env.SKIP_EMAIL_VERIFICATION = "true";
 
   const server = app.listen(0);
   const { port } = server.address();
@@ -243,6 +246,7 @@ async function main() {
     console.log("✅ security-hardening: all checks passed");
   } finally {
     process.env.ENABLE_DEV_RESET_TOKENS = origEnv;
+    process.env.SKIP_EMAIL_VERIFICATION = origSkipVerify;
     await new Promise((resolve) => server.close(resolve));
   }
 }

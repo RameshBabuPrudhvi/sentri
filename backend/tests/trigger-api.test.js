@@ -247,7 +247,7 @@ async function main() {
 
     console.log("\n\u2500\u2500 Token revocation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
 
-    const db = getDatabase();
+    // Reuse the `db` variable declared above (line 106) — do not redeclare with `const`
     db.prepare("UPDATE runs SET status = 'completed' WHERE id = ?").run(triggeredRunId);
 
     await test("DELETE trigger-tokens 404 for non-existent token", async () => {

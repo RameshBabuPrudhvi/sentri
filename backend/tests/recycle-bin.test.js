@@ -91,6 +91,10 @@ async function main() {
   mountOnce();
   resetDb();
 
+  // Skip email verification so test users can log in immediately (SEC-001)
+  const origSkipVerify = process.env.SKIP_EMAIL_VERIFICATION;
+  process.env.SKIP_EMAIL_VERIFICATION = "true";
+
   const server = app.listen(0);
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
@@ -240,6 +244,7 @@ async function main() {
     assert.ok(t1Deleted?.deletedAt, "individually-deleted test should still have deletedAt set");
   });
 
+  process.env.SKIP_EMAIL_VERIFICATION = origSkipVerify;
   server.close();
 
   console.log(`\n  ${passed} passed, ${failed} failed`);

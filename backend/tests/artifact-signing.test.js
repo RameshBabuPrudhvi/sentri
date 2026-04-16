@@ -59,6 +59,10 @@ async function main() {
   mountRoutesOnce();
   resetDb();
 
+  // Skip email verification so test users can log in immediately (SEC-001)
+  const origSkipVerify = process.env.SKIP_EMAIL_VERIFICATION;
+  process.env.SKIP_EMAIL_VERIFICATION = "true";
+
   // Create a dummy artifact file so express.static can serve it
   const screenshotsDir = path.join(ARTIFACTS_DIR, "screenshots");
   if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true });
@@ -223,6 +227,7 @@ async function main() {
 
     console.log("✅ artifact-signing: all checks passed");
   } finally {
+    process.env.SKIP_EMAIL_VERIFICATION = origSkipVerify;
     // Clean up test artifact
     try { fs.unlinkSync(testFilePath); } catch { /* ignore */ }
     await new Promise((resolve) => server.close(resolve));
