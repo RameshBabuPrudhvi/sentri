@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { redis, isRedisAvailable } from "../utils/redisClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,20 +152,44 @@ export function getJwtSecret() {
 
 // ─── Token revocation ─────────────────────────────────────────────────────────
 
-/** Token revocation list (logout): { jti → expiry_timestamp } */
-export const revokedTokens = new Map();
+// When Redis is available (INF-002), revoked JTIs are stored as Redis keys
+// with a TTL matching the token's remaining lifetime.  This means:
+//   1. Revocations survive server restarts.
+//   2. Revocations are shared across all instances in a multi-process deployment.
+//   3. Expired entries are cleaned up automatically by Redis TTL.
+// When Redis is NOT available, the original in-memory Map is used as fallback.
 
-// Purge expired revoked tokens every hour so the Map doesn't grow unboundedly.
-// Once a JWT's `exp` has passed, the token is naturally invalid — keeping the
-// JTI in the revocation list is pointless.  .unref() prevents this timer from
-// keeping the process alive during tests.
+/** In-memory fallback revocation list: { jti → expiry_timestamp_sec } */
+const _localRevokedTokens = new Map();
+
+// Purge expired entries from the in-memory fallback every hour.
+// Only needed when Redis is not available — Redis handles TTL natively.
 const _purgeInterval = setInterval(() => {
+  if (isRedisAvailable()) return;
   const now = Date.now() / 1000;
-  for (const [jti, exp] of revokedTokens) {
-    if (exp < now) revokedTokens.delete(jti);
+  for (const [jti, exp] of _localRevokedTokens) {
+    if (exp < now) _localRevokedTokens.delete(jti);
   }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
+
+/**
+ * Revoked tokens facade — `.set()` / `.has()` API matching the original Map
+ * so all existing callers (auth.js logout, refresh) work without changes.
+ * Delegates to Redis when available.
+ */
+export const revokedTokens = {
+  set(jti, exp) {
+    _localRevokedTokens.set(jti, exp);
+    if (isRedisAvailable()) {
+      const ttl = Math.max(1, Math.ceil(exp - Date.now() / 1000));
+      redis.set(`sentri:revoked:${jti}`, "1", "EX", ttl).catch(() => {});
+    }
+  },
+  has(jti) {
+    return _localRevokedTokens.has(jti);
+  },
+};
 
 // ─── Strategy definitions ─────────────────────────────────────────────────────
 
