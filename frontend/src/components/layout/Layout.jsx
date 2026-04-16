@@ -2,13 +2,16 @@ import React from "react";
 import { Outlet } from "react-router-dom";
 import OnboardingTour from "./OnboardingTour.jsx";
 import useOnboarding from "../../hooks/useOnboarding.js";
+import { useAuth } from "../../context/AuthContext.jsx";
 import AIChat from "../ai/AIChat.jsx";
 import CommandPalette from "./CommandPalette.jsx";
+import ProviderBanner from "./ProviderBanner.jsx";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 
 export default function Layout() {
   const tour = useOnboarding();
+  const { user } = useAuth();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [chatOpen, setChatOpen] = React.useState(false);
   const [chatQuery, setChatQuery] = React.useState("");
@@ -45,6 +48,7 @@ export default function Layout() {
       </button>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <TopBar onOpenPalette={openPalette} onOpenChat={openChat} />
+        <ProviderBanner userId={user?.id} />
         <main style={{ flex: 1, padding: "28px 32px", overflow: "auto" }}>
           <Outlet />
         </main>
