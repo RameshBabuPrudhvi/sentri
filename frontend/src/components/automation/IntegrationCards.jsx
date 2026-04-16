@@ -8,7 +8,6 @@
  * @param {{ onScrollToSnippets?: () => void }} props
  */
 
-import { useState } from "react";
 import {
   Github, GitBranch, Terminal, MessageSquare,
   Plug, Cloud, CheckCircle2, ArrowRight,
@@ -85,36 +84,21 @@ const INTEGRATIONS = [
 // ─── Single card ──────────────────────────────────────────────────────────────
 
 function IntegrationCard({ integration, onScrollToSnippets }) {
-  const [hovered, setHovered] = useState(false);
   const Icon = integration.icon;
   const isConnected = integration.status === "connected";
 
   return (
     <div
-      className="card"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        padding: "20px 18px",
-        display: "flex", flexDirection: "column", gap: 12,
-        transition: "box-shadow 0.15s, border-color 0.15s",
-        borderColor: hovered ? "var(--border2)" : undefined,
-        boxShadow: hovered ? "var(--shadow)" : undefined,
-        cursor: isConnected ? "pointer" : "default",
-      }}
+      className="card auto-integ-card"
+      style={{ cursor: isConnected ? "pointer" : "default" }}
       onClick={isConnected && onScrollToSnippets ? onScrollToSnippets : undefined}
       role={isConnected ? "button" : undefined}
       tabIndex={isConnected ? 0 : undefined}
       onKeyDown={isConnected && onScrollToSnippets ? (e) => { if (e.key === "Enter") onScrollToSnippets(); } : undefined}
     >
       {/* Icon + status */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{
-          width: 38, height: 38, borderRadius: 10,
-          background: integration.bgColor,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}>
+      <div className="flex-between">
+        <div className="auto-integ-icon" style={{ background: integration.bgColor }}>
           <Icon size={18} color={integration.color} />
         </div>
         {isConnected ? (
@@ -128,10 +112,10 @@ function IntegrationCard({ integration, onScrollToSnippets }) {
 
       {/* Name + description */}
       <div>
-        <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--text)", marginBottom: 4 }}>
+        <div className="font-bold" style={{ fontSize: "0.88rem", marginBottom: 4 }}>
           {integration.name}
         </div>
-        <div style={{ fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.55 }}>
+        <div className="text-sub" style={{ fontSize: "0.78rem", lineHeight: 1.55 }}>
           {integration.description}
         </div>
       </div>
@@ -166,20 +150,16 @@ function IntegrationCard({ integration, onScrollToSnippets }) {
 export default function IntegrationCards({ onScrollToSnippets }) {
   return (
     <div className="card" style={{ padding: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
+      <div className="flex-center gap-sm mb-md">
         <Plug size={14} color="var(--accent)" />
-        <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text)" }}>
+        <span className="font-bold" style={{ fontSize: "0.95rem" }}>
           Integrations
         </span>
-        <span style={{ fontSize: "0.78rem", color: "var(--text3)", marginLeft: 4 }}>
+        <span className="text-xs text-muted" style={{ marginLeft: 4 }}>
           {INTEGRATIONS.filter(i => i.status === "connected").length} connected
         </span>
       </div>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-        gap: 12,
-      }}>
+      <div className="auto-integ-grid">
         {INTEGRATIONS.map(i => (
           <IntegrationCard
             key={i.id}

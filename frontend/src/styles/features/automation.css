@@ -98,6 +98,156 @@
   right: 8px;
 }
 
+/* ── Project automation card ────────────────────────────────────────────────── */
+.auto-card__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 18px 22px;
+  text-align: left;
+}
+
+.auto-card__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--purple-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.auto-card__body {
+  padding: 0 22px 22px;
+  border-top: 1px solid var(--border);
+}
+
+.auto-card__section {
+  margin-top: 20px;
+}
+
+.auto-card__section--bordered {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.auto-card__section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.auto-card__section-title span {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+/* ── Schedule blocks ───────────────────────────────────────────────────────── */
+.auto-sched-empty {
+  padding: 16px 18px;
+  background: var(--bg2);
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  text-align: center;
+}
+
+.auto-sched-summary {
+  padding: 12px 14px;
+  background: var(--bg2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.auto-sched-editor {
+  padding: 16px 18px;
+  background: var(--bg2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auto-sched-hint {
+  color: var(--text3);
+  font-size: 0.78rem;
+}
+
+.auto-sched-label {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+/* ── Preset dropdown ───────────────────────────────────────────────────────── */
+.auto-preset-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  min-width: 200px;
+  padding: 4px 0;
+}
+
+.auto-preset-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.auto-preset-item:hover,
+.auto-preset-item:focus {
+  background: var(--bg2);
+}
+
+/* ── Integration cards ─────────────────────────────────────────────────────── */
+.auto-integ-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.auto-integ-card {
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.auto-integ-card:hover {
+  border-color: var(--border2);
+  box-shadow: var(--shadow);
+}
+
+.auto-integ-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .auto-token-reveal {

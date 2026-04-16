@@ -106,24 +106,21 @@ export default function IntegrationSnippets({ projects, defaultProjectId }) {
     <div className="card" style={{ padding: 24 }}>
       {/* Header — clickable to expand/collapse */}
       <button
+        className="auto-card__header"
         onClick={() => setExpanded(e => !e)}
-        style={{
-          display: "flex", alignItems: "center", gap: 8, width: "100%",
-          background: "none", border: "none", cursor: "pointer", padding: 0,
-          color: "var(--text)", fontWeight: 700, fontSize: "0.95rem",
-        }}
+        style={{ padding: 0 }}
       >
         <Zap size={14} color="var(--accent)" />
-        Integration Snippets
-        <ChevronDown size={14} color="var(--text3)"
-          style={{ marginLeft: "auto", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+        <span className="font-bold flex-1" style={{ fontSize: "0.95rem" }}>Integration Snippets</span>
+        <ChevronDown size={14} color="var(--text3)" className="shrink-0"
+          style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
       </button>
 
       {expanded && (
         <div style={{ marginTop: 18 }}>
           {/* Project selector */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-            <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text2)", whiteSpace: "nowrap" }}>
+          <div className="flex-center gap-md mb-md">
+            <label className="font-semi text-sub" style={{ fontSize: "0.8rem", whiteSpace: "nowrap" }}>
               Project:
             </label>
             <select
@@ -138,30 +135,30 @@ export default function IntegrationSnippets({ projects, defaultProjectId }) {
             </select>
           </div>
 
-          <p style={{ fontSize: "0.83rem", color: "var(--text2)", marginBottom: 20, marginTop: 0 }}>
+          <p className="text-sub" style={{ fontSize: "0.83rem", marginBottom: 20, marginTop: 0 }}>
             Use these in your CI pipeline. Store the token as a secret (e.g.{" "}
-            <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>SENTRI_TOKEN</code>
+            <code className="text-mono text-xs">SENTRI_TOKEN</code>
             ) — never commit it directly.
           </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="flex-col gap-lg">
             <Snippet label="GitHub Actions" code={ghActionsSnippet(selectedId, apiBase)} />
             <Snippet label="GitLab CI" code={gitlabSnippet(selectedId, apiBase)} />
             <Snippet label="cURL (direct)" code={curlSnippet(selectedId, apiBase)} />
           </div>
 
           {/* How it works */}
-          <div style={{ fontSize: "0.83rem", color: "var(--text2)", marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
-            <div style={{ fontWeight: 700, marginBottom: 10 }}>How it works</div>
+          <div className="text-sub" style={{ fontSize: "0.83rem", marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
+            <div className="font-bold" style={{ marginBottom: 10 }}>How it works</div>
             <ol style={{ margin: "0 0 0 1.2em", padding: 0, lineHeight: 1.8 }}>
               <li>
-                <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>POST /trigger</code>
-                {" "}returns <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>202 Accepted</code>
-                {" "}immediately with <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>{"{ runId, statusUrl }"}</code>.
+                <code className="text-mono text-xs">POST /trigger</code>
+                {" "}returns <code className="text-mono text-xs">202 Accepted</code>
+                {" "}immediately with <code className="text-mono text-xs">{"{ runId, statusUrl }"}</code>.
               </li>
-              <li>Poll <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>statusUrl</code> until <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>status</code> is no longer <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>"running"</code>.</li>
-              <li>A <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>status</code> of <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>"completed"</code> means all tests passed. Any other terminal value (<code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>"failed"</code>, <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>"aborted"</code>) means the run did not pass cleanly.</li>
-              <li>Optionally pass <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem" }}>callbackUrl</code> in the request body to receive a POST with the summary when the run finishes.</li>
+              <li>Poll <code className="text-mono text-xs">statusUrl</code> until <code className="text-mono text-xs">status</code> is no longer <code className="text-mono text-xs">"running"</code>.</li>
+              <li>A <code className="text-mono text-xs">status</code> of <code className="text-mono text-xs">"completed"</code> means all tests passed. Any other terminal value (<code className="text-mono text-xs">"failed"</code>, <code className="text-mono text-xs">"aborted"</code>) means the run did not pass cleanly.</li>
+              <li>Optionally pass <code className="text-mono text-xs">callbackUrl</code> in the request body to receive a POST with the summary when the run finishes.</li>
             </ol>
           </div>
         </div>

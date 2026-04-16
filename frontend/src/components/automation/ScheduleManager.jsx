@@ -202,7 +202,7 @@ export default function ScheduleManager({ projectId }) {
   }
 
   return (
-    <div style={{ fontSize: "0.85rem" }}>
+    <div className="text-sm">
 
       {/* ── Status banner ── */}
       {success && (
@@ -218,11 +218,8 @@ export default function ScheduleManager({ projectId }) {
 
       {/* ── No schedule yet ── */}
       {!schedule && !showEditor && (
-        <div style={{
-          padding: "16px 18px", background: "var(--bg2)", borderRadius: "var(--radius)",
-          border: "1px dashed var(--border)", textAlign: "center",
-        }}>
-          <p style={{ color: "var(--text3)", margin: "0 0 12px" }}>
+        <div className="auto-sched-empty">
+          <p className="text-muted" style={{ margin: "0 0 12px" }}>
             No schedule configured. Set up automated regression runs on a cron schedule.
           </p>
           <button className="btn btn-primary btn-sm" onClick={() => { setCronExpr("0 9 * * 1"); setShowEditor(true); }}>
@@ -233,32 +230,26 @@ export default function ScheduleManager({ projectId }) {
 
       {/* ── Existing schedule summary ── */}
       {schedule && !showEditor && (
-        <div style={{
-          padding: "12px 14px", background: "var(--bg2)", borderRadius: "var(--radius)",
-          border: "1px solid var(--border)",
-        }}>
+        <div className="auto-sched-summary">
           <div className="flex-between" style={{ gap: 10, flexWrap: "wrap" }}>
             {/* Left: cron + timezone */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <div className="flex-center gap-md" style={{ minWidth: 0 }}>
               <span className={`badge ${schedule.enabled ? "badge-green" : "badge-amber"}`}>
                 {schedule.enabled ? "Active" : "Paused"}
               </span>
-              <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: "var(--text)" }}>
-                {schedule.cronExpr}
-              </code>
-              <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>{schedule.timezone}</span>
+              <code className="text-sm text-mono">{schedule.cronExpr}</code>
+              <span className="auto-sched-hint">{schedule.timezone}</span>
             </div>
             {/* Right: next run + actions */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div className="flex-center gap-sm shrink-0">
               {schedule.enabled && schedule.nextRunAt && (
-                <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>
+                <span className="auto-sched-hint">
                   Next: {fmtFutureRelative(schedule.nextRunAt)}
                 </span>
               )}
               {schedule.lastRunAt && (
-                <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>
+                <span className="auto-sched-hint">
                   Last: {fmtFutureRelative(schedule.lastRunAt).replace("in ", "")}
-                  {/* Show "Xm ago" style using Date diff */}
                 </span>
               )}
               <button
@@ -299,15 +290,12 @@ export default function ScheduleManager({ projectId }) {
 
       {/* ── Inline editor ── */}
       {showEditor && (
-        <div style={{
-          padding: "16px 18px", background: "var(--bg2)", borderRadius: "var(--radius)",
-          border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 12,
-        }}>
+        <div className="auto-sched-editor">
 
           {/* Cron expression row */}
           <div>
-            <div className="flex-between" style={{ marginBottom: 6 }}>
-              <label style={{ fontWeight: 600, color: "var(--text)", fontSize: "0.82rem" }}>
+            <div className="flex-between mb-sm">
+              <label className="auto-sched-label">
                 Cron expression
               </label>
               {/* Preset picker */}
@@ -326,6 +314,7 @@ export default function ScheduleManager({ projectId }) {
                       onClick={() => setShowPresets(false)}
                     />
                     <div
+                      className="auto-preset-menu"
                       role="menu"
                       aria-label="Cron presets"
                       onKeyDown={e => {
@@ -340,31 +329,17 @@ export default function ScheduleManager({ projectId }) {
                           items[next]?.focus();
                         }
                       }}
-                      style={{
-                        position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50,
-                        background: "var(--surface)", border: "1px solid var(--border)",
-                        borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)",
-                        minWidth: 200, padding: "4px 0",
-                      }}
                     >
                       {PRESETS.map((p, i) => (
                         <button
                           key={p.cron}
+                          className="auto-preset-item"
                           role="menuitem"
                           tabIndex={i === 0 ? 0 : -1}
                           ref={el => { if (i === 0 && el) el.focus(); }}
                           onClick={() => applyPreset(p.cron)}
-                          style={{
-                            display: "block", width: "100%", textAlign: "left",
-                            padding: "7px 14px", background: "none", border: "none",
-                            cursor: "pointer", fontSize: "0.82rem", color: "var(--text)",
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
-                          onMouseLeave={e => e.currentTarget.style.background = "none"}
-                          onFocus={e => e.currentTarget.style.background = "var(--bg2)"}
-                          onBlur={e => e.currentTarget.style.background = "none"}
                         >
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text3)", marginRight: 8 }}>
+                          <span className="text-mono text-muted" style={{ fontSize: "0.78rem", marginRight: 8 }}>
                             {p.cron}
                           </span>
                           {p.label}
@@ -387,15 +362,15 @@ export default function ScheduleManager({ projectId }) {
             {cronError && (
               <div style={{ color: "var(--red)", fontSize: "0.78rem", marginTop: 4 }}>{cronError}</div>
             )}
-            <div style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 5 }}>
-              Format: <code style={{ fontFamily: "var(--font-mono)" }}>minute hour day month weekday</code>
-              &nbsp;— e.g. <code style={{ fontFamily: "var(--font-mono)" }}>0 9 * * 1</code> = every Monday at 9 AM
+            <div className="text-xs text-muted" style={{ marginTop: 5 }}>
+              Format: <code className="text-mono">minute hour day month weekday</code>
+              &nbsp;— e.g. <code className="text-mono">0 9 * * 1</code> = every Monday at 9 AM
             </div>
           </div>
 
           {/* Timezone row */}
           <div>
-            <label style={{ fontWeight: 600, color: "var(--text)", fontSize: "0.82rem", display: "block", marginBottom: 6 }}>
+            <label className="auto-sched-label" style={{ display: "block", marginBottom: 6 }}>
               Timezone
             </label>
             <select
@@ -412,7 +387,7 @@ export default function ScheduleManager({ projectId }) {
           </div>
 
           {/* Enabled toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="flex-center gap-md">
             <button
               onClick={() => setEnabled(v => !v)}
               style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center" }}
@@ -423,7 +398,7 @@ export default function ScheduleManager({ projectId }) {
                 : <ToggleLeft size={22} color="var(--text3)" />
               }
             </button>
-            <span style={{ color: "var(--text)", fontSize: "0.82rem" }}>
+            <span className="text-sm">
               {enabled ? "Enabled — run will fire on schedule" : "Paused — schedule saved but won't run"}
             </span>
           </div>

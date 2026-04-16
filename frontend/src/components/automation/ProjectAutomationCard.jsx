@@ -20,41 +20,31 @@ export default function ProjectAutomationCard({ project, defaultExpanded = false
   return (
     <div className="card" style={{ overflow: "hidden" }}>
       {/* Header — clickable to expand/collapse */}
-      <button
-        onClick={() => setExpanded(e => !e)}
-        style={{
-          display: "flex", alignItems: "center", gap: 12, width: "100%",
-          background: "none", border: "none", cursor: "pointer",
-          padding: "18px 22px", textAlign: "left",
-        }}
-      >
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, background: "var(--purple-bg)",
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        }}>
+      <button className="auto-card__header" onClick={() => setExpanded(e => !e)}>
+        <div className="auto-card__icon">
           <Globe size={14} color="var(--purple)" />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "var(--text)" }}>
+        <div className="flex-1">
+          <div className="font-bold" style={{ fontSize: "0.92rem" }}>
             {project.name}
           </div>
-          <div style={{ fontSize: "0.73rem", fontFamily: "var(--font-mono)", color: "var(--text3)", marginTop: 1 }}>
+          <div className="text-xs text-mono text-muted" style={{ marginTop: 1 }}>
             {project.url}
           </div>
         </div>
-        <ChevronDown size={15} color="var(--text3)"
-          style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }} />
+        <ChevronDown size={15} color="var(--text3)" className="shrink-0"
+          style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
       </button>
 
       {/* Expanded content */}
       {expanded && (
-        <div style={{ padding: "0 22px 22px", borderTop: "1px solid var(--border)" }}>
+        <div className="auto-card__body">
 
           {/* ── CI/CD Triggers ────────────────────────────────────────── */}
-          <div style={{ marginTop: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div className="auto-card__section">
+            <div className="auto-card__section-title">
               <Zap size={13} color="var(--accent)" />
-              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--text)" }}>CI/CD Triggers</span>
+              <span>CI/CD Triggers</span>
               <button
                 className="btn btn-ghost btn-xs"
                 style={{ marginLeft: "auto" }}
@@ -67,10 +57,10 @@ export default function ProjectAutomationCard({ project, defaultExpanded = false
           </div>
 
           {/* ── Scheduled Runs (ENH-006) ──────────────────────────────── */}
-          <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div className="auto-card__section--bordered">
+            <div className="auto-card__section-title">
               <Clock size={13} color="var(--accent)" />
-              <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--text)" }}>Scheduled Runs</span>
+              <span>Scheduled Runs</span>
             </div>
             <ScheduleManager projectId={project.id} />
           </div>
