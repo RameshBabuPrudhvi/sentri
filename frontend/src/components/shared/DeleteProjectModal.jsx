@@ -32,7 +32,7 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
       .then(tokens => setTokenCount(tokens.length))
       .catch(() => {});
     api.getSchedule(project.id)
-      .then(data => setHasSchedule(!!(data.schedule && data.schedule.enabled)))
+      .then(data => setHasSchedule(!!data.schedule))
       .catch(() => {});
   }, [project?.id]);
 
@@ -83,7 +83,7 @@ export default function DeleteProjectModal({ project, onClose, onDeleted }) {
               <li>{tokenCount} CI/CD trigger token{tokenCount !== 1 ? "s" : ""} — pipelines using them will break immediately</li>
             )}
             {hasSchedule && (
-              <li>Active cron schedule — scheduled runs will stop</li>
+              <li>Cron schedule — scheduled runs will stop and the configuration will be lost</li>
             )}
           </ul>
         </div>

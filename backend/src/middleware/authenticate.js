@@ -154,6 +154,18 @@ export function getJwtSecret() {
 /** Token revocation list (logout): { jti → expiry_timestamp } */
 export const revokedTokens = new Map();
 
+// Purge expired revoked tokens every hour so the Map doesn't grow unboundedly.
+// Once a JWT's `exp` has passed, the token is naturally invalid — keeping the
+// JTI in the revocation list is pointless.  .unref() prevents this timer from
+// keeping the process alive during tests.
+const _purgeInterval = setInterval(() => {
+  const now = Date.now() / 1000;
+  for (const [jti, exp] of revokedTokens) {
+    if (exp < now) revokedTokens.delete(jti);
+  }
+}, 60 * 60 * 1000);
+_purgeInterval.unref();
+
 // ─── Strategy definitions ─────────────────────────────────────────────────────
 
 /**

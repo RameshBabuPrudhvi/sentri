@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Clock, Play, Trash2, ToggleLeft, ToggleRight, RefreshCw, ChevronDown } from "lucide-react";
 import { api } from "../../api.js";
-import { fmtFutureRelative } from "../../utils/formatters.js";
+import { fmtFutureRelative, fmtRelativeDate } from "../../utils/formatters.js";
 
 // ─── Common presets ────────────────────────────────────────────────────────────
 
@@ -249,7 +249,7 @@ export default function ScheduleManager({ projectId }) {
               )}
               {schedule.lastRunAt && (
                 <span className="auto-sched-hint">
-                  Last: {fmtFutureRelative(schedule.lastRunAt).replace("in ", "")}
+                  Last: {fmtRelativeDate(schedule.lastRunAt)}
                 </span>
               )}
               <button

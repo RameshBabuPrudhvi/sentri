@@ -64,7 +64,7 @@ const VALID_PAGE_ACTIONS = new Set([
  *   e.g.  page.clicks(...)  →  method = "clicks"
  *         locator.fillup()  →  method = "fillup"
  */
-const ACTION_CALL_RE = /(?:page|locator|frame|context|request)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * validateActions(code) → string[]
