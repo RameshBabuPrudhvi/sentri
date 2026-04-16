@@ -38,6 +38,18 @@ export function hasNoAssertions(playwrightCode) {
   return !playwrightCode.includes("expect(");
 }
 
+/**
+ * Regex that matches `toHaveURL` or `toHaveTitle` only when they appear as
+ * method calls after an `expect(` expression — i.e. inside a real assertion
+ * chain.  Bare mentions in comments (`// TODO: add toHaveURL`) or string
+ * literals (`'toHaveURL'`) are NOT matched.
+ *
+ * Pattern: `expect(` … `)` … `.toHaveURL(` or `.toHaveTitle(`
+ * The `.+` is greedy so it backtracks from the last `)` on the line,
+ * correctly handling nested parens like `expect(page.locator('x').first())`.
+ */
+const HAS_PAGE_LOAD_ASSERTION_RE = /expect\s*\(.+\).*\.(?:toHaveURL|toHaveTitle)\s*\(/;
+
 // ── Assertion templates ──────────────────────────────────────────────────────
 // Two tiers of templates:
 //   1. INTENT templates — used when classifiedPage is available (crawl pipeline)
@@ -180,17 +192,20 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // ── Fast-path: already fully enhanced ────────────────────────────────────
   // A test qualifies only when it has at least one strong assertion AND a
-  // page-load anchor (toHaveURL or toHaveTitle) AND at least one expect()
-  // call. All three conditions must hold because:
-  //   - hasStrongAssertions() uses bare regexes that can match inside
-  //     comments or string literals, so !hasNoAssertions() gates on real
-  //     expect() calls;
-  //   - toBeVisible/toHaveText etc. do not verify navigation — the
-  //     page-load check is the separate gate.
+  // page-load anchor (toHaveURL or toHaveTitle inside an actual expect()
+  // chain) AND at least one expect() call.
+  //
+  // We use a regex that requires the matcher to appear after `expect(`
+  // so that mentions in comments or string literals don't trigger the
+  // fast-path.  Example false positive without this:
+  //   await expect(el).toBeVisible();
+  //   // TODO: add toHaveURL assertion
+  // → code.includes("toHaveURL") is true but there is no real page-load
+  //   assertion, so the test should NOT be fast-pathed.
   if (
     hasStrongAssertions(code) &&
     !hasNoAssertions(code) &&
-    (code.includes("toHaveURL") || code.includes("toHaveTitle"))
+    HAS_PAGE_LOAD_ASSERTION_RE.test(code)
   ) {
     return { ...test, _assertionEnhanced: false };
   }
@@ -240,7 +255,7 @@ export function enhanceTest(test, snapshot, classifiedPage) {
   }
 
   // Already has strong assertions — ensure page load assertion exists
-  if (!code.includes("toHaveURL") && !code.includes("toHaveTitle")) {
+  if (!HAS_PAGE_LOAD_ASSERTION_RE.test(code)) {
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
     code = code.replace(/(\}\s*\);\s*$)/, `${pageLoad}\n$1`);
     return { ...test, playwrightCode: code, _assertionEnhanced: true, _enhancementReason: "added_page_load_assertion" };

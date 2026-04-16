@@ -502,6 +502,51 @@ test("fast-path does NOT trigger for tests with only weak assertions", () => {
   assert.equal(r._enhancementReason, "weak_assertions_replaced");
 });
 
+test("fast-path does NOT trigger when toHaveURL appears only in a comment (real expect exists)", () => {
+  // This test has real expect() calls with strong assertions (toBeVisible),
+  // but toHaveURL only appears in a comment — the fast-path should NOT
+  // trigger because there is no actual page-load assertion.
+  const t = {
+    name: "Comment-only toHaveURL",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.getByText('Welcome')).toBeVisible();",
+      "  // TODO: add toHaveURL assertion for page load verification",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  // Should be enhanced (page-load assertion added), not fast-pathed
+  assert.equal(r._assertionEnhanced, true,
+    "fast-path should NOT trigger when toHaveURL is only in a comment");
+  assert.equal(r._enhancementReason, "added_page_load_assertion");
+  // Verify a real toHaveURL was injected
+  assert.match(r.playwrightCode, /expect\(.+\)\.toHaveURL/,
+    "Should have injected a real toHaveURL assertion");
+});
+
+test("fast-path does NOT trigger when toHaveTitle appears only in a string literal", () => {
+  const t = {
+    name: "String literal toHaveTitle",
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.goto('http://ex.com/page');",
+      "  await expect(page.getByText('Welcome')).toBeVisible();",
+      "  const msg = 'should toHaveTitle but does not';",
+      "});",
+    ].join("\n"),
+    steps: ["s"],
+    sourceUrl: "http://ex.com/page",
+  };
+  const r = enhanceTest(t, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, true,
+    "fast-path should NOT trigger when toHaveTitle is only in a string literal");
+  assert.equal(r._enhancementReason, "added_page_load_assertion");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);
