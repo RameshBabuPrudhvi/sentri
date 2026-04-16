@@ -58,7 +58,7 @@ async function main() {
     assert.ok(loginPayload.sub, "Login JWT should contain sub");
 
     // ── JWT name claim: refresh token also contains name ──────────────────
-    out = await req(base, "/api/auth/refresh", {
+    let out = await req(base, "/api/auth/refresh", {
       method: "POST",
       token,
     });

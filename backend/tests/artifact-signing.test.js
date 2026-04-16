@@ -135,17 +135,18 @@ async function main() {
     // This endpoint requires auth, so register + login first
 
     const artEmail = `artifact-${Date.now()}@test.local`;
-    // Use raw req() so we can capture the CSRF cookie for manual fetch calls below
-    await t.req(base, "/api/auth/register", {
+    // Use registerAndLogin to get the auth token; capture CSRF from the
+    // register response (the first request sets the _csrf cookie).
+    const regOut = await t.req(base, "/api/auth/register", {
       method: "POST", body: { name: "Artifact User", email: artEmail, password: "Password123!" },
     });
+    const csrf = extractCookie(regOut.res, "_csrf");
+    assert.ok(csrf, "Should get _csrf cookie from register response");
     const loginOut = await t.req(base, "/api/auth/login", {
       method: "POST", body: { email: artEmail, password: "Password123!" },
     });
     const accessToken = extractCookie(loginOut.res, "access_token");
-    const csrf = extractCookie(loginOut.res, "_csrf");
     assert.ok(accessToken, "Should get access_token cookie");
-    assert.ok(csrf, "Should get _csrf cookie");
     const cookies = `access_token=${accessToken}; _csrf=${csrf}`;
 
     // POST with a valid crash report
