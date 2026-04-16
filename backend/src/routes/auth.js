@@ -208,6 +208,48 @@ function sanitiseString(str, maxLen = 200) {
   return typeof str === "string" ? str.trim().slice(0, maxLen) : "";
 }
 
+// ─── Password strength validation (GAP-02) ───────────────────────────────────
+// Enforces complexity beyond a minimum length: at least one uppercase letter,
+// one lowercase letter, one digit, and one special character.  Also rejects the
+// 20 most common passwords that pass the character-class checks.
+
+const COMMON_PASSWORDS = new Set([
+  "password", "12345678", "123456789", "1234567890", "qwerty123",
+  "password1", "iloveyou", "sunshine1", "princess1", "football1",
+  "charlie1", "access14", "trustno1", "passw0rd", "master123",
+  "welcome1", "monkey123", "dragon12", "letmein1", "abc12345",
+]);
+
+/**
+ * Validate password strength.
+ * @param   {string} password
+ * @returns {string|null} Error message, or null if valid.
+ */
+function validatePasswordStrength(password) {
+  if (typeof password !== "string" || password.length < 8) {
+    return "Password must be at least 8 characters.";
+  }
+  if (password.length > 128) {
+    return "Password is too long.";
+  }
+  if (!/[A-Z]/.test(password)) {
+    return "Password must contain at least one uppercase letter.";
+  }
+  if (!/[a-z]/.test(password)) {
+    return "Password must contain at least one lowercase letter.";
+  }
+  if (!/[0-9]/.test(password)) {
+    return "Password must contain at least one digit.";
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return "Password must contain at least one special character.";
+  }
+  if (COMMON_PASSWORDS.has(password.toLowerCase())) {
+    return "This password is too common. Please choose a stronger one.";
+  }
+  return null;
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 /**
@@ -230,9 +272,8 @@ router.post("/register", async (req, res) => {
 
     if (!name)                       return res.status(400).json({ error: "Name is required." });
     if (!isValidEmail(email))        return res.status(400).json({ error: "A valid email address is required." });
-    if (typeof password !== "string" || password.length < 8)
-                                     return res.status(400).json({ error: "Password must be at least 8 characters." });
-    if (password.length > 128)       return res.status(400).json({ error: "Password is too long." });
+    const pwErr = validatePasswordStrength(password);
+    if (pwErr)                       return res.status(400).json({ error: pwErr });
 
     const existing = userRepo.getByEmail(email);
     if (existing) {
@@ -470,11 +511,9 @@ router.post("/reset-password", async (req, res) => {
   if (!token || typeof token !== "string") {
     return res.status(400).json({ error: "Reset token is required." });
   }
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
-    return res.status(400).json({ error: "New password must be at least 8 characters." });
-  }
-  if (newPassword.length > 128) {
-    return res.status(400).json({ error: "Password is too long." });
+  const pwErr = validatePasswordStrength(newPassword);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr });
   }
 
   // Atomically claim the token — marks it as used in a single UPDATE so two

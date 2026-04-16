@@ -74,3 +74,13 @@ CREATE INDEX IF NOT EXISTS idx_schedules_enabled   ON schedules(enabled);
 
 -- Seed counter for schedule IDs (SCH-1, SCH-2, …)
 INSERT OR IGNORE INTO counters(name, value) VALUES ('schedule', 0);
+
+-- ── Concurrent-run guard (FLW-04) ──────────────────────────────────────────
+-- Defence-in-depth: enforce at most one "running" run per project at the DB
+-- level.  The application already checks via findActiveByProjectId() before
+-- creating a run, but this partial unique index prevents a second run from
+-- being inserted if two requests slip through the application-level guard
+-- (e.g. in a future multi-process deployment).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_one_active_per_project
+  ON runs(projectId)
+  WHERE status = 'running' AND deletedAt IS NULL;

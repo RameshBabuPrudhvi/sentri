@@ -200,12 +200,34 @@ router.post("/runs/:runId/abort", (req, res) => {
     runAbortControllers.delete(req.params.runId);
   }
 
+  // Mark queued tests that never executed as "skipped" so pass/fail/total
+  // metrics are consistent (FLW-03).  Uses the live in-memory run when
+  // available (has the latest results from processResult calls).
+  const liveRun = entry?.run || run;
+  if (Array.isArray(liveRun.results) && Array.isArray(liveRun.testQueue)) {
+    const executedIds = new Set(liveRun.results.map(r => r.testId));
+    for (const queued of liveRun.testQueue) {
+      if (!executedIds.has(queued.id)) {
+        liveRun.results.push({
+          testId: queued.id,
+          testName: queued.name,
+          status: "skipped",
+          error: "Aborted before execution",
+        });
+      }
+    }
+  }
+
   runRepo.update(req.params.runId, {
     status: "aborted",
     finishedAt: new Date().toISOString(),
     duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
     error: "Aborted by user",
   });
+  // Persist the updated results (with skipped entries) to SQLite
+  if (liveRun.results) {
+    runRepo.update(req.params.runId, { results: liveRun.results });
+  }
 
   const project = projectRepo.getById(run.projectId);
   logActivity({ ...actor(req),

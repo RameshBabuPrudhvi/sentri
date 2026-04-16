@@ -436,6 +436,47 @@ async function withRetry(fn, label = "") {
 
 const DEFAULT_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS, 10) || 16384;
 
+// Per-call timeout for cloud AI providers (GAP-08).
+// Prevents a hung API call from blocking the pipeline indefinitely.
+// Ollama has its own timeout (OLLAMA_TIMEOUT_MS, default 120s) so this only
+// applies to Anthropic, OpenAI, and Google.  Override via LLM_TIMEOUT_MS.
+const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
+
+/**
+ * Compose an AbortSignal that fires on EITHER the external signal (user abort)
+ * OR a per-call timeout — whichever comes first.  Returns the composite signal
+ * and a cleanup function that MUST be called in a finally block to prevent the
+ * timeout from leaking if the call completes before the deadline.
+ *
+ * @param {AbortSignal|undefined} external - Signal from runWithAbort (user abort).
+ * @param {number}                timeoutMs - Per-call deadline.
+ * @returns {{ signal: AbortSignal, cleanup: () => void }}
+ */
+function composeSignal(external, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("AI call timed out")), timeoutMs);
+
+  // Forward external abort
+  let onExternal = null;
+  if (external) {
+    if (external.aborted) {
+      clearTimeout(timer);
+      controller.abort(external.reason);
+    } else {
+      onExternal = () => { clearTimeout(timer); controller.abort(external.reason); };
+      external.addEventListener("abort", onExternal, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      if (onExternal && external) external.removeEventListener("abort", onExternal);
+    },
+  };
+}
+
 // ── Ollama caller ─────────────────────────────────────────────────────────────
 
 async function callOllama(prompt, maxTokens, externalSignal, useJson = true) {
@@ -571,51 +612,60 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
 
   if (provider === "anthropic") {
     const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-    return withRetry(async () => {
-      const params = {
-        model: buildProviderMeta().anthropic.model,
-        max_tokens: tokens,
-        messages: [{ role: "user", content: user }],
-      };
-      // Anthropic natively supports a top-level "system" field
-      if (system) params.system = system;
-      const msg = await client.messages.create(params, { signal });
-      return msg.content[0].text;
-    }, "Anthropic");
+    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+    try {
+      return await withRetry(async () => {
+        const params = {
+          model: buildProviderMeta().anthropic.model,
+          max_tokens: tokens,
+          messages: [{ role: "user", content: user }],
+        };
+        // Anthropic natively supports a top-level "system" field
+        if (system) params.system = system;
+        const msg = await client.messages.create(params, { signal: composedSignal });
+        return msg.content[0].text;
+      }, "Anthropic");
+    } finally { cleanup(); }
   }
 
   if (provider === "openai") {
     const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-    return withRetry(async () => {
-      const messages = [];
-      if (system) messages.push({ role: "system", content: system });
-      messages.push({ role: "user", content: user });
-      const params = {
-        model: buildProviderMeta().openai.model,
-        max_tokens: tokens,
-        messages,
-      };
-      if (useJson) params.response_format = { type: "json_object" };
-      const res = await client.chat.completions.create(params, { signal });
-      return res.choices[0].message.content;
-    }, "OpenAI");
+    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+    try {
+      return await withRetry(async () => {
+        const messages = [];
+        if (system) messages.push({ role: "system", content: system });
+        messages.push({ role: "user", content: user });
+        const params = {
+          model: buildProviderMeta().openai.model,
+          max_tokens: tokens,
+          messages,
+        };
+        if (useJson) params.response_format = { type: "json_object" };
+        const res = await client.chat.completions.create(params, { signal: composedSignal });
+        return res.choices[0].message.content;
+      }, "OpenAI");
+    } finally { cleanup(); }
   }
 
   if (provider === "google") {
     const genAI = new GoogleGenerativeAI(getKey("GOOGLE_API_KEY"));
-    return withRetry(async () => {
-      const generationConfig = { maxOutputTokens: tokens };
-      if (useJson) generationConfig.responseMimeType = "application/json";
-      const modelConfig = {
-        model: buildProviderMeta().google.model,
-        generationConfig,
-      };
-      // Gemini supports systemInstruction for system-level context
-      if (system) modelConfig.systemInstruction = { parts: [{ text: system }] };
-      const model = genAI.getGenerativeModel(modelConfig);
-      const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: user }] }] }, { signal });
-      return result.response.text();
-    }, "Google Gemini");
+    const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+    try {
+      return await withRetry(async () => {
+        const generationConfig = { maxOutputTokens: tokens };
+        if (useJson) generationConfig.responseMimeType = "application/json";
+        const modelConfig = {
+          model: buildProviderMeta().google.model,
+          generationConfig,
+        };
+        // Gemini supports systemInstruction for system-level context
+        if (system) modelConfig.systemInstruction = { parts: [{ text: system }] };
+        const model = genAI.getGenerativeModel(modelConfig);
+        const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: user }] }] }, { signal: composedSignal });
+        return result.response.text();
+      }, "Google Gemini");
+    } finally { cleanup(); }
   }
 
   if (provider === "local") {

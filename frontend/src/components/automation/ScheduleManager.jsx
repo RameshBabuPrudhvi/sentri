@@ -25,27 +25,25 @@ const PRESETS = [
   { label: "Every Sunday midnight",cron: "0 0 * * 0" },
 ];
 
-// A curated subset of common IANA timezone names that covers most users.
-// A full list would be hundreds of entries — we keep it focused.
-const TIMEZONES = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Sao_Paulo",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Europe/Moscow",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Asia/Shanghai",
-  "Asia/Tokyo",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
+// Build the timezone list from the Intl API when available (all modern browsers
+// and Node 18+).  Falls back to a curated subset for older environments.
+const TIMEZONES = (() => {
+  try {
+    const all = Intl.supportedValuesOf("timeZone");
+    // Ensure UTC is first for convenience
+    return all.includes("UTC") ? ["UTC", ...all.filter(tz => tz !== "UTC")] : all;
+  } catch {
+    // Fallback for environments without Intl.supportedValuesOf
+    return [
+      "UTC",
+      "America/New_York", "America/Chicago", "America/Denver",
+      "America/Los_Angeles", "America/Sao_Paulo",
+      "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+      "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Shanghai",
+      "Asia/Tokyo", "Australia/Sydney", "Pacific/Auckland",
+    ];
+  }
+})();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
