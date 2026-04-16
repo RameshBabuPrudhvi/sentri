@@ -85,6 +85,11 @@ router.delete("/:id", (req, res) => {
     });
   }
 
+  // Check for automation config that will be permanently destroyed (not recoverable
+  // via restore) so the response can inform the frontend for a user-facing warning.
+  const existingTokens  = webhookTokenRepo.getByProjectId(req.params.id);
+  const existingSchedule = scheduleRepo.getByProjectId(req.params.id);
+
   // Wrap the cascade soft-delete in a transaction so all three tables get the
   // same `datetime('now')` value.  This guarantees the cascade-restore in
   // recycleBin.js (which uses `deletedAt >= project.deletedAt`) never misses
@@ -97,9 +102,13 @@ router.delete("/:id", (req, res) => {
     runIds  = runRepo.deleteByProjectId(req.params.id);
     // Trigger tokens are not soft-deleted — they are always hard-deleted
     // immediately since they are security credentials, not recoverable data.
+    // Restoring the project will NOT restore these — CI pipelines will need
+    // new tokens.
     webhookTokenRepo.deleteByProjectId(req.params.id);
     // Stop any armed cron task so the scheduler doesn't keep firing for a
     // soft-deleted project (which would log repeated warnings every interval).
+    // Restoring the project will NOT restore the schedule — it must be
+    // reconfigured manually.
     scheduleRepo.deleteByProjectId(req.params.id);
   })();
   stopSchedule(req.params.id);
@@ -109,7 +118,15 @@ router.delete("/:id", (req, res) => {
     detail: `Project soft-deleted — "${project.name}" (${testIds.length} tests, ${runIds.length} runs moved to recycle bin)`,
   });
 
-  res.json({ ok: true, deletedTests: testIds.length, deletedRuns: runIds.length });
+  res.json({
+    ok: true,
+    deletedTests: testIds.length,
+    deletedRuns: runIds.length,
+    // Inform the client about permanently destroyed automation config so the
+    // frontend can display a warning (these are NOT restored on project restore).
+    destroyedTokens: existingTokens.length,
+    destroyedSchedule: !!existingSchedule,
+  });
 });
 
 // ─── Schedule endpoints ───────────────────────────────────────────────────────

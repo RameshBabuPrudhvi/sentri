@@ -23,6 +23,7 @@ import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { activeTaskCount } from "../scheduler.js";
 
 const router = Router();
 
@@ -143,6 +144,7 @@ router.get("/system", async (req, res) => {
     nodeVersion:   process.version,
     playwrightVersion,
     memoryMB:      Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    activeSchedules: activeTaskCount(),
   });
 });
 

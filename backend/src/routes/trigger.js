@@ -286,6 +286,10 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTriggerToken, as
   const { dialsConfig, callbackUrl } = req.body || {};
 
   if (callbackUrl && typeof callbackUrl === "string") {
+    // Length cap — prevent abuse via extremely long URLs
+    if (callbackUrl.length > 2048) {
+      return res.status(400).json({ error: "callbackUrl exceeds maximum length (2048 characters)." });
+    }
     const urlErr = await validateCallbackUrl(callbackUrl);
     if (urlErr) return res.status(400).json({ error: urlErr });
   }
