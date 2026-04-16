@@ -54,7 +54,7 @@ The following items have been verified complete against the codebase and are **n
 | MAINT-011 | Feature-sliced frontend component architecture | PR #81 |
 | MAINT-012 | Deep test validation (locator, action, assertion) | PR #57 |
 | MAINT-013 | Graceful shutdown with in-flight run draining | PR #86 |
-| MAINT-016 | Dependabot for automated dependency updates | PR #79 |
+| MAINT-016 | Renovate for automated dependency updates | Renovate |
 
 ---
 
