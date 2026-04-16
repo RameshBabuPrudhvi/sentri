@@ -21,6 +21,10 @@ export default function ProviderBanner({ userId }) {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Wait until userId is resolved to avoid a wasted fetch during auth loading
+    // (userId transitions from undefined → real value on mount).
+    if (userId === undefined) return;
+
     // Skip if already dismissed this session
     if (sessionStorage.getItem(DISMISS_KEY(userId))) return;
 
