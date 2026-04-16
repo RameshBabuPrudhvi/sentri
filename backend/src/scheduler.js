@@ -163,6 +163,11 @@ async function fireScheduledRun(projectId) {
     return;
   }
 
+  // Use the project's configured parallelWorkers (from last dials config),
+  // falling back to the PARALLEL_WORKERS env var or 1 if not set.
+  const defaultWorkers = parseInt(process.env.PARALLEL_WORKERS, 10) || 1;
+  const parallelWorkers = Math.max(1, Math.min(10, defaultWorkers));
+
   const runId = generateRunId();
   const run = {
     id: runId,
@@ -175,7 +180,7 @@ async function fireScheduledRun(projectId) {
     passed: 0,
     failed: 0,
     total: tests.length,
-    parallelWorkers: 1,
+    parallelWorkers,
     testQueue: tests.map(t => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   runRepo.create(run);
@@ -184,14 +189,14 @@ async function fireScheduledRun(projectId) {
     type: "scheduled_run.start",
     projectId: project.id,
     projectName: project.name,
-    detail: `Scheduled test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}`,
+    detail: `Scheduled test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
 
   console.log(formatLogLine("info", null, `[scheduler] Firing scheduled run ${runId} for project ${project.name}`));
 
   runWithAbort(runId, run,
-    signal => runTests(project, tests, run, { parallelWorkers: 1, signal }),
+    signal => runTests(project, tests, run, { parallelWorkers, signal }),
     {
       onSuccess: () => {
         logActivity({

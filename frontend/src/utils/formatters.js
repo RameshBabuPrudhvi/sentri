@@ -111,6 +111,41 @@ export function fmtDurationMs(ms, fallback = "—") {
 }
 
 /**
+ * Medium date+time — `"Apr 8, 2026, 3:45 PM"`.
+ * Used by TokenManager for created/lastUsed columns.
+ *
+ * @param {string|null|undefined} iso - ISO 8601 timestamp.
+ * @returns {string}
+ */
+export function fmtDateTimeMedium(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+/**
+ * Future-relative time — `"in 5m"`, `"in 3h"`, `"in 2d"`, `"soon"`.
+ * Used by ScheduleManager and ProjectHeader for next-run display.
+ *
+ * @param {string|null|undefined} iso - ISO 8601 timestamp (expected to be in the future).
+ * @param {string} [fallback="Not scheduled"] - Returned when `iso` is falsy.
+ * @returns {string}
+ */
+export function fmtFutureRelative(iso, fallback = "Not scheduled") {
+  if (!iso) return fallback;
+  const diff = new Date(iso) - Date.now();
+  if (diff <= 0) return "soon";
+  const mins = Math.round(diff / 60_000);
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.round(diff / 3_600_000);
+  if (hrs < 24) return `in ${hrs}h`;
+  const days = Math.round(diff / 86_400_000);
+  return `in ${days}d`;
+}
+
+/**
  * Pass-rate colour based on threshold.
  *
  * @param {number|null} rate - Pass rate percentage (0–100).

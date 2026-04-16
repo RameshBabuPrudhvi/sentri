@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Clock, Play, Trash2, ToggleLeft, ToggleRight, RefreshCw, ChevronDown } from "lucide-react";
 import { api } from "../../api.js";
+import { fmtFutureRelative } from "../../utils/formatters.js";
 
 // ─── Common presets ────────────────────────────────────────────────────────────
 
@@ -49,54 +50,24 @@ const TIMEZONES = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Format an ISO date for display using the browser locale.
- * @param {string|null} iso
- * @returns {string}
- */
-function fmtNextRun(iso) {
-  if (!iso) return "Not scheduled";
-  const d = new Date(iso);
-  const diff = d - Date.now();
-  if (diff < 0) return "Soon";
-  const mins = Math.round(diff / 60_000);
-  if (mins < 60) return `in ${mins}m`;
-  const hrs = Math.round(diff / 3_600_000);
-  if (hrs < 24) return `in ${hrs}h`;
-  const days = Math.round(diff / 86_400_000);
-  return `in ${days}d`;
-}
-
-/**
  * Lightweight client-side cron validator.
- * Returns an error message string, or null if valid.
+ * Checks field count and basic syntax. Full validation (including value
+ * ranges) is done server-side by node-cron — this only catches obvious
+ * mistakes so the user gets instant feedback.
+ *
  * @param {string} expr
- * @returns {string|null}
+ * @returns {string|null} Error message string, or null if valid.
  */
 function validateCron(expr) {
   if (!expr || !expr.trim()) return "Cron expression is required.";
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return "Must be a 5-field expression: minute hour day month weekday";
-  const ranges = [
-    [0, 59],  // minute
-    [0, 23],  // hour
-    [1, 31],  // day of month
-    [1, 12],  // month
-    [0, 6],   // day of week
-  ];
+  // Each field must be: *, */N, N, N-N, N-N/N, or comma-separated combinations thereof
+  const fieldRe = /^(\*|\d+(-\d+)?(\/\d+)?)(,(\*|\d+(-\d+)?(\/\d+)?))*$/;
   for (let i = 0; i < 5; i++) {
-    const f = parts[i];
-    if (f === "*") continue;
-    if (/^\*\/\d+$/.test(f)) continue;
-    if (/^\d+-\d+$/.test(f)) continue;
-    if (/^\d+(,\d+)*$/.test(f)) continue;
-    if (/^\d+$/.test(f)) {
-      const v = parseInt(f, 10);
-      if (v < ranges[i][0] || v > ranges[i][1]) {
-        return `Field ${i + 1} value ${v} is out of range ${ranges[i][0]}–${ranges[i][1]}.`;
-      }
-      continue;
+    if (!fieldRe.test(parts[i])) {
+      return `Invalid cron field: "${parts[i]}"`;
     }
-    return `Invalid cron field: "${f}"`;
   }
   return null;
 }
@@ -281,12 +252,12 @@ export default function ScheduleManager({ projectId }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               {schedule.enabled && schedule.nextRunAt && (
                 <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>
-                  Next: {fmtNextRun(schedule.nextRunAt)}
+                  Next: {fmtFutureRelative(schedule.nextRunAt)}
                 </span>
               )}
               {schedule.lastRunAt && (
                 <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>
-                  Last: {fmtNextRun(schedule.lastRunAt).replace("in ", "")}
+                  Last: {fmtFutureRelative(schedule.lastRunAt).replace("in ", "")}
                   {/* Show "Xm ago" style using Date diff */}
                 </span>
               )}
@@ -354,15 +325,34 @@ export default function ScheduleManager({ projectId }) {
                       style={{ position: "fixed", inset: 0, zIndex: 40 }}
                       onClick={() => setShowPresets(false)}
                     />
-                    <div style={{
-                      position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50,
-                      background: "var(--surface)", border: "1px solid var(--border)",
-                      borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)",
-                      minWidth: 200, padding: "4px 0",
-                    }}>
-                      {PRESETS.map(p => (
+                    <div
+                      role="menu"
+                      aria-label="Cron presets"
+                      onKeyDown={e => {
+                        if (e.key === "Escape") { setShowPresets(false); return; }
+                        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                          e.preventDefault();
+                          const items = e.currentTarget.querySelectorAll("[role=menuitem]");
+                          const idx = Array.from(items).indexOf(document.activeElement);
+                          const next = e.key === "ArrowDown"
+                            ? (idx + 1) % items.length
+                            : (idx - 1 + items.length) % items.length;
+                          items[next]?.focus();
+                        }
+                      }}
+                      style={{
+                        position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50,
+                        background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)", boxShadow: "var(--shadow-md)",
+                        minWidth: 200, padding: "4px 0",
+                      }}
+                    >
+                      {PRESETS.map((p, i) => (
                         <button
                           key={p.cron}
+                          role="menuitem"
+                          tabIndex={i === 0 ? 0 : -1}
+                          ref={el => { if (i === 0 && el) el.focus(); }}
                           onClick={() => applyPreset(p.cron)}
                           style={{
                             display: "block", width: "100%", textAlign: "left",
@@ -371,6 +361,8 @@ export default function ScheduleManager({ projectId }) {
                           }}
                           onMouseEnter={e => e.currentTarget.style.background = "var(--bg2)"}
                           onMouseLeave={e => e.currentTarget.style.background = "none"}
+                          onFocus={e => e.currentTarget.style.background = "var(--bg2)"}
+                          onBlur={e => e.currentTarget.style.background = "none"}
                         >
                           <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text3)", marginRight: 8 }}>
                             {p.cron}

@@ -8,25 +8,8 @@
  */
 
 import { useState } from "react";
-import { Copy, Check, Zap, ChevronDown } from "lucide-react";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function CopyButton({ text, className = "btn btn-ghost btn-xs" }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable */ });
-  };
-  return (
-    <button className={className} onClick={copy} title="Copy to clipboard">
-      {copied ? <Check size={13} /> : <Copy size={13} />}
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
-}
+import { Zap, ChevronDown } from "lucide-react";
+import CopyButton from "../shared/CopyButton.jsx";
 
 // ─── Snippet builders ─────────────────────────────────────────────────────────
 

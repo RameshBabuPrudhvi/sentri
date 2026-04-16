@@ -193,6 +193,49 @@ async function safeFetchCallback(url, payload) {
 
 const router = Router();
 
+// ─── Shared trigger-token authentication middleware ───────────────────────────
+// Extracts Bearer token, validates hash, resolves project, and verifies
+// ownership. Sets req.triggerToken and req.triggerProject on success.
+
+/**
+ * Middleware: authenticate a per-project trigger token from the Authorization
+ * header and verify it belongs to the `:id` project in the URL.
+ *
+ * On success, sets:
+ *   - `req.triggerToken`   — the token row from `webhook_tokens`
+ *   - `req.triggerProject` — the project row from `projects`
+ *
+ * @param {Object} req
+ * @param {Object} res
+ * @param {Function} next
+ */
+function requireTriggerToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Authorization: Bearer <token> header required." });
+  }
+  const plaintext = authHeader.slice(7).trim();
+  if (!plaintext) {
+    return res.status(401).json({ error: "Empty token." });
+  }
+
+  const tokenRow = webhookTokenRepo.findByHash(webhookTokenRepo.hashToken(plaintext));
+  if (!tokenRow) {
+    return res.status(401).json({ error: "Invalid trigger token." });
+  }
+
+  const project = projectRepo.getById(req.params.id);
+  if (!project) return res.status(404).json({ error: "not found" });
+
+  if (tokenRow.projectId !== project.id) {
+    return res.status(403).json({ error: "Token does not belong to this project." });
+  }
+
+  req.triggerToken = tokenRow;
+  req.triggerProject = project;
+  next();
+}
+
 /**
  * POST /api/projects/:id/trigger
  * Token-authenticated endpoint for CI/CD pipelines (ENH-011).
@@ -232,30 +275,8 @@ const router = Router();
  * @param {Object}  req - Express request
  * @param {Object} res - Express response
  */
-router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
-  // ── 1. Authenticate with trigger token ──────────────────────────────────
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Authorization: Bearer <token> header required." });
-  }
-  const plaintext = authHeader.slice(7).trim();
-  if (!plaintext) {
-    return res.status(401).json({ error: "Empty token." });
-  }
-
-  const tokenRow = webhookTokenRepo.findByHash(webhookTokenRepo.hashToken(plaintext));
-  if (!tokenRow) {
-    return res.status(401).json({ error: "Invalid trigger token." });
-  }
-
-  // ── 2. Resolve project ────────────────────────────────────────────────
-  const project = projectRepo.getById(req.params.id);
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  // Ensure the token belongs to this project (prevent cross-project misuse)
-  if (tokenRow.projectId !== project.id) {
-    return res.status(403).json({ error: "Token does not belong to this project." });
-  }
+router.post("/projects/:id/trigger", expensiveOpLimiter, requireTriggerToken, async (req, res) => {
+  const { triggerToken: tokenRow, triggerProject: project } = req;
 
   // ── 3. Extract and validate optional config (async) ────────────────
   // callbackUrl validation includes DNS resolution, so it must happen
@@ -379,29 +400,8 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, async (req, res) => {
  * @param {Object}  req - Express request
  * @param {Object} res - Express response
  */
-router.get("/projects/:id/trigger/runs/:runId", (req, res) => {
-  // ── Authenticate with trigger token ──────────────────────────────────
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Authorization: Bearer <token> header required." });
-  }
-  const plaintext = authHeader.slice(7).trim();
-  if (!plaintext) {
-    return res.status(401).json({ error: "Empty token." });
-  }
-
-  const tokenRow = webhookTokenRepo.findByHash(webhookTokenRepo.hashToken(plaintext));
-  if (!tokenRow) {
-    return res.status(401).json({ error: "Invalid trigger token." });
-  }
-
-  // ── Resolve project ────────────────────────────────────────────────
-  const project = projectRepo.getById(req.params.id);
-  if (!project) return res.status(404).json({ error: "not found" });
-
-  if (tokenRow.projectId !== project.id) {
-    return res.status(403).json({ error: "Token does not belong to this project." });
-  }
+router.get("/projects/:id/trigger/runs/:runId", requireTriggerToken, (req, res) => {
+  const { triggerProject: project } = req;
 
   // ── Fetch run ──────────────────────────────────────────────────────
   const run = runRepo.getById(req.params.runId);

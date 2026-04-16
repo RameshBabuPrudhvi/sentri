@@ -31,6 +31,7 @@ const files = [
   "tests/webhook-token.test.js",
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",
+  "tests/ssrf-protection.test.js",
 ];
 
 let passed = 0;

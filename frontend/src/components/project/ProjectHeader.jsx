@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
 import { api } from "../../api.js";
+import { fmtFutureRelative } from "../../utils/formatters.js";
 
 /**
  * @param {Object} props
@@ -52,17 +53,6 @@ export default function ProjectHeader({
       .catch(() => {});
   }, [projectId]);
 
-  function fmtNextRun(iso) {
-    if (!iso) return null;
-    const diff = new Date(iso) - Date.now();
-    if (diff <= 0) return "soon";
-    const mins = Math.round(diff / 60000);
-    if (mins < 60) return "in " + mins + "m";
-    const hrs = Math.round(diff / 3600000);
-    if (hrs < 24) return "in " + hrs + "h";
-    return "in " + Math.round(diff / 86400000) + "d";
-  }
-
   return (
     <div className="card pd-header">
       <div className="pd-header-top">
@@ -92,7 +82,7 @@ export default function ProjectHeader({
                 style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.75rem", color: "var(--text3)" }}
               >
                 <Clock size={11} />
-                {fmtNextRun(nextRunAt)}
+                {fmtFutureRelative(nextRunAt)}
               </span>
             )}
             <button

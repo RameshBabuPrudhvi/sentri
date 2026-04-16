@@ -9,33 +9,10 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Copy, Check, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { api } from "../../api.js";
-
-// ─── Small helpers ─────────────────────────────────────────────────────────────
-
-function CopyButton({ text, className = "btn btn-ghost btn-xs" }) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => { /* clipboard unavailable (non-HTTPS, denied permission) */ });
-  };
-  return (
-    <button className={className} onClick={copy} title="Copy to clipboard">
-      {copied ? <Check size={13} /> : <Copy size={13} />}
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
-}
-
-function fmtDate(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium", timeStyle: "short",
-  });
-}
+import CopyButton from "../shared/CopyButton.jsx";
+import { fmtDateTimeMedium } from "../../utils/formatters.js";
 
 // ─── Token reveal banner (shown once) ────────────────────────────────────────
 
@@ -98,7 +75,7 @@ export default function TokenManager({ projectId }) {
   };
 
   const handleRevoke = async (tokenId) => {
-    if (!confirm("Permanently revoke this token? CI pipelines using it will stop working immediately.")) return;
+    if (!window.confirm("Permanently revoke this token? CI pipelines using it will stop working immediately.")) return;
     setRevoking(tokenId);
     try {
       await api.deleteTriggerToken(projectId, tokenId);
@@ -170,8 +147,8 @@ export default function TokenManager({ projectId }) {
                 <td style={{ color: t.label ? "var(--text1)" : "var(--text3)" }}>
                   {t.label || <em>unlabelled</em>}
                 </td>
-                <td style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{fmtDate(t.createdAt)}</td>
-                <td style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{fmtDate(t.lastUsedAt)}</td>
+                <td style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{fmtDateTimeMedium(t.createdAt)}</td>
+                <td style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{fmtDateTimeMedium(t.lastUsedAt)}</td>
                 <td style={{ textAlign: "right" }}>
                   <button
                     className="btn btn-ghost btn-xs"

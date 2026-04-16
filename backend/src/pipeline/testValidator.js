@@ -46,7 +46,7 @@ const VALID_PAGE_ACTIONS = new Set([
   "locator", "getByRole", "getByLabel", "getByText", "getByPlaceholder",
   "getByAltText", "getByTitle", "getByTestId", "frameLocator",
   // Locator terminal actions (called on locator, not page)
-  "count", "nth", "first", "last", "filter", "all",
+  "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
   // Expect (assertion builder)
   "expect",
