@@ -337,7 +337,7 @@ The following items have been verified complete against the codebase and are **n
 
 ## Phase 3 — AI-Native Differentiation
 
-*Goal: Pull ahead of Mabl, Testim, and SmartBear with AI-powered capabilities and advanced testing features. These items build the competitive moat.*
+*Goal: Pull ahead of Mabl, Testim, and SmartBear (including BearQ) with AI-powered capabilities and advanced testing features. These items build the competitive moat.*
 
 ---
 
@@ -432,7 +432,7 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-### FEA-004 — Step-level timing waterfall 🔵 Medium
+### DIF-015 — Step-level timing waterfall 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
 
@@ -471,7 +471,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
 
-**Problem:** The `/chat` route and `LLMStreamPanel` component exist but are not connected to specific tests. Users who want to modify a test must edit Playwright code directly. Natural-language test editing — "add an assertion that the cart total updates" — is a significant UX differentiator no competitor offers.
+**Problem:** The `/chat` route and `LLMStreamPanel` component exist but are not connected to specific tests. Users who want to modify a test must edit Playwright code directly. Natural-language test editing — "add an assertion that the cart total updates" — is a significant UX differentiator (BearQ offers NL input for creation but not inline code editing on existing tests).
 
 **Fix:** In `TestDetail.jsx`, add an "Edit with AI" panel that opens a chat thread pre-seeded with the test's current Playwright code. The AI response proposes a code change. Show a Myers diff of old vs. new code (the `DiffView` component is already complete ✅). One-click "Apply" patches the code and saves.
 
@@ -970,9 +970,9 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** 🔲 Planned | **Effort:** XL | **Source:** Competitive
 
-**Problem:** The self-healing waterfall uses DOM selectors exclusively (ARIA roles, text content, CSS fallbacks). When the DOM structure changes drastically — a major redesign or component library migration — all six strategies can fail simultaneously. Mabl uses screenshot diff + CV-based element finding to heal across structural changes.
+**Problem:** The self-healing waterfall uses DOM selectors exclusively (ARIA roles, text content, CSS fallbacks). When the DOM structure changes drastically — a major redesign or component library migration — all strategies can fail simultaneously. Mabl uses screenshot diff + CV-based element finding to heal across structural changes.
 
-**Fix:** Add a vision-based healing strategy as the final fallback (stage 7) in the waterfall. Capture a screenshot of the failing step's expected element area from the baseline, use image similarity (`pixelmatch`) to locate the nearest visual match in the current DOM, and derive a fresh selector from the matched element.
+**Fix:** Add a vision-based healing strategy as the final fallback in the waterfall. Capture a screenshot of the failing step's expected element area from the baseline, use image similarity (`pixelmatch`) to locate the nearest visual match in the current DOM, and derive a fresh selector from the matched element.
 
 **Files to change:**
 - `backend/src/selfHealing.js` — add vision strategy as waterfall stage 7
@@ -1095,29 +1095,35 @@ The following items have been verified complete against the codebase and are **n
 
 ## Competitive Gap Analysis
 
-| Capability | Sentri | Mabl | Testim | SmartBear | Playwright OSS |
+> **Note:** The SmartBear column reflects both their legacy portfolio (TestComplete, ReadyAPI)
+> and the new **BearQ** AI-native platform (early access — https://smartbear.com/product/bearq/early-access/).
+> BearQ significantly changes SmartBear's competitive position; capabilities marked with † are BearQ-specific.
+
+| Capability | Sentri | Mabl | Testim | SmartBear / BearQ | Playwright OSS |
 |---|---|---|---|---|---|
-| AI test generation | ✅ 8-stage pipeline | ✅ Auto-heal only | ✅ AI recorder | ❌ Manual | ❌ Manual |
-| Self-healing selectors | ✅ 6-strategy waterfall | ✅ ML-based | ✅ Smart locators | ❌ | ❌ |
+| AI test generation | ✅ 8-stage pipeline | ✅ Auto-heal only | ✅ AI recorder | ✅ BearQ AI generation † | ❌ Manual |
+| Self-healing selectors | ✅ Multi-strategy waterfall | ✅ ML-based | ✅ Smart locators | ✅ BearQ AI healing † | ❌ |
 | Human review queue | ✅ Draft → Approve flow | ❌ | ❌ | ❌ | ❌ |
-| NL test editing | ✅ AI chat + fix | ❌ | ❌ | ❌ | ❌ |
+| NL test editing | ✅ AI chat + fix | ❌ | ❌ | ✅ BearQ NL input † | ❌ |
+| API test generation | ✅ HAR-based auto-gen | ✅ | ❌ | ✅ ReadyAPI | ✅ Manual |
 | Scheduled runs | ✅ Cron + timezone | ✅ | ✅ | ✅ | Via CI cron |
 | CI/CD integration | ✅ Webhook + token auth | ✅ Native | ✅ Native | ✅ Native | ✅ CLI |
 | Self-hosted / private | ✅ Docker | ❌ SaaS only | ❌ SaaS only | Partial | ✅ |
 | Multi-provider LLM | ✅ Anthropic/OpenAI/Google/Ollama | ❌ | ❌ | ❌ | ❌ |
-| Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ Native | Via plugins |
+| Parallel execution | ✅ 1–10 workers | ✅ Cloud | ✅ Cloud | ✅ Cloud | ✅ CLI sharding |
+| Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ❌ → DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ❌ → FEA-001 | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 | Multi-tenancy / RBAC | ❌ → ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ❌ → DIF-004 | ✅ | ✅ | ✅ | ❌ |
-| Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ❌ | ❌ |
+| Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
 | Accessibility testing | ❌ → AUTO-016 | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
 | Quality gate enforcement | ❌ → AUTO-012 | ✅ | ✅ | ✅ | Via Playwright |
 
-**Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + NL test editing. No competitor offers all of these together.
+**Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
 **Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · SEC-001 · DIF-001 · DIF-002
 
@@ -1130,12 +1136,12 @@ The following items have been verified complete against the codebase and are **n
 | Security & Compliance | SEC-001–004 | SEC-001 | SEC-002, SEC-003 | SEC-004 |
 | Infrastructure | INF-001–005 | INF-001, INF-002 | INF-003 | INF-004, INF-005 |
 | Access Control | ACL-001–002 | ACL-001, ACL-002 | — | — |
-| Platform Features | FEA-001–004 | — | FEA-001 | FEA-002–004 |
-| Differentiators | DIF-001–014 | — | — | All |
+| Platform Features | FEA-001–003 | — | FEA-001 | FEA-002–003 |
+| Differentiators | DIF-001–015 | — | — | All |
 | Autonomous Intelligence | AUTO-001–020 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
 | Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
 
-**Total active items:** 55 tracked items across 7 categories
+**Total active items:** 57 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
 SEC-001 (email verification) · INF-001 (PostgreSQL) · INF-002 (Redis) · ACL-001 (multi-tenancy) · ACL-002 (RBAC)
@@ -1144,7 +1150,7 @@ SEC-001 (email verification) · INF-001 (PostgreSQL) · INF-002 (Redis) · ACL-0
 `SEC-001` → `INF-001` → `INF-002` → `ACL-001` → `ACL-002` → `INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
 
 **Lowest effort / highest immediate value:**
-SEC-002 (S) · INF-005 (S) · DIF-003 (S) · DIF-011 (S) · AUTO-007 (S) · AUTO-013 (S)
+INF-005 (S) · DIF-003 (S) · DIF-011 (S) · DIF-014 (S) · AUTO-007 (S) · AUTO-013 (S)
 
 ---
 
