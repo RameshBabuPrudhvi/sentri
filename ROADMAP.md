@@ -432,7 +432,25 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-### DIF-015 — Step-level timing waterfall 🔵 Medium
+### DIF-015 — Interactive browser recorder for test creation 🟡 High
+
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ)
+
+**Problem:** Sentri requires users to either write a plain-English description or wait for a full-site crawl to create tests. BearQ's primary UX is a visual recorder: click through the app, and the AI records and enhances the test. Users who cannot articulate a test scenario in text have no path to test creation. This is the single biggest UX barrier vs BearQ.
+
+**Fix:** Add a "Record a test" mode that opens the target URL in a Playwright browser served via CDP screencast (the live view infrastructure already exists). Capture user interactions (clicks, fills, navigations) as raw Playwright actions. On stop, run the captured actions through the existing assertion enhancement pipeline (Stage 6) and self-healing transform (`applyHealingTransforms`). Save as a draft test with the recorded code.
+
+**Files to change:**
+- New `backend/src/runner/recorder.js` — Playwright `page.on('action')` capture + CDP session management
+- `backend/src/routes/runs.js` — `POST /api/projects/:id/record` endpoint to start/stop recording
+- `frontend/src/components/run/RecorderModal.jsx` — live browser view with record/stop controls
+- `frontend/src/pages/Tests.jsx` — "Record a test" button alongside existing Crawl and Generate
+
+**Dependencies:** None (reuses existing CDP screencast and self-healing transform infrastructure)
+
+---
+
+### DIF-016 — Step-level timing waterfall 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
 
@@ -960,6 +978,62 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
+### AUTO-021 — AI-generated test suite health insights 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive (BearQ)
+
+**Problem:** The dashboard shows pass rate, MTTR, and defect breakdown, but never explains *why* metrics changed. BearQ positions AI-driven analytics as a differentiator. AUTO-011 (anomaly detection) detects statistical drops but doesn't provide actionable explanations. The existing `feedbackLoop.js:buildQualityAnalytics()` produces rule-based `insights[]` strings (e.g., "N tests failed on URL assertions"), but these are static templates — not AI-generated contextual analysis.
+
+**Fix:** After each run, feed the quality analytics summary (failure categories, flaky tests, healing events, pass rate delta) to the LLM and generate a 3–5 sentence natural-language insight: "Pass rate dropped 12% — 8 of 10 failures share the same login timeout. The auth endpoint may be degraded. Consider checking `/api/auth/login` response times." Surface as an "AI Insights" card on the dashboard and include in run completion notifications.
+
+**Files to change:**
+- `backend/src/routes/dashboard.js` — generate and cache AI insight on run completion
+- `frontend/src/pages/Dashboard.jsx` — AI Insights card
+- `backend/src/testRunner.js` — trigger insight generation after `applyFeedbackLoop()`
+
+**Dependencies:** FEA-001 (notifications — to include insights in failure alerts)
+
+---
+
+### AUTO-022 — Data-driven test parameterisation 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive (BearQ, Mabl)
+
+**Problem:** There is no way to run the same test with multiple input data sets. Testing login with 10 different user/password combinations, or a search with 20 different queries, requires creating 10 or 20 separate tests. BearQ and Mabl both support data-driven parameterisation natively. MNT-004 (fixtures) covers setup/teardown but not repeated execution with varying inputs.
+
+**Fix:** Add an optional `testData: [{ key: value, … }, …]` array on tests. When present, `testRunner.js` executes the test once per data row, injecting the row's values as variables accessible via `testData.key` in the Playwright code. Report per-row pass/fail in the run results. Add a "Test Data" tab in `TestDetail.jsx` for managing rows.
+
+**Files to change:**
+- `backend/src/testRunner.js` — iterate over `testData` rows per test
+- `backend/src/runner/codeExecutor.js` — inject `testData` variables into execution context
+- `backend/src/database/migrations/` — add `testData` JSON column to `tests`
+- `frontend/src/pages/TestDetail.jsx` — Test Data tab with row editor
+- `frontend/src/pages/RunDetail.jsx` — per-row result breakdown
+
+**Dependencies:** None
+**See also:** MNT-004 (fixtures) — fixtures handle environment setup/teardown; parameterisation handles input variation. They are complementary.
+
+---
+
+### SEC-005 — SAML / OIDC SSO federation 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ, enterprise)
+
+**Problem:** Sentri supports email/password + GitHub/Google OAuth, and SEC-004 covers TOTP MFA, but there is no SAML 2.0 or OIDC federation support. Enterprise procurement teams require SSO integration with their identity provider (Okta, Azure AD, OneLogin, Ping). BearQ inherits SmartBear's enterprise SSO. This is a distinct requirement from MFA — SSO replaces the login flow entirely rather than adding a second factor.
+
+**Fix:** Integrate `openid-client` for OIDC and `@node-saml/passport-saml` for SAML 2.0. Add a per-workspace SSO configuration (metadata URL, client ID, certificate). When SSO is enabled, redirect login to the IdP. Map IdP attributes to Sentri user fields. Auto-provision users on first SSO login. Add SSO configuration UI in Settings → Authentication.
+
+**Files to change:**
+- `backend/src/middleware/authenticate.js` — add `saml` and `oidc` auth strategies
+- `backend/src/routes/auth.js` — SSO callback endpoints, IdP-initiated login
+- `backend/src/database/migrations/` — `sso_configurations` table per workspace
+- `frontend/src/pages/Settings.jsx` — SSO configuration panel
+- `backend/package.json` — add `openid-client`, `@node-saml/passport-saml`
+
+**Dependencies:** ACL-001 (workspaces must exist for per-workspace SSO configuration)
+
+---
+
 ## Ongoing Maintenance & Platform Health
 
 *These items are not phase-bounded. Address them incrementally alongside feature work, prioritising MNT-006 (object storage) before any cloud deployment.*
@@ -1102,7 +1176,9 @@ The following items have been verified complete against the codebase and are **n
 | Capability | Sentri | Mabl | Testim | SmartBear / BearQ | Playwright OSS |
 |---|---|---|---|---|---|
 | AI test generation | ✅ 8-stage pipeline | ✅ Auto-heal only | ✅ AI recorder | ✅ BearQ AI generation † | ❌ Manual |
+| Interactive recorder | ❌ → DIF-015 | ✅ | ✅ | ✅ BearQ recorder † | Via codegen |
 | Self-healing selectors | ✅ Multi-strategy waterfall | ✅ ML-based | ✅ Smart locators | ✅ BearQ AI healing † | ❌ |
+| AI auto-repair on failure | ✅ Feedback loop | ✅ | ✅ | ✅ BearQ † | ❌ |
 | Human review queue | ✅ Draft → Approve flow | ❌ | ❌ | ❌ | ❌ |
 | NL test editing | ✅ AI chat + fix | ❌ | ❌ | ✅ BearQ NL input † | ❌ |
 | API test generation | ✅ HAR-based auto-gen | ✅ | ❌ | ✅ ReadyAPI | ✅ Manual |
@@ -1125,7 +1201,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · SEC-001 · DIF-001 · DIF-002
+**Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · SEC-001 · DIF-001 · DIF-002 · DIF-015 (recorder)
 
 ---
 
@@ -1133,15 +1209,15 @@ The following items have been verified complete against the codebase and are **n
 
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–004 | SEC-001 | SEC-002, SEC-003 | SEC-004 |
+| Security & Compliance | SEC-001–005 | SEC-001 | SEC-002, SEC-003 | SEC-004, SEC-005 |
 | Infrastructure | INF-001–005 | INF-001, INF-002 | INF-003 | INF-004, INF-005 |
 | Access Control | ACL-001–002 | ACL-001, ACL-002 | — | — |
 | Platform Features | FEA-001–003 | — | FEA-001 | FEA-002–003 |
-| Differentiators | DIF-001–015 | — | — | All |
-| Autonomous Intelligence | AUTO-001–020 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
+| Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
+| Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
 | Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
 
-**Total active items:** 57 tracked items across 7 categories
+**Total active items:** 61 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
 SEC-001 (email verification) · INF-001 (PostgreSQL) · INF-002 (Redis) · ACL-001 (multi-tenancy) · ACL-002 (RBAC)
