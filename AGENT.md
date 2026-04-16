@@ -175,6 +175,12 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
 
+#### Test shared utilities (`backend/tests/helpers/`)
+
+| Module | What it provides | When to use |
+|---|---|---|
+| `test-base.js` | `createTestContext()` → `{ app, req, resetDb, setupEnv, registerAndLogin, extractCookie, parseCookies, buildCookieHeader, decodeJwtPayload, createTestRunner, getDatabase }` | Every integration test that needs HTTP requests, auth, or DB access |
+
 **If you need a shared helper** (e.g. `escapeHtml`, `formatDuration`, `debounce`), create it in `frontend/src/utils/<name>.js` and import it. Do not define utility functions locally inside a component file — they will inevitably be needed elsewhere and duplicated.
 
 ```js
@@ -563,6 +569,7 @@ Or run all at once: `npm test` from `backend/`.
 - Integration tests use a shared SQLite database file. Reset state between tests by calling `getDatabase().exec("DELETE FROM ...")` on each table and resetting counters. Seed test data using repository modules (`projectRepo.create(...)`, `testRepo.create(...)`, etc.) — never use `getDb()` for writes in tests.
 - **Unit tests** (repositories, utilities) use the synchronous `test(name, fn)` pattern — no HTTP server needed.
 - **Integration tests** (route handlers, auth flows) spin up the Express app on a random port via `app.listen(0)`, make real HTTP requests, and shut down in a `finally` block.
+- **Shared test helpers** live in `backend/tests/helpers/test-base.js`. Use `createTestContext()` to get a pre-wired bundle of utilities: `req()` (CSRF-aware HTTP), `resetDb()`, `setupEnv()`, `registerAndLogin()`, `extractCookie()`, `parseCookies()`, `buildCookieHeader()`, `decodeJwtPayload()`, and `createTestRunner()`. New integration tests should import from `test-base.js` instead of duplicating these patterns.
 
 #### What makes a good test
 
@@ -1062,3 +1069,4 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.
+- **Do not duplicate test helpers.** Integration test utilities (`extractCookie`, `resetDb`, `req` with CSRF, `registerAndLogin`, `setupEnv`, `createTestRunner`) live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.

@@ -5,15 +5,17 @@
  */
 
 import assert from "node:assert/strict";
-import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import recycleBinRouter from "../src/routes/recycleBin.js";
-import { getDatabase } from "../src/database/sqlite.js";
 import * as projectRepo from "../src/database/repositories/projectRepo.js";
 import * as testRepo from "../src/database/repositories/testRepo.js";
-import { generateProjectId, generateTestId } from "../src/utils/idGenerator.js";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { app, req, getDatabase } = t;
+const { test, summary } = t.createTestRunner();
 
 // ─── Mount routes once ────────────────────────────────────────────────────────
 
@@ -27,85 +29,22 @@ function mountOnce() {
   mounted = true;
 }
 
-// ─── DB helpers ───────────────────────────────────────────────────────────────
-
-function resetDb() {
-  const db = getDatabase();
-  db.exec("DELETE FROM healing_history");
-  db.exec("DELETE FROM activities");
-  db.exec("DELETE FROM runs     WHERE id LIKE 'RUN-RB-%'");
-  db.exec("DELETE FROM tests    WHERE id LIKE 'TC-RB-%'");
-  db.exec("DELETE FROM projects WHERE id LIKE 'PRJ-RB-%'");
-  db.exec("DELETE FROM users    WHERE email LIKE '%@recycle-bin-test%'");
-}
-
-// ─── HTTP helpers ─────────────────────────────────────────────────────────────
-
-let csrfToken = null;
-
-function extractCookie(res, name) {
-  const raw = res.headers.getSetCookie?.() || [];
-  for (const c of raw) {
-    const match = c.match(new RegExp(`^${name}=([^;]+)`));
-    if (match) return match[1];
-  }
-  return null;
-}
-
-async function req(base, path, { method = "GET", token, body } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (csrfToken) {
-    headers["X-CSRF-Token"] = csrfToken;
-    headers.Cookie = `_csrf=${csrfToken}`;
-  }
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const csrf = extractCookie(res, "_csrf");
-  if (csrf) csrfToken = csrf;
-  const json = await res.json().catch(() => ({}));
-  return { res, json };
-}
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
-
 async function main() {
   mountOnce();
-  resetDb();
+  t.resetDb();
 
-  // Skip email verification so test users can log in immediately (SEC-001)
-  const origSkipVerify = process.env.SKIP_EMAIL_VERIFICATION;
-  process.env.SKIP_EMAIL_VERIFICATION = "true";
+  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true" });
 
   const server = app.listen(0);
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
-  // Register + login to get auth token
-  const email = "rb-test@recycle-bin-test.com";
-  const password = "RbTest1234!";
-  await req(base, "/api/auth/register", { method: "POST", body: { name: "RB Test", email, password } });
-  const { res: loginRes } = await req(base, "/api/auth/login", { method: "POST", body: { email, password } });
-  const token = extractCookie(loginRes, "access_token");
-  assert.ok(token, "should receive auth token");
+  // Register + login using shared helper
+  const { token } = await t.registerAndLogin(base, {
+    name: "RB Test",
+    email: "rb-test@recycle-bin-test.com",
+    password: "RbTest1234!",
+  });
 
   // ── Create shared test data directly via repos (fast, no HTTP overhead) ──
   const prbId = "PRJ-RB-001";
@@ -244,11 +183,10 @@ async function main() {
     assert.ok(t1Deleted?.deletedAt, "individually-deleted test should still have deletedAt set");
   });
 
-  process.env.SKIP_EMAIL_VERIFICATION = origSkipVerify;
+  env.restore();
   server.close();
 
-  console.log(`\n  ${passed} passed, ${failed} failed`);
-  if (failed > 0) process.exit(1);
+  summary("recycle-bin");
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
