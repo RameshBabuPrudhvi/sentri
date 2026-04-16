@@ -55,6 +55,7 @@ The following items have been verified complete against the codebase and are **n
 | MAINT-012 | Deep test validation (locator, action, assertion) | PR #57 |
 | MAINT-013 | Graceful shutdown with in-flight run draining | PR #86 |
 | MAINT-016 | Renovate for automated dependency updates | Renovate |
+| SEC-001 | Email verification on registration | PR #87 |
 
 ---
 
@@ -78,7 +79,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### SEC-001 — Email verification on registration 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (GAP-01)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-01)
 
 **Problem:** `POST /api/auth/register` creates accounts immediately with no email verification. Any actor can claim any email address, enabling account spoofing. The forgot-password flow explicitly acknowledges this gap (`auth.js:426`). This is a SOC 2 compliance failure.
 

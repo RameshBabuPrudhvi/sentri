@@ -32,6 +32,7 @@ const files = [
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",
   "tests/ssrf-protection.test.js",
+  "tests/email-verification.test.js",
 ];
 
 let passed = 0;

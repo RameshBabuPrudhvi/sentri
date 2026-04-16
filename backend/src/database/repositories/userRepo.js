@@ -62,7 +62,7 @@ export function create(user) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "email", "passwordHash", "role", "avatar", "updatedAt"];
+  const allowed = ["name", "email", "passwordHash", "role", "avatar", "emailVerified", "updatedAt"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {

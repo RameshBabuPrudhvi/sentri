@@ -67,12 +67,22 @@ export default function Login() {
   const [success, setSuccess] = useState("");
   const [mounted, setMounted] = useState(false);
   const [tIdx, setTIdx] = useState(0);
+  const [verifyEmail, setVerifyEmail] = useState(""); // SEC-001: email needing verification
+  const [resending, setResending] = useState(false);
 
   const from = location.state?.from?.pathname || "/dashboard";
 
   useEffect(() => {
     setMounted(true);
     const params = new URLSearchParams(location.search);
+
+    // SEC-001: Handle email verification token from link
+    const verifyToken = params.get("verify");
+    if (verifyToken) {
+      handleVerifyToken(verifyToken);
+      return;
+    }
+
     const code = params.get("code");
     const provider = params.get("provider");
     const err = params.get("error");
@@ -89,6 +99,33 @@ export default function Login() {
     }
     if (code && provider && ["github", "google"].includes(provider)) handleOAuthCallback(provider, code);
   }, []);
+
+  async function handleVerifyToken(token) {
+    setLoading(true); setError(""); setSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/verify?token=${encodeURIComponent(token)}`, { credentials: "include" });
+      const data = await parseJsonResponse(res);
+      if (!res.ok) throw new Error(data.error || "Verification failed");
+      setSuccess(data.message || "Email verified successfully! You can now sign in.");
+      setMode("login");
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
+  }
+
+  async function handleResendVerification() {
+    if (!verifyEmail || resending) return;
+    setResending(true); setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "include", body: JSON.stringify({ email: verifyEmail }),
+      });
+      const data = await parseJsonResponse(res);
+      if (!res.ok) throw new Error(data.error || "Failed to resend");
+      setSuccess("Verification email sent! Please check your inbox.");
+    } catch (e) { setError(e.message); }
+    finally { setResending(false); }
+  }
 
   const [testiPaused, setTestiPaused] = useState(false);
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
@@ -143,8 +180,22 @@ export default function Login() {
       const body = mode === "login" ? { email, password } : { name, email, password };
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
       const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "Something went wrong");
-      if (mode === "register") { setSuccess("Account created! You can now sign in."); setMode("login"); setPassword(""); setConfirmPassword(""); }
+      if (!res.ok) {
+        // SEC-001: Handle unverified email on login attempt
+        if (data.code === "EMAIL_NOT_VERIFIED" && data.email) {
+          setVerifyEmail(data.email);
+        }
+        throw new Error(data.error || "Something went wrong");
+      }
+      if (mode === "register") {
+        if (data.requiresVerification) {
+          setSuccess("Account created! Please check your email to verify your account before signing in.");
+          setVerifyEmail(email);
+        } else {
+          setSuccess("Account created! You can now sign in.");
+        }
+        setMode("login"); setPassword(""); setConfirmPassword("");
+      }
       else login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -242,6 +293,17 @@ export default function Login() {
               <div className="lp-alert lp-aok" role="status">
                 <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" style={{flexShrink:0,marginTop:1}}><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>
                 {success}
+              </div>
+            )}
+
+            {/* SEC-001: Resend verification email prompt */}
+            {verifyEmail && (
+              <div className="lp-alert" role="status" style={{background:"#eff6ff",border:"1px solid #bfdbfe",color:"#1e40af",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <svg viewBox="0 0 20 20" width="15" height="15" fill="currentColor" style={{flexShrink:0}}><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/></svg>
+                <span style={{flex:1}}>Didn't receive the email? Check your spam folder or</span>
+                <button type="button" onClick={handleResendVerification} disabled={resending} style={{background:"#3b82f6",color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",opacity:resending?0.6:1}}>
+                  {resending ? "Sending…" : "Resend verification email"}
+                </button>
               </div>
             )}
 

@@ -112,6 +112,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
+| `emailSender.js` | `sendEmail()`, `sendVerificationEmail()`, `getTransportName()` | Transactional email (Resend / SMTP / console fallback) |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 
@@ -359,7 +360,7 @@ The CSRF middleware in `appSetup.js` skips validation when no `access_token` coo
 | File | Role |
 |---|---|
 | `middleware/authenticate.js` | Strategy definitions, JWT primitives (`signJwt`, `verifyJwt`, `getJwtSecret`), token revocation, `authenticate()` factory |
-| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
+| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset, email verification). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
 | `middleware/appSetup.js` | CSRF middleware — imports `AUTH_COOKIE` from `authenticate.js` for auto-exemption |
 | `routes/trigger.js` | CI/CD trigger routes — uses `requireTrigger` from `authenticate.js` |
 
@@ -370,7 +371,7 @@ Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
 - **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -890,6 +891,13 @@ The following are **not yet implemented** but should be addressed before product
 | `MAX_CONVERSATION_TURNS` | No | `20` | Max user↔assistant turn pairs in chat context window (sliding window trims older turns) |
 | `ARTIFACT_SECRET` | Yes (prod) | random (dev) | HMAC-SHA256 key for signing artifact URLs. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `ARTIFACT_TOKEN_TTL_MS` | No | `3600000` (1 hr) | Lifetime of signed artifact URL tokens (ms) |
+| `RESEND_API_KEY` | No | — | Resend API key for transactional email |
+| `SMTP_HOST` | No | — | SMTP server host (alternative to Resend) |
+| `SMTP_PORT` | No | `587` | SMTP server port |
+| `SMTP_SECURE` | No | `false` | Use TLS for SMTP |
+| `SMTP_USER` | No | — | SMTP username |
+| `SMTP_PASS` | No | — | SMTP password |
+| `EMAIL_FROM` | No | `Sentri <noreply@sentri.dev>` | Sender address for transactional emails |
 
 ---
 
