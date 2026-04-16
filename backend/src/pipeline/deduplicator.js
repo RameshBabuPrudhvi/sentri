@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 
 /**
- * fingerprintHash(str) → 16-char hex string (64-bit FNV-1a via SHA-256 truncation)
+ * fingerprintHash(str) → 16-char hex string (64-bit via SHA-256 truncation)
  *
  * Replaces the previous 32-bit djb2 implementation. A 32-bit hash has a
  * ~1-in-4-billion collision rate per pair, which becomes non-negligible once a
@@ -208,7 +208,7 @@ export function hashTest(test) {
     .join("|");
 
   // Include description in hash so tests with identical code but different
-  // description fields are not treated as unique (resolves defect #4).
+  // descriptions produce distinct fingerprints (resolves defect #4).
   const descriptionPart = normalizeText(test.description || "");
   const signature = [
     playwrightActions || stepsSignature || normalizeText(test.name),
@@ -226,7 +226,6 @@ export function hashTest(test) {
 export function scoreTest(test) {
   let score = 0;
   const code = test.playwrightCode || "";
-  const steps = (test.steps || []).join(" ");
 
   // Reward strong assertions
   if (code.includes("toHaveURL")) score += 20;
@@ -317,7 +316,7 @@ export function deduplicateTests(tests) {
       // deduplicated within the same batch.
       if (
         normCandName.length >= 15 &&
-        candidate.sourceUrl === kept.sourceUrl &&
+        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
         fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
       ) {
         // Keep the higher-quality test
@@ -336,7 +335,7 @@ export function deduplicateTests(tests) {
       // are not falsely deduplicated.
       if (
         normCandName.length >= 15 &&
-        candidate.sourceUrl === kept.sourceUrl &&
+        candidate.sourceUrl && candidate.sourceUrl === kept.sourceUrl &&
         semanticSimilarity(candidate, kept) >= SEMANTIC_SIMILARITY_THRESHOLD
       ) {
         if (candidate._quality > kept._quality) {
@@ -389,7 +388,7 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     const normName = normalizeText(t.name);
     if (normName && normName.length >= 15 && existingNames.has(normName)) {
       const match = existingTests.find(e =>
-        normalizeText(e.name) === normName && e.sourceUrl === t.sourceUrl
+        normalizeText(e.name) === normName && t.sourceUrl && e.sourceUrl === t.sourceUrl
       );
       if (match) return false;
     }
@@ -399,7 +398,7 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // different pages with similar names are not falsely deduplicated.
     if (normName.length >= 15) {
       const fuzzyMatch = existingTests.find(e =>
-        e.sourceUrl === t.sourceUrl &&
+        t.sourceUrl && e.sourceUrl === t.sourceUrl &&
         fuzzyNameSimilarity(normName, normalizeText(e.name)) >= FUZZY_NAME_THRESHOLD
       );
       if (fuzzyMatch) return false;
@@ -413,7 +412,7 @@ export function deduplicateAcrossRuns(newTests, existingTests) {
     // single shared term yields cosine ≈ 1.0, causing false positives.
     if (normName.length >= 15) {
       const semanticMatch = existingTests.find(e =>
-        e.sourceUrl === t.sourceUrl &&
+        t.sourceUrl && e.sourceUrl === t.sourceUrl &&
         semanticSimilarity(t, e) >= SEMANTIC_SIMILARITY_THRESHOLD
       );
       if (semanticMatch) return false;

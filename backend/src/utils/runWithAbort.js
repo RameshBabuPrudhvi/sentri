@@ -68,11 +68,11 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, a
       emitRunEvent(runId, "done", { status: "failed" });
       runRepo.save(run); // persist failed status to SQLite
     })
-    .finally(() => {
+    .finally(async () => {
       // Fire onComplete for any terminal state (completed, failed, aborted).
-      // Errors are silently caught so a failing callback never masks the
-      // original run outcome or breaks the pipeline cleanup.
-      try { onComplete?.(run); } catch { /* best-effort */ }
+      // Errors (sync or async) are silently caught so a failing callback
+      // never masks the original run outcome or breaks the pipeline cleanup.
+      try { await onComplete?.(run); } catch { /* best-effort */ }
       // Evict the run's seq counter from the runLogRepo cache — the run is
       // finished and will never append more log lines, so keeping the entry
       // would be an unbounded memory leak on long-running servers.
