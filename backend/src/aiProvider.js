@@ -450,7 +450,7 @@ const CLOUD_TIMEOUT_MS = parseInt(process.env.LLM_TIMEOUT_MS, 10) || 120_000;
  *
  * @param {AbortSignal|undefined} external - Signal from runWithAbort (user abort).
  * @param {number}                timeoutMs - Per-call deadline.
- * @returns {{ signal: AbortSignal, cleanup: () => void }}
+ * @returns {Object} `{ signal: AbortSignal, cleanup: Function }`
  */
 function composeSignal(external, timeoutMs) {
   const controller = new AbortController();
