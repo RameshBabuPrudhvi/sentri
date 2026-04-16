@@ -13,6 +13,7 @@
 import { emitRunEvent } from "../routes/sse.js";
 import { logActivity } from "./activityLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import { classifyError } from "./errorClassifier.js";
 import { formatLogLine } from "./logFormatter.js";
 
@@ -72,5 +73,9 @@ export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, a
       // Errors are silently caught so a failing callback never masks the
       // original run outcome or breaks the pipeline cleanup.
       try { onComplete?.(run); } catch { /* best-effort */ }
+      // Evict the run's seq counter from the runLogRepo cache — the run is
+      // finished and will never append more log lines, so keeping the entry
+      // would be an unbounded memory leak on long-running servers.
+      runLogRepo.evictCache(runId);
     });
 }

@@ -159,6 +159,30 @@ export function deleteByRunIds(runIds) {
 }
 
 /**
+ * Hard-delete ALL log rows (used by runRepo.hardClearAll).
+ * Also clears the entire in-process seq cache.
+ *
+ * @returns {number} Total rows deleted.
+ */
+export function deleteAll() {
+  const db = getDatabase();
+  const info = db.prepare("DELETE FROM run_logs").run();
+  _seqCache.clear();
+  return info.changes;
+}
+
+/**
+ * Evict a single run from the in-process seq cache.
+ * Called when a run reaches a terminal state (completed, failed, aborted)
+ * so the cache doesn't grow unboundedly on long-running servers.
+ *
+ * @param {string} runId
+ */
+export function evictCache(runId) {
+  _seqCache.delete(runId);
+}
+
+/**
  * Count log rows for a run.
  * Primarily used in tests to verify write behaviour.
  *

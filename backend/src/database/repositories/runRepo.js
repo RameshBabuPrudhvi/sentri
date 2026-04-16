@@ -380,7 +380,7 @@ export function count() {
  */
 export function hardClearAll() {
   const db = getDatabase();
-  db.prepare("DELETE FROM run_logs").run();
+  runLogRepo.deleteAll();
   const info = db.prepare("DELETE FROM runs").run();
   return info.changes;
 }
