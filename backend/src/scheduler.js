@@ -33,6 +33,7 @@ import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
 import { runTests } from "./testRunner.js";
 import { logActivity } from "./utils/activityLogger.js";
+import { classifyError } from "./utils/errorClassifier.js";
 import { formatLogLine } from "./utils/logFormatter.js";
 
 // ─── Task registry ─────────────────────────────────────────────────────────────
@@ -200,11 +201,11 @@ async function fireScheduledRun(projectId) {
           detail: `Scheduled run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
       },
-      onFailActivity: () => ({
+      onFailActivity: (err) => ({
         type: "scheduled_run.fail",
         projectId: project.id,
         projectName: project.name,
-        detail: `Scheduled run failed`,
+        detail: `Scheduled run failed: ${classifyError(err, "run").message}`,
       }),
       onComplete: () => {
         // Record lastRunAt and update nextRunAt

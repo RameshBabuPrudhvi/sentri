@@ -316,7 +316,7 @@ export function deduplicateTests(tests) {
       // so tests targeting different pages with similar names are not falsely
       // deduplicated within the same batch.
       if (
-        normCandName.length >= 10 &&
+        normCandName.length >= 15 &&
         candidate.sourceUrl === kept.sourceUrl &&
         fuzzyNameSimilarity(normCandName, normalizeText(kept.name)) >= FUZZY_NAME_THRESHOLD
       ) {

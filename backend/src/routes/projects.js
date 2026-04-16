@@ -112,8 +112,6 @@ router.delete("/:id", (req, res) => {
   res.json({ ok: true, deletedTests: testIds.length, deletedRuns: runIds.length });
 });
 
-export default router;
-
 // ─── Schedule endpoints ───────────────────────────────────────────────────────
 
 /**
@@ -216,3 +214,5 @@ router.delete("/:id/schedule", (req, res) => {
 
   res.json({ ok: true });
 });
+
+export default router;
