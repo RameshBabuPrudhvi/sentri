@@ -26,7 +26,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
-    middleware/            Express middleware (appSetup, CORS, Helmet)
+    middleware/            Express middleware (appSetup, authenticate, CORS, Helmet)
     routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin, trigger)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
@@ -306,7 +306,7 @@ console.error(`API key: ${apiKey}`);
 - 4xx errors return `{ error: string }` with a descriptive message.
 - 5xx errors return `{ error: "Internal server error" }` — never leak stack traces to the client.
 - Validate all user-supplied input at the route boundary using `utils/validate.js` before touching the DB.
-- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware. The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use their own `requireTriggerToken` middleware (defined in `routes/trigger.js`) for per-project Bearer token authentication (ENH-011).
+- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware (re-exported from `routes/auth.js`, delegates to `middleware/authenticate.js`). The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use `requireTrigger` from `middleware/authenticate.js` for per-project Bearer token authentication (ENH-011). Both middlewares are produced by the same `authenticate()` strategy factory — see "Authentication Architecture" below.
 
 ```js
 // ✅ Route pattern — use repository modules for DB access
@@ -320,6 +320,48 @@ router.post("/projects/:id/thing", async (req, res) => {
   res.json({ ok: true, result });
 });
 ```
+
+### Authentication Architecture
+
+All authentication is centralised in **`backend/src/middleware/authenticate.js`** using a strategy pattern. This is the single source of truth for token extraction, verification, and revocation. Route files never implement their own auth logic.
+
+#### Strategy table
+
+| Strategy name    | Token source                   | Verifier                                 | Sets on `req`                              |
+|------------------|--------------------------------|------------------------------------------|--------------------------------------------|
+| `jwt-cookie`     | `access_token` HttpOnly cookie | HS256 JWT verify + revocation check      | `req.authUser`                             |
+| `jwt-bearer`     | `Authorization: Bearer` header | Same                                     | `req.authUser`                             |
+| `jwt-query`      | `?token=` query param (SSE)    | Same                                     | `req.authUser`                             |
+| `trigger-token`  | `Authorization: Bearer` header | SHA-256 hash lookup in `webhook_tokens`  | `req.triggerToken`, `req.triggerProject`    |
+
+#### Convenience aliases
+
+| Alias            | Strategies tried (in order)                       | Used by                                   |
+|------------------|---------------------------------------------------|-------------------------------------------|
+| `requireUser`    | `jwt-cookie` → `jwt-bearer` → `jwt-query`        | All user-facing routes (via `requireAuth`) |
+| `requireTrigger` | `trigger-token`                                   | CI/CD trigger endpoints in `trigger.js`    |
+| `requireAuth`    | Re-export of `requireUser` from `routes/auth.js`  | Backward compat — all existing imports     |
+
+#### CSRF auto-exemption
+
+The CSRF middleware in `appSetup.js` skips validation when no `access_token` cookie is present on the request. This means non-cookie auth strategies (Bearer token, trigger token, query param) are automatically CSRF-exempt — no manual regex carve-outs needed. When adding a new auth strategy, if it does not use cookies, CSRF exemption is automatic.
+
+#### Adding a new auth strategy
+
+1. Add a new entry to `AUTH_TYPE` in `middleware/authenticate.js`.
+2. Add a strategy object to the `STRATEGIES` array (extract → verify).
+3. If the strategy uses cookies, add its name to `COOKIE_STRATEGIES`.
+4. Create a convenience alias (e.g. `export const requireApiKey = authenticate(AUTH_TYPE.API_KEY)`).
+5. Mount it on the relevant routes. No changes needed to `appSetup.js`, `index.js`, or other route files.
+
+#### Key files
+
+| File | Role |
+|---|---|
+| `middleware/authenticate.js` | Strategy definitions, JWT primitives (`signJwt`, `verifyJwt`, `getJwtSecret`), token revocation, `authenticate()` factory |
+| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
+| `middleware/appSetup.js` | CSRF middleware — imports `AUTH_COOKIE` from `authenticate.js` for auto-exemption |
+| `routes/trigger.js` | CI/CD trigger routes — uses `requireTrigger` from `authenticate.js` |
 
 ### Database
 
@@ -785,9 +827,9 @@ When adding external observability, consider:
 Before submitting any PR that touches auth, routes, or data handling, verify:
 
 - [ ] Passwords are hashed with `hashPassword()` (scrypt, random salt) — never stored plaintext.
-- [ ] JWTs are validated with `requireAuth` on every non-public endpoint.
+- [ ] JWTs are validated with `requireAuth` (or `requireUser`/`requireTrigger` from `middleware/authenticate.js`) on every non-public endpoint.
 - [ ] JWTs are stored in HttpOnly cookies only — never returned in response bodies or stored in localStorage.
-- [ ] Mutating endpoints (POST/PATCH/PUT/DELETE) are protected by CSRF double-submit cookie validation (handled by `csrfMiddleware` in `appSetup.js`). New exempt paths must be added to `CSRF_EXEMPT_PATHS`.
+- [ ] Mutating endpoints (POST/PATCH/PUT/DELETE) are protected by CSRF double-submit cookie validation (handled by `csrfMiddleware` in `appSetup.js`). Non-cookie auth strategies are auto-exempt. Public mutation paths must be added to `CSRF_EXEMPT_PATHS`.
 - [ ] User-supplied strings are validated with `utils/validate.js` before DB writes.
 - [ ] No sensitive data (API keys, passwords, full JWTs) is returned in API responses. Use `maskKey()` for display.
 - [ ] Credential values stored in the DB use `credentialEncryption.js`.
@@ -856,8 +898,8 @@ The following are **not yet implemented** but should be addressed before product
 ### Adding a New API Endpoint
 
 1. Add the handler to the appropriate file in `backend/src/routes/`.
-2. Mount it in `index.js` behind `requireAuth` unless it is explicitly public.
-3. If the endpoint is a public mutation (no auth required), add it to `CSRF_EXEMPT_PATHS` in `backend/src/middleware/appSetup.js`.
+2. Mount it in `index.js` behind `requireAuth` unless it is explicitly public or uses a different auth strategy (e.g. `requireTrigger` for CI/CD endpoints).
+3. If the endpoint uses a new auth strategy, add it to `middleware/authenticate.js` (see "Authentication Architecture"). Non-cookie strategies are CSRF-exempt automatically. Public mutation paths must be added to `CSRF_EXEMPT_PATHS` in `appSetup.js`.
 4. Add a JSDoc block documenting method, path, auth requirement, request body, and response shape.
 5. Add a corresponding function in `frontend/src/api.js`. The `req()` wrapper auto-injects `credentials: "include"` and `X-CSRF-Token` — no manual auth handling needed.
 6. Write a test in `backend/tests/api-flow.test.js` or a dedicated test file. Register it in `backend/tests/run-tests.js`.
