@@ -20,8 +20,9 @@ import { API_BASE } from "../utils/apiBase.js";
 
 function setFaviconStatus(status) {
   try {
-    const emoji = status === "running"   ? "⏳"
-                : status === "completed" ? "✅"
+    const emoji = status === "running"         ? "⏳"
+                : status === "completed"       ? "✅"
+                : status === "completed_empty" ? "⚠️"
                 : "❌";
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 32;
