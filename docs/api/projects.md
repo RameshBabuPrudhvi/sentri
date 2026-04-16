@@ -40,6 +40,21 @@ DELETE /api/projects/:id
 
 Soft-deletes the project and cascade soft-deletes all its tests and runs. Items are moved to the Recycle Bin and can be restored via `POST /api/restore/project/:id`. Healing history and activities are preserved for audit trail. Returns 409 if a crawl or test run is in progress.
 
+**Response:**
+```json
+{
+  "ok": true,
+  "deletedTests": 12,
+  "deletedRuns": 5,
+  "destroyedTokens": 2,
+  "destroyedSchedule": true
+}
+```
+
+::: warning
+CI/CD trigger tokens and cron schedules are **permanently deleted** (not soft-deleted) because they are security credentials and active cron tasks. Restoring the project from the Recycle Bin will **not** restore these — they must be re-created manually.
+:::
+
 ## Start a Crawl
 
 ```

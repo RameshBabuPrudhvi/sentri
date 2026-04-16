@@ -25,12 +25,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **API**: `callbackUrl` webhook now fires on **any** terminal state (completed, failed, aborted) — previously it only fired on success, leaving CI pipelines unnotified on failure; payload now includes `error` field (#86)
+- **API**: `callbackUrl` input now capped at 2048 characters to prevent abuse via extremely long URLs (#85)
+- **API**: `DELETE /api/projects/:id` response now includes `destroyedTokens` and `destroyedSchedule` counts so the frontend can warn about permanently lost automation config (#85)
+- **Scheduler**: Timezone conversion in `getNextRunAt()` replaced fragile `toLocaleString` round-trip with `Intl.DateTimeFormat.formatToParts()` — spec-guaranteed approach that correctly handles DST transitions (spring-forward gaps, fall-back overlaps) (#85)
+- **Scheduler**: Scheduled runs now respect `PARALLEL_WORKERS` env var instead of hardcoding `parallelWorkers: 1` (#85)
+- **API**: `/api/system` endpoint now includes `activeSchedules` count from the cron task registry (#85)
+- **Pipeline**: `waitFor` added to `VALID_PAGE_ACTIONS` whitelist in test validator — prevents false rejection of tests using `locator.waitFor()` (#85)
+- **Frontend**: `DeleteProjectModal` now warns users about permanently destroyed CI/CD tokens and schedules before confirming project deletion (#85)
+- **Frontend**: Automation preset dropdown now supports keyboard navigation (Arrow keys, Escape, focus management) for accessibility (#85)
+- **Frontend**: Client-side cron validator relaxed to accept range+step (`0-30/5`) and list+range (`1-5,10`) expressions — defers full validation to server (#85)
+- **Frontend**: `confirm()` calls standardised to `window.confirm()` across all automation components (#85)
 
 ### Security
 - **API**: SSRF protection for `callbackUrl` hardened with DNS resolution — domains pointing to private/reserved IPs (e.g. `evil.com → 169.254.169.254`) are now blocked at validation time via `dns.promises.lookup()`; fetch uses `redirect: "error"` to prevent open-redirect bypasses; DNS is re-resolved at fetch time to mitigate rebinding attacks (#86)
 
 ### Changed
 - **Data**: Run log lines are now persisted in the `run_logs` table instead of the `runs.logs` JSON column — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically so callers see no API change (ENH-008) (#86)
+- **Frontend**: Duplicated `CopyButton` component extracted to `components/shared/CopyButton.jsx` — used by TokenManager and IntegrationSnippets (#85)
+- **Frontend**: Duplicated date/time formatters (`fmtDate`, `fmtNextRun`) consolidated into `utils/formatters.js` as `fmtDateTimeMedium()` and `fmtFutureRelative()` (#85)
+- **Frontend**: Automation component inline styles replaced with CSS classes in `features/automation.css` — 15 new `.auto-*` classes for cards, schedules, presets, and integration grid (#85)
+- **Backend**: Duplicated Bearer token auth logic in trigger routes extracted to `requireTriggerToken` middleware (#85)
+- **Tests**: Added `ssrf-protection.test.js` with 35 unit tests covering all IPv4/IPv6 private range detection, cloud metadata IPs, and hostname false-positive guards (#85)
+- **Tests**: Added 4 timezone correctness tests for `getNextRunAt()` covering Asia/Tokyo, Europe/London, Australia/Sydney, and cross-timezone offset verification (#85)
 
 ## [1.3.0] — 2026-04-14
 

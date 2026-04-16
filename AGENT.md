@@ -148,6 +148,11 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | Text helpers | `.text-sm .text-xs .text-muted .text-sub .text-mono .font-bold .font-semi` | Inline font overrides |
 | Divider line | `.divider` | `style={{ height: 1, background: "var(--border)" }}` |
 | Animations | `.spin .pulse .fade-in .skeleton` | Custom `@keyframes` for common effects |
+| Automation card | `.auto-card__header .auto-card__icon .auto-card__body .auto-card__section .auto-card__section--bordered .auto-card__section-title` | `features/automation.css` — project automation card layout |
+| Schedule blocks | `.auto-sched-empty .auto-sched-summary .auto-sched-editor .auto-sched-hint .auto-sched-label` | `features/automation.css` — schedule manager states |
+| Preset dropdown | `.auto-preset-menu .auto-preset-item` | `features/automation.css` — cron preset picker |
+| Integration grid | `.auto-integ-grid .auto-integ-card .auto-integ-icon` | `features/automation.css` — CI/CD integration card grid |
+| Token states | `.auto-token-reveal .auto-token-empty .auto-snippet` | `features/automation.css` — token reveal banner, empty state, CI snippets |
 
 **When to create a new CSS file**:
 - **Feature-scoped styles** → `frontend/src/styles/features/<feature>.css` — for self-contained features (e.g. chat, onboarding). Scope all classes under a namespace prefix (`.chat-*`, `.onboard-*`).
@@ -163,6 +168,8 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
 | `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
 | `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
+| `src/utils/formatters.js` | `fmtMs()`, `fmtDate()`, `fmtDateTime()`, `fmtRelativeDate()`, `fmtDateTimeMedium()`, `fmtFutureRelative()`, `fmtDuration()`, `passRateColor()` | All date, time, duration, and colour formatting across pages and components |
+| `src/components/shared/CopyButton.jsx` | `<CopyButton text={…} />` | Copy-to-clipboard button with "Copied" feedback (used by TokenManager, IntegrationSnippets) |
 | `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
@@ -299,7 +306,7 @@ console.error(`API key: ${apiKey}`);
 - 4xx errors return `{ error: string }` with a descriptive message.
 - 5xx errors return `{ error: "Internal server error" }` — never leak stack traces to the client.
 - Validate all user-supplied input at the route boundary using `utils/validate.js` before touching the DB.
-- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware. The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use their own per-project Bearer token authentication (ENH-011).
+- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware. The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use their own `requireTriggerToken` middleware (defined in `routes/trigger.js`) for per-project Bearer token authentication (ENH-011).
 
 ```js
 // ✅ Route pattern — use repository modules for DB access
@@ -763,7 +770,7 @@ The Vite dev server proxies `/api/*` to `http://localhost:3001` automatically. I
 Current observability:
 
 - **Health endpoint**: `GET /health` — use for uptime monitoring (e.g. UptimeRobot, Pingdom).
-- **System info**: `GET /api/system` (authenticated) — returns uptime, Node/Playwright versions, memory usage, and DB record counts.
+- **System info**: `GET /api/system` (authenticated) — returns uptime, Node/Playwright versions, memory usage, DB record counts, and `activeSchedules` (number of armed cron tasks).
 - **Structured logging**: All backend logs go through `formatLogLine()` from `utils/logFormatter.js`. Set `LOG_JSON=true` for machine-parseable JSON lines (compatible with Datadog, Cloud Logging, etc.). Semantic lifecycle events (`run.start`, `browser.launched`, `run.complete`, etc.) are emitted via `structuredLog()`.
 - **SSE events**: Real-time run progress is streamed to the frontend via Server-Sent Events.
 
