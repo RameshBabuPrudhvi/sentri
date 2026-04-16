@@ -152,7 +152,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-002 — Redis for rate limiting, token revocation, and SSE pub/sub 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
 
 **Problem:** Three critical components are process-local and broken in any multi-instance deployment: (1) `revokedTokens` Map — logged-out users can reuse tokens after restart; (2) `express-rate-limit` memory store — rate limits reset on restart and are not shared across instances; (3) `runListeners` Map — SSE events emitted on instance A are never received by clients on instance B.
 

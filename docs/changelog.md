@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DB**: `sqlite-adapter.js` and `postgres-adapter.js` — database adapter modules implementing the unified `prepare`/`exec`/`transaction`/`pragma`/`close` interface (INF-001) (#87)
 - **DB**: Dialect-aware migration runner — automatically translates SQLite-specific SQL (AUTOINCREMENT, datetime, INSERT OR IGNORE/REPLACE, LIKE) to PostgreSQL when running against a PostgreSQL backend (INF-001) (#87)
 - **Docker**: Optional PostgreSQL service in `docker-compose.yml` — activate with `docker compose --profile postgres up` (INF-001) (#87)
+- **Infra**: Redis support for rate limiting, token revocation, and SSE pub/sub — set `REDIS_URL` to enable; falls back to in-memory stores when Redis is not configured (INF-002) (#87)
+- **Auth**: Token revocation now writes to both Redis (with TTL) and the local Map, so revocations survive server restarts and are visible across instances (INF-002) (#87)
+- **API**: Rate limiters (`express-rate-limit`) use `rate-limit-redis` store when Redis is available, sharing counters across all instances (INF-002) (#87)
+- **SSE**: Run events are published to Redis pub/sub channels; SSE endpoints subscribe per-run so events from any instance reach all connected browsers (INF-002) (#87)
+- **Docker**: Optional Redis service in `docker-compose.yml` — activate with `docker compose --profile redis up` (INF-002) (#87)
 
 ### Security
 - **Auth**: Login blocked for unverified email accounts — returns `403` with `EMAIL_NOT_VERIFIED` code; prevents account spoofing via unclaimed email addresses (SEC-001) (#87)

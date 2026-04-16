@@ -174,6 +174,9 @@ router.get("/runs/:runId/events", (req, res) => {
   if (!runListeners.has(runId)) runListeners.set(runId, new Set());
   runListeners.get(runId).add(res);
 
+  // Subscribe to the Redis channel so events from other instances are relayed.
+  _subscribeToRun(runId);
+
   // Heartbeat — keeps the connection alive through proxies / load balancers.
   // 5 s interval: long AI feedback-loop calls (30–120 s) can cause aggressive
   // OS TCP stacks or proxies to reset the idle SSE connection. A shorter
@@ -185,7 +188,11 @@ router.get("/runs/:runId/events", (req, res) => {
   req.on("close", () => {
     clearInterval(heartbeat);
     runListeners.get(runId)?.delete(res);
-    if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
+    if (runListeners.get(runId)?.size === 0) {
+      runListeners.delete(runId);
+      // No more local listeners for this run — unsubscribe from Redis channel
+      _unsubscribeFromRun(runId);
+    }
   });
 });
 

@@ -25,6 +25,7 @@ import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
 import { initScheduler, stopAllTasks } from "./scheduler.js";
+import { closeRedis } from "./utils/redisClient.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -139,7 +140,10 @@ async function gracefulShutdown(signal) {
     runAbortControllers.clear();
   }
 
-  // 5. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
+  // 5. Close Redis connections (INF-002)
+  await closeRedis();
+
+  // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
   closeDatabase();
   console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
   process.exit(0);

@@ -34,6 +34,8 @@ services:
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
       # Uncomment to use PostgreSQL instead of SQLite:
       # - DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
+      # Uncomment to use Redis for rate limiting, token revocation, and SSE pub/sub:
+      # - REDIS_URL=redis://redis:6379
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -58,6 +60,23 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    restart: unless-stopped
+
+  # ── Optional Redis service (INF-002) ─────────────────────────────────────────
+  # Activate with: docker compose --profile redis up
+  # Set REDIS_URL on the backend service (see above).
+  redis:
+    image: redis:7-alpine
+    container_name: sentri-redis
+    profiles:
+      - redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   # ── Optional PostgreSQL service (INF-001) ──────────────────────────────────

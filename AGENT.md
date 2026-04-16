@@ -889,6 +889,7 @@ The following are **not yet implemented** but should be addressed before product
 | `JWT_SECRET` | Yes (prod) | — | HS256 signing key |
 | `DATABASE_URL` | No | — | PostgreSQL connection string (`postgres://…`). When set, uses PostgreSQL instead of SQLite. Requires `pg` + `pg-native`. |
 | `PG_POOL_SIZE` | No | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
+| `REDIS_URL` | No | — | Redis connection URL (`redis://…`). When set, enables Redis-backed rate limiting, token revocation, and cross-instance SSE pub/sub. Requires `ioredis`. |
 | `PORT` | No | `3001` | Backend HTTP port |
 | `CORS_ORIGIN` | No | `*` | Allowed frontend origin(s), comma-separated |
 | `PARALLEL_WORKERS` | No | `1` | Default test parallelism |
