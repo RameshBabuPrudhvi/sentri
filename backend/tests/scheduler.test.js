@@ -130,6 +130,43 @@ test("handles range+step field like '0-30/5' for minutes", () => {
   assert.ok(result !== null, "should find a match for range+step field");
 });
 
+// ── Day-of-week 7 = Sunday alias (POSIX cron) ──────────────────────────────
+
+test("dow 7 (Sunday alias) returns a valid future date, not null", () => {
+  // POSIX cron allows both 0 and 7 to mean Sunday. node-cron validates
+  // "0 9 * * 7" and fires correctly, so getNextRunAt must also match.
+  const result = getNextRunAt("0 9 * * 7", "UTC");
+  assert.ok(result !== null, "dow 7 (Sunday alias) must not return null");
+  assert.ok(new Date(result) > new Date(), "result must be in the future");
+  // Verify the matched day is actually a Sunday (getDay() === 0)
+  assert.equal(new Date(result).getUTCDay(), 0,
+    "dow 7 should match Sunday (getUTCDay()=0), got " + new Date(result).getUTCDay());
+});
+
+test("dow 0 and dow 7 produce the same next-fire time", () => {
+  const with0 = getNextRunAt("0 9 * * 0", "UTC");
+  const with7 = getNextRunAt("0 9 * * 7", "UTC");
+  assert.ok(with0 !== null && with7 !== null);
+  assert.equal(with0, with7, "dow 0 and dow 7 must resolve to the same Sunday");
+});
+
+test("dow range including 7 (e.g. '5-7') matches Fri-Sun", () => {
+  // "0 9 * * 5-7" should match Friday (5), Saturday (6), and Sunday (7→0)
+  const result = getNextRunAt("0 9 * * 5-7", "UTC");
+  assert.ok(result !== null, "range 5-7 must find a match");
+  const day = new Date(result).getUTCDay();
+  assert.ok(day === 5 || day === 6 || day === 0,
+    "5-7 should match Fri(5)/Sat(6)/Sun(0), got " + day);
+});
+
+test("dow list including 7 (e.g. '1,7') matches Mon and Sun", () => {
+  const result = getNextRunAt("0 9 * * 1,7", "UTC");
+  assert.ok(result !== null, "list 1,7 must find a match");
+  const day = new Date(result).getUTCDay();
+  assert.ok(day === 1 || day === 0,
+    "1,7 should match Mon(1) or Sun(0), got " + day);
+});
+
 // ── Timezone correctness (Intl.DateTimeFormat.formatToParts) ─────────────────
 
 console.log("\n\u2500\u2500 getNextRunAt timezone correctness \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");

@@ -153,6 +153,22 @@ export function getNextRunAt(cronExpr, timezone = "UTC") {
     return matchesAtom(field, value, min, max);
   }
 
+  // ── Day-of-week Sunday alias: POSIX cron allows 7 as well as 0 ──────
+  // getDatePartsInTz returns 0 for Sunday (JS convention: 0=Sun … 6=Sat).
+  // When the cron field contains 7, we need to match it against value 0.
+  //
+  // Simple text replacement ("7"→"0") breaks ranges like "5-7" → "5-0"
+  // (which would never match). Instead, we match the dow field twice:
+  //   1. Match with the real weekday value (0–6) — handles 0-based fields.
+  //   2. If Sunday (value=0), also try matching as value 7 — handles
+  //      fields written with the 7-alias (plain "7", range "5-7", list "1,7").
+  function matchesDow(field, value) {
+    if (matches(field, value, 0, 7)) return true;
+    // If today is Sunday (0), also check if the field matches 7
+    if (value === 0 && matches(field, 7, 0, 7)) return true;
+    return false;
+  }
+
   // Start from the next full minute
   const start = new Date();
   start.setSeconds(0, 0);
@@ -171,7 +187,7 @@ export function getNextRunAt(cronExpr, timezone = "UTC") {
       matches(hourField,   tp.hour,    0, 23) &&
       matches(domField,    tp.day,     1, 31) &&
       matches(monthField,  tp.month,   1, 12) &&
-      matches(dowField,    tp.weekday, 0,  6)
+      matchesDow(dowField, tp.weekday)
     ) {
       return candidate.toISOString();
     }
