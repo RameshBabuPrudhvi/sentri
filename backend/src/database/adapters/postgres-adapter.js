@@ -1,0 +1,343 @@
+/**
+ * @module database/adapters/postgres-adapter
+ * @description PostgreSQL adapter implementing the db-adapter interface.
+ *
+ * Uses the `pg` package with `pg-native` for synchronous query execution.
+ * The existing repository layer calls `db.prepare().run()` synchronously
+ * (better-sqlite3 API), so this adapter provides the same blocking semantics.
+ *
+ * ### Prerequisites
+ * ```bash
+ * npm install pg pg-native
+ * ```
+ * `pg-native` provides libpq C bindings with a `querySync` method.
+ * If `pg-native` is not installed, the adapter falls back to `deasync`
+ * (`npm install deasync`) to block the event loop on async pool queries.
+ *
+ * ### SQL compatibility
+ * Automatically translates common SQLite-isms to PostgreSQL:
+ * - `@param` named bindings → `$N` positional parameters
+ * - `INTEGER PRIMARY KEY AUTOINCREMENT` → `SERIAL PRIMARY KEY`
+ * - `datetime('now')` → `NOW()`
+ * - `INSERT OR IGNORE` → `INSERT ... ON CONFLICT DO NOTHING`
+ * - `INSERT OR REPLACE` → upsert via `ON CONFLICT DO UPDATE SET`
+ * - `LIKE` → `ILIKE` (case-insensitive matching)
+ * - `PRAGMA table_info(t)` → `information_schema.columns` query
+ *
+ * @exports createPostgresAdapter
+ */
+
+import pg from "pg";
+import { createRequire } from "module";
+import { formatLogLine } from "../../utils/logFormatter.js";
+
+const { Pool } = pg;
+const _require = createRequire(import.meta.url);
+
+// Try to load pg-native for synchronous query support
+let PgNative = null;
+try {
+  PgNative = _require("pg-native");
+} catch {
+  // pg-native not installed — will try deasync fallback
+}
+
+// Try to load deasync for async→sync bridge
+let deasyncLib = null;
+if (!PgNative) {
+  try {
+    deasyncLib = _require("deasync");
+  } catch {
+    // Neither available — will throw on createPostgresAdapter()
+  }
+}
+
+// ─── SQL dialect translation ──────────────────────────────────────────────────
+
+/**
+ * Convert SQLite-flavoured SQL to PostgreSQL.
+ *
+ * @param {string} sql
+ * @returns {string} PostgreSQL-compatible SQL
+ */
+export function translateSql(sql) {
+  let out = sql;
+
+  // datetime('now') → NOW()
+  out = out.replace(/datetime\('now'\)/gi, "NOW()");
+
+  // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
+  out = out.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "SERIAL PRIMARY KEY");
+
+  // INSERT OR IGNORE INTO → INSERT INTO ... ON CONFLICT DO NOTHING
+  if (/INSERT\s+OR\s+IGNORE/i.test(out)) {
+    out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, "INSERT INTO");
+    if (!/ON\s+CONFLICT/i.test(out)) {
+      out = out.replace(/;?\s*$/, " ON CONFLICT DO NOTHING;");
+    }
+  }
+
+  // INSERT OR REPLACE INTO → INSERT INTO ... ON CONFLICT DO UPDATE SET
+  if (/INSERT\s+OR\s+REPLACE\s+INTO/i.test(out)) {
+    out = out.replace(/INSERT\s+OR\s+REPLACE\s+INTO/gi, "INSERT INTO");
+    if (!/ON\s+CONFLICT/i.test(out)) {
+      const match = out.match(/INSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
+      if (match) {
+        const cols = match[2].split(",").map(c => c.trim());
+        const pk = cols[0];
+        const updateCols = cols.slice(1);
+        if (updateCols.length > 0) {
+          const setClauses = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
+          out = out.replace(/;\s*$/, "").trimEnd() + ` ON CONFLICT(${pk}) DO UPDATE SET ${setClauses};`;
+        } else {
+          out = out.replace(/;\s*$/, "").trimEnd() + ` ON CONFLICT(${pk}) DO NOTHING;`;
+        }
+      }
+    }
+  }
+
+  // SQLite LIKE is case-insensitive by default; PostgreSQL LIKE is case-sensitive.
+  out = out.replace(/\bLIKE\b/g, "ILIKE");
+
+  return out;
+}
+
+/**
+ * Convert `@name` named parameters to `$N` positional parameters.
+ *
+ * @param {string} sql — SQL with `@name` placeholders
+ * @param {Object} namedParams — `{ name: value, ... }`
+ * @returns {{ sql: string, values: any[] }}
+ */
+function namedToPositional(sql, namedParams) {
+  const paramIndex = {};
+  const values = [];
+  let idx = 0;
+  const translated = sql.replace(/@(\w+)/g, (_match, name) => {
+    if (!(name in paramIndex)) {
+      idx++;
+      paramIndex[name] = idx;
+      values.push(namedParams[name] !== undefined ? namedParams[name] : null);
+    }
+    return `$${paramIndex[name]}`;
+  });
+  return { sql: translated, values };
+}
+
+/**
+ * Convert `?` positional placeholders to `$N` numbered placeholders.
+ *
+ * @param {string} sql
+ * @returns {string}
+ */
+function questionToNumbered(sql) {
+  let idx = 0;
+  return sql.replace(/\?/g, () => `$${++idx}`);
+}
+
+/**
+ * Determine if args represent a named-params object (vs positional args).
+ *
+ * @param {any[]} args
+ * @returns {boolean}
+ */
+function isNamedParams(args) {
+  return args.length === 1
+    && typeof args[0] === "object"
+    && args[0] !== null
+    && !Array.isArray(args[0]);
+}
+
+// ─── Adapter factory ──────────────────────────────────────────────────────────
+
+/**
+ * Create a PostgreSQL adapter instance.
+ *
+ * @param {Object}  [opts]
+ * @param {string}  [opts.connectionString] — PostgreSQL connection URL.
+ *   Defaults to `process.env.DATABASE_URL`.
+ * @param {number}  [opts.poolSize] — Max pool connections (default 10).
+ * @returns {Object} Adapter conforming to the db-adapter interface.
+ * @throws {Error} If `DATABASE_URL` is not set.
+ * @throws {Error} If neither `pg-native` nor `deasync` is installed.
+ */
+export function createPostgresAdapter(opts = {}) {
+  const connectionString = opts.connectionString || process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("[postgres-adapter] DATABASE_URL is required");
+  }
+
+  if (!PgNative && !deasyncLib) {
+    throw new Error(
+      "[postgres-adapter] PostgreSQL requires either `pg-native` (recommended) " +
+      "or `deasync` for synchronous query execution. Install one:\n" +
+      "  npm install pg-native    # recommended — uses libpq C bindings\n" +
+      "  npm install deasync      # fallback — blocks event loop"
+    );
+  }
+
+  // ── pg-native synchronous path ────────────────────────────────────────
+  let nativeClient = null;
+  if (PgNative) {
+    nativeClient = new PgNative();
+    nativeClient.connectSync(connectionString);
+    console.log(formatLogLine("info", null, "[postgres-adapter] Connected via pg-native (synchronous)"));
+  }
+
+  // ── deasync fallback path ─────────────────────────────────────────────
+  const maxPool = opts.poolSize || parseInt(process.env.PG_POOL_SIZE, 10) || 10;
+  const pool = !nativeClient ? new Pool({
+    connectionString,
+    max: maxPool,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  }) : null;
+
+  if (pool) {
+    console.log(formatLogLine("info", null, `[postgres-adapter] Connection pool created via deasync (max ${maxPool})`));
+  }
+
+  /**
+   * Execute a query synchronously.
+   *
+   * @param {string} sql
+   * @param {any[]}  [values]
+   * @returns {{ rows: Object[], rowCount: number }}
+   */
+  function query(sql, values = []) {
+    if (nativeClient) {
+      const rows = nativeClient.querySync(sql, values);
+      return { rows, rowCount: rows.length };
+    }
+
+    // deasync fallback: run async query and block until it resolves
+    let done = false;
+    let result = null;
+    let error = null;
+
+    pool.query(sql, values)
+      .then(r => { result = r; done = true; })
+      .catch(e => { error = e; done = true; });
+
+    deasyncLib.loopWhile(() => !done);
+
+    if (error) throw error;
+    return { rows: result.rows, rowCount: result.rowCount || 0 };
+  }
+
+  /**
+   * Handle PRAGMA table_info() calls by querying information_schema.
+   *
+   * @param {string} sql
+   * @returns {{ isPragma: boolean, rows?: Object[] }}
+   */
+  function handlePragmaTableInfo(sql) {
+    const match = sql.match(/PRAGMA\s+table_info\((\w+)\)/i);
+    if (!match) return { isPragma: false };
+    const tableName = match[1];
+    const pgSql = `SELECT column_name AS name, data_type AS type
+      FROM information_schema.columns
+      WHERE table_name = $1 ORDER BY ordinal_position`;
+    const result = query(pgSql, [tableName]);
+    return { isPragma: true, rows: result.rows };
+  }
+
+  return {
+    /** @type {"postgres"} */
+    dialect: "postgres",
+
+    prepare(rawSql) {
+      // Intercept PRAGMA table_info() calls
+      const pragmaResult = handlePragmaTableInfo(rawSql);
+      if (pragmaResult.isPragma) {
+        return {
+          run() { return { changes: 0 }; },
+          get() { return pragmaResult.rows[0]; },
+          all() { return pragmaResult.rows; },
+        };
+      }
+
+      const pgSql = translateSql(rawSql);
+
+      return {
+        run(...args) {
+          let sql, values;
+          if (isNamedParams(args)) {
+            ({ sql, values } = namedToPositional(pgSql, args[0]));
+          } else {
+            sql = questionToNumbered(pgSql);
+            values = args;
+          }
+          const result = query(sql, values);
+          if (result.rows && result.rows.length > 0) {
+            return { changes: result.rowCount || 0, ...result.rows[0] };
+          }
+          return { changes: result.rowCount || 0 };
+        },
+
+        get(...args) {
+          let sql, values;
+          if (isNamedParams(args)) {
+            ({ sql, values } = namedToPositional(pgSql, args[0]));
+          } else {
+            sql = questionToNumbered(pgSql);
+            values = args;
+          }
+          const result = query(sql, values);
+          return result.rows[0] || undefined;
+        },
+
+        all(...args) {
+          let sql, values;
+          if (isNamedParams(args)) {
+            ({ sql, values } = namedToPositional(pgSql, args[0]));
+          } else {
+            sql = questionToNumbered(pgSql);
+            values = args;
+          }
+          const result = query(sql, values);
+          return result.rows;
+        },
+      };
+    },
+
+    exec(sql) {
+      const pgSql = translateSql(sql);
+      query(pgSql);
+    },
+
+    transaction(fn) {
+      return function (...args) {
+        query("BEGIN");
+        try {
+          const result = fn(...args);
+          query("COMMIT");
+          return result;
+        } catch (err) {
+          query("ROLLBACK");
+          throw err;
+        }
+      };
+    },
+
+    pragma(_str) {
+      // No-op for PostgreSQL
+    },
+
+    close() {
+      if (nativeClient) {
+        try {
+          nativeClient.end();
+          console.log(formatLogLine("info", null, "[postgres-adapter] Native client closed"));
+        } catch (err) {
+          console.warn(formatLogLine("warn", null, `[postgres-adapter] Close error: ${err.message}`));
+        }
+      }
+      if (pool) {
+        pool.end()
+          .then(() => console.log(formatLogLine("info", null, "[postgres-adapter] Connection pool closed")))
+          .catch(err => console.warn(formatLogLine("warn", null, `[postgres-adapter] Pool close error: ${err.message}`)));
+      }
+    },
+  };
+}

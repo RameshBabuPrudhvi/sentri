@@ -1,6 +1,6 @@
 /**
  * @module database/migrationRunner
- * @description Versioned database migration runner.
+ * @description Versioned, dialect-aware database migration runner.
  *
  * Implements a standard sequential migration pattern:
  *   1. A `schema_migrations` table tracks which migrations have been applied.
@@ -9,6 +9,12 @@
  *      in order inside a transaction.
  *   4. Each migration is recorded with its name and timestamp so the history
  *      is auditable.
+ *
+ * ### Dialect awareness (INF-001)
+ * The runner accepts a database adapter (not a raw `better-sqlite3` instance).
+ * When the adapter's `dialect` is `"postgres"`, the runner translates
+ * SQLite-specific SQL in migration files using the PostgreSQL adapter's
+ * `translateSql()` function before execution.
  *
  * ### Adding a new migration
  * 1. Create `backend/src/database/migrations/NNN_description.sql`
@@ -31,7 +37,7 @@ const MIGRATIONS_DIR = path.join(__dirname, "migrations");
 
 /**
  * Ensure the schema_migrations tracking table exists.
- * @param {Object} db — better-sqlite3 Database instance.
+ * @param {Object} db — Database adapter instance.
  */
 function ensureMigrationsTable(db) {
   db.exec(`
@@ -42,10 +48,20 @@ function ensureMigrationsTable(db) {
       durationMs  INTEGER NOT NULL        -- execution time in ms
     )
   `);
-  // Add checksum column if upgrading from an older schema_migrations table
-  const cols = db.prepare("PRAGMA table_info(schema_migrations)").all().map(c => c.name);
-  if (!cols.includes("checksum")) {
-    db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
+  // Add checksum column if upgrading from an older schema_migrations table.
+  // Use PRAGMA table_info on SQLite; information_schema on PostgreSQL.
+  if (db.dialect === "postgres") {
+    const cols = db.prepare(
+      "SELECT column_name AS name FROM information_schema.columns WHERE table_name = 'schema_migrations'"
+    ).all().map(c => c.name);
+    if (!cols.includes("checksum")) {
+      db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
+    }
+  } else {
+    const cols = db.prepare("PRAGMA table_info(schema_migrations)").all().map(c => c.name);
+    if (!cols.includes("checksum")) {
+      db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
+    }
   }
 }
 
@@ -60,7 +76,7 @@ function checksum(sql) {
 
 /**
  * Get already-applied migrations as a Map of version → checksum.
- * @param {Object} db — better-sqlite3 Database instance.
+ * @param {Object} db — Database adapter instance.
  * @returns {Map<string, string>}
  */
 function getAppliedMigrations(db) {
