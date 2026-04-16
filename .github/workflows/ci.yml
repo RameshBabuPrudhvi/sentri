@@ -106,6 +106,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci
           PORT: 3001
+          SKIP_EMAIL_VERIFICATION: "true"
 
   # ── Frontend ──────────────────────────────────────────────────────────────
   frontend:
@@ -203,6 +204,7 @@ jobs:
           docker run -d --name sentri-ci \
             -e ANTHROPIC_API_KEY=sk-ant-placeholder-for-ci \
             -e PORT=3001 \
+            -e SKIP_EMAIL_VERIFICATION=true \
             -p 3001:3001 \
             sentri-backend:ci
 

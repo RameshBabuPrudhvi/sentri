@@ -92,6 +92,9 @@ async function main() {
     });
     assert.equal(out.res.status, 201);
 
+    // SEC-001: Mark test user as verified so login succeeds
+    getDatabase().prepare("UPDATE users SET emailVerified = 1 WHERE email = ?").run(email);
+
     out = await req(base, "/api/auth/login", {
       method: "POST",
       body: { email, password: "Password123!" },

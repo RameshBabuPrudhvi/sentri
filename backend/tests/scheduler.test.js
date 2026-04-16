@@ -331,6 +331,8 @@ if (dbAvailable) {
 
   const email = "sched-" + Date.now() + "@test.com";
   await fetch(base + "/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: "Test1234!", name: "Sched Tester" }) });
+  // SEC-001: Mark test user as verified so login succeeds
+  db.prepare("UPDATE users SET emailVerified = 1 WHERE email = ?").run(email);
   const loginRes = await fetch(base + "/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: "Test1234!" }) });
   const rawCookies = loginRes.headers.get("set-cookie") || "";
   const accessToken = rawCookies.match(/access_token=([^;]+)/)?.[1];
