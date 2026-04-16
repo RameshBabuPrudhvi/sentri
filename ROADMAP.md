@@ -662,6 +662,147 @@ Token format: `?token=<hmac-sha256(artifactPath+exp, ARTIFACT_SECRET)>&exp=<unix
 
 ---
 
+## Quality Review Findings (April 2026)
+
+*Source: Comprehensive Product Quality Review. Items below were identified as gaps not covered by the existing roadmap. Findings already addressed (FLW-05 SSRF, FLW-06 rate limiting, BE-01 health endpoint) and findings already fixed in PR #85 (GAP-02, GAP-08, FLW-03, FLW-04, UX-08) are omitted.*
+
+---
+
+### ENH-031 — Email verification on registration 🔴 Blocker
+
+**Problem:** `POST /api/auth/register` creates an account immediately with no email verification. Anyone can claim any email address. This is a SOC 2 compliance failure and enables account spoofing. The forgot-password flow already acknowledges this gap with a comment "In production this would send an email" (`backend/src/routes/auth.js:426`).
+
+**Fix:** Add a `verification_tokens(token, userId, email, expiresAt)` table. On registration, create the user with `emailVerified = false` and send a verification email with a signed token link. Block login until `emailVerified = true`. Add `GET /api/auth/verify?token=` endpoint. Resend verification from the login error state.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `verification_tokens` table; add `emailVerified` column to `users`
+- `backend/src/routes/auth.js` — verification endpoint; block login for unverified users
+- New `backend/src/utils/emailSender.js` — email transport (Resend/SendGrid/SMTP)
+- `frontend/src/pages/Login.jsx` — show "verify your email" state
+- `backend/.env.example` — document `SMTP_*` / `RESEND_API_KEY`
+
+**Effort:** M | **Source:** Quality Review (GAP-01)
+
+---
+
+### ENH-032 — Nonce-based Content Security Policy 🟡 High
+
+**Problem:** `backend/src/middleware/appSetup.js:55` uses `'unsafe-inline'` for both `scriptSrc` and `styleSrc`. The code comment acknowledges "replace with nonces in prod." Without nonces, any XSS injection can execute inline scripts — CSP provides no protection. This weakens the otherwise strong security posture.
+
+**Fix:** Generate a per-request nonce via `crypto.randomBytes(16).toString('base64')`. Pass it to helmet's CSP directives as `'nonce-<value>'`. Inject the nonce into Vite's HTML template via a custom plugin (`transformIndexHtml`). Remove `'unsafe-inline'` from `scriptSrc`.
+
+**Files to change:**
+- `backend/src/middleware/appSetup.js` — nonce generation middleware; update helmet CSP directives
+- `frontend/vite.config.js` — custom plugin to inject `nonce` attribute on `<script>` tags
+- `frontend/index.html` — add `nonce` placeholder
+
+**Effort:** M | **Source:** Quality Review (GAP-03)
+
+---
+
+### ENH-033 — GDPR/CCPA account data export and deletion 🟡 High
+
+**Problem:** There is no way for a user to export their data or delete their account. GDPR Article 17 (right to erasure) and Article 20 (data portability) require both. This is a compliance blocker for EU deployments and increasingly expected by US users under CCPA.
+
+**Fix:** Add `DELETE /api/auth/account` — hard-deletes the user, their projects, tests, runs, activities, tokens, and schedules. Add `GET /api/auth/export` — returns a JSON archive of all user data. Require password confirmation for both. Add UI in Settings → Account.
+
+**Files to change:**
+- `backend/src/routes/auth.js` — `DELETE /account`, `GET /export`
+- All repo files — cascade delete by userId
+- `frontend/src/pages/Settings.jsx` — Account tab with delete/export buttons
+
+**Effort:** M | **Source:** Quality Review (GAP-04)
+
+---
+
+### ENH-034 — Empty crawl result distinction (`completed_empty`) 🟡 High
+
+**Problem:** When a crawl completes but generates zero tests (e.g., site is behind auth, JavaScript-only SPA with no crawlable links, or AI provider returned empty), the run status is `completed` with 0 tests. The UI shows a green success state. Users re-crawl repeatedly without understanding why no tests were generated.
+
+**Fix:** Add `completed_empty` as a run status value. Set it when `run.type === 'crawl' && run.tests.length === 0` at pipeline completion. Show a warning banner in RunDetail with actionable guidance ("Check credentials", "Try a different start URL", "Ensure the page has interactive elements").
+
+**Files to change:**
+- `backend/src/crawler.js` — set `completed_empty` status when no tests generated
+- `frontend/src/components/run/TestRunView.jsx` — render warning for `completed_empty`
+- `frontend/src/pages/RunDetail.jsx` — handle new status in status badge
+
+**Effort:** S | **Source:** Quality Review (FLW-02)
+
+---
+
+### ENH-035 — No-provider-configured global banner 🟡 High
+
+**Problem:** After registration, if no AI provider key is configured, the user can navigate to any project and attempt a crawl, which fails silently (error buried in SSE log stream). There is no persistent, visible warning that the platform requires an API key to function.
+
+**Fix:** Add a global sticky banner component that renders when `config.hasProvider === false`. Show on Dashboard, Tests, and ProjectDetail pages. Link directly to Settings → AI Provider. Dismissible per-session but re-appears on next login.
+
+**Files to change:**
+- New `frontend/src/components/layout/ProviderBanner.jsx`
+- `frontend/src/App.jsx` or layout wrapper — render banner conditionally
+- `frontend/src/api.js` — expose `hasProvider` from `GET /api/config`
+
+**Effort:** S | **Source:** Quality Review (FLW-01)
+
+---
+
+### MAINT-013 — Graceful shutdown with in-flight run draining
+
+**Problem:** `backend/src/index.js:86-87` handles SIGINT/SIGTERM by calling `closeDatabase()` and `process.exit(0)` immediately. Any in-flight test run, crawl, or AI generation is killed mid-execution with no cleanup. The run remains in `status: 'running'` until the next startup when `markOrphansInterrupted()` catches it. Playwright browser processes may leak.
+
+**Fix:** On SIGTERM/SIGINT: (1) stop accepting new HTTP connections, (2) abort all in-flight runs via `runAbortControllers`, (3) wait up to 30s for graceful completion, (4) close the database, (5) exit. Log the shutdown sequence.
+
+**Files to change:**
+- `backend/src/index.js` — replace immediate exit with graceful drain
+- `backend/src/utils/runWithAbort.js` — export a `abortAll()` helper
+
+**Effort:** S | **Source:** Quality Review (BE-05)
+
+---
+
+### MAINT-014 — ARIA live regions for real-time updates
+
+**Problem:** SSE-driven log streams, run status changes, and toast notifications update the DOM without announcing changes to screen readers. Users relying on assistive technology have no awareness of real-time updates — the live log panel is completely invisible to them.
+
+**Fix:** Add `aria-live="polite"` to the log stream container and run status badge. Add `role="alert"` to error/success toast banners. Add `aria-live="assertive"` to the abort confirmation. Ensure focus management after modal close (restore to trigger element).
+
+**Files to change:**
+- `frontend/src/components/run/TestRunView.jsx` — add `aria-live` to log panel
+- `frontend/src/components/shared/Toast.jsx` or banner components — add `role="alert"`
+- All modal components — restore focus on close
+
+**Effort:** S | **Source:** Quality Review (UX-06, UX-07)
+
+---
+
+### MAINT-015 — ESLint + Prettier enforcement in CI
+
+**Problem:** The codebase has no linting or formatting enforcement. Code style varies across files (trailing commas, semicolons, quote style). New contributors have no automated feedback on style violations. This increases review friction and produces unnecessary diff noise.
+
+**Fix:** Add ESLint (flat config) with `@eslint/js` recommended rules + `eslint-plugin-react`. Add Prettier with a `.prettierrc` matching the existing dominant style. Add `npm run lint` to the CI pipeline. Auto-fix existing files in a single formatting commit.
+
+**Files to change:**
+- `backend/eslint.config.js`, `frontend/eslint.config.js` — ESLint configs
+- `.prettierrc` — Prettier config
+- `.github/workflows/ci.yml` — add lint step
+- `backend/package.json`, `frontend/package.json` — add dev dependencies
+
+**Effort:** M | **Source:** Quality Review (PRD-04)
+
+---
+
+### MAINT-016 — Dependabot for automated dependency updates
+
+**Problem:** No automated dependency update mechanism exists. Security vulnerabilities in transitive dependencies (Playwright, Express, AI SDKs) will go undetected until a manual audit. The project has 50+ npm dependencies across backend and frontend.
+
+**Fix:** Add `.github/dependabot.yml` with weekly update schedules for both `backend/` and `frontend/` package ecosystems. Group minor/patch updates. Set reviewers to the maintainer team. Add a CI check that runs tests on Dependabot PRs.
+
+**Files to change:**
+- New `.github/dependabot.yml`
+
+**Effort:** XS | **Source:** Quality Review (PRD-07)
+
+---
+
 These items are not phase-bounded — they should be addressed incrementally alongside feature work.
 
 ---
@@ -812,7 +953,7 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM support + standalone Playwright export (planned). No competitor offers all of these together.
 
-**Critical competitive gaps to close (Phase 2–3):** Cross-browser, visual regression, multi-tenancy/RBAC, failure notifications.
+**Critical competitive gaps to close (Phase 2–3):** Cross-browser, visual regression, multi-tenancy/RBAC, failure notifications, email verification (ENH-031).
 
 ---
 
@@ -824,14 +965,15 @@ How Sentri compares to industry-standard QA platforms as of this audit:
 | Phase 1 (Weeks 1–6) | ENH-005, 007, 013, 027, 030, 021, 020, 010, 008, 004, 024 | ✅ Complete | Production-safe for real teams |
 | Phase 2 (Weeks 7–16) | ENH-001, 002, 003, 012, 009, 011, 006, 017, 022, 023 | 🔄 In progress (ENH-011 ✅, ENH-006 ✅) | Sellable to companies |
 | Phase 3 (Weeks 17–28) | ENH-016, 014, 015, 018, 019, 025, 028, 029, 026, S4-03, S4-04, S4-05, S4-06, S4-07, S4-08, S4-09 | 🔲 Not started | Competitive with Mabl / Testim |
-| Ongoing | MAINT-001 through MAINT-012 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅, MAINT-012 ✅) | Platform moat + infrastructure |
+| Ongoing | MAINT-001 through MAINT-016 | 🔄 In progress (MAINT-010 ✅, MAINT-011 ✅, MAINT-012 ✅) | Platform moat + infrastructure |
+| Quality Review | ENH-031–035, MAINT-013–016 | 🔲 Not started | Compliance, UX, DX |
 
-**Total items:** 30 audit enhancements + 17 NEXT_STEPS sprint items + 12 maintenance items = **59 tracked items**
+**Total items:** 35 audit enhancements + 17 NEXT_STEPS sprint items + 16 maintenance items = **68 tracked items**
 **Completed:** S1-01 → S1-06 (Sprint 1), S3-02, S3-04, S3-08 (Sprint 3), ENH-004, ENH-005, ENH-006, ENH-007, ENH-008, ENH-010, ENH-011, ENH-013, ENH-020, ENH-021, ENH-024, ENH-027, ENH-030, MAINT-010, MAINT-012 = **24 complete**
-**Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2) = **4 blockers**
-**Highest adoption impact:** ENH-003 (multi-tenancy), S4-06 (monitoring mode), ENH-017 (failure notifications)
-**Lowest effort / highest immediate value:** ENH-015, S4-09, S4-07
-**Next PR priorities (recommended order):** ENH-009 (BullMQ job queue, L) → ENH-001 (PostgreSQL, XL) → ENH-003 (Multi-tenancy, L)
+**Critical blockers remaining:** ENH-001, 002, 003, 012 (Phase 2), ENH-031 (email verification) = **5 blockers**
+**Highest adoption impact:** ENH-003 (multi-tenancy), S4-06 (monitoring mode), ENH-017 (failure notifications), ENH-031 (email verification)
+**Lowest effort / highest immediate value:** ENH-034 (S), ENH-035 (S), MAINT-016 (XS), MAINT-013 (S)
+**Next PR priorities (recommended order):** ENH-031 (email verification, M) → ENH-009 (BullMQ job queue, L) → ENH-001 (PostgreSQL, XL) → ENH-003 (Multi-tenancy, L)
 
 ---
 
