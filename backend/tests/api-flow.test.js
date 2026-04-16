@@ -8,15 +8,17 @@
  */
 
 import assert from "node:assert/strict";
-import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import runsRouter from "../src/routes/runs.js";
 import sseRouter from "../src/routes/sse.js";
-import { getDatabase } from "../src/database/sqlite.js";
 import * as runRepo from "../src/database/repositories/runRepo.js";
 import * as activityRepo from "../src/database/repositories/activityRepo.js";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { app, req } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
@@ -29,81 +31,24 @@ function mountRoutesOnce() {
   mounted = true;
 }
 
-function resetDb() {
-  const db = getDatabase();
-  db.exec("DELETE FROM healing_history");
-  db.exec("DELETE FROM activities");
-  db.exec("DELETE FROM runs");
-  db.exec("DELETE FROM tests");
-  db.exec("DELETE FROM oauth_ids");
-  db.exec("DELETE FROM projects");
-  db.exec("DELETE FROM users");
-  db.exec("UPDATE counters SET value = 0");
-}
-
-/** Extract a named cookie value from a fetch Response's Set-Cookie header. */
-function extractCookie(res, name) {
-  const raw = res.headers.getSetCookie?.() || [];
-  for (const c of raw) {
-    const match = c.match(new RegExp(`^${name}=([^;]+)`));
-    if (match) return match[1];
-  }
-  return null;
-}
-
-/** Shared CSRF token — captured from the first server response that sets it. */
-let csrfToken = null;
-
-async function req(base, path, { method = "GET", token, body } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  // CSRF double-submit: send both the cookie and the header so the middleware
-  // can compare them. Plain fetch() does not auto-send cookies.
-  if (csrfToken) {
-    headers["X-CSRF-Token"] = csrfToken;
-    headers.Cookie = (headers.Cookie ? headers.Cookie + "; " : "") + `_csrf=${csrfToken}`;
-  }
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  // Capture CSRF cookie from any response that sets it
-  const csrf = extractCookie(res, "_csrf");
-  if (csrf) csrfToken = csrf;
-  const json = await res.json().catch(() => ({}));
-  return { res, json };
-}
-
 async function main() {
   mountRoutesOnce();
-  resetDb();
+  t.resetDb();
+
+  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true" });
 
   const server = app.listen(0);
   const { port } = server.address();
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    const email = `qa-${Date.now()}@test.local`;
-
-    let out = await req(base, "/api/auth/register", {
-      method: "POST",
-      body: { name: "QA User", email, password: "Password123!" },
+    const { token } = await t.registerAndLogin(base, {
+      name: "QA User",
+      email: `qa-${Date.now()}@test.local`,
+      password: "Password123!",
     });
-    assert.equal(out.res.status, 201);
 
-    // SEC-001: Mark test user as verified so login succeeds
-    getDatabase().prepare("UPDATE users SET emailVerified = 1 WHERE email = ?").run(email);
-
-    out = await req(base, "/api/auth/login", {
-      method: "POST",
-      body: { email, password: "Password123!" },
-    });
-    assert.equal(out.res.status, 200);
-    const token = extractCookie(out.res, "access_token");
-    assert.ok(token, "Login response should set access_token cookie");
-
-    out = await req(base, "/api/projects", {
+    let out = await req(base, "/api/projects", {
       method: "POST",
       token,
       body: { name: "Flow App", url: "https://example.com" },
@@ -182,6 +127,7 @@ async function main() {
 
     console.log("✅ api-flow: all checks passed");
   } finally {
+    env.restore();
     await new Promise((resolve) => server.close(resolve));
   }
 }

@@ -14,10 +14,12 @@
  */
 
 import assert from "node:assert/strict";
-import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
-import { getDatabase } from "../src/database/sqlite.js";
+import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { app } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
@@ -27,45 +29,11 @@ function mountRoutesOnce() {
   mounted = true;
 }
 
-function resetDb() {
-  const db = getDatabase();
-  db.exec("DELETE FROM healing_history");
-  db.exec("DELETE FROM activities");
-  db.exec("DELETE FROM runs");
-  db.exec("DELETE FROM tests");
-  db.exec("DELETE FROM oauth_ids");
-  db.exec("DELETE FROM projects");
-  db.exec("DELETE FROM users");
-  db.exec("UPDATE counters SET value = 0");
-}
-
-/** Parse all Set-Cookie headers into a map of { name → { value, attrs } }. */
-function parseCookies(res) {
-  const raw = res.headers.getSetCookie?.() || [];
-  const cookies = {};
-  for (const c of raw) {
-    const parts = c.split(";").map(s => s.trim());
-    const [nameVal, ...attrs] = parts;
-    const eqIdx = nameVal.indexOf("=");
-    const name = nameVal.slice(0, eqIdx);
-    const value = nameVal.slice(eqIdx + 1);
-    cookies[name] = { value, attrs: attrs.map(a => a.toLowerCase()) };
-  }
-  return cookies;
-}
-
-/** Build a Cookie header string from a parsed cookies map. */
-function buildCookieHeader(cookies) {
-  return Object.entries(cookies).map(([k, v]) => `${k}=${v.value}`).join("; ");
-}
-
 async function main() {
   mountRoutesOnce();
-  resetDb();
+  t.resetDb();
 
-  // Skip email verification so test users can log in immediately (SEC-001)
-  const origSkipVerify = process.env.SKIP_EMAIL_VERIFICATION;
-  process.env.SKIP_EMAIL_VERIFICATION = "true";
+  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true" });
 
   const server = app.listen(0);
   const { port } = server.address();
@@ -205,7 +173,7 @@ async function main() {
 
     console.log("✅ auth-cookies: all checks passed");
   } finally {
-    process.env.SKIP_EMAIL_VERIFICATION = origSkipVerify;
+    env.restore();
     await new Promise((resolve) => server.close(resolve));
   }
 }
