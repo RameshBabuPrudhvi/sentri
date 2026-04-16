@@ -44,13 +44,65 @@ const tasks = new Map();
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * Extract date/time components from a UTC timestamp in a given IANA timezone.
+ *
+ * Uses `Intl.DateTimeFormat.formatToParts()` — the spec-guaranteed approach
+ * for timezone-aware field extraction. Unlike the `toLocaleString` round-trip
+ * (`new Date(d.toLocaleString("en-US", { timeZone }))`), this does not
+ * depend on locale-specific date string formatting or parsing, and handles
+ * DST transitions correctly (spring-forward gaps, fall-back overlaps).
+ *
+ * @param {Date}   date     - UTC Date object.
+ * @param {string} timezone - IANA timezone name (e.g. "America/New_York").
+ * @returns {{ minute: number, hour: number, day: number, month: number, weekday: number }}
+ */
+const _tzFormatters = new Map();
+
+function getDatePartsInTz(date, timezone) {
+  // Cache the DateTimeFormat instance per timezone — construction is expensive,
+  // but formatToParts() on a cached instance is fast.
+  let fmt = _tzFormatters.get(timezone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour12: false,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      weekday: "short",
+    });
+    _tzFormatters.set(timezone, fmt);
+  }
+
+  const partsArr = fmt.formatToParts(date);
+  const parts = {};
+  for (const p of partsArr) parts[p.type] = p.value;
+
+  // Map weekday short name → 0-6 (Sun=0)
+  const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+  return {
+    minute:  parseInt(parts.minute, 10),
+    hour:    parseInt(parts.hour, 10) % 24, // en-US hour12:false returns 24 for midnight in some engines
+    day:     parseInt(parts.day, 10),
+    month:   parseInt(parts.month, 10),
+    weekday: dayMap[parts.weekday] ?? 0,
+  };
+}
+
+/**
  * Compute the next fire time for a cron expression in a given timezone.
  * Returns an ISO 8601 string or null if the expression is invalid.
  *
  * We use a lightweight approach: advance minute-by-minute from now (max
- * 1 year) until cron.validate passes for the expression.  For common
- * schedules this resolves in at most 525,960 steps, typically far fewer.
- * A real cron-parser library would be cleaner but avoids a new dependency.
+ * 1 year) until the cron fields match.  For common schedules this resolves
+ * in at most 525,960 steps, typically far fewer.  A real cron-parser
+ * library would be cleaner but avoids a new dependency.
+ *
+ * Timezone conversion uses `Intl.DateTimeFormat.formatToParts()` — the
+ * spec-guaranteed approach that correctly handles DST transitions.
  *
  * @param {string} cronExpr  - 5-field cron expression.
  * @param {string} [timezone] - IANA timezone (defaults to "UTC").
@@ -60,9 +112,9 @@ export function getNextRunAt(cronExpr, timezone = "UTC") {
   if (!cron.validate(cronExpr)) return null;
 
   // Parse cron fields: minute hour dom month dow
-  const parts = cronExpr.trim().split(/\s+/);
-  if (parts.length !== 5) return null;
-  const [minuteField, hourField, domField, monthField, dowField] = parts;
+  const fields = cronExpr.trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const [minuteField, hourField, domField, monthField, dowField] = fields;
 
   /**
    * Check if a single atomic cron token matches the given value.
@@ -111,20 +163,15 @@ export function getNextRunAt(cronExpr, timezone = "UTC") {
   const candidate = new Date(start);
 
   while (candidate.getTime() < limit) {
-    // Evaluate the candidate in the target timezone
-    const tzDate = new Date(candidate.toLocaleString("en-US", { timeZone: timezone }));
-    const min   = tzDate.getMinutes();
-    const hour  = tzDate.getHours();
-    const dom   = tzDate.getDate();
-    const month = tzDate.getMonth() + 1; // 1-based
-    const dow   = tzDate.getDay();       // 0=Sun
+    // Evaluate the candidate in the target timezone using Intl.DateTimeFormat
+    const tp = getDatePartsInTz(candidate, timezone);
 
     if (
-      matches(minuteField, min,   0, 59) &&
-      matches(hourField,   hour,  0, 23) &&
-      matches(domField,    dom,   1, 31) &&
-      matches(monthField,  month, 1, 12) &&
-      matches(dowField,    dow,   0,  6)
+      matches(minuteField, tp.minute,  0, 59) &&
+      matches(hourField,   tp.hour,    0, 23) &&
+      matches(domField,    tp.day,     1, 31) &&
+      matches(monthField,  tp.month,   1, 12) &&
+      matches(dowField,    tp.weekday, 0,  6)
     ) {
       return candidate.toISOString();
     }

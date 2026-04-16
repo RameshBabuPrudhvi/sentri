@@ -130,6 +130,54 @@ test("handles range+step field like '0-30/5' for minutes", () => {
   assert.ok(result !== null, "should find a match for range+step field");
 });
 
+// ── Timezone correctness (Intl.DateTimeFormat.formatToParts) ─────────────────
+
+console.log("\n\u2500\u2500 getNextRunAt timezone correctness \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+
+test("same cron in different timezones produces different UTC times", () => {
+  // "0 9 * * *" at 9 AM UTC vs 9 AM New York — they must differ
+  const utc = getNextRunAt("0 9 * * *", "UTC");
+  const ny  = getNextRunAt("0 9 * * *", "America/New_York");
+  assert.ok(utc !== null && ny !== null);
+  // NY is UTC-5 or UTC-4 (DST), so 9 AM NY = 13:00 or 14:00 UTC
+  // They must not be the same instant
+  assert.notEqual(utc, ny, "9 AM UTC and 9 AM NY should be different UTC instants");
+});
+
+test("result for Asia/Tokyo is offset correctly (UTC+9, no DST)", () => {
+  // "0 0 * * *" = midnight in the target timezone
+  // Tokyo midnight = 15:00 UTC previous day (UTC+9)
+  const result = getNextRunAt("0 0 * * *", "Asia/Tokyo");
+  assert.ok(result !== null);
+  const d = new Date(result);
+  // In UTC, Tokyo midnight is always hour 15 (no DST in Japan)
+  assert.equal(d.getUTCHours(), 15, "Tokyo midnight should be 15:00 UTC, got " + d.getUTCHours());
+  assert.equal(d.getUTCMinutes(), 0);
+});
+
+test("Europe/London and UTC produce same result outside BST", () => {
+  // In winter (GMT = UTC+0), London midnight = UTC midnight
+  // We can't guarantee the test runs in winter, but we can verify both
+  // return valid future dates
+  const utc = getNextRunAt("0 3 * * *", "UTC");
+  const lon = getNextRunAt("0 3 * * *", "Europe/London");
+  assert.ok(utc !== null && lon !== null);
+  // During BST (UTC+1), 3 AM London = 2 AM UTC, so they differ
+  // During GMT, they're the same. Either way, both must be valid.
+  assert.ok(new Date(utc) > new Date());
+  assert.ok(new Date(lon) > new Date());
+});
+
+test("handles Australia/Sydney (UTC+10/+11 with DST)", () => {
+  const result = getNextRunAt("0 12 * * *", "Australia/Sydney");
+  assert.ok(result !== null);
+  const d = new Date(result);
+  // Sydney noon = 01:00 or 02:00 UTC depending on DST
+  const utcHour = d.getUTCHours();
+  assert.ok(utcHour === 1 || utcHour === 2,
+    "Sydney noon should be 01:00 or 02:00 UTC, got " + utcHour);
+});
+
 // ── Sections 2-3: DB-dependent tests ─────────────────────────────────────────
 
 let dbAvailable = false;
