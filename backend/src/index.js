@@ -121,6 +121,9 @@ async function gracefulShutdown(signal) {
     console.warn(formatLogLine("warn", null, `[shutdown] Force-aborting ${runAbortControllers.size} straggler run(s)`));
     for (const [runId, entry] of runAbortControllers) {
       try {
+        // Set the in-memory run status BEFORE aborting so the .catch()
+        // handler in runWithAbort doesn't overwrite with "running".
+        if (entry.run) entry.run.status = "interrupted";
         entry.controller.abort();
         // Mark the run as interrupted in the database so it isn't left
         // in "running" state (the normal abort flow may not complete in time).

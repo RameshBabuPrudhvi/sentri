@@ -49,9 +49,13 @@ export function isRunAborted(run, signal) {
  */
 export function finalizeRunIfNotAborted(run, onComplete) {
   if (run.status !== "aborted") {
-    // Set default "completed" only if the onComplete callback hasn't already
-    // assigned a more specific terminal status (e.g. "completed_empty").
-    run.status = "completed";
+    // Let onComplete run first — it may assign a more specific terminal status
+    // (e.g. "completed_empty") before any SSE snapshots are emitted.
     onComplete?.();
+    // Set default "completed" only if the callback hasn't already assigned
+    // a more specific terminal status.
+    if (!run.status || run.status === "running") {
+      run.status = "completed";
+    }
   }
 }

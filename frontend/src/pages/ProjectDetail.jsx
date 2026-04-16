@@ -186,17 +186,21 @@ export default function ProjectDetail() {
       const failed = evt.failed;
       const testsGenerated = evt.testsGenerated ?? (Array.isArray(evt.tests) ? evt.tests.length : undefined);
       const isTestRun = passed != null || failed != null;
-      const notifType = status === "completed" ? "success"
-                      : status === "aborted"   ? "warning"
+      const notifType = status === "completed"       ? "success"
+                      : status === "completed_empty" ? "warning"
+                      : status === "aborted"         ? "warning"
                       : "error";
       addNotification({
         type: notifType,
-        title: status === "aborted" ? "Run aborted"
+        title: status === "completed_empty" ? "No tests generated"
+             : status === "aborted" ? "Run aborted"
              : status === "failed"  ? "Run failed"
              : "Run complete",
         body: isTestRun
           ? `${passed ?? 0} passed · ${failed ?? 0} failed`
-          : `${testsGenerated ?? 0} test(s) generated`,
+          : status === "completed_empty"
+            ? "Crawl completed but generated 0 tests — check project settings"
+            : `${testsGenerated ?? 0} test(s) generated`,
         link: activeRunId ? `/runs/${activeRunId}` : null,
       });
     }

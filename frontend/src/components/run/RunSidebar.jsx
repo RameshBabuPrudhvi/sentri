@@ -47,9 +47,10 @@ export default function RunSidebar({ stats = [], run, isRunning, failLabel, chil
           {
             label: "Status",
             val: (
-              <span className={`badge ${isRunning ? "badge-blue" : run?.status === "completed" ? "badge-green" : "badge-red"}`}>
+              <span className={`badge ${isRunning ? "badge-blue" : run?.status === "completed" ? "badge-green" : run?.status === "completed_empty" ? "badge-amber" : run?.status === "aborted" ? "badge-gray" : "badge-red"}`}>
                 {isRunning
                   ? <><RefreshCw size={9} style={{ animation: "spin 1s linear infinite" }} /> Running</>
+                  : run?.status === "completed_empty" ? "Completed (empty)"
                   : run?.status}
               </span>
             ),
