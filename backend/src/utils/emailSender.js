@@ -23,7 +23,7 @@ import { formatLogLine } from "./logFormatter.js";
 
 /**
  * Detect which transport is configured and return a send function.
- * @returns {{ name: string, send: (payload: EmailPayload) => Promise<void> }}
+ * @returns {Object} `{ name: string, send: Function }`
  */
 function detectTransport() {
   if (process.env.RESEND_API_KEY) {

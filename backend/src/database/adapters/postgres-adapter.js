@@ -229,7 +229,7 @@ export function createPostgresAdapter(opts = {}) {
    * Handle PRAGMA table_info() calls by querying information_schema.
    *
    * @param {string} sql
-   * @returns {{ isPragma: boolean, rows?: Object[] }}
+   * @returns {Object} `{ isPragma: boolean, rows: Object[]|undefined }`
    */
   function handlePragmaTableInfo(sql) {
     const match = sql.match(/PRAGMA\s+table_info\((\w+)\)/i);
