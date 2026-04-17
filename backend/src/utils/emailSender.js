@@ -143,6 +143,7 @@ export async function sendVerificationEmail(email, token, userName) {
 
   const subject = "Verify your Sentri account";
   const safeName = escapeHtml(userName);
+  const safeUrl = escapeHtml(verifyUrl);
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
       <h2 style="margin: 0 0 16px; font-size: 20px; color: #0f172a;">Welcome to Sentri${safeName ? `, ${safeName}` : ""}!</h2>
@@ -150,12 +151,12 @@ export async function sendVerificationEmail(email, token, userName) {
         Click the button below to verify your email address and activate your account.
         This link expires in 24 hours.
       </p>
-      <a href="${verifyUrl}" style="display: inline-block; padding: 12px 28px; background: #6366f1; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">
+      <a href="${safeUrl}" style="display: inline-block; padding: 12px 28px; background: #6366f1; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">
         Verify Email Address
       </a>
       <p style="margin: 24px 0 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
         If you didn't create a Sentri account, you can safely ignore this email.<br/>
-        Link: <a href="${verifyUrl}" style="color: #6366f1; word-break: break-all;">${verifyUrl}</a>
+        Link: <a href="${safeUrl}" style="color: #6366f1; word-break: break-all;">${safeUrl}</a>
       </p>
     </div>
   `;

@@ -240,19 +240,31 @@ app.use(csrfMiddleware);
 // AFTER all synchronous module-level code runs, so `isRedisAvailable()` would
 // always return `false` at import time. The RedisStore itself handles
 // connection retries gracefully — commands are queued until the client connects.
+//
+// IMPORTANT: Each rate limiter MUST have its own RedisStore instance with a
+// unique prefix. Sharing a single store across multiple limiters corrupts
+// counters because rate-limit-redis uses the prefix to namespace keys.
 const _require = createRequire(import.meta.url);
-let _redisStore = undefined; // undefined = use default in-memory store
+let _RedisStoreClass = null;
 if (redis) {
   try {
-    const { RedisStore } = _require("rate-limit-redis");
-    _redisStore = new RedisStore({
-      sendCommand: (...args) => redis.call(...args),
-      prefix: "sentri:rl:",
-    });
+    const mod = _require("rate-limit-redis");
+    _RedisStoreClass = mod.RedisStore;
     console.log(formatLogLine("info", null, "[rate-limit] Using Redis-backed store for rate limiting"));
   } catch {
     console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis not installed — using in-memory store. Run `npm install rate-limit-redis` for shared rate limiting."));
   }
+}
+
+/** Create a RedisStore with a unique prefix, or return {} for in-memory fallback. */
+function _makeRedisStore(prefix) {
+  if (!_RedisStoreClass) return {};
+  return {
+    store: new _RedisStoreClass({
+      sendCommand: (...args) => redis.call(...args),
+      prefix,
+    }),
+  };
 }
 
 /**
@@ -265,7 +277,7 @@ const generalApiLimiter = rateLimit({
   standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
   legacyHeaders:    false,
   skip:             (req) => req.method === "OPTIONS", // never block preflight
-  ...(_redisStore ? { store: _redisStore } : {}),
+  ..._makeRedisStore("sentri:rl:general:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Too many requests. Please slow down and try again shortly.",
@@ -284,7 +296,7 @@ export const expensiveOpLimiter = rateLimit({
   max:              20,               // 20 crawl/run triggers per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
-  ...(_redisStore ? { store: _redisStore } : {}),
+  ..._makeRedisStore("sentri:rl:expensive:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for test runs. You can trigger up to 20 runs per hour. Please wait before starting another.",
@@ -302,7 +314,7 @@ export const aiGenerationLimiter = rateLimit({
   max:              30,               // 30 AI generation calls per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
-  ...(_redisStore ? { store: _redisStore } : {}),
+  ..._makeRedisStore("sentri:rl:ai:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for AI generation. You can trigger up to 30 AI requests per hour. Please wait before generating more tests.",

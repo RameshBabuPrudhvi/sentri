@@ -88,11 +88,13 @@ function maskStringLiterals(sql) {
  * @returns {string} PostgreSQL-compatible SQL statement
  */
 function translateSingleStatement(stmt) {
-  const { masked, restore } = maskStringLiterals(stmt);
-  let out = masked;
+  // datetime('now') → NOW()  — must run BEFORE maskStringLiterals because
+  // the masker treats 'now' as a string literal and replaces it with a
+  // placeholder, preventing the regex from matching.
+  let pre = stmt.replace(/datetime\('now'\)/gi, "NOW()");
 
-  // datetime('now') → NOW()
-  out = out.replace(/datetime\('now'\)/gi, "NOW()");
+  const { masked, restore } = maskStringLiterals(pre);
+  let out = masked;
 
   // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
   out = out.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "SERIAL PRIMARY KEY");
@@ -143,14 +145,32 @@ function translateSingleStatement(stmt) {
  * @returns {string} PostgreSQL-compatible SQL
  */
 export function translateSql(sql) {
-  // Split on semicolons that are NOT inside single-quoted string literals.
-  // This handles migration files with multiple statements.
+  // Split on semicolons that are NOT inside single-quoted string literals
+  // and NOT inside -- line comments.
+  // This handles migration files with multiple statements and SQL comments
+  // that may contain semicolons (e.g. `-- ISO 8601; checked on every ...`).
   const statements = [];
   let current = "";
   let inString = false;
+  let inLineComment = false;
 
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
+
+    // End of line comment on newline
+    if (inLineComment) {
+      current += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    // Detect start of -- line comment (only outside strings)
+    if (!inString && ch === "-" && i + 1 < sql.length && sql[i + 1] === "-") {
+      inLineComment = true;
+      current += ch;
+      continue;
+    }
+
     if (ch === "'" && !inString) {
       inString = true;
       current += ch;

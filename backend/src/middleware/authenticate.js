@@ -194,7 +194,12 @@ if (redisSub) {
 
 // On startup, pre-load recent revocations from Redis into the local Map
 // so tokens revoked before this instance started are still rejected.
-if (isRedisAvailable()) {
+// Check `redis !== null` (client created) rather than `isRedisAvailable()`
+// (client connected) because the ioredis `connect` event fires async after
+// all module-level code runs — `isRedisAvailable()` would always be false here.
+// The redis client queues commands until connected, so the scan will execute
+// once the connection is established.
+if (redis) {
   (async () => {
     try {
       let cursor = "0";

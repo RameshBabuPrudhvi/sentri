@@ -71,6 +71,12 @@ test("converts datetime('now') to NOW()", () => {
   assert.ok(!result.includes("datetime"), `Should not contain datetime, got: ${result}`);
 });
 
+test("converts datetime('now') in UPDATE (soft-delete pattern)", () => {
+  const result = translateSql("UPDATE projects SET deletedAt = datetime('now') WHERE id = 'PRJ-1'");
+  assert.ok(result.includes("NOW()"), `Expected NOW() in UPDATE, got: ${result}`);
+  assert.ok(!result.includes("datetime("), `Should not contain datetime(, got: ${result}`);
+});
+
 // ─── AUTOINCREMENT → SERIAL ──────────────────────────────────────────────────
 
 console.log("\n🐘 translateSql: AUTOINCREMENT → SERIAL");
@@ -127,6 +133,19 @@ test("preserves string literals containing semicolons", () => {
   const sql = "INSERT INTO logs (msg) VALUES ('hello; world')";
   const result = translateSql(sql);
   assert.ok(result.includes("'hello; world'"), `Semicolon in string should be preserved, got: ${result}`);
+});
+
+test("preserves semicolons inside -- line comments (migration DDL)", () => {
+  const sql = `CREATE TABLE IF NOT EXISTS tokens (
+  token     TEXT PRIMARY KEY,
+  expiresAt TEXT NOT NULL,             -- ISO 8601; checked on every verification
+  usedAt    TEXT
+)`;
+  const result = translateSql(sql);
+  // Should produce exactly one statement — the semicolon in the comment must not split it
+  const stmts = result.split(";\n").map(s => s.replace(/;\s*$/, "").trim()).filter(Boolean);
+  assert.equal(stmts.length, 1, `Should be 1 statement, got ${stmts.length}: ${JSON.stringify(stmts)}`);
+  assert.ok(result.includes("usedAt"), `Statement should not be truncated, got: ${result}`);
 });
 
 // ─── String literal safety ───────────────────────────────────────────────────
