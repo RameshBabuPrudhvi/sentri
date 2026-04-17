@@ -270,7 +270,8 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Job Queue** | ⬜ Add BullMQ for durable background run execution (INF-003) |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk (MNT-006) |
 | **Notifications** | ⬜ Send Slack/email alerts on test failures (FEA-001) |
-| **Multi-tenancy** | ⬜ Add workspace/organisation scoping (ACL-001) |
+| **Multi-tenancy** | ✅ Workspace isolation — every entity scoped to a workspace; auto-created on first login (ACL-001) |
+| **RBAC** | ✅ Role-based access control — Admin / QA Lead / Viewer with `requireRole()` middleware on all mutating routes (ACL-002) |
 | **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (DIF-002) |
 | **Visual Regression** | ⬜ Baseline screenshot diffing with `pixelmatch` (DIF-001) |
 
