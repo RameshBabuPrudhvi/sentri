@@ -38,6 +38,7 @@
 import assert from "node:assert/strict";
 import { app } from "../../src/middleware/appSetup.js";
 import { getDatabase } from "../../src/database/sqlite.js";
+import { workspaceScope } from "../../src/middleware/workspaceScope.js";
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
