@@ -33,13 +33,17 @@ export function workspaceScope(req, res, next) {
   if (!req.authUser) return next();
 
   const { sub: userId, workspaceId: jwtWorkspaceId } = req.authUser;
+  const headerWorkspaceId = typeof req.headers["x-workspace-id"] === "string"
+    ? req.headers["x-workspace-id"].trim()
+    : "";
+  const requestedWorkspaceId = headerWorkspaceId || jwtWorkspaceId;
 
   // If the JWT contains a workspaceId hint, verify membership and resolve
   // the current role from the DB (never trust the JWT for authorization).
-  if (jwtWorkspaceId) {
-    const membership = workspaceRepo.getMembership(jwtWorkspaceId, userId);
+  if (requestedWorkspaceId) {
+    const membership = workspaceRepo.getMembership(requestedWorkspaceId, userId);
     if (membership) {
-      req.workspaceId = jwtWorkspaceId;
+      req.workspaceId = requestedWorkspaceId;
       req.userRole = membership.role;
       return next();
     }

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Zap, Settings, BookOpen, ExternalLink, MessageSquare } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
@@ -17,8 +17,38 @@ const NAV = [
 ];
 
 export default function Sidebar({ open }) {
-  const { user } = useAuth();
+  const { user, authFetch, switchWorkspace } = useAuth();
   const isAdmin = userHasRole(user, "admin");
+  const [workspaces, setWorkspaces] = useState([]);
+  const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) return;
+    authFetch("/api/workspaces")
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (!cancelled && Array.isArray(data)) setWorkspaces(data);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => { cancelled = true; };
+  }, [authFetch, user?.id, user?.workspaceId]);
+
+  async function onWorkspaceChange(e) {
+    const nextId = e.target.value;
+    if (!nextId || nextId === user?.workspaceId) return;
+    setSwitchingWorkspaceId(nextId);
+    try {
+      await switchWorkspace(nextId);
+      window.location.reload();
+    } catch (err) {
+      alert(err.message || "Failed to switch workspace.");
+    } finally {
+      setSwitchingWorkspaceId("");
+    }
+  }
 
   return (
     <aside className={open ? "sidebar-open" : ""} style={{
@@ -36,6 +66,29 @@ export default function Sidebar({ open }) {
         <div style={{ padding: "6px 8px", borderRadius: "var(--radius)" }}>
           <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)" }}>{user?.workspaceName || "My Workspace"}</div>
           <div style={{ fontSize: "0.7rem", color: "var(--text3)", textTransform: "capitalize" }}>{user?.workspaceRole || "Personal"}</div>
+          {workspaces.length > 1 && (
+            <select
+              value={user?.workspaceId || ""}
+              onChange={onWorkspaceChange}
+              disabled={!!switchingWorkspaceId}
+              style={{
+                marginTop: 8,
+                width: "100%",
+                fontSize: "0.72rem",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text)",
+                padding: "6px 7px",
+              }}
+            >
+              {workspaces.map((ws) => (
+                <option key={ws.id} value={ws.id}>
+                  {ws.name} ({ws.role.replace("_", " ")})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

@@ -56,6 +56,33 @@ export function getByUserId(userId) {
 }
 
 /**
+ * Resolve a user's preferred active workspace.
+ *
+ * Selection order:
+ * 1) `preferredWorkspaceId` if the user is a member.
+ * 2) A workspace the user owns (`ownerId = userId`), oldest first.
+ * 3) Any other membership, oldest first.
+ *
+ * @param {string} userId
+ * @param {string|null} [preferredWorkspaceId=null]
+ * @returns {Object|undefined}
+ */
+export function getPreferredForUser(userId, preferredWorkspaceId = null) {
+  const workspaces = getByUserId(userId);
+  if (!workspaces || workspaces.length === 0) return undefined;
+
+  if (preferredWorkspaceId) {
+    const preferred = workspaces.find(ws => ws.id === preferredWorkspaceId);
+    if (preferred) return preferred;
+  }
+
+  const owned = workspaces.find(ws => ws.ownerId === userId);
+  if (owned) return owned;
+
+  return workspaces[0];
+}
+
+/**
  * Get a user's membership in a specific workspace.
  * @param {string} workspaceId
  * @param {string} userId

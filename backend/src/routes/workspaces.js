@@ -5,6 +5,8 @@
  * ### Endpoints
  * | Method | Path                                    | Description                   | Min Role |
  * |--------|-----------------------------------------|-------------------------------|----------|
+ * | GET    | `/api/workspaces`                       | List my workspaces            | viewer   |
+ * | POST   | `/api/workspaces/switch`                | Switch active workspace       | viewer   |
  * | GET    | `/api/workspaces/current`               | Get current workspace info    | viewer   |
  * | PATCH  | `/api/workspaces/current`               | Update workspace name/slug    | admin    |
  * | GET    | `/api/workspaces/current/members`       | List workspace members        | viewer   |
@@ -14,11 +16,31 @@
  */
 
 import { Router } from "express";
+import crypto from "crypto";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
+import { cookieSameSite } from "../middleware/appSetup.js";
+import {
+  signJwt, getJwtSecret, revokedTokens, AUTH_COOKIE,
+} from "../middleware/authenticate.js";
 
 const router = Router();
+const EXP_COOKIE = "token_exp";
+const JWT_TTL_SEC = 8 * 60 * 60;
+
+/**
+ * Set auth cookies on response.
+ * @param {Object} res
+ * @param {string} token
+ * @param {number} expSec
+ */
+function setAuthCookie(res, token, expSec) {
+  const maxAge = JWT_TTL_SEC;
+  const sameSite = cookieSameSite();
+  res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}${sameSite}`);
+  res.appendHeader("Set-Cookie", `${EXP_COOKIE}=${expSec}; Path=/; Max-Age=${maxAge}${sameSite}`);
+}
 
 // ─── Current workspace info ───────────────────────────────────────────────────
 
@@ -56,6 +78,59 @@ router.patch("/current", requireRole("admin"), (req, res) => {
   workspaceRepo.update(req.workspaceId, updates);
   const ws = workspaceRepo.getById(req.workspaceId);
   return res.json(ws);
+});
+
+/**
+ * List all workspaces for the current user.
+ * @route GET /api/workspaces
+ */
+router.get("/", (req, res) => {
+  const workspaces = workspaceRepo.getByUserId(req.authUser.sub);
+  return res.json(workspaces);
+});
+
+/**
+ * Switch active workspace and issue a fresh JWT cookie scoped to it.
+ * @route POST /api/workspaces/switch
+ */
+router.post("/switch", (req, res) => {
+  const { workspaceId } = req.body || {};
+  if (!workspaceId || typeof workspaceId !== "string") {
+    return res.status(400).json({ error: "workspaceId is required." });
+  }
+
+  const membership = workspaceRepo.getMembership(workspaceId, req.authUser.sub);
+  if (!membership) {
+    return res.status(403).json({ error: "You are not a member of that workspace." });
+  }
+
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  const { jti: oldJti, exp: oldExp } = req.authUser;
+  if (oldJti) revokedTokens.set(oldJti, oldExp);
+
+  const jti = crypto.randomUUID();
+  const payload = {
+    sub: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    jti,
+    workspaceId,
+  };
+  const token = signJwt(payload, getJwtSecret(), JWT_TTL_SEC);
+  const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+  setAuthCookie(res, token, exp);
+
+  const ws = workspaceRepo.getById(workspaceId);
+  return res.json({
+    workspaceId,
+    workspaceName: ws?.name || null,
+    workspaceRole: membership.role,
+  });
 });
 
 // ─── Member management ────────────────────────────────────────────────────────

@@ -188,6 +188,41 @@ export function AuthProvider({ children }) {
   }
 
   /**
+   * Switch active workspace for the current session.
+   * The backend issues a fresh JWT cookie with the requested workspace hint.
+   *
+   * @param {string} workspaceId
+   * @returns {Promise<Object>} Updated user profile.
+   */
+  async function switchWorkspace(workspaceId) {
+    if (!workspaceId || !user) return user;
+    const res = await fetch(`${API_BASE}/api/workspaces/switch`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
+      body: JSON.stringify({ workspaceId }),
+    });
+    if (res.status === 401) {
+      doLogout(true);
+      throw new Error("Session expired. Please sign in again.");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to switch workspace.");
+    }
+    const nextUser = sanitiseUser({
+      ...user,
+      workspaceId: data.workspaceId || null,
+      workspaceName: data.workspaceName || null,
+      workspaceRole: data.workspaceRole || null,
+    });
+    localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+    setUser(nextUser);
+    scheduleRefresh();
+    return nextUser;
+  }
+
+  /**
    * Authenticated fetch wrapper.
    * Sends `credentials: "include"` so the HttpOnly cookie is attached automatically.
    * Injects X-CSRF-Token for mutating requests.
@@ -211,7 +246,7 @@ export function AuthProvider({ children }) {
   }, []); // eslint-disable-line
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, authFetch, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, switchWorkspace, authFetch, loading }}>
       {children}
     </AuthContext.Provider>
   );

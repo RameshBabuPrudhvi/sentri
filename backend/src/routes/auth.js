@@ -277,16 +277,18 @@ function validatePasswordStrength(password) {
  * authorization from the database.
  *
  * @param {Object} user — User row from the database.
+ * @param {Object} [opts]
+ * @param {string|null} [opts.preferredWorkspaceId] - Workspace ID hint to keep active on refresh.
  * @returns {{ sub, email, name, role, workspaceId, jti }}
  */
-function buildJwtPayload(user) {
+function buildJwtPayload(user, opts = {}) {
   const jti = crypto.randomUUID();
   const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti };
 
   // Include workspaceId as a routing hint (not for authorization)
-  const workspaces = workspaceRepo.getByUserId(user.id);
-  if (workspaces && workspaces.length > 0) {
-    payload.workspaceId = workspaces[0].id;
+  const activeWorkspace = workspaceRepo.getPreferredForUser(user.id, opts.preferredWorkspaceId || null);
+  if (activeWorkspace) {
+    payload.workspaceId = activeWorkspace.id;
   }
 
   return payload;
@@ -309,16 +311,18 @@ function ensureUserWorkspace(user) {
 /**
  * Build the user response object with workspace info for the frontend.
  * @param {Object} user — User row from the database.
+ * @param {Object} [opts]
+ * @param {string|null} [opts.preferredWorkspaceId] - Workspace ID hint to return as active.
  * @returns {Object}
  */
-function buildUserResponse(user) {
+function buildUserResponse(user, opts = {}) {
   const resp = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null };
 
-  const workspaces = workspaceRepo.getByUserId(user.id);
-  if (workspaces && workspaces.length > 0) {
-    resp.workspaceId = workspaces[0].id;
-    resp.workspaceName = workspaces[0].name;
-    resp.workspaceRole = workspaces[0].role;
+  const activeWorkspace = workspaceRepo.getPreferredForUser(user.id, opts.preferredWorkspaceId || null);
+  if (activeWorkspace) {
+    resp.workspaceId = activeWorkspace.id;
+    resp.workspaceName = activeWorkspace.name;
+    resp.workspaceRole = activeWorkspace.role;
   }
 
   return resp;
@@ -491,7 +495,10 @@ router.post("/logout", requireAuth, (req, res) => {
 router.get("/me", requireAuth, (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
-  return res.json({ ...buildUserResponse(user), createdAt: user.createdAt });
+  return res.json({
+    ...buildUserResponse(user, { preferredWorkspaceId: req.authUser.workspaceId || null }),
+    createdAt: user.createdAt,
+  });
 });
 
 /**
@@ -515,12 +522,12 @@ router.post("/refresh", requireAuth, (req, res) => {
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
   // Issue a fresh token with a new JTI (includes updated workspace context)
-  const payload = buildJwtPayload(user);
+  const payload = buildJwtPayload(user, { preferredWorkspaceId: req.authUser.workspaceId || null });
   const token = signJwt(payload, getJwtSecret());
   const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
   setAuthCookie(res, token, exp);
 
-  return res.json({ user: buildUserResponse(user) });
+  return res.json({ user: buildUserResponse(user, { preferredWorkspaceId: payload.workspaceId || null }) });
 });
 
 // ─── Email Verification (SEC-001) ────────────────────────────────────────────

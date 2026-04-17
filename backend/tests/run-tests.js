@@ -34,6 +34,7 @@ const files = [
   "tests/ssrf-protection.test.js",
   "tests/email-verification.test.js",
   "tests/postgres-adapter.test.js",
+  "tests/workspace-switch.test.js",
 ];
 
 let passed = 0;
