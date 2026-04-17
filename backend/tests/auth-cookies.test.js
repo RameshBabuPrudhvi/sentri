@@ -21,14 +21,14 @@ import * as workspaceRepo from "../src/database/repositories/workspaceRepo.js";
 import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app } = t;
+const { app, workspaceScope } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
-  app.use("/api/workspaces", requireAuth, workspacesRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  app.use("/api/workspaces", requireAuth, workspaceScope, workspacesRouter);
   mounted = true;
 }
 

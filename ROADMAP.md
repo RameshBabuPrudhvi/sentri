@@ -174,7 +174,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### ACL-001 — Multi-tenancy: workspace ownership on all entities 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** L | **Source:** Audit
 
 **Problem:** Every authenticated user sees every project, test, and run in the database. There is no workspace, organisation, or team concept. `GET /api/tests` returns all tests to any authenticated user. This is a hard blocker for any commercial deployment — companies must not see each other's test data.
 
@@ -194,7 +194,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### ACL-002 — Role-based access control (Admin / QA Lead / Viewer) 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
 **Problem:** All authenticated users have identical permissions. Admin-only operations (settings, data deletion, user management) are only visually guarded on the frontend — the API accepts them from any authenticated user. Role separation is a hard requirement for any team deployment.
 

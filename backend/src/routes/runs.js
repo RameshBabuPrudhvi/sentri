@@ -32,12 +32,13 @@ import { runTests } from "../testRunner.js"; // thin orchestrator — delegates 
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { actor } from "../utils/actor.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
-router.post("/projects/:id/crawl", expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -98,7 +99,7 @@ router.post("/projects/:id/crawl", expensiveOpLimiter, async (req, res) => {
 
 // ─── Run Tests ────────────────────────────────────────────────────────────────
 
-router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -185,7 +186,7 @@ router.get("/runs/:runId", (req, res) => {
 
 // ─── Abort a running task ─────────────────────────────────────────────────────
 
-router.post("/runs/:runId/abort", (req, res) => {
+router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });
   // Verify the run's project belongs to the user's workspace (ACL-001)
@@ -239,11 +240,10 @@ router.post("/runs/:runId/abort", (req, res) => {
     runRepo.update(req.params.runId, { results: liveRun.results });
   }
 
-  const project = projectRepo.getById(run.projectId);
   logActivity({ ...actor(req),
     type: `${run.type === "test_run" || run.type === "run" ? "test_run" : run.type}.abort`,
     projectId: run.projectId,
-    projectName: project?.name || null,
+    projectName: ownerProject.name,
     detail: `Run aborted by user`,
     status: "aborted",
   });
@@ -287,7 +287,7 @@ router.get("/projects/:id/trigger-tokens", (req, res) => {
  * Body: `{ label?: string }`
  * Response `201`: `{ id, token, label, createdAt }`
  */
-router.post("/projects/:id/trigger-tokens", (req, res) => {
+router.post("/projects/:id/trigger-tokens", requireRole("admin"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 
@@ -319,7 +319,7 @@ router.post("/projects/:id/trigger-tokens", (req, res) => {
  * DELETE /api/projects/:id/trigger-tokens/:tid
  * Revoke (permanently delete) a trigger token.
  */
-router.delete("/projects/:id/trigger-tokens/:tid", (req, res) => {
+router.delete("/projects/:id/trigger-tokens/:tid", requireRole("admin"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 

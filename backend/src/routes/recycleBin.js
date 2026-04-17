@@ -22,6 +22,7 @@ import { stopSchedule } from "../scheduler.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
 import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
@@ -50,7 +51,7 @@ router.get("/recycle-bin", (req, res) => {
  * POST /api/restore/:type/:id
  * Restore a soft-deleted entity. type must be "project", "test", or "run".
  */
-router.post("/restore/:type/:id", (req, res) => {
+router.post("/restore/:type/:id", requireRole("qa_lead"), (req, res) => {
   const { type, id } = req.params;
   let restored = false;
 
@@ -128,7 +129,7 @@ router.post("/restore/:type/:id", (req, res) => {
  * Permanently and irreversibly delete a soft-deleted entity.
  * type must be "project", "test", or "run".
  */
-router.delete("/purge/:type/:id", (req, res) => {
+router.delete("/purge/:type/:id", requireRole("admin"), (req, res) => {
   const { type, id } = req.params;
 
   if (type === "project") {

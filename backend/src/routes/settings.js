@@ -16,6 +16,7 @@ import { Router } from "express";
 import { logActivity } from "../utils/activityLogger.js";
 import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
 import { actor } from "../utils/actor.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
@@ -33,12 +34,12 @@ router.get("/config", (req, res) => {
 });
 
 // GET /api/settings — returns masked key status (never full keys)
-router.get("/settings", (req, res) => {
+router.get("/settings", requireRole("admin"), (req, res) => {
   res.json(getConfiguredKeys());
 });
 
 // POST /api/settings — save API key at runtime (no server restart needed)
-router.post("/settings", (req, res) => {
+router.post("/settings", requireRole("admin"), (req, res) => {
   const { provider, apiKey, baseUrl, model } = req.body;
   const validProviders = ["anthropic", "openai", "google", "local"];
 
@@ -115,7 +116,7 @@ router.post("/settings", (req, res) => {
 });
 
 // DELETE /api/settings/:provider — remove a key or deactivate local provider
-router.delete("/settings/:provider", (req, res) => {
+router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
   const { provider } = req.params;
   const validProviders = ["anthropic", "openai", "google", "local"];
   if (!validProviders.includes(provider)) {

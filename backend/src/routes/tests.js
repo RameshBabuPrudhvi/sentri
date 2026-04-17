@@ -41,6 +41,7 @@ import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
 import { actor } from "../utils/actor.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
@@ -84,7 +85,7 @@ router.get("/tests/:testId", (req, res) => {
 });
 
 // PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
-router.patch("/tests/:testId", async (req, res) => {
+router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const validationErr = validateTestUpdate(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
@@ -305,7 +306,7 @@ No imports, no explanation.`;
 });
 
 // ── Manual test creation ──────────────────────────────────────────────────────
-router.post("/projects/:id/tests", (req, res) => {
+router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
   const validationErr = validateTestPayload(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
@@ -350,7 +351,7 @@ router.post("/projects/:id/tests", (req, res) => {
   res.status(201).json(test);
 });
 
-router.delete("/projects/:id/tests/:testId", (req, res) => {
+router.delete("/projects/:id/tests/:testId", requireRole("qa_lead"), (req, res) => {
   // Verify the project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
@@ -368,7 +369,7 @@ router.delete("/projects/:id/tests/:testId", (req, res) => {
 
 // ─── AI-powered test generation (pipeline-based) ──────────────────────────────
 
-router.post("/projects/:id/tests/generate", aiGenerationLimiter, async (req, res) => {
+router.post("/projects/:id/tests/generate", requireRole("qa_lead"), aiGenerationLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
@@ -472,7 +473,7 @@ router.post("/projects/:id/tests/generate", aiGenerationLimiter, async (req, res
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
-router.post("/tests/:testId/run", expensiveOpLimiter, async (req, res) => {
+router.post("/tests/:testId/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 
@@ -522,7 +523,7 @@ router.post("/tests/:testId/run", expensiveOpLimiter, async (req, res) => {
 
 // ─── Test Review: Approve / Reject / Restore / Bulk ──────────────────────────
 
-router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
+router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req, res) => {
   // Verify the project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
@@ -539,7 +540,7 @@ router.patch("/projects/:id/tests/:testId/approve", (req, res) => {
   res.json(testRepo.getById(test.id));
 });
 
-router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
+router.patch("/projects/:id/tests/:testId/reject", requireRole("qa_lead"), (req, res) => {
   // Verify the project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
@@ -556,7 +557,7 @@ router.patch("/projects/:id/tests/:testId/reject", (req, res) => {
   res.json(testRepo.getById(test.id));
 });
 
-router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
+router.patch("/projects/:id/tests/:testId/restore", requireRole("qa_lead"), (req, res) => {
   // Verify the project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
@@ -573,7 +574,7 @@ router.patch("/projects/:id/tests/:testId/restore", (req, res) => {
 });
 
 // NOTE: bulk must be declared BEFORE :testId wildcard routes to avoid conflict
-router.post("/projects/:id/tests/bulk", (req, res) => {
+router.post("/projects/:id/tests/bulk", requireRole("qa_lead"), (req, res) => {
   // Verify the project belongs to the user's workspace (ACL-001)
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
