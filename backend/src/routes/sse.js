@@ -81,7 +81,10 @@ function _deliverToLocal(runId, type, data) {
         if (type === "done") res.end();
     } catch { /* client gone */ }
   }
-  if (type === "done") runListeners.delete(runId);
+  if (type === "done") {
+    runListeners.delete(runId);
+    _unsubscribeFromRun(runId);
+  }
 }
 
 // ─── Redis pub/sub subscriber (INF-002) ───────────────────────────────────────

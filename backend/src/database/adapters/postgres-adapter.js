@@ -273,10 +273,16 @@ export function createPostgresAdapter(opts = {}) {
     console.log(formatLogLine("info", null, `[postgres-adapter] Connection pool created via deasync (max ${maxPool})`));
   }
 
-  // When a deasync transaction is active, this holds a function that
-  // executes queries on the dedicated transaction client instead of the
-  // pool.  Set by transaction() before calling fn(), cleared in finally.
-  let _txQueryOverride = null;
+  // When a deasync transaction is active, this Map holds the txQuery
+  // function keyed by a unique transaction token.  Each call to
+  // transaction() creates a fresh token and passes it to fn() via a
+  // closure-scoped _activeTxToken variable.  query() checks whether
+  // _activeTxToken is set and looks up the corresponding override.
+  // This prevents concurrent requests (whose event-loop turns are
+  // interleaved by deasyncLib.loopWhile) from accidentally routing
+  // their queries through another transaction's dedicated client.
+  const _txQueryOverrides = new Map();
+  let _activeTxToken = null;
 
   /**
    * Execute a query synchronously.
@@ -291,10 +297,10 @@ export function createPostgresAdapter(opts = {}) {
       return { rows, rowCount: rows.length };
     }
 
-    // If a deasync transaction is active, route all queries through the
-    // dedicated transaction client so they run inside BEGIN/COMMIT.
-    if (_txQueryOverride) {
-      return _txQueryOverride(sql, values);
+    // If a deasync transaction is active on THIS call stack, route the
+    // query through the dedicated transaction client.
+    if (_activeTxToken && _txQueryOverrides.has(_activeTxToken)) {
+      return _txQueryOverrides.get(_activeTxToken)(sql, values);
     }
 
     // deasync fallback: run async query and block until it resolves
@@ -439,7 +445,12 @@ export function createPostgresAdapter(opts = {}) {
         // Redirect all query() calls inside fn() to the dedicated
         // transaction client so that db.prepare().run() etc. execute
         // within the same BEGIN/COMMIT block.
-        _txQueryOverride = txQuery;
+        // Use a unique token so concurrent transactions (interleaved by
+        // deasyncLib.loopWhile pumping the event loop) don't collide.
+        const txToken = Symbol("tx");
+        _txQueryOverrides.set(txToken, txQuery);
+        const prevToken = _activeTxToken;
+        _activeTxToken = txToken;
         try {
           const result = fn(...args);
           txQuery("COMMIT");
@@ -448,7 +459,8 @@ export function createPostgresAdapter(opts = {}) {
           try { txQuery("ROLLBACK"); } catch { /* best-effort rollback */ }
           throw err;
         } finally {
-          _txQueryOverride = null;
+          _activeTxToken = prevToken;
+          _txQueryOverrides.delete(txToken);
           client.release();
         }
       };
