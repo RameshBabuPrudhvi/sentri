@@ -52,6 +52,7 @@ router.post("/", (req, res) => {
     credentials: encryptCredentials(credentials) || null,
     createdAt: new Date().toISOString(),
     status: "idle",
+    workspaceId: req.workspaceId || null,
   };
   projectRepo.create(project);
 
@@ -64,7 +65,7 @@ router.post("/", (req, res) => {
 });
 
 router.get("/", (req, res) => {
-  res.json(projectRepo.getAll().map(sanitiseProjectForClient));
+  res.json(projectRepo.getAll(req.workspaceId).map(sanitiseProjectForClient));
 });
 
 router.get("/:id", (req, res) => {

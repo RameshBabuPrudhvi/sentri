@@ -6,11 +6,16 @@
  */
 
 /**
- * @param {Object} req - Express request with `authUser` set by requireAuth.
- * @returns {{ userId: string, userName: string } | {}}
+ * @param {Object} req - Express request with `authUser` set by requireAuth
+ *                        and `workspaceId` set by workspaceScope.
+ * @returns {{ userId: string, userName: string, workspaceId: string } | {}}
  */
 export function actor(req) {
   const u = req?.authUser;
   if (!u) return {};
-  return { userId: u.sub, userName: u.name || u.email || u.sub };
+  return {
+    userId: u.sub,
+    userName: u.name || u.email || u.sub,
+    workspaceId: req.workspaceId || null,
+  };
 }
