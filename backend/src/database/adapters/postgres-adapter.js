@@ -246,6 +246,11 @@ export function createPostgresAdapter(opts = {}) {
     console.log(formatLogLine("info", null, `[postgres-adapter] Connection pool created via deasync (max ${maxPool})`));
   }
 
+  // When a deasync transaction is active, this holds a function that
+  // executes queries on the dedicated transaction client instead of the
+  // pool.  Set by transaction() before calling fn(), cleared in finally.
+  let _txQueryOverride = null;
+
   /**
    * Execute a query synchronously.
    *
@@ -257,6 +262,12 @@ export function createPostgresAdapter(opts = {}) {
     if (nativeClient) {
       const rows = nativeClient.querySync(sql, values);
       return { rows, rowCount: rows.length };
+    }
+
+    // If a deasync transaction is active, route all queries through the
+    // dedicated transaction client so they run inside BEGIN/COMMIT.
+    if (_txQueryOverride) {
+      return _txQueryOverride(sql, values);
     }
 
     // deasync fallback: run async query and block until it resolves
@@ -398,6 +409,10 @@ export function createPostgresAdapter(opts = {}) {
         }
 
         txQuery("BEGIN");
+        // Redirect all query() calls inside fn() to the dedicated
+        // transaction client so that db.prepare().run() etc. execute
+        // within the same BEGIN/COMMIT block.
+        _txQueryOverride = txQuery;
         try {
           const result = fn(...args);
           txQuery("COMMIT");
@@ -406,6 +421,7 @@ export function createPostgresAdapter(opts = {}) {
           try { txQuery("ROLLBACK"); } catch { /* best-effort rollback */ }
           throw err;
         } finally {
+          _txQueryOverride = null;
           client.release();
         }
       };

@@ -179,6 +179,7 @@ const CSRF_EXEMPT_PATHS = new Set([
   "/api/auth/refresh",         // refresh reads cookie for auth — no CSRF risk
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/auth/resend-verification", // public endpoint — user may have stale auth cookie
   "/api/auth/github/callback",
   "/api/auth/google/callback",
 ]);
