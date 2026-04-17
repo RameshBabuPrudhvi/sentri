@@ -188,6 +188,20 @@ export function getByProjectId(projectId) {
 }
 
 /**
+ * Count non-deleted runs for a set of project IDs.
+ * @param {string[]} projectIds
+ * @returns {number}
+ */
+export function countByProjectIds(projectIds) {
+  if (!projectIds || projectIds.length === 0) return 0;
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT COUNT(*) as cnt FROM runs WHERE projectId IN (${placeholders}) AND deletedAt IS NULL`
+  ).get(...projectIds).cnt;
+}
+
+/**
  * Get non-deleted runs for a project with lean columns, paginated.
  * @param {string}        projectId
  * @param {number|string} [page=1]

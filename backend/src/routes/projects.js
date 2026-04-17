@@ -30,13 +30,14 @@ import { validateProjectPayload, sanitise } from "../utils/validate.js";
 import { actor } from "../utils/actor.js";
 import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 import { reloadSchedule, stopSchedule, getNextRunAt } from "../scheduler.js";
+import { requireRole } from "../middleware/requireRole.js";
 import cron from "node-cron";
 
 const router = Router();
 
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
-router.post("/", (req, res) => {
+router.post("/", requireRole("qa_lead"), (req, res) => {
   const validationErr = validateProjectPayload(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
@@ -74,7 +75,7 @@ router.get("/:id", (req, res) => {
   res.json(sanitiseProjectForClient(project));
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requireRole("admin"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 
@@ -152,7 +153,7 @@ router.get("/:id/schedule", (req, res) => {
  *   timezone {string}  - IANA timezone name (default "UTC")
  *   enabled  {boolean} - Whether the schedule is active (default true)
  */
-router.patch("/:id/schedule", (req, res) => {
+router.patch("/:id/schedule", requireRole("qa_lead"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -212,7 +213,7 @@ router.patch("/:id/schedule", (req, res) => {
  * DELETE /api/projects/:id/schedule
  * Remove the cron schedule for a project entirely.
  */
-router.delete("/:id/schedule", (req, res) => {
+router.delete("/:id/schedule", requireRole("qa_lead"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
 

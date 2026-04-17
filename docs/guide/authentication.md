@@ -53,6 +53,30 @@ The `AuthContext` provider handles:
 - 401 response interception → automatic session clear and redirect
 - Server-side token revocation on sign-out (clears cookies)
 
+## Workspaces (ACL-001)
+
+Every user belongs to at least one **workspace**. A personal workspace is auto-created on first login. All entities (projects, tests, runs, activities) are scoped to the active workspace — users in one workspace cannot see data from another.
+
+- **Workspace switching** — Users with multiple workspaces can switch via the sidebar dropdown or `POST /api/workspaces/switch`. A new JWT is issued with the target workspace as a routing hint.
+- **Workspace members** — Admins can invite users, update roles, and remove members via `/api/workspaces/current/members`.
+- **Default backfill** — On startup, `ensureDefaultWorkspaces()` creates workspaces for any existing users and assigns orphaned entities.
+
+The JWT carries `workspaceId` as a **hint only**. Authorization is always resolved from the `workspace_members` table at request time so that permission changes take effect immediately.
+
+## Role-Based Access Control (ACL-002)
+
+Each workspace member has a role with a strict hierarchy:
+
+| Role | Weight | Can do |
+|---|---|---|
+| `admin` | 30 | Everything — settings, data deletion, member management, plus all below |
+| `qa_lead` | 20 | Create/edit/delete projects, tests, runs, schedules, plus all below |
+| `viewer` | 10 | Read-only access to all workspace data |
+
+The `requireRole(minimumRole)` middleware (in `backend/src/middleware/requireRole.js`) guards all mutating API routes. The `workspaceScope` middleware injects `req.workspaceId` and `req.userRole` from the database on every request.
+
+**Frontend gating:** The `<ProtectedRoute requiredRole="admin">` component restricts page access by role, and `userHasRole(user, role)` from `frontend/src/utils/roles.js` hides UI elements (buttons, nav links) for insufficient roles. These are UX-only — the backend is the source of truth.
+
 ## Protected Routes
 
-All routes except `/login` are wrapped in `<ProtectedRoute>`. Unauthenticated users are redirected to the sign-in page with their original destination saved.
+All routes except `/login` are wrapped in `<ProtectedRoute>`. Unauthenticated users are redirected to the sign-in page with their original destination saved. The Settings page requires `admin` role.

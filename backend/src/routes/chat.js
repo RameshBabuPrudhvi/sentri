@@ -357,9 +357,11 @@ router.post("/chat", async (req, res) => {
   // for failure analysis. Skipping logs/testQueue/videoSegments saves ~10-50×
   // in JSON parse time.
   const isLocal = isLocalProvider();
-  const projects = projectRepo.getAll();
-  const tests = testRepo.getAll();
-  const runs = runRepo.getAllWithResults();
+  const projects = projectRepo.getAll(req.workspaceId);
+  const projectIds = projects.map((p) => p.id);
+  const projectIdSet = new Set(projectIds);
+  const tests = testRepo.getAllByProjectIds(projectIds);
+  const runs = runRepo.getAllWithResults().filter((r) => projectIdSet.has(r.projectId));
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
   const testsById = {};

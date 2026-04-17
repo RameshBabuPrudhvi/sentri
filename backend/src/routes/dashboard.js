@@ -33,7 +33,9 @@ router.get("/dashboard", (req, res) => {
   const allTests = testRepo.getAll();
   const tests = allTests.filter(t => projectIds.has(t.projectId));
   // Only fetch activity types needed for dashboard counters (not all activities)
-  const allGenerationActivities = activityRepo.getByTypes(["test.create", "test.generate"]);
+  const allGenerationActivities = activityRepo.getByTypes(["test.create", "test.generate"], {
+    workspaceId: req.workspaceId,
+  });
   const generationActivities = allGenerationActivities.filter(a => !a.projectId || projectIds.has(a.projectId));
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
@@ -96,8 +98,9 @@ router.get("/dashboard", (req, res) => {
   // ── Tests auto-fixed (feedback loop + self-healing) ─────────────────────
   let testsAutoFixed = 0;
   for (const r of runs) { if (r.feedbackLoop?.improved) testsAutoFixed += r.feedbackLoop.improved; }
-  const healingEntries = healingRepo.count();
-  const healingSuccesses = healingRepo.countSuccesses();
+  const testIds = tests.map((t) => t.id);
+  const healingEntries = healingRepo.countByTestIds(testIds);
+  const healingSuccesses = healingRepo.countSuccessesByTestIds(testIds);
 
   // ── Average run duration (completed test runs) ──────────────────────────
   const durations = completedTestRuns.filter((r) => r.duration > 0).map((r) => r.duration);
@@ -183,7 +186,7 @@ router.get("/dashboard", (req, res) => {
     totalProjects: projects.length,
     totalTests: tests.length,
     totalRuns: runs.length,
-    totalActivities: activityRepo.count(),
+    totalActivities: activityRepo.countFiltered({ workspaceId: req.workspaceId }),
     passRate,
     history,
     recentRuns,

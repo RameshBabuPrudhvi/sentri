@@ -14,12 +14,12 @@
  */
 
 import { Router } from "express";
-import crypto from "crypto";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
 import { signJwt, getJwtSecret } from "../middleware/authenticate.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
+import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 
 const AUTH_COOKIE = "access_token";
 const EXP_COOKIE  = "token_exp";
@@ -105,8 +105,7 @@ router.get("/", (req, res) => {
   if (!user) return res.status(401).json({ error: "User not found." });
 
   // Issue a new JWT with the target workspace as the hint
-  const jti = crypto.randomUUID();
-  const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti, workspaceId: targetId };
+  const payload = buildJwtPayload(user, targetId);
   const token = signJwt(payload, getJwtSecret());
   const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
@@ -116,24 +115,7 @@ router.get("/", (req, res) => {
   res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}${sameSite}`);
   res.appendHeader("Set-Cookie", `${EXP_COOKIE}=${exp}; Path=/; Max-Age=${maxAge}${sameSite}`);
 
-  // Build response with the target workspace info
-  const ws = workspaceRepo.getById(targetId);
-  const allWorkspaces = workspaceRepo.getByUserId(userId);
-  const resp = {
-    user: {
-      id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null,
-      workspaceId: targetId,
-      workspaceName: ws?.name || null,
-      workspaceRole: membership.role,
-      ...(allWorkspaces.length > 1 ? {
-        workspaces: allWorkspaces.map(w => ({
-          id: w.id, name: w.name, role: w.role, isOwner: w.ownerId === userId,
-        })),
-      } : {}),
-    },
-  };
-
-  return res.json(resp);
+  return res.json({ user: buildUserResponse(user, targetId) });
 });
 
 // ─── Member management ────────────────────────────────────────────────────────

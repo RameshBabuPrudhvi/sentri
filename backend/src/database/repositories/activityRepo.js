@@ -90,17 +90,44 @@ export function count() {
 }
 
 /**
+ * Count activities with optional workspace/project scope.
+ * @param {Object} [filters]
+ * @param {string} [filters.workspaceId]
+ * @param {string} [filters.projectId]
+ * @returns {number}
+ */
+export function countFiltered({ workspaceId, projectId } = {}) {
+  const db = getDatabase();
+  let sql = "SELECT COUNT(*) as cnt FROM activities WHERE 1=1";
+  const params = [];
+  if (workspaceId) {
+    sql += " AND workspaceId = ?";
+    params.push(workspaceId);
+  }
+  if (projectId) {
+    sql += " AND projectId = ?";
+    params.push(projectId);
+  }
+  return db.prepare(sql).get(...params).cnt;
+}
+
+/**
  * Get activities filtered by type for dashboard analytics.
  * Only returns type, status, createdAt — skips detail, names, etc.
  * @param {string[]} types — Activity types to include.
+ * @param {Object} [opts]
+ * @param {string} [opts.workspaceId] — Optional workspace scope.
  * @returns {Object[]}
  */
-export function getByTypes(types) {
+export function getByTypes(types, opts = {}) {
   const db = getDatabase();
+  const { workspaceId } = opts;
   const placeholders = types.map(() => "?").join(", ");
+  const workspaceClause = workspaceId ? " AND workspaceId = ?" : "";
+  const params = workspaceId ? [...types, workspaceId] : types;
   return db.prepare(
-    `SELECT type, status, createdAt FROM activities WHERE type IN (${placeholders}) ORDER BY createdAt DESC`
-  ).all(...types);
+    `SELECT type, status, createdAt FROM activities WHERE type IN (${placeholders})${workspaceClause} ORDER BY createdAt DESC`
+  ).all(...params);
 }
 
 /**
@@ -123,4 +150,15 @@ export function clearAll() {
   const count = db.prepare("SELECT COUNT(*) as cnt FROM activities").get().cnt;
   db.prepare("DELETE FROM activities").run();
   return count;
+}
+
+/**
+ * Delete all activities in a workspace.
+ * @param {string} workspaceId
+ * @returns {number} Number of deleted rows.
+ */
+export function clearByWorkspaceId(workspaceId) {
+  const db = getDatabase();
+  const info = db.prepare("DELETE FROM activities WHERE workspaceId = ?").run(workspaceId);
+  return info.changes;
 }
