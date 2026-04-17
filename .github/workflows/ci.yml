@@ -123,7 +123,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U sentri"
+          --health-cmd "pg_isready -U sentri -d sentri_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
@@ -154,7 +154,7 @@ jobs:
 
       - name: Smoke test — server starts with PostgreSQL + Redis
         run: |
-          node src/index.js &
+          node src/index.js > /tmp/server.log 2>&1 &
           SERVER_PID=$!
           echo "Server PID: $SERVER_PID"
 
@@ -167,6 +167,9 @@ jobs:
             echo "Waiting ($i/10)..."
             sleep 2
           done
+          echo "--- Server startup logs ---"
+          cat /tmp/server.log
+          echo "--- End startup logs ---"
 
           # Verify /health/ready reports database OK
           READY=$(curl -sf http://localhost:3001/health/ready)
@@ -174,15 +177,25 @@ jobs:
 
           # Register + login (full auth flow against PostgreSQL)
           COOKIE_JAR=$(mktemp)
-          curl -sf -X POST http://localhost:3001/api/auth/register \
+          REG_RESP=$(curl -s -w "\n%{http_code}" -X POST http://localhost:3001/api/auth/register \
             -H "Content-Type: application/json" \
-            -d '{"name":"PG Bot","email":"pg@test.local","password":"PgTestPass123!"}' \
-            | grep -q "Account created" && echo "✅ POST /api/auth/register OK (PostgreSQL)"
+            -d '{"name":"PG Bot","email":"pg@test.local","password":"PgTestPass123!"}')
+          REG_CODE=$(echo "$REG_RESP" | tail -1)
+          REG_BODY=$(echo "$REG_RESP" | sed '$d')
+          echo "Register: HTTP $REG_CODE — $REG_BODY"
+          echo "$REG_BODY" | grep -q "Account created" && echo "✅ POST /api/auth/register OK (PostgreSQL)"
 
-          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
+          LOGIN_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
             -H "Content-Type: application/json" \
-            -d '{"email":"pg@test.local","password":"PgTestPass123!"}' \
-            | grep -q '"user"' && echo "✅ POST /api/auth/login OK (PostgreSQL)"
+            -d '{"email":"pg@test.local","password":"PgTestPass123!"}') || true
+          LOGIN_CODE=$(echo "$LOGIN_RESP" | tail -1)
+          LOGIN_BODY=$(echo "$LOGIN_RESP" | sed '$d')
+          echo "Login: HTTP $LOGIN_CODE — $LOGIN_BODY"
+          # Show server logs for debugging
+          echo "--- Server logs after login attempt ---"
+          cat /tmp/server.log | tail -40
+          echo "--- End server logs ---"
+          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE" && exit 1)
 
           # Extract CSRF token
           CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
@@ -207,6 +220,9 @@ jobs:
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE_JAR" http://localhost:3001/api/dashboard)
           [ "$HTTP_CODE" = "401" ] && echo "✅ Token revoked — 401 after logout (Redis)" || echo "❌ Expected 401, got $HTTP_CODE"
 
+          echo "--- Full server log ---"
+          cat /tmp/server.log
+          echo "--- End full server log ---"
           kill $SERVER_PID
         env:
           DATABASE_URL: postgres://sentri:sentri@localhost:5432/sentri_test
