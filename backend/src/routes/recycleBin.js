@@ -34,9 +34,15 @@ const router = Router();
  */
 router.get("/recycle-bin", (req, res) => {
   const LIMIT = 200;
-  const projects = projectRepo.getDeletedAll().slice(0, LIMIT).map(sanitiseProjectForClient);
-  const tests    = testRepo.getDeletedAll().slice(0, LIMIT);
-  const runs     = runRepo.getDeletedAll().slice(0, LIMIT);
+  // ACL-001: Scope recycle bin to the user's workspace.
+  const projects = projectRepo.getDeletedAll(req.workspaceId).slice(0, LIMIT).map(sanitiseProjectForClient);
+  const deletedProjectIds = new Set(projects.map(p => p.id));
+  // Also include project IDs from live projects in this workspace so we can
+  // show deleted tests/runs that belong to non-deleted workspace projects.
+  const liveProjects = projectRepo.getAll(req.workspaceId);
+  const allProjectIds = new Set([...deletedProjectIds, ...liveProjects.map(p => p.id)]);
+  const tests    = testRepo.getDeletedAll().filter(t => allProjectIds.has(t.projectId)).slice(0, LIMIT);
+  const runs     = runRepo.getDeletedAll().filter(r => allProjectIds.has(r.projectId)).slice(0, LIMIT);
   res.json({ projects, tests, runs });
 });
 
@@ -49,10 +55,14 @@ router.post("/restore/:type/:id", (req, res) => {
   let restored = false;
 
   if (type === "project") {
+    // ACL-001: Verify the project belongs to the user's workspace.
+    const projectBefore = projectRepo.getByIdIncludeDeleted(id);
+    if (!projectBefore || projectBefore.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ error: "not found or not in recycle bin" });
+    }
     // Capture the project's deletedAt before restoring so we can scope the
     // cascade to only children deleted at the same time (or later).  Items
     // individually deleted *before* the project are left in the recycle bin.
-    const projectBefore = projectRepo.getByIdIncludeDeleted(id);
     restored = projectRepo.restore(id);
     if (restored) {
       const deletedAt = projectBefore?.deletedAt;
@@ -69,6 +79,11 @@ router.post("/restore/:type/:id", (req, res) => {
   } else if (type === "test") {
     const test = testRepo.getByIdIncludeDeleted(id);
     if (test) {
+      // ACL-001: Verify the test's project belongs to the user's workspace.
+      const parentProjectFull = projectRepo.getByIdIncludeDeleted(test.projectId);
+      if (!parentProjectFull || parentProjectFull.workspaceId !== req.workspaceId) {
+        return res.status(404).json({ error: "not found or not in recycle bin" });
+      }
       const parentProject = projectRepo.getById(test.projectId);
       if (!parentProject) {
         return res.status(409).json({ error: "Parent project is deleted — restore the project first" });
@@ -84,6 +99,11 @@ router.post("/restore/:type/:id", (req, res) => {
   } else if (type === "run") {
     const run = runRepo.getByIdIncludeDeleted(id);
     if (run) {
+      // ACL-001: Verify the run's project belongs to the user's workspace.
+      const parentProjectFull = projectRepo.getByIdIncludeDeleted(run.projectId);
+      if (!parentProjectFull || parentProjectFull.workspaceId !== req.workspaceId) {
+        return res.status(404).json({ error: "not found or not in recycle bin" });
+      }
       const parentProject = projectRepo.getById(run.projectId);
       if (!parentProject) {
         return res.status(409).json({ error: "Parent project is deleted — restore the project first" });
@@ -116,6 +136,10 @@ router.delete("/purge/:type/:id", (req, res) => {
     if (!project || !project.deletedAt) {
       return res.status(404).json({ error: "not found in recycle bin" });
     }
+    // ACL-001: Verify the project belongs to the user's workspace.
+    if (project.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ error: "not found in recycle bin" });
+    }
     const testIds = testRepo.hardDeleteByProjectId(id);
     if (testIds.length > 0) healingRepo.deleteByTestIds(testIds);
     runRepo.hardDeleteByProjectId(id);
@@ -133,6 +157,11 @@ router.delete("/purge/:type/:id", (req, res) => {
     if (!test || !test.deletedAt) {
       return res.status(404).json({ error: "not found in recycle bin" });
     }
+    // ACL-001: Verify the test's project belongs to the user's workspace.
+    const testProject = projectRepo.getByIdIncludeDeleted(test.projectId);
+    if (!testProject || testProject.workspaceId !== req.workspaceId) {
+      return res.status(404).json({ error: "not found in recycle bin" });
+    }
     healingRepo.deleteByTestIds([id]);
     testRepo.hardDeleteById(id);
     logActivity({ ...actor(req),
@@ -142,6 +171,11 @@ router.delete("/purge/:type/:id", (req, res) => {
   } else if (type === "run") {
     const run = runRepo.getByIdIncludeDeleted(id);
     if (!run || !run.deletedAt) {
+      return res.status(404).json({ error: "not found in recycle bin" });
+    }
+    // ACL-001: Verify the run's project belongs to the user's workspace.
+    const runProject = projectRepo.getByIdIncludeDeleted(run.projectId);
+    if (!runProject || runProject.workspaceId !== req.workspaceId) {
       return res.status(404).json({ error: "not found in recycle bin" });
     }
     runRepo.hardDeleteById(id);

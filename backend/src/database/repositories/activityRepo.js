@@ -7,13 +7,13 @@ import { getDatabase } from "../sqlite.js";
 
 /**
  * Create an activity entry.
- * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId?, userName? }
+ * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId?, userName?, workspaceId? }
  */
 export function create(activity) {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName)
-    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName)
+    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName, workspaceId)
+    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName, @workspaceId)
   `).run({
     id: activity.id,
     type: activity.type,
@@ -26,6 +26,7 @@ export function create(activity) {
     createdAt: activity.createdAt,
     userId: activity.userId || null,
     userName: activity.userName || null,
+    workspaceId: activity.workspaceId || null,
   });
 }
 
@@ -54,13 +55,18 @@ export function getAllAsDict() {
  * @param {Object} [filters]
  * @param {string} [filters.type]
  * @param {string} [filters.projectId]
+ * @param {string} [filters.workspaceId] — Scope to workspace (ACL-001).
  * @param {number} [filters.limit=200]
  * @returns {Object[]}
  */
-export function getFiltered({ type, projectId, limit } = {}) {
+export function getFiltered({ type, projectId, workspaceId, limit } = {}) {
   const db = getDatabase();
   let sql = "SELECT * FROM activities WHERE 1=1";
   const params = [];
+  if (workspaceId) {
+    sql += " AND workspaceId = ?";
+    params.push(workspaceId);
+  }
   if (type) {
     sql += " AND type = ?";
     params.push(type);

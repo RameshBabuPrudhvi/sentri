@@ -19,14 +19,22 @@ import { classifyFailure } from "../pipeline/feedbackLoop.js";
 const router = Router();
 
 router.get("/dashboard", (req, res) => {
-  const projects = projectRepo.getAll();
+  // ACL-001: Scope dashboard data to the user's workspace.
+  // Projects are filtered by workspaceId; runs and tests are filtered by
+  // the set of project IDs that belong to this workspace.
+  const projects = projectRepo.getAll(req.workspaceId);
+  const projectIds = new Set(projects.map(p => p.id));
+
   // Use lean queries — dashboard only needs scalar fields + results for failure analysis.
   // Skipping logs, testQueue, generateInput, promptAudit, videoSegments saves ~10-50×
   // in JSON parse time compared to runRepo.getAll().
-  const runs = runRepo.getAllWithResults();
-  const tests = testRepo.getAll();
+  const allRuns = runRepo.getAllWithResults();
+  const runs = allRuns.filter(r => projectIds.has(r.projectId));
+  const allTests = testRepo.getAll();
+  const tests = allTests.filter(t => projectIds.has(t.projectId));
   // Only fetch activity types needed for dashboard counters (not all activities)
-  const generationActivities = activityRepo.getByTypes(["test.create", "test.generate"]);
+  const allGenerationActivities = activityRepo.getByTypes(["test.create", "test.generate"]);
+  const generationActivities = allGenerationActivities.filter(a => !a.projectId || projectIds.has(a.projectId));
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
 

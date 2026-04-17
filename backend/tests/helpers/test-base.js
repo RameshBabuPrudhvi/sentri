@@ -38,6 +38,7 @@
 import assert from "node:assert/strict";
 import { app } from "../../src/middleware/appSetup.js";
 import { getDatabase } from "../../src/database/sqlite.js";
+import { workspaceScope } from "../../src/middleware/workspaceScope.js";
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
@@ -118,6 +119,8 @@ const RESET_TABLES = [
   "tests",
   "oauth_ids",
   "projects",
+  "workspace_members",
+  "workspaces",
   "users",
 ];
 
@@ -324,6 +327,7 @@ export function createTestContext() {
   return {
     app,
     getDatabase,
+    workspaceScope,
     req,
     extractCookie: ec,
     parseCookies,

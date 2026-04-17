@@ -349,6 +349,20 @@ export const api = {
    */
   resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
 
+  // ── Workspace & Members (ACL-001, ACL-002) ───────────────────────────────────
+  /** @returns {Promise<Object>} Current workspace details. */
+  getWorkspace:      ()              => req("GET",    "/workspaces/current"),
+  /** @param {Object} data - `{ name?, slug? }` */
+  updateWorkspace:   (data)          => req("PATCH",  "/workspaces/current", data),
+  /** @returns {Promise<Array>} List of workspace members with roles. */
+  getMembers:        ()              => req("GET",    "/workspaces/current/members"),
+  /** @param {Object} data - `{ email, role? }` */
+  inviteMember:      (data)          => req("POST",   "/workspaces/current/members", data),
+  /** @param {string} userId @param {string} role */
+  updateMemberRole:  (userId, role)  => req("PATCH",  `/workspaces/current/members/${userId}`, { role }),
+  /** @param {string} userId */
+  removeMember:      (userId)        => req("DELETE", `/workspaces/current/members/${userId}`),
+
   // ── System info & data management ───────────────────────────────────────────
   /** @returns {Promise<Object>} Uptime, Node/Playwright versions, memory, DB counts. */
   getSystemInfo:   () => req("GET",    "/system"),

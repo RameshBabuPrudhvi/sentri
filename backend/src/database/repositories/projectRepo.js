@@ -33,10 +33,14 @@ function projectToRow(p) {
 
 /**
  * Get all non-deleted projects.
+ * @param {string} [workspaceId] — If provided, scope to this workspace (ACL-001).
  * @returns {Object[]}
  */
-export function getAll() {
+export function getAll(workspaceId) {
   const db = getDatabase();
+  if (workspaceId) {
+    return db.prepare("SELECT * FROM projects WHERE deletedAt IS NULL AND workspaceId = ?").all(workspaceId).map(rowToProject);
+  }
   return db.prepare("SELECT * FROM projects WHERE deletedAt IS NULL").all().map(rowToProject);
 }
 
@@ -73,15 +77,31 @@ export function getById(id) {
 }
 
 /**
+ * Get a non-deleted project by ID, scoped to a workspace (ACL-001).
+ * Returns undefined if the project doesn't exist OR belongs to a different workspace.
+ * Use this in route handlers to prevent cross-workspace IDOR.
+ * @param {string} id
+ * @param {string} workspaceId
+ * @returns {Object|undefined}
+ */
+export function getByIdInWorkspace(id, workspaceId) {
+  const db = getDatabase();
+  return rowToProject(
+    db.prepare("SELECT * FROM projects WHERE id = ? AND workspaceId = ? AND deletedAt IS NULL").get(id, workspaceId)
+  );
+}
+
+/**
  * Create a project.
- * @param {Object} project
+ * @param {Object} project — Must include `workspaceId` (ACL-001).
  */
 export function create(project) {
   const db = getDatabase();
   const row = projectToRow(project);
+  row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, createdAt)
-    VALUES (@id, @name, @url, @credentials, @status, @createdAt)
+    INSERT INTO projects (id, name, url, credentials, status, createdAt, workspaceId)
+    VALUES (@id, @name, @url, @credentials, @status, @createdAt, @workspaceId)
   `).run(row);
 }
 
@@ -110,10 +130,14 @@ export function update(id, fields) {
 
 /**
  * Count total non-deleted projects.
+ * @param {string} [workspaceId] — If provided, scope to this workspace (ACL-001).
  * @returns {number}
  */
-export function count() {
+export function count(workspaceId) {
   const db = getDatabase();
+  if (workspaceId) {
+    return db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE deletedAt IS NULL AND workspaceId = ?").get(workspaceId).cnt;
+  }
   return db.prepare("SELECT COUNT(*) as cnt FROM projects WHERE deletedAt IS NULL").get().cnt;
 }
 
@@ -139,10 +163,14 @@ export function hardDeleteById(id) {
 
 /**
  * Get all soft-deleted projects (recycle bin).
+ * @param {string} [workspaceId] — If provided, scope to this workspace (ACL-001).
  * @returns {Object[]}
  */
-export function getDeletedAll() {
+export function getDeletedAll(workspaceId) {
   const db = getDatabase();
+  if (workspaceId) {
+    return db.prepare("SELECT * FROM projects WHERE deletedAt IS NOT NULL AND workspaceId = ? ORDER BY deletedAt DESC").all(workspaceId).map(rowToProject);
+  }
   return db.prepare("SELECT * FROM projects WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC").all().map(rowToProject);
 }
 

@@ -38,7 +38,7 @@ const router = Router();
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
 router.post("/projects/:id/crawl", expensiveOpLimiter, async (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
   if (existingRun) {
@@ -99,7 +99,7 @@ router.post("/projects/:id/crawl", expensiveOpLimiter, async (req, res) => {
 // ─── Run Tests ────────────────────────────────────────────────────────────────
 
 router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
   if (existingRun) {
@@ -161,6 +161,10 @@ router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
 // ─── Run listing ──────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/runs", (req, res) => {
+  // Verify the project belongs to the user's workspace (ACL-001)
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+
   const { page, pageSize } = req.query;
   if (page !== undefined || pageSize !== undefined) {
     const result = runRepo.getByProjectIdPaged(req.params.id, page, pageSize);
@@ -173,6 +177,9 @@ router.get("/projects/:id/runs", (req, res) => {
 router.get("/runs/:runId", (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });
+  // Verify the run's project belongs to the user's workspace (ACL-001)
+  const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
   res.json(signRunArtifacts(run));
 });
 
@@ -181,6 +188,9 @@ router.get("/runs/:runId", (req, res) => {
 router.post("/runs/:runId/abort", (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });
+  // Verify the run's project belongs to the user's workspace (ACL-001)
+  const ownerProject = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
+  if (!ownerProject) return res.status(404).json({ error: "not found" });
   if (run.status !== "running") {
     return res.status(409).json({ error: "Run is not in progress" });
   }
@@ -264,7 +274,7 @@ router.post("/runs/:runId/abort", (req, res) => {
  * List all trigger tokens for a project (hashes never returned).
  */
 router.get("/projects/:id/trigger-tokens", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   res.json(webhookTokenRepo.getByProjectId(project.id));
 });
@@ -278,7 +288,7 @@ router.get("/projects/:id/trigger-tokens", (req, res) => {
  * Response `201`: `{ id, token, label, createdAt }`
  */
 router.post("/projects/:id/trigger-tokens", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 
   const label = typeof req.body?.label === "string"
@@ -310,7 +320,7 @@ router.post("/projects/:id/trigger-tokens", (req, res) => {
  * Revoke (permanently delete) a trigger token.
  */
 router.delete("/projects/:id/trigger-tokens/:tid", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 
   // Verify the token belongs to this project before deleting (prevent

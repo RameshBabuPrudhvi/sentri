@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **API**: Multi-tenancy workspaces — all entities (projects, tests, runs, activities) are scoped to workspaces; workspace management endpoints at `/api/workspaces/*` (ACL-001) (#88)
+- **API**: Role-based access control — `admin`/`qa_lead`/`viewer` roles enforced via `requireRole` middleware; role hierarchy admin > qa_lead > viewer (ACL-002) (#88)
+- **DB**: Migration 004 — `workspaces` and `workspace_members` tables; `workspaceId` foreign key on projects, tests, runs, activities (ACL-001) (#88)
+- **Auth**: JWT now includes `workspaceId` hint; workspace role resolved from DB on every request for immediate permission changes (ACL-001, ACL-002) (#88)
+- **Frontend**: `ProtectedRoute` supports `requiredRole` prop for role-gated pages; `AuthContext` exposes `workspaceId`, `workspaceName`, `workspaceRole` (ACL-002) (#88)
+
 ## [1.5.0] — 2026-04-17
 
 ### Added

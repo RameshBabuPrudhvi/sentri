@@ -18,16 +18,16 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app, req } = t;
+const { app, req, workspaceScope } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
-  app.use("/api", requireAuth, testsRouter);
-  app.use("/api", requireAuth, runsRouter);
-  app.use("/api", requireAuth, sseRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, runsRouter);
+  app.use("/api", requireAuth, workspaceScope, sseRouter);
   mounted = true;
 }
 

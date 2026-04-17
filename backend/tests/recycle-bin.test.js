@@ -14,7 +14,7 @@ import * as testRepo from "../src/database/repositories/testRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app, req, getDatabase } = t;
+const { app, req, getDatabase, workspaceScope } = t;
 const { test, summary } = t.createTestRunner();
 
 // ─── Mount routes once ────────────────────────────────────────────────────────
@@ -23,9 +23,9 @@ let mounted = false;
 function mountOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
-  app.use("/api", requireAuth, testsRouter);
-  app.use("/api", requireAuth, recycleBinRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, recycleBinRouter);
   mounted = true;
 }
 
@@ -40,11 +40,12 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
 
   // Register + login using shared helper
-  const { token } = await t.registerAndLogin(base, {
+  const { token, payload } = await t.registerAndLogin(base, {
     name: "RB Test",
     email: "rb-test@recycle-bin-test.com",
     password: "RbTest1234!",
   });
+  const wsId = payload.workspaceId;
 
   // ── Create shared test data directly via repos (fast, no HTTP overhead) ──
   const prbId = "PRJ-RB-001";
@@ -54,7 +55,7 @@ async function main() {
 
   await test("returns empty recycle bin when nothing is deleted", async () => {
     // Seed a live project
-    projectRepo.create({ id: prbId, name: "RB Project", url: "https://rb.test", createdAt: new Date().toISOString(), status: "idle" });
+    projectRepo.create({ id: prbId, name: "RB Project", url: "https://rb.test", createdAt: new Date().toISOString(), status: "idle", workspaceId: wsId });
     testRepo.create({ id: trbId, projectId: prbId, name: "RB Test", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
 
     const { res, json } = await req(base, "/api/recycle-bin", { token });
@@ -137,7 +138,7 @@ async function main() {
   await test("deleting a project cascades soft-delete to its tests", async () => {
     const cid = "PRJ-RB-002";
     const ctid = "TC-RB-003";
-    projectRepo.create({ id: cid, name: "Cascade Project", url: "https://cascade.test", createdAt: new Date().toISOString(), status: "idle" });
+    projectRepo.create({ id: cid, name: "Cascade Project", url: "https://cascade.test", createdAt: new Date().toISOString(), status: "idle", workspaceId: wsId });
     testRepo.create({ id: ctid, projectId: cid, name: "Cascade Test", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
 
     const { res } = await req(base, `/api/projects/${cid}`, { method: "DELETE", token });
@@ -156,7 +157,7 @@ async function main() {
     const scid = "PRJ-RB-003";
     const stid1 = "TC-RB-010";
     const stid2 = "TC-RB-011";
-    projectRepo.create({ id: scid, name: "Scoped Project", url: "https://scoped.test", createdAt: new Date().toISOString(), status: "idle" });
+    projectRepo.create({ id: scid, name: "Scoped Project", url: "https://scoped.test", createdAt: new Date().toISOString(), status: "idle", workspaceId: wsId });
     testRepo.create({ id: stid1, projectId: scid, name: "Individually Deleted", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
     testRepo.create({ id: stid2, projectId: scid, name: "Cascade Deleted", description: "", steps: [], tags: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reviewStatus: "draft", priority: "medium", codeVersion: 0, isJourneyTest: false, assertionEnhanced: false });
 

@@ -37,6 +37,7 @@ import crypto from "crypto";
 import * as userRepo from "../database/repositories/userRepo.js";
 import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
 import * as verificationTokenRepo from "../database/repositories/verificationTokenRepo.js";
+import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
@@ -261,6 +262,68 @@ function validatePasswordStrength(password) {
   return null;
 }
 
+// ─── Workspace-aware JWT builder (ACL-001) ───────────────────────────────────
+
+/**
+ * Build a JWT payload with a workspace hint.
+ *
+ * The JWT carries `workspaceId` as a **hint** so the `workspaceScope`
+ * middleware can look up the correct workspace without scanning all
+ * memberships.  The **role is never stored in the JWT** — it is always
+ * resolved from the `workspace_members` table at request time so that
+ * permission changes (promote / demote / remove) take effect immediately.
+ *
+ * This follows the Slack / GitHub model: identity in the token,
+ * authorization from the database.
+ *
+ * @param {Object} user — User row from the database.
+ * @returns {{ sub, email, name, role, workspaceId, jti }}
+ */
+function buildJwtPayload(user) {
+  const jti = crypto.randomUUID();
+  const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti };
+
+  // Include workspaceId as a routing hint (not for authorization)
+  const workspaces = workspaceRepo.getByUserId(user.id);
+  if (workspaces && workspaces.length > 0) {
+    payload.workspaceId = workspaces[0].id;
+  }
+
+  return payload;
+}
+
+/**
+ * Ensure the user belongs to at least one workspace, creating a personal
+ * workspace if needed.  Called from every auth path (login, OAuth) so no
+ * user can end up without a workspace.
+ *
+ * @param {Object} user — User row from the database.
+ */
+function ensureUserWorkspace(user) {
+  const existing = workspaceRepo.getByUserId(user.id);
+  if (existing && existing.length > 0) return;
+  const slug = `${(user.name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
+  workspaceRepo.create({ name: `${user.name || "My"}'s Workspace`, slug, ownerId: user.id });
+}
+
+/**
+ * Build the user response object with workspace info for the frontend.
+ * @param {Object} user — User row from the database.
+ * @returns {Object}
+ */
+function buildUserResponse(user) {
+  const resp = { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null };
+
+  const workspaces = workspaceRepo.getByUserId(user.id);
+  if (workspaces && workspaces.length > 0) {
+    resp.workspaceId = workspaces[0].id;
+    resp.workspaceName = workspaces[0].name;
+    resp.workspaceRole = workspaces[0].role;
+  }
+
+  return resp;
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 /**
@@ -382,8 +445,11 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
+    // ACL-001: Ensure the user has a workspace before issuing a token.
+    ensureUserWorkspace(user);
+
+    const payload = buildJwtPayload(user);
+    const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
     setAuthCookie(res, token, exp);
@@ -391,9 +457,7 @@ router.post("/login", async (req, res) => {
     // Note: token is NOT returned in the response body — it lives in the HttpOnly
     // cookie only. The frontend reads user profile from this response and stores
     // it in React state. The token_exp cookie exposes the expiry timestamp.
-    return res.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
-    });
+    return res.json({ user: buildUserResponse(user) });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/login] ${err.message}`));
     return res.status(500).json({ error: "Sign-in failed. Please try again." });
@@ -427,7 +491,7 @@ router.post("/logout", requireAuth, (req, res) => {
 router.get("/me", requireAuth, (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
-  return res.json({ id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null, createdAt: user.createdAt });
+  return res.json({ ...buildUserResponse(user), createdAt: user.createdAt });
 });
 
 /**
@@ -450,15 +514,13 @@ router.post("/refresh", requireAuth, (req, res) => {
   const { jti: oldJti, exp: oldExp } = req.authUser;
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
-  // Issue a fresh token with a new JTI
-  const jti   = crypto.randomUUID();
-  const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
+  // Issue a fresh token with a new JTI (includes updated workspace context)
+  const payload = buildJwtPayload(user);
+  const token = signJwt(payload, getJwtSecret());
   const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
   setAuthCookie(res, token, exp);
 
-  return res.json({
-    user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
-  });
+  return res.json({ user: buildUserResponse(user) });
 });
 
 // ─── Email Verification (SEC-001) ────────────────────────────────────────────
@@ -759,14 +821,14 @@ router.get("/github/callback", async (req, res) => {
       avatar: profile.avatar_url || null,
     });
 
-    const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
+    ensureUserWorkspace(user);
+
+    const payload = buildJwtPayload(user);
+    const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
 
-    return res.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
-    });
+    return res.json({ user: buildUserResponse(user) });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/github] ${err.message}`));
     return res.status(401).json({ error: err.message || "GitHub authentication failed." });
@@ -822,18 +884,18 @@ router.get("/google/callback", async (req, res) => {
       provider: "google",
       providerId: profile.sub,
       email: profile.email.toLowerCase(),
-      name: profile.name,
+      name: profile.name || profile.email.split("@")[0],
       avatar: profile.picture || null,
     });
 
-    const jti   = crypto.randomUUID();
-    const token = signJwt({ sub: user.id, email: user.email, name: user.name, role: user.role, jti }, getJwtSecret());
+    ensureUserWorkspace(user);
+
+    const payload = buildJwtPayload(user);
+    const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
 
-    return res.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
-    });
+    return res.json({ user: buildUserResponse(user) });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/google] ${err.message}`));
     return res.status(401).json({ error: err.message || "Google authentication failed." });
