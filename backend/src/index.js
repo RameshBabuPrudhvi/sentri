@@ -26,9 +26,11 @@ import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
 import { initScheduler, stopAllTasks } from "./scheduler.js";
 import { closeRedis } from "./utils/redisClient.js";
+import { ensureDefaultWorkspaces } from "./database/repositories/workspaceRepo.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
+import { workspaceScope } from "./middleware/workspaceScope.js";
 
 // ─── Route modules ────────────────────────────────────────────────────────────
 import projectsRouter from "./routes/projects.js";
@@ -44,6 +46,7 @@ import { requireAuth } from "./routes/auth.js";
 import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
 import recycleBinRouter from "./routes/recycleBin.js";
+import workspacesRouter from "./routes/workspaces.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -82,7 +85,10 @@ const orphanCount = runRepo.markOrphansInterrupted();
 if (orphanCount > 0) {
   console.warn(formatLogLine("warn", null, `[db] Marked ${orphanCount} orphaned run(s) as interrupted`));
 }
-// 5. Initialise cron-based test scheduler (ENH-006)
+// 5. Ensure every user has a workspace (ACL-001 backfill for existing data).
+//    Must run after DB init + migrations so the workspaces table exists.
+ensureDefaultWorkspaces();
+// 6. Initialise cron-based test scheduler (ENH-006)
 //    Must run after DB init so scheduleRepo can read the schedules table.
 initScheduler();
 
@@ -170,17 +176,19 @@ app.use("/api/auth", authRouter);
 // with a project token rather than a user JWT.
 app.use("/api", triggerRouter);
 
-// All other API routes require a valid JWT token
-app.use("/api/projects", requireAuth, projectsRouter);
-app.use("/api", requireAuth, testsRouter);
-app.use("/api", requireAuth, runsRouter);
-app.use("/api", requireAuth, sseRouter);
-app.use("/api", requireAuth, dashboardRouter);
-app.use("/api", requireAuth, settingsRouter);
-app.use("/api", requireAuth, systemRouter);
-app.use("/api", requireAuth, chatRouter);
-app.use("/api", requireAuth, testFixRouter);
-app.use("/api", requireAuth, recycleBinRouter);
+// All other API routes require a valid JWT token + workspace context (ACL-001).
+// workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
+app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+app.use("/api", requireAuth, workspaceScope, testsRouter);
+app.use("/api", requireAuth, workspaceScope, runsRouter);
+app.use("/api", requireAuth, workspaceScope, sseRouter);
+app.use("/api", requireAuth, workspaceScope, dashboardRouter);
+app.use("/api", requireAuth, workspaceScope, settingsRouter);
+app.use("/api", requireAuth, workspaceScope, systemRouter);
+app.use("/api", requireAuth, workspaceScope, chatRouter);
+app.use("/api", requireAuth, workspaceScope, testFixRouter);
+app.use("/api", requireAuth, workspaceScope, recycleBinRouter);
+app.use("/api/workspaces", requireAuth, workspaceScope, workspacesRouter);
 
 // ─── Health probes (root-level, not under /api, no auth required) ────────────
 // GET /health  — liveness: is the process alive?

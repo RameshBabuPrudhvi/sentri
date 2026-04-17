@@ -65,7 +65,12 @@ function msUntilRefresh() {
 }
 
 function sanitiseUser(u) {
-  return { id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user" };
+  return {
+    id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user",
+    workspaceId: u.workspaceId || null,
+    workspaceName: u.workspaceName || null,
+    workspaceRole: u.workspaceRole || null,
+  };
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
