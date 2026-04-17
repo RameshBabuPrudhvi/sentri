@@ -19,13 +19,13 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app, req, getDatabase, extractCookie, decodeJwtPayload } = t;
+const { app, req, getDatabase, extractCookie, decodeJwtPayload, workspaceScope } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
   mounted = true;
 }
 

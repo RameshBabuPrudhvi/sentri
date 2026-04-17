@@ -105,6 +105,7 @@ async function main() {
     assert.equal(res.status, 200, "Switch should succeed for owned workspace");
     const switchCookies = parseCookies(res);
     const switchedCookieHeader = buildCookieHeader(switchCookies);
+    const switchedToken = switchCookies.access_token.value;
     const switchedUser = (await res.json()).user;
     assert.equal(switchedUser.workspaceId, secondaryWorkspace.id, "Switch response should reflect target workspace");
 
@@ -174,14 +175,14 @@ async function main() {
     assert.equal(res.status, 200, "Refresh should succeed with valid cookie");
     const refreshCookies = parseCookies(res);
     assert.ok(refreshCookies.access_token, "Refresh should set new access_token cookie");
-    assert.notEqual(refreshCookies.access_token.value, token, "Refresh should issue a different token");
+    assert.notEqual(refreshCookies.access_token.value, switchedToken, "Refresh should issue a different token");
     const refreshBody = await res.json();
     assert.ok(refreshBody.user, "Refresh should return user");
     assert.equal(refreshBody.user.workspaceId, secondaryWorkspace.id, "Refresh response should preserve switched workspace");
 
-    // Old token should be revoked
+    // Old (switched) token should be revoked
     res = await fetch(`${base}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${switchedToken}` },
     });
     assert.equal(res.status, 401, "Old token should be revoked after refresh");
 
