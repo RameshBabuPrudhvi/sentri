@@ -24,6 +24,7 @@ import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { AUTH_COOKIE } from "./authenticate.js";
 import { redis, isRedisAvailable } from "../utils/redisClient.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -233,19 +234,24 @@ app.use(csrfMiddleware);
 // so limits are enforced globally (not per-process).  When Redis is not
 // available, the default in-memory store is used (single-instance only).
 
-// Lazy-load rate-limit-redis only when Redis is available
+// Lazy-load rate-limit-redis only when Redis is configured.
+// We check `redis !== null` (client created) rather than `isRedisAvailable()`
+// (client connected) because the ioredis `connect` event fires asynchronously
+// AFTER all synchronous module-level code runs, so `isRedisAvailable()` would
+// always return `false` at import time. The RedisStore itself handles
+// connection retries gracefully — commands are queued until the client connects.
 const _require = createRequire(import.meta.url);
 let _redisStore = undefined; // undefined = use default in-memory store
-if (isRedisAvailable()) {
+if (redis) {
   try {
     const { RedisStore } = _require("rate-limit-redis");
     _redisStore = new RedisStore({
       sendCommand: (...args) => redis.call(...args),
       prefix: "sentri:rl:",
     });
-    console.log("[rate-limit] Using Redis-backed store for rate limiting");
+    console.log(formatLogLine("info", null, "[rate-limit] Using Redis-backed store for rate limiting"));
   } catch {
-    console.warn("[rate-limit] rate-limit-redis not installed — using in-memory store. Run `npm install rate-limit-redis` for shared rate limiting.");
+    console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis not installed — using in-memory store. Run `npm install rate-limit-redis` for shared rate limiting."));
   }
 }
 

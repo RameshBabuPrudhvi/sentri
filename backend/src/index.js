@@ -99,54 +99,59 @@ async function gracefulShutdown(signal) {
   _shuttingDown = true;
   console.log(formatLogLine("info", null, `[shutdown] ${signal} received — starting graceful shutdown (drain ${SHUTDOWN_DRAIN_MS}ms)`));
 
-  // 1. Stop accepting new connections
-  if (_server) {
-    _server.close(() => {
-      console.log(formatLogLine("info", null, "[shutdown] HTTP server closed — no new connections"));
-    });
-  }
-
-  // 2. Stop all cron tasks so no new runs are scheduled
-  stopAllTasks();
-  console.log(formatLogLine("info", null, "[shutdown] Scheduler tasks stopped"));
-
-  // 3. Wait for in-flight runs to finish (up to SHUTDOWN_DRAIN_MS)
-  const deadline = Date.now() + SHUTDOWN_DRAIN_MS;
-  while (runAbortControllers.size > 0 && Date.now() < deadline) {
-    console.log(formatLogLine("info", null, `[shutdown] Draining ${runAbortControllers.size} in-flight run(s)…`));
-    await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
-  }
-
-  // 4. Force-abort any stragglers and mark them interrupted
-  if (runAbortControllers.size > 0) {
-    console.warn(formatLogLine("warn", null, `[shutdown] Force-aborting ${runAbortControllers.size} straggler run(s)`));
-    for (const [runId, entry] of runAbortControllers) {
-      try {
-        // Set the in-memory run status BEFORE aborting so the .catch()
-        // handler in runWithAbort doesn't overwrite with "running".
-        if (entry.run) entry.run.status = "interrupted";
-        entry.controller.abort();
-        // Mark the run as interrupted in the database so it isn't left
-        // in "running" state (the normal abort flow may not complete in time).
-        runRepo.update(runId, {
-          status: "interrupted",
-          finishedAt: new Date().toISOString(),
-          error: "Server shutdown while run was in progress",
-        });
-      } catch (err) {
-        console.warn(formatLogLine("warn", null, `[shutdown] Error aborting run ${runId}: ${err.message}`));
-      }
+  try {
+    // 1. Stop accepting new connections
+    if (_server) {
+      _server.close(() => {
+        console.log(formatLogLine("info", null, "[shutdown] HTTP server closed — no new connections"));
+      });
     }
-    runAbortControllers.clear();
+
+    // 2. Stop all cron tasks so no new runs are scheduled
+    stopAllTasks();
+    console.log(formatLogLine("info", null, "[shutdown] Scheduler tasks stopped"));
+
+    // 3. Wait for in-flight runs to finish (up to SHUTDOWN_DRAIN_MS)
+    const deadline = Date.now() + SHUTDOWN_DRAIN_MS;
+    while (runAbortControllers.size > 0 && Date.now() < deadline) {
+      console.log(formatLogLine("info", null, `[shutdown] Draining ${runAbortControllers.size} in-flight run(s)…`));
+      await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
+    }
+
+    // 4. Force-abort any stragglers and mark them interrupted
+    if (runAbortControllers.size > 0) {
+      console.warn(formatLogLine("warn", null, `[shutdown] Force-aborting ${runAbortControllers.size} straggler run(s)`));
+      for (const [runId, entry] of runAbortControllers) {
+        try {
+          // Set the in-memory run status BEFORE aborting so the .catch()
+          // handler in runWithAbort doesn't overwrite with "running".
+          if (entry.run) entry.run.status = "interrupted";
+          entry.controller.abort();
+          // Mark the run as interrupted in the database so it isn't left
+          // in "running" state (the normal abort flow may not complete in time).
+          runRepo.update(runId, {
+            status: "interrupted",
+            finishedAt: new Date().toISOString(),
+            error: "Server shutdown while run was in progress",
+          });
+        } catch (err) {
+          console.warn(formatLogLine("warn", null, `[shutdown] Error aborting run ${runId}: ${err.message}`));
+        }
+      }
+      runAbortControllers.clear();
+    }
+
+    // 5. Close Redis connections (INF-002)
+    await closeRedis();
+
+    // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
+    closeDatabase();
+    console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
+    process.exit(0);
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[shutdown] Error during graceful shutdown: ${err?.message || err}`));
+    process.exit(1);
   }
-
-  // 5. Close Redis connections (INF-002)
-  await closeRedis();
-
-  // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
-  closeDatabase();
-  console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
-  process.exit(0);
 }
 
 process.on("SIGINT",  () => gracefulShutdown("SIGINT"));

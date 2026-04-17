@@ -876,10 +876,24 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
 
   // Always keep OAuth provider link up to date
   userRepo.setOAuthLink(key, user.id);
+
+  // SEC-001: If the user registered via email/password but hasn't verified yet,
+  // auto-verify them now — the OAuth provider already verified the email.
+  // This prevents the scenario where a user registers, then logs in via OAuth,
+  // but can never use email/password login because emailVerified stays 0.
+  const updates = {};
+  if (user.emailVerified === 0) {
+    updates.emailVerified = 1;
+  }
   // Update avatar if missing
   if (!user.avatar && avatar) {
-    userRepo.update(user.id, { avatar, updatedAt: new Date().toISOString() });
+    updates.avatar = avatar;
     user.avatar = avatar;
+  }
+  if (Object.keys(updates).length > 0) {
+    updates.updatedAt = new Date().toISOString();
+    userRepo.update(user.id, updates);
+    if (updates.emailVerified) user.emailVerified = 1;
   }
 
   return user;

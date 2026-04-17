@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/layout/AppLogo.jsx";
 import { API_BASE, parseJsonResponse } from "../utils/apiBase.js";
+import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import "../styles/pages/login.css";
 
@@ -116,13 +117,8 @@ export default function Login() {
     if (!verifyEmail || resending) return;
     setResending(true); setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        credentials: "include", body: JSON.stringify({ email: verifyEmail }),
-      });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "Failed to resend");
-      setSuccess("Verification email sent! Please check your inbox.");
+      const data = await api.resendVerification(verifyEmail);
+      setSuccess(data.message || "Verification email sent! Please check your inbox.");
     } catch (e) { setError(e.message); }
     finally { setResending(false); }
   }

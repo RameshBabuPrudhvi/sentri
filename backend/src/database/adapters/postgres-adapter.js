@@ -28,6 +28,7 @@
  */
 
 import pg from "pg";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createRequire } from "module";
 import { formatLogLine } from "../../utils/logFormatter.js";
 
@@ -124,7 +125,8 @@ function translateSingleStatement(stmt) {
   }
 
   // SQLite LIKE is case-insensitive by default; PostgreSQL LIKE is case-sensitive.
-  out = out.replace(/\bLIKE\b/g, "ILIKE");
+  // Case-insensitive flag so both `LIKE` and `like` are translated.
+  out = out.replace(/\bLIKE\b/gi, "ILIKE");
 
   return restore(out);
 }
@@ -181,15 +183,20 @@ export function translateSql(sql) {
 /**
  * Convert `@name` named parameters to `$N` positional parameters.
  *
+ * String literals are masked before replacement so that email addresses
+ * or other values containing `@` inside quoted strings are not treated
+ * as parameter placeholders (e.g. `'user@example.com'` stays intact).
+ *
  * @param {string} sql — SQL with `@name` placeholders
  * @param {Object} namedParams — `{ name: value, ... }`
  * @returns {{ sql: string, values: any[] }}
  */
 function namedToPositional(sql, namedParams) {
+  const { masked, restore } = maskStringLiterals(sql);
   const paramIndex = {};
   const values = [];
   let idx = 0;
-  const translated = sql.replace(/@(\w+)/g, (_match, name) => {
+  const translated = masked.replace(/@(\w+)/g, (_match, name) => {
     if (!(name in paramIndex)) {
       idx++;
       paramIndex[name] = idx;
@@ -197,18 +204,22 @@ function namedToPositional(sql, namedParams) {
     }
     return `$${paramIndex[name]}`;
   });
-  return { sql: translated, values };
+  return { sql: restore(translated), values };
 }
 
 /**
  * Convert `?` positional placeholders to `$N` numbered placeholders.
  *
+ * String literals are masked before replacement so that `?` inside
+ * quoted strings (e.g. `'What?'`) is not treated as a placeholder.
+ *
  * @param {string} sql
  * @returns {string}
  */
 function questionToNumbered(sql) {
+  const { masked, restore } = maskStringLiterals(sql);
   let idx = 0;
-  return sql.replace(/\?/g, () => `$${++idx}`);
+  return restore(masked.replace(/\?/g, () => `$${++idx}`));
 }
 
 /**
@@ -275,14 +286,14 @@ export function createPostgresAdapter(opts = {}) {
 
   // When a deasync transaction is active, this Map holds the txQuery
   // function keyed by a unique transaction token.  Each call to
-  // transaction() creates a fresh token and passes it to fn() via a
-  // closure-scoped _activeTxToken variable.  query() checks whether
-  // _activeTxToken is set and looks up the corresponding override.
-  // This prevents concurrent requests (whose event-loop turns are
-  // interleaved by deasyncLib.loopWhile) from accidentally routing
+  // transaction() creates a fresh token and stores it in AsyncLocalStorage
+  // so it is scoped to the current async execution context.  query()
+  // reads the token from AsyncLocalStorage and looks up the corresponding
+  // override.  This prevents concurrent requests (whose event-loop turns
+  // are interleaved by deasyncLib.loopWhile) from accidentally routing
   // their queries through another transaction's dedicated client.
   const _txQueryOverrides = new Map();
-  let _activeTxToken = null;
+  const _txStorage = new AsyncLocalStorage();
 
   /**
    * Execute a query synchronously.
@@ -297,10 +308,13 @@ export function createPostgresAdapter(opts = {}) {
       return { rows, rowCount: rows.length };
     }
 
-    // If a deasync transaction is active on THIS call stack, route the
-    // query through the dedicated transaction client.
-    if (_activeTxToken && _txQueryOverrides.has(_activeTxToken)) {
-      return _txQueryOverrides.get(_activeTxToken)(sql, values);
+    // If a deasync transaction is active on THIS async context, route the
+    // query through the dedicated transaction client.  AsyncLocalStorage
+    // ensures each request's transaction token is isolated even when
+    // deasyncLib.loopWhile() interleaves event-loop turns from other requests.
+    const txToken = _txStorage.getStore();
+    if (txToken && _txQueryOverrides.has(txToken)) {
+      return _txQueryOverrides.get(txToken)(sql, values);
     }
 
     // deasync fallback: run async query and block until it resolves
@@ -396,7 +410,14 @@ export function createPostgresAdapter(opts = {}) {
 
     exec(sql) {
       const pgSql = translateSql(sql);
-      query(pgSql);
+      // Execute each statement individually — PostgreSQL's simple query
+      // protocol handles multi-statement strings, but some DDL combinations
+      // (e.g. CREATE TABLE + CREATE INDEX) can fail when sent as one query.
+      // Split on the semicolons that translateSql() uses as delimiters.
+      const stmts = pgSql.split(/;\s*\n/).map(s => s.replace(/;\s*$/, "").trim()).filter(Boolean);
+      for (const stmt of stmts) {
+        query(stmt);
+      }
     },
 
     transaction(fn) {
@@ -445,21 +466,21 @@ export function createPostgresAdapter(opts = {}) {
         // Redirect all query() calls inside fn() to the dedicated
         // transaction client so that db.prepare().run() etc. execute
         // within the same BEGIN/COMMIT block.
-        // Use a unique token so concurrent transactions (interleaved by
-        // deasyncLib.loopWhile pumping the event loop) don't collide.
+        // Use a unique Symbol token stored in AsyncLocalStorage so
+        // concurrent transactions (interleaved by deasyncLib.loopWhile
+        // pumping the event loop) each route to their own client.
         const txToken = Symbol("tx");
         _txQueryOverrides.set(txToken, txQuery);
-        const prevToken = _activeTxToken;
-        _activeTxToken = txToken;
         try {
-          const result = fn(...args);
+          // _txStorage.run() scopes the token to this async context,
+          // so query() in other request handlers won't see it.
+          const result = _txStorage.run(txToken, () => fn(...args));
           txQuery("COMMIT");
           return result;
         } catch (err) {
           try { txQuery("ROLLBACK"); } catch { /* best-effort rollback */ }
           throw err;
         } finally {
-          _activeTxToken = prevToken;
           _txQueryOverrides.delete(txToken);
           client.release();
         }

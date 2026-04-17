@@ -760,7 +760,7 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 
 ## Dependency Management
 
-- **Renovate** is configured for automated dependency updates.
+- **Renovate** is configured for automated dependency updates (`.github/renovate.json`). Minor and patch updates are auto-merged via branch strategy.
 - **Adding a new dependency**: Prefer lightweight, well-maintained packages. Check bundle size impact for frontend deps (use [bundlephobia.com](https://bundlephobia.com)). Justify the addition in the PR description.
 - **`dependencies` vs `devDependencies`**: Runtime packages go in `dependencies`. Build tools, test utilities, and type stubs go in `devDependencies`. Playwright is in `dependencies` (backend) because it runs in production.
 - **Lock files**: `package-lock.json` should be committed for both `backend/` and `frontend/`. Run `npm install` (not `npm ci`) only when changing dependencies; use `npm ci` in Docker builds and CI for reproducibility.
