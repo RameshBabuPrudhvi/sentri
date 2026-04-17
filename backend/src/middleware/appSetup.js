@@ -249,8 +249,15 @@ let _RedisStoreClass = null;
 if (redis) {
   try {
     const mod = _require("rate-limit-redis");
-    _RedisStoreClass = mod.RedisStore;
-    console.log(formatLogLine("info", null, "[rate-limit] Using Redis-backed store for rate limiting"));
+    // rate-limit-redis v4 uses `export default class RedisStore`. When loaded
+    // via CJS require(), the module object is `{ default: RedisStore }`, so
+    // mod.RedisStore is undefined. Handle both named and default export shapes.
+    _RedisStoreClass = mod.RedisStore || mod.default || null;
+    if (!_RedisStoreClass) {
+      console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis loaded but RedisStore class not found — using in-memory store."));
+    } else {
+      console.log(formatLogLine("info", null, "[rate-limit] Using Redis-backed store for rate limiting"));
+    }
   } catch {
     console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis not installed — using in-memory store. Run `npm install rate-limit-redis` for shared rate limiting."));
   }
