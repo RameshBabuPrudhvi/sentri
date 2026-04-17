@@ -99,7 +99,7 @@ async function main() {
 
     res = await fetch(`${base}/api/workspaces/switch`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookieHeader },
+      headers: { "Content-Type": "application/json", Cookie: cookieHeader, "X-CSRF-Token": csrfCookie.value },
       body: JSON.stringify({ workspaceId: secondaryWorkspace.id }),
     });
     assert.equal(res.status, 200, "Switch should succeed for owned workspace");
