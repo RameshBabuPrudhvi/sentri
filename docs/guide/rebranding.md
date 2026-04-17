@@ -24,7 +24,9 @@ Run a case-sensitive find-and-replace across the repo:
 |---|---|
 | `backend/package.json` | `"name"` field |
 | `backend/src/index.js` | Startup log message |
-| `backend/src/database/sqlite.js` | Database filename `sentri.db` and data directory path |
+| `backend/src/database/sqlite.js` | Module name (kept for backward compatibility); dialect detection |
+| `backend/src/database/adapters/sqlite-adapter.js` | Database filename `sentri.db` and data directory path |
+| `backend/src/utils/emailSender.js` | Email sender name `Sentri <noreply@sentri.dev>` and template text |
 | `backend/src/routes/auth.js` | User-Agent string for GitHub API |
 
 ### Docker / CI
