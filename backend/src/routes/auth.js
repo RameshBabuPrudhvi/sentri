@@ -265,26 +265,45 @@ function validatePasswordStrength(password) {
 // ─── Workspace-aware JWT builder (ACL-001) ───────────────────────────────────
 
 /**
- * Build a JWT payload that includes workspace context.
- * Looks up the user's first workspace membership and includes `workspaceId`
- * and `workspaceRole` in the token so the `workspaceScope` middleware can
- * resolve them without a DB query on every request.
+ * Build a JWT payload with a workspace hint.
+ *
+ * The JWT carries `workspaceId` as a **hint** so the `workspaceScope`
+ * middleware can look up the correct workspace without scanning all
+ * memberships.  The **role is never stored in the JWT** — it is always
+ * resolved from the `workspace_members` table at request time so that
+ * permission changes (promote / demote / remove) take effect immediately.
+ *
+ * This follows the Slack / GitHub model: identity in the token,
+ * authorization from the database.
  *
  * @param {Object} user — User row from the database.
- * @returns {{ sub, email, name, role, workspaceId, workspaceRole, jti }}
+ * @returns {{ sub, email, name, role, workspaceId, jti }}
  */
 function buildJwtPayload(user) {
   const jti = crypto.randomUUID();
   const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti };
 
-  // Resolve workspace membership
+  // Include workspaceId as a routing hint (not for authorization)
   const workspaces = workspaceRepo.getByUserId(user.id);
   if (workspaces && workspaces.length > 0) {
     payload.workspaceId = workspaces[0].id;
-    payload.workspaceRole = workspaces[0].role;
   }
 
   return payload;
+}
+
+/**
+ * Ensure the user belongs to at least one workspace, creating a personal
+ * workspace if needed.  Called from every auth path (login, OAuth) so no
+ * user can end up without a workspace.
+ *
+ * @param {Object} user — User row from the database.
+ */
+function ensureUserWorkspace(user) {
+  const existing = workspaceRepo.getByUserId(user.id);
+  if (existing && existing.length > 0) return;
+  const slug = `${(user.name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
+  workspaceRepo.create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
 }
 
 /**
@@ -426,13 +445,8 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // ACL-001: Ensure the user has a workspace (may not if they registered
-    // before migration 004 and ensureDefaultWorkspaces didn't cover them).
-    const userWorkspaces = workspaceRepo.getByUserId(user.id);
-    if (!userWorkspaces || userWorkspaces.length === 0) {
-      const slug = `${user.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
-      workspaceRepo.create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
-    }
+    // ACL-001: Ensure the user has a workspace before issuing a token.
+    ensureUserWorkspace(user);
 
     const payload = buildJwtPayload(user);
     const token = signJwt(payload, getJwtSecret());
@@ -807,12 +821,7 @@ router.get("/github/callback", async (req, res) => {
       avatar: profile.avatar_url || null,
     });
 
-    // ACL-001: Ensure workspace exists for OAuth users
-    const userWorkspaces = workspaceRepo.getByUserId(user.id);
-    if (!userWorkspaces || userWorkspaces.length === 0) {
-      const slug = `${(user.name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
-      workspaceRepo.create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
-    }
+    ensureUserWorkspace(user);
 
     const payload = buildJwtPayload(user);
     const token = signJwt(payload, getJwtSecret());
@@ -879,12 +888,7 @@ router.get("/google/callback", async (req, res) => {
       avatar: profile.picture || null,
     });
 
-    // ACL-001: Ensure workspace exists for OAuth users
-    const userWorkspaces = workspaceRepo.getByUserId(user.id);
-    if (!userWorkspaces || userWorkspaces.length === 0) {
-      const slug = `${(user.name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
-      workspaceRepo.create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
-    }
+    ensureUserWorkspace(user);
 
     const payload = buildJwtPayload(user);
     const token = signJwt(payload, getJwtSecret());

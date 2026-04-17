@@ -6,10 +6,11 @@
  * Must run AFTER `requireAuth` (which sets `req.authUser`).
  *
  * ### Resolution strategy
- * 1. If the JWT payload contains `workspaceId` and `workspaceRole`, use those
- *    (fast path — no DB query on every request).
- * 2. Otherwise, look up the user's first workspace membership in the DB
- *    (fallback for tokens issued before ACL-001).
+ * The JWT contains `workspaceId` as a hint for which workspace the user last
+ * used.  The **role is always resolved from the database** so that permission
+ * changes (promote / demote / remove) take effect immediately — not after the
+ * JWT expires.  This follows the Slack / GitHub model: identity in the token,
+ * authorization from the DB.
  *
  * If the user has no workspace membership at all, returns 403.
  *
@@ -31,16 +32,22 @@ export function workspaceScope(req, res, next) {
   // Skip for non-user auth strategies (e.g. trigger tokens)
   if (!req.authUser) return next();
 
-  const { sub: userId, workspaceId, workspaceRole } = req.authUser;
+  const { sub: userId, workspaceId: jwtWorkspaceId } = req.authUser;
 
-  // Fast path: workspace info is in the JWT
-  if (workspaceId && workspaceRole) {
-    req.workspaceId = workspaceId;
-    req.userRole = workspaceRole;
-    return next();
+  // If the JWT contains a workspaceId hint, verify membership and resolve
+  // the current role from the DB (never trust the JWT for authorization).
+  if (jwtWorkspaceId) {
+    const membership = workspaceRepo.getMembership(jwtWorkspaceId, userId);
+    if (membership) {
+      req.workspaceId = jwtWorkspaceId;
+      req.userRole = membership.role;
+      return next();
+    }
+    // Membership was revoked since the JWT was issued — fall through to
+    // check if the user has any other workspace.
   }
 
-  // Fallback: look up membership in DB (tokens issued before ACL-001)
+  // Resolve from all memberships (no JWT hint, or hint was stale).
   const workspaces = workspaceRepo.getByUserId(userId);
   if (!workspaces || workspaces.length === 0) {
     return res.status(403).json({
@@ -48,7 +55,7 @@ export function workspaceScope(req, res, next) {
     });
   }
 
-  // Use the first workspace (default). Future: allow workspace switching.
+  // Use the first workspace. Future: allow workspace switching via header.
   const ws = workspaces[0];
   req.workspaceId = ws.id;
   req.userRole = ws.role;

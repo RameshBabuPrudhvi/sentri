@@ -30,22 +30,7 @@
 
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
-
-/** Role hierarchy weights — higher = more privileged. */
-const ROLE_WEIGHT = { admin: 30, qa_lead: 20, viewer: 10 };
-
-/**
- * Check if the user's workspace role meets the minimum required role.
- * @param {string|null} userRole
- * @param {string} requiredRole
- * @returns {boolean}
- */
-function hasMinimumRole(userRole, requiredRole) {
-  if (!requiredRole) return true;
-  const userW = ROLE_WEIGHT[userRole] || 0;
-  const reqW = ROLE_WEIGHT[requiredRole] || 0;
-  return userW >= reqW;
-}
+import { hasMinimumRole } from "../../utils/roles.js";
 
 function AuthLoadingSkeleton() {
   return (
@@ -114,16 +99,5 @@ export default function ProtectedRoute({ children, requiredRole }) {
   return children;
 }
 
-/**
- * Check if a user has the minimum required workspace role.
- * Exported for use in components that need to conditionally render
- * UI elements based on role (e.g. hide delete buttons for viewers).
- *
- * @param {Object|null} user — The user object from useAuth().
- * @param {string} role — Minimum role required.
- * @returns {boolean}
- */
-export function userHasRole(user, role) {
-  if (!user) return false;
-  return hasMinimumRole(user.workspaceRole, role);
-}
+// Re-export for backward compatibility — prefer importing from utils/roles.js directly.
+export { userHasRole } from "../../utils/roles.js";

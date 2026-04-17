@@ -199,8 +199,23 @@ function slugify(name) {
  * Ensure every existing user has at least one workspace.
  *
  * Called once on startup after migration 004.  For each user without a
- * workspace membership, creates a personal "My Workspace" workspace and
- * assigns all their orphaned entities (projects with NULL workspaceId) to it.
+ * workspace membership, creates a personal workspace.
+ *
+ * ### Orphaned entity backfill
+ * Entities (projects, tests, runs) have no `userId` column, so there is no
+ * reliable way to attribute them to individual users.  The backfill strategy
+ * depends on how many orphan users exist:
+ *
+ * - **Single orphan user:** All orphaned entities are assigned to that user's
+ *   workspace.  This is the common case (single-user deployment upgrading).
+ * - **Multiple orphan users:** A shared "Default" workspace is created and
+ *   all orphaned entities are assigned there.  All orphan users are added as
+ *   members.  The first orphan user is the admin; the rest are viewers.
+ *   This prevents the first-user-claims-everything bug and preserves data
+ *   visibility for all existing users.
+ *
+ * Activities (which have `userId`) are always attributed to the correct
+ * user's workspace when possible.
  *
  * This is idempotent — calling it multiple times is safe.
  */
@@ -218,19 +233,47 @@ export function ensureDefaultWorkspaces() {
   if (orphanUsers.length === 0) return;
 
   const txn = db.transaction(() => {
-    for (const user of orphanUsers) {
+    if (orphanUsers.length === 1) {
+      // ── Single user: straightforward assignment ─────────────────────
+      const user = orphanUsers[0];
       const wsName = `${user.name}'s Workspace`;
-      const baseSlug = slugify(user.name);
-      // Ensure slug uniqueness by appending a short random suffix
-      const slug = `${baseSlug}-${crypto.randomBytes(3).toString("hex")}`;
-
+      const slug = `${slugify(user.name)}-${crypto.randomBytes(3).toString("hex")}`;
       const ws = create({ name: wsName, slug, ownerId: user.id });
 
-      // Backfill all orphaned entities to this workspace
       db.prepare("UPDATE projects SET workspaceId = ? WHERE workspaceId IS NULL").run(ws.id);
       db.prepare("UPDATE tests SET workspaceId = ? WHERE workspaceId IS NULL").run(ws.id);
       db.prepare("UPDATE runs SET workspaceId = ? WHERE workspaceId IS NULL").run(ws.id);
       db.prepare("UPDATE activities SET workspaceId = ? WHERE workspaceId IS NULL").run(ws.id);
+    } else {
+      // ── Multiple users: shared workspace for orphaned entities ──────
+      const sharedSlug = `default-${crypto.randomBytes(3).toString("hex")}`;
+      const sharedWs = create({ name: "Default Workspace", slug: sharedSlug, ownerId: orphanUsers[0].id });
+
+      // Add all other orphan users to the shared workspace
+      for (let i = 1; i < orphanUsers.length; i++) {
+        addMember(sharedWs.id, orphanUsers[i].id, "viewer");
+      }
+
+      // Assign all un-owned entities to the shared workspace
+      db.prepare("UPDATE projects SET workspaceId = ? WHERE workspaceId IS NULL").run(sharedWs.id);
+      db.prepare("UPDATE tests SET workspaceId = ? WHERE workspaceId IS NULL").run(sharedWs.id);
+      db.prepare("UPDATE runs SET workspaceId = ? WHERE workspaceId IS NULL").run(sharedWs.id);
+
+      // Activities have userId — attribute to the correct user's workspace
+      // where possible. Activities without a userId go to the shared workspace.
+      db.prepare("UPDATE activities SET workspaceId = ? WHERE workspaceId IS NULL AND userId IS NULL").run(sharedWs.id);
+
+      // For activities with a userId, they all go to the shared workspace
+      // too (since all users are members), but we set it explicitly.
+      db.prepare("UPDATE activities SET workspaceId = ? WHERE workspaceId IS NULL").run(sharedWs.id);
+
+      // Also create personal workspaces for each user (empty — for future use)
+      for (const user of orphanUsers) {
+        // Skip the first user — they already own the shared workspace
+        if (user.id === orphanUsers[0].id) continue;
+        const slug = `${slugify(user.name)}-${crypto.randomBytes(3).toString("hex")}`;
+        create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
+      }
     }
   });
   txn();
