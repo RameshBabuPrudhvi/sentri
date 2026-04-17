@@ -236,8 +236,8 @@ export function ensureDefaultWorkspaces() {
     if (orphanUsers.length === 1) {
       // ── Single user: straightforward assignment ─────────────────────
       const user = orphanUsers[0];
-      const wsName = `${user.name}'s Workspace`;
-      const slug = `${slugify(user.name)}-${crypto.randomBytes(3).toString("hex")}`;
+      const wsName = `${user.name || "My"}'s Workspace`;
+      const slug = `${slugify(user.name || "user")}-${crypto.randomBytes(3).toString("hex")}`;
       const ws = create({ name: wsName, slug, ownerId: user.id });
 
       db.prepare("UPDATE projects SET workspaceId = ? WHERE workspaceId IS NULL").run(ws.id);
@@ -271,8 +271,8 @@ export function ensureDefaultWorkspaces() {
       for (const user of orphanUsers) {
         // Skip the first user — they already own the shared workspace
         if (user.id === orphanUsers[0].id) continue;
-        const slug = `${slugify(user.name)}-${crypto.randomBytes(3).toString("hex")}`;
-        create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
+        const slug = `${slugify(user.name || "user")}-${crypto.randomBytes(3).toString("hex")}`;
+        create({ name: `${user.name || "My"}'s Workspace`, slug, ownerId: user.id });
       }
     }
   });

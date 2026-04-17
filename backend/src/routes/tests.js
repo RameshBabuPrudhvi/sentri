@@ -63,11 +63,15 @@ router.get("/projects/:id/tests", (req, res) => {
 });
 
 router.get("/tests", (req, res) => {
+  // Scope to the user's workspace by fetching workspace project IDs (ACL-001)
+  const wsProjects = projectRepo.getAll(req.workspaceId);
+  const projectIds = wsProjects.map(p => p.id);
+
   const { page, pageSize } = req.query;
   if (page !== undefined || pageSize !== undefined) {
-    return res.json(testRepo.getAllPaged(page, pageSize));
+    return res.json(testRepo.getAllPagedByProjectIds(projectIds, page, pageSize));
   }
-  res.json(testRepo.getAll());
+  res.json(testRepo.getAllByProjectIds(projectIds));
 });
 
 router.get("/tests/:testId", (req, res) => {

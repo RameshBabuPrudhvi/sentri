@@ -303,7 +303,7 @@ function ensureUserWorkspace(user) {
   const existing = workspaceRepo.getByUserId(user.id);
   if (existing && existing.length > 0) return;
   const slug = `${(user.name || "user").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(3).toString("hex")}`;
-  workspaceRepo.create({ name: `${user.name}'s Workspace`, slug, ownerId: user.id });
+  workspaceRepo.create({ name: `${user.name || "My"}'s Workspace`, slug, ownerId: user.id });
 }
 
 /**
@@ -884,7 +884,7 @@ router.get("/google/callback", async (req, res) => {
       provider: "google",
       providerId: profile.sub,
       email: profile.email.toLowerCase(),
-      name: profile.name,
+      name: profile.name || profile.email.split("@")[0],
       avatar: profile.picture || null,
     });
 

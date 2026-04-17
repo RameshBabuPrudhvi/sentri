@@ -92,6 +92,46 @@ export function getAllPaged(page, pageSize) {
 }
 
 /**
+ * Get all non-deleted tests belonging to the given project IDs.
+ * Used by the workspace-scoped GET /api/tests endpoint (ACL-001).
+ * @param {string[]} projectIds
+ * @returns {Object[]}
+ */
+export function getAllByProjectIds(projectIds) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT * FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL`
+  ).all(...projectIds).map(rowToTest);
+}
+
+/**
+ * Get all non-deleted tests belonging to the given project IDs with pagination.
+ * Used by the workspace-scoped GET /api/tests endpoint (ACL-001).
+ * @param {string[]} projectIds
+ * @param {number|string} [page=1]
+ * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
+ * @returns {PagedResult}
+ */
+export function getAllPagedByProjectIds(projectIds, page, pageSize) {
+  if (!projectIds || projectIds.length === 0) {
+    const { page: p, pageSize: ps } = parsePagination(page, pageSize);
+    return { data: [], meta: { total: 0, page: p, pageSize: ps, hasMore: false } };
+  }
+  const db = getDatabase();
+  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const total = db.prepare(
+    `SELECT COUNT(*) as cnt FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL`
+  ).get(...projectIds).cnt;
+  const data = db.prepare(
+    `SELECT * FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL ORDER BY createdAt DESC LIMIT ? OFFSET ?`
+  ).all(...projectIds, ps, offset).map(rowToTest);
+  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
+}
+
+/**
  * Get all non-deleted tests as a dictionary keyed by ID.
  * @returns {Object<string, Object>}
  */
