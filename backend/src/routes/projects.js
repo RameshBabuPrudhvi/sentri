@@ -69,13 +69,13 @@ router.get("/", (req, res) => {
 });
 
 router.get("/:id", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   res.json(sanitiseProjectForClient(project));
 });
 
 router.delete("/:id", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
 
   // Refuse soft-deletion while async operations are in progress
@@ -137,7 +137,7 @@ router.delete("/:id", (req, res) => {
  * Return the current schedule for a project, or null if none exists.
  */
 router.get("/:id/schedule", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
   const schedule = scheduleRepo.getByProjectId(req.params.id);
   res.json({ schedule: schedule || null });
@@ -153,7 +153,7 @@ router.get("/:id/schedule", (req, res) => {
  *   enabled  {boolean} - Whether the schedule is active (default true)
  */
 router.patch("/:id/schedule", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
 
   const { cronExpr, timezone = "UTC", enabled = true } = req.body || {};
@@ -213,7 +213,7 @@ router.patch("/:id/schedule", (req, res) => {
  * Remove the cron schedule for a project entirely.
  */
 router.delete("/:id/schedule", (req, res) => {
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
 
   const existing = scheduleRepo.getByProjectId(req.params.id);

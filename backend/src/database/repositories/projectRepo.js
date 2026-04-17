@@ -77,6 +77,21 @@ export function getById(id) {
 }
 
 /**
+ * Get a non-deleted project by ID, scoped to a workspace (ACL-001).
+ * Returns undefined if the project doesn't exist OR belongs to a different workspace.
+ * Use this in route handlers to prevent cross-workspace IDOR.
+ * @param {string} id
+ * @param {string} workspaceId
+ * @returns {Object|undefined}
+ */
+export function getByIdInWorkspace(id, workspaceId) {
+  const db = getDatabase();
+  return rowToProject(
+    db.prepare("SELECT * FROM projects WHERE id = ? AND workspaceId = ? AND deletedAt IS NULL").get(id, workspaceId)
+  );
+}
+
+/**
  * Create a project.
  * @param {Object} project — Must include `workspaceId` (ACL-001).
  */

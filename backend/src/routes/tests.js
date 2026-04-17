@@ -69,6 +69,9 @@ router.get("/tests", (req, res) => {
 router.get("/tests/:testId", (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
+  // Verify the test's project belongs to the user's workspace (ACL-001)
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
   res.json(test);
 });
 
@@ -79,6 +82,9 @@ router.patch("/tests/:testId", async (req, res) => {
 
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "not found" });
+  // Verify the test's project belongs to the user's workspace (ACL-001)
+  const ownerProject = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!ownerProject) return res.status(404).json({ error: "not found" });
 
   const { steps, name, description, priority, regenerateCode, previewCode, playwrightCode, linkedIssueKey, tags } = req.body;
 
@@ -295,7 +301,7 @@ router.post("/projects/:id/tests", (req, res) => {
   const validationErr = validateTestPayload(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
 
-  const project = projectRepo.getById(req.params.id);
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const { name, description, steps, playwrightCode, priority, type } = req.body;
@@ -460,7 +466,7 @@ router.post("/tests/:testId/run", expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 
-  const project = projectRepo.getById(test.projectId);
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const runId = generateRunId();
