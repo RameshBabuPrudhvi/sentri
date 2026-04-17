@@ -47,12 +47,13 @@ export function getBySlug(slug) {
 export function getByUserId(userId) {
   const db = getDatabase();
   return db.prepare(`
-    SELECT w.*, wm.role
+    SELECT w.*, wm.role,
+           CASE WHEN w.ownerId = ? THEN 0 ELSE 1 END AS _sortOwner
     FROM workspaces w
     INNER JOIN workspace_members wm ON wm.workspaceId = w.id
     WHERE wm.userId = ?
-    ORDER BY w.createdAt ASC
-  `).all(userId);
+    ORDER BY _sortOwner ASC, w.createdAt ASC
+   `).all(userId, userId);
 }
 
 /**

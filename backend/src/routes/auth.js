@@ -321,6 +321,12 @@ function buildUserResponse(user) {
     resp.workspaceRole = workspaces[0].role;
   }
 
+  // Include all workspaces for workspace switching (ACL-001)
+  if (workspaces && workspaces.length > 1) {
+    resp.workspaces = workspaces.map(ws => ({
+      id: ws.id, name: ws.name, role: ws.role, isOwner: ws.ownerId === user.id,
+    }));
+  }
   return resp;
 }
 
