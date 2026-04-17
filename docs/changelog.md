@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-04-17
+
 ### Added
 - **Auth**: Email verification on registration — new users must verify their email address before signing in; verification link sent via Resend, SMTP, or console fallback (SEC-001) (#87)
 - **API**: `GET /api/auth/verify?token=` — verify email address using a signed token from the verification email (SEC-001) (#87)
