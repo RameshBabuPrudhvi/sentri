@@ -24,6 +24,11 @@
  * - `LIKE` → `ILIKE` (case-insensitive matching)
  * - `PRAGMA table_info(t)` → `information_schema.columns` query
  *
+ * ### Column name case mapping
+ * PostgreSQL folds unquoted identifiers to lowercase (`passwordHash` → `passwordhash`).
+ * The adapter automatically remaps lowercase column names back to camelCase on
+ * every returned row so the application code works identically on both backends.
+ *
  * @exports createPostgresAdapter
  */
 
@@ -255,6 +260,94 @@ function isNamedParams(args) {
     && !Array.isArray(args[0]);
 }
 
+// ─── Column name case mapping ─────────────────────────────────────────────────
+// PostgreSQL folds unquoted identifiers to lowercase. The migration SQL uses
+// camelCase column names (e.g. `passwordHash`) which PostgreSQL stores as
+// `passwordhash`. When rows are returned, the keys are all lowercase.
+// The application code expects camelCase, so we remap on every row returned.
+// This is cheaper than quoting every identifier in every SQL statement.
+
+/**
+ * Build a lowercase → camelCase lookup from a list of camelCase names.
+ * Only entries where lowercase differs from the original are included.
+ * @param {string[]} names
+ * @returns {Object<string, string>}
+ */
+function buildColumnMap(names) {
+  const map = {};
+  for (const n of names) {
+    const lower = n.toLowerCase();
+    if (lower !== n) map[lower] = n;
+  }
+  return map;
+}
+
+/** All camelCase column names used across the schema. */
+const _COL_MAP = buildColumnMap([
+  // users
+  "passwordHash", "createdAt", "updatedAt", "emailVerified",
+  // oauth_ids
+  "userId",
+  // projects
+  "deletedAt",
+  // tests
+  "projectId", "playwrightCode", "playwrightCodePrev", "sourceUrl", "pageTitle",
+  "lastResult", "lastRunAt", "qualityScore", "isJourneyTest", "journeyType",
+  "assertionEnhanced", "reviewStatus", "reviewedAt", "promptVersion", "modelUsed",
+  "linkedIssueKey", "generatedFrom", "isApiTest", "codeRegeneratedAt",
+  "aiFixAppliedAt", "codeVersion",
+  // runs
+  "startedAt", "finishedAt", "errorCategory", "pagesFound", "parallelWorkers",
+  "tracePath", "videoPath", "videoSegments", "testQueue", "generateInput",
+  "promptAudit", "pipelineStats", "feedbackLoop", "currentStep", "rateLimitError",
+  "qualityAnalytics",
+  // activities
+  "projectName", "testId", "testName", "userName",
+  // healing_history
+  "strategyIndex", "succeededAt", "failCount", "strategyVersion",
+  // password_reset_tokens & verification_tokens
+  "expiresAt", "usedAt",
+  // webhook_tokens (migration 002)
+  "tokenHash", "lastUsedAt",
+  // schedules (migration 002)
+  "cronExpr", "nextRunAt",
+  // run_logs (migration 002)
+  "runId",
+  // schema_migrations
+  "appliedAt", "durationMs",
+  // information_schema queries
+  "column_name", "data_type",
+]);
+
+/**
+ * Remap lowercase PostgreSQL column names to camelCase on a single row object.
+ * Keys that are already camelCase or not in the map are left unchanged.
+ * @param {Object} row
+ * @returns {Object}
+ */
+function remapRow(row) {
+  if (!row || typeof row !== "object") return row;
+  const out = {};
+  for (const key of Object.keys(row)) {
+    out[_COL_MAP[key] || key] = row[key];
+  }
+  return out;
+}
+
+/**
+ * Remap all rows in an array.
+ * @param {Object[]} rows
+ * @returns {Object[]}
+ */
+function remapRows(rows) {
+  if (!rows || rows.length === 0) return rows;
+  // Fast path: check if the first row has any lowercase keys that need mapping
+  const firstKeys = Object.keys(rows[0]);
+  const needsRemap = firstKeys.some(k => k in _COL_MAP);
+  if (!needsRemap) return rows;
+  return rows.map(remapRow);
+}
+
 // ─── Adapter factory ──────────────────────────────────────────────────────────
 
 /**
@@ -347,14 +440,14 @@ export function createPostgresAdapter(opts = {}) {
     if (nativeClient) {
       try {
         const rows = nativeClient.querySync(sql, values);
-        return { rows, rowCount: rows.length };
+        return { rows: remapRows(rows), rowCount: rows.length };
       } catch (err) {
         // Attempt one reconnect on connection-level errors (e.g. PostgreSQL
         // restarted, TCP timeout). If the reconnect succeeds, retry the query.
         const isConnectionError = /connection|socket|EPIPE|ECONNRESET|terminating/i.test(err.message);
         if (isConnectionError && reconnectNativeClient()) {
           const rows = nativeClient.querySync(sql, values);
-          return { rows, rowCount: rows.length };
+          return { rows: remapRows(rows), rowCount: rows.length };
         }
         throw err;
       }
@@ -381,7 +474,7 @@ export function createPostgresAdapter(opts = {}) {
     deasyncLib.loopWhile(() => !done);
 
     if (error) throw error;
-    return { rows: result.rows, rowCount: result.rowCount || 0 };
+    return { rows: remapRows(result.rows), rowCount: result.rowCount || 0 };
   }
 
   /**
@@ -511,7 +604,7 @@ export function createPostgresAdapter(opts = {}) {
             .catch(e => { txError = e; txDone = true; });
           deasyncLib.loopWhile(() => !txDone);
           if (txError) throw txError;
-          return { rows: txResult.rows, rowCount: txResult.rowCount || 0 };
+          return { rows: remapRows(txResult.rows), rowCount: txResult.rowCount || 0 };
         }
 
         txQuery("BEGIN");

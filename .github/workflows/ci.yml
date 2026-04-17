@@ -167,10 +167,6 @@ jobs:
             echo "Waiting ($i/10)..."
             sleep 2
           done
-          echo "--- Server startup logs ---"
-          cat /tmp/server.log
-          echo "--- End startup logs ---"
-
           # Verify /health/ready reports database OK
           READY=$(curl -sf http://localhost:3001/health/ready)
           echo "$READY" | grep -q '"ok":true' && echo "✅ /health/ready OK" || (echo "❌ /health/ready failed: $READY" && exit 1)
@@ -191,11 +187,7 @@ jobs:
           LOGIN_CODE=$(echo "$LOGIN_RESP" | tail -1)
           LOGIN_BODY=$(echo "$LOGIN_RESP" | sed '$d')
           echo "Login: HTTP $LOGIN_CODE — $LOGIN_BODY"
-          # Show server logs for debugging
-          echo "--- Server logs after login attempt ---"
-          cat /tmp/server.log | tail -40
-          echo "--- End server logs ---"
-          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE" && exit 1)
+          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE"; cat /tmp/server.log | tail -20; exit 1)
 
           # Extract CSRF token
           CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
@@ -220,9 +212,6 @@ jobs:
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE_JAR" http://localhost:3001/api/dashboard)
           [ "$HTTP_CODE" = "401" ] && echo "✅ Token revoked — 401 after logout (Redis)" || echo "❌ Expected 401, got $HTTP_CODE"
 
-          echo "--- Full server log ---"
-          cat /tmp/server.log
-          echo "--- End full server log ---"
           kill $SERVER_PID
         env:
           DATABASE_URL: postgres://sentri:sentri@localhost:5432/sentri_test
