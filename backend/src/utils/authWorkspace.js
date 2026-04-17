@@ -14,7 +14,7 @@ import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
  *
  * @param {Object} user - User row from the database.
  * @param {string} [workspaceIdHint] - Preferred current workspace ID.
- * @returns {{ sub: string, email: string, name: string, role: string, jti: string, workspaceId?: string }}
+ * @returns {{ sub: string, email: string, name: string, role: string, jti: string, workspaceId: (string|undefined) }}
  */
 export function buildJwtPayload(user, workspaceIdHint) {
   const jti = crypto.randomUUID();
