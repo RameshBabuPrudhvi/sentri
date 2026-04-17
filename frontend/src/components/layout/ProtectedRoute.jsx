@@ -1,10 +1,14 @@
 /**
  * @module components/ProtectedRoute
- * @description Route guard that requires authentication.
+ * @description Route guard that requires authentication and optional role check.
  *
  * Wraps routes that require a signed-in user. If the user is not authenticated,
  * they are redirected to `/login` with the current location saved in state
  * so they can be sent back after sign-in.
+ *
+ * ### Role-based guarding (ACL-002)
+ * Pass `requiredRole` to restrict access by workspace role.
+ * Role hierarchy: `admin > qa_lead > viewer`.
  *
  * While the auth token is being validated (e.g. on initial page load), a
  * lightweight skeleton placeholder is shown instead of a blank screen to
@@ -12,16 +16,36 @@
  *
  * @param {Object} props
  * @param {React.ReactNode} props.children - Protected child routes/components.
+ * @param {string} [props.requiredRole] - Minimum workspace role ('admin' | 'qa_lead' | 'viewer').
  * @returns {React.ReactElement}
  *
  * @example
  * <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
  *   <Route path="/dashboard" element={<Dashboard />} />
  * </Route>
+ *
+ * // Role-gated route:
+ * <Route element={<ProtectedRoute requiredRole="admin"><Settings /></ProtectedRoute>} />
  */
 
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
+
+/** Role hierarchy weights — higher = more privileged. */
+const ROLE_WEIGHT = { admin: 30, qa_lead: 20, viewer: 10 };
+
+/**
+ * Check if the user's workspace role meets the minimum required role.
+ * @param {string|null} userRole
+ * @param {string} requiredRole
+ * @returns {boolean}
+ */
+function hasMinimumRole(userRole, requiredRole) {
+  if (!requiredRole) return true;
+  const userW = ROLE_WEIGHT[userRole] || 0;
+  const reqW = ROLE_WEIGHT[requiredRole] || 0;
+  return userW >= reqW;
+}
 
 function AuthLoadingSkeleton() {
   return (
@@ -60,7 +84,7 @@ function AuthLoadingSkeleton() {
   );
 }
 
-export default function ProtectedRoute({ children }) {
+export default function ProtectedRoute({ children, requiredRole }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -71,5 +95,35 @@ export default function ProtectedRoute({ children }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // ACL-002: Role-based access check
+  if (requiredRole && !hasMinimumRole(user.workspaceRole, requiredRole)) {
+    return (
+      <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
+        <div style={{ fontSize: "3rem", marginBottom: 16 }}>403</div>
+        <div style={{ fontWeight: 700, fontSize: "1.2rem", color: "var(--text)", marginBottom: 8 }}>
+          Access Denied
+        </div>
+        <div style={{ fontSize: "0.875rem", marginBottom: 24 }}>
+          This page requires <strong>{requiredRole}</strong> permissions.
+          Your current role is <strong>{user.workspaceRole || "viewer"}</strong>.
+        </div>
+      </div>
+    );
+  }
+
   return children;
+}
+
+/**
+ * Check if a user has the minimum required workspace role.
+ * Exported for use in components that need to conditionally render
+ * UI elements based on role (e.g. hide delete buttons for viewers).
+ *
+ * @param {Object|null} user — The user object from useAuth().
+ * @param {string} role — Minimum role required.
+ * @returns {boolean}
+ */
+export function userHasRole(user, role) {
+  if (!user) return false;
+  return hasMinimumRole(user.workspaceRole, role);
 }
