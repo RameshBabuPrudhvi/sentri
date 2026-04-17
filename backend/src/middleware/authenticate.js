@@ -165,10 +165,11 @@ const _localRevokedTokens = new Map();
 /** Redis pub/sub channel for broadcasting revocations across instances. */
 const REVOKE_CHANNEL = "sentri:token:revoked";
 
-// Purge expired entries from the in-memory fallback every hour.
-// Only needed when Redis is not available — Redis handles TTL natively.
+// Purge expired entries from the in-memory Map every hour.
+// When Redis is available, the local Map is still populated (by set(), pub/sub,
+// and the startup pre-load), so expired entries must still be cleaned up to
+// prevent unbounded memory growth.
 const _purgeInterval = setInterval(() => {
-  if (isRedisAvailable()) return;
   const now = Date.now() / 1000;
   for (const [jti, exp] of _localRevokedTokens) {
     if (exp < now) _localRevokedTokens.delete(jti);

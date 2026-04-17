@@ -145,7 +145,7 @@ async function gracefulShutdown(signal) {
     await closeRedis();
 
     // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
-    closeDatabase();
+    await closeDatabase();
     console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
     process.exit(0);
   } catch (err) {

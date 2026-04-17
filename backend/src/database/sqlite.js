@@ -115,13 +115,13 @@ export function getDatabaseDialect() {
 /**
  * Gracefully close the database connection.
  * For SQLite: checkpoints the WAL file before closing.
- * For PostgreSQL: drains the connection pool.
+ * For PostgreSQL: drains the connection pool (async).
  * Called from shutdown hooks in index.js.
  */
-export function closeDatabase() {
+export async function closeDatabase() {
   if (_db) {
     try {
-      _db.close();
+      await _db.close();
     } catch (err) {
       console.warn(formatLogLine("warn", null, `[db] Close failed: ${err.message}`));
     }

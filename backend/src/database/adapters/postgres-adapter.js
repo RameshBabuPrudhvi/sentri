@@ -430,6 +430,25 @@ export function createPostgresAdapter(opts = {}) {
   const _txStorage = new AsyncLocalStorage();
 
   /**
+   * Detect whether a SQL statement is a DML command (INSERT/UPDATE/DELETE)
+   * that does not already have a RETURNING clause. pg-native's querySync
+   * only returns rows, so DML without RETURNING returns [] and we lose
+   * the affected row count. Appending RETURNING * makes pg-native return
+   * the affected rows so rows.length gives the correct count.
+   *
+   * @param {string} sql
+   * @returns {string} SQL with RETURNING * appended if needed.
+   */
+  function ensureReturning(sql) {
+    if (!nativeClient) return sql;
+    const trimmed = sql.trimStart();
+    const isDml = /^(INSERT|UPDATE|DELETE)\b/i.test(trimmed);
+    if (!isDml) return sql;
+    if (/\bRETURNING\b/i.test(sql)) return sql;
+    return sql.trimEnd().replace(/;?\s*$/, "") + " RETURNING *";
+  }
+
+  /**
    * Execute a query synchronously.
    *
    * @param {string} sql
@@ -438,15 +457,16 @@ export function createPostgresAdapter(opts = {}) {
    */
   function query(sql, values = []) {
     if (nativeClient) {
+      const execSql = ensureReturning(sql);
       try {
-        const rows = nativeClient.querySync(sql, values);
+        const rows = nativeClient.querySync(execSql, values);
         return { rows: remapRows(rows), rowCount: rows.length };
       } catch (err) {
         // Attempt one reconnect on connection-level errors (e.g. PostgreSQL
         // restarted, TCP timeout). If the reconnect succeeds, retry the query.
         const isConnectionError = /connection|socket|EPIPE|ECONNRESET|terminating/i.test(err.message);
         if (isConnectionError && reconnectNativeClient()) {
-          const rows = nativeClient.querySync(sql, values);
+          const rows = nativeClient.querySync(execSql, values);
           return { rows: remapRows(rows), rowCount: rows.length };
         }
         throw err;
@@ -636,7 +656,7 @@ export function createPostgresAdapter(opts = {}) {
       // No-op for PostgreSQL
     },
 
-    close() {
+    async close() {
       if (nativeClient) {
         try {
           nativeClient.end();
@@ -646,9 +666,12 @@ export function createPostgresAdapter(opts = {}) {
         }
       }
       if (pool) {
-        pool.end()
-          .then(() => console.log(formatLogLine("info", null, "[postgres-adapter] Connection pool closed")))
-          .catch(err => console.warn(formatLogLine("warn", null, `[postgres-adapter] Pool close error: ${err.message}`)));
+        try {
+          await pool.end();
+          console.log(formatLogLine("info", null, "[postgres-adapter] Connection pool closed"));
+        } catch (err) {
+          console.warn(formatLogLine("warn", null, `[postgres-adapter] Pool close error: ${err.message}`));
+        }
       }
     },
   };
