@@ -5,11 +5,13 @@ import {
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
+  Users, UserPlus, Crown, ChevronDown,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/layout/ProviderBadge.jsx";
 import { resetOnboarding, emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const PROVIDERS = [
   {
@@ -521,12 +523,227 @@ function fmtUptime(seconds) {
 
 const SETTINGS_TABS = [
   { key: "providers",   label: "AI Providers",  icon: <Zap size={14} /> },
+  { key: "members",     label: "Members",       icon: <Users size={14} /> },
   { key: "execution",   label: "Execution",     icon: <Cpu size={14} /> },
   { key: "data",        label: "Data",          icon: <Database size={14} /> },
   { key: "recycle-bin", label: "Recycle Bin",   icon: <Trash2 size={14} /> },
   { key: "system",      label: "System",        icon: <Server size={14} /> },
 ];
 
+
+// ── Members tab (ACL-002) ─────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = [
+  { value: "admin",   label: "Admin",   desc: "Full access — manage members, settings, and all data" },
+  { value: "qa_lead", label: "QA Lead", desc: "Create, edit, run, and delete tests and projects" },
+  { value: "viewer",  label: "Viewer",  desc: "Read-only access to all data" },
+];
+
+function MembersTab() {
+  const { user } = useAuth();
+  const [members, setMembers]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole]   = useState("viewer");
+  const [inviting, setInviting]   = useState(false);
+  const [inviteMsg, setInviteMsg] = useState(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.getMembers();
+      setMembers(data);
+    } catch (e) {
+      setError(e.message || "Failed to load members");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleInvite(e) {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteMsg(null);
+    try {
+      await api.inviteMember({ email: inviteEmail.trim().toLowerCase(), role: inviteRole });
+      setInviteEmail("");
+      setInviteRole("viewer");
+      setInviteMsg({ type: "ok", text: "Member invited successfully." });
+      await load();
+    } catch (err) {
+      setInviteMsg({ type: "err", text: err.message });
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function handleRoleChange(userId, role) {
+    try {
+      await api.updateMemberRole(userId, role);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleRemove(userId, name) {
+    if (!window.confirm(`Remove ${name} from this workspace?`)) return;
+    try {
+      await api.removeMember(userId);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (loading) return (
+    <div className="text-sm text-muted" style={{ padding: "32px 0", textAlign: "center" }}>
+      Loading members…
+    </div>
+  );
+
+  return (
+    <div className="flex-col gap-lg">
+      <SectionTitle
+        icon={<Users size={16} color="var(--accent)" />}
+        title="Workspace Members"
+        sub={`${members.length} member${members.length !== 1 ? "s" : ""}`}
+      />
+
+      {error && (
+        <div className="card card-padded" style={{ borderColor: "var(--danger)", color: "var(--danger)", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertCircle size={15} /> {error}
+        </div>
+      )}
+
+      {/* Invite form */}
+      <form onSubmit={handleInvite} className="card card-padded" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+            <UserPlus size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
+            Invite by email
+          </label>
+          <input
+            className="input"
+            type="email"
+            value={inviteEmail}
+            onChange={e => setInviteEmail(e.target.value)}
+            placeholder="colleague@company.com"
+            style={{ height: 36, fontSize: "0.85rem" }}
+            required
+          />
+        </div>
+        <div style={{ flex: "0 0 130px" }}>
+          <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: 5, color: "var(--text2)" }}>
+            Role
+          </label>
+          <select
+            className="input"
+            value={inviteRole}
+            onChange={e => setInviteRole(e.target.value)}
+            style={{ height: 36, fontSize: "0.85rem" }}
+          >
+            {ROLE_OPTIONS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <button className="btn btn-primary btn-sm" type="submit" disabled={inviting || !inviteEmail.trim()} style={{ height: 36 }}>
+          {inviting ? <RefreshCw size={13} className="spin" /> : <UserPlus size={13} />}
+          Invite
+        </button>
+      </form>
+      {inviteMsg && (
+        <div className={inviteMsg.type === "ok" ? "st-status-ok" : "st-status-err"}>
+          {inviteMsg.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {inviteMsg.text}
+        </div>
+      )}
+
+      {/* Member list */}
+      <div className="flex-col gap-xs">
+        {members.map(m => {
+          const isCurrentUser = m.userId === user?.id;
+          return (
+            <div key={m.userId} className="card" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+              {/* Avatar / initial */}
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "0.82rem", fontWeight: 700, color: "var(--text2)",
+                overflow: "hidden",
+              }}>
+                {m.avatar
+                  ? <img src={m.avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : (m.name || m.email || "?").charAt(0).toUpperCase()}
+              </div>
+
+              {/* Name + email */}
+              <div className="flex-1" style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="font-semi text-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.name || m.email}
+                  </span>
+                  {isCurrentUser && (
+                    <span className="badge" style={{ fontSize: "0.65rem", padding: "1px 6px" }}>You</span>
+                  )}
+                  {m.role === "admin" && (
+                    <Crown size={12} color="var(--amber)" title="Admin" />
+                  )}
+                </div>
+                <div className="text-xs text-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.email}
+                </div>
+              </div>
+
+              {/* Role selector */}
+              <select
+                className="input"
+                value={m.role}
+                onChange={e => handleRoleChange(m.userId, e.target.value)}
+                disabled={isCurrentUser}
+                style={{ width: 110, height: 32, fontSize: "0.8rem", flexShrink: 0 }}
+                title={isCurrentUser ? "You cannot change your own role" : `Change role for ${m.name || m.email}`}
+              >
+                {ROLE_OPTIONS.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+
+              {/* Remove button */}
+              <button
+                className="btn btn-ghost btn-xs"
+                style={{ color: "var(--text3)", flexShrink: 0 }}
+                onClick={() => handleRemove(m.userId, m.name || m.email)}
+                disabled={isCurrentUser}
+                title={isCurrentUser ? "You cannot remove yourself" : `Remove ${m.name || m.email}`}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Role legend */}
+      <div className="card card-padded" style={{ background: "var(--bg3)" }}>
+        <div className="font-semi text-xs" style={{ marginBottom: 10, color: "var(--text2)" }}>Role permissions</div>
+        <div className="flex-col gap-xs">
+          {ROLE_OPTIONS.map(r => (
+            <div key={r.value} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <span className="text-sm font-semi" style={{ width: 70, flexShrink: 0 }}>{r.label}</span>
+              <span className="text-xs text-muted">{r.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Recycle Bin helpers ────────────────────────────────────────────────────────
 
@@ -835,6 +1052,9 @@ export default function Settings() {
         </div>
       </div>
       </>}
+
+      {/* ── Tab: Members ── */}
+      {tab === "members" && <MembersTab />}
 
       {/* ── Tab: Execution ── */}
       {tab === "execution" && <>

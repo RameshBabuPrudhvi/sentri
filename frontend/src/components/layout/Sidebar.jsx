@@ -2,6 +2,8 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Zap, Settings, BookOpen, ExternalLink, MessageSquare } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { userHasRole } from "../../utils/roles.js";
 
 const NAV = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },
@@ -15,6 +17,9 @@ const NAV = [
 ];
 
 export default function Sidebar({ open }) {
+  const { user } = useAuth();
+  const isAdmin = userHasRole(user, "admin");
+
   return (
     <aside className={open ? "sidebar-open" : ""} style={{
       width: 192, background: "var(--surface)", borderRight: "1px solid var(--border)",
@@ -26,11 +31,11 @@ export default function Sidebar({ open }) {
         <AppLogo size={30} variant="full" />
       </div>
 
-      {/* Workspace — no interactive styling until feature exists (Fix #16) */}
+      {/* Workspace name from auth context (ACL-001) */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ padding: "6px 8px", borderRadius: "var(--radius)" }}>
-          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)" }}>My Workspace</div>
-          <div style={{ fontSize: "0.7rem", color: "var(--text3)" }}>Personal</div>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)" }}>{user?.workspaceName || "My Workspace"}</div>
+          <div style={{ fontSize: "0.7rem", color: "var(--text3)", textTransform: "capitalize" }}>{user?.workspaceRole || "Personal"}</div>
         </div>
       </div>
 
@@ -51,8 +56,9 @@ export default function Sidebar({ open }) {
         ))}
       </nav>
 
-      {/* Settings + Docs at bottom */}
+      {/* Settings (admin only) + Docs at bottom */}
       <div style={{ padding: "10px 8px", borderTop: "1px solid var(--border)" }}>
+        {isAdmin && (
         <NavLink to="/settings" className="nav-link" data-tour="tour-settings" style={({ isActive }) => ({
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
           borderRadius: "var(--radius)", fontWeight: isActive ? 600 : 400,
@@ -62,6 +68,7 @@ export default function Sidebar({ open }) {
         })}>
           <Settings size={16} />Settings
         </NavLink>
+        )}
         <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
           borderRadius: "var(--radius)", fontSize: "0.875rem", color: "var(--text2)",

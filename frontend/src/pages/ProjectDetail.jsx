@@ -14,6 +14,8 @@ import { StatusBadge, ReviewBadge, ScenarioBadges } from "../components/shared/T
 import usePageTitle from "../hooks/usePageTitle.js";
 import useProjectRunMonitor from "../hooks/useProjectRunMonitor.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
+import { userHasRole } from "../utils/roles.js";
 import ActiveRunBanner from "../components/project/ActiveRunBanner.jsx";
 import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
@@ -69,6 +71,8 @@ export default function ProjectDetail() {
   const [traceability, setTraceability]     = useState(null);
   const [traceLoading, setTraceLoading]     = useState(false);
   const { addNotification } = useNotifications();
+  const { user: authUser } = useAuth();
+  const canEdit = userHasRole(authUser, "qa_lead");
 
   // ── Debounce search input → search state (300ms) ───────────────────────────
   useEffect(() => {
@@ -472,10 +476,12 @@ export default function ProjectDetail() {
                     onClick={() => bulkAction("reject")}>
                     <ThumbsDown size={12} /> Reject {bulkScope}
                   </button>
+                  {canEdit && (
                   <button className="btn btn-sm" style={{ background: "var(--red-bg)", color: "var(--red)", border: "1px solid #fca5a5" }}
                     onClick={requestBulkDelete}>
                     <Trash2 size={12} /> Delete {bulkScope}
                   </button>
+                  )}
                   {selected.size > 0 && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
                   )}
@@ -571,12 +577,14 @@ export default function ProjectDetail() {
                                     <RotateCcw size={11} /> Restore
                                   </button>
                                 )}
+                                {canEdit && (
                                 <button className="btn btn-ghost btn-xs" onClick={() => {
                                   if (!window.confirm(`Delete test "${t.name}"? This cannot be undone.`)) return;
                                   api.deleteTest(id, t.id).then(refresh).catch(err => showToast(err.message, "error"));
                                 }}>
                                   <Trash2 size={11} />
                                 </button>
+                                )}
                               </div>
                             </td>
                           </tr>

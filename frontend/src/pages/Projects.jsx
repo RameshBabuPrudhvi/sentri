@@ -17,6 +17,8 @@ import PassRateBar from "../components/charts/PassRateBar";
 import DeleteProjectModal from "../components/shared/DeleteProjectModal.jsx";
 import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { userHasRole } from "../utils/roles.js";
 
 function StatusDot({ status }) {
   const colors = {
@@ -39,6 +41,8 @@ export default function Projects() {
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null); // project to confirm-delete
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canDelete = userHasRole(user, "qa_lead");
 
   // Derive per-project stats from the shared hook data
   const projectStats = useMemo(() => {
@@ -225,6 +229,7 @@ export default function Projects() {
                   >
                     <FlaskConical size={13} /> Tests
                   </button>
+                  {canDelete && (
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ color: "var(--text3)" }}
@@ -233,6 +238,7 @@ export default function Projects() {
                   >
                     <Trash2 size={13} />
                   </button>
+                  )}
                   <ChevronRight size={16} color="var(--text3)" style={{ marginLeft: 4 }} />
                 </div>
               </div>
