@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
+import { workspaceScope } from "../src/middleware/workspaceScope.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import runsRouter from "../src/routes/runs.js";
@@ -26,9 +27,9 @@ function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
   app.use("/api", triggerRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
-  app.use("/api", requireAuth, testsRouter);
-  app.use("/api", requireAuth, runsRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  app.use("/api", requireAuth, workspaceScope, testsRouter);
+  app.use("/api", requireAuth, workspaceScope, runsRouter);
   mounted = true;
 }
 

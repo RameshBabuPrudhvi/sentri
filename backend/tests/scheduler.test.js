@@ -322,8 +322,10 @@ if (dbAvailable) {
   const projectsRouter = (await import("../src/routes/projects.js")).default;
   const authRouter = (await import("../src/routes/auth.js")).default;
   const { requireAuth } = await import("../src/routes/auth.js");
+  const { workspaceScope } = await import("../src/middleware/workspaceScope.js");
+  const { ensureDefaultWorkspaces } = await import("../src/database/repositories/workspaceRepo.js");
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
 
   const server = createServer(app);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
