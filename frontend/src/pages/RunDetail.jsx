@@ -209,17 +209,21 @@ export default function RunDetail() {
       // ── In-app notification ──────────────────────────────────────────
       const isTestRun = event.passed != null || event.failed != null;
       const status = event.status ?? "completed";
-      const notifType = status === "completed" ? "success"
-                      : status === "aborted"   ? "warning"
+      const notifType = status === "completed"       ? "success"
+                      : status === "completed_empty" ? "warning"
+                      : status === "aborted"         ? "warning"
                       : "error";
       addNotification({
         type: notifType,
-        title: status === "aborted" ? "Run aborted"
+        title: status === "completed_empty" ? "No tests generated"
+             : status === "aborted" ? "Run aborted"
              : status === "failed"  ? "Run failed"
              : "Run complete",
         body: isTestRun
           ? `${event.passed ?? 0} passed · ${event.failed ?? 0} failed`
-          : `${event.testsGenerated ?? 0} test(s) generated`,
+          : status === "completed_empty"
+            ? "Crawl completed but generated 0 tests — check project settings"
+            : `${event.testsGenerated ?? 0} test(s) generated`,
         link: `/runs/${runId}`,
       });
     }
@@ -337,6 +341,11 @@ export default function RunDetail() {
           {run.status === "completed" && run.rateLimitError && (
             <span className="badge badge-amber" style={{ background: "var(--amber-bg)", color: "#92400e", border: "1px solid #fcd34d" }}>
               ⚠ Rate Limited
+            </span>
+          )}
+          {run.status === "completed_empty" && (
+            <span className="badge badge-amber" style={{ background: "var(--amber-bg)", color: "#92400e", border: "1px solid #fcd34d" }}>
+              <AlertTriangle size={10} /> No Tests Generated
             </span>
           )}
           {isRunning && (
@@ -481,6 +490,28 @@ export default function RunDetail() {
       )}
 
       {/* ── Run-level error / warning banners ─────────────────────────── */}
+      {/* ── ENH-034: Empty crawl guidance banner ─────────────────────── */}
+      {!isRunning && run.status === "completed_empty" && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 10,
+          padding: "12px 16px", marginBottom: 16,
+          background: "var(--amber-bg)", border: "1px solid #fcd34d",
+          borderRadius: 10, fontSize: "0.82rem", color: "#92400e", lineHeight: 1.5,
+        }}>
+          <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>⚠️</span>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>No Tests Generated</div>
+            <div>The crawl completed successfully but did not produce any tests. This usually means the AI could not find testable interactions on the discovered pages.</div>
+            <div style={{ marginTop: 8, fontSize: "0.78rem", color: "#78350f" }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Try these fixes:</div>
+              <div>1. <strong>Check credentials</strong> — if the site requires login, add credentials in Project Settings</div>
+              <div>2. <strong>Try a different start URL</strong> — point to a page with forms, buttons, or interactive elements</div>
+              <div>3. <strong>Use State Exploration mode</strong> — it clicks and fills to discover dynamic content that link crawl misses</div>
+              <div>4. <strong>Verify your AI provider</strong> — check that your API key is valid in Settings</div>
+            </div>
+          </div>
+        </div>
+      )}
       {!isRunning && run.rateLimitError && (
         <div style={{
           display: "flex", alignItems: "flex-start", gap: 10,

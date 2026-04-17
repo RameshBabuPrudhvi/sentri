@@ -106,6 +106,119 @@ jobs:
         env:
           ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci
           PORT: 3001
+          SKIP_EMAIL_VERIFICATION: "true"
+
+  # ── PostgreSQL + Redis integration smoke test ─────────────────────────────
+  integration:
+    name: Integration — PostgreSQL & Redis smoke test
+    runs-on: ubuntu-latest
+    needs: [secrets]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentri
+          POSTGRES_PASSWORD: sentri
+          POSTGRES_DB: sentri_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sentri -d sentri_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (including optional pg + ioredis)
+        run: npm install && npm install pg deasync ioredis rate-limit-redis
+
+      - name: Smoke test — server starts with PostgreSQL + Redis
+        run: |
+          node src/index.js > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+
+          # Wait up to 20s for server
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:3001/health > /dev/null 2>&1; then
+              echo "✅ Server is up (PostgreSQL + Redis)"
+              break
+            fi
+            echo "Waiting ($i/10)..."
+            sleep 2
+          done
+          # Verify /health/ready reports database OK
+          READY=$(curl -sf http://localhost:3001/health/ready)
+          echo "$READY" | grep -q '"ok":true' && echo "✅ /health/ready OK" || (echo "❌ /health/ready failed: $READY" && exit 1)
+
+          # Register + login (full auth flow against PostgreSQL)
+          COOKIE_JAR=$(mktemp)
+          REG_RESP=$(curl -s -w "\n%{http_code}" -X POST http://localhost:3001/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{"name":"PG Bot","email":"pg@test.local","password":"PgTestPass123!"}')
+          REG_CODE=$(echo "$REG_RESP" | tail -1)
+          REG_BODY=$(echo "$REG_RESP" | sed '$d')
+          echo "Register: HTTP $REG_CODE — $REG_BODY"
+          echo "$REG_BODY" | grep -q "Account created" && echo "✅ POST /api/auth/register OK (PostgreSQL)"
+
+          LOGIN_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"pg@test.local","password":"PgTestPass123!"}') || true
+          LOGIN_CODE=$(echo "$LOGIN_RESP" | tail -1)
+          LOGIN_BODY=$(echo "$LOGIN_RESP" | sed '$d')
+          echo "Login: HTTP $LOGIN_CODE — $LOGIN_BODY"
+          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE"; cat /tmp/server.log | tail -20; exit 1)
+
+          # Extract CSRF token
+          CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
+
+          # Verify authenticated endpoint works
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard \
+            | grep -q "totalProjects" && echo "✅ /api/dashboard OK (PostgreSQL)"
+
+          # Create a project (tests INSERT with named params against PostgreSQL)
+          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/projects \
+            -H "Content-Type: application/json" \
+            -H "X-CSRF-Token: $CSRF" \
+            -d '{"name":"PG Integration Test","url":"https://example.com"}')
+          echo "$PROJ" | grep -q '"name":"PG Integration Test"' && echo "✅ POST /api/projects OK (PostgreSQL)"
+
+          # Verify logout (tests token revocation via Redis)
+          curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/logout \
+            -H "X-CSRF-Token: $CSRF" \
+            | grep -q "Signed out" && echo "✅ POST /api/auth/logout OK (Redis revocation)"
+
+          # Verify the token is revoked (should get 401)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE_JAR" http://localhost:3001/api/dashboard)
+          [ "$HTTP_CODE" = "401" ] && echo "✅ Token revoked — 401 after logout (Redis)" || echo "❌ Expected 401, got $HTTP_CODE"
+
+          kill $SERVER_PID
+        env:
+          DATABASE_URL: postgres://sentri:sentri@localhost:5432/sentri_test
+          REDIS_URL: redis://localhost:6379
+          ANTHROPIC_API_KEY: sk-ant-placeholder-for-ci
+          PORT: 3001
+          SKIP_EMAIL_VERIFICATION: "true"
 
   # ── Frontend ──────────────────────────────────────────────────────────────
   frontend:
@@ -179,7 +292,7 @@ jobs:
   docker:
     name: Docker — Build Both Images
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, integration]
 
     steps:
       - uses: actions/checkout@v6
@@ -203,6 +316,7 @@ jobs:
           docker run -d --name sentri-ci \
             -e ANTHROPIC_API_KEY=sk-ant-placeholder-for-ci \
             -e PORT=3001 \
+            -e SKIP_EMAIL_VERIFICATION=true \
             -p 3001:3001 \
             sentri-backend:ci
 

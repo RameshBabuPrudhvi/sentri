@@ -11,6 +11,8 @@ import { CheckCircle2, Clock, RefreshCw, SkipForward } from "lucide-react";
  *   isRunning      — shorthand for status === "running"
  */
 export default function PipelineCard({ stages: rawStages, currentStep = 0, status, isRunning }) {
+  const isCompleted = status === "completed" || status === "completed_empty";
+
   const stages = rawStages.map((s) => {
     let done, active;
     if (s.skipped) {
@@ -19,7 +21,7 @@ export default function PipelineCard({ stages: rawStages, currentStep = 0, statu
     } else {
       done = isRunning
         ? s.step < currentStep
-        : status === "completed"
+        : isCompleted
         ? true
         : status === "failed"
         ? s.step < currentStep
@@ -31,13 +33,13 @@ export default function PipelineCard({ stages: rawStages, currentStep = 0, statu
 
   const completedCount = isRunning
     ? Math.max(0, currentStep - 1)
-    : status === "completed"
+    : isCompleted
     ? rawStages.length
     : status === "failed"
     ? Math.max(0, currentStep - 1)
     : rawStages.filter(s => s.skipped).length || 0;
 
-  const barColor = status === "completed" ? "var(--green)"
+  const barColor = isCompleted ? (status === "completed_empty" ? "var(--amber)" : "var(--green)")
     : status === "failed" ? "var(--red)"
     : "var(--accent)";
 

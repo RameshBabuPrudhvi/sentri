@@ -62,7 +62,7 @@ router.get("/dashboard", (req, res) => {
     });
 
   // ── Run status distribution ─────────────────────────────────────────────
-  const runsByStatus = { completed: 0, failed: 0, aborted: 0, running: 0 };
+  const runsByStatus = { completed: 0, completed_empty: 0, failed: 0, aborted: 0, running: 0 };
   for (const r of runs) { if (r.status in runsByStatus) runsByStatus[r.status]++; }
 
   // ── Test review pipeline ────────────────────────────────────────────────

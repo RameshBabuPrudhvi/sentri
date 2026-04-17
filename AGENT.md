@@ -16,7 +16,7 @@ frontend/          React 18 SPA (Vite, no framework beyond React Router)
 backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
   src/
     index.js               Entry point — DB init, route mounting, process guards
-    db.js                  SQLite compatibility shim (getDb → snapshot, saveDb → no-op)
+    db.js                  DEPRECATED — emptied stub; all consumers migrated to repository modules
     database/
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
@@ -112,6 +112,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
+| `emailSender.js` | `sendEmail()`, `sendVerificationEmail()`, `getTransportName()` | Transactional email (Resend / SMTP / console fallback) |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 
@@ -173,6 +174,12 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
 | `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
+
+#### Test shared utilities (`backend/tests/helpers/`)
+
+| Module | What it provides | When to use |
+|---|---|---|
+| `test-base.js` | `createTestContext()` → `{ app, req, resetDb, setupEnv, registerAndLogin, extractCookie, parseCookies, buildCookieHeader, decodeJwtPayload, createTestRunner, getDatabase }` | Every integration test that needs HTTP requests, auth, or DB access |
 
 **If you need a shared helper** (e.g. `escapeHtml`, `formatDuration`, `debounce`), create it in `frontend/src/utils/<name>.js` and import it. Do not define utility functions locally inside a component file — they will inevitably be needed elsewhere and duplicated.
 
@@ -359,18 +366,24 @@ The CSRF middleware in `appSetup.js` skips validation when no `access_token` coo
 | File | Role |
 |---|---|
 | `middleware/authenticate.js` | Strategy definitions, JWT primitives (`signJwt`, `verifyJwt`, `getJwtSecret`), token revocation, `authenticate()` factory |
-| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
+| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset, email verification). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
 | `middleware/appSetup.js` | CSRF middleware — imports `AUTH_COOKIE` from `authenticate.js` for auto-exemption |
 | `routes/trigger.js` | CI/CD trigger routes — uses `requireTrigger` from `authenticate.js` |
 
 ### Database
 
-Sentri uses **SQLite** (via `better-sqlite3`) with WAL mode. Data lives in `data/sentri.db`.
+Sentri supports **SQLite** (default, via `better-sqlite3`) and **PostgreSQL** (via `pg` + `pg-native`). The backend is selected by the `DATABASE_URL` environment variable:
+
+| `DATABASE_URL` | Backend | Adapter |
+|---|---|---|
+| Not set | SQLite (WAL mode, `data/sentri.db`) | `adapters/sqlite-adapter.js` |
+| `postgres://…` | PostgreSQL (connection pool) | `adapters/postgres-adapter.js` |
+
+Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `pragma`, `close`, `dialect`) so all repository modules work unchanged. The adapter is selected at startup by `database/sqlite.js` (the module name is kept for backward compatibility).
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
-- **`getDb()`** (in `db.js`) returns a read-only snapshot from SQLite. It exists as a backward-compatibility shim for pipeline code that still receives `db` as a parameter. **Do not use `getDb()` for writes** — use repository modules directly.
-- **`saveDb()`** is a no-op. SQLite writes are synchronous and immediately durable.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
+- **`db.js` is deprecated** — the file has been emptied. All consumers have been migrated to use repository modules directly. Do not import `getDb()` or `saveDb()` in new code.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -555,6 +568,7 @@ Or run all at once: `npm test` from `backend/`.
 - Integration tests use a shared SQLite database file. Reset state between tests by calling `getDatabase().exec("DELETE FROM ...")` on each table and resetting counters. Seed test data using repository modules (`projectRepo.create(...)`, `testRepo.create(...)`, etc.) — never use `getDb()` for writes in tests.
 - **Unit tests** (repositories, utilities) use the synchronous `test(name, fn)` pattern — no HTTP server needed.
 - **Integration tests** (route handlers, auth flows) spin up the Express app on a random port via `app.listen(0)`, make real HTTP requests, and shut down in a `finally` block.
+- **Shared test helpers** live in `backend/tests/helpers/test-base.js`. Use `createTestContext()` to get a pre-wired bundle of utilities: `req()` (CSRF-aware HTTP), `resetDb()`, `setupEnv()`, `registerAndLogin()`, `extractCookie()`, `parseCookies()`, `buildCookieHeader()`, `decodeJwtPayload()`, and `createTestRunner()`. New integration tests should import from `test-base.js` instead of duplicating these patterns.
 
 #### What makes a good test
 
@@ -745,7 +759,7 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 
 ## Dependency Management
 
-- **No Dependabot or Renovate** is configured. Dependency updates are manual.
+- **Renovate** is configured for automated dependency updates (`.github/renovate.json`). Minor and patch updates are auto-merged via branch strategy.
 - **Adding a new dependency**: Prefer lightweight, well-maintained packages. Check bundle size impact for frontend deps (use [bundlephobia.com](https://bundlephobia.com)). Justify the addition in the PR description.
 - **`dependencies` vs `devDependencies`**: Runtime packages go in `dependencies`. Build tools, test utilities, and type stubs go in `devDependencies`. Playwright is in `dependencies` (backend) because it runs in production.
 - **Lock files**: `package-lock.json` should be committed for both `backend/` and `frontend/`. Run `npm install` (not `npm ci`) only when changing dependencies; use `npm ci` in Docker builds and CI for reproducibility.
@@ -857,7 +871,8 @@ The following have been implemented and are no longer open:
 The following are **not yet implemented** but should be addressed before production:
 
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
-- **Redis for rate limiting**: The global API rate limiters use `express-rate-limit`'s default in-memory store. In multi-instance deployments, replace with `rate-limit-redis` so limits are shared across processes.
+- **Nonce-based CSP**: `'unsafe-inline'` should be replaced with nonce-based script allowlisting (SEC-002).
+- **GDPR/CCPA**: No account data export or deletion endpoints exist yet (SEC-003).
 
 ---
 
@@ -872,6 +887,9 @@ The following are **not yet implemented** but should be addressed before product
 | `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server |
 | `OLLAMA_MODEL` | No | `mistral:7b` | Ollama model name |
 | `JWT_SECRET` | Yes (prod) | — | HS256 signing key |
+| `DATABASE_URL` | No | — | PostgreSQL connection string (`postgres://…`). When set, uses PostgreSQL instead of SQLite. Requires `pg` + `pg-native`. |
+| `PG_POOL_SIZE` | No | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
+| `REDIS_URL` | No | — | Redis connection URL (`redis://…`). When set, enables Redis-backed rate limiting, token revocation, and cross-instance SSE pub/sub. Requires `ioredis`. |
 | `PORT` | No | `3001` | Backend HTTP port |
 | `CORS_ORIGIN` | No | `*` | Allowed frontend origin(s), comma-separated |
 | `PARALLEL_WORKERS` | No | `1` | Default test parallelism |
@@ -890,6 +908,14 @@ The following are **not yet implemented** but should be addressed before product
 | `MAX_CONVERSATION_TURNS` | No | `20` | Max user↔assistant turn pairs in chat context window (sliding window trims older turns) |
 | `ARTIFACT_SECRET` | Yes (prod) | random (dev) | HMAC-SHA256 key for signing artifact URLs. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `ARTIFACT_TOKEN_TTL_MS` | No | `3600000` (1 hr) | Lifetime of signed artifact URL tokens (ms) |
+| `RESEND_API_KEY` | No | — | Resend API key for transactional email |
+| `SMTP_HOST` | No | — | SMTP server host (alternative to Resend) |
+| `SMTP_PORT` | No | `587` | SMTP server port |
+| `SMTP_SECURE` | No | `false` | Use TLS for SMTP |
+| `SMTP_USER` | No | — | SMTP username |
+| `SMTP_PASS` | No | — | SMTP password |
+| `EMAIL_FROM` | No | `Sentri <noreply@sentri.dev>` | Sender address for transactional emails |
+| `SKIP_EMAIL_VERIFICATION` | No | `false` | When `"true"`, registration auto-verifies users (dev/CI only — never set in production) |
 
 ---
 
@@ -1031,7 +1057,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not change the `healingHistory` key schema** (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).
 - **Do not add a new test framework** to either package. Backend tests use `node:assert/strict`; keep it that way.
-- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not use `getDb()` for writes — it returns a read-only snapshot.
+- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not import `getDb()` or `saveDb()` from `db.js` — the file is deprecated and emptied.
 - **Do not skip `throwIfAborted(signal)`** in pipeline or runner stages — it breaks the abort/cancel feature.
 - **Do not use `dangerouslySetInnerHTML`** without escaping all dynamic content first. AI/user-generated text must be sanitised before DOM insertion to prevent XSS.
 - **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages via `classifyError()`. Log the real error server-side with `formatLogLine()`.
@@ -1044,3 +1070,4 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.
+- **Do not duplicate test helpers.** Integration test utilities (`extractCookie`, `resetDb`, `req` with CSRF, `registerAndLogin`, `setupEnv`, `createTestRunner`) live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.

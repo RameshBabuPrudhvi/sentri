@@ -36,8 +36,30 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 |---|---|---|
 | `PORT` | `3001` | Backend server port |
 | `NODE_ENV` | — | Set to `production` for production deployments |
-| `DB_PATH` | `data/sentri.db` | SQLite database file path |
+| `DB_PATH` | `data/sentri.db` | SQLite database file path (ignored when `DATABASE_URL` is set) |
 | `CORS_ORIGIN` | `*` | Frontend origin(s) for CORS, comma-separated. **Required in production** |
+| `SHUTDOWN_DRAIN_MS` | `10000` | Max time (ms) to wait for in-flight runs during graceful shutdown |
+
+### Database & Infrastructure
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | — | PostgreSQL connection string (e.g. `postgres://user:pass@host:5432/db`). When set, uses PostgreSQL instead of SQLite. Requires `pg` + `pg-native` (or `deasync` as fallback) |
+| `PG_POOL_SIZE` | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
+| `REDIS_URL` | — | Redis connection URL (e.g. `redis://localhost:6379`). When set, enables shared rate limiting, cross-instance token revocation, and SSE pub/sub. Requires `ioredis`. For Redis-backed rate limiting also install `rate-limit-redis` |
+
+### Email (Transactional)
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESEND_API_KEY` | — | [Resend](https://resend.com) API key for transactional email (recommended) |
+| `SMTP_HOST` | — | SMTP server host (alternative to Resend) |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_SECURE` | `false` | Use TLS for SMTP connection |
+| `SMTP_USER` | — | SMTP username |
+| `SMTP_PASS` | — | SMTP password |
+| `EMAIL_FROM` | `Sentri <noreply@sentri.dev>` | Sender address for all transactional emails |
+| `SKIP_EMAIL_VERIFICATION` | `false` | When `"true"`, new users are auto-verified on registration. **Dev/CI only — never set in production** |
 
 ### Auth & Security
 
@@ -47,7 +69,8 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `CREDENTIAL_SECRET` | falls back to `JWT_SECRET` | Encryption secret for project credentials |
 | `ARTIFACT_SECRET` | random (dev) | **Required in production.** Signs artifact URLs (screenshots, videos) |
 | `ARTIFACT_TOKEN_TTL_MS` | `3600000` | Artifact URL token TTL (ms) |
-| `APP_URL` | `http://localhost:3000` | Frontend base URL (used for OAuth redirects) |
+| `ENABLE_DEV_RESET_TOKENS` | `false` | When `"true"`, forgot-password response includes the reset token (dev/test only — never in production) |
+| `APP_URL` | `http://localhost:3000` | Frontend base URL (used for OAuth redirects and email verification links) |
 | `APP_BASE_PATH` | `/` | Frontend base path prefix (e.g. `/sentri` for GitHub Pages) |
 | `BACKEND_URL` | auto-detect | Backend URL override for cross-origin cookie detection |
 
@@ -79,6 +102,8 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `HEALING_ELEMENT_TIMEOUT` | `5000` | Element finding timeout per strategy (ms) |
 | `HEALING_RETRY_COUNT` | `3` | Retries per interaction before giving up |
 | `HEALING_RETRY_DELAY` | `400` | Pause between retries (ms) |
+| `HEALING_HINT_MAX_FAILS` | `3` | Skip healing hints that have failed this many consecutive times |
+| `HEALING_VISIBLE_WAIT_CAP` | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
 
 ### AI Chat
 

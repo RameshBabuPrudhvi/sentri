@@ -10,6 +10,8 @@
  * | POST   | `/api/auth/logout`            | Token revocation + cookie clear      |
  * | POST   | `/api/auth/refresh`           | Refresh session (extend cookie TTL)  |
  * | GET    | `/api/auth/me`                | Return current user from cookie      |
+ * | GET    | `/api/auth/verify`            | Verify email via token (SEC-001)     |
+ * | POST   | `/api/auth/resend-verification` | Resend verification email (SEC-001)|
  * | POST   | `/api/auth/forgot-password`   | Request a password reset token       |
  * | POST   | `/api/auth/reset-password`    | Reset password using a valid token   |
  * | GET    | `/api/auth/github/callback`   | GitHub OAuth token exchange          |
@@ -34,7 +36,9 @@ import express from "express";
 import crypto from "crypto";
 import * as userRepo from "../database/repositories/userRepo.js";
 import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
+import * as verificationTokenRepo from "../database/repositories/verificationTokenRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { sendVerificationEmail } from "../utils/emailSender.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 import {
   signJwt, getJwtSecret, revokedTokens,
@@ -139,6 +143,10 @@ async function verifyPassword(password, stored) {
 // (migration 003). The token TTL is enforced by the `expiresAt` column.
 const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+// Email verification tokens (SEC-001, migration 003).
+// 24-hour TTL gives users plenty of time to check their inbox.
+const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 // Rate limiters — separate buckets per endpoint category so flooding
 // one endpoint (e.g. forgot-password) doesn't lock out login.
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
@@ -171,13 +179,16 @@ function checkRateLimit(bucket, ip) {
   return { allowed: true };
 }
 
-// Purge expired DB reset tokens periodically.
+// Purge expired DB tokens periodically (reset + verification).
 // In-memory revoked JWT purging is handled by middleware/authenticate.js.
 // .unref() prevents this timer from keeping the process alive during tests.
 const _purgeInterval = setInterval(() => {
   try {
     resetTokenRepo.deleteExpired();
   } catch (err) { console.error(formatLogLine("error", null, `[auth/purge] Failed to delete expired reset tokens: ${err.message}`)); }
+  try {
+    verificationTokenRepo.deleteExpired();
+  } catch (err) { console.error(formatLogLine("error", null, `[auth/purge] Failed to delete expired verification tokens: ${err.message}`)); }
 }, 60 * 60 * 1000);
 _purgeInterval.unref();
 
@@ -284,10 +295,37 @@ router.post("/register", async (req, res) => {
     const passwordHash = await hashPassword(password);
     const now          = new Date().toISOString();
 
-    const user = { id, name, email, passwordHash, role: "user", createdAt: now, updatedAt: now };
+    // SEC-001: New users are created with emailVerified = 0 (false).
+    // They must verify their email before they can log in.
+    // SKIP_EMAIL_VERIFICATION=true bypasses this for dev/CI environments.
+    const skipVerification = process.env.SKIP_EMAIL_VERIFICATION === "true";
+
+    // Set emailVerified atomically at creation time — no separate UPDATE needed.
+    // This prevents a window where the user exists with emailVerified=1 if the
+    // update were to fail after the INSERT.
+    const user = { id, name, email, passwordHash, role: "user", emailVerified: skipVerification ? 1 : 0, createdAt: now, updatedAt: now };
     userRepo.create(user);
 
-    return res.status(201).json({ message: "Account created successfully." });
+    if (skipVerification) {
+      // Auto-verify: dev/CI mode — no email required
+      return res.status(201).json({ message: "Account created successfully." });
+    }
+
+    // Generate and send verification email
+    const verifyToken = crypto.randomBytes(32).toString("base64url");
+    const tokenExpiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS).toISOString();
+    try {
+      verificationTokenRepo.create(verifyToken, id, email, tokenExpiresAt);
+      await sendVerificationEmail(email, verifyToken, name);
+    } catch (emailErr) {
+      // Non-fatal: account is created, user can request a resend.
+      console.error(formatLogLine("error", null, `[auth/register] Failed to send verification email: ${emailErr.message}`));
+    }
+
+    return res.status(201).json({
+      message: "Account created. Please check your email to verify your account.",
+      requiresVerification: true,
+    });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/register] ${err.message}`));
     return res.status(500).json({ error: "Registration failed. Please try again." });
@@ -331,6 +369,17 @@ router.post("/login", async (req, res) => {
 
     if (!user || !valid) {
       return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    // SEC-001: Block login for unverified email accounts.
+    // emailVerified defaults to 1 for existing/OAuth users (migration 003),
+    // so only new email/password registrations are affected.
+    if (user.emailVerified === 0) {
+      return res.status(403).json({
+        error: "Please verify your email address before signing in.",
+        code: "EMAIL_NOT_VERIFIED",
+        email: user.email,
+      });
     }
 
     const jti   = crypto.randomUUID();
@@ -410,6 +459,101 @@ router.post("/refresh", requireAuth, (req, res) => {
   return res.json({
     user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar || null },
   });
+});
+
+// ─── Email Verification (SEC-001) ────────────────────────────────────────────
+
+/**
+ * Verify a user's email address using a signed token.
+ * Called when the user clicks the verification link in their email.
+ *
+ * @route GET /api/auth/verify
+ * @param {string} req.query.token - The verification token from the email.
+ * @returns {200} `{ message, verified: true }` on success.
+ * @returns {400} Invalid, expired, or already-used token.
+ */
+router.get("/verify", async (req, res) => {
+  const { token } = req.query;
+
+  if (!token || typeof token !== "string") {
+    return res.status(400).json({ error: "Verification token is required." });
+  }
+
+  let entry;
+  try {
+    entry = verificationTokenRepo.claim(token);
+  } catch (dbErr) {
+    console.error(formatLogLine("error", null, `[auth/verify] DB error: ${dbErr.message}`));
+    return res.status(500).json({ error: "Server error. Please try again." });
+  }
+
+  if (!entry) {
+    return res.status(400).json({ error: "Invalid or expired verification link. Please request a new one." });
+  }
+
+  const user = userRepo.getById(entry.userId);
+  if (!user) {
+    return res.status(400).json({ error: "Account not found." });
+  }
+
+  // Mark user as verified
+  userRepo.update(user.id, { emailVerified: 1, updatedAt: new Date().toISOString() });
+
+  // Clean up any remaining unused tokens for this user
+  try {
+    verificationTokenRepo.deleteUnusedByUserId(entry.userId);
+  } catch (dbErr) {
+    console.error(formatLogLine("error", null, `[auth/verify] Token cleanup error: ${dbErr.message}`));
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(formatLogLine("info", null, `[auth/verify] Email verified for ${user.email}`));
+  }
+
+  return res.json({ message: "Email verified successfully. You can now sign in.", verified: true });
+});
+
+/**
+ * Resend the verification email for an unverified account.
+ * Rate-limited to prevent abuse.
+ *
+ * @route POST /api/auth/resend-verification
+ * @param {Object} req.body
+ * @param {string} req.body.email - Email address of the unverified account.
+ * @returns {200} `{ message }` — always returns success to prevent enumeration.
+ */
+router.post("/resend-verification", async (req, res) => {
+  const ip = req.ip || "unknown";
+  const rate = checkRateLimit("forgotPassword", ip); // reuse the same bucket
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
+  const email = sanitiseString(req.body.email, 254).toLowerCase();
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "A valid email address is required." });
+  }
+
+  const genericMsg = "If an unverified account with that email exists, a verification link has been sent.";
+
+  const user = userRepo.getByEmail(email);
+  if (!user || user.emailVerified !== 0) {
+    // No account or already verified — silently succeed to prevent enumeration
+    return res.json({ message: genericMsg });
+  }
+
+  const verifyToken = crypto.randomBytes(32).toString("base64url");
+  const tokenExpiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS).toISOString();
+  try {
+    verificationTokenRepo.create(verifyToken, user.id, email, tokenExpiresAt);
+    await sendVerificationEmail(email, verifyToken, user.name);
+  } catch (emailErr) {
+    console.error(formatLogLine("error", null, `[auth/resend-verification] Failed to send: ${emailErr.message}`));
+    return res.status(500).json({ error: "Failed to send verification email. Please try again." });
+  }
+
+  return res.json({ message: genericMsg });
 });
 
 // ─── Password Reset ──────────────────────────────────────────────────────────
@@ -732,10 +876,24 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
 
   // Always keep OAuth provider link up to date
   userRepo.setOAuthLink(key, user.id);
+
+  // SEC-001: If the user registered via email/password but hasn't verified yet,
+  // auto-verify them now — the OAuth provider already verified the email.
+  // This prevents the scenario where a user registers, then logs in via OAuth,
+  // but can never use email/password login because emailVerified stays 0.
+  const updates = {};
+  if (user.emailVerified === 0) {
+    updates.emailVerified = 1;
+  }
   // Update avatar if missing
   if (!user.avatar && avatar) {
-    userRepo.update(user.id, { avatar, updatedAt: new Date().toISOString() });
+    updates.avatar = avatar;
     user.avatar = avatar;
+  }
+  if (Object.keys(updates).length > 0) {
+    updates.updatedAt = new Date().toISOString();
+    userRepo.update(user.id, updates);
+    if (updates.emailVerified) user.emailVerified = 1;
   }
 
   return user;

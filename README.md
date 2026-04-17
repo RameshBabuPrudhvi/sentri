@@ -117,7 +117,7 @@ cp .env.example .env        # Add at least one AI provider key
 npm run dev                 # Starts on :3001, creates data/sentri.db automatically
 ```
 
-> **Database:** SQLite (`data/sentri.db`) is created automatically on first startup — no manual setup needed. If upgrading from a previous version that used `sentri-db.json`, data is auto-migrated on first run.
+> **Database:** SQLite (`data/sentri.db`) is created automatically on first startup — no manual setup needed. To use PostgreSQL instead, set `DATABASE_URL=postgres://…` and install `pg` + `pg-native`. If upgrading from a previous version that used `sentri-db.json`, data is auto-migrated on first run.
 
 **Frontend:**
 ```bash
@@ -157,6 +157,12 @@ ANTHROPIC_API_KEY=sk-ant-...       # or OPENAI_API_KEY, GOOGLE_API_KEY, AI_PROVI
 # Auth (required in production)
 JWT_SECRET=<openssl rand -base64 48>
 NODE_ENV=production
+
+# Database — SQLite by default; set for PostgreSQL:
+# DATABASE_URL=postgres://sentri:sentri@localhost:5432/sentri
+
+# Redis — optional; enables shared rate limiting, token revocation, SSE pub/sub:
+# REDIS_URL=redis://localhost:6379
 
 # Parallel test execution (1 = sequential, max 10)
 PARALLEL_WORKERS=4
@@ -248,7 +254,8 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Token Storage** | ✅ JWT in HttpOnly; Secure; SameSite=Strict cookie + CSRF double-submit protection |
 | **Password Reset** | ✅ DB-backed tokens with atomic one-time claim (TOCTOU-safe) |
 | **Audit Trail** | ✅ Per-user `userId`/`userName` on every activity log entry |
-| **Database** | ✅ SQLite (better-sqlite3) with WAL mode, migration runner, auto-migrates from legacy JSON |
+| **Database** | ✅ SQLite (default) or PostgreSQL — set `DATABASE_URL=postgres://…` to switch; adapter pattern, dialect-aware migrations |
+| **Redis** | ✅ Optional — set `REDIS_URL` for shared rate limiting, cross-instance token revocation, and SSE pub/sub |
 | **Parallel Execution** | ✅ 1–10 concurrent browser contexts per run (`PARALLEL_WORKERS` env or UI selector) |
 | **API Test Generation** | ✅ HAR capture during crawl → auto-generated Playwright `request` API contract tests |
 | **SPA Routing** | ✅ GitHub Pages `404.html` redirect |
@@ -256,14 +263,16 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Artifact Auth** | ✅ HMAC-SHA256 signed expiring URLs for all artifact serving (screenshots, videos, traces) — requires `ARTIFACT_SECRET` in production |
 | **Secrets Scanning** | ✅ Gitleaks CI job gates every PR/push — blocks builds on accidentally committed secrets |
 | **Error Boundary** | ✅ Extracted `ErrorBoundary` component with server-side crash reporting and soft retry UI |
-| **Job Queue** | ⬜ Add BullMQ + Redis for background crawl/run jobs |
-| **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk |
-| **Scheduling** | ⬜ Add cron-based auto-runs via `node-cron` |
-| **Notifications** | ⬜ Send Slack/email alerts on test failures |
-| **Multi-tenancy** | ⬜ Add workspace/organisation scoping |
-| **CI/CD Integration** | ⬜ Expose a run trigger webhook for GitHub Actions / GitLab CI |
-| **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (Playwright-native) |
-| **Visual Regression** | ⬜ Baseline screenshot diffing with `pixelmatch` |
+| **Email Verification** | ✅ New users must verify email before login; Resend / SMTP / console fallback |
+| **Scheduling** | ✅ Cron-based auto-runs with timezone support via `node-cron` |
+| **CI/CD Integration** | ✅ Webhook trigger endpoint with per-project Bearer tokens |
+| **Graceful Shutdown** | ✅ Drains in-flight runs, stops scheduler, closes Redis + DB on SIGTERM/SIGINT |
+| **Job Queue** | ⬜ Add BullMQ for durable background run execution (INF-003) |
+| **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk (MNT-006) |
+| **Notifications** | ⬜ Send Slack/email alerts on test failures (FEA-001) |
+| **Multi-tenancy** | ⬜ Add workspace/organisation scoping (ACL-001) |
+| **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (DIF-002) |
+| **Visual Regression** | ⬜ Baseline screenshot diffing with `pixelmatch` (DIF-001) |
 
 ---
 

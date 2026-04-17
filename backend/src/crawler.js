@@ -347,7 +347,20 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     if (apiEndpoints.length > 0) {
       log(run, `API endpoints discovered: ${apiEndpoints.length}`);
     }
-    if (run.rateLimitError) {
+
+    // ── ENH-034: Distinguish empty crawl results ──────────────────────────
+    // When a crawl completes but generates zero tests (site behind auth,
+    // SPA with no crawlable links, AI returned empty), mark as
+    // "completed_empty" so the UI can show a warning instead of green success.
+    if (run.tests.length === 0) {
+      run.status = "completed_empty";
+      logWarn(run, `Crawl completed but no tests were generated.`);
+      logWarn(run, `Possible causes:`);
+      logWarn(run, `  1. Site requires authentication — add credentials in Project Settings`);
+      logWarn(run, `  2. Pages have no interactive elements — try a different start URL`);
+      logWarn(run, `  3. AI provider returned empty — check your API key in Settings`);
+      logWarn(run, `  4. Try "State exploration" mode to discover dynamic content`);
+    } else if (run.rateLimitError) {
       logWarn(run, `Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
     } else {
       logSuccess(run, `Done! ${run.tests.length} high-quality tests generated.`);
@@ -357,6 +370,6 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       pages: snapshots.length, tests: run.tests.length, durationMs: run.duration,
       apiEndpoints: apiEndpoints.length,
     });
-    emitRunEvent(run.id, "done", { status: "completed", testsGenerated: run.tests.length });
+    emitRunEvent(run.id, "done", { status: run.status, testsGenerated: run.tests.length });
   });
 }

@@ -17,27 +17,61 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "../middleware/appSetup.js";
+import { redis, redisSub, isRedisAvailable } from "../utils/redisClient.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
 
-// ─── SSE: Real-time run events ────────────────────────────────────────────────
-// Registry: runId → Set of SSE response objects
+// ─── SSE: Real-time run events (INF-002: Redis pub/sub for multi-instance) ────
+// Registry: runId → Set of SSE response objects (local to this process)
 export const runListeners = new Map();
+
+/** Redis channel prefix for run events. */
+const CHANNEL_PREFIX = "sentri:run:";
+
+/** Unique identifier for this server instance — used to skip self-echo from Redis. */
+const _instanceId = `inst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 /**
  * emitRunEvent(runId, type, payload)
+ *
  * Broadcasts a Server-Sent Event to every client listening on this run.
  * Called from testRunner.js and crawler.js to push live updates.
+ *
+ * When Redis is available, the event is also published to a Redis channel
+ * so other server instances can relay it to their connected SSE clients.
+ * The local delivery happens first (instant), then Redis pub (async).
+ * The message includes an `_origin` field so the subscriber can skip
+ * messages published by this same instance (preventing duplicate delivery).
  */
 export function emitRunEvent(runId, type, payload = {}) {
+  const data = JSON.stringify({ type, ...payload });
+
+  // ── Publish to Redis so other instances can relay ──────────────────────
+  if (isRedisAvailable()) {
+    // Include _origin so the subscriber on this instance can skip self-echo.
+    const redisData = JSON.stringify({ type, ...payload, _origin: _instanceId });
+    redis.publish(`${CHANNEL_PREFIX}${runId}`, redisData).catch(() => {});
+  }
+
+  // ── Deliver to local SSE listeners ────────────────────────────────────
+  _deliverToLocal(runId, type, data);
+}
+
+/**
+ * Deliver an SSE event to locally connected clients for a given run.
+ * Separated from emitRunEvent so the Redis subscriber can call it too.
+ *
+ * @param {string} runId
+ * @param {string} type  — event type (for "done" cleanup logic)
+ * @param {string} data  — pre-serialised JSON string
+ */
+function _deliverToLocal(runId, type, data) {
   const listeners = runListeners.get(runId);
   if (!listeners || listeners.size === 0) {
-    // Even with no active listeners, clean up the registry on "done" so
-    // the Map doesn't grow unboundedly with stale runId keys.
     if (type === "done") runListeners.delete(runId);
     return;
   }
-  const data = JSON.stringify({ type, ...payload });
   // Snapshot the Set before iterating — res.end() triggers the "close"
   // handler which mutates the Set, causing concurrent-modification issues.
   const snapshot = [...listeners];
@@ -47,7 +81,63 @@ export function emitRunEvent(runId, type, payload = {}) {
         if (type === "done") res.end();
     } catch { /* client gone */ }
   }
-  if (type === "done") runListeners.delete(runId);
+  if (type === "done") {
+    runListeners.delete(runId);
+    _unsubscribeFromRun(runId);
+  }
+}
+
+// ─── Redis pub/sub subscriber (INF-002) ───────────────────────────────────────
+// When a client connects to an SSE endpoint on this instance, we subscribe to
+// the Redis channel for that run.  Events published by ANY instance are then
+// relayed to the local SSE clients.  This is how instance A's run events reach
+// instance B's connected browsers.
+
+/** Set of runIds this instance is subscribed to (avoids duplicate subscribes). */
+const _subscribedRuns = new Set();
+
+/**
+ * Subscribe to the Redis channel for a run (if not already subscribed).
+ * @param {string} runId
+ */
+function _subscribeToRun(runId) {
+  if (!isRedisAvailable() || !redisSub) return;
+  if (_subscribedRuns.has(runId)) return;
+  _subscribedRuns.add(runId);
+  redisSub.subscribe(`${CHANNEL_PREFIX}${runId}`).catch(err => {
+    console.warn(formatLogLine("warn", null, `[sse] Redis subscribe failed for ${runId}: ${err.message}`));
+    _subscribedRuns.delete(runId);
+  });
+}
+
+/**
+ * Unsubscribe from the Redis channel for a run (when no local listeners remain).
+ * @param {string} runId
+ */
+function _unsubscribeFromRun(runId) {
+  if (!isRedisAvailable() || !redisSub) return;
+  if (!_subscribedRuns.has(runId)) return;
+  _subscribedRuns.delete(runId);
+  redisSub.unsubscribe(`${CHANNEL_PREFIX}${runId}`).catch(() => {});
+}
+
+// Handle incoming messages from Redis — relay to local SSE clients.
+// Skip messages that originated from this instance to prevent duplicate
+// delivery (emitRunEvent already delivered locally before publishing).
+if (redisSub) {
+  redisSub.on("message", (channel, message) => {
+    if (!channel.startsWith(CHANNEL_PREFIX)) return;
+    const runId = channel.slice(CHANNEL_PREFIX.length);
+    try {
+      const parsed = JSON.parse(message);
+      // Skip self-echo: this instance already delivered the event locally.
+      if (parsed._origin === _instanceId) return;
+      // Strip _origin before forwarding to clients — it's an internal field.
+      const { _origin, ...clientPayload } = parsed;
+      const clientData = JSON.stringify(clientPayload);
+      _deliverToLocal(runId, parsed.type, clientData);
+    } catch { /* malformed message — ignore */ }
+  });
 }
 
 // GET /api/runs/:id/events  — SSE stream for a single run
@@ -101,6 +191,9 @@ router.get("/runs/:runId/events", (req, res) => {
   if (!runListeners.has(runId)) runListeners.set(runId, new Set());
   runListeners.get(runId).add(res);
 
+  // Subscribe to the Redis channel so events from other instances are relayed.
+  _subscribeToRun(runId);
+
   // Heartbeat — keeps the connection alive through proxies / load balancers.
   // 5 s interval: long AI feedback-loop calls (30–120 s) can cause aggressive
   // OS TCP stacks or proxies to reset the idle SSE connection. A shorter
@@ -112,7 +205,11 @@ router.get("/runs/:runId/events", (req, res) => {
   req.on("close", () => {
     clearInterval(heartbeat);
     runListeners.get(runId)?.delete(res);
-    if (runListeners.get(runId)?.size === 0) runListeners.delete(runId);
+    if (runListeners.get(runId)?.size === 0) {
+      runListeners.delete(runId);
+      // No more local listeners for this run — unsubscribe from Redis channel
+      _unsubscribeFromRun(runId);
+    }
   });
 });
 

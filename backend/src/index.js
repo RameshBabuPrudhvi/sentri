@@ -24,7 +24,8 @@ import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
-import { initScheduler } from "./scheduler.js";
+import { initScheduler, stopAllTasks } from "./scheduler.js";
+import { closeRedis } from "./utils/redisClient.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -49,6 +50,8 @@ import recycleBinRouter from "./routes/recycleBin.js";
 export { emitRunEvent, runListeners } from "./routes/sse.js";
 export { runAbortControllers } from "./utils/runWithAbort.js";
 
+import { runAbortControllers } from "./utils/runWithAbort.js";
+
 dotenv.config();
 
 // ─── Process-level crash guards ───────────────────────────────────────────────
@@ -67,7 +70,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ─── DB init ──────────────────────────────────────────────────────────────────
-// 1. Open SQLite and apply schema
+// 1. Open database (SQLite or PostgreSQL) and apply schema migrations
 getDatabase();
 // 2. Migrate legacy sentri-db.json → SQLite (one-time, skips if already done)
 migrateFromJsonIfNeeded();
@@ -82,9 +85,77 @@ if (orphanCount > 0) {
 // 5. Initialise cron-based test scheduler (ENH-006)
 //    Must run after DB init so scheduleRepo can read the schedules table.
 initScheduler();
-// Graceful shutdown — close SQLite connection
-process.on("SIGINT",  () => { closeDatabase(); process.exit(0); });
-process.on("SIGTERM", () => { closeDatabase(); process.exit(0); });
+
+// ─── Graceful shutdown (MAINT-013) ────────────────────────────────────────────
+// Instead of killing the process immediately, drain in-flight runs so they
+// persist their results and Playwright browsers are cleaned up properly.
+const SHUTDOWN_DRAIN_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS, 10) || 10_000;
+const DRAIN_POLL_MS = 250;
+let _server = null; // populated when app.listen() returns
+let _shuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (_shuttingDown) return; // prevent double-fire from SIGINT+SIGTERM
+  _shuttingDown = true;
+  console.log(formatLogLine("info", null, `[shutdown] ${signal} received — starting graceful shutdown (drain ${SHUTDOWN_DRAIN_MS}ms)`));
+
+  try {
+    // 1. Stop accepting new connections
+    if (_server) {
+      _server.close(() => {
+        console.log(formatLogLine("info", null, "[shutdown] HTTP server closed — no new connections"));
+      });
+    }
+
+    // 2. Stop all cron tasks so no new runs are scheduled
+    stopAllTasks();
+    console.log(formatLogLine("info", null, "[shutdown] Scheduler tasks stopped"));
+
+    // 3. Wait for in-flight runs to finish (up to SHUTDOWN_DRAIN_MS)
+    const deadline = Date.now() + SHUTDOWN_DRAIN_MS;
+    while (runAbortControllers.size > 0 && Date.now() < deadline) {
+      console.log(formatLogLine("info", null, `[shutdown] Draining ${runAbortControllers.size} in-flight run(s)…`));
+      await new Promise(resolve => setTimeout(resolve, DRAIN_POLL_MS));
+    }
+
+    // 4. Force-abort any stragglers and mark them interrupted
+    if (runAbortControllers.size > 0) {
+      console.warn(formatLogLine("warn", null, `[shutdown] Force-aborting ${runAbortControllers.size} straggler run(s)`));
+      for (const [runId, entry] of runAbortControllers) {
+        try {
+          // Set the in-memory run status BEFORE aborting so the .catch()
+          // handler in runWithAbort doesn't overwrite with "running".
+          if (entry.run) entry.run.status = "interrupted";
+          entry.controller.abort();
+          // Mark the run as interrupted in the database so it isn't left
+          // in "running" state (the normal abort flow may not complete in time).
+          runRepo.update(runId, {
+            status: "interrupted",
+            finishedAt: new Date().toISOString(),
+            error: "Server shutdown while run was in progress",
+          });
+        } catch (err) {
+          console.warn(formatLogLine("warn", null, `[shutdown] Error aborting run ${runId}: ${err.message}`));
+        }
+      }
+      runAbortControllers.clear();
+    }
+
+    // 5. Close Redis connections (INF-002)
+    await closeRedis();
+
+    // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
+    await closeDatabase();
+    console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
+    process.exit(0);
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[shutdown] Error during graceful shutdown: ${err?.message || err}`));
+    process.exit(1);
+  }
+}
+
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 // NOTE: The _seed/runs endpoint has been removed from this file.
 // If you need it for integration tests, mount it in your test setup file
@@ -128,7 +199,7 @@ app.get("/health/ready", async (_req, res) => {
   const checks = {};
   let allOk = true;
 
-  // 1. SQLite ping
+  // 1. Database ping (SQLite or PostgreSQL)
   try {
     const { getDatabase } = await import("./database/sqlite.js").catch(() => ({}));
     if (getDatabase) {
@@ -180,7 +251,7 @@ app.get("/health/ready", async (_req, res) => {
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+_server = app.listen(PORT, () => {
   console.log(formatLogLine("info", null, `🐻 Sentri API running on port ${PORT}`));
   structuredLog("server.start", { port: PORT });
 });

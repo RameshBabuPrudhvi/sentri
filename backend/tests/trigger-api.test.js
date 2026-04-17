@@ -102,6 +102,10 @@ async function main() {
     });
     assert.equal(out.res.status, 201);
 
+    // SEC-001: Mark test user as verified so login succeeds
+    const db = getDatabase();
+    db.prepare("UPDATE users SET emailVerified = 1 WHERE email = ?").run(email);
+
     out = await jwtReq(base, "/api/auth/login", {
       method: "POST", body: { email, password: "Password123!" },
     });
@@ -243,7 +247,7 @@ async function main() {
 
     console.log("\n\u2500\u2500 Token revocation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
 
-    const db = getDatabase();
+    // Reuse the `db` variable declared above (line 106) — do not redeclare with `const`
     db.prepare("UPDATE runs SET status = 'completed' WHERE id = ?").run(triggeredRunId);
 
     await test("DELETE trigger-tokens 404 for non-existent token", async () => {

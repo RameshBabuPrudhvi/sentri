@@ -12,11 +12,17 @@ Auto-generated documentation for every module, function, and type in the codebas
 
 | Module | Description |
 |---|---|
-| `db.js` | SQLite compatibility shim — `getDb()` returns snapshot, `saveDb()` is no-op |
-| `database/sqlite.js` | SQLite singleton — `getDatabase()`, `closeDatabase()`, WAL mode, auto-schema |
-| `database/repositories/*.js` | Data access layer — `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo` |
+| `db.js` | **Deprecated** — emptied stub. All consumers migrated to repository modules. Do not use in new code |
+| `database/sqlite.js` | Database singleton — `getDatabase()`, `closeDatabase()`, `getDatabaseDialect()`. Detects SQLite vs PostgreSQL from `DATABASE_URL` |
+| `database/adapters/sqlite-adapter.js` | SQLite adapter — WAL mode, better-sqlite3 wrapper |
+| `database/adapters/postgres-adapter.js` | PostgreSQL adapter — pg-native/deasync, SQL dialect translation, `AsyncLocalStorage` transactions |
+| `database/migrationRunner.js` | Versioned, dialect-aware migration runner with checksum validation |
+| `database/repositories/*.js` | Data access layer — `projectRepo`, `testRepo`, `runRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `verificationTokenRepo`, `passwordResetTokenRepo`, `webhookTokenRepo`, `scheduleRepo` |
 | `database/migrate.js` | One-time migration from legacy `sentri-db.json` → SQLite |
-| `routes/auth.js` | Authentication — all 6 endpoints, JWT helpers, password hashing, OAuth, `requireAuth` middleware |
+| `utils/redisClient.js` | Shared Redis client — `redis`, `redisSub`, `isRedisAvailable()`, `closeRedis()` |
+| `utils/emailSender.js` | Transactional email — `sendEmail()`, `sendVerificationEmail()`, Resend/SMTP/console transport |
+| `routes/auth.js` | Authentication — 10 endpoints (register, login, logout, refresh, me, verify, resend-verification, forgot-password, reset-password, OAuth), JWT helpers, password hashing |
+| `middleware/authenticate.js` | Strategy-based auth — JWT cookie/bearer/query + trigger token, token revocation with Redis pub/sub |
 | `crawler.js` | Chromium-based page crawler |
 | `testRunner.js` | Playwright test execution engine |
 | `selfHealing.js` | Multi-strategy selector waterfall with healing history |

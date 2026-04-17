@@ -341,6 +341,14 @@ export const api = {
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 
+  // ── Email verification (SEC-001) ──────────────────────────────────────────────
+  /**
+   * Resend the email verification link for an unverified account.
+   * @param {string} email - The email address of the unverified account.
+   * @returns {Promise<{message: string}>}
+   */
+  resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
+
   // ── System info & data management ───────────────────────────────────────────
   /** @returns {Promise<Object>} Uptime, Node/Playwright versions, memory, DB counts. */
   getSystemInfo:   () => req("GET",    "/system"),

@@ -83,7 +83,7 @@ export default function Work() {
   // ── Counts for filter dots ────────────────────────────────────────────────
   const statusCounts = useMemo(() => ({
     running:   runs.filter(r => r.status === "running").length,
-    completed: runs.filter(r => r.status === "completed").length,
+    completed: runs.filter(r => r.status === "completed" || r.status === "completed_empty").length,
     failed:    runs.filter(r => r.status === "failed").length,
     aborted:   runs.filter(r => r.status === "aborted").length,
   }), [runs]);
@@ -95,7 +95,13 @@ export default function Work() {
   }), [runs]);
 
   const filtered = useMemo(() => runs.filter(r => {
-    if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (statusFilter !== "all") {
+      // Group completed_empty under the "completed" filter
+      const matches = statusFilter === "completed"
+        ? (r.status === "completed" || r.status === "completed_empty")
+        : r.status === statusFilter;
+      if (!matches) return false;
+    }
     if (typeFilter   !== "all" && r.type   !== typeFilter)   return false;
     if (search.trim()) {
       const q = search.toLowerCase();

@@ -54,7 +54,8 @@ Dashboard with pass rate, defect categories, flaky test detection, test growth s
 │  ├── HAR Capture: API traffic → endpoints   │
 │  ├── AI Pipeline: 8-stage generation        │
 │  ├── Self-Healing: multi-strategy waterfall │
-│  └── DB: SQLite (better-sqlite3, WAL mode)  │
+│  ├── DB: SQLite (default) or PostgreSQL     │
+│  └── Redis (optional): rate limits, SSE     │
 ├─────────────────────────────────────────────┤
 │  AI Providers                               │
 │  ├── Anthropic Claude                       │

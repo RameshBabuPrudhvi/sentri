@@ -21,7 +21,10 @@ import { rateLimit } from "express-rate-limit";
 import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { AUTH_COOKIE } from "./authenticate.js";
+import { redis, isRedisAvailable } from "../utils/redisClient.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -177,6 +180,7 @@ const CSRF_EXEMPT_PATHS = new Set([
   "/api/auth/refresh",         // refresh reads cookie for auth — no CSRF risk
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/auth/resend-verification", // public endpoint — user may have stale auth cookie
   "/api/auth/github/callback",
   "/api/auth/google/callback",
 ]);
@@ -221,18 +225,54 @@ export function csrfMiddleware(req, res, next) {
 
 app.use(csrfMiddleware);
 
-// ─── Global API rate limiting ─────────────────────────────────────────────────
+// ─── Global API rate limiting (INF-002: Redis-backed when available) ──────────
 // Applies to ALL /api/* routes. Separate tighter buckets are defined below for
 // expensive operations (crawl, test run, AI generation) that consume significant
 // server or third-party AI API resources.
 //
-// Limits are intentionally generous for the general bucket (300 req / 15 min per
-// IP) to avoid false positives on legitimate power users, while the expensive
-// operation buckets are tight (5–30 req / hour per IP).
+// When REDIS_URL is set, rate-limit-redis shares counters across all instances
+// so limits are enforced globally (not per-process).  When Redis is not
+// available, the default in-memory store is used (single-instance only).
+
+// Lazy-load rate-limit-redis only when Redis is configured.
+// We check `redis !== null` (client created) rather than `isRedisAvailable()`
+// (client connected) because the ioredis `connect` event fires asynchronously
+// AFTER all synchronous module-level code runs, so `isRedisAvailable()` would
+// always return `false` at import time. The RedisStore itself handles
+// connection retries gracefully — commands are queued until the client connects.
 //
-// In production, replace the default in-memory store with a Redis store:
-//   import { RedisStore } from "rate-limit-redis";
-//   store: new RedisStore({ sendCommand: (...args) => redisClient.sendCommand(args) })
+// IMPORTANT: Each rate limiter MUST have its own RedisStore instance with a
+// unique prefix. Sharing a single store across multiple limiters corrupts
+// counters because rate-limit-redis uses the prefix to namespace keys.
+const _require = createRequire(import.meta.url);
+let _RedisStoreClass = null;
+if (redis) {
+  try {
+    const mod = _require("rate-limit-redis");
+    // rate-limit-redis v4 uses `export default class RedisStore`. When loaded
+    // via CJS require(), the module object is `{ default: RedisStore }`, so
+    // mod.RedisStore is undefined. Handle both named and default export shapes.
+    _RedisStoreClass = mod.RedisStore || mod.default || null;
+    if (!_RedisStoreClass) {
+      console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis loaded but RedisStore class not found — using in-memory store."));
+    } else {
+      console.log(formatLogLine("info", null, "[rate-limit] Using Redis-backed store for rate limiting"));
+    }
+  } catch {
+    console.warn(formatLogLine("warn", null, "[rate-limit] rate-limit-redis not installed — using in-memory store. Run `npm install rate-limit-redis` for shared rate limiting."));
+  }
+}
+
+/** Create a RedisStore with a unique prefix, or return {} for in-memory fallback. */
+function _makeRedisStore(prefix) {
+  if (!_RedisStoreClass) return {};
+  return {
+    store: new _RedisStoreClass({
+      sendCommand: (...args) => redis.call(...args),
+      prefix,
+    }),
+  };
+}
 
 /**
  * General API rate limiter — 300 requests per 15 minutes per IP.
@@ -244,6 +284,7 @@ const generalApiLimiter = rateLimit({
   standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
   legacyHeaders:    false,
   skip:             (req) => req.method === "OPTIONS", // never block preflight
+  ..._makeRedisStore("sentri:rl:general:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Too many requests. Please slow down and try again shortly.",
@@ -262,6 +303,7 @@ export const expensiveOpLimiter = rateLimit({
   max:              20,               // 20 crawl/run triggers per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
+  ..._makeRedisStore("sentri:rl:expensive:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for test runs. You can trigger up to 20 runs per hour. Please wait before starting another.",
@@ -279,6 +321,7 @@ export const aiGenerationLimiter = rateLimit({
   max:              30,               // 30 AI generation calls per hour per IP
   standardHeaders:  "draft-7",
   legacyHeaders:    false,
+  ..._makeRedisStore("sentri:rl:ai:"),
   handler: (_req, res) => {
     res.status(429).json({
       error: "Rate limit reached for AI generation. You can trigger up to 30 AI requests per hour. Please wait before generating more tests.",

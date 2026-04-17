@@ -24,7 +24,7 @@ Authorization: Bearer <jwt-token>
 | [Tests](/api/tests) | CRUD, generate, review (approve/reject/restore), bulk actions, counts, pagination |
 | [Runs](/api/runs) | Execute tests, get results, SSE event stream, abort, pagination |
 | [Settings](/api/settings) | AI provider config, Ollama status, system info, recycle bin, data management |
-| [Authentication](/api/auth) | Register, sign in, OAuth (GitHub/Google), token management |
+| [Authentication](/api/auth) | Register, sign in, email verification, OAuth (GitHub/Google), password reset, token management |
 
 ## Common Patterns
 

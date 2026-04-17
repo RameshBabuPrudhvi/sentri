@@ -379,6 +379,18 @@ export function stopSchedule(projectId) {
 }
 
 /**
+ * Stop and remove all active cron tasks.
+ * Called during graceful shutdown so no new scheduled runs fire while
+ * in-flight work is draining.
+ */
+export function stopAllTasks() {
+  for (const [projectId, task] of tasks) {
+    task.stop();
+  }
+  tasks.clear();
+}
+
+/**
  * Return the number of currently active (armed) cron tasks.
  * Exposed for the /api/system health endpoint.
  *

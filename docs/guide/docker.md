@@ -21,9 +21,33 @@ Open [http://localhost:80](http://localhost:80)
 │  Serves SPA       │     │  Express API      │
 │  Proxies /api/*   │     │  Playwright       │
 └──────────────────┘     └──────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+              ┌─────┴─────┐       ┌──────┴──────┐
+              │ PostgreSQL │       │    Redis    │
+              │ (optional) │       │ (optional)  │
+              └───────────┘       └─────────────┘
 ```
 
 Nginx proxies `/api/*` and `/artifacts/*` to the backend container automatically.
+
+By default, the backend uses SQLite (zero config). To use PostgreSQL and/or Redis, activate the optional services:
+
+```bash
+# With PostgreSQL:
+docker compose --profile postgres up --build
+
+# With Redis:
+docker compose --profile redis up --build
+
+# With both:
+docker compose --profile postgres --profile redis up --build
+```
+
+Set the corresponding env vars on the backend service in `docker-compose.yml`:
+- `DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri`
+- `REDIS_URL=redis://redis:6379`
 
 ## Environment Variables
 
@@ -34,6 +58,12 @@ AI_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 JWT_SECRET=your-32-char-secret
 NODE_ENV=production
+
+# Optional — PostgreSQL instead of SQLite:
+# DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
+
+# Optional — Redis for shared rate limiting, token revocation, SSE pub/sub:
+# REDIS_URL=redis://redis:6379
 ```
 
 ## Production Compose
@@ -48,7 +78,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## Volumes
 
-The backend stores data in `/app/data/sentri.db` (SQLite) inside the container. Mount a volume to persist across restarts:
+The backend stores data in `/app/data/sentri.db` (SQLite) inside the container. When using PostgreSQL (`DATABASE_URL`), data is stored in the PostgreSQL database instead. Mount a volume to persist SQLite data across restarts:
 
 ```yaml
 volumes:

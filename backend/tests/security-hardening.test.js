@@ -13,11 +13,13 @@
  */
 
 import assert from "node:assert/strict";
-import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
-import { getDatabase } from "../src/database/sqlite.js";
 import * as activityRepo from "../src/database/repositories/activityRepo.js";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { app, req, getDatabase, extractCookie, decodeJwtPayload } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
@@ -27,63 +29,14 @@ function mountRoutesOnce() {
   mounted = true;
 }
 
-function resetDb() {
-  const db = getDatabase();
-  db.exec("DELETE FROM password_reset_tokens");
-  db.exec("DELETE FROM healing_history");
-  db.exec("DELETE FROM activities");
-  db.exec("DELETE FROM runs");
-  db.exec("DELETE FROM tests");
-  db.exec("DELETE FROM oauth_ids");
-  db.exec("DELETE FROM projects");
-  db.exec("DELETE FROM users");
-  db.exec("UPDATE counters SET value = 0");
-}
-
-/** Extract a named cookie value from a fetch Response's Set-Cookie header. */
-function extractCookie(res, name) {
-  const raw = res.headers.getSetCookie?.() || [];
-  for (const c of raw) {
-    const match = c.match(new RegExp(`^${name}=([^;]+)`));
-    if (match) return match[1];
-  }
-  return null;
-}
-
-/** Decode a JWT payload (no signature verification — just base64url decode). */
-function decodeJwtPayload(token) {
-  const parts = token.split(".");
-  return JSON.parse(Buffer.from(parts[1], "base64url").toString());
-}
-
-/** Shared CSRF token — captured from the first server response that sets it. */
-let csrfToken = null;
-
-async function req(base, path, { method = "GET", token, body } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (csrfToken) {
-    headers["X-CSRF-Token"] = csrfToken;
-    headers.Cookie = (headers.Cookie ? headers.Cookie + "; " : "") + `_csrf=${csrfToken}`;
-  }
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const csrf = extractCookie(res, "_csrf");
-  if (csrf) csrfToken = csrf;
-  const json = await res.json().catch(() => ({}));
-  return { res, json };
-}
-
 async function main() {
   mountRoutesOnce();
-  resetDb();
+  t.resetDb();
 
-  // Enable dev reset tokens so the forgot-password response includes the token
-  const origEnv = process.env.ENABLE_DEV_RESET_TOKENS;
-  process.env.ENABLE_DEV_RESET_TOKENS = "true";
+  const env = t.setupEnv({
+    ENABLE_DEV_RESET_TOKENS: "true",
+    SKIP_EMAIL_VERIFICATION: "true",
+  });
 
   const server = app.listen(0);
   const { port } = server.address();
@@ -95,28 +48,17 @@ async function main() {
     const newPassword = "NewPassword456!";
 
     // ── Register + Login ──────────────────────────────────────────────────
-    let out = await req(base, "/api/auth/register", {
-      method: "POST",
-      body: { name: "Security User", email, password },
+    const { token, payload: loginPayload } = await t.registerAndLogin(base, {
+      name: "Security User", email, password,
     });
-    assert.equal(out.res.status, 201);
-
-    out = await req(base, "/api/auth/login", {
-      method: "POST",
-      body: { email, password },
-    });
-    assert.equal(out.res.status, 200);
-    const token = extractCookie(out.res, "access_token");
-    assert.ok(token, "Login should set access_token cookie");
 
     // ── JWT name claim: login token contains name ─────────────────────────
-    const loginPayload = decodeJwtPayload(token);
     assert.equal(loginPayload.name, "Security User", "Login JWT should contain user's display name");
     assert.equal(loginPayload.email, email, "Login JWT should contain email");
     assert.ok(loginPayload.sub, "Login JWT should contain sub");
 
     // ── JWT name claim: refresh token also contains name ──────────────────
-    out = await req(base, "/api/auth/refresh", {
+    let out = await req(base, "/api/auth/refresh", {
       method: "POST",
       token,
     });
@@ -242,7 +184,7 @@ async function main() {
 
     console.log("✅ security-hardening: all checks passed");
   } finally {
-    process.env.ENABLE_DEV_RESET_TOKENS = origEnv;
+    env.restore();
     await new Promise((resolve) => server.close(resolve));
   }
 }

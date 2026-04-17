@@ -15,10 +15,13 @@
 import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
-import { app, ARTIFACTS_DIR, signArtifactUrl, signRunArtifacts } from "../src/middleware/appSetup.js";
+import { ARTIFACTS_DIR, signArtifactUrl, signRunArtifacts } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import systemRouter from "../src/routes/system.js";
-import { getDatabase } from "../src/database/sqlite.js";
+import { createTestContext, extractCookie } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { app } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
@@ -28,36 +31,11 @@ function mountRoutesOnce() {
   mounted = true;
 }
 
-function resetDb() {
-  const db = getDatabase();
-  db.exec("DELETE FROM healing_history");
-  db.exec("DELETE FROM activities");
-  db.exec("DELETE FROM runs");
-  db.exec("DELETE FROM tests");
-  db.exec("DELETE FROM oauth_ids");
-  db.exec("DELETE FROM projects");
-  db.exec("DELETE FROM users");
-  db.exec("UPDATE counters SET value = 0");
-}
-
-/** Extract a named cookie value from a fetch Response's Set-Cookie header. */
-function extractCookie(res, name) {
-  const raw = res.headers.getSetCookie?.() || [];
-  for (const c of raw) {
-    const match = c.match(new RegExp(`^${name}=([^;]+)`));
-    if (match) return match[1];
-  }
-  return null;
-}
-
-/** Build a Cookie header string from parsed cookies. */
-function buildCookieHeader(cookies) {
-  return Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join("; ");
-}
-
 async function main() {
   mountRoutesOnce();
-  resetDb();
+  t.resetDb();
+
+  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true" });
 
   // Create a dummy artifact file so express.static can serve it
   const screenshotsDir = path.join(ARTIFACTS_DIR, "screenshots");
@@ -156,26 +134,20 @@ async function main() {
     // ── POST /api/system/client-error ────────────────────────────────────────
     // This endpoint requires auth, so register + login first
 
-    const email = `artifact-${Date.now()}@test.local`;
-    res = await fetch(`${base}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Artifact User", email, password: "Password123!" }),
+    const artEmail = `artifact-${Date.now()}@test.local`;
+    // Use registerAndLogin to get the auth token; capture CSRF from the
+    // register response (the first request sets the _csrf cookie).
+    const regOut = await t.req(base, "/api/auth/register", {
+      method: "POST", body: { name: "Artifact User", email: artEmail, password: "Password123!" },
     });
-    assert.equal(res.status, 201);
-
-    res = await fetch(`${base}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: "Password123!" }),
+    const csrf = extractCookie(regOut.res, "_csrf");
+    assert.ok(csrf, "Should get _csrf cookie from register response");
+    const loginOut = await t.req(base, "/api/auth/login", {
+      method: "POST", body: { email: artEmail, password: "Password123!" },
     });
-    assert.equal(res.status, 200);
-    const accessToken = extractCookie(res, "access_token");
-    const csrf = extractCookie(res, "_csrf");
+    const accessToken = extractCookie(loginOut.res, "access_token");
     assert.ok(accessToken, "Should get access_token cookie");
-    assert.ok(csrf, "Should get _csrf cookie");
-
-    const cookies = buildCookieHeader({ access_token: accessToken, _csrf: csrf });
+    const cookies = `access_token=${accessToken}; _csrf=${csrf}`;
 
     // POST with a valid crash report
     res = await fetch(`${base}/api/system/client-error`, {
@@ -223,6 +195,7 @@ async function main() {
 
     console.log("✅ artifact-signing: all checks passed");
   } finally {
+    env.restore();
     // Clean up test artifact
     try { fs.unlinkSync(testFilePath); } catch { /* ignore */ }
     await new Promise((resolve) => server.close(resolve));
