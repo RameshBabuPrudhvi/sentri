@@ -66,6 +66,22 @@ export function generateScheduleId() {
 }
 
 /**
+ * generateWorkspaceId() → "WS-1", "WS-2", …
+ * Used for multi-tenancy workspaces (ACL-001).
+ */
+export function generateWorkspaceId() {
+  return `WS-${counterRepo.next("workspace")}`;
+}
+
+/**
+ * generateWorkspaceMemberId() → "WM-1", "WM-2", …
+ * Used for workspace membership records (ACL-002).
+ */
+export function generateWorkspaceMemberId() {
+  return `WM-${counterRepo.next("workspace_member")}`;
+}
+
+/**
  * No-op — counters are now managed by the SQLite `counters` table.
  * Kept for backward compatibility so existing callers don't break.
  * The migration script (database/migrate.js) seeds the counters table
