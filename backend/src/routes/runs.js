@@ -161,6 +161,10 @@ router.post("/projects/:id/run", expensiveOpLimiter, async (req, res) => {
 // ─── Run listing ──────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/runs", (req, res) => {
+  // Verify the project belongs to the user's workspace (ACL-001)
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+
   const { page, pageSize } = req.query;
   if (page !== undefined || pageSize !== undefined) {
     const result = runRepo.getByProjectIdPaged(req.params.id, page, pageSize);
