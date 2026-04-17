@@ -56,6 +56,8 @@ The following items have been verified complete against the codebase and are **n
 | MAINT-013 | Graceful shutdown with in-flight run draining | PR #86 |
 | MAINT-016 | Renovate for automated dependency updates | Renovate |
 | SEC-001 | Email verification on registration | PR #87 |
+| INF-001 | PostgreSQL support with SQLite fallback | PR #87 |
+| INF-002 | Redis for rate limiting, token revocation, and SSE pub/sub | PR #87 |
 
 ---
 
@@ -132,7 +134,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-001 — PostgreSQL support with SQLite fallback 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** XL | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** XL | **Source:** Audit
 
 **Problem:** SQLite is a single-writer database. There is no horizontal scaling, no read replicas, and data loss is permanent if a container is recreated without a persistent volume. WAL mode helps concurrent reads but does not solve write contention at scale.
 
@@ -152,7 +154,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-002 — Redis for rate limiting, token revocation, and SSE pub/sub 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** L | **Source:** Audit
 
 **Problem:** Three critical components are process-local and broken in any multi-instance deployment: (1) `revokedTokens` Map — logged-out users can reuse tokens after restart; (2) `express-rate-limit` memory store — rate limits reset on restart and are not shared across instances; (3) `runListeners` Map — SSE events emitted on instance A are never received by clients on instance B.
 
@@ -1202,7 +1204,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · SEC-001 · DIF-001 · DIF-002 · DIF-015 (recorder)
+**Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · DIF-001 · DIF-002 · DIF-015 (recorder)
 
 ---
 
@@ -1210,8 +1212,8 @@ The following items have been verified complete against the codebase and are **n
 
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–005 | SEC-001 | SEC-002, SEC-003 | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | INF-001, INF-002 | INF-003 | INF-004, INF-005 |
+| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | SEC-002, SEC-003 | SEC-004, SEC-005 |
+| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | INF-003 | INF-004, INF-005 |
 | Access Control | ACL-001–002 | ACL-001, ACL-002 | — | — |
 | Platform Features | FEA-001–003 | — | FEA-001 | FEA-002–003 |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
@@ -1221,10 +1223,10 @@ The following items have been verified complete against the codebase and are **n
 **Total active items:** 61 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
-SEC-001 (email verification) · INF-001 (PostgreSQL) · INF-002 (Redis) · ACL-001 (multi-tenancy) · ACL-002 (RBAC)
+~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ACL-001 (multi-tenancy) · ACL-002 (RBAC)
 
-**Recommended PR order:**
-`SEC-001` → `INF-001` → `INF-002` → `ACL-001` → `ACL-002` → `INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
+**Recommended PR order (remaining):**
+`ACL-001` → `ACL-002` → `INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
 
 **Lowest effort / highest immediate value:**
 INF-005 (S) · DIF-003 (S) · DIF-011 (S) · DIF-014 (S) · AUTO-007 (S) · AUTO-013 (S)

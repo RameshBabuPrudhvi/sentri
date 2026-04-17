@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SSE**: Run events are published to Redis pub/sub channels; SSE endpoints subscribe per-run so events from any instance reach all connected browsers (INF-002) (#87)
 - **Docker**: Optional Redis service in `docker-compose.yml` — activate with `docker compose --profile redis up` (INF-002) (#87)
 
+### Fixed
+- **DB**: PostgreSQL adapter `namedToPositional` now masks string literals before `@` replacement — prevents `'user@example.com'` from being treated as a parameter placeholder (INF-001) (#87)
+- **DB**: PostgreSQL adapter `questionToNumbered` now masks string literals before `?` replacement — prevents `'What?'` from being treated as a parameter placeholder (INF-001) (#87)
+- **DB**: PostgreSQL adapter `LIKE→ILIKE` translation is now case-insensitive — both `LIKE` and `like` are correctly translated (INF-001) (#87)
+- **DB**: PostgreSQL adapter `exec()` now splits multi-statement SQL and executes each statement individually — prevents DDL failures when combining `CREATE TABLE` + `CREATE INDEX` (INF-001) (#87)
+- **DB**: PostgreSQL adapter deasync transaction path now uses `AsyncLocalStorage` for concurrency-safe query routing — prevents concurrent requests from routing queries through the wrong transaction client (INF-001) (#87)
+- **DB**: PostgreSQL adapter pg-native path now auto-reconnects on connection loss (e.g. PostgreSQL restart, TCP timeout) — retries the query once after a fresh `connectSync()` (INF-001) (#87)
+- **Auth**: OAuth login with a previously-registered unverified email now auto-verifies the account — prevents permanent password login blockage when OAuth links to an unverified user (SEC-001) (#87)
+- **Frontend**: `Login.jsx` resend verification now uses `api.resendVerification()` instead of raw `fetch()` — fixes missing CSRF token and follows AGENT.md conventions (SEC-001) (#87)
+- **Infra**: Redis rate-limit store now initialises based on client existence (`redis !== null`) instead of `isRedisAvailable()` — fixes race condition where the async `connect` event hadn't fired yet at module evaluation time (INF-002) (#87)
+- **Infra**: Graceful shutdown now wrapped in try/catch with fallback `process.exit(1)` — prevents the process from hanging if an error occurs during shutdown (MAINT-013) (#87)
+- **CI**: Added PostgreSQL + Redis integration smoke test job — validates the full auth flow (register → login → CRUD → logout → token revocation) against real PostgreSQL and Redis services (INF-001, INF-002) (#87)
+- **Tests**: Added `postgres-adapter.test.js` — 16 unit tests covering all SQL translation functions (LIKE→ILIKE, datetime, AUTOINCREMENT, INSERT OR IGNORE/REPLACE, multi-statement, string literal safety) (INF-001) (#87)
+
 ### Security
 - **Auth**: Login blocked for unverified email accounts — returns `403` with `EMAIL_NOT_VERIFIED` code; prevents account spoofing via unclaimed email addresses (SEC-001) (#87)
 

@@ -271,6 +271,27 @@ export function createPostgresAdapter(opts = {}) {
     console.log(formatLogLine("info", null, "[postgres-adapter] Connected via pg-native (synchronous)"));
   }
 
+  /**
+   * Reconnect the pg-native client if the connection was lost.
+   * Called from query() when querySync throws a connection error.
+   * @returns {boolean} true if reconnection succeeded.
+   */
+  function reconnectNativeClient() {
+    if (!nativeClient || !PgNative) return false;
+    try {
+      console.warn(formatLogLine("warn", null, "[postgres-adapter] Connection lost — attempting reconnect…"));
+      // Create a fresh client — pg-native does not support reconnecting
+      // an existing client after the underlying libpq connection is closed.
+      nativeClient = new PgNative();
+      nativeClient.connectSync(connectionString);
+      console.log(formatLogLine("info", null, "[postgres-adapter] Reconnected via pg-native"));
+      return true;
+    } catch (err) {
+      console.error(formatLogLine("error", null, `[postgres-adapter] Reconnect failed: ${err.message}`));
+      return false;
+    }
+  }
+
   // ── deasync fallback path ─────────────────────────────────────────────
   const maxPool = opts.poolSize || parseInt(process.env.PG_POOL_SIZE, 10) || 10;
   const pool = !nativeClient ? new Pool({
@@ -304,8 +325,19 @@ export function createPostgresAdapter(opts = {}) {
    */
   function query(sql, values = []) {
     if (nativeClient) {
-      const rows = nativeClient.querySync(sql, values);
-      return { rows, rowCount: rows.length };
+      try {
+        const rows = nativeClient.querySync(sql, values);
+        return { rows, rowCount: rows.length };
+      } catch (err) {
+        // Attempt one reconnect on connection-level errors (e.g. PostgreSQL
+        // restarted, TCP timeout). If the reconnect succeeds, retry the query.
+        const isConnectionError = /connection|socket|EPIPE|ECONNRESET|terminating/i.test(err.message);
+        if (isConnectionError && reconnectNativeClient()) {
+          const rows = nativeClient.querySync(sql, values);
+          return { rows, rowCount: rows.length };
+        }
+        throw err;
+      }
     }
 
     // If a deasync transaction is active on THIS async context, route the
