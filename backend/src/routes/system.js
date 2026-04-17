@@ -161,7 +161,7 @@ router.get("/system", async (req, res) => {
 // the user doesn't report them. The endpoint intentionally does minimal work
 // and always returns 200 — it must never throw back to the already-crashed UI.
 
-router.post("/system/client-error", requireRole("qa_lead"), (req, res) => {
+router.post("/system/client-error", (req, res) => {
   const { message, stack, componentStack, url } = req.body || {};
   console.error(formatLogLine("error", null,
     `[client-error] ${message || "Unknown error"} at ${url || "unknown URL"}` +
@@ -175,7 +175,7 @@ router.post("/system/client-error", requireRole("qa_lead"), (req, res) => {
 
 router.delete("/data/runs", requireRole("admin"), (req, res) => {
   const projects = projectRepo.getAll(req.workspaceId);
-  const count = projects.reduce((sum, p) => sum + runRepo.hardDeleteByProjectId(p.id), 0);
+  const count = projects.reduce((sum, p) => sum + runRepo.hardDeleteByProjectId(p.id).length, 0);
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
