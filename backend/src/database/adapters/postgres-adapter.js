@@ -60,7 +60,7 @@ if (!PgNative) {
  * function that puts the original literals back.
  *
  * @param {string} sql
- * @returns {{ masked: string, restore: (s: string) => string }}
+ * @returns {{ masked: string, restore: Function }}
  */
 function maskStringLiterals(sql) {
   const literals = [];
