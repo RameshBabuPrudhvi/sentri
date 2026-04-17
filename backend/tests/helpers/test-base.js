@@ -119,6 +119,8 @@ const RESET_TABLES = [
   "tests",
   "oauth_ids",
   "projects",
+  "workspace_members",
+  "workspaces",
   "users",
 ];
 
@@ -325,6 +327,7 @@ export function createTestContext() {
   return {
     app,
     getDatabase,
+    workspaceScope,
     req,
     extractCookie: ec,
     parseCookies,
