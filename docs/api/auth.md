@@ -17,14 +17,61 @@ POST /api/auth/register
 {
   "name": "Ada Lovelace",
   "email": "ada@example.com",
-  "password": "min8chars"
+  "password": "Min8chars!"
 }
 ```
 
+Password must contain at least 8 characters with one uppercase, one lowercase, one digit, and one special character.
+
 **Response:** `201 Created`
+
+When email verification is enabled (default):
+```json
+{
+  "message": "Account created. Please check your email to verify your account.",
+  "requiresVerification": true
+}
+```
+
+When `SKIP_EMAIL_VERIFICATION=true` (dev/CI only):
 ```json
 { "message": "Account created successfully." }
 ```
+
+The user is created with `emailVerified = 0` and must verify their email before logging in. A verification email is sent via the configured transport (Resend, SMTP, or console fallback).
+
+## Verify Email
+
+```
+GET /api/auth/verify?token=<verification-token>
+```
+
+Called when the user clicks the verification link in their email. Marks the user as verified and invalidates any remaining unused tokens.
+
+**Response:** `200 OK`
+```json
+{ "message": "Email verified successfully. You can now sign in.", "verified": true }
+```
+
+Returns `400` for invalid, expired, or already-used tokens.
+
+## Resend Verification Email
+
+```
+POST /api/auth/resend-verification
+```
+
+**Body:**
+```json
+{ "email": "ada@example.com" }
+```
+
+**Response:** `200 OK` (always — prevents user enumeration)
+```json
+{ "message": "If an unverified account with that email exists, a verification link has been sent." }
+```
+
+Rate limited to **5 requests per IP per 15 minutes** (shares bucket with forgot-password).
 
 ## Sign In
 
@@ -36,7 +83,7 @@ POST /api/auth/login
 ```json
 {
   "email": "ada@example.com",
-  "password": "min8chars"
+  "password": "Min8chars!"
 }
 ```
 
@@ -52,6 +99,15 @@ Sets `access_token` (HttpOnly) and `token_exp` cookies. Body:
     "role": "user",
     "avatar": null
   }
+}
+```
+
+**Error:** `403 Forbidden` — when the user has not verified their email:
+```json
+{
+  "error": "Please verify your email address before signing in.",
+  "code": "EMAIL_NOT_VERIFIED",
+  "email": "ada@example.com"
 }
 ```
 
