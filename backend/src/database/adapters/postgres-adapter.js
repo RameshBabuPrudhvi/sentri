@@ -55,13 +55,40 @@ if (!PgNative) {
 // ─── SQL dialect translation ──────────────────────────────────────────────────
 
 /**
+ * Mask single-quoted string literals in SQL so regex replacements don't
+ * corrupt values inside strings.  Returns the masked SQL and a restore
+ * function that puts the original literals back.
+ *
+ * @param {string} sql
+ * @returns {{ masked: string, restore: (s: string) => string }}
+ */
+function maskStringLiterals(sql) {
+  const literals = [];
+  const masked = sql.replace(/'(?:[^']|'')*'/g, (match) => {
+    const idx = literals.length;
+    literals.push(match);
+    return `__STRLIT_${idx}__`;
+  });
+  return {
+    masked,
+    restore(s) {
+      return s.replace(/__STRLIT_(\d+)__/g, (_m, i) => literals[Number(i)]);
+    },
+  };
+}
+
+/**
  * Translate a single SQL statement from SQLite dialect to PostgreSQL.
+ *
+ * String literals are masked before replacements and restored afterward
+ * so that values like `'I LIKE cats'` are never corrupted to `'I ILIKE cats'`.
  *
  * @param {string} stmt — a single SQL statement (no trailing semicolons expected)
  * @returns {string} PostgreSQL-compatible SQL statement
  */
 function translateSingleStatement(stmt) {
-  let out = stmt;
+  const { masked, restore } = maskStringLiterals(stmt);
+  let out = masked;
 
   // datetime('now') → NOW()
   out = out.replace(/datetime\('now'\)/gi, "NOW()");
@@ -99,7 +126,7 @@ function translateSingleStatement(stmt) {
   // SQLite LIKE is case-insensitive by default; PostgreSQL LIKE is case-sensitive.
   out = out.replace(/\bLIKE\b/g, "ILIKE");
 
-  return out;
+  return restore(out);
 }
 
 /**

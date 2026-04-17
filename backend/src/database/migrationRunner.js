@@ -119,26 +119,14 @@ export function runMigrations(db, opts = {}) {
 
   // Lazy-load translateSql only when running against PostgreSQL.
   // This avoids importing the postgres-adapter module (and its pg dependency)
-  // when using SQLite. Callers can pass translateSql directly to avoid the
-  // dynamic import (sqlite.js already has the module loaded).
+  // when using SQLite. Callers MUST pass translateSql for PostgreSQL —
+  // sqlite.js loads the module via top-level await and passes it here.
   let translateSql = opts.translateSql || null;
   if (!translateSql && db.dialect === "postgres") {
-    // Synchronous fallback: the module should already be loaded by sqlite.js
-    // via top-level await before runMigrations is called. If not, we attempt
-    // a dynamic import wrapped in deasync or simply warn.
-    try {
-      // The postgres-adapter module exports translateSql. Since sqlite.js
-      // loads it via top-level await before calling runMigrations, the module
-      // is already in the ESM module cache and import() resolves synchronously
-      // in practice. But to be safe, we accept it as an opt-in parameter.
-      console.warn(formatLogLine("warn", null,
-        `[migrations] translateSql not provided — PostgreSQL SQL translation may be incomplete`
-      ));
-    } catch (err) {
-      console.warn(formatLogLine("warn", null,
-        `[migrations] Could not load translateSql from postgres-adapter: ${err.message}`
-      ));
-    }
+    throw new Error(
+      "[migrations] translateSql must be provided for PostgreSQL dialect. " +
+      "Ensure sqlite.js passes opts.translateSql from the pre-loaded postgres-adapter module."
+    );
   }
 
   const applied = getAppliedMigrations(db);
@@ -202,24 +190,4 @@ export function runMigrations(db, opts = {}) {
   return { applied: results, skipped: all.length - pending.length };
 }
 
-// ─── Lazy import helper ───────────────────────────────────────────────────────
 
-/**
- * Lazy-load the postgres-adapter module for its translateSql function.
- * Uses dynamic import() so the ESM module can be loaded on Node 20+
- * (require() of ESM throws ERR_REQUIRE_ESM on Node < 22.12).
- * The module is only loaded when dialect is "postgres".
- *
- * @type {Object|null} Cached module reference
- */
-let _pgAdapterModule = null;
-
-/**
- * @returns {Promise<{ translateSql: Function }>}
- */
-async function loadPostgresAdapter() {
-  if (!_pgAdapterModule) {
-    _pgAdapterModule = await import("./adapters/postgres-adapter.js");
-  }
-  return _pgAdapterModule;
-}
