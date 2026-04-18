@@ -2,16 +2,18 @@
  * @module routes/system
  * @description System info, activities, data management, and URL reachability. Mounted at `/api`.
  *
+ * All queries are scoped to the authenticated user's workspace (ACL-001).
+ *
  * ### Endpoints
- * | Method   | Path                     | Description                                |
- * |----------|--------------------------|--------------------------------------------|
- * | `GET`    | `/api/activities`        | Activity log (filterable by type, project)  |
- * | `POST`   | `/api/test-connection`   | Verify a URL is reachable (SSRF-protected)  |
- * | `GET`    | `/api/system`            | Uptime, Node/Playwright versions, DB counts |
- * | `POST`   | `/api/system/client-error` | Log a frontend crash report (from ErrorBoundary) |
- * | `DELETE` | `/api/data/runs`         | Clear all run history                       |
- * | `DELETE` | `/api/data/activities`   | Clear activity log                          |
- * | `DELETE` | `/api/data/healing`      | Clear self-healing history                  |
+ * | Method   | Path                       | Description                                | Min Role  |
+ * |----------|----------------------------|--------------------------------------------|-----------|
+ * | `GET`    | `/api/activities`          | Activity log (filterable by type, project)  | viewer    |
+ * | `POST`   | `/api/test-connection`     | Verify a URL is reachable (SSRF-protected)  | qa_lead   |
+ * | `GET`    | `/api/system`              | Uptime, Node/Playwright versions, DB counts | viewer    |
+ * | `POST`   | `/api/system/client-error` | Log a frontend crash report                 | viewer    |
+ * | `DELETE` | `/api/data/runs`           | Clear all run history (incl. soft-deleted)  | admin     |
+ * | `DELETE` | `/api/data/activities`     | Clear activity log                          | admin     |
+ * | `DELETE` | `/api/data/healing`        | Clear self-healing history                  | admin     |
  */
 
 import { Router } from "express";

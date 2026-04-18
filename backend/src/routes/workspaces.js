@@ -5,6 +5,8 @@
  * ### Endpoints
  * | Method | Path                                    | Description                   | Min Role |
  * |--------|-----------------------------------------|-------------------------------|----------|
+ * | GET    | `/api/workspaces`                       | List user's workspaces        | viewer   |
+ * | POST   | `/api/workspaces/switch`                | Switch active workspace       | viewer   |
  * | GET    | `/api/workspaces/current`               | Get current workspace info    | viewer   |
  * | PATCH  | `/api/workspaces/current`               | Update workspace name/slug    | admin    |
  * | GET    | `/api/workspaces/current/members`       | List workspace members        | viewer   |

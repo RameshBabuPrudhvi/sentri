@@ -7,6 +7,19 @@ import crypto from "crypto";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 
 /**
+ * Resolve the current workspace from a user's memberships.
+ * Returns the workspace matching `hint`, or the first workspace as fallback.
+ *
+ * @param {Object[]} workspaces - Result of `workspaceRepo.getByUserId()`.
+ * @param {string}   [hint]     - Preferred workspace ID.
+ * @returns {Object|undefined}    The resolved workspace, or undefined if empty.
+ */
+function resolveCurrentWorkspace(workspaces, hint) {
+  if (!workspaces || workspaces.length === 0) return undefined;
+  return workspaces.find((ws) => ws.id === hint) || workspaces[0];
+}
+
+/**
  * Build a JWT payload with a workspace hint.
  *
  * The JWT carries `workspaceId` as a routing hint only. Authorization is always
@@ -21,9 +34,9 @@ export function buildJwtPayload(user, workspaceIdHint) {
   const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti };
 
   const workspaces = workspaceRepo.getByUserId(user.id);
-  if (workspaces && workspaces.length > 0) {
-    const currentWorkspace = workspaces.find((ws) => ws.id === workspaceIdHint) || workspaces[0];
-    payload.workspaceId = currentWorkspace.id;
+  const current = resolveCurrentWorkspace(workspaces, workspaceIdHint);
+  if (current) {
+    payload.workspaceId = current.id;
   }
 
   return payload;
@@ -34,7 +47,7 @@ export function buildJwtPayload(user, workspaceIdHint) {
  *
  * @param {Object} user - User row from the database.
  * @param {string} [workspaceIdHint] - Preferred current workspace ID.
- * @returns {Object}
+ * @returns {{ id: string, name: string, email: string, role: string, avatar: (string|null), workspaceId?: string, workspaceName?: string, workspaceRole?: string, workspaces?: Array<{id: string, name: string, role: string, isOwner: boolean}> }}
  */
 export function buildUserResponse(user, workspaceIdHint) {
   const resp = {
@@ -46,11 +59,11 @@ export function buildUserResponse(user, workspaceIdHint) {
   };
 
   const workspaces = workspaceRepo.getByUserId(user.id);
-  if (workspaces && workspaces.length > 0) {
-    const currentWorkspace = workspaces.find((ws) => ws.id === workspaceIdHint) || workspaces[0];
-    resp.workspaceId = currentWorkspace.id;
-    resp.workspaceName = currentWorkspace.name;
-    resp.workspaceRole = currentWorkspace.role;
+  const current = resolveCurrentWorkspace(workspaces, workspaceIdHint);
+  if (current) {
+    resp.workspaceId = current.id;
+    resp.workspaceName = current.name;
+    resp.workspaceRole = current.role;
   }
 
   if (workspaces && workspaces.length > 1) {

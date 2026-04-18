@@ -349,16 +349,17 @@ router.post("/register", async (req, res) => {
 });
 
 /**
- * Sign in with email and password. Returns a JWT token and user profile.
+ * Sign in with email and password. Sets auth cookies and returns user profile.
  * Rate-limited to 10 attempts per IP per 15 minutes.
  *
  * @route POST /api/auth/login
  * @param {Object} req.body
  * @param {string} req.body.email    - Email address.
  * @param {string} req.body.password - Password.
- * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {200} `{ user: { id, name, email, role, avatar, workspaceId, workspaceName, workspaceRole } }`.
  * @returns {400} Invalid input.
  * @returns {401} Wrong credentials.
+ * @returns {403} Email not verified.
  * @returns {429} Rate limit exceeded (`Retry-After` header set).
  */
 router.post("/login", async (req, res) => {
@@ -433,11 +434,10 @@ router.post("/logout", requireAuth, (req, res) => {
 });
 
 /**
- * Get the currently authenticated user's profile.
- * Requires `Authorization: Bearer <token>`.
+ * Get the currently authenticated user's profile with workspace context.
  *
  * @route GET /api/auth/me
- * @returns {200} `{ id, name, email, role, avatar, createdAt }`.
+ * @returns {200} `{ id, name, email, role, avatar, createdAt, workspaceId, workspaceName, workspaceRole }`.
  * @returns {401} Missing or invalid token.
  * @returns {404} User not found in database.
  */
@@ -718,11 +718,11 @@ router.post("/reset-password", async (req, res) => {
 
 /**
  * GitHub OAuth callback. Exchanges an authorization code for an access token,
- * fetches the user profile, and issues a signed JWT.
+ * fetches the user profile, sets auth cookies, and returns the user profile.
  *
  * @route GET /api/auth/github/callback
  * @param {string} req.query.code - The OAuth authorization code from GitHub.
- * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {200} `{ user: { id, name, email, role, avatar, workspaceId, workspaceName, workspaceRole } }`.
  * @returns {400} Missing code parameter.
  * @returns {401} Token exchange or profile fetch failed.
  * @returns {503} GitHub OAuth not configured on this server.
@@ -792,11 +792,11 @@ router.get("/github/callback", async (req, res) => {
 
 /**
  * Google OAuth callback. Exchanges an authorization code for an access token,
- * fetches the user profile, and issues a signed JWT.
+ * fetches the user profile, sets auth cookies, and returns the user profile.
  *
  * @route GET /api/auth/google/callback
  * @param {string} req.query.code - The OAuth authorization code from Google.
- * @returns {200} `{ token, user: { id, name, email, role, avatar } }`.
+ * @returns {200} `{ user: { id, name, email, role, avatar, workspaceId, workspaceName, workspaceRole } }`.
  * @returns {400} Missing code parameter.
  * @returns {401} Token exchange or profile fetch failed.
  * @returns {503} Google OAuth not configured on this server.
