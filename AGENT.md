@@ -811,9 +811,10 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 
 - `docker-compose.yml` — local development and production (pulls from GHCR).
 - `docker-compose.prod.yml` — production overrides (stricter resource limits).
-- The frontend Dockerfile builds the Vite SPA and serves it with nginx. The nginx config proxies `/api/*` to the backend container.
+- The frontend Dockerfile builds the Vite SPA and serves it with nginx. The nginx config proxies `/api/*` to the backend container. SPA navigation routes (non-file requests) fall through to `@backend_spa` which proxies to the backend's `serveIndexWithNonce()` for per-request CSP nonce injection (SEC-002).
 - **Never bake secrets into images.** Pass all keys via environment variables. The `.dockerignore` already excludes `.env` files.
 - `backend/data/` is a Docker volume — it persists `sentri.db` (SQLite) across container restarts.
+- `frontend_dist` is a shared named volume — the frontend container copies its built dist into it, and the backend mounts it read-only at `/usr/share/frontend` so `serveIndexWithNonce()` can read `index.html` for CSP nonce replacement. The backend's `SPA_INDEX_PATH` env var points to `/usr/share/frontend/index.html`.
 - The backend Dockerfile installs Playwright's system dependencies and uses the system Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`).
 
 ### Health Checks
@@ -906,7 +907,7 @@ The following have been implemented and are no longer open:
 - **Artifact authentication** ✅: The `/artifacts` route is protected by HMAC-SHA256 signed `?token=&exp=` query-param tokens (1 hour TTL, configurable via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` is required in production; dev uses a random per-process secret. `signArtifactUrl()` in `middleware/appSetup.js` generates signed URLs; all artifact producers (screenshots, videos, traces) use it. `Cache-Control: private, no-store` prevents browsers from caching expiring URLs.
 - **Secrets scanning** ✅: Gitleaks runs on every PR and push to `main` via the `secrets` CI job (`.github/workflows/ci.yml`). Both `lint` and `build` jobs depend on it, gating the entire pipeline. Configuration in `.github/.gitleaks.toml` extends the default ruleset with allowlists for CI placeholders and `.env.example` files.
 - **Nonce-based CSP** ✅: Per-request nonce generated via `crypto.randomBytes(16)` in `middleware/appSetup.js`, passed to Helmet CSP `scriptSrc` as `'nonce-<value>'`. Vite `transformIndexHtml` plugin injects `nonce="__CSP_NONCE__"` on all `<script>` tags; `serveIndexWithNonce()` replaces the placeholder at serve-time. `'unsafe-inline'` removed from `scriptSrc` (SEC-002).
-- **GDPR/CCPA account export & deletion** ✅: `GET /api/auth/export` returns a JSON archive of all user-owned data (workspaces, projects, tests, runs, activities, schedules, notification settings) with `passwordHash` stripped. `DELETE /api/auth/account` hard-deletes the user and all owned data in a single transaction. Both require password confirmation (403 on mismatch). Frontend Account tab in Settings with two-click confirm flow (SEC-003).
+- **GDPR/CCPA account export & deletion** ✅: `GET /api/auth/export` returns a JSON archive of all user-owned data (workspaces, projects, tests, runs, run logs, activities, schedules, notification settings, healing history) with `passwordHash` stripped. `DELETE /api/auth/account` hard-deletes the user and all owned data in a single transaction. Both require password confirmation (403 on mismatch). Frontend Account tab in Settings with two-click confirm flow (SEC-003).
 
 ### Known Security Gaps (TODO)
 
@@ -958,6 +959,7 @@ The following are **not yet implemented** but should be addressed before product
 | `SKIP_EMAIL_VERIFICATION` | No | `false` | When `"true"`, registration auto-verifies users (dev/CI only — never set in production) |
 | `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution (INF-003). Ignored when Redis/BullMQ is not available. |
 | `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads (e.g. `https://sentri.example.com`). Falls back to `CORS_ORIGIN`, then `http://localhost:3000`. |
+| `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location. In Docker, set to `/usr/share/frontend/index.html` (shared volume). |
 
 ---
 

@@ -39,6 +39,7 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `DB_PATH` | `data/sentri.db` | SQLite database file path (ignored when `DATABASE_URL` is set) |
 | `CORS_ORIGIN` | `*` | Frontend origin(s) for CORS, comma-separated. **Required in production** |
 | `SHUTDOWN_DRAIN_MS` | `10000` | Max time (ms) to wait for in-flight runs during graceful shutdown |
+| `SPA_INDEX_PATH` | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location relative to the backend source. In Docker multi-container deployments, set to the shared volume path (e.g. `/usr/share/frontend/index.html`) |
 
 ### Database & Infrastructure
 
