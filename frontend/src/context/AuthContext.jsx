@@ -71,6 +71,7 @@ function sanitiseUser(u) {
     workspaceName: u.workspaceName || null,
     workspaceRole: u.workspaceRole || null,
     workspaces: Array.isArray(u.workspaces) ? u.workspaces : null,
+    hasPassword: u.hasPassword !== undefined ? u.hasPassword : true,
   };
 }
 
