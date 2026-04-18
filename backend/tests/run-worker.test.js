@@ -73,6 +73,11 @@ function simulateCatchBlock({ run, job, err, type, signal }) {
     run.error = null;
     run.errorCategory = null;
     run.finishedAt = null;
+    run.results = [];
+    run.passed = 0;
+    run.failed = 0;
+    run.pagesFound = 0;
+    run.logs = [];
     return { action: "retry", run, runType };
   }
 }
@@ -93,6 +98,32 @@ test("non-final attempt resets run to running state", () => {
   assert.equal(result.run.error, null);
   assert.equal(result.run.errorCategory, null);
   assert.equal(result.run.finishedAt, null);
+});
+
+test("non-final attempt clears accumulated results, pass/fail counts, and logs", () => {
+  // Simulate a run that accumulated partial results before failing
+  const run = {
+    status: "running",
+    error: null,
+    errorCategory: null,
+    finishedAt: null,
+    results: [{ testId: "T-1", status: "passed" }, { testId: "T-2", status: "failed" }],
+    passed: 1,
+    failed: 1,
+    pagesFound: 5,
+    logs: ["log line 1", "log line 2"],
+  };
+  const job = { opts: { attempts: 2 }, attemptsMade: 0 };
+  const err = new Error("transient failure");
+
+  const result = simulateCatchBlock({ run, job, err, type: "test_run" });
+
+  assert.equal(result.action, "retry");
+  assert.deepEqual(result.run.results, [], "results should be cleared on retry");
+  assert.equal(result.run.passed, 0, "passed count should be reset on retry");
+  assert.equal(result.run.failed, 0, "failed count should be reset on retry");
+  assert.equal(result.run.pagesFound, 0, "pagesFound should be reset on retry");
+  assert.deepEqual(result.run.logs, [], "logs should be cleared on retry");
 });
 
 test("final attempt persists failed state", () => {

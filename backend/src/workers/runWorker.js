@@ -186,11 +186,21 @@ async function processJob(job) {
       emitRunEvent(runId, "done", { status: "failed" });
       runRepo.save(run);
     } else {
-      // Non-final attempt: reset run state so the retry starts clean.
+      // Non-final attempt: reset ALL accumulated run state so the retry
+      // starts completely clean.  Without this, the retry would reload the
+      // partially-populated run from the DB (via runRepo.getById at line 81)
+      // and runTests/crawlAndGenerateTests would append MORE results to the
+      // already-populated arrays, causing duplicate entries in run.results,
+      // inflated pass/fail counts, and incorrect totals.
       run.status = "running";
       run.error = null;
       run.errorCategory = null;
       run.finishedAt = null;
+      run.results = [];
+      run.passed = 0;
+      run.failed = 0;
+      run.pagesFound = 0;
+      run.logs = [];
       runRepo.save(run);
     }
 

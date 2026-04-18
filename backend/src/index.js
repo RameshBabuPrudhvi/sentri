@@ -271,7 +271,13 @@ app.get("/health/ready", async (_req, res) => {
 // This catch-all serves the Vite-built index.html with __CSP_NONCE__ replaced
 // by the per-request nonce so inline scripts pass CSP validation.
 // Must be mounted AFTER all API routes and health checks.
-app.get("*", serveIndexWithNonce);
+//
+// Skip /api/* and /artifacts/* paths so unmatched API GETs fall through to
+// Express's default 404 handler and return a proper JSON error instead of HTML.
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/") || req.path.startsWith("/artifacts/")) return next();
+  serveIndexWithNonce(req, res);
+});
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
