@@ -8,6 +8,7 @@
  * ### Exports
  * - {@link app} — The Express application instance.
  * - {@link ARTIFACTS_DIR} — Absolute path to the Playwright artifacts directory.
+ * - {@link serveIndexWithNonce} — SPA fallback handler that injects the CSP nonce (SEC-002).
  *
  * @example
  * import { app, ARTIFACTS_DIR } from "./middleware/appSetup.js";

@@ -31,7 +31,7 @@ import { closeQueue } from "./queue.js";
 import { startWorker, stopWorker } from "./workers/runWorker.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
-import { app } from "./middleware/appSetup.js";
+import { app, serveIndexWithNonce } from "./middleware/appSetup.js";
 import { workspaceScope } from "./middleware/workspaceScope.js";
 
 // ─── Route modules ────────────────────────────────────────────────────────────
@@ -265,6 +265,13 @@ app.get("/health/ready", async (_req, res) => {
 
   res.status(allOk ? 200 : 503).json({ ok: allOk, checks });
 });
+
+// ─── SPA fallback (SEC-002: nonce injection) ─────────────────────────────────
+// In Docker, nginx proxies unmatched paths to the backend via @backend_spa.
+// This catch-all serves the Vite-built index.html with __CSP_NONCE__ replaced
+// by the per-request nonce so inline scripts pass CSP validation.
+// Must be mounted AFTER all API routes and health checks.
+app.get("*", serveIndexWithNonce);
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
