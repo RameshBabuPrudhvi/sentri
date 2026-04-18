@@ -28,10 +28,12 @@ export default function CrawlView({ run, isRunning }) {
   const [selectedPage, setSelectedPage] = React.useState(null);
 
   // DIF-011: Fetch testsByUrl from dashboard API for coverage heatmap.
-  // Only fetch once when the component mounts (or when run completes) —
-  // the dashboard endpoint is lightweight and already workspace-scoped.
+  // Only fetch when the crawl is NOT running (avoids hitting the heavy
+  // dashboard endpoint on every status toggle). Re-fetches when a run
+  // finishes so the heatmap reflects newly generated tests.
   const [testsByUrl, setTestsByUrl] = useState(null);
   useEffect(() => {
+    if (isRunning) return; // skip while crawl is active
     api.getDashboard()
       .then(d => { if (d?.testsByUrl) setTestsByUrl(d.testsByUrl); })
       .catch(() => { /* non-fatal — heatmap falls back to legacy mode */ });

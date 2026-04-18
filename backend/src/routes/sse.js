@@ -2,10 +2,10 @@
  * @module routes/sse
  * @description SSE (Server-Sent Events) infrastructure for real-time run updates.
  *
- * ### Endpoints
- * | Method | Path                         | Description                 |
- * |--------|------------------------------|-----------------------------|
- * | `GET`  | `/api/runs/:runId/events`    | SSE stream for a single run |
+ * ### Endpoints (INF-005: all under `/api/v1/`)
+ * | Method | Path                            | Description                 |
+ * |--------|---------------------------------|-----------------------------|
+ * | `GET`  | `/api/v1/runs/:runId/events`    | SSE stream for a single run |
  *
  * ### Exports
  * - {@link emitRunEvent} — Broadcast an event to all listeners on a run.

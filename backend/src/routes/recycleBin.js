@@ -1,13 +1,13 @@
 /**
  * @module routes/recycleBin
- * @description Recycle-bin endpoints for soft-deleted entities. Mounted at `/api`.
+ * @description Recycle-bin endpoints for soft-deleted entities. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                        | Description                                        |
- * |----------|-----------------------------|-----------------------------------------------------|
- * | `GET`    | `/api/recycle-bin`          | List all soft-deleted entities grouped by type     |
- * | `POST`   | `/api/restore/:type/:id`    | Restore a soft-deleted entity                      |
- * | `DELETE` | `/api/purge/:type/:id`      | Permanently delete a soft-deleted entity (purge)   |
+ * | Method   | Path                           | Description                                        |
+ * |----------|--------------------------------|-----------------------------------------------------|
+ * | `GET`    | `/api/v1/recycle-bin`          | List all soft-deleted entities grouped by type     |
+ * | `POST`   | `/api/v1/restore/:type/:id`    | Restore a soft-deleted entity                      |
+ * | `DELETE` | `/api/v1/purge/:type/:id`      | Permanently delete a soft-deleted entity (purge)   |
  */
 
 import { Router } from "express";

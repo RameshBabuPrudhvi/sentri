@@ -1,15 +1,15 @@
 /**
  * @module routes/settings
- * @description Config and Settings routes — AI provider management. Mounted at `/api`.
+ * @description Config and Settings routes — AI provider management. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                       | Description                              |
- * |----------|----------------------------|------------------------------------------|
- * | `GET`    | `/api/config`              | Active AI provider info for the UI badge |
- * | `GET`    | `/api/settings`            | Masked API key status per provider       |
- * | `POST`   | `/api/settings`            | Save an API key or activate Ollama       |
- * | `DELETE` | `/api/settings/:provider`  | Remove a key or deactivate Ollama        |
- * | `GET`    | `/api/ollama/status`       | Check Ollama connectivity + list models  |
+ * | Method   | Path                          | Description                              |
+ * |----------|-------------------------------|------------------------------------------|
+ * | `GET`    | `/api/v1/config`              | Active AI provider info for the UI badge |
+ * | `GET`    | `/api/v1/settings`            | Masked API key status per provider       |
+ * | `POST`   | `/api/v1/settings`            | Save an API key or activate Ollama       |
+ * | `DELETE` | `/api/v1/settings/:provider`  | Remove a key or deactivate Ollama        |
+ * | `GET`    | `/api/v1/ollama/status`       | Check Ollama connectivity + list models  |
  */
 
 import { Router } from "express";

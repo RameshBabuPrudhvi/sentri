@@ -1,13 +1,13 @@
 /**
  * @module routes/testFix
  * @description AI-powered test auto-fix from failure context.
- * Mounted at `/api`.
+ * Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method | Path                          | Description                                |
- * |--------|-------------------------------|--------------------------------------------|
- * | `POST` | `/api/tests/:testId/fix`      | Stream an AI-generated fix for a failing test (SSE) |
- * | `POST` | `/api/tests/:testId/apply-fix` | Apply the fixed code to the test record     |
+ * | Method | Path                             | Description                                |
+ * |--------|----------------------------------|--------------------------------------------|
+ * | `POST` | `/api/v1/tests/:testId/fix`      | Stream an AI-generated fix for a failing test (SSE) |
+ * | `POST` | `/api/v1/tests/:testId/apply-fix` | Apply the fixed code to the test record     |
  */
 
 import { Router } from "express";

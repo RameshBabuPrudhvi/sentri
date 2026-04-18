@@ -98,6 +98,13 @@ export function setRuntimeKey(provider, key) {
   const envName = CLOUD_KEY_MAP[provider];
   if (!envName) return;
   runtimeKeys[envName] = key;
+  // FEA-003: Reset circuit breaker when the key changes so the provider is
+  // immediately retried with the new credentials instead of waiting out the
+  // cooldown from the old key's rate-limit failures.
+  if (circuitBreakers[provider]) {
+    circuitBreakers[provider].failures = 0;
+    circuitBreakers[provider].disabledUntil = 0;
+  }
   try {
     if (key) {
       apiKeyRepo.set(provider, key);
@@ -882,6 +889,13 @@ export function parseJSON(text) {
  *
  * Falls back to a single blocking call (Google / Ollama) that delivers
  * the entire response as one synthetic "token".
+ *
+ * NOTE: Unlike {@link generateText}, this function does NOT implement the
+ * FEA-003 provider fallback chain. If the primary provider is rate-limited,
+ * the error propagates directly. Google and Ollama paths delegate to
+ * `generateText()` which does have fallback, but Anthropic/OpenAI streaming
+ * paths do not. This is intentional — streaming callers (chat) need a
+ * consistent provider for multi-turn context.
  *
  * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
  * @param {function(string): void} onToken - Callback invoked for each token.

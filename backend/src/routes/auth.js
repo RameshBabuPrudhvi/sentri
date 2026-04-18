@@ -2,22 +2,22 @@
  * @module routes/auth
  * @description Authentication routes for email/password and OAuth (GitHub, Google).
  *
- * ### Endpoints
- * | Method | Path                          | Description                          |
- * |--------|-------------------------------|--------------------------------------|
- * | POST   | `/api/auth/register`          | Email/password registration          |
- * | POST   | `/api/auth/login`             | Email/password sign-in               |
- * | POST   | `/api/auth/logout`            | Token revocation + cookie clear      |
- * | POST   | `/api/auth/refresh`           | Refresh session (extend cookie TTL)  |
- * | GET    | `/api/auth/me`                | Return current user from cookie      |
- * | GET    | `/api/auth/export`            | Export user-owned account data (SEC-003) |
- * | DELETE | `/api/auth/account`           | Delete account + owned data (SEC-003) |
- * | GET    | `/api/auth/verify`            | Verify email via token (SEC-001)     |
- * | POST   | `/api/auth/resend-verification` | Resend verification email (SEC-001)|
- * | POST   | `/api/auth/forgot-password`   | Request a password reset token       |
- * | POST   | `/api/auth/reset-password`    | Reset password using a valid token   |
- * | GET    | `/api/auth/github/callback`   | GitHub OAuth token exchange          |
- * | GET    | `/api/auth/google/callback`   | Google OAuth token exchange          |
+ * ### Endpoints (INF-005: all under `/api/v1/auth/`)
+ * | Method | Path                              | Description                          |
+ * |--------|-----------------------------------|--------------------------------------|
+ * | POST   | `/api/v1/auth/register`           | Email/password registration          |
+ * | POST   | `/api/v1/auth/login`              | Email/password sign-in               |
+ * | POST   | `/api/v1/auth/logout`             | Token revocation + cookie clear      |
+ * | POST   | `/api/v1/auth/refresh`            | Refresh session (extend cookie TTL)  |
+ * | GET    | `/api/v1/auth/me`                 | Return current user from cookie      |
+ * | GET    | `/api/v1/auth/export`             | Export user-owned account data (SEC-003) |
+ * | DELETE | `/api/v1/auth/account`            | Delete account + owned data (SEC-003) |
+ * | GET    | `/api/v1/auth/verify`             | Verify email via token (SEC-001)     |
+ * | POST   | `/api/v1/auth/resend-verification`| Resend verification email (SEC-001)  |
+ * | POST   | `/api/v1/auth/forgot-password`    | Request a password reset token       |
+ * | POST   | `/api/v1/auth/reset-password`     | Reset password using a valid token   |
+ * | GET    | `/api/v1/auth/github/callback`    | GitHub OAuth token exchange          |
+ * | GET    | `/api/v1/auth/google/callback`    | Google OAuth token exchange          |
  *
  * ### Security measures
  * - Passwords hashed with scrypt (64-byte key, 16-byte random salt)

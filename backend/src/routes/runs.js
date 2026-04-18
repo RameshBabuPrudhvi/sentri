@@ -1,20 +1,20 @@
 /**
  * @module routes/runs
  * @description Run routes — crawl, test execution, abort, listing, and CI/CD triggers.
- * Mounted at `/api`.
+ * Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                                     | Description                         |
- * |----------|------------------------------------------|-------------------------------------|
- * | `POST`   | `/api/projects/:id/crawl`                | Start crawl + AI test generation    |
- * | `POST`   | `/api/projects/:id/run`                  | Execute all approved tests          |
- * | `GET`    | `/api/projects/:id/runs`                 | List runs for a project             |
- * | `GET`    | `/api/runs/:runId`                       | Get run detail                      |
- * | `POST`   | `/api/runs/:runId/abort`                 | Abort a running crawl or test run   |
- * | `POST`   | `/api/projects/:id/trigger`              | CI/CD token-authenticated test run  |
- * | `GET`    | `/api/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
- * | `POST`   | `/api/projects/:id/trigger-tokens`       | Create a new trigger token          |
- * | `DELETE` | `/api/projects/:id/trigger-tokens/:tid`  | Revoke a trigger token              |
+ * | Method   | Path                                        | Description                         |
+ * |----------|---------------------------------------------|-------------------------------------|
+ * | `POST`   | `/api/v1/projects/:id/crawl`                | Start crawl + AI test generation    |
+ * | `POST`   | `/api/v1/projects/:id/run`                  | Execute all approved tests          |
+ * | `GET`    | `/api/v1/projects/:id/runs`                 | List runs for a project             |
+ * | `GET`    | `/api/v1/runs/:runId`                       | Get run detail                      |
+ * | `POST`   | `/api/v1/runs/:runId/abort`                 | Abort a running crawl or test run   |
+ * | `POST`   | `/api/v1/projects/:id/trigger`              | CI/CD token-authenticated test run  |
+ * | `GET`    | `/api/v1/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
+ * | `POST`   | `/api/v1/projects/:id/trigger-tokens`       | Create a new trigger token          |
+ * | `DELETE` | `/api/v1/projects/:id/trigger-tokens/:tid`  | Revoke a trigger token              |
  */
 
 import { Router } from "express";

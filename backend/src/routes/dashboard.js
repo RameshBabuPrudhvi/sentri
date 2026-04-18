@@ -1,11 +1,11 @@
 /**
  * @module routes/dashboard
- * @description Dashboard analytics endpoint. Mounted at `/api`.
+ * @description Dashboard analytics endpoint. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method | Path              | Description                                                |
- * |--------|-------------------|------------------------------------------------------------|
- * | `GET`  | `/api/dashboard`  | Pass rate, defects, flaky tests, MTTR, growth, and more    |
+ * | Method | Path                 | Description                                                |
+ * |--------|----------------------|------------------------------------------------------------|
+ * | `GET`  | `/api/v1/dashboard`  | Pass rate, defects, flaky tests, MTTR, growth, and more    |
  */
 
 import { Router } from "express";
