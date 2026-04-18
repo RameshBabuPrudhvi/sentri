@@ -1223,7 +1223,7 @@ The following items have been verified complete against the codebase and are **n
 
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | SEC-002, SEC-003 | SEC-004, SEC-005 |
+| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | ~~SEC-002~~ ✅, ~~SEC-003~~ ✅ | SEC-004, SEC-005 |
 | Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | INF-004, ~~INF-005~~ ✅ |
 | Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
