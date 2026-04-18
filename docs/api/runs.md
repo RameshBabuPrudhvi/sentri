@@ -23,10 +23,33 @@ POST /api/v1/projects/:id/run
 
 **Body (optional):**
 ```json
-{ "dialsConfig": { "parallelWorkers": 4 } }
+{ "dialsConfig": { "parallelWorkers": 4 }, "device": "iPhone 14" }
 ```
 
 Runs all approved tests for the project. When `parallelWorkers > 1`, tests execute concurrently in isolated browser contexts within a single Chromium instance (1–10, default 1).
+
+### Device emulation (DIF-003)
+
+Pass a `device` field in the request body to run tests with a Playwright device profile. The device name is looked up in [`playwright.devices`](https://playwright.dev/docs/emulation#devices) and applies viewport, user agent, touch emulation, and device scale factor to the browser context.
+
+Available presets (also shown in the UI dropdown):
+
+| Label | Value |
+|---|---|
+| Desktop (default) | `""` (omit or empty) |
+| iPhone 14 | `"iPhone 14"` |
+| iPhone 14 Pro Max | `"iPhone 14 Pro Max"` |
+| iPhone 12 | `"iPhone 12"` |
+| iPad (gen 7) | `"iPad (gen 7)"` |
+| iPad Pro 11 | `"iPad Pro 11"` |
+| Galaxy S9+ | `"Galaxy S9+"` |
+| Pixel 7 | `"Pixel 7"` |
+| Pixel 5 | `"Pixel 5"` |
+| Galaxy Tab S4 | `"Galaxy Tab S4"` |
+| Desktop Chrome HiDPI | `"Desktop Chrome HiDPI"` |
+| Desktop Firefox HiDPI | `"Desktop Firefox HiDPI"` |
+
+Any name from `playwright.devices` is accepted — the presets above are a curated subset for the UI.
 
 **Response:**
 ```json

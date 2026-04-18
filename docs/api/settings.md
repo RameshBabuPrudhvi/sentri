@@ -15,7 +15,23 @@ Returns the currently active AI provider info:
   "hasProvider": true,
   "providerName": "Anthropic Claude",
   "model": "claude-sonnet-4-20250514",
-  "color": "#e8965a"
+  "color": "#e8965a",
+  "supportedProviders": ["anthropic", "openai", "google", "local"],
+  "demoMode": false,
+  "demoQuota": null
+}
+```
+
+When `DEMO_GOOGLE_API_KEY` is set, `demoMode` is `true` and `demoQuota` contains per-user daily usage for authenticated users:
+
+```json
+{
+  "demoMode": true,
+  "demoQuota": {
+    "crawl": { "used": 1, "limit": 2, "remaining": 1 },
+    "run": { "used": 0, "limit": 3, "remaining": 3 },
+    "generation": { "used": 2, "limit": 5, "remaining": 3 }
+  }
 }
 ```
 
@@ -86,6 +102,20 @@ GET /api/v1/system
 
 ```
 GET /api/v1/dashboard
+```
+
+Returns project and test suite analytics. The response includes a `testsByUrl` object (DIF-011) mapping each source URL to the count of approved tests targeting it — used by the frontend coverage heatmap on the site graph:
+
+```json
+{
+  "totalProjects": 3,
+  "totalTests": 42,
+  "testsByUrl": {
+    "https://example.com/": 5,
+    "https://example.com/login": 3,
+    "https://example.com/dashboard": 1
+  }
+}
 ```
 
 ## Data Management
