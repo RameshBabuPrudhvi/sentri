@@ -138,8 +138,13 @@ export function demoQuota(operation) {
     const limit = DAILY_LIMITS[operation];
     if (!limit) return next(); // unknown operation — no quota
 
-    const current = await getCount(userId, operation);
-    if (current >= limit) {
+    // Atomic increment-then-check: INCR first, then reject if over limit.
+    // This prevents the TOCTOU race where two concurrent requests both read
+    // the same count, both pass the check, and both proceed — allowing one
+    // extra request beyond the daily limit. With INCR-first, Redis INCR is
+    // atomic, and in-memory mode is single-threaded, so no race is possible.
+    const current = await incrementCount(userId, operation);
+    if (current > limit) {
       return res.status(429).json({
         error: `Daily demo limit reached (${limit} ${operation}${limit !== 1 ? "s" : ""} per day). Add your own AI provider key in Settings for unlimited usage.`,
         demoLimit: true,
@@ -149,9 +154,6 @@ export function demoQuota(operation) {
       });
     }
 
-    // Increment AFTER the check (will be incremented again if the operation
-    // actually starts — but this prevents burst-through on concurrent requests)
-    await incrementCount(userId, operation);
     next();
   };
 }
