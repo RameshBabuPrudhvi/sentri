@@ -174,7 +174,7 @@ router.post("/system/client-error", (req, res) => {
 // ─── Data Management ──────────────────────────────────────────────────────────
 
 router.delete("/data/runs", requireRole("admin"), (req, res) => {
-  const projects = projectRepo.getAll(req.workspaceId);
+  const projects = [...projectRepo.getAll(req.workspaceId), ...projectRepo.getDeletedAll(req.workspaceId)];
   const count = projects.reduce((sum, p) => sum + runRepo.hardDeleteByProjectId(p.id).length, 0);
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
@@ -186,7 +186,7 @@ router.delete("/data/activities", requireRole("admin"), (req, res) => {
 });
 
 router.delete("/data/healing", requireRole("admin"), (req, res) => {
-  const projectIds = projectRepo.getAll(req.workspaceId).map((p) => p.id);
+  const projectIds = [...projectRepo.getAll(req.workspaceId), ...projectRepo.getDeletedAll(req.workspaceId)].map((p) => p.id);
   const testIds = testRepo.getAllByProjectIds(projectIds).map((t) => t.id);
   const count = healingRepo.countByTestIds(testIds);
   healingRepo.deleteByTestIds(testIds);

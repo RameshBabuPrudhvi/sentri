@@ -17,11 +17,10 @@ import { Router } from "express";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
-import { signJwt, getJwtSecret } from "../middleware/authenticate.js";
+import { signJwt, getJwtSecret, revokedTokens, AUTH_COOKIE } from "../middleware/authenticate.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 
-const AUTH_COOKIE = "access_token";
 const EXP_COOKIE  = "token_exp";
 const JWT_TTL_SEC = 8 * 60 * 60;
 
@@ -103,6 +102,10 @@ router.get("/", (req, res) => {
 
   const user = userRepo.getById(userId);
   if (!user) return res.status(401).json({ error: "User not found." });
+
+  // Revoke the old token so it cannot be replayed (matches /refresh behaviour)
+  const { jti: oldJti, exp: oldExp } = req.authUser;
+  if (oldJti) revokedTokens.set(oldJti, oldExp);
 
   // Issue a new JWT with the target workspace as the hint
   const payload = buildJwtPayload(user, targetId);
