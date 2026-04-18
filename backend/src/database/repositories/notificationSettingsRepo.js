@@ -18,9 +18,12 @@ import { getDatabase } from "../sqlite.js";
  */
 export function getByProjectId(projectId) {
   const db = getDatabase();
-  return db.prepare(
+  const row = db.prepare(
     "SELECT * FROM notification_settings WHERE projectId = ?"
-  ).get(projectId) || undefined;
+  ).get(projectId);
+  if (!row) return undefined;
+  // SQLite stores booleans as INTEGER 0/1 — convert to JS boolean for API consumers.
+  return { ...row, enabled: !!row.enabled };
 }
 
 /**

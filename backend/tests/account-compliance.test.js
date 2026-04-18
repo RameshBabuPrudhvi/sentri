@@ -69,7 +69,7 @@ async function main() {
     out = await req(base, `/api/projects/${projectId}/notifications`, {
       method: "PATCH",
       token,
-      body: { teamsWebhookUrl: "https://teams.example/webhook", emailRecipients: "qa@example.com", enabled: true },
+      body: { teamsWebhookUrl: "https://93.184.216.34/webhook", emailRecipients: "qa@example.com", enabled: true },
     });
     assert.equal(out.res.status, 200);
     assert.equal(out.json.notifications.enabled, true);
