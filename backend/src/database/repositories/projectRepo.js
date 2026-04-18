@@ -162,6 +162,17 @@ export function hardDeleteById(id) {
 }
 
 /**
+ * Get all projects (live + soft-deleted) for a workspace.
+ * Used by data-management cleanup endpoints that must clear derived data
+ * across all projects regardless of soft-delete status.
+ * @param {string} workspaceId
+ * @returns {Object[]}
+ */
+export function getAllIncludeDeleted(workspaceId) {
+  return [...getAll(workspaceId), ...getDeletedAll(workspaceId)];
+}
+
+/**
  * Get all soft-deleted projects (recycle bin).
  * @param {string} [workspaceId] — If provided, scope to this workspace (ACL-001).
  * @returns {Object[]}

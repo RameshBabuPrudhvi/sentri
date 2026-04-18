@@ -58,19 +58,19 @@ export const requireAuth = requireUser;
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 /** Expiry hint cookie — Non-HttpOnly so the frontend can read the `exp` timestamp. */
-const EXP_COOKIE      = "token_exp";
+export const EXP_COOKIE      = "token_exp";
 /** JWT TTL in seconds (8 hours). Must match signJwt default. */
-const JWT_TTL_SEC     = 8 * 60 * 60;
+export const JWT_TTL_SEC     = 8 * 60 * 60;
 
 /**
  * Set the HttpOnly auth cookie + a readable expiry hint cookie on a response.
- * Called after every successful authentication (login, OAuth, refresh).
+ * Called after every successful authentication (login, OAuth, refresh, workspace switch).
  *
  * @param {Object} res       - Express response object.
  * @param {string} token     - The signed JWT string.
  * @param {number} expSec    - Unix timestamp of token expiry (seconds).
  */
-function setAuthCookie(res, token, expSec) {
+export function setAuthCookie(res, token, expSec) {
   const maxAge  = JWT_TTL_SEC;
   const sameSite = cookieSameSite();
 

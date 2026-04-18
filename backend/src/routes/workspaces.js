@@ -17,12 +17,9 @@ import { Router } from "express";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
-import { signJwt, getJwtSecret, revokedTokens, AUTH_COOKIE } from "../middleware/authenticate.js";
-import { cookieSameSite } from "../middleware/appSetup.js";
+import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
-
-const EXP_COOKIE  = "token_exp";
-const JWT_TTL_SEC = 8 * 60 * 60;
+import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
 
 const router = Router();
 
@@ -112,11 +109,7 @@ router.get("/", (req, res) => {
   const token = signJwt(payload, getJwtSecret());
   const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
-  // Set cookies
-  const maxAge = JWT_TTL_SEC;
-  const sameSite = cookieSameSite();
-  res.appendHeader("Set-Cookie", `${AUTH_COOKIE}=${token}; Path=/; HttpOnly; Max-Age=${maxAge}${sameSite}`);
-  res.appendHeader("Set-Cookie", `${EXP_COOKIE}=${exp}; Path=/; Max-Age=${maxAge}${sameSite}`);
+  setAuthCookie(res, token, exp);
 
   return res.json({ user: buildUserResponse(user, targetId) });
 });
