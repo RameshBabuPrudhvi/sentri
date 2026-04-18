@@ -203,7 +203,7 @@ export function AuthProvider({ children }) {
       ...(!safe.has(method) ? { "X-CSRF-Token": getCsrfToken() } : {}),
     };
     // authFetch callers pass paths like "/api/v1/…" — prepend the backend origin.
-    const fullUrl = url.startsWith("/api/") ? `${API_PATH}${url.replace(/^\/api\/v\d+/, "")}` : url;
+    const fullUrl = url.startsWith("/api/") ? `${API_PATH}${url.replace(/^\/api(\/v\d+)?/, "")}` : url;
     const res = await fetch(fullUrl, { ...options, headers, credentials: "include" });
     if (res.status === 401) {
       doLogout(true);

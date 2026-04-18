@@ -37,7 +37,9 @@ router.get("/config", async (req, res) => {
   };
   // Include per-user quota status when in demo mode and user is authenticated
   if (isDemoEnabled && req.authUser?.sub) {
-    response.demoQuota = await getDemoQuotaStatus(req.authUser.sub);
+    try {
+      response.demoQuota = await getDemoQuotaStatus(req.authUser.sub);
+    } catch { /* non-fatal — Redis may be unavailable */ }
   }
   res.json(response);
 });

@@ -17,7 +17,7 @@
  * | `/api/v1/auth`         | `routes/auth`       |
  * | `/health`              | Health check        |
  *
- * Legacy `/api/*` paths are 301-redirected to `/api/v1/*` for backward
+ * Legacy `/api/*` paths are 308-redirected to `/api/v1/*` for backward
  * compatibility during the transition window (INF-005).
  */
 
@@ -207,15 +207,16 @@ app.use(API_PREFIX, requireAuth, workspaceScope, testFixRouter);
 app.use(API_PREFIX, requireAuth, workspaceScope, recycleBinRouter);
 app.use(`${API_PREFIX}/workspaces`, requireAuth, workspaceScope, workspacesRouter);
 
-// ─── INF-005: Legacy /api/* → /api/v1/* 301 redirects ────────────────────────
+// ─── INF-005: Legacy /api/* → /api/v1/* 308 redirects ────────────────────────
 // Backward compatibility during the transition window. CI/CD integrations,
 // GitHub Actions, and external webhooks using the old /api/* paths will be
-// redirected to the versioned endpoint. Remove after all consumers migrate.
+// redirected to the versioned endpoint. Uses 308 (not 301) to preserve the
+// HTTP method on POST/PUT/PATCH/DELETE requests. Remove after all consumers migrate.
 app.use("/api", (req, res, next) => {
   // Skip if already under the versioned prefix
   if (req.path.startsWith(`/${API_VERSION}`)) return next();
   const newUrl = `${API_PREFIX}${req.path}${req._parsedUrl?.search || ""}`;
-  res.redirect(301, newUrl);
+  res.redirect(308, newUrl);
 });
 
 // ─── Health probes (root-level, not under /api, no auth required) ────────────

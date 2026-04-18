@@ -222,7 +222,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   const host  = req.headers["x-forwarded-host"]  || req.get("host");
   // Point to the token-authenticated status endpoint so CI pipelines can
   // poll without a JWT — they reuse the same Bearer token.
-  const statusUrl = `${proto}://${host}/api/projects/${project.id}/trigger/runs/${runId}`;
+  const statusUrl = `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${runId}`;
 
   res.status(202).json({ runId, statusUrl });
 });
