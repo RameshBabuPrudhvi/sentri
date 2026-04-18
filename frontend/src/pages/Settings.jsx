@@ -936,6 +936,13 @@ function AccountTab() {
   const [status, setStatus] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Auto-disarm delete confirmation after 5s; clean up on unmount.
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const timer = setTimeout(() => setConfirmDelete(false), 5000);
+    return () => clearTimeout(timer);
+  }, [confirmDelete]);
+
   async function handleExport() {
     if (!password.trim()) {
       setStatus({ type: "err", text: "Enter your password to export account data." });
@@ -967,7 +974,6 @@ function AccountTab() {
     }
     if (!confirmDelete) {
       setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 5000);
       return;
     }
     setBusy(true);

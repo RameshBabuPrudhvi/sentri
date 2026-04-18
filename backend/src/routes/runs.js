@@ -104,6 +104,10 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, a
           detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
         }),
         actorInfo: actor(req),
+        onComplete: async (finishedRun) => {
+          // FEA-001: Fire failure notifications — best-effort
+          try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
+        },
       },
     );
   }

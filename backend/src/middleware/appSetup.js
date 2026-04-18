@@ -480,22 +480,28 @@ app.use("/artifacts", (req, res, next) => {
 // The replacement is done on-the-fly for `index.html` only — it is a small file
 // and the string replace is negligible. All other static assets are served as-is.
 
-/** @type {string|null} Cached index.html template with `__CSP_NONCE__` placeholders. */
-let _indexHtmlTemplate = null;
+/** @type {string|null|undefined} Cached index.html template with `__CSP_NONCE__` placeholders. */
+let _indexHtmlTemplate = undefined;
 
 /**
  * Read and cache the built `index.html` from the frontend dist directory.
  * Returns `null` when the file does not exist (e.g. dev mode where Vite serves).
  *
+ * Uses `undefined` as the "not yet loaded" sentinel so that a failed read
+ * (empty string) is not permanently cached — the file may appear later if
+ * the build completes after the server starts.
+ *
  * @returns {string|null}
  */
 function getIndexHtmlTemplate() {
-  if (_indexHtmlTemplate !== null) return _indexHtmlTemplate;
+  if (typeof _indexHtmlTemplate === "string" && _indexHtmlTemplate.length > 0) {
+    return _indexHtmlTemplate;
+  }
   const distIndex = path.join(__dirname, "..", "..", "..", "frontend", "dist", "index.html");
   try {
     _indexHtmlTemplate = fs.readFileSync(distIndex, "utf-8");
   } catch {
-    _indexHtmlTemplate = "";
+    _indexHtmlTemplate = undefined;
   }
   return _indexHtmlTemplate || null;
 }

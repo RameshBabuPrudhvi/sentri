@@ -81,7 +81,8 @@ export function buildAccountExport(userId) {
   let schedules = [];
   if (projectIds.length > 0) {
     const pph = placeholders(projectIds);
-    notificationSettings = db.prepare(`SELECT * FROM notification_settings WHERE projectId IN (${pph})`).all(...projectIds);
+    notificationSettings = db.prepare(`SELECT * FROM notification_settings WHERE projectId IN (${pph})`).all(...projectIds)
+      .map((row) => ({ ...row, enabled: !!row.enabled }));
     schedules = db.prepare(`SELECT * FROM schedules WHERE projectId IN (${pph})`).all(...projectIds);
   }
 
