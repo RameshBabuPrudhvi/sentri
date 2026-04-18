@@ -182,7 +182,7 @@ const CSRF_HEADER_NAME  = "x-csrf-token";
 // These paths receive mutations but are either public (login, register) or
 // use the cookie as the auth mechanism itself (logout clears it on the server).
 // INF-005: Both /api/v1/ and legacy /api/ paths are exempt so CSRF doesn't
-// block requests that arrive before the 301 redirect fires (e.g. form POSTs).
+// block requests that arrive before the 308 redirect fires (e.g. form POSTs).
 // Generated from a single list to avoid drift when adding new exempt paths.
 const _CSRF_EXEMPT_AUTH_SUFFIXES = [
   "login", "register", "logout", "refresh",
