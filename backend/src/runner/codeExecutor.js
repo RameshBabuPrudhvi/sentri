@@ -295,7 +295,6 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     const now = Date.now();
     const durationMs = now - lastStepTime;
     stepTimings.push({ step: stepNumber, durationMs, completedAt: now });
-    lastStepTime = now;
 
     if (opts.onStepCapture) {
       try {
@@ -303,6 +302,10 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
         if (capture) stepCaptures.push({ step: stepNumber, ...capture });
       } catch { /* swallow — step capture must never fail the test */ }
     }
+
+    // Update lastStepTime AFTER the screenshot so the next step's duration
+    // does not include the screenshot overhead from this step (DIF-016).
+    lastStepTime = Date.now();
   };
 
   // Build the code string that will run inside the vm sandbox.
