@@ -89,21 +89,28 @@ async function incrementCount(userId, operation) {
 // ── BYOK detection ────────────────────────────────────────────────────────────
 
 /**
- * Check whether the current user has configured their own AI provider key.
- * Users with their own key bypass all demo quotas.
+ * Check whether any AI provider key has been configured on this server
+ * (beyond the platform-owned demo key). When true, all users bypass
+ * demo quotas — this is a SERVER-GLOBAL check, not per-user.
+ *
+ * Rationale: Sentri stores AI keys at the server level (env vars or
+ * Settings page), not per-user. If an admin configures a key via
+ * `POST /api/v1/settings`, ALL users benefit from it. In the intended
+ * demo deployment, no admin keys are set — only `DEMO_GOOGLE_API_KEY`.
+ *
+ * If per-user key storage is added in the future, this function should
+ * be updated to check user-scoped keys instead.
  *
  * @returns {boolean}
  */
-function userHasOwnKey() {
+function serverHasConfiguredKey() {
   const keys = getConfiguredKeys();
-  // If any cloud provider has a key that is NOT the demo key, user is BYOK
+  // If any cloud provider has a key that is NOT the demo key, server is BYOK
   if (keys.anthropic) return true;
   if (keys.openai) return true;
-  // For Google: check if the active key differs from the demo key.
-  // getConfiguredKeys() returns masked keys, so we can't compare directly.
-  // Instead, check if the user explicitly saved a Google key via Settings.
-  // The demo key is injected via env var, not via setRuntimeKey, so if
-  // getConfiguredKeys().google is non-empty, the user added their own.
+  // For Google: getConfiguredKeys() uses getUserConfiguredKey() which
+  // excludes the demo fallback. A non-empty value means an admin saved
+  // their own Google key via Settings.
   if (keys.google) return true;
   if (keys.ollamaConfigured) return true;
   return false;
@@ -122,8 +129,8 @@ export function demoQuota(operation) {
     // Skip if demo mode is not enabled
     if (!isDemoEnabled) return next();
 
-    // Skip if user has their own AI key (BYOK)
-    if (userHasOwnKey()) return next();
+    // Skip if the server has a configured AI key (admin BYOK — server-global)
+    if (serverHasConfiguredKey()) return next();
 
     const userId = req.authUser?.sub;
     if (!userId) return next(); // unauthenticated — let auth middleware handle it

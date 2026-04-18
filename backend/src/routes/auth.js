@@ -287,7 +287,7 @@ function ensureUserWorkspace(user) {
 /**
  * Register a new user with email and password.
  *
- * @route POST /api/auth/register
+ * @route POST /api/v1/auth/register
  * @param {Object} req.body
  * @param {string} req.body.name     - Full name (max 100 chars).
  * @param {string} req.body.email    - Email address (max 254 chars).
@@ -357,7 +357,7 @@ router.post("/register", async (req, res) => {
  * Sign in with email and password. Sets auth cookies and returns user profile.
  * Rate-limited to 10 attempts per IP per 15 minutes.
  *
- * @route POST /api/auth/login
+ * @route POST /api/v1/auth/login
  * @param {Object} req.body
  * @param {string} req.body.email    - Email address.
  * @param {string} req.body.password - Password.
@@ -427,7 +427,7 @@ router.post("/login", async (req, res) => {
  * Sign out — revokes the JWT server-side so it can't be reused.
  * Requires `Authorization: Bearer <token>`.
  *
- * @route POST /api/auth/logout
+ * @route POST /api/v1/auth/logout
  * @returns {200} `{ message: "Signed out successfully." }`.
  * @returns {401} Missing or invalid token.
  */
@@ -441,7 +441,7 @@ router.post("/logout", requireAuth, (req, res) => {
 /**
  * Get the currently authenticated user's profile with workspace context.
  *
- * @route GET /api/auth/me
+ * @route GET /api/v1/auth/me
  * @returns {200} `{ id, name, email, role, avatar, createdAt, workspaceId, workspaceName, workspaceRole }`.
  * @returns {401} Missing or invalid token.
  * @returns {404} User not found in database.
@@ -483,7 +483,7 @@ async function verifyAccountPassword(user, password) {
  * Export all user-owned account data as JSON (GDPR/CCPA data portability).
  * Requires password confirmation via `x-account-password` header.
  *
- * @route GET /api/auth/export
+ * @route GET /api/v1/auth/export
  * @returns {200} JSON export payload.
  * @returns {400} Missing password.
  * @returns {403} Invalid password.
@@ -512,7 +512,7 @@ router.get("/export", requireAuth, async (req, res) => {
  * Delete account and all user-owned workspace data (GDPR right to erasure).
  * Requires password confirmation.
  *
- * @route DELETE /api/auth/account
+ * @route DELETE /api/v1/auth/account
  * @param {Object} req.body
  * @param {string} req.body.password - Account password confirmation.
  * @returns {200} `{ ok: true }` on success.
@@ -572,7 +572,7 @@ router.delete("/account", requireAuth, async (req, res) => {
  * The existing token must still be valid (not expired, not revoked).
  * The old JTI is revoked and a new one is issued.
  *
- * @route POST /api/auth/refresh
+ * @route POST /api/v1/auth/refresh
  * @returns {200} `{ user }` — same shape as login response.
  * @returns {401} If the current session is invalid or expired.
  */
@@ -599,7 +599,7 @@ router.post("/refresh", requireAuth, (req, res) => {
  * Verify a user's email address using a signed token.
  * Called when the user clicks the verification link in their email.
  *
- * @route GET /api/auth/verify
+ * @route GET /api/v1/auth/verify
  * @param {string} req.query.token - The verification token from the email.
  * @returns {200} `{ message, verified: true }` on success.
  * @returns {400} Invalid, expired, or already-used token.
@@ -649,7 +649,7 @@ router.get("/verify", async (req, res) => {
  * Resend the verification email for an unverified account.
  * Rate-limited to prevent abuse.
  *
- * @route POST /api/auth/resend-verification
+ * @route POST /api/v1/auth/resend-verification
  * @param {Object} req.body
  * @param {string} req.body.email - Email address of the unverified account.
  * @returns {200} `{ message }` — always returns success to prevent enumeration.
@@ -698,7 +698,7 @@ router.post("/resend-verification", async (req, res) => {
  * Always returns 200 regardless of whether the email exists to prevent
  * user enumeration.
  *
- * @route POST /api/auth/forgot-password
+ * @route POST /api/v1/auth/forgot-password
  * @param {Object} req.body
  * @param {string} req.body.email - Email address of the account.
  * @returns {200} `{ message, ...(dev: resetToken, resetUrl) }`.
@@ -766,7 +766,7 @@ router.post("/forgot-password", async (req, res) => {
 /**
  * Reset password using a valid reset token.
  *
- * @route POST /api/auth/reset-password
+ * @route POST /api/v1/auth/reset-password
  * @param {Object} req.body
  * @param {string} req.body.token       - The reset token from the email/URL.
  * @param {string} req.body.newPassword - New password (8–128 chars).
@@ -837,7 +837,7 @@ router.post("/reset-password", async (req, res) => {
  * GitHub OAuth callback. Exchanges an authorization code for an access token,
  * fetches the user profile, sets auth cookies, and returns the user profile.
  *
- * @route GET /api/auth/github/callback
+ * @route GET /api/v1/auth/github/callback
  * @param {string} req.query.code - The OAuth authorization code from GitHub.
  * @returns {200} `{ user: { id, name, email, role, avatar, workspaceId, workspaceName, workspaceRole } }`.
  * @returns {400} Missing code parameter.
@@ -911,7 +911,7 @@ router.get("/github/callback", async (req, res) => {
  * Google OAuth callback. Exchanges an authorization code for an access token,
  * fetches the user profile, sets auth cookies, and returns the user profile.
  *
- * @route GET /api/auth/google/callback
+ * @route GET /api/v1/auth/google/callback
  * @param {string} req.query.code - The OAuth authorization code from Google.
  * @returns {200} `{ user: { id, name, email, role, avatar, workspaceId, workspaceName, workspaceRole } }`.
  * @returns {400} Missing code parameter.

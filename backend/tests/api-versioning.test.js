@@ -3,7 +3,7 @@
  * @description Integration tests for INF-005 API versioning and DIF-011 testsByUrl.
  *
  * Verifies:
- * - Legacy /api/* paths are 301-redirected to /api/v1/*
+ * - Legacy /api/* paths are 308-redirected to /api/v1/*
  * - Versioned /api/v1/* endpoints respond correctly
  * - Dashboard response includes testsByUrl (DIF-011)
  */
@@ -34,7 +34,7 @@ function mountRoutesOnce() {
     // Auth is already mounted at /api/auth — only redirect other paths
     if (req.path.startsWith("/auth")) return next();
     const newUrl = `/api/v1${req.path}${req._parsedUrl?.search || ""}`;
-    res.redirect(301, newUrl);
+    res.redirect(308, newUrl);
   });
   mounted = true;
 }
@@ -59,9 +59,9 @@ async function main() {
 
     console.log("\n🧪 INF-005: Legacy redirect");
 
-    await test("GET /api/dashboard redirects to /api/v1/dashboard with 301", async () => {
+    await test("GET /api/dashboard redirects to /api/v1/dashboard with 308", async () => {
       const res = await fetch(`${base}/api/dashboard`, { redirect: "manual" });
-      assert.equal(res.status, 301, `Expected 301, got ${res.status}`);
+      assert.equal(res.status, 308, `Expected 308, got ${res.status}`);
       const location = res.headers.get("location");
       assert.ok(location.includes("/api/v1/dashboard"), `Expected redirect to /api/v1/dashboard, got ${location}`);
     });
