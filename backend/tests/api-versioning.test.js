@@ -15,6 +15,7 @@ import dashboardRouter from "../src/routes/dashboard.js";
 
 const t = createTestContext();
 const { app, req, workspaceScope } = t;
+const { test, summary } = t.createTestRunner();
 
 let mounted = false;
 
@@ -36,21 +37,6 @@ function mountRoutesOnce() {
     res.redirect(301, newUrl);
   });
   mounted = true;
-}
-
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
 }
 
 async function main() {
@@ -114,21 +100,12 @@ async function main() {
       assert.deepEqual(out.json.testsByUrl, {}, "testsByUrl should be empty with no approved tests");
     });
 
-    console.log("✅ api-versioning: all checks passed");
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));
   }
 
-  console.log("\n──────────────────────────────────────────────────");
-  console.log(`Results: ${passed} passed, ${failed} failed`);
-
-  if (failed > 0) {
-    console.log("\n⚠️  API versioning tests failed");
-    process.exit(1);
-  }
-
-  console.log("\n🎉 API versioning tests passed");
+  summary("API versioning");
 }
 
 main().catch((err) => {

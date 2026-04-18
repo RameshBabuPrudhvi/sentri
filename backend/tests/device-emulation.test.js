@@ -5,21 +5,9 @@
 
 import assert from "node:assert/strict";
 import { resolveDevice, DEVICE_PRESETS } from "../src/runner/config.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+const { test, summary } = createTestRunner();
 
 console.log("\n🧪 resolveDevice()");
 
@@ -88,12 +76,4 @@ test("every preset has label and value properties", () => {
   }
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  Device emulation tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 Device emulation tests passed");
+summary("device emulation");

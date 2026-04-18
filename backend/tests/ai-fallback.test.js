@@ -9,21 +9,9 @@
 
 import assert from "node:assert/strict";
 import { isRateLimitError } from "../src/aiProvider.js";
+import { createTestRunner } from "./helpers/test-base.js";
 
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-  try {
-    fn();
-    passed += 1;
-    console.log(`  ✅  ${name}`);
-  } catch (err) {
-    failed += 1;
-    console.log(`  ❌  ${name}`);
-    console.log(`      ${err.message}`);
-  }
-}
+const { test, summary } = createTestRunner();
 
 // ── isRateLimitError detection ────────────────────────────────────────────────
 // This is the public function that drives the fallback chain's decision logic.
@@ -98,12 +86,4 @@ test("detects '429' as a standalone number in message", () => {
   assert.equal(isRateLimitError(new Error("Error 429")), true);
 });
 
-console.log("\n──────────────────────────────────────────────────");
-console.log(`Results: ${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-  console.log("\n⚠️  AI fallback tests failed");
-  process.exit(1);
-}
-
-console.log("\n🎉 AI fallback tests passed");
+summary("AI fallback");
