@@ -497,7 +497,11 @@ function getIndexHtmlTemplate() {
   if (typeof _indexHtmlTemplate === "string" && _indexHtmlTemplate.length > 0) {
     return _indexHtmlTemplate;
   }
-  const distIndex = path.join(__dirname, "..", "..", "..", "frontend", "dist", "index.html");
+  // SPA_INDEX_PATH allows Docker / custom deployments to point at the built
+  // index.html when the frontend dist is not a sibling of the backend source
+  // tree (e.g. multi-container Docker where frontend is a separate image).
+  const distIndex = process.env.SPA_INDEX_PATH
+    || path.join(__dirname, "..", "..", "..", "frontend", "dist", "index.html");
   try {
     _indexHtmlTemplate = fs.readFileSync(distIndex, "utf-8");
   } catch {
