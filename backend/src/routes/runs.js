@@ -139,8 +139,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  // Extract parallel workers from dials config (if provided)
-  const { dialsConfig } = req.body || {};
+  // Extract parallel workers and device emulation from request body / dials config
+  const { dialsConfig, device } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
@@ -157,6 +157,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
     failed: 0,
     total: tests.length,
     parallelWorkers,
+    device: device || null,
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   runRepo.create(run);
@@ -176,7 +177,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, device: device || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -187,7 +188,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
+      (signal) => runTests(project, tests, run, { parallelWorkers, device, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,
