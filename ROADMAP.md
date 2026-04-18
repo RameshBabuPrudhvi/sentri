@@ -214,7 +214,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-003 — BullMQ job queue for run execution 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
 
 **Problem:** Run execution is started as a detached `async` operation directly on the HTTP request handler thread (`runWithAbort`). If the process crashes mid-run, work is lost and runs remain stuck in `status: 'running'`. There is no global concurrency limit across projects, no priority queue, and no visibility into the job backlog.
 
@@ -233,7 +233,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### FEA-001 — Teams / email / webhook failure notifications 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive (S2-03)
+**Status:** 🔄 In Progress | **Effort:** M | **Source:** Competitive (S2-03)
 
 **Problem:** When a test run completes with failures, there is no outbound notification. Teams must poll the dashboard. With scheduling already live (ENH-006 ✅), this is the other half of autonomous operation — teams need to know immediately when something breaks.
 
