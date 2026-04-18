@@ -32,6 +32,9 @@ services:
       - NODE_ENV=production
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      # SEC-002: Point at the frontend dist copied into the shared volume so
+      # serveIndexWithNonce() can inject per-request CSP nonces into index.html.
+      - SPA_INDEX_PATH=/usr/share/frontend/index.html
       # Uncomment to use PostgreSQL instead of SQLite:
       # - DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
       # Uncomment to use Redis for rate limiting, token revocation, and SSE pub/sub:
@@ -42,6 +45,8 @@ services:
     security_opt:
       - seccomp=unconfined
     shm_size: "256mb"
+    volumes:
+      - frontend_dist:/usr/share/frontend:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -61,6 +66,8 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - frontend_dist:/usr/share/frontend_dist
 
   # ── Optional Redis service (INF-002) ─────────────────────────────────────────
   # Activate with: docker compose --profile redis up
@@ -108,3 +115,4 @@ networks:
 
 volumes:
   pgdata:
+  frontend_dist:

@@ -271,7 +271,10 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   // Mark queued tests that never executed as "skipped" so pass/fail/total
   // metrics are consistent (FLW-03).  Uses the live in-memory run when
   // available (has the latest results from processResult calls).
-  const liveRun = entry?.run || run;
+  // For BullMQ runs (workerController path), re-read from DB after signalling
+  // abort — testRunner flushes results to SQLite after each test, so the fresh
+  // snapshot captures results completed between the initial read and the abort.
+  const liveRun = entry?.run || (workerController ? (runRepo.getById(req.params.runId) || run) : run);
   if (Array.isArray(liveRun.results) && Array.isArray(liveRun.testQueue)) {
     const executedIds = new Set(liveRun.results.map(r => r.testId));
     for (const queued of liveRun.testQueue) {
