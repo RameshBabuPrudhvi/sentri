@@ -109,6 +109,11 @@ async function processJob(job) {
           detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
         });
       }
+
+      // FEA-001: Fire failure notifications — best-effort (consistent with
+      // the in-process fallback in runs.js which calls fireNotifications for
+      // crawls via the onComplete callback).
+      try { await fireNotifications(run, project); } catch { /* best-effort */ }
     } else if (type === "test_run") {
       // Use the snapshotted test IDs from enqueue time (options.testIds) so
       // retries execute the same set of tests as the original attempt.
@@ -216,6 +221,11 @@ async function processJob(job) {
       run.failed = 0;
       run.pagesFound = 0;
       run.logs = [];
+      // Delete run_logs table rows from the failed attempt so the retry
+      // doesn't start with stale log entries.  runRepo.getById() hydrates
+      // run.logs from run_logs, so without this the retry would see the
+      // old logs concatenated with new ones.
+      runLogRepo.deleteByRunId(runId);
       runRepo.save(run);
     }
 
