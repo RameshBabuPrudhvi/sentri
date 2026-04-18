@@ -31,6 +31,8 @@ import { actor } from "../utils/actor.js";
 import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 import { reloadSchedule, stopSchedule, getNextRunAt } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
+import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
+import { generateNotificationSettingId } from "../utils/idGenerator.js";
 import cron from "node-cron";
 
 const router = Router();

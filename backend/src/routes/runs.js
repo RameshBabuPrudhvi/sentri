@@ -33,6 +33,8 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
+import { runQueue, isQueueAvailable } from "../queue.js";
+import { fireNotifications } from "../utils/notifications.js";
 
 const router = Router();
 
@@ -79,20 +81,31 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, a
     detail: `Crawl started for ${project.url}`, status: "running",
   });
 
-  runWithAbort(runId, run,
-    (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
-    {
-      onSuccess: () => logActivity({ ...actor(req),
-        type: "crawl.complete", projectId: project.id, projectName: project.name,
-        detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
-      }),
-      onFailActivity: (err) => ({
-        type: "crawl.fail", projectId: project.id, projectName: project.name,
-        detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
-      }),
-      actorInfo: actor(req),
-    },
-  );
+  if (isQueueAvailable()) {
+    // INF-003: Enqueue via BullMQ for durable execution
+    await runQueue.add("crawl", {
+      runId,
+      projectId: project.id,
+      type: "crawl",
+      options: { dialsPrompt, testCount, explorerMode, explorerTuning, actorInfo: actor(req) },
+    }, { jobId: runId });
+  } else {
+    // Fallback: in-process execution (no Redis)
+    runWithAbort(runId, run,
+      (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
+      {
+        onSuccess: () => logActivity({ ...actor(req),
+          type: "crawl.complete", projectId: project.id, projectName: project.name,
+          detail: `Crawl completed — ${run.pagesFound || 0} pages found`,
+        }),
+        onFailActivity: (err) => ({
+          type: "crawl.fail", projectId: project.id, projectName: project.name,
+          detail: `Crawl failed: ${classifyError(err, "crawl").message}`,
+        }),
+        actorInfo: actor(req),
+      },
+    );
+  }
 
   res.json({ runId });
 });
@@ -141,20 +154,35 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
     detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
 
-  runWithAbort(runId, run,
-    (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
-    {
-      onSuccess: () => logActivity({ ...actor(req),
-        type: "test_run.complete", projectId: project.id, projectName: project.name,
-        detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
-      }),
-      onFailActivity: (err) => ({
-        type: "test_run.fail", projectId: project.id, projectName: project.name,
-        detail: `Test run failed: ${classifyError(err, "run").message}`,
-      }),
-      actorInfo: actor(req),
-    },
-  );
+  if (isQueueAvailable()) {
+    // INF-003: Enqueue via BullMQ for durable execution
+    await runQueue.add("test_run", {
+      runId,
+      projectId: project.id,
+      type: "test_run",
+      options: { parallelWorkers, actorInfo: actor(req) },
+    }, { jobId: runId });
+  } else {
+    // Fallback: in-process execution (no Redis)
+    runWithAbort(runId, run,
+      (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
+      {
+        onSuccess: () => logActivity({ ...actor(req),
+          type: "test_run.complete", projectId: project.id, projectName: project.name,
+          detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
+        }),
+        onFailActivity: (err) => ({
+          type: "test_run.fail", projectId: project.id, projectName: project.name,
+          detail: `Test run failed: ${classifyError(err, "run").message}`,
+        }),
+        actorInfo: actor(req),
+        onComplete: async (finishedRun) => {
+          // FEA-001: Fire failure notifications — best-effort
+          try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
+        },
+      },
+    );
+  }
 
   res.json({ runId });
 });
