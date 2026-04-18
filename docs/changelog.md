@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DB**: Migration 004 — `workspaces` and `workspace_members` tables; `workspaceId` foreign key on projects, tests, runs, activities (ACL-001) (#88)
 - **Auth**: JWT now includes `workspaceId` hint; workspace role resolved from DB on every request for immediate permission changes (ACL-001, ACL-002) (#88)
 - **Frontend**: `ProtectedRoute` supports `requiredRole` prop for role-gated pages; `AuthContext` exposes `workspaceId`, `workspaceName`, `workspaceRole` (ACL-002) (#88)
+- **Infra**: BullMQ job queue for durable run execution — when Redis is available, crawl and test runs are enqueued via BullMQ instead of fire-and-forget in-process execution; provides crash recovery, global concurrency control via `MAX_WORKERS`, and queue depth visibility; falls back to in-process execution without Redis (INF-003) (#92)
+- **Backend**: `queue.js` — shared BullMQ Queue definition with lazy-load and graceful fallback (INF-003) (#92)
+- **Backend**: `workers/runWorker.js` — BullMQ Worker that processes crawl and test_run jobs with abort support, structured logging, and automatic retry (INF-003) (#92)
+- **API**: Per-project failure notification settings — `GET/PATCH/DELETE /api/projects/:id/notifications` for configuring Microsoft Teams webhook, email recipients, and generic webhook URL per project (FEA-001) (#92)
+- **Backend**: `notifications.js` — failure notification dispatcher supporting Teams Adaptive Cards, HTML email via existing emailSender transport, and generic webhook POST; all dispatches are best-effort (FEA-001) (#92)
+- **DB**: Migration 004 — `notification_settings` table with per-project Teams webhook URL, email recipients, generic webhook URL, and enabled flag (FEA-001) (#92)
+- **Backend**: Failure notifications fire automatically on run completion (with failures) for all run types: manual, scheduled, CI/CD triggered, and BullMQ worker-processed (FEA-001) (#92)
+- **Frontend**: `api.getNotifications()`, `api.upsertNotifications()`, `api.deleteNotifications()` — notification settings API methods (FEA-001) (#92)
 
 ## [1.5.0] — 2026-04-17
 
