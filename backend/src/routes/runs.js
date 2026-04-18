@@ -241,8 +241,8 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     runAbortControllers.delete(req.params.runId);
   } else if (workerController) {
     // BullMQ-processed run: signal the worker's AbortController.
-    // The worker's catch block checks run.status === "aborted" (persisted
-    // via runRepo.update below) and skips terminal side-effects.
+    // The worker's catch block checks signal.aborted (set synchronously
+    // by controller.abort()) and skips terminal side-effects.
     workerController.abort();
     workerAbortControllers.delete(req.params.runId);
   }

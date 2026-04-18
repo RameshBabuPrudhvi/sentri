@@ -45,11 +45,15 @@ function test(name, fn) {
  * @param {Object} params.job        - Simulated BullMQ job.
  * @param {Error}  params.err        - The error that was thrown.
  * @param {string} params.type       - "crawl" or "test_run".
+ * @param {AbortSignal} [params.signal] - Optional AbortSignal for abort detection.
  * @returns {{ action: string, run: Object }}
  */
-function simulateCatchBlock({ run, job, err, type }) {
-  // Abort handling (unchanged by retry logic)
-  if (err.name === "AbortError" || run.status === "aborted") {
+function simulateCatchBlock({ run, job, err, type, signal }) {
+  // Abort handling — check all three paths:
+  //   1. err.name === "AbortError" (standard AbortController error)
+  //   2. signal.aborted (synchronously set by controller.abort())
+  //   3. run.status === "aborted" (set by abort endpoint on in-memory run)
+  if (err.name === "AbortError" || signal?.aborted || run.status === "aborted") {
     return { action: "abort", run };
   }
 
@@ -164,6 +168,30 @@ test("aborted run status is handled regardless of attempt number", () => {
 
   const result = simulateCatchBlock({ run, job, err, type: "test_run" });
   assert.equal(result.action, "abort");
+});
+
+test("signal.aborted detects abort even when error is not AbortError", () => {
+  // Simulates Playwright wrapping the abort into its own error type
+  const run = { status: "running", error: null, errorCategory: null, finishedAt: null };
+  const job = { opts: { attempts: 2 }, attemptsMade: 0 };
+  const err = new Error("Target page, context or browser has been closed");
+  // err.name is "Error", not "AbortError" — but the signal was aborted
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = simulateCatchBlock({ run, job, err, type: "test_run", signal: controller.signal });
+  assert.equal(result.action, "abort", "should detect abort via signal.aborted");
+});
+
+test("non-aborted signal does not trigger abort path", () => {
+  const run = { status: "running", error: null, errorCategory: null, finishedAt: null };
+  const job = { opts: { attempts: 2 }, attemptsMade: 1 };
+  const err = new Error("real failure");
+  const controller = new AbortController();
+  // signal NOT aborted
+
+  const result = simulateCatchBlock({ run, job, err, type: "test_run", signal: controller.signal });
+  assert.equal(result.action, "final_fail", "should not trigger abort when signal is not aborted");
 });
 
 test("crawl type is correctly identified", () => {

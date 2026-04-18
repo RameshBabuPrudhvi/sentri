@@ -142,7 +142,7 @@ async function processJob(job) {
   } catch (err) {
     workerAbortControllers.delete(runId);
 
-    if (err.name === "AbortError" || run.status === "aborted") {
+    if (err.name === "AbortError" || signal.aborted || run.status === "aborted") {
       runRepo.save(run);
       return;
     }
