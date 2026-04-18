@@ -187,7 +187,7 @@ router.delete("/data/activities", requireRole("admin"), (req, res) => {
 
 router.delete("/data/healing", requireRole("admin"), (req, res) => {
   const projectIds = [...projectRepo.getAll(req.workspaceId), ...projectRepo.getDeletedAll(req.workspaceId)].map((p) => p.id);
-  const testIds = testRepo.getAllByProjectIds(projectIds).map((t) => t.id);
+  const testIds = testRepo.getAllIdsByProjectIdsIncludeDeleted(projectIds);
   const count = healingRepo.countByTestIds(testIds);
   healingRepo.deleteByTestIds(testIds);
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} healing history entries` });

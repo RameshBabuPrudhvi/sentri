@@ -107,6 +107,22 @@ export function getAllByProjectIds(projectIds) {
 }
 
 /**
+ * Get all test IDs (including soft-deleted) for the given project IDs.
+ * Used by data-management cleanup endpoints that need to clear derived data
+ * (e.g. healing history) for ALL tests, not just live ones.
+ * @param {string[]} projectIds
+ * @returns {string[]}
+ */
+export function getAllIdsByProjectIdsIncludeDeleted(projectIds) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT id FROM tests WHERE projectId IN (${placeholders})`
+  ).all(...projectIds).map((r) => r.id);
+}
+
+/**
  * Count non-deleted tests for a set of project IDs.
  * @param {string[]} projectIds
  * @returns {number}
