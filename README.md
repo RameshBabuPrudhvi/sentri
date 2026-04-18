@@ -119,6 +119,10 @@ npm run dev                 # Starts on :3001, creates data/sentri.db automatica
 
 > **Database:** SQLite (`data/sentri.db`) is created automatically on first startup — no manual setup needed. To use PostgreSQL instead, set `DATABASE_URL=postgres://…` and install `pg` + `pg-native`. If upgrading from a previous version that used `sentri-db.json`, data is auto-migrated on first run.
 
+> **Redis (optional):** Install and start Redis locally (`brew install redis && redis-server` on macOS, or `docker run -p 6379:6379 redis:7-alpine`), then set `REDIS_URL=redis://localhost:6379` in `.env`. This enables shared rate limiting, token revocation across restarts, and SSE pub/sub. Requires `npm install ioredis rate-limit-redis`.
+
+> **BullMQ (optional):** With Redis running, install `npm install bullmq` to enable durable job queue execution for crawls and test runs. Without BullMQ, runs execute in-process (fine for local dev). Set `MAX_WORKERS=2` to control concurrency. See [INF-003 in ROADMAP.md](ROADMAP.md) for details.
+
 **Frontend:**
 ```bash
 cd frontend

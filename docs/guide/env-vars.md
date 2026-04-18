@@ -59,6 +59,42 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `REDIS_URL` | — | Redis connection URL (e.g. `redis://localhost:6379`). When set, enables shared rate limiting, cross-instance token revocation, SSE pub/sub, and BullMQ job queue. Requires `ioredis`. For Redis-backed rate limiting also install `rate-limit-redis` |
 | `MAX_WORKERS` | `2` | Global concurrency limit for BullMQ run execution (INF-003). Each slot processes one crawl or test run at a time. Ignored when Redis/BullMQ is not available |
 
+#### Local Redis setup
+
+Redis is **optional** for local development — without it, Sentri uses in-memory stores for rate limiting, token revocation, and SSE. To enable Redis locally:
+
+```bash
+# macOS (Homebrew)
+brew install redis && redis-server
+
+# Or via Docker (any platform)
+docker run -d --name sentri-redis -p 6379:6379 redis:7-alpine
+```
+
+Then in `backend/.env`:
+```bash
+REDIS_URL=redis://localhost:6379
+```
+
+Install the required npm packages:
+```bash
+cd backend
+npm install ioredis rate-limit-redis
+```
+
+#### Local BullMQ setup
+
+BullMQ provides **durable job queue execution** for crawls and test runs (INF-003). Without it, runs execute in-process — which is fine for local development but means runs are lost if the server crashes mid-execution.
+
+To enable BullMQ locally, ensure Redis is running (see above), then:
+
+```bash
+cd backend
+npm install bullmq
+```
+
+BullMQ is detected automatically when both `REDIS_URL` is set and the `bullmq` package is installed. Set `MAX_WORKERS` to control how many runs can execute concurrently (default: 2).
+
 ### Email (Transactional)
 
 | Variable | Default | Description |
