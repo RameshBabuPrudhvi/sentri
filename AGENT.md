@@ -140,12 +140,14 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `abortHelper.js` | `throwIfAborted(signal)`, `isRunAborted()`, `finalizeRunIfNotAborted()` | Every pipeline/runner stage with I/O |
 | `runLogger.js` | `log()`, `logWarn()`, `logError()`, `logSuccess()`, `emitRunEvent()` | All run-level logging and SSE |
 | `errorClassifier.js` | `classifyError(err, context)`, `ERROR_CATEGORY` | Converting raw errors to user-friendly messages (runs, chat, activity logs) |
-| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()`, `generateWebhookTokenId()`, `generateScheduleId()` | Creating new domain objects |
+| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()`, `generateWebhookTokenId()`, `generateScheduleId()`, `generateNotificationSettingId()` | Creating new domain objects |
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
 | `emailSender.js` | `sendEmail()`, `sendVerificationEmail()`, `getTransportName()` | Transactional email (Resend / SMTP / console fallback) |
+| `ssrfGuard.js` | `validateUrl()`, `safeFetch()`, `isPrivateIp()` | SSRF protection for outbound HTTP requests to user-configured URLs (notification webhooks, CI/CD callback URLs) |
+| `notifications.js` | `fireNotifications(run, project)` | Failure notification dispatcher — Teams Adaptive Card, HTML email, generic webhook; best-effort, never affects run outcome |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
@@ -423,7 +425,7 @@ Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `prag
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`db.js` is deprecated** — the file has been emptied. All consumers have been migrated to use repository modules directly. Do not import `getDb()` or `saveDb()` in new code.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo`, `notificationSettingsRepo`, `accountRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.

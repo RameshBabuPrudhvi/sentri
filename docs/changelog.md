@@ -27,8 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Frontend**: Account tab in Settings with password-confirmed "Export account data" (JSON download) and "Delete account" (two-click confirm with 5s auto-disarm) actions (SEC-003) (#93)
 - **Frontend**: `api.exportAccountData(password)` and `api.deleteAccount(password)` client methods (SEC-003) (#93)
 
+### Fixed
+- **Backend**: `notificationSettingsRepo.getByProjectId()` now converts SQLite INTEGER `enabled` (0/1) to JS boolean — previously the API returned `enabled: 1` instead of `enabled: true`, inconsistent with the `scheduleRepo` pattern and the API contract (FEA-001) (#92)
+- **Backend**: BullMQ worker retry logic no longer persists terminal state (failed status, activity log, SSE event) on non-final attempts — previously a failed first attempt wrote `status: "failed"` to the DB before BullMQ retried, causing duplicate activity logs, duplicate SSE events, and status overwrites (INF-003) (#92)
+- **Backend**: Abort endpoint now checks `workerAbortControllers` for BullMQ-processed runs — previously only the in-process `runAbortControllers` registry was consulted, so aborting a BullMQ run updated the DB but the worker continued executing and overwrote the status (INF-003) (#92)
+
 ### Security
 - **CSP**: Replaced `'unsafe-inline'` in `script-src` with per-request cryptographic nonce — generates `crypto.randomBytes(16)` nonce per request, passes it to Helmet CSP directive, and injects `nonce="__CSP_NONCE__"` placeholder on all `<script>` tags via Vite plugin; `serveIndexWithNonce()` replaces the placeholder at serve-time (SEC-002) (#93)
+- **SSRF**: Notification webhook URLs are now validated with full SSRF protection at write time (`PATCH /notifications`) and at fetch time (`safeFetch`) — rejects private IPs, localhost, `.internal`/`.local` hostnames, non-http protocols, and DNS-rebinding attacks; SSRF logic extracted from `trigger.js` into shared `utils/ssrfGuard.js` (FEA-001) (#92)
 - **Account**: Account export strips `passwordHash` from the user profile before including it in the JSON payload — prevents offline brute-force attacks if the export file is shared (SEC-003) (#93)
 - **Account**: Password confirmation failures on export/delete return 403 (not 401) to prevent the frontend from misinterpreting them as session expiry and triggering an unexpected logout redirect (SEC-003) (#93)
 
