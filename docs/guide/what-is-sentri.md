@@ -49,7 +49,7 @@ Dashboard with pass rate, defect categories, flaky test detection, test growth s
 │  └── CDP: live browser screencast           │
 ├─────────────────────────────────────────────┤
 │  Backend (Express + Node.js)                │
-│  ├── Routes: /api/projects, /tests, /runs   │
+│  ├── Routes: /api/v1/projects, /tests, /runs │
 │  ├── Crawler: Playwright + SmartCrawlQueue  │
 │  ├── HAR Capture: API traffic → endpoints   │
 │  ├── AI Pipeline: 8-stage generation        │

@@ -5,7 +5,7 @@ Sentri can be triggered directly from your CI/CD pipeline so regression tests ru
 ## How It Works
 
 1. **Create a trigger token** — one per project, from the **Automation** page (sidebar → Automation, or ⚡ button in ProjectHeader).
-2. **`POST /api/projects/:id/trigger`** with the token as a Bearer header — returns `202 Accepted` immediately with `{ runId, statusUrl }`.
+2. **`POST /api/v1/projects/:id/trigger`** with the token as a Bearer header — returns `202 Accepted` immediately with `{ runId, statusUrl }`.
 3. **Poll `statusUrl`** until `status` is no longer `"running"`.
 4. Optionally pass a `callbackUrl` in the request body to receive a POST with the run summary when it finishes.
 
@@ -23,16 +23,16 @@ Treat trigger tokens like passwords. Never commit them to your repository.
 
 | Action | Endpoint | Auth |
 |---|---|---|
-| List tokens | `GET /api/projects/:id/trigger-tokens` | JWT (user session) |
-| Create token | `POST /api/projects/:id/trigger-tokens` | JWT (user session) |
-| Revoke token | `DELETE /api/projects/:id/trigger-tokens/:tid` | JWT (user session) |
+| List tokens | `GET /api/v1/projects/:id/trigger-tokens` | JWT (user session) |
+| Create token | `POST /api/v1/projects/:id/trigger-tokens` | JWT (user session) |
+| Revoke token | `DELETE /api/v1/projects/:id/trigger-tokens/:tid` | JWT (user session) |
 
 Token management endpoints require a normal user session (JWT). Only the trigger endpoint itself accepts Bearer tokens.
 
 ## Trigger Endpoint
 
 ```
-POST /api/projects/:id/trigger
+POST /api/v1/projects/:id/trigger
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -45,7 +45,7 @@ Content-Type: application/json
 **Response `202 Accepted`:**
 
 ```json
-{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/projects/PRJ-1/trigger/runs/RUN-42" }
+{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/v1/projects/PRJ-1/trigger/runs/RUN-42" }
 ```
 
 ### Error Codes
@@ -79,7 +79,7 @@ jobs:
           response=$(curl -sf -X POST \
             -H "Authorization: Bearer ${{ secrets.SENTRI_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "https://your-sentri-instance.com/api/projects/PRJ-1/trigger")
+            "https://your-sentri-instance.com/api/v1/projects/PRJ-1/trigger")
           echo "run_id=$(echo $response | jq -r .runId)" >> $GITHUB_OUTPUT
           echo "status_url=$(echo $response | jq -r .statusUrl)" >> $GITHUB_OUTPUT
 
@@ -108,7 +108,7 @@ sentri:
       response=$(curl -sf -X POST \
         -H "Authorization: Bearer $SENTRI_TOKEN" \
         -H "Content-Type: application/json" \
-        "https://your-sentri-instance.com/api/projects/PRJ-1/trigger")
+        "https://your-sentri-instance.com/api/v1/projects/PRJ-1/trigger")
       STATUS_URL=$(echo $response | jq -r .statusUrl)
       for i in $(seq 1 60); do
         STATUS=$(curl -sf \
@@ -127,7 +127,7 @@ sentri:
 curl -X POST \
   -H "Authorization: Bearer <YOUR_TOKEN>" \
   -H "Content-Type: application/json" \
-  "https://your-sentri-instance.com/api/projects/PRJ-1/trigger"
+  "https://your-sentri-instance.com/api/v1/projects/PRJ-1/trigger"
 ```
 
 ## Callback URL
