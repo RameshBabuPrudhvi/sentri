@@ -81,15 +81,6 @@ export function getFiltered({ type, projectId, workspaceId, limit } = {}) {
 }
 
 /**
- * Count total activities.
- * @returns {number}
- */
-export function count() {
-  const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM activities").get().cnt;
-}
-
-/**
  * Count activities with optional workspace/project scope.
  * @param {Object} [filters]
  * @param {string} [filters.workspaceId]
@@ -139,17 +130,6 @@ export function deleteByProjectId(projectId) {
   const db = getDatabase();
   const info = db.prepare("DELETE FROM activities WHERE projectId = ?").run(projectId);
   return info.changes;
-}
-
-/**
- * Delete all activities.
- * @returns {number} Number of deleted rows.
- */
-export function clearAll() {
-  const db = getDatabase();
-  const count = db.prepare("SELECT COUNT(*) as cnt FROM activities").get().cnt;
-  db.prepare("DELETE FROM activities").run();
-  return count;
 }
 
 /**

@@ -47,17 +47,6 @@ export function getAll(workspaceId) {
 }
 
 /**
- * Get all non-deleted projects as a dictionary keyed by ID.
- * @returns {Object<string, Object>}
- */
-export function getAllAsDict() {
-  const all = getAll();
-  const dict = {};
-  for (const p of all) dict[p.id] = p;
-  return dict;
-}
-
-/**
  * Get a project by ID (including soft-deleted — needed for restore and audit).
  * Most callers should use {@link getById} which excludes deleted items.
  * @param {string} id

@@ -10,7 +10,7 @@
  * Use {@link getDeletedByProjectId} / {@link restore} for recycle-bin operations.
  *
  * ### Pagination
- * {@link getByProjectIdPaged} and {@link getAllPaged} return
+ * {@link getByProjectIdPaged} and {@link getAllPagedByProjectIds} return
  * `{ data: Test[], meta: { total, page, pageSize, hasMore } }`.
  */
 
@@ -73,22 +73,6 @@ const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
 export function getAll() {
   const db = getDatabase();
   return db.prepare("SELECT * FROM tests WHERE deletedAt IS NULL").all().map(rowToTest);
-}
-
-/**
- * Get all non-deleted tests with pagination.
- * @param {number|string} [page=1]
- * @param {number|string} [pageSize=DEFAULT_PAGE_SIZE]
- * @returns {PagedResult}
- */
-export function getAllPaged(page, pageSize) {
-  const db = getDatabase();
-  const { page: p, pageSize: ps, offset } = parsePagination(page, pageSize);
-  const total = db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE deletedAt IS NULL").get().cnt;
-  const data  = db.prepare(
-    "SELECT * FROM tests WHERE deletedAt IS NULL ORDER BY createdAt DESC LIMIT ? OFFSET ?"
-  ).all(ps, offset).map(rowToTest);
-  return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
 }
 
 /**
@@ -192,17 +176,6 @@ export function getAllPagedByProjectIds(projectIds, page, pageSize) {
     `SELECT * FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL ORDER BY createdAt DESC LIMIT ? OFFSET ?`
   ).all(...projectIds, ps, offset).map(rowToTest);
   return { data, meta: { total, page: p, pageSize: ps, hasMore: offset + data.length < total } };
-}
-
-/**
- * Get all non-deleted tests as a dictionary keyed by ID.
- * @returns {Object<string, Object>}
- */
-export function getAllAsDict() {
-  const all = getAll();
-  const dict = {};
-  for (const t of all) dict[t.id] = t;
-  return dict;
 }
 
 /**
@@ -456,33 +429,6 @@ export function restoreByProjectIdAfter(projectId, deletedAfter) {
 }
 
 // ─── Counts ───────────────────────────────────────────────────────────────────
-
-/**
- * Count total non-deleted tests.
- * @returns {number}
- */
-export function count() {
-  const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE deletedAt IS NULL").get().cnt;
-}
-
-/**
- * Count approved non-deleted tests.
- * @returns {number}
- */
-export function countApproved() {
-  const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'approved' AND deletedAt IS NULL").get().cnt;
-}
-
-/**
- * Count draft non-deleted tests.
- * @returns {number}
- */
-export function countDraft() {
-  const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM tests WHERE reviewStatus = 'draft' AND deletedAt IS NULL").get().cnt;
-}
 
 /**
  * Count tests by review status for a project (non-deleted only).

@@ -271,15 +271,15 @@ test("hardDeleteByProjectId permanently removes tests", () => {
   assert.equal(testRepo.getByIdIncludeDeleted(t.id), undefined, "row should be gone");
 });
 
-test("countApproved excludes soft-deleted tests", () => {
+test("countApprovedByProjectIds excludes soft-deleted tests", () => {
   const p4 = makeProject();
   projectRepo.create(p4);
   const t = makeTest(p4.id, { reviewStatus: "approved" });
   testRepo.create(t);
-  const before = testRepo.countApproved();
+  const before = testRepo.countApprovedByProjectIds([p4.id]);
   testRepo.deleteById(t.id);
-  const after = testRepo.countApproved();
-  assert.equal(after, before - 1, "countApproved should decrease after soft-delete");
+  const after = testRepo.countApprovedByProjectIds([p4.id]);
+  assert.equal(after, before - 1, "countApprovedByProjectIds should decrease after soft-delete");
 });
 
 // ─── testRepo pagination ──────────────────────────────────────────────────────
@@ -371,22 +371,22 @@ test("getByProjectIdPaged respects soft-delete", () => {
   assert.equal(result.meta.total, 0, "paged total should be 0 after soft-delete");
 });
 
-// ─── runRepo.hardClearAll ─────────────────────────────────────────────────────
+// ─── runRepo.hardDeleteByProjectId ────────────────────────────────────────────
 
-console.log("\n🧪 runRepo — hardClearAll");
+console.log("\n🧪 runRepo — hardDeleteByProjectId");
 
-test("hardClearAll permanently removes all runs (live and soft-deleted)", () => {
+test("hardDeleteByProjectId permanently removes all runs for a project (live and soft-deleted)", () => {
   const p = makeProject();
   projectRepo.create(p);
   const r1 = makeRun(p.id);
   const r2 = makeRun(p.id);
   runRepo.create(r1);
   runRepo.create(r2);
-  // Soft-delete one to verify hard clear removes both live and deleted
+  // Soft-delete one to verify hard delete removes both live and deleted
   const db = getDatabase();
   db.prepare("UPDATE runs SET deletedAt = datetime('now') WHERE id = ?").run(r1.id);
-  const cleared = runRepo.hardClearAll();
-  assert.ok(cleared >= 2, "should report at least 2 cleared");
+  const ids = runRepo.hardDeleteByProjectId(p.id);
+  assert.ok(ids.length >= 2, "should report at least 2 deleted IDs");
   assert.equal(runRepo.getByIdIncludeDeleted(r1.id), undefined, "soft-deleted r1 should be gone");
   assert.equal(runRepo.getByIdIncludeDeleted(r2.id), undefined, "live r2 should be gone");
 });

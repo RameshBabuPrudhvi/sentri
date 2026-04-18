@@ -128,37 +128,6 @@ export function deleteByTestIds(testIds) {
 }
 
 /**
- * Delete all healing entries.
- * @returns {number}
- */
-export function clearAll() {
-  const db = getDatabase();
-  const count = db.prepare("SELECT COUNT(*) as cnt FROM healing_history").get().cnt;
-  db.prepare("DELETE FROM healing_history").run();
-  return count;
-}
-
-/**
- * Count total entries.
- * @returns {number}
- */
-export function count() {
-  const db = getDatabase();
-  return db.prepare("SELECT COUNT(*) as cnt FROM healing_history").get().cnt;
-}
-
-/**
- * Count entries where strategyIndex >= 0 and succeededAt is not null.
- * @returns {number}
- */
-export function countSuccesses() {
-  const db = getDatabase();
-  return db.prepare(
-    "SELECT COUNT(*) as cnt FROM healing_history WHERE strategyIndex >= 0 AND succeededAt IS NOT NULL"
-  ).get().cnt;
-}
-
-/**
  * Count healing entries for specific test IDs.
  * @param {string[]} testIds
  * @returns {number}

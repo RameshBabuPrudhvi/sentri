@@ -5,7 +5,7 @@ import {
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
-  Users, UserPlus, Crown, ChevronDown,
+  Users, UserPlus, Crown,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateConfigCache } from "../components/layout/ProviderBadge.jsx";
