@@ -43,11 +43,24 @@ export function buildJwtPayload(user, workspaceIdHint) {
 }
 
 /**
+ * @typedef {Object} UserResponse
+ * @property {string}      id
+ * @property {string}      name
+ * @property {string}      email
+ * @property {string}      role
+ * @property {string|null} avatar
+ * @property {string}      [workspaceId]    - Active workspace ID (present when user has workspaces).
+ * @property {string}      [workspaceName]  - Active workspace display name.
+ * @property {string}      [workspaceRole]  - User's role in the active workspace.
+ * @property {Array<{id: string, name: string, role: string, isOwner: boolean}>} [workspaces] - All workspaces (present when user belongs to 2+).
+ */
+
+/**
  * Build the user response object with workspace context for the frontend.
  *
  * @param {Object} user - User row from the database.
  * @param {string} [workspaceIdHint] - Preferred current workspace ID.
- * @returns {{ id: string, name: string, email: string, role: string, avatar: (string|null), workspaceId?: string, workspaceName?: string, workspaceRole?: string, workspaces?: Array<{id: string, name: string, role: string, isOwner: boolean}> }}
+ * @returns {UserResponse}
  */
 export function buildUserResponse(user, workspaceIdHint) {
   const resp = {
