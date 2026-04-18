@@ -62,6 +62,7 @@ export function buildAccountExport(userId) {
       projects: [],
       tests: [],
       runs: [],
+      runLogs: [],
       activities: [],
       notificationSettings: [],
       schedules: [],
@@ -76,6 +77,17 @@ export function buildAccountExport(userId) {
 
   const tests = db.prepare(`SELECT * FROM tests WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
   const runs = db.prepare(`SELECT * FROM runs WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
+
+  // Include run_logs (ENH-008) — log lines were moved from the runs.logs
+  // JSON column to the run_logs table.  Post-migration runs have no inline
+  // logs, so without this the export would be missing all log data.
+  const runIds = runs.map((r) => r.id);
+  let runLogs = [];
+  if (runIds.length > 0) {
+    const rph = placeholders(runIds);
+    runLogs = db.prepare(`SELECT * FROM run_logs WHERE runId IN (${rph}) ORDER BY runId, seq ASC`).all(...runIds);
+  }
+
   const activities = db.prepare(`SELECT * FROM activities WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
   const workspaceMembers = db.prepare(`SELECT * FROM workspace_members WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
 
@@ -113,6 +125,7 @@ export function buildAccountExport(userId) {
     projects,
     tests,
     runs,
+    runLogs,
     activities,
     notificationSettings,
     schedules,

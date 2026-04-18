@@ -147,6 +147,12 @@ async function processJob(job) {
       try { await fireNotifications(run, project); } catch { /* best-effort */ }
     }
 
+    // Check abort signal one final time before persisting.  If the abort
+    // endpoint fired between the pipeline completing and this point, the DB
+    // already has status="aborted" + "skipped" entries.  Writing the worker's
+    // stale in-memory run back would overwrite that state.
+    if (signal.aborted || run.status === "aborted") return;
+
     // Persist final state
     runRepo.save(run);
 
