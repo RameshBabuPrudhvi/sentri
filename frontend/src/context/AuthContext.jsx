@@ -67,6 +67,7 @@ function msUntilRefresh() {
 function sanitiseUser(u) {
   return {
     id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user",
+    hasPassword: u.hasPassword !== undefined ? !!u.hasPassword : undefined,
     workspaceId: u.workspaceId || null,
     workspaceName: u.workspaceName || null,
     workspaceRole: u.workspaceRole || null,
