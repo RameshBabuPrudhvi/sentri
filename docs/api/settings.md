@@ -1,6 +1,6 @@
 # Settings API
 
-> All settings endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 301-redirected.
+> All settings endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 308-redirected.
 
 ## Get Active Provider Config
 

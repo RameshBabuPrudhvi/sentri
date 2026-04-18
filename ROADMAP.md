@@ -303,7 +303,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Problem:** All routes are mounted at `/api/*` with no version prefix. Any breaking API change will immediately break all consumers — CI/CD integrations, GitHub Actions, external webhooks — with no safe migration path.
 
-**Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 301 redirects from `/api/*` to `/api/v1/*` for backward compatibility during the transition window.
+**Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 308 redirects from `/api/*` to `/api/v1/*` for backward compatibility during the transition window (308 preserves HTTP method on redirect).
 
 **Files to change:**
 - `backend/src/index.js` — update route mount paths

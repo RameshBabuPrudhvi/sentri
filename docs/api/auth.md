@@ -1,6 +1,6 @@
 # Authentication API
 
-> All auth endpoints are under `/api/v1/auth/` (INF-005). Legacy `/api/auth/*` paths are 301-redirected.
+> All auth endpoints are under `/api/v1/auth/` (INF-005). Legacy `/api/auth/*` paths are 308-redirected.
 
 ## Cookie-Based Auth
 

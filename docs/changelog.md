@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **API**: All routes versioned under `/api/v1/` — legacy `/api/*` paths 301-redirect to `/api/v1/*` for backward compatibility during migration window (INF-005) (#94)
+- **API**: All routes versioned under `/api/v1/` — legacy `/api/*` paths 308-redirect to `/api/v1/*` for backward compatibility during migration window; 308 preserves HTTP method so POST/PATCH/DELETE requests are not downgraded to GET (INF-005) (#94)
 - **AI**: Provider fallback chain on rate limits — when the primary AI provider returns a rate-limit error, `generateText()` automatically retries with the next configured provider in detection order before giving up; per-provider circuit breaker disables a provider for 5 minutes after 3 consecutive rate-limit failures (FEA-003) (#94)
 - **Runner**: Mobile viewport / device emulation — pass a `device` parameter (e.g. `"iPhone 14"`, `"Pixel 7"`) in run config to apply Playwright's built-in device profiles (viewport, user agent, touch); curated preset list exposed for UI dropdowns (DIF-003) (#94)
 - **Dashboard**: `testsByUrl` field in dashboard API response — counts approved tests per source URL for coverage heatmap visualisation (DIF-011) (#94)

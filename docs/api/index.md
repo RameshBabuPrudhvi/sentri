@@ -4,7 +4,7 @@ The Sentri backend exposes a RESTful JSON API on port `3001` by default.
 
 **Base URL:** `http://localhost:3001/api/v1`
 
-> **Versioning (INF-005):** All endpoints are served under `/api/v1/`. Legacy `/api/*` paths are 301-redirected for backward compatibility.
+> **Versioning (INF-005):** All endpoints are served under `/api/v1/`. Legacy `/api/*` paths are 308-redirected for backward compatibility (preserves HTTP method).
 
 ## Authentication
 

@@ -180,7 +180,7 @@ VITE_API_URL=https://your-backend.onrender.com
 
 ## API Reference
 
-The backend exposes a RESTful JSON API on port `3001`. All endpoints are versioned under `/api/v1/` (INF-005). Legacy `/api/*` paths are 301-redirected for backward compatibility. Key endpoint groups:
+The backend exposes a RESTful JSON API on port `3001`. All endpoints are versioned under `/api/v1/` (INF-005). Legacy `/api/*` paths are 308-redirected for backward compatibility (preserves HTTP method on POST/PUT/PATCH/DELETE). Key endpoint groups:
 
 | Group | Endpoints | Description |
 |---|---|---|

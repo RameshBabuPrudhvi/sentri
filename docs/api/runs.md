@@ -1,6 +1,6 @@
 # Runs API
 
-> All run endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 301-redirected.
+> All run endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 308-redirected.
 
 ## Start a Crawl + Generate Run
 
