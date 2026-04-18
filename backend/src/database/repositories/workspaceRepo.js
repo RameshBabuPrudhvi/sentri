@@ -87,6 +87,19 @@ export function getMembers(workspaceId) {
   `).all(workspaceId);
 }
 
+/**
+ * Get IDs of all workspaces owned by a user.
+ * Used by account deletion to collect owned project IDs before cascade delete.
+ * @param {string} userId
+ * @returns {string[]}
+ */
+export function getOwnedWorkspaceIds(userId) {
+  const db = getDatabase();
+  return db.prepare("SELECT id FROM workspaces WHERE ownerId = ?")
+    .all(userId)
+    .map((w) => w.id);
+}
+
 // ─── Write ────────────────────────────────────────────────────────────────────
 
 /**

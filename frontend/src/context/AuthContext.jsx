@@ -67,12 +67,11 @@ function msUntilRefresh() {
 function sanitiseUser(u) {
   return {
     id: u.id, name: u.name, email: u.email, avatar: u.avatar || null, role: u.role || "user",
-    hasPassword: u.hasPassword !== undefined ? !!u.hasPassword : undefined,
+    hasPassword: u.hasPassword !== undefined ? !!u.hasPassword : true,
     workspaceId: u.workspaceId || null,
     workspaceName: u.workspaceName || null,
     workspaceRole: u.workspaceRole || null,
     workspaces: Array.isArray(u.workspaces) ? u.workspaces : null,
-    hasPassword: u.hasPassword !== undefined ? u.hasPassword : true,
   };
 }
 
