@@ -57,10 +57,11 @@ async function run() {
   global.document = { cookie: "_csrf=test-csrf-token" };
   global.fetch = async (url, init = {}) => {
     requests.push({ url, init });
-    if (url.endsWith("/api/projects")) {
+    // INF-005: api.js now sends requests to /api/v1/
+    if (url.endsWith("/api/v1/projects")) {
       return makeJsonResponse(200, [{ id: "PRJ-1" }]);
     }
-    if (url.endsWith("/api/runs/RUN-1") && init.method === "GET") {
+    if (url.endsWith("/api/v1/runs/RUN-1") && init.method === "GET") {
       return makeJsonResponse(401, { error: "Unauthorized" });
     }
     return makeJsonResponse(500, { error: "Unexpected path" });

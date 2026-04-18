@@ -59,7 +59,7 @@ export default function ForgotPassword() {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { setError("Please enter a valid email address."); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/auth/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ email }) });
+      const res = await fetch(`${API_BASE}/api/v1/auth/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ email }) });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       setSuccess(data.message || "If an account with that email exists, a reset link has been generated.");
@@ -73,7 +73,7 @@ export default function ForgotPassword() {
     if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/auth/reset-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ token, newPassword }) });
+      const res = await fetch(`${API_BASE}/api/v1/auth/reset-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ token, newPassword }) });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       setSuccess(data.message || "Password has been reset successfully.");

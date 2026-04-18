@@ -72,35 +72,36 @@ jobs:
           done
 
           # Register a test user and login (cookie-based auth)
+          # INF-005: All API routes are now under /api/v1/
           COOKIE_JAR=$(mktemp)
-          curl -sf -X POST http://localhost:3001/api/auth/register \
+          curl -sf -X POST http://localhost:3001/api/v1/auth/register \
             -H "Content-Type: application/json" \
             -d '{"name":"CI Bot","email":"ci@test.local","password":"CiTestPass123!"}' \
-            | grep -q "Account created" && echo "✅ POST /api/auth/register OK"
+            | grep -q "Account created" && echo "✅ POST /api/v1/auth/register OK"
 
           # Login — JWT is set as HttpOnly cookie, not in response body.
           # Use -c to save cookies (access_token, _csrf) to a jar file.
-          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
+          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/auth/login \
             -H "Content-Type: application/json" \
             -d '{"email":"ci@test.local","password":"CiTestPass123!"}' \
-            | grep -q '"user"' && echo "✅ POST /api/auth/login OK"
+            | grep -q '"user"' && echo "✅ POST /api/v1/auth/login OK"
 
           # Extract CSRF token from cookie jar for mutating requests
           CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
 
           # Verify authenticated endpoints (use -b to send cookies)
-          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard | grep -q "totalProjects" && echo "✅ /api/dashboard OK"
-          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/projects | grep -q "\[\]" && echo "✅ /api/projects OK"
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/v1/dashboard | grep -q "totalProjects" && echo "✅ /api/v1/dashboard OK"
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/v1/projects | grep -q "\[\]" && echo "✅ /api/v1/projects OK"
 
-          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/projects \
+          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/projects \
             -H "Content-Type: application/json" \
             -H "X-CSRF-Token: $CSRF" \
             -d '{"name":"CI Test","url":"https://example.com"}')
-          echo "$PROJ" | grep -q '"name":"CI Test"' && echo "✅ POST /api/projects OK"
+          echo "$PROJ" | grep -q '"name":"CI Test"' && echo "✅ POST /api/v1/projects OK"
 
           # Verify unauthenticated access is blocked
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/dashboard)
-          [ "$HTTP_CODE" = "401" ] && echo "✅ Unauthenticated /api/dashboard returns 401" || echo "❌ Expected 401, got $HTTP_CODE"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/v1/dashboard)
+          [ "$HTTP_CODE" = "401" ] && echo "✅ Unauthenticated /api/v1/dashboard returns 401" || echo "❌ Expected 401, got $HTTP_CODE"
 
           kill $SERVER_PID
         env:
@@ -172,44 +173,45 @@ jobs:
           echo "$READY" | grep -q '"ok":true' && echo "✅ /health/ready OK" || (echo "❌ /health/ready failed: $READY" && exit 1)
 
           # Register + login (full auth flow against PostgreSQL)
+          # INF-005: All API routes are now under /api/v1/
           COOKIE_JAR=$(mktemp)
-          REG_RESP=$(curl -s -w "\n%{http_code}" -X POST http://localhost:3001/api/auth/register \
+          REG_RESP=$(curl -s -w "\n%{http_code}" -X POST http://localhost:3001/api/v1/auth/register \
             -H "Content-Type: application/json" \
             -d '{"name":"PG Bot","email":"pg@test.local","password":"PgTestPass123!"}')
           REG_CODE=$(echo "$REG_RESP" | tail -1)
           REG_BODY=$(echo "$REG_RESP" | sed '$d')
           echo "Register: HTTP $REG_CODE — $REG_BODY"
-          echo "$REG_BODY" | grep -q "Account created" && echo "✅ POST /api/auth/register OK (PostgreSQL)"
+          echo "$REG_BODY" | grep -q "Account created" && echo "✅ POST /api/v1/auth/register OK (PostgreSQL)"
 
-          LOGIN_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
+          LOGIN_RESP=$(curl -s -w "\n%{http_code}" --max-time 10 -c "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/auth/login \
             -H "Content-Type: application/json" \
             -d '{"email":"pg@test.local","password":"PgTestPass123!"}') || true
           LOGIN_CODE=$(echo "$LOGIN_RESP" | tail -1)
           LOGIN_BODY=$(echo "$LOGIN_RESP" | sed '$d')
           echo "Login: HTTP $LOGIN_CODE — $LOGIN_BODY"
-          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE"; cat /tmp/server.log | tail -20; exit 1)
+          [ "$LOGIN_CODE" = "200" ] && echo "✅ POST /api/v1/auth/login OK (PostgreSQL)" || (echo "❌ Login failed with HTTP $LOGIN_CODE"; cat /tmp/server.log | tail -20; exit 1)
 
           # Extract CSRF token
           CSRF=$(grep '_csrf' "$COOKIE_JAR" | awk '{print $NF}')
 
           # Verify authenticated endpoint works
-          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard \
-            | grep -q "totalProjects" && echo "✅ /api/dashboard OK (PostgreSQL)"
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/v1/dashboard \
+            | grep -q "totalProjects" && echo "✅ /api/v1/dashboard OK (PostgreSQL)"
 
           # Create a project (tests INSERT with named params against PostgreSQL)
-          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/projects \
+          PROJ=$(curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/projects \
             -H "Content-Type: application/json" \
             -H "X-CSRF-Token: $CSRF" \
             -d '{"name":"PG Integration Test","url":"https://example.com"}')
-          echo "$PROJ" | grep -q '"name":"PG Integration Test"' && echo "✅ POST /api/projects OK (PostgreSQL)"
+          echo "$PROJ" | grep -q '"name":"PG Integration Test"' && echo "✅ POST /api/v1/projects OK (PostgreSQL)"
 
           # Verify logout (tests token revocation via Redis)
-          curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/logout \
+          curl -sf -b "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/auth/logout \
             -H "X-CSRF-Token: $CSRF" \
-            | grep -q "Signed out" && echo "✅ POST /api/auth/logout OK (Redis revocation)"
+            | grep -q "Signed out" && echo "✅ POST /api/v1/auth/logout OK (Redis revocation)"
 
           # Verify the token is revoked (should get 401)
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE_JAR" http://localhost:3001/api/dashboard)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE_JAR" http://localhost:3001/api/v1/dashboard)
           [ "$HTTP_CODE" = "401" ] && echo "✅ Token revoked — 401 after logout (Redis)" || echo "❌ Expected 401, got $HTTP_CODE"
 
           kill $SERVER_PID
@@ -330,19 +332,19 @@ jobs:
             sleep 2
           done
 
-          # Register + login (cookie-based auth)
+          # Register + login (cookie-based auth, INF-005: /api/v1/)
           COOKIE_JAR=$(mktemp)
-          curl -sf -X POST http://localhost:3001/api/auth/register \
+          curl -sf -X POST http://localhost:3001/api/v1/auth/register \
             -H "Content-Type: application/json" \
             -d '{"name":"CI Bot","email":"ci@test.local","password":"CiTestPass123!"}'
 
-          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/auth/login \
+          curl -sf -c "$COOKIE_JAR" -X POST http://localhost:3001/api/v1/auth/login \
             -H "Content-Type: application/json" \
             -d '{"email":"ci@test.local","password":"CiTestPass123!"}' > /dev/null
 
-          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/dashboard \
+          curl -sf -b "$COOKIE_JAR" http://localhost:3001/api/v1/dashboard \
             | grep -q "totalProjects" \
-            && echo "✅ /api/dashboard OK" \
+            && echo "✅ /api/v1/dashboard OK" \
             || (docker logs sentri-ci && exit 1)
 
           docker stop sentri-ci

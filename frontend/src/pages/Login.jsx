@@ -104,7 +104,7 @@ export default function Login() {
   async function handleVerifyToken(token) {
     setLoading(true); setError(""); setSuccess("");
     try {
-      const res = await fetch(`${API_BASE}/api/auth/verify?token=${encodeURIComponent(token)}`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/api/v1/auth/verify?token=${encodeURIComponent(token)}`, { credentials: "include" });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Verification failed");
       setSuccess(data.message || "Email verified successfully! You can now sign in.");
@@ -137,7 +137,7 @@ export default function Login() {
       if (!returnedState || returnedState !== savedState) {
         throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
       }
-      const res = await fetch(`${API_BASE}/api/auth/${provider}/callback?code=${code}`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/api/v1/auth/${provider}/callback?code=${code}`, { credentials: "include" });
       const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "OAuth sign-in failed");
       login(data.user);
@@ -172,7 +172,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const endpoint = mode === "login" ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/register`;
+      const endpoint = mode === "login" ? `${API_BASE}/api/v1/auth/login` : `${API_BASE}/api/v1/auth/register`;
       const body = mode === "login" ? { email, password } : { name, email, password };
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
       const data = await parseJsonResponse(res);
