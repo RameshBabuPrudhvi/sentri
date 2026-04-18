@@ -457,13 +457,13 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-### DIF-016 — Step-level timing waterfall 🔵 Medium
+### DIF-016 — Step-level timing and per-step screenshots 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
-**Problem:** Test results show pass/fail per test but not a timeline of how long each step took. The most common debugging question — "where is my test slow?" — requires reading raw logs. Step timing data is not currently collected.
+**Problem:** Test results show pass/fail per test but not a timeline of how long each step took. The most common debugging question — "where is my test slow?" — requires reading raw logs. Step timing data is not currently collected. Additionally, clicking different steps in StepResultsView always shows the same end-of-test screenshot — users cannot see what the page looked like at each step.
 
-**Fix:** Record `{ step, durationMs, startedAt }` for each step in `codeExecutor.js` and store as `stepTimings` on the test result. Render as a horizontal waterfall bar chart in `StepResultsView.jsx`.
+**Fix:** Inject `await __captureStep(N)` calls after each `// Step N:` comment in the generated code. Each capture records a screenshot and timing data (`{ step, durationMs, completedAt }`). StepResultsView shows the per-step screenshot when a step is clicked (falls back to the final screenshot for tests without step markers). Real per-step timing replaces the approximate linear interpolation.
 
 **Files to change:**
 - `backend/src/runner/executeTest.js` — record step start/end timestamps

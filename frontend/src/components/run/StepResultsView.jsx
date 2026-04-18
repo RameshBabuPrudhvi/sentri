@@ -724,25 +724,42 @@ export default function StepResultsView({ result, run, onBack }) {
                       {step}
                     </div>
 
-                    {/* Timestamp (derived from durationMs / runTimestamp) */}
-                    {result?.durationMs && stepStatus !== "pending" && (
-                      <div
-                        style={{
-                          fontSize: "0.65rem",
-                          color: "var(--text3)",
-                          paddingLeft: 30,
-                          marginTop: 4,
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {/* Show approximate time per step */}
-                        ~{fmtMs(
-                          Math.round(
-                            (result.durationMs / steps.length) * (i + 1)
-                          )
-                        )}
-                      </div>
-                    )}
+                    {/* Timestamp — use real per-step timing when available (DIF-016) */}
+                    {stepStatus !== "pending" && (() => {
+                      const realTiming = result?.stepTimings?.find((t) => t.step === i + 1);
+                      if (realTiming) {
+                        return (
+                          <div
+                            style={{
+                              fontSize: "0.65rem",
+                              color: "var(--text3)",
+                              paddingLeft: 30,
+                              marginTop: 4,
+                              fontFamily: "var(--font-mono)",
+                            }}
+                          >
+                            {fmtMs(realTiming.durationMs)}
+                          </div>
+                        );
+                      }
+                      // Fallback: approximate time per step
+                      if (result?.durationMs) {
+                        return (
+                          <div
+                            style={{
+                              fontSize: "0.65rem",
+                              color: "var(--text3)",
+                              paddingLeft: 30,
+                              marginTop: 4,
+                              fontFamily: "var(--font-mono)",
+                            }}
+                          >
+                            ~{fmtMs(Math.round((result.durationMs / steps.length) * (i + 1)))}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
                     {/* Error inline for the failed step */}
                     {stepStatus === "failed" && result?.error && (
@@ -901,8 +918,15 @@ export default function StepResultsView({ result, run, onBack }) {
             )}
 
             {/* 📸 SCREENSHOT / 🔌 API RESULT */}
-            {activeTab === "screenshot" && (
-              isApi ? (
+            {activeTab === "screenshot" && (() => {
+              // DIF-016: Per-step screenshot — find the capture for the active step
+              const stepCapture = result?.stepCaptures?.find(
+                (c) => c.step === activeStepIdx + 1
+              );
+              const activeScreenshot = stepCapture?.screenshot || result?.screenshot;
+              const activeBoxes = stepCapture ? [] : (result?.boundingBoxes || []);
+
+              return isApi ? (
                 <div style={{
                   borderRadius: 10, overflow: "hidden",
                   border: "1px solid var(--border)",
@@ -1039,11 +1063,11 @@ export default function StepResultsView({ result, run, onBack }) {
                     stepStatuses[activeStepIdx] === "running"
                   }
                 >
-                  {result?.screenshot ? (
+                  {activeScreenshot ? (
                     <OverlayCanvas
-                      base64={result.screenshot}
-                      boxes={result.boundingBoxes || []}
-                      status={result.status}
+                      base64={activeScreenshot}
+                      boxes={activeBoxes}
+                      status={stepCapture ? stepStatuses[activeStepIdx] : result.status}
                     />
                   ) : (
                     <div
@@ -1068,8 +1092,8 @@ export default function StepResultsView({ result, run, onBack }) {
                     </div>
                   )}
                 </BrowserChrome>
-              )
-            )}
+              );
+            })()}
 
             {/* 🌐 NETWORK */}
             {activeTab === "network" && (

@@ -133,15 +133,20 @@ export async function captureDomSnapshot(page) {
 }
 
 /**
- * captureScreenshot(page, runId, stepIndex, { failed }) → { base64, artifactPath }
+ * captureScreenshot(page, runId, stepIndex, opts) → { base64, artifactPath }
  *
  * Takes a PNG screenshot, writes it to disk, and returns both the base64
  * string (for SSE) and the artifact path (for the DB).
  *
- * @param {boolean} failed — appends "-fail" to the filename when true
+ * @param {Object}  page
+ * @param {string}  runId
+ * @param {number}  stepIndex    — test index within the run
+ * @param {Object}  [opts]
+ * @param {boolean} [opts.failed]     — appends "-fail" to the filename
+ * @param {number}  [opts.stepNumber] — per-step capture (DIF-016): appends "-s{N}" to the filename
  */
-export async function captureScreenshot(page, runId, stepIndex, { failed = false } = {}) {
-  const suffix = failed ? "-fail" : "";
+export async function captureScreenshot(page, runId, stepIndex, { failed = false, stepNumber } = {}) {
+  const suffix = failed ? "-fail" : stepNumber != null ? `-s${stepNumber}` : "";
   const shotName = `${runId}-step${stepIndex}${suffix}.png`;
   const shotPath = path.join(SHOTS_DIR, shotName);
   const buf = await page.screenshot({ type: "png", fullPage: false });

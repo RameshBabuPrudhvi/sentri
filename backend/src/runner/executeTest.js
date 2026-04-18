@@ -251,6 +251,8 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     consoleLogs: [],
     domSnapshot: null,
     boundingBoxes: [],
+    stepCaptures: [],   // DIF-016: per-step screenshots
+    stepTimings: [],    // DIF-016: per-step timing data
   };
 
   const start = Date.now();
@@ -290,8 +292,19 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
         const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
         const healingHints = getHealingHistoryForTest(healingScopeId);
-        const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
+        const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints, {
+          onStepCapture: async (stepNumber, _page) => {
+            try {
+              const shot = await captureScreenshot(_page, runId, stepIndex, { stepNumber });
+              return { screenshot: shot.base64, screenshotPath: shot.artifactPath };
+            } catch { return null; }
+          },
+        });
         persistHealingEvents(healingScopeId, codeResult.healingEvents);
+
+        // Collect per-step captures and timings from the instrumented run
+        result.stepCaptures = codeResult.stepCaptures || [];
+        result.stepTimings = codeResult.stepTimings || [];
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -342,6 +355,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
     persistHealingEvents(healingScopeId, err.__healingEvents);
+
+    // Collect any per-step captures/timings gathered before the failure
+    result.stepCaptures = err.__stepCaptures || [];
+    result.stepTimings = err.__stepTimings || [];
 
     // Screenshot the failure state
     try {

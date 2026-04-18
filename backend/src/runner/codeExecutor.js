@@ -29,7 +29,7 @@
  * keys), use worker_threads with `env: {}` — see NEXT_STEPS.md S1-02.
  *
  * Exports:
- *   runGeneratedCode(page, context, playwrightCode, expect, healingHints)
+ *   runGeneratedCode(page, context, playwrightCode, expect, healingHints, { onStepCapture? })
  *   runApiTestCode(playwrightCode, expect, { signal? })
  *   getExpect()
  */
@@ -203,16 +203,70 @@ async function runInSandbox(code, exposed, filename = "generated-test.js") {
 }
 
 /**
- * runGeneratedCode(page, context, playwrightCode, expect, healingHints)
+ * Inject `await __captureStep(N)` calls after each `// Step N:` comment in the
+ * test body so we capture a screenshot + timing after each logical step.
+ *
+ * If the code has no `// Step N:` comments (older tests, manual code), the
+ * original code is returned unchanged — the caller falls back to a single
+ * end-of-test screenshot.
+ *
+ * @param {string} code — cleaned test body
+ * @returns {string} instrumented code
+ */
+function injectStepCaptures(code) {
+  // Match "// Step N:" with optional trailing text, case-insensitive
+  const stepPattern = /^(\s*\/\/\s*Step\s+(\d+)\s*:.*)$/gmi;
+  let hasSteps = false;
+
+  // Strategy: after each block of code belonging to a step (i.e. just before
+  // the NEXT "// Step N:" comment or end-of-code), insert a capture call.
+  // We split on step boundaries and reassemble with capture calls.
+  const lines = code.split("\n");
+  const result = [];
+  let currentStep = null;
+
+  for (const line of lines) {
+    const match = line.match(/^\s*\/\/\s*Step\s+(\d+)\s*:/i);
+    if (match) {
+      // Before starting a new step, capture the previous step (if any)
+      if (currentStep !== null) {
+        result.push(`      await __captureStep(${currentStep});`);
+        hasSteps = true;
+      }
+      currentStep = parseInt(match[1], 10);
+    }
+    result.push(line);
+  }
+  // Capture the last step
+  if (currentStep !== null) {
+    result.push(`      await __captureStep(${currentStep});`);
+    hasSteps = true;
+  }
+
+  return hasSteps ? result.join("\n") : code;
+}
+
+/**
+ * runGeneratedCode(page, context, playwrightCode, expect, healingHints, opts)
  *
  * Dynamically executes the AI-generated test body against the live page.
- * Returns { passed: true, healingEvents: [...] } or throws with the error.
+ * Returns { passed: true, healingEvents: [...], stepCaptures: [...] } or throws.
  *
  * healingHints is an optional map of "action::label" → strategyIndex from
  * previous runs, injected into the runtime helpers so the winning strategy
  * is tried first (adaptive self-healing).
+ *
+ * @param {Object}   page
+ * @param {Object}   context
+ * @param {string}   playwrightCode
+ * @param {Function} expect
+ * @param {Object}   [healingHints]
+ * @param {Object}   [opts]
+ * @param {Function} [opts.onStepCapture] — async (stepNumber, page) => captureData.
+ *   Called after each `// Step N:` block completes. Should return a serialisable
+ *   object (e.g. { screenshot, artifactPath }) or null. Errors are swallowed.
  */
-export async function runGeneratedCode(page, context, playwrightCode, expect, healingHints) {
+export async function runGeneratedCode(page, context, playwrightCode, expect, healingHints, opts = {}) {
   const body = extractTestBody(playwrightCode);
   if (!body) {
     throw new Error("Could not parse test body from generated code");
@@ -223,7 +277,33 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       patchNetworkIdle(stripPlaywrightImports(body))
     )
   );
+
+  // Inject per-step screenshot capture points
+  const instrumented = injectStepCaptures(cleaned);
+
   const helpers = getSelfHealingHelperCode(healingHints);
+
+  // Step capture state — collected by __captureStep inside the sandbox,
+  // populated by the onStepCapture callback provided by executeTest.
+  const stepCaptures = [];
+  const stepTimings = [];
+  let lastStepTime = Date.now();
+
+  // The __captureStep function is injected into the sandbox context.
+  // It records timing and calls the external onStepCapture callback.
+  const __captureStep = async (stepNumber) => {
+    const now = Date.now();
+    const durationMs = now - lastStepTime;
+    stepTimings.push({ step: stepNumber, durationMs, completedAt: now });
+    lastStepTime = now;
+
+    if (opts.onStepCapture) {
+      try {
+        const capture = await opts.onStepCapture(stepNumber, page);
+        if (capture) stepCaptures.push({ step: stepNumber, ...capture });
+      } catch { /* swallow — step capture must never fail the test */ }
+    }
+  };
 
   // Build the code string that will run inside the vm sandbox.
   // The sandbox context provides page, context, expect as globals.
@@ -238,7 +318,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       const request = undefined;
       let __testError = null;
       try {
-        ${cleaned}
+        ${instrumented}
       } catch (e) {
         __testError = e;
       }
@@ -253,10 +333,12 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   `;
 
   try {
-    const result = await runInSandbox(code, { page, context, expect }, "browser-test.js");
-    return { passed: true, healingEvents: result?.__healingEvents || [] };
+    const result = await runInSandbox(code, { page, context, expect, __captureStep }, "browser-test.js");
+    return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
+    err.__stepCaptures = stepCaptures;
+    err.__stepTimings = stepTimings;
     throw err;
   }
 }
