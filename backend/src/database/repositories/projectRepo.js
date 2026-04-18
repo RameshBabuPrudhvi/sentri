@@ -5,6 +5,8 @@
  * All read queries filter `WHERE deletedAt IS NULL` by default.
  * Hard deletes are replaced with soft-deletes: `deletedAt = datetime('now')`.
  * Use {@link getDeletedAll} / {@link restore} for recycle-bin operations.
+ * Use {@link getAllIncludeDeleted} for data-management cleanup that must
+ * span both live and soft-deleted projects.
  */
 
 import { getDatabase } from "../sqlite.js";
@@ -159,6 +161,17 @@ export function deleteById(id) {
 export function hardDeleteById(id) {
   const db = getDatabase();
   db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+}
+
+/**
+ * Get all projects (live + soft-deleted) for a workspace.
+ * Used by data-management cleanup endpoints that must clear derived data
+ * across all projects regardless of soft-delete status.
+ * @param {string} workspaceId
+ * @returns {Object[]}
+ */
+export function getAllIncludeDeleted(workspaceId) {
+  return [...getAll(workspaceId), ...getDeletedAll(workspaceId)];
 }
 
 /**

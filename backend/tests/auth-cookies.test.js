@@ -16,16 +16,19 @@
 import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
+import workspacesRouter from "../src/routes/workspaces.js";
+import * as workspaceRepo from "../src/database/repositories/workspaceRepo.js";
 import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app } = t;
+const { app, workspaceScope } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, projectsRouter);
+  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  app.use("/api/workspaces", requireAuth, workspaceScope, workspacesRouter);
   mounted = true;
 }
 
@@ -85,17 +88,49 @@ async function main() {
     assert.equal(res.status, 200);
     const me = await res.json();
     assert.equal(me.email, email, "/me should return the authenticated user");
+    const originalWorkspaceId = me.workspaceId;
+
+    // ── Workspace switch should persist across /me and /refresh ─────────────
+    const secondaryWorkspace = workspaceRepo.create({
+      name: "Secondary Workspace",
+      slug: `secondary-${Date.now()}`,
+      ownerId: me.id,
+    });
+
+    res = await fetch(`${base}/api/workspaces/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookieHeader, "X-CSRF-Token": csrfCookie.value },
+      body: JSON.stringify({ workspaceId: secondaryWorkspace.id }),
+    });
+    assert.equal(res.status, 200, "Switch should succeed for owned workspace");
+    const switchCookies = parseCookies(res);
+    // Carry forward the _csrf cookie from login (switch response only sets auth cookies)
+    if (csrfCookie && !switchCookies._csrf) switchCookies._csrf = csrfCookie;
+    const switchedCookieHeader = buildCookieHeader(switchCookies);
+    const switchedToken = switchCookies.access_token.value;
+    const switchedUser = (await res.json()).user;
+    assert.equal(switchedUser.workspaceId, secondaryWorkspace.id, "Switch response should reflect target workspace");
+
+    // /me should reflect workspace from the switched token
+    res = await fetch(`${base}/api/auth/me`, {
+      headers: { Cookie: switchedCookieHeader },
+    });
+    assert.equal(res.status, 200);
+    const switchedMe = await res.json();
+    assert.equal(switchedMe.workspaceId, secondaryWorkspace.id, "/me should preserve switched workspace");
+    assert.notEqual(switchedMe.workspaceId, originalWorkspaceId, "Switched workspace should differ from original");
 
     // ── CSRF: GET should work without X-CSRF-Token ────────────────────────
+    // Use switchedCookieHeader — the original token was revoked by workspace switch.
     res = await fetch(`${base}/api/projects`, {
-      headers: { Cookie: cookieHeader },
+      headers: { Cookie: switchedCookieHeader },
     });
     assert.equal(res.status, 200, "GET should not require CSRF token");
 
     // ── CSRF: POST should fail without X-CSRF-Token ───────────────────────
     res = await fetch(`${base}/api/projects`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookieHeader },
+      headers: { "Content-Type": "application/json", Cookie: switchedCookieHeader },
       body: JSON.stringify({ name: "No CSRF", url: "https://example.com" }),
     });
     assert.equal(res.status, 403, "POST without CSRF token should be 403");
@@ -107,7 +142,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieHeader,
+        Cookie: switchedCookieHeader,
         "X-CSRF-Token": csrfCookie.value,
       },
       body: JSON.stringify({ name: "With CSRF", url: "https://example.com" }),
@@ -119,7 +154,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieHeader,
+        Cookie: switchedCookieHeader,
         "X-CSRF-Token": "wrong-token",
       },
       body: JSON.stringify({ name: "Bad CSRF", url: "https://example.com" }),
@@ -138,18 +173,19 @@ async function main() {
     // Refresh is CSRF-exempt, so no X-CSRF-Token needed
     res = await fetch(`${base}/api/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookieHeader },
+      headers: { "Content-Type": "application/json", Cookie: switchedCookieHeader },
     });
     assert.equal(res.status, 200, "Refresh should succeed with valid cookie");
     const refreshCookies = parseCookies(res);
     assert.ok(refreshCookies.access_token, "Refresh should set new access_token cookie");
-    assert.notEqual(refreshCookies.access_token.value, token, "Refresh should issue a different token");
+    assert.notEqual(refreshCookies.access_token.value, switchedToken, "Refresh should issue a different token");
     const refreshBody = await res.json();
     assert.ok(refreshBody.user, "Refresh should return user");
+    assert.equal(refreshBody.user.workspaceId, secondaryWorkspace.id, "Refresh response should preserve switched workspace");
 
-    // Old token should be revoked
+    // Old (switched) token should be revoked
     res = await fetch(`${base}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${switchedToken}` },
     });
     assert.equal(res.status, 401, "Old token should be revoked after refresh");
 

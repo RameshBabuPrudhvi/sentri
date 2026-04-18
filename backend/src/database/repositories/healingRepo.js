@@ -157,3 +157,39 @@ export function countSuccesses() {
     "SELECT COUNT(*) as cnt FROM healing_history WHERE strategyIndex >= 0 AND succeededAt IS NOT NULL"
   ).get().cnt;
 }
+
+/**
+ * Count healing entries for specific test IDs.
+ * @param {string[]} testIds
+ * @returns {number}
+ */
+export function countByTestIds(testIds) {
+  if (!testIds || testIds.length === 0) return 0;
+  const db = getDatabase();
+  const clauses = [];
+  const params = [];
+  for (const tid of testIds) {
+    clauses.push("key LIKE ?", "key LIKE ?");
+    params.push(`${tid}::%`, `${tid}@v%::%`);
+  }
+  return db.prepare(`SELECT COUNT(*) as cnt FROM healing_history WHERE ${clauses.join(" OR ")}`).get(...params).cnt;
+}
+
+/**
+ * Count successful healing entries for specific test IDs.
+ * @param {string[]} testIds
+ * @returns {number}
+ */
+export function countSuccessesByTestIds(testIds) {
+  if (!testIds || testIds.length === 0) return 0;
+  const db = getDatabase();
+  const clauses = [];
+  const params = [];
+  for (const tid of testIds) {
+    clauses.push("key LIKE ?", "key LIKE ?");
+    params.push(`${tid}::%`, `${tid}@v%::%`);
+  }
+  return db.prepare(
+    `SELECT COUNT(*) as cnt FROM healing_history WHERE (${clauses.join(" OR ")}) AND strategyIndex >= 0 AND succeededAt IS NOT NULL`
+  ).get(...params).cnt;
+}

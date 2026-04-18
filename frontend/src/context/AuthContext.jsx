@@ -70,6 +70,7 @@ function sanitiseUser(u) {
     workspaceId: u.workspaceId || null,
     workspaceName: u.workspaceName || null,
     workspaceRole: u.workspaceRole || null,
+    workspaces: Array.isArray(u.workspaces) ? u.workspaces : null,
   };
 }
 

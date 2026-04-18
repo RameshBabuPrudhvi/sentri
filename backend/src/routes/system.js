@@ -2,16 +2,18 @@
  * @module routes/system
  * @description System info, activities, data management, and URL reachability. Mounted at `/api`.
  *
+ * All queries are scoped to the authenticated user's workspace (ACL-001).
+ *
  * ### Endpoints
- * | Method   | Path                     | Description                                |
- * |----------|--------------------------|--------------------------------------------|
- * | `GET`    | `/api/activities`        | Activity log (filterable by type, project)  |
- * | `POST`   | `/api/test-connection`   | Verify a URL is reachable (SSRF-protected)  |
- * | `GET`    | `/api/system`            | Uptime, Node/Playwright versions, DB counts |
- * | `POST`   | `/api/system/client-error` | Log a frontend crash report (from ErrorBoundary) |
- * | `DELETE` | `/api/data/runs`         | Clear all run history                       |
- * | `DELETE` | `/api/data/activities`   | Clear activity log                          |
- * | `DELETE` | `/api/data/healing`      | Clear self-healing history                  |
+ * | Method   | Path                       | Description                                | Min Role  |
+ * |----------|----------------------------|--------------------------------------------|-----------|
+ * | `GET`    | `/api/activities`          | Activity log (filterable by type, project)  | viewer    |
+ * | `POST`   | `/api/test-connection`     | Verify a URL is reachable (SSRF-protected)  | qa_lead   |
+ * | `GET`    | `/api/system`              | Uptime, Node/Playwright versions, DB counts | viewer    |
+ * | `POST`   | `/api/system/client-error` | Log a frontend crash report                 | viewer    |
+ * | `DELETE` | `/api/data/runs`           | Clear all run history (incl. soft-deleted)  | admin     |
+ * | `DELETE` | `/api/data/activities`     | Clear activity log                          | admin     |
+ * | `DELETE` | `/api/data/healing`        | Clear self-healing history                  | admin     |
  */
 
 import { Router } from "express";
@@ -24,6 +26,7 @@ import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { activeTaskCount } from "../scheduler.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
@@ -34,6 +37,7 @@ router.get("/activities", (req, res) => {
   const activities = activityRepo.getFiltered({
     type: req.query.type || undefined,
     projectId: req.query.projectId || undefined,
+    workspaceId: req.workspaceId,
     limit,
   });
   res.json(activities);
@@ -41,7 +45,7 @@ router.get("/activities", (req, res) => {
 
 // ─── URL reachability test ────────────────────────────────────────────────────
 
-router.post("/test-connection", async (req, res) => {
+router.post("/test-connection", requireRole("qa_lead"), async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: "url is required" });
   let parsed;
@@ -124,13 +128,18 @@ router.get("/system", async (req, res) => {
     } catch { /* ignore */ }
   }
 
-  const projectCount   = projectRepo.count();
-  const testCount      = testRepo.count();
-  const runCount       = runRepo.count();
-  const activityCount  = activityRepo.count();
-  const healingEntries = healingRepo.count();
-  const approvedTests  = testRepo.countApproved();
-  const draftTests     = testRepo.countDraft();
+  const projects = projectRepo.getAll(req.workspaceId);
+  const projectIds = projects.map((p) => p.id);
+  const tests = testRepo.getAllByProjectIds(projectIds);
+  const testIds = tests.map((t) => t.id);
+
+  const projectCount = projects.length;
+  const testCount = tests.length;
+  const runCount = runRepo.countByProjectIds(projectIds);
+  const activityCount = activityRepo.countFiltered({ workspaceId: req.workspaceId });
+  const healingEntries = healingRepo.countByTestIds(testIds);
+  const approvedTests = tests.filter((t) => t.reviewStatus === "approved").length;
+  const draftTests = tests.filter((t) => (t.reviewStatus || "draft") === "draft").length;
 
   res.json({
     projects:     projectCount,
@@ -166,19 +175,23 @@ router.post("/system/client-error", (req, res) => {
 
 // ─── Data Management ──────────────────────────────────────────────────────────
 
-router.delete("/data/runs", (req, res) => {
-  const count = runRepo.hardClearAll();
+router.delete("/data/runs", requireRole("admin"), (req, res) => {
+  const projects = projectRepo.getAllIncludeDeleted(req.workspaceId);
+  const count = projects.reduce((sum, p) => sum + runRepo.hardDeleteByProjectId(p.id).length, 0);
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} run(s)` });
   res.json({ ok: true, cleared: count });
 });
 
-router.delete("/data/activities", (req, res) => {
-  const count = activityRepo.clearAll();
+router.delete("/data/activities", requireRole("admin"), (req, res) => {
+  const count = activityRepo.clearByWorkspaceId(req.workspaceId);
   res.json({ ok: true, cleared: count });
 });
 
-router.delete("/data/healing", (req, res) => {
-  const count = healingRepo.clearAll();
+router.delete("/data/healing", requireRole("admin"), (req, res) => {
+  const projectIds = projectRepo.getAllIncludeDeleted(req.workspaceId).map((p) => p.id);
+  const testIds = testRepo.getAllIdsByProjectIdsIncludeDeleted(projectIds);
+  const count = healingRepo.countByTestIds(testIds);
+  healingRepo.deleteByTestIds(testIds);
   logActivity({ ...actor(req), type: "settings.update", detail: `Cleared ${count} healing history entries` });
   res.json({ ok: true, cleared: count });
 });

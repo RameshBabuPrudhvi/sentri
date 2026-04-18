@@ -20,6 +20,7 @@ import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
 import { actor } from "../utils/actor.js";
+import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
 
@@ -137,9 +138,11 @@ function computeDiffSummary(before, after) {
 
 // ── POST /api/tests/:testId/fix — SSE stream of AI-generated fix ─────────────
 
-router.post("/tests/:testId/fix", async (req, res) => {
+router.post("/tests/:testId/fix", requireRole("qa_lead"), async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "Test not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "Test not found" });
 
   if (!test.playwrightCode) {
     return res.status(400).json({ error: "Test has no Playwright code to fix." });
@@ -151,7 +154,6 @@ router.post("/tests/:testId/fix", async (req, res) => {
     });
   }
 
-  const project = projectRepo.getById(test.projectId) || null;
   const failureResult = runRepo.findLatestResultForTest(test.id);
 
   const userPrompt = buildUserPrompt(test, failureResult, project);
@@ -261,9 +263,11 @@ router.post("/tests/:testId/fix", async (req, res) => {
 
 // ── POST /api/tests/:testId/apply-fix — persist the AI-generated fix ─────────
 
-router.post("/tests/:testId/apply-fix", (req, res) => {
+router.post("/tests/:testId/apply-fix", requireRole("qa_lead"), (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "Test not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "Test not found" });
 
   const { code } = req.body;
   if (!code || typeof code !== "string" || !code.trim()) {
@@ -297,7 +301,6 @@ router.post("/tests/:testId/apply-fix", (req, res) => {
 
   testRepo.update(test.id, updates);
 
-  const project = projectRepo.getById(test.projectId);
   logActivity({ ...actor(req),
     type: "test.ai_fix",
     projectId: test.projectId,

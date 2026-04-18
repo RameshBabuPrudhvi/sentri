@@ -107,6 +107,69 @@ export function getAllByProjectIds(projectIds) {
 }
 
 /**
+ * Get all test IDs (including soft-deleted) for the given project IDs.
+ * Used by data-management cleanup endpoints that need to clear derived data
+ * (e.g. healing history) for ALL tests, not just live ones.
+ * @param {string[]} projectIds
+ * @returns {string[]}
+ */
+export function getAllIdsByProjectIdsIncludeDeleted(projectIds) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT id FROM tests WHERE projectId IN (${placeholders})`
+  ).all(...projectIds).map((r) => r.id);
+}
+
+/**
+ * Count non-deleted tests for a set of project IDs.
+ * @param {string[]} projectIds
+ * @returns {number}
+ */
+export function countByProjectIds(projectIds) {
+  if (!projectIds || projectIds.length === 0) return 0;
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT COUNT(*) as cnt FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL`
+  ).get(...projectIds).cnt;
+}
+
+/**
+ * Count tests by review status for a set of project IDs.
+ * @param {string[]} projectIds
+ * @param {"approved"|"draft"} reviewStatus
+ * @returns {number}
+ */
+function countByProjectIdsAndStatus(projectIds, reviewStatus) {
+  if (!projectIds || projectIds.length === 0) return 0;
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT COUNT(*) as cnt FROM tests WHERE projectId IN (${placeholders}) AND deletedAt IS NULL AND reviewStatus = ?`
+  ).get(...projectIds, reviewStatus).cnt;
+}
+
+/**
+ * Count approved tests for a set of project IDs.
+ * @param {string[]} projectIds
+ * @returns {number}
+ */
+export function countApprovedByProjectIds(projectIds) {
+  return countByProjectIdsAndStatus(projectIds, "approved");
+}
+
+/**
+ * Count draft tests for a set of project IDs.
+ * @param {string[]} projectIds
+ * @returns {number}
+ */
+export function countDraftByProjectIds(projectIds) {
+  return countByProjectIdsAndStatus(projectIds, "draft");
+}
+
+/**
  * Get all non-deleted tests belonging to the given project IDs with pagination.
  * Used by the workspace-scoped GET /api/tests endpoint (ACL-001).
  * @param {string[]} projectIds

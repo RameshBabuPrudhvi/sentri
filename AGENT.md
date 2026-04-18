@@ -21,13 +21,13 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, webhookTokenRepo, scheduleRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, webhookTokenRepo, scheduleRepo, workspaceRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
     testRunner.js          Parallel test execution orchestrator
-    middleware/            Express middleware (appSetup, authenticate, CORS, Helmet)
-    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin, trigger)
+    middleware/            Express middleware (appSetup, authenticate, workspaceScope, requireRole, CORS, Helmet)
+    routes/                REST endpoints (auth, projects, tests, runs, sse, settings, dashboard, system, chat, recycleBin, trigger, workspaces)
     pipeline/              8-stage AI generation pipeline
     runner/                Per-test execution (code parsing, executor, screencast, page capture)
     utils/                 ID generator, logging, abort helpers, encryption, validation
@@ -96,6 +96,39 @@ export async function doThing(name, opts) { … }
 - Document `@typedef` for all non-trivial object shapes.
 - Internal helpers that are not exported do not need JSDoc but benefit from a brief inline comment.
 
+#### JSDoc type syntax rules
+
+**This project uses JSDoc (not TypeScript).** The CI pipeline runs `jsdoc` to generate documentation, and it will **fail** on TypeScript-only syntax. The most common mistake is using TypeScript-style optional properties (`prop?: type`) in record types — JSDoc does not support `?:`.
+
+| Need | ✅ JSDoc syntax | ❌ TypeScript syntax (breaks CI) |
+|---|---|---|
+| Optional param | `@param {string} [name]` | `@param {string?} name` |
+| Optional property in record | Use `@typedef` with `@property {string} [prop]` | `{ prop?: string }` inline |
+| Nullable type | `{string\|null}` or `{?string}` | `{string?}` |
+| Union type | `{string\|number}` | `{string \| number}` (works but prefer `\|`) |
+| Complex return shape | Define a `@typedef` and reference it in `@returns` | Inline `{{ prop?: type }}` record |
+
+**When a return type has optional properties, always use `@typedef`:**
+
+```js
+// ✅ Correct — @typedef with optional properties using [brackets]
+/**
+ * @typedef {Object} UserResponse
+ * @property {string}      id
+ * @property {string}      [workspaceId]   - Present when user has workspaces.
+ * @property {string|null} avatar
+ */
+
+/** @returns {UserResponse} */
+export function buildUserResponse(user) { … }
+
+// ❌ Wrong — TypeScript optional syntax breaks jsdoc parser
+/** @returns {{ id: string, workspaceId?: string, avatar: string | null }} */
+export function buildUserResponse(user) { … }
+```
+
+Simple record types without optional properties are fine inline: `@returns {{ id: string, name: string }}`.
+
 ### DRY — No Duplication
 
 Before writing new code, check whether a shared utility, component, or CSS class already exists. Duplicating logic that belongs in a shared module is a common agent mistake.
@@ -115,6 +148,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `emailSender.js` | `sendEmail()`, `sendVerificationEmail()`, `getTransportName()` | Transactional email (Resend / SMTP / console fallback) |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
+| `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -179,7 +213,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 
 | Module | What it provides | When to use |
 |---|---|---|
-| `test-base.js` | `createTestContext()` → `{ app, req, resetDb, setupEnv, registerAndLogin, extractCookie, parseCookies, buildCookieHeader, decodeJwtPayload, createTestRunner, getDatabase }` | Every integration test that needs HTTP requests, auth, or DB access |
+| `test-base.js` | `createTestContext()` → `{ app, req, workspaceScope, resetDb, setupEnv, registerAndLogin, extractCookie, parseCookies, buildCookieHeader, decodeJwtPayload, createTestRunner, getDatabase }` | Every integration test that needs HTTP requests, auth, or DB access |
 
 **If you need a shared helper** (e.g. `escapeHtml`, `formatDuration`, `debounce`), create it in `frontend/src/utils/<name>.js` and import it. Do not define utility functions locally inside a component file — they will inevitably be needed elsewhere and duplicated.
 
@@ -314,6 +348,8 @@ console.error(`API key: ${apiKey}`);
 - 5xx errors return `{ error: "Internal server error" }` — never leak stack traces to the client.
 - Validate all user-supplied input at the route boundary using `utils/validate.js` before touching the DB.
 - All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware (re-exported from `routes/auth.js`, delegates to `middleware/authenticate.js`). The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use `requireTrigger` from `middleware/authenticate.js` for per-project Bearer token authentication (ENH-011). Both middlewares are produced by the same `authenticate()` strategy factory — see "Authentication Architecture" below.
+- After `requireAuth`, the `workspaceScope` middleware (`middleware/workspaceScope.js`) resolves `req.workspaceId` and `req.userRole` from the database on every request (ACL-001). All entity queries must be scoped to `req.workspaceId`.
+- Mutating routes are further guarded by `requireRole(minimumRole)` from `middleware/requireRole.js` (ACL-002). The role hierarchy is `admin` > `qa_lead` > `viewer`. See the endpoint tables in each route module for per-route minimum roles.
 
 ```js
 // ✅ Route pattern — use repository modules for DB access
@@ -366,7 +402,11 @@ The CSRF middleware in `appSetup.js` skips validation when no `access_token` coo
 | File | Role |
 |---|---|
 | `middleware/authenticate.js` | Strategy definitions, JWT primitives (`signJwt`, `verifyJwt`, `getJwtSecret`), token revocation, `authenticate()` factory |
-| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset, email verification). Imports JWT primitives from `authenticate.js`. Re-exports `requireAuth` as alias for `requireUser`. |
+| `middleware/workspaceScope.js` | Resolves `req.workspaceId` and `req.userRole` from DB on every request (ACL-001). Must run after `requireAuth`. |
+| `middleware/requireRole.js` | `requireRole(minimumRole)` — blocks requests below the required role level (ACL-002) |
+| `routes/auth.js` | Auth **routes** (login, register, OAuth, logout, refresh, password reset, email verification). Exports `setAuthCookie`, `JWT_TTL_SEC`, `EXP_COOKIE` for reuse. Re-exports `requireAuth` as alias for `requireUser`. |
+| `routes/workspaces.js` | Workspace listing, switching, and member management routes (ACL-001, ACL-002) |
+| `utils/authWorkspace.js` | `buildJwtPayload()` / `buildUserResponse()` — shared by `auth.js` and `workspaces.js` |
 | `middleware/appSetup.js` | CSRF middleware — imports `AUTH_COOKIE` from `authenticate.js` for auto-exemption |
 | `routes/trigger.js` | CI/CD trigger routes — uses `requireTrigger` from `authenticate.js` |
 
@@ -383,7 +423,7 @@ Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `prag
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
 - **`db.js` is deprecated** — the file has been emptied. All consumers have been migrated to use repository modules directly. Do not import `getDb()` or `saveDb()` in new code.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -1071,3 +1111,4 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.
 - **Do not duplicate test helpers.** Integration test utilities (`extractCookie`, `resetDb`, `req` with CSRF, `registerAndLogin`, `setupEnv`, `createTestRunner`) live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.
+- **Do not use TypeScript syntax in JSDoc comments.** This project uses plain JSDoc, not TypeScript. The CI pipeline runs `jsdoc` and will **fail** on TS-only syntax. In particular: never use `prop?: type` (optional property) in inline record types — use `@typedef` with `@property {type} [prop]` instead. Never use `type?` for nullable — use `{type|null}` or `{?type}`. See the "JSDoc type syntax rules" section for the full reference.

@@ -7,7 +7,7 @@
  * scoped to the authenticated user's workspace.
  *
  * ### Default workspace
- * On first startup after migration 004, {@link ensureDefaultWorkspace} creates
+ * On first startup after migration 004, {@link ensureDefaultWorkspaces} creates
  * a "Default" workspace for every existing user and backfills `workspaceId`
  * on all orphaned entity rows.  This makes the migration non-breaking for
  * existing single-user deployments.
@@ -41,18 +41,20 @@ export function getBySlug(slug) {
 
 /**
  * Get all workspaces for a user (via workspace_members).
+ * Results are sorted with owned workspaces first, then by creation date.
  * @param {string} userId
- * @returns {Object[]}
+ * @returns {Object[]} Workspace rows augmented with `role` from the membership.
  */
 export function getByUserId(userId) {
   const db = getDatabase();
   return db.prepare(`
-    SELECT w.*, wm.role
+    SELECT w.*, wm.role,
+           CASE WHEN w.ownerId = ? THEN 0 ELSE 1 END AS _sortOwner
     FROM workspaces w
     INNER JOIN workspace_members wm ON wm.workspaceId = w.id
     WHERE wm.userId = ?
-    ORDER BY w.createdAt ASC
-  `).all(userId);
+    ORDER BY _sortOwner ASC, w.createdAt ASC
+   `).all(userId, userId);
 }
 
 /**

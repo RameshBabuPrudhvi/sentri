@@ -174,7 +174,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### ACL-001 — Multi-tenancy: workspace ownership on all entities 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** L | **Source:** Audit
 
 **Problem:** Every authenticated user sees every project, test, and run in the database. There is no workspace, organisation, or team concept. `GET /api/tests` returns all tests to any authenticated user. This is a hard blocker for any commercial deployment — companies must not see each other's test data.
 
@@ -194,7 +194,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### ACL-002 — Role-based access control (Admin / QA Lead / Viewer) 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
 **Problem:** All authenticated users have identical permissions. Admin-only operations (settings, data deletion, user management) are only visually guarded on the frontend — the API accepts them from any authenticated user. Role separation is a hard requirement for any team deployment.
 
@@ -231,16 +231,16 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-### FEA-001 — Slack / email / webhook failure notifications 🟡 High
+### FEA-001 — Teams / email / webhook failure notifications 🟡 High
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive (S2-03)
 
 **Problem:** When a test run completes with failures, there is no outbound notification. Teams must poll the dashboard. With scheduling already live (ENH-006 ✅), this is the other half of autonomous operation — teams need to know immediately when something breaks.
 
-**Fix:** Add a per-project `notification_settings` table (Slack webhook URL, email recipients via Resend/SendGrid, generic webhook URL). On run completion, if `run.failed > 0`, dispatch all configured channels. Slack payload includes pass/fail counts, failing test names, run duration, and a deep link to the run detail page.
+**Fix:** Add a per-project `notification_settings` table (Microsoft Teams incoming webhook URL, email recipients via Resend/SendGrid, generic webhook URL). On run completion, if `run.failed > 0`, dispatch all configured channels. Teams Adaptive Card payload includes pass/fail counts, failing test names, run duration, and a deep link to the run detail page.
 
 **Files to change:**
-- New `backend/src/utils/notifications.js` — Slack / email / generic webhook dispatcher
+- New `backend/src/utils/notifications.js` — Teams / email / generic webhook dispatcher
 - `backend/src/testRunner.js` — call `fireNotifications(run, project)` on completion
 - `backend/src/routes/projects.js` — notification config CRUD endpoints
 - `frontend/src/pages/Settings.jsx` — per-project notification config UI
@@ -935,7 +935,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Problem:** There is no way to extend Sentri without forking the repository. An autonomous platform should expose hooks for custom assertions, custom healing strategies, custom report formats, and custom notification channels. All integration points are currently hardcoded.
 
-**Fix:** Define a plugin interface: `beforeRun`, `afterStep`, `onFailure`, `onHealAttempt`, `onRunComplete`. Load plugins from a configurable `PLUGINS_DIR`. Ship three first-party plugins as reference implementations: custom Slack formatter, custom assertion library, custom HTML report.
+**Fix:** Define a plugin interface: `beforeRun`, `afterStep`, `onFailure`, `onHealAttempt`, `onRunComplete`. Load plugins from a configurable `PLUGINS_DIR`. Ship three first-party plugins as reference implementations: custom Teams notification formatter, custom assertion library, custom HTML report.
 
 **Files to change:**
 - New `backend/src/plugins/pluginLoader.js` — discover and register plugins
@@ -1194,7 +1194,8 @@ The following items have been verified complete against the codebase and are **n
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ❌ → DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ❌ → FEA-001 | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
-| Multi-tenancy / RBAC | ❌ → ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
+<!-- Sentri targets Teams/email/webhook — see FEA-001 -->
+| Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ❌ → DIF-004 | ✅ | ✅ | ✅ | ❌ |
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
@@ -1204,7 +1205,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close first:** FEA-001 · ACL-001/ACL-002 · DIF-001 · DIF-002 · DIF-015 (recorder)
+**Critical gaps to close first:** FEA-001 · DIF-001 · DIF-002 · DIF-015 (recorder)
 
 ---
 
@@ -1214,7 +1215,7 @@ The following items have been verified complete against the codebase and are **n
 |----------|-------|---------|---------|-------|
 | Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | SEC-002, SEC-003 | SEC-004, SEC-005 |
 | Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | INF-003 | INF-004, INF-005 |
-| Access Control | ACL-001–002 | ACL-001, ACL-002 | — | — |
+| Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
 | Platform Features | FEA-001–003 | — | FEA-001 | FEA-002–003 |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
@@ -1223,10 +1224,12 @@ The following items have been verified complete against the codebase and are **n
 **Total active items:** 61 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
-~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ACL-001 (multi-tenancy) · ACL-002 (RBAC)
+~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
 
-**Recommended PR order (remaining):**
-`ACL-001` → `ACL-002` → `INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
+**All blockers resolved.** ✅
+
+**Recommended PR order (next):**
+`INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
 
 **Lowest effort / highest immediate value:**
 INF-005 (S) · DIF-003 (S) · DIF-011 (S) · DIF-014 (S) · AUTO-007 (S) · AUTO-013 (S)

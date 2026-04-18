@@ -14,16 +14,16 @@ import * as runRepo from "../src/database/repositories/runRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app, req } = t;
+const { app, req, workspaceScope } = t;
 
 let mounted = false;
 
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api", requireAuth, dashboardRouter);
-  app.use("/api", requireAuth, settingsRouter);
-  app.use("/api", requireAuth, systemRouter);
+  app.use("/api", requireAuth, workspaceScope, dashboardRouter);
+  app.use("/api", requireAuth, workspaceScope, settingsRouter);
+  app.use("/api", requireAuth, workspaceScope, systemRouter);
   mounted = true;
 }
 
@@ -38,11 +38,12 @@ async function main() {
   const base = `http://127.0.0.1:${port}`;
 
   try {
-    const { token } = await t.registerAndLogin(base, {
+    const { token, payload } = await t.registerAndLogin(base, {
       name: "Integration User",
       email: `integration-${Date.now()}@test.local`,
       password: "Password123!",
     });
+    const workspaceId = payload.workspaceId;
 
     let out = await req(base, "/api/dashboard");
     assert.equal(out.res.status, 401);
@@ -52,6 +53,7 @@ async function main() {
       name: "Coverage App",
       url: "https://example.com",
       createdAt: new Date().toISOString(),
+      workspaceId,
     });
     testRepo.create({
       id: "TC-100",

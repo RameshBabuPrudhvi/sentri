@@ -289,7 +289,7 @@ const _COL_MAP = buildColumnMap([
   // oauth_ids
   "userId",
   // projects
-  "deletedAt",
+  "deletedAt", "workspaceId",
   // tests
   "projectId", "playwrightCode", "playwrightCodePrev", "sourceUrl", "pageTitle",
   "lastResult", "lastRunAt", "qualityScore", "isJourneyTest", "journeyType",
@@ -317,6 +317,10 @@ const _COL_MAP = buildColumnMap([
   "appliedAt", "durationMs",
   // information_schema queries
   "column_name", "data_type",
+  // workspaces (ACL-001)
+  "ownerId",
+  // workspace_members (ACL-001)
+  "joinedAt",
 ]);
 
 /**

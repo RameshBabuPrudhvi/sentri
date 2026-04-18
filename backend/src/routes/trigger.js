@@ -305,6 +305,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
     type: "test_run.start",
     projectId: project.id,
     projectName: project.name,
+    workspaceId: project.workspaceId,
     detail: `CI/CD triggered test run — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
@@ -317,6 +318,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
           type: "test_run.complete",
           projectId: project.id,
           projectName: project.name,
+          workspaceId: project.workspaceId,
           detail: `CI/CD run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
       },
@@ -324,6 +326,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
         type: "test_run.fail",
         projectId: project.id,
         projectName: project.name,
+        workspaceId: project.workspaceId,
         detail: `CI/CD run failed: ${classifyError(err, "run").message}`,
       }),
       // Fire optional callback URL with run summary on ANY terminal state

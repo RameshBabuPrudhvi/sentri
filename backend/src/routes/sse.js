@@ -149,8 +149,8 @@ router.get("/runs/:runId/events", (req, res) => {
   const run = runRepo.getById(runId);
   if (!run) return res.status(404).json({ error: "not found" });
 
-  // Verify the run's project exists (future: check user ownership here)
-  const project = projectRepo.getById(run.projectId);
+  // Verify the run belongs to the current workspace (ACL-001)
+  const project = projectRepo.getByIdInWorkspace(run.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
   res.setHeader("Content-Type", "text/event-stream");

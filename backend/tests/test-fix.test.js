@@ -18,7 +18,7 @@ import * as activityRepo from "../src/database/repositories/activityRepo.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
-const { app } = t;
+const { app, workspaceScope } = t;
 // Alias: t.req() returns { res, json }; reqJson is the same thing.
 const reqJson = t.req;
 
@@ -27,7 +27,7 @@ let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
-  app.use("/api", requireAuth, testFixRouter);
+  app.use("/api", requireAuth, workspaceScope, testFixRouter);
   mounted = true;
 }
 
@@ -49,11 +49,12 @@ async function main() {
 
   try {
     // ── Register + login ──────────────────────────────────────────────────
-    const { token } = await t.registerAndLogin(base, {
+    const { token, payload } = await t.registerAndLogin(base, {
       name: "Fix User",
       email: `fix-${Date.now()}@test.local`,
       password: "Password123!",
     });
+    const workspaceId = payload.workspaceId;
 
     // ── Seed test data ────────────────────────────────────────────────────
     projectRepo.create({
@@ -61,6 +62,7 @@ async function main() {
       name: "Fix App",
       url: "https://example.com",
       createdAt: new Date().toISOString(),
+      workspaceId,
     });
 
     testRepo.create({

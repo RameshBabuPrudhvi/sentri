@@ -352,6 +352,10 @@ export const api = {
   // ── Workspace & Members (ACL-001, ACL-002) ───────────────────────────────────
   /** @returns {Promise<Object>} Current workspace details. */
   getWorkspace:      ()              => req("GET",    "/workspaces/current"),
+  /** @returns {Promise<Array>} All workspaces the user belongs to. */
+  getWorkspaces:     ()              => req("GET",    "/workspaces"),
+  /** @param {string} workspaceId — Switch to a different workspace. Returns updated user. */
+  switchWorkspace:   (workspaceId)   => req("POST",   "/workspaces/switch", { workspaceId }),
   /** @param {Object} data - `{ name?, slug? }` */
   updateWorkspace:   (data)          => req("PATCH",  "/workspaces/current", data),
   /** @returns {Promise<Array>} List of workspace members with roles. */

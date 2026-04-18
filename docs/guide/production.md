@@ -24,7 +24,8 @@
 - [ ] Add BullMQ for durable background run execution (INF-003 — requires Redis)
 - [ ] Store videos and screenshots to S3/R2 instead of local disk (MNT-006)
 - [ ] Send Slack/email alerts on test failures (FEA-001)
-- [ ] Add workspace/organisation scoping for multi-tenancy (ACL-001)
+- [x] ~~Workspace/organisation scoping for multi-tenancy~~ — Done (ACL-001). Every entity is scoped to a workspace via `workspaceId`. Workspaces auto-created on first login. Existing data backfilled on startup.
+- [x] ~~Role-based access control~~ — Done (ACL-002). Three roles: Admin / QA Lead / Viewer. `requireRole()` middleware guards all mutating routes. Frontend gates Settings to admins and hides actions for insufficient roles.
 
 ## Security
 

@@ -5,6 +5,8 @@
  * ### Endpoints
  * | Method | Path                                    | Description                   | Min Role |
  * |--------|-----------------------------------------|-------------------------------|----------|
+ * | GET    | `/api/workspaces`                       | List user's workspaces        | viewer   |
+ * | POST   | `/api/workspaces/switch`                | Switch active workspace       | viewer   |
  * | GET    | `/api/workspaces/current`               | Get current workspace info    | viewer   |
  * | PATCH  | `/api/workspaces/current`               | Update workspace name/slug    | admin    |
  * | GET    | `/api/workspaces/current/members`       | List workspace members        | viewer   |
@@ -17,6 +19,9 @@ import { Router } from "express";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
+import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
+import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
+import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
 
 const router = Router();
 
@@ -56,6 +61,59 @@ router.patch("/current", requireRole("admin"), (req, res) => {
   workspaceRepo.update(req.workspaceId, updates);
   const ws = workspaceRepo.getById(req.workspaceId);
   return res.json(ws);
+});
+
+// ─── Workspace listing & switching ────────────────────────────────────────────
+
+/**
+ * List all workspaces the current user belongs to.
+ * @route GET /api/workspaces
+ */
+router.get("/", (req, res) => {
+  const userId = req.authUser.sub;
+  const workspaces = workspaceRepo.getByUserId(userId);
+  return res.json(workspaces.map(ws => ({
+    id: ws.id, name: ws.name, slug: ws.slug, role: ws.role,
+    isOwner: ws.ownerId === userId, createdAt: ws.createdAt,
+  })));
+});
+
+/**
+ * Switch the active workspace. Issues a new JWT with the target workspaceId
+ * hint and returns updated user info. The user must be a member of the
+ * target workspace.
+ *
+ * @route POST /api/workspaces/switch
+ * @param {Object} req.body
+ * @param {string} req.body.workspaceId — The workspace to switch to.
+ */
+router.post("/switch", (req, res) => {
+  const { workspaceId: targetId } = req.body;
+  if (!targetId || typeof targetId !== "string") {
+    return res.status(400).json({ error: "workspaceId is required." });
+  }
+
+  const userId = req.authUser.sub;
+  const membership = workspaceRepo.getMembership(targetId, userId);
+  if (!membership) {
+    return res.status(403).json({ error: "You are not a member of that workspace." });
+  }
+
+  const user = userRepo.getById(userId);
+  if (!user) return res.status(401).json({ error: "User not found." });
+
+  // Revoke the old token so it cannot be replayed (matches /refresh behaviour)
+  const { jti: oldJti, exp: oldExp } = req.authUser;
+  if (oldJti) revokedTokens.set(oldJti, oldExp);
+
+  // Issue a new JWT with the target workspace as the hint
+  const payload = buildJwtPayload(user, targetId);
+  const token = signJwt(payload, getJwtSecret());
+  const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+
+  setAuthCookie(res, token, exp);
+
+  return res.json({ user: buildUserResponse(user, targetId) });
 });
 
 // ─── Member management ────────────────────────────────────────────────────────
