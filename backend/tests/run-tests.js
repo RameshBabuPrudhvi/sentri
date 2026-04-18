@@ -32,6 +32,8 @@ const files = [
   "tests/scheduler.test.js",
   "tests/trigger-api.test.js",
   "tests/ssrf-protection.test.js",
+  "tests/run-worker.test.js",
+  "tests/abort-worker.test.js",
   "tests/email-verification.test.js",
   "tests/postgres-adapter.test.js",
 ];
