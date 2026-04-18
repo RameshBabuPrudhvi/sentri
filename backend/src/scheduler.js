@@ -35,6 +35,7 @@ import { runTests } from "./testRunner.js";
 import { logActivity } from "./utils/activityLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { formatLogLine } from "./utils/logFormatter.js";
+import { fireNotifications } from "./utils/notifications.js";
 
 // ─── Task registry ─────────────────────────────────────────────────────────────
 // Maps projectId → node-cron ScheduledTask
@@ -252,6 +253,7 @@ async function fireScheduledRun(projectId) {
     type: "scheduled_run.start",
     projectId: project.id,
     projectName: project.name,
+    workspaceId: project.workspaceId || null,
     detail: `Scheduled test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
@@ -266,6 +268,7 @@ async function fireScheduledRun(projectId) {
           type: "scheduled_run.complete",
           projectId: project.id,
           projectName: project.name,
+          workspaceId: project.workspaceId || null,
           detail: `Scheduled run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
       },
@@ -273,15 +276,18 @@ async function fireScheduledRun(projectId) {
         type: "scheduled_run.fail",
         projectId: project.id,
         projectName: project.name,
+        workspaceId: project.workspaceId || null,
         detail: `Scheduled run failed: ${classifyError(err, "run").message}`,
       }),
-      onComplete: () => {
+      onComplete: async (finishedRun) => {
         // Record lastRunAt and update nextRunAt
         const schedule = scheduleRepo.getByProjectId(projectId);
         if (schedule) {
           const nextRunAt = getNextRunAt(schedule.cronExpr, schedule.timezone);
           scheduleRepo.updateRunTimes(projectId, new Date().toISOString(), nextRunAt);
         }
+        // FEA-001: Fire failure notifications — best-effort
+        try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
       },
     },
   );

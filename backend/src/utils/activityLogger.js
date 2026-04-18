@@ -14,6 +14,7 @@
 
 import { generateActivityId } from "./idGenerator.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
+import { formatLogLine } from "./logFormatter.js";
 
 /**
  * Log an activity entry to the database.
@@ -32,6 +33,14 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
  * @returns {Object}    The created activity record.
  */
 export function logActivity({ type, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId }) {
+  // Warn when a project-scoped activity is logged without a workspaceId.
+  // Activities with workspaceId=NULL become orphaned — invisible to
+  // workspace-scoped queries (/api/activities, /api/data/activities).
+  if (projectId && !workspaceId) {
+    console.warn(formatLogLine("warn", null,
+      `[activity] Activity "${type}" for project ${projectId} logged without workspaceId — row will be orphaned`));
+  }
+
   const id = generateActivityId();
   const activity = {
     id,

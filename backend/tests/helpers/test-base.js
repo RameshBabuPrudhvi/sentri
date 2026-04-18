@@ -108,6 +108,7 @@ export function decodeJwtPayload(token) {
  * Additional tables can be passed to resetDb() for test-specific cleanup.
  */
 const RESET_TABLES = [
+  "notification_settings",
   "verification_tokens",
   "password_reset_tokens",
   "webhook_tokens",

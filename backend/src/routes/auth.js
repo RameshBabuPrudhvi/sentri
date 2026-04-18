@@ -10,6 +10,8 @@
  * | POST   | `/api/auth/logout`            | Token revocation + cookie clear      |
  * | POST   | `/api/auth/refresh`           | Refresh session (extend cookie TTL)  |
  * | GET    | `/api/auth/me`                | Return current user from cookie      |
+ * | GET    | `/api/auth/export`            | Export user-owned account data (SEC-003) |
+ * | DELETE | `/api/auth/account`           | Delete account + owned data (SEC-003) |
  * | GET    | `/api/auth/verify`            | Verify email via token (SEC-001)     |
  * | POST   | `/api/auth/resend-verification` | Resend verification email (SEC-001)|
  * | POST   | `/api/auth/forgot-password`   | Request a password reset token       |
@@ -38,7 +40,10 @@ import * as userRepo from "../database/repositories/userRepo.js";
 import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
 import * as verificationTokenRepo from "../database/repositories/verificationTokenRepo.js";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
+import * as accountRepo from "../database/repositories/accountRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
@@ -445,6 +450,118 @@ router.get("/me", requireAuth, (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
   return res.json({ ...buildUserResponse(user, req.authUser.workspaceId), createdAt: user.createdAt });
+});
+
+// ─── Account export / deletion (SEC-003) ─────────────────────────────────────
+
+/**
+ * Check whether a user registered via OAuth only (no password set).
+ *
+ * @param {Object} user
+ * @returns {boolean}
+ */
+function isOAuthOnlyUser(user) {
+  return !user?.passwordHash;
+}
+
+/**
+ * Verify the authenticated user's password for sensitive account actions.
+ * For OAuth-only users (no passwordHash), password verification is skipped
+ * — the OAuth session itself serves as proof of identity.
+ *
+ * @param {Object} user
+ * @param {string} password
+ * @returns {Promise<boolean>}
+ */
+async function verifyAccountPassword(user, password) {
+  if (isOAuthOnlyUser(user)) return true;
+  if (typeof password !== "string" || !password) return false;
+  return verifyPassword(password, user.passwordHash);
+}
+
+/**
+ * Export all user-owned account data as JSON (GDPR/CCPA data portability).
+ * Requires password confirmation via `x-account-password` header.
+ *
+ * @route GET /api/auth/export
+ * @returns {200} JSON export payload.
+ * @returns {400} Missing password.
+ * @returns {403} Invalid password.
+ */
+router.get("/export", requireAuth, async (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+
+  // OAuth-only users have no password — skip confirmation (session is proof).
+  if (!isOAuthOnlyUser(user)) {
+    const password = req.headers["x-account-password"];
+    if (typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "Password confirmation is required." });
+    }
+    const valid = await verifyAccountPassword(user, password);
+    if (!valid) {
+      return res.status(403).json({ error: "Password confirmation failed." });
+    }
+  }
+
+  const data = accountRepo.buildAccountExport(user.id);
+  return res.json(data);
+});
+
+/**
+ * Delete account and all user-owned workspace data (GDPR right to erasure).
+ * Requires password confirmation.
+ *
+ * @route DELETE /api/auth/account
+ * @param {Object} req.body
+ * @param {string} req.body.password - Account password confirmation.
+ * @returns {200} `{ ok: true }` on success.
+ */
+router.delete("/account", requireAuth, async (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+
+  // OAuth-only users have no password — skip confirmation (session is proof).
+  if (!isOAuthOnlyUser(user)) {
+    const password = req.body?.password;
+    if (typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "Password confirmation is required." });
+    }
+    const valid = await verifyAccountPassword(user, password);
+    if (!valid) {
+      return res.status(403).json({ error: "Password confirmation failed." });
+    }
+  }
+
+  // Collect owned project IDs before deletion so we can stop their in-memory
+  // cron tasks afterwards. deleteAccount() removes the DB rows but cannot
+  // reach the process-local scheduler task Map.
+  const db = getDatabase();
+  const ownedWsRows = db.prepare("SELECT id FROM workspaces WHERE ownerId = ?").all(user.id);
+  const ownedWsIds = ownedWsRows.map(w => w.id);
+  let ownedProjectIds = [];
+  if (ownedWsIds.length > 0) {
+    const wsph = ownedWsIds.map(() => "?").join(", ");
+    ownedProjectIds = db.prepare(`SELECT id FROM projects WHERE workspaceId IN (${wsph})`).all(...ownedWsIds).map(p => p.id);
+  }
+
+  try {
+    accountRepo.deleteAccount(user.id);
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/account] Delete failed for user ${user.id}: ${err.message}`));
+    return res.status(500).json({ error: "Failed to delete account." });
+  }
+
+  // Stop in-memory cron tasks for deleted projects (no-op if no schedule existed).
+  for (const projectId of ownedProjectIds) {
+    stopSchedule(projectId);
+  }
+
+  // Revoke the current JWT so it cannot be reused from another tab or replay.
+  const { jti, exp } = req.authUser;
+  if (jti) revokedTokens.set(jti, exp);
+  clearAuthCookies(res);
+  return res.json({ ok: true, message: "Account and owned data deleted." });
 });
 
 /**

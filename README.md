@@ -167,6 +167,9 @@ NODE_ENV=production
 # Parallel test execution (1 = sequential, max 10)
 PARALLEL_WORKERS=4
 
+# BullMQ concurrency (requires REDIS_URL + npm install bullmq)
+# MAX_WORKERS=2
+
 # Frontend (build-time, for cross-origin deploys)
 VITE_API_URL=https://your-backend.onrender.com
 ```
@@ -185,7 +188,8 @@ The backend exposes a RESTful JSON API on port `3001`. Key endpoint groups:
 | **Crawl & Run** | `POST /api/projects/:id/crawl`, `/run` | Start crawl or execute tests |
 | **Tests** | `GET/POST/PATCH/DELETE /api/tests` | CRUD, generate, review, bulk actions, export |
 | **Runs** | `GET /api/runs/:id`, `/events`, `POST /abort` | Results, SSE stream, abort |
-| **Auth** | `POST /api/auth/register`, `/login`, `/logout` | Email/password + OAuth |
+| **Auth** | `POST /api/auth/register`, `/login`, `/logout`, `GET /export`, `DELETE /account` | Email/password + OAuth, GDPR export/delete |
+| **Notifications** | `GET/PATCH/DELETE /api/projects/:id/notifications` | Per-project failure alert config (Teams, email, webhook) |
 | **Settings** | `GET/POST/DELETE /api/settings` | AI provider config, Ollama status |
 | **System** | `GET /api/dashboard`, `/system`, `/activities`, `POST /system/client-error` | Analytics, info, data management, client crash reports |
 
@@ -267,9 +271,11 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **Scheduling** | ✅ Cron-based auto-runs with timezone support via `node-cron` |
 | **CI/CD Integration** | ✅ Webhook trigger endpoint with per-project Bearer tokens |
 | **Graceful Shutdown** | ✅ Drains in-flight runs, stops scheduler, closes Redis + DB on SIGTERM/SIGINT |
-| **Job Queue** | ⬜ Add BullMQ for durable background run execution (INF-003) |
+| **Job Queue** | ✅ BullMQ durable execution when Redis is available — crash recovery, retry, `MAX_WORKERS` concurrency (INF-003) |
+| **Notifications** | ✅ Per-project failure alerts via Microsoft Teams, email, and generic webhook (FEA-001) |
+| **Nonce CSP** | ✅ Per-request cryptographic nonce replaces `'unsafe-inline'` in `script-src` (SEC-002) |
+| **GDPR/CCPA** | ✅ Account data export (`GET /api/auth/export`) and cascade deletion (`DELETE /api/auth/account`) with password confirmation (SEC-003) |
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk (MNT-006) |
-| **Notifications** | ⬜ Send Slack/email alerts on test failures (FEA-001) |
 | **Multi-tenancy** | ✅ Workspace isolation — every entity scoped to a workspace; auto-created on first login (ACL-001) |
 | **RBAC** | ✅ Role-based access control — Admin / QA Lead / Viewer with `requireRole()` middleware on all mutating routes (ACL-002) |
 | **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (DIF-002) |

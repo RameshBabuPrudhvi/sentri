@@ -1,8 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+function cspNoncePlugin() {
+  return {
+    name: "sentri-csp-nonce",
+    transformIndexHtml(html) {
+      return html.replace(/<script(?![^>]*\bnonce=)/g, '<script nonce="__CSP_NONCE__"');
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspNoncePlugin()],
   base: process.env.GITHUB_PAGES === "true" ? "/sentri/" : "/",
 
   build: {

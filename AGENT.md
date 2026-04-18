@@ -16,12 +16,11 @@ frontend/          React 18 SPA (Vite, no framework beyond React Router)
 backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
   src/
     index.js               Entry point — DB init, route mounting, process guards
-    db.js                  DEPRECATED — emptied stub; all consumers migrated to repository modules
     database/
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, webhookTokenRepo, scheduleRepo, workspaceRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, webhookTokenRepo, scheduleRepo, workspaceRepo, notificationSettingsRepo, accountRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
@@ -140,12 +139,14 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `abortHelper.js` | `throwIfAborted(signal)`, `isRunAborted()`, `finalizeRunIfNotAborted()` | Every pipeline/runner stage with I/O |
 | `runLogger.js` | `log()`, `logWarn()`, `logError()`, `logSuccess()`, `emitRunEvent()` | All run-level logging and SSE |
 | `errorClassifier.js` | `classifyError(err, context)`, `ERROR_CATEGORY` | Converting raw errors to user-friendly messages (runs, chat, activity logs) |
-| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()`, `generateWebhookTokenId()`, `generateScheduleId()` | Creating new domain objects |
+| `idGenerator.js` | `generateProjectId()`, `generateTestId()`, `generateRunId()`, `generateWebhookTokenId()`, `generateScheduleId()`, `generateNotificationSettingId()` | Creating new domain objects |
 | `validate.js` | `sanitise()`, `validateUrl()`, `validateProjectPayload()`, `validateTestPayload()`, etc. | All route input validation |
 | `credentialEncryption.js` | `encryptCredentials()`, `decryptCredentials()` | Storing/reading project login credentials |
 | `logFormatter.js` | `formatTimestamp()`, `formatLogLine()`, `shouldLog()` | Log formatting (used by runLogger) |
 | `actor.js` | `actor(req)` → `{ userId, userName }` | Extracting user identity from `req.authUser` for audit trail logging |
 | `emailSender.js` | `sendEmail()`, `sendVerificationEmail()`, `getTransportName()` | Transactional email (Resend / SMTP / console fallback) |
+| `ssrfGuard.js` | `validateUrl()`, `safeFetch()`, `isPrivateIp()` | SSRF protection for outbound HTTP requests to user-configured URLs (notification webhooks, CI/CD callback URLs) |
+| `notifications.js` | `fireNotifications(run, project)` | Failure notification dispatcher — Teams Adaptive Card, HTML email, generic webhook; best-effort, never affects run outcome |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
@@ -422,8 +423,7 @@ Sentri supports **SQLite** (default, via `better-sqlite3`) and **PostgreSQL** (v
 Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `pragma`, `close`, `dialect`) so all repository modules work unchanged. The adapter is selected at startup by `database/sqlite.js` (the module name is kept for backward compatibility).
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
-- **`db.js` is deprecated** — the file has been emptied. All consumers have been migrated to use repository modules directly. Do not import `getDb()` or `saveDb()` in new code.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo`, `notificationSettingsRepo`, `accountRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -811,9 +811,10 @@ Long conversations are automatically trimmed by `trimConversationHistory()` befo
 
 - `docker-compose.yml` — local development and production (pulls from GHCR).
 - `docker-compose.prod.yml` — production overrides (stricter resource limits).
-- The frontend Dockerfile builds the Vite SPA and serves it with nginx. The nginx config proxies `/api/*` to the backend container.
+- The frontend Dockerfile builds the Vite SPA and serves it with nginx. The nginx config proxies `/api/*` to the backend container. SPA navigation routes (non-file requests) fall through to `@backend_spa` which proxies to the backend's `serveIndexWithNonce()` for per-request CSP nonce injection (SEC-002).
 - **Never bake secrets into images.** Pass all keys via environment variables. The `.dockerignore` already excludes `.env` files.
 - `backend/data/` is a Docker volume — it persists `sentri.db` (SQLite) across container restarts.
+- `frontend_dist` is a shared named volume — the frontend container copies its built dist into it, and the backend mounts it read-only at `/usr/share/frontend` so `serveIndexWithNonce()` can read `index.html` for CSP nonce replacement. The backend's `SPA_INDEX_PATH` env var points to `/usr/share/frontend/index.html`.
 - The backend Dockerfile installs Playwright's system dependencies and uses the system Chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`).
 
 ### Health Checks
@@ -899,20 +900,20 @@ The following have been implemented and are no longer open:
 - **Session refresh** ✅: `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 minutes before expiry.
 - **Auth rate limiting** ✅: Per-endpoint rate limiters in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
 - **Global API rate limiting** ✅: Three-tier `express-rate-limit` in `middleware/appSetup.js` — general (300 req/15 min for all `/api/*`), expensive operations (20/hr for crawl/run), AI generation (30/hr for test generation). In-memory store; swap to Redis for horizontal scaling.
-- **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). Tighten `'unsafe-inline'` to nonce-based in production.
+- **Content-Security-Policy** ✅: Helmet CSP is fully enabled in `middleware/appSetup.js` with explicit directives (`default-src 'self'`, `script-src 'self' 'nonce-<per-request>'`, `connect-src 'self'`, `frame-ancestors 'none'`, etc.). `'unsafe-inline'` replaced with per-request nonces (SEC-002).
 - **Reset token exposure** ✅: The forgot-password endpoint only returns the reset token in the response when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. Absence of a production flag is no longer sufficient to leak tokens.
 - **DB-backed password reset tokens** ✅: Reset tokens are persisted in the `password_reset_tokens` SQLite table (migration 003) via `passwordResetTokenRepo`. Tokens survive server restarts, support multi-instance deployments, and use atomic `claim()` to prevent TOCTOU double-use. A `usedAt` column provides one-time-use enforcement with an audit trail.
 - **Per-user audit trail** ✅: Every activity log entry records `userId` and `userName` (migration 004). The `actor(req)` utility in `utils/actor.js` extracts identity from `req.authUser` (JWT payload includes `name`). Bulk approve/reject/restore actions log per-test entries with the acting user's identity.
 - **Artifact authentication** ✅: The `/artifacts` route is protected by HMAC-SHA256 signed `?token=&exp=` query-param tokens (1 hour TTL, configurable via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` is required in production; dev uses a random per-process secret. `signArtifactUrl()` in `middleware/appSetup.js` generates signed URLs; all artifact producers (screenshots, videos, traces) use it. `Cache-Control: private, no-store` prevents browsers from caching expiring URLs.
 - **Secrets scanning** ✅: Gitleaks runs on every PR and push to `main` via the `secrets` CI job (`.github/workflows/ci.yml`). Both `lint` and `build` jobs depend on it, gating the entire pipeline. Configuration in `.github/.gitleaks.toml` extends the default ruleset with allowlists for CI placeholders and `.env.example` files.
+- **Nonce-based CSP** ✅: Per-request nonce generated via `crypto.randomBytes(16)` in `middleware/appSetup.js`, passed to Helmet CSP `scriptSrc` as `'nonce-<value>'`. Vite `transformIndexHtml` plugin injects `nonce="__CSP_NONCE__"` on all `<script>` tags; `serveIndexWithNonce()` replaces the placeholder at serve-time. `'unsafe-inline'` removed from `scriptSrc` (SEC-002).
+- **GDPR/CCPA account export & deletion** ✅: `GET /api/auth/export` returns a JSON archive of all user-owned data (workspaces, projects, tests, runs, run logs, activities, schedules, notification settings, healing history) with `passwordHash` stripped. `DELETE /api/auth/account` hard-deletes the user and all owned data in a single transaction. Both require password confirmation (403 on mismatch). Frontend Account tab in Settings with two-click confirm flow (SEC-003).
 
 ### Known Security Gaps (TODO)
 
 The following are **not yet implemented** but should be addressed before production:
 
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
-- **Nonce-based CSP**: `'unsafe-inline'` should be replaced with nonce-based script allowlisting (SEC-002).
-- **GDPR/CCPA**: No account data export or deletion endpoints exist yet (SEC-003).
 
 ---
 
@@ -956,6 +957,9 @@ The following are **not yet implemented** but should be addressed before product
 | `SMTP_PASS` | No | — | SMTP password |
 | `EMAIL_FROM` | No | `Sentri <noreply@sentri.dev>` | Sender address for transactional emails |
 | `SKIP_EMAIL_VERIFICATION` | No | `false` | When `"true"`, registration auto-verifies users (dev/CI only — never set in production) |
+| `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution (INF-003). Ignored when Redis/BullMQ is not available. |
+| `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads (e.g. `https://sentri.example.com`). Falls back to `CORS_ORIGIN`, then `http://localhost:3000`. |
+| `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location. In Docker, set to `/usr/share/frontend/index.html` (shared volume). |
 
 ---
 
@@ -1097,7 +1101,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not change the `healingHistory` key schema** (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).
 - **Do not add a new test framework** to either package. Backend tests use `node:assert/strict`; keep it that way.
-- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not import `getDb()` or `saveDb()` from `db.js` — the file is deprecated and emptied.
+- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`.
 - **Do not skip `throwIfAborted(signal)`** in pipeline or runner stages — it breaks the abort/cancel feature.
 - **Do not use `dangerouslySetInnerHTML`** without escaping all dynamic content first. AI/user-generated text must be sanitised before DOM insertion to prevent XSS.
 - **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages via `classifyError()`. Log the real error server-side with `formatLogLine()`.

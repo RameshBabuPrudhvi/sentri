@@ -23,20 +23,16 @@ router.get("/dashboard", (req, res) => {
   // Projects are filtered by workspaceId; runs and tests are filtered by
   // the set of project IDs that belong to this workspace.
   const projects = projectRepo.getAll(req.workspaceId);
-  const projectIds = new Set(projects.map(p => p.id));
+  const projectIds = projects.map(p => p.id);
 
-  // Use lean queries — dashboard only needs scalar fields + results for failure analysis.
-  // Skipping logs, testQueue, generateInput, promptAudit, videoSegments saves ~10-50×
-  // in JSON parse time compared to runRepo.getAll().
-  const allRuns = runRepo.getAllWithResults();
-  const runs = allRuns.filter(r => projectIds.has(r.projectId));
-  const allTests = testRepo.getAll();
-  const tests = allTests.filter(t => projectIds.has(t.projectId));
+  // Scope queries to the user's workspace project IDs at the SQL layer
+  // so multi-tenant deployments don't load data from other workspaces.
+  const runs = runRepo.getWithResultsByProjectIds(projectIds);
+  const tests = testRepo.getAllByProjectIds(projectIds);
   // Only fetch activity types needed for dashboard counters (not all activities)
-  const allGenerationActivities = activityRepo.getByTypes(["test.create", "test.generate"], {
+  const generationActivities = activityRepo.getByTypes(["test.create", "test.generate"], {
     workspaceId: req.workspaceId,
   });
-  const generationActivities = allGenerationActivities.filter(a => !a.projectId || projectIds.has(a.projectId));
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
 

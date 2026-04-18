@@ -58,6 +58,10 @@ The following items have been verified complete against the codebase and are **n
 | SEC-001 | Email verification on registration | PR #87 |
 | INF-001 | PostgreSQL support with SQLite fallback | PR #87 |
 | INF-002 | Redis for rate limiting, token revocation, and SSE pub/sub | PR #87 |
+| INF-003 | BullMQ job queue for durable run execution | PR #92 |
+| FEA-001 | Teams / email / webhook failure notifications | PR #92 |
+| SEC-002 | Nonce-based Content Security Policy | PR #92 |
+| SEC-003 | GDPR / CCPA account data export and deletion | PR #92 |
 
 ---
 
@@ -100,7 +104,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### SEC-002 — Nonce-based Content Security Policy 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (GAP-03)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-03)
 
 **Problem:** `appSetup.js:55` uses `'unsafe-inline'` for both `scriptSrc` and `styleSrc`. An inline comment acknowledges "replace with nonces in prod." Without nonces, any XSS injection can execute inline scripts — CSP provides no real protection.
 
@@ -117,7 +121,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### SEC-003 — GDPR / CCPA account data export and deletion 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (GAP-04)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-04)
 
 **Problem:** There is no way for a user to export their data or delete their account. GDPR Article 17 (right to erasure) and Article 20 (data portability) are legal requirements for EU deployments. CCPA creates equivalent expectations for US users.
 
@@ -214,7 +218,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-003 — BullMQ job queue for run execution 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** L | **Source:** Audit
 
 **Problem:** Run execution is started as a detached `async` operation directly on the HTTP request handler thread (`runWithAbort`). If the process crashes mid-run, work is lost and runs remain stuck in `status: 'running'`. There is no global concurrency limit across projects, no priority queue, and no visibility into the job backlog.
 
@@ -233,7 +237,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### FEA-001 — Teams / email / webhook failure notifications 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive (S2-03)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive (S2-03)
 
 **Problem:** When a test run completes with failures, there is no outbound notification. Teams must poll the dashboard. With scheduling already live (ENH-006 ✅), this is the other half of autonomous operation — teams need to know immediately when something breaks.
 
@@ -1193,7 +1197,7 @@ The following items have been verified complete against the codebase and are **n
 | Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ❌ → DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
-| Failure notifications | ❌ → FEA-001 | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
+| Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 <!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
@@ -1214,9 +1218,9 @@ The following items have been verified complete against the codebase and are **n
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
 | Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | SEC-002, SEC-003 | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | INF-003 | INF-004, INF-005 |
+| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | INF-004, INF-005 |
 | Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
-| Platform Features | FEA-001–003 | — | FEA-001 | FEA-002–003 |
+| Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002–003 |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
 | Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
@@ -1229,7 +1233,7 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`INF-003` → `FEA-001` → `SEC-002` → `SEC-003`
+`SEC-004` → `INF-004` → `INF-005` → `FEA-002`
 
 **Lowest effort / highest immediate value:**
 INF-005 (S) · DIF-003 (S) · DIF-011 (S) · DIF-014 (S) · AUTO-007 (S) · AUTO-013 (S)
