@@ -147,26 +147,42 @@ async function processJob(job) {
       return;
     }
 
+    const maxAttempts = job.opts?.attempts || 2;
+    const isFinalAttempt = job.attemptsMade >= maxAttempts - 1;
+
     const runType = type === "crawl" ? "crawl" : "run";
     const classified = classifyError(err, runType);
     console.error(formatLogLine("error", runId, `[worker] ${err.message}`));
 
-    run.status = "failed";
-    run.error = classified.message;
-    run.errorCategory = classified.category;
-    run.finishedAt = new Date().toISOString();
+    if (isFinalAttempt) {
+      // Only persist terminal state on the final attempt to prevent
+      // retries from re-executing an already-failed run (the DB row
+      // would have status="failed" and finishedAt set, causing duplicate
+      // activity logs, duplicate SSE events, and status overwrites).
+      run.status = "failed";
+      run.error = classified.message;
+      run.errorCategory = classified.category;
+      run.finishedAt = new Date().toISOString();
 
-    logActivity({
-      ...options.actorInfo,
-      type: `${runType === "crawl" ? "crawl" : "test_run"}.fail`,
-      projectId: project.id,
-      projectName: project.name,
-      detail: `${runType === "crawl" ? "Crawl" : "Test run"} failed: ${classified.message}`,
-      status: "failed",
-    });
+      logActivity({
+        ...options.actorInfo,
+        type: `${runType === "crawl" ? "crawl" : "test_run"}.fail`,
+        projectId: project.id,
+        projectName: project.name,
+        detail: `${runType === "crawl" ? "Crawl" : "Test run"} failed: ${classified.message}`,
+        status: "failed",
+      });
 
-    emitRunEvent(runId, "done", { status: "failed" });
-    runRepo.save(run);
+      emitRunEvent(runId, "done", { status: "failed" });
+      runRepo.save(run);
+    } else {
+      // Non-final attempt: reset run state so the retry starts clean.
+      run.status = "running";
+      run.error = null;
+      run.errorCategory = null;
+      run.finishedAt = null;
+      runRepo.save(run);
+    }
 
     throw err; // Let BullMQ handle retry logic
   } finally {

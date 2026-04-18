@@ -22,6 +22,7 @@
 import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
 import { sendEmail } from "./emailSender.js";
 import { formatLogLine } from "./logFormatter.js";
+import { safeFetch } from "./ssrfGuard.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -134,7 +135,7 @@ async function sendTeamsNotification(webhookUrl, run, project) {
     }],
   };
 
-  const res = await fetch(webhookUrl, {
+  const res = await safeFetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(card),
@@ -221,7 +222,7 @@ async function sendWebhookNotification(url, run, project) {
     timestamp: new Date().toISOString(),
   };
 
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

@@ -36,6 +36,7 @@ import { reloadSchedule, stopSchedule, getNextRunAt } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
 import { generateNotificationSettingId } from "../utils/idGenerator.js";
+import { validateUrl } from "../utils/ssrfGuard.js";
 import cron from "node-cron";
 
 const router = Router();
@@ -262,7 +263,7 @@ router.get("/:id/notifications", (req, res) => {
  *   webhookUrl       {string}  - Generic webhook URL (optional)
  *   enabled          {boolean} - Whether notifications are active (default true)
  */
-router.patch("/:id/notifications", requireRole("qa_lead"), (req, res) => {
+router.patch("/:id/notifications", requireRole("qa_lead"), async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "Project not found" });
 
@@ -277,16 +278,14 @@ router.patch("/:id/notifications", requireRole("qa_lead"), (req, res) => {
     return res.status(400).json({ error: "At least one notification channel must be configured (teamsWebhookUrl, emailRecipients, or webhookUrl)" });
   }
 
-  // Basic URL validation for webhook URLs
+  // SSRF-safe URL validation for webhook URLs (protocol, private hosts, DNS resolution)
   if (hasTeams) {
-    try { new URL(teamsWebhookUrl); } catch {
-      return res.status(400).json({ error: "teamsWebhookUrl is not a valid URL" });
-    }
+    const teamsErr = await validateUrl(teamsWebhookUrl);
+    if (teamsErr) return res.status(400).json({ error: `teamsWebhookUrl: ${teamsErr}` });
   }
   if (hasWebhook) {
-    try { new URL(webhookUrl); } catch {
-      return res.status(400).json({ error: "webhookUrl is not a valid URL" });
-    }
+    const webhookErr = await validateUrl(webhookUrl);
+    if (webhookErr) return res.status(400).json({ error: `webhookUrl: ${webhookErr}` });
   }
 
   // Validate email format (basic check)

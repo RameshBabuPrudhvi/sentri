@@ -25,6 +25,7 @@ import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js"
 import { generateRunId, generateWebhookTokenId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
+import { workerAbortControllers } from "../workers/runWorker.js";
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
@@ -225,6 +226,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   }
 
   const entry = runAbortControllers.get(req.params.runId);
+  const workerController = workerAbortControllers.get(req.params.runId);
   if (entry) {
     // Mutate the in-memory run object that the pipeline holds so that
     // finalizeRunIfNotAborted() and runRepo.save(run) see "aborted" and
@@ -237,6 +239,12 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
 
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
+  } else if (workerController) {
+    // BullMQ-processed run: signal the worker's AbortController.
+    // The worker's catch block checks run.status === "aborted" (persisted
+    // via runRepo.update below) and skips terminal side-effects.
+    workerController.abort();
+    workerAbortControllers.delete(req.params.runId);
   }
 
   // Mark queued tests that never executed as "skipped" so pass/fail/total

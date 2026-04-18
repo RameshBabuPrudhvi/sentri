@@ -17,8 +17,6 @@
  */
 
 import { Router } from "express";
-import { URL } from "url";
-import dns from "node:dns";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
@@ -31,164 +29,30 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { requireTrigger } from "../middleware/authenticate.js";
 import { fireNotifications } from "../utils/notifications.js";
+import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
-// Two-layer defence:
-//   1. validateCallbackUrl() — synchronous string checks + async DNS resolution
+// Two-layer defence provided by utils/ssrfGuard.js:
+//   1. validateUrl() — synchronous string checks + async DNS resolution
 //      to block domains that resolve to private/reserved IPs.
-//   2. safeFetchCallback() — fires the actual POST with `redirect: "error"` to
-//      prevent open-redirect bypasses (302 → http://169.254.169.254/…).
-
-/** @type {Array<Array<number>>} [baseIp, mask, bits] for IPv4 */
-const PRIVATE_IPV4_RANGES = [
-  // 10.0.0.0/8
-  [0x0A000000, 0xFF000000, 8],
-  // 172.16.0.0/12
-  [0xAC100000, 0xFFF00000, 12],
-  // 192.168.0.0/16
-  [0xC0A80000, 0xFFFF0000, 16],
-  // 127.0.0.0/8 (loopback)
-  [0x7F000000, 0xFF000000, 8],
-  // 169.254.0.0/16 (link-local / cloud metadata)
-  [0xA9FE0000, 0xFFFF0000, 16],
-  // 0.0.0.0/8
-  [0x00000000, 0xFF000000, 8],
-];
-
-function ipv4ToInt(ip) {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return null;
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
-}
-
-function isPrivateIp(ip) {
-  // IPv6 loopback
-  if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true;
-
-  // Only check IPv6 prefix ranges when the input is actually an IPv6 address
-  // (contains a colon).  Without this guard, hostnames like "fdic.gov",
-  // "fcbarcelona.com", or "ffmpeg.org" would be falsely rejected because
-  // their first characters match IPv6 private-range prefixes.
-  if (ip.includes(":")) {
-    const lower = ip.toLowerCase();
-    // fc00::/7 — unique local addresses (includes fd00::/8)
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-    // fe80::/10 — link-local
-    if (lower.startsWith("fe80")) return true;
-    // ff00::/8 — multicast
-    if (lower.startsWith("ff")) return true;
-    // :: — unspecified address
-    if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
-  }
-
-  // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1)
-  const v4match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-  const v4 = v4match ? v4match[1] : ip;
-  const num = ipv4ToInt(v4);
-  if (num === null) return false; // not an IP address — hostname validation is handled by the caller
-  for (const [base, mask] of PRIVATE_IPV4_RANGES) {
-    if (((num & mask) >>> 0) === base) return true;
-  }
-  return false;
-}
+//   2. safeFetch() — fires the actual request with `redirect: "error"` to
+//      prevent open-redirect bypasses (302 → http://169.254.169.254/…),
+//      and re-resolves DNS to mitigate DNS rebinding.
 
 /**
- * Validate a callbackUrl for SSRF safety.
- *
- * Performs synchronous string checks (protocol, known private hostnames,
- * literal private IPs) and then resolves the hostname via DNS to catch
- * domains that point to private/reserved addresses (e.g. evil.com → 169.254.169.254).
- *
- * @param {string} raw
- * @returns {Promise<string|null>} null if valid, or an error message string.
- */
-async function validateCallbackUrl(raw) {
-  let parsed;
-  try { parsed = new URL(raw); } catch { return "callbackUrl is not a valid URL."; }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return "callbackUrl must use http or https.";
-  }
-  // Block obvious private hostnames
-  const host = parsed.hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) {
-    return "callbackUrl must not target a private/internal host.";
-  }
-  if (isPrivateIp(host)) {
-    return "callbackUrl must not target a private or reserved IP address.";
-  }
-
-  // Resolve DNS to catch domains pointing to private IPs (e.g. evil.com → 10.0.0.1).
-  // Skip resolution for bare IP addresses — already checked above.
-  // Use dns.resolve4/resolve6 to check ALL addresses (not just the first one
-  // returned by lookup) — a domain with a safe A record but a private AAAA
-  // record would bypass a single-address check.
-  if (ipv4ToInt(host) === null && !host.includes(":")) {
-    try {
-      const [v4addrs, v6addrs] = await Promise.all([
-        dns.promises.resolve4(host).catch(() => []),
-        dns.promises.resolve6(host).catch(() => []),
-      ]);
-      const allAddrs = [...v4addrs, ...v6addrs];
-      if (allAddrs.length === 0) {
-        return "callbackUrl hostname could not be resolved.";
-      }
-      for (const addr of allAddrs) {
-        if (isPrivateIp(addr)) {
-          return "callbackUrl resolves to a private or reserved IP address.";
-        }
-      }
-    } catch {
-      return "callbackUrl hostname could not be resolved.";
-    }
-  }
-
-  return null; // valid
-}
-
-/**
- * Fire the callbackUrl POST with SSRF-safe fetch options.
- *
- * - `redirect: "error"` prevents the server from following 302 redirects to
- *   private IPs (open-redirect bypass).
- * - Re-resolves DNS at fetch time to mitigate DNS rebinding (where the domain
- *   changes resolution between validateCallbackUrl and the actual fetch).
- * - Best-effort: errors are silently caught so a failing callback never
- *   affects the run outcome.
+ * Thin wrapper around safeFetch for the callbackUrl POST.
+ * Best-effort: errors are silently caught so a failing callback never
+ * affects the run outcome.
  *
  * @param {string} url      - The validated callbackUrl.
  * @param {string} payload  - JSON string body.
  */
 async function safeFetchCallback(url, payload) {
-  // Re-resolve DNS at fetch time to mitigate DNS rebinding attacks.
-  // Check all resolved addresses (both A and AAAA) to prevent bypass
-  // via a safe A record paired with a private AAAA record.
-  const parsed = new URL(url);
-  const host = parsed.hostname.toLowerCase();
-  if (ipv4ToInt(host) === null && !host.includes(":")) {
-    try {
-      const [v4addrs, v6addrs] = await Promise.all([
-        dns.promises.resolve4(host).catch(() => []),
-        dns.promises.resolve6(host).catch(() => []),
-      ]);
-      const allAddrs = [...v4addrs, ...v6addrs];
-      if (allAddrs.length === 0) return; // hostname no longer resolves — abort
-      for (const addr of allAddrs) {
-        if (isPrivateIp(addr)) return; // silently abort — DNS rebinding detected
-      }
-    } catch {
-      return; // hostname no longer resolves — abort
-    }
-  }
-
-  await fetch(url, {
+  await safeFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: payload,
     signal: AbortSignal.timeout(10_000),
-    // Prevent open-redirect bypass: a 302 to http://169.254.169.254/…
-    // would bypass hostname validation. "error" makes fetch() reject on
-    // any redirect response instead of following it.
-    redirect: "error",
   });
 }
 
@@ -253,7 +117,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
     if (callbackUrl.length > 2048) {
       return res.status(400).json({ error: "callbackUrl exceeds maximum length (2048 characters)." });
     }
-    const urlErr = await validateCallbackUrl(callbackUrl);
+    const urlErr = await validateUrl(callbackUrl);
     if (urlErr) return res.status(400).json({ error: urlErr });
   }
 
