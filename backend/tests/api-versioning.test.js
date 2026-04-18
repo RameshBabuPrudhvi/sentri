@@ -20,13 +20,18 @@ let mounted = false;
 
 function mountRoutesOnce() {
   if (mounted) return;
-  // Mount auth at versioned path
+  // Mount auth at BOTH paths: /api/auth (for test-base.js registerAndLogin helper)
+  // and /api/v1/auth (the versioned path we're testing).
+  app.use("/api/auth", authRouter);
   app.use("/api/v1/auth", authRouter);
   // Mount dashboard at versioned path with auth + workspace scope
   app.use("/api/v1", requireAuth, workspaceScope, dashboardRouter);
-  // Legacy redirect handler (mirrors index.js)
+  // Legacy redirect handler (mirrors index.js) — only for non-auth paths
+  // since auth is mounted at both prefixes above.
   app.use("/api", (req, res, next) => {
     if (req.path.startsWith("/v1")) return next();
+    // Auth is already mounted at /api/auth — only redirect other paths
+    if (req.path.startsWith("/auth")) return next();
     const newUrl = `/api/v1${req.path}${req._parsedUrl?.search || ""}`;
     res.redirect(301, newUrl);
   });

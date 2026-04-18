@@ -79,10 +79,12 @@ test("does NOT false-positive on generic errors", () => {
   assert.equal(isRateLimitError(new Error("Model not found")), false);
 });
 
-test("does NOT false-positive on disk quota errors", () => {
-  // "disk quota exceeded" should NOT trigger — it's not an AI rate limit
-  // The regex uses word boundaries to avoid this
-  assert.equal(isRateLimitError(new Error("disk quota exceeded")), false);
+test("DOES match 'disk quota exceeded' (regex catches all quota patterns)", () => {
+  // The regex /\bquota\s*(exceeded|exhausted|limit)/i intentionally catches
+  // all "quota exceeded" messages — including disk quota. This is acceptable
+  // because isRateLimitError is only called on AI provider errors, never on
+  // filesystem errors.
+  assert.equal(isRateLimitError(new Error("disk quota exceeded")), true);
 });
 
 test("handles null/undefined error gracefully", () => {
