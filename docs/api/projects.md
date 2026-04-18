@@ -1,9 +1,11 @@
 # Projects API
 
+> All project endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 301-redirected.
+
 ## Create a Project
 
 ```
-POST /api/projects
+POST /api/v1/projects
 ```
 
 **Body:**
@@ -21,7 +23,7 @@ POST /api/projects
 ## List Projects
 
 ```
-GET /api/projects
+GET /api/v1/projects
 ```
 
 Returns an array of all non-deleted projects.
@@ -29,16 +31,16 @@ Returns an array of all non-deleted projects.
 ## Get a Project
 
 ```
-GET /api/projects/:id
+GET /api/v1/projects/:id
 ```
 
 ## Delete a Project
 
 ```
-DELETE /api/projects/:id
+DELETE /api/v1/projects/:id
 ```
 
-Soft-deletes the project and cascade soft-deletes all its tests and runs. Items are moved to the Recycle Bin and can be restored via `POST /api/restore/project/:id`. Healing history and activities are preserved for audit trail. Returns 409 if a crawl or test run is in progress.
+Soft-deletes the project and cascade soft-deletes all its tests and runs. Items are moved to the Recycle Bin and can be restored via `POST /api/v1/restore/project/:id`. Healing history and activities are preserved for audit trail. Returns 409 if a crawl or test run is in progress.
 
 **Response:**
 ```json
@@ -58,7 +60,7 @@ CI/CD trigger tokens and cron schedules are **permanently deleted** (not soft-de
 ## Start a Crawl
 
 ```
-POST /api/projects/:id/crawl
+POST /api/v1/projects/:id/crawl
 ```
 
 Launches Chromium, crawls the project URL, and generates tests via the AI pipeline. Returns a run ID for tracking via SSE.
@@ -74,7 +76,7 @@ Launches Chromium, crawls the project URL, and generates tests via the AI pipeli
 ## Run Regression
 
 ```
-POST /api/projects/:id/run
+POST /api/v1/projects/:id/run
 ```
 
 Executes all approved tests for the project. Returns a run ID.
@@ -82,7 +84,7 @@ Executes all approved tests for the project. Returns a run ID.
 ## CI/CD Trigger
 
 ```
-POST /api/projects/:id/trigger
+POST /api/v1/projects/:id/trigger
 ```
 
 **Auth:** `Authorization: Bearer <project-trigger-token>` (not a user JWT).
@@ -99,7 +101,7 @@ Token-authenticated endpoint for CI/CD pipelines. Starts a test run using the pr
 
 **Response `202 Accepted`:**
 ```json
-{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/projects/PRJ-1/trigger/runs/RUN-42" }
+{ "runId": "RUN-42", "statusUrl": "https://sentri.example.com/api/v1/projects/PRJ-1/trigger/runs/RUN-42" }
 ```
 
 Poll `statusUrl` with the same Bearer token until `status` is no longer `"running"`. If `callbackUrl` is provided, Sentri POSTs a JSON summary on any terminal state (`completed`, `failed`, or `aborted`) — best-effort, 10s timeout. The payload includes `error: null | string` so CI pipelines can distinguish success from failure.
@@ -116,7 +118,7 @@ Poll `statusUrl` with the same Bearer token until `status` is no longer `"runnin
 ## List Trigger Tokens
 
 ```
-GET /api/projects/:id/trigger-tokens
+GET /api/v1/projects/:id/trigger-tokens
 ```
 
 Returns all trigger tokens for the project (token hashes are never returned).
@@ -131,7 +133,7 @@ Returns all trigger tokens for the project (token hashes are never returned).
 ## Create Trigger Token
 
 ```
-POST /api/projects/:id/trigger-tokens
+POST /api/v1/projects/:id/trigger-tokens
 ```
 
 **Body (optional):**
@@ -151,7 +153,7 @@ The plaintext token is returned **exactly once**. Store it securely (e.g. as a C
 ## Revoke Trigger Token
 
 ```
-DELETE /api/projects/:id/trigger-tokens/:tid
+DELETE /api/v1/projects/:id/trigger-tokens/:tid
 ```
 
 Permanently deletes the token. CI pipelines using it will fail immediately.
@@ -159,7 +161,7 @@ Permanently deletes the token. CI pipelines using it will fail immediately.
 ## Get Schedule
 
 ```
-GET /api/projects/:id/schedule
+GET /api/v1/projects/:id/schedule
 ```
 
 Returns the current cron schedule for a project, or `null` if none exists.
@@ -172,7 +174,7 @@ Returns the current cron schedule for a project, or `null` if none exists.
 ## Create or Update Schedule
 
 ```
-PATCH /api/projects/:id/schedule
+PATCH /api/v1/projects/:id/schedule
 ```
 
 **Body:**
@@ -201,7 +203,7 @@ PATCH /api/projects/:id/schedule
 ## Delete Schedule
 
 ```
-DELETE /api/projects/:id/schedule
+DELETE /api/v1/projects/:id/schedule
 ```
 
 Removes the cron schedule and cancels the running cron task.

@@ -126,7 +126,7 @@ Requires a valid `access_token` cookie. Revokes the token server-side and clears
 ## Refresh Session
 
 ```
-POST /api/auth/refresh
+POST /api/v1/auth/refresh
 ```
 
 Requires a valid `access_token` cookie. Revokes the old token, issues a new one, and resets cookie TTL. Called proactively by the frontend 5 minutes before expiry.
@@ -136,7 +136,7 @@ Requires a valid `access_token` cookie. Revokes the old token, issues a new one,
 ## Get Current User
 
 ```
-GET /api/auth/me
+GET /api/v1/auth/me
 ```
 
 Requires a valid `access_token` cookie (or `Authorization: Bearer` header as fallback).
@@ -144,7 +144,7 @@ Requires a valid `access_token` cookie (or `Authorization: Bearer` header as fal
 ## OAuth — GitHub
 
 ```
-GET /api/auth/github/callback?code=<code>
+GET /api/v1/auth/github/callback?code=<code>
 ```
 
 Exchanges a GitHub OAuth code for a user profile and sets auth cookies. Requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` env vars on the server.
@@ -152,7 +152,7 @@ Exchanges a GitHub OAuth code for a user profile and sets auth cookies. Requires
 ## OAuth — Google
 
 ```
-GET /api/auth/google/callback?code=<code>
+GET /api/v1/auth/google/callback?code=<code>
 ```
 
 Exchanges a Google OAuth code for a user profile and sets auth cookies. Requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` env vars on the server.
@@ -162,7 +162,7 @@ Exchanges a Google OAuth code for a user profile and sets auth cookies. Requires
 ### Request Reset Token
 
 ```
-POST /api/auth/forgot-password
+POST /api/v1/auth/forgot-password
 ```
 
 **Body:**
@@ -180,7 +180,7 @@ Rate limited to **5 requests per IP per 15 minutes**. Tokens are persisted in th
 ### Reset Password
 
 ```
-POST /api/auth/reset-password
+POST /api/v1/auth/reset-password
 ```
 
 **Body:**
