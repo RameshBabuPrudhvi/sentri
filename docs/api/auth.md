@@ -1,5 +1,7 @@
 # Authentication API
 
+> All auth endpoints are under `/api/v1/auth/` (INF-005). Legacy `/api/auth/*` paths are 301-redirected.
+
 ## Cookie-Based Auth
 
 All auth endpoints set JWT tokens in **HttpOnly; Secure; SameSite=Strict** cookies. The token is never returned in response bodies. A companion `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX.
@@ -9,7 +11,7 @@ All mutating endpoints are protected by **CSRF double-submit cookie** validation
 ## Register
 
 ```
-POST /api/auth/register
+POST /api/v1/auth/register
 ```
 
 **Body:**
@@ -43,7 +45,7 @@ The user is created with `emailVerified = 0` and must verify their email before 
 ## Verify Email
 
 ```
-GET /api/auth/verify?token=<verification-token>
+GET /api/v1/auth/verify?token=<verification-token>
 ```
 
 Called when the user clicks the verification link in their email. Marks the user as verified and invalidates any remaining unused tokens.
@@ -58,7 +60,7 @@ Returns `400` for invalid, expired, or already-used tokens.
 ## Resend Verification Email
 
 ```
-POST /api/auth/resend-verification
+POST /api/v1/auth/resend-verification
 ```
 
 **Body:**
@@ -76,7 +78,7 @@ Rate limited to **5 requests per IP per 15 minutes** (shares bucket with forgot-
 ## Sign In
 
 ```
-POST /api/auth/login
+POST /api/v1/auth/login
 ```
 
 **Body:**
@@ -116,7 +118,7 @@ Rate limited to **10 attempts per IP per 15 minutes**.
 ## Sign Out
 
 ```
-POST /api/auth/logout
+POST /api/v1/auth/logout
 ```
 
 Requires a valid `access_token` cookie. Revokes the token server-side and clears auth cookies.
