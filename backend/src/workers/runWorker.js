@@ -130,6 +130,7 @@ async function processJob(job) {
 
       await runTests(project, tests, run, {
         parallelWorkers: options.parallelWorkers || 1,
+        device: options.device || null,
         signal,
       });
 

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **API**: All routes versioned under `/api/v1/` — legacy `/api/*` paths 308-redirect to `/api/v1/*` for backward compatibility during migration window; 308 preserves HTTP method so POST/PATCH/DELETE requests are not downgraded to GET (INF-005) (#94)
+- **AI**: Provider fallback chain on rate limits — when the primary AI provider returns a rate-limit error, `generateText()` automatically retries with the next configured provider in detection order before giving up; per-provider circuit breaker disables a provider for 5 minutes after 3 consecutive rate-limit failures (FEA-003) (#94)
+- **Runner**: Mobile viewport / device emulation — pass a `device` parameter (e.g. `"iPhone 14"`, `"Pixel 7"`) in run config to apply Playwright's built-in device profiles (viewport, user agent, touch); curated preset list exposed for UI dropdowns (DIF-003) (#94)
+- **Dashboard**: `testsByUrl` field in dashboard API response — counts approved tests per source URL for coverage heatmap visualisation (DIF-011) (#94)
+- **Frontend**: Coverage heatmap on SiteGraph — when `testsByUrl` is provided, nodes are coloured by test density: red (0 tests) → amber (1–2) → green (3+); legend updates to show heatmap tiers (DIF-011) (#94)
+- **Runner**: Cursor overlay on live browser view — injects animated cursor dot, click ripple, and keystroke toast via `page.evaluate()` so CDP screencast viewers can follow what the test is doing; re-injected after each navigation (DIF-014) (#94)
+- **Platform**: Demo mode — set `DEMO_GOOGLE_API_KEY` on hosted deployments to let new users try Sentri without bringing their own AI key; per-user daily quotas (2 crawls, 3 runs, 5 generations) enforced via `demoQuota` middleware; users who add their own key (BYOK) bypass all quotas; counters use Redis when available, in-memory otherwise; `GET /config` returns `demoMode` flag and per-user quota status (#94)
+- **Runner**: Per-step screenshots and timing — injects `__captureStep(N)` calls after each `// Step N:` comment in generated code; captures a screenshot and records `{ step, durationMs }` after each logical step; `StepResultsView` now shows the per-step screenshot when a step is clicked instead of always showing the final screenshot; real per-step timing replaces the approximate linear interpolation (DIF-016) (#94)
 - **API**: Multi-tenancy workspaces — all entities (projects, tests, runs, activities) are scoped to workspaces; workspace management endpoints at `/api/workspaces/*` (ACL-001) (#88)
 - **API**: Role-based access control — `admin`/`qa_lead`/`viewer` roles enforced via `requireRole` middleware; role hierarchy admin > qa_lead > viewer (ACL-002) (#88)
 - **DB**: Migration 004 — `workspaces` and `workspace_members` tables; `workspaceId` foreign key on projects, tests, runs, activities (ACL-001) (#88)

@@ -1,16 +1,16 @@
 /**
  * @module routes/trigger
- * @description CI/CD webhook trigger routes (ENH-011). Mounted at `/api` without
- * `requireAuth` — this router handles its own token-based authentication so
+ * @description CI/CD webhook trigger routes (ENH-011). Mounted at `/api/v1` (INF-005)
+ * without `requireAuth` — this router handles its own token-based authentication so
  * CI pipelines can call it with a per-project Bearer token rather than a user JWT.
  *
  * ### Endpoints
- * | Method   | Path                                     | Auth              | Description                        |
- * |----------|------------------------------------------|-------------------|------------------------------------|
- * | `POST`   | `/api/projects/:id/trigger`              | Bearer token      | Start a CI/CD test run             |
- * | `GET`    | `/api/projects/:id/trigger-tokens`       | JWT (requireAuth) | List tokens — see runs.js          |
- * | `POST`   | `/api/projects/:id/trigger-tokens`       | JWT (requireAuth) | Create token — see runs.js         |
- * | `DELETE` | `/api/projects/:id/trigger-tokens/:tid`  | JWT (requireAuth) | Revoke token — see runs.js         |
+ * | Method   | Path                                        | Auth              | Description                        |
+ * |----------|---------------------------------------------|-------------------|------------------------------------|
+ * | `POST`   | `/api/v1/projects/:id/trigger`              | Bearer token      | Start a CI/CD test run             |
+ * | `GET`    | `/api/v1/projects/:id/trigger-tokens`       | JWT (requireAuth) | List tokens — see runs.js          |
+ * | `POST`   | `/api/v1/projects/:id/trigger-tokens`       | JWT (requireAuth) | Create token — see runs.js         |
+ * | `DELETE` | `/api/v1/projects/:id/trigger-tokens/:tid`  | JWT (requireAuth) | Revoke token — see runs.js         |
  *
  * Token management endpoints (list/create/delete) live in `runs.js` and are
  * protected by `requireAuth`.  Only `POST /trigger` is here, unprotected.
@@ -222,7 +222,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   const host  = req.headers["x-forwarded-host"]  || req.get("host");
   // Point to the token-authenticated status endpoint so CI pipelines can
   // poll without a JWT — they reuse the same Bearer token.
-  const statusUrl = `${proto}://${host}/api/projects/${project.id}/trigger/runs/${runId}`;
+  const statusUrl = `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${runId}`;
 
   res.status(202).json({ runId, statusUrl });
 });

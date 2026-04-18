@@ -98,6 +98,13 @@ export function setRuntimeKey(provider, key) {
   const envName = CLOUD_KEY_MAP[provider];
   if (!envName) return;
   runtimeKeys[envName] = key;
+  // FEA-003: Reset circuit breaker when the key changes so the provider is
+  // immediately retried with the new credentials instead of waiting out the
+  // cooldown from the old key's rate-limit failures.
+  if (circuitBreakers[provider]) {
+    circuitBreakers[provider].failures = 0;
+    circuitBreakers[provider].disabledUntil = 0;
+  }
   try {
     if (key) {
       apiKeyRepo.set(provider, key);
@@ -139,7 +146,15 @@ function getKey(envName) {
   // takes precedence over the env var. Previously `||` made "" falsy, falling
   // through to process.env and making runtime deactivation impossible.
   if (envName in runtimeKeys) return runtimeKeys[envName];
-  return process.env[envName] || "";
+  const envVal = process.env[envName] || "";
+  if (envVal) return envVal;
+  // DEMO-MODE: Fall back to the platform-owned demo key for Google when no
+  // user key is configured. This lets users try Sentri without bringing their
+  // own API key. The demo key is rate-limited per-user by demoQuota middleware.
+  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) {
+    return process.env.DEMO_GOOGLE_API_KEY;
+  }
+  return "";
 }
 
 function getOllamaBaseUrl() {
@@ -204,7 +219,10 @@ function isProviderUsable(provider) {
   if (!envName) return false;
   // Runtime key of "" means explicitly cleared — respect that
   if (envName in runtimeKeys) return runtimeKeys[envName].length > 0;
-  return !!(process.env[envName]);
+  if (process.env[envName]) return true;
+  // DEMO-MODE: Google is usable when the demo key is set
+  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) return true;
+  return false;
 }
 
 /** True if Ollama has any config (runtime or env) hinting it should be auto-detected. */
@@ -265,9 +283,12 @@ export function getProviderMeta() {
  */
 export function getConfiguredKeys() {
   const result = { activeProvider: getProvider() };
-  // Cloud providers — masked keys via the shared map
+  // Cloud providers — masked keys via the shared map.
+  // Exclude the demo key fallback so the Settings UI (and demoQuota BYOK
+  // detection) only reflects keys the user explicitly configured.
   for (const [id, envName] of Object.entries(CLOUD_KEY_MAP)) {
-    result[id] = maskKey(getKey(envName));
+    const userKey = getUserConfiguredKey(envName);
+    result[id] = maskKey(userKey);
   }
   // Ollama-specific fields (never sensitive, no masking needed)
   result.ollamaBaseUrl = getOllamaBaseUrl();
@@ -276,6 +297,17 @@ export function getConfiguredKeys() {
   // the dropdown from showing Ollama as "saved" when it's just the default URL.
   result.ollamaConfigured = !runtimeOllamaDisabled && hasOllamaConfig();
   return result;
+}
+
+/**
+ * Get a user-configured key WITHOUT the demo fallback.
+ * Used by getConfiguredKeys() so BYOK detection is accurate.
+ * @param {string} envName
+ * @returns {string}
+ */
+function getUserConfiguredKey(envName) {
+  if (envName in runtimeKeys) return runtimeKeys[envName];
+  return process.env[envName] || "";
 }
 
 function maskKey(key) {
@@ -601,6 +633,78 @@ function normaliseMessages(promptOrMessages) {
   return { system: system || null, user, combined };
 }
 
+// ── FEA-003: Circuit breaker per provider ─────────────────────────────────────
+// When a provider hits 3 consecutive rate-limit failures, disable it for 5 min.
+// This prevents burning retry budget on a provider that is clearly overloaded.
+
+/** @type {Object<string, {failures: number, disabledUntil: number}>} */
+const circuitBreakers = {};
+
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Record a rate-limit failure for a provider. If the threshold is reached,
+ * the provider is disabled for CIRCUIT_BREAKER_COOLDOWN_MS.
+ *
+ * @param {string} provider
+ */
+function recordProviderFailure(provider) {
+  if (!circuitBreakers[provider]) circuitBreakers[provider] = { failures: 0, disabledUntil: 0 };
+  circuitBreakers[provider].failures += 1;
+  if (circuitBreakers[provider].failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreakers[provider].disabledUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+    console.warn(formatLogLine("warn", null, `[aiProvider] Circuit breaker tripped for ${provider} — disabled for ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s after ${CIRCUIT_BREAKER_THRESHOLD} consecutive rate-limit failures`));
+  }
+}
+
+/**
+ * Record a successful call — resets the failure counter.
+ *
+ * @param {string} provider
+ */
+function recordProviderSuccess(provider) {
+  if (circuitBreakers[provider]) {
+    circuitBreakers[provider].failures = 0;
+  }
+}
+
+/**
+ * Check whether a provider's circuit breaker is open (disabled).
+ *
+ * @param {string} provider
+ * @returns {boolean} `true` if the provider is temporarily disabled.
+ */
+function isCircuitBreakerOpen(provider) {
+  const cb = circuitBreakers[provider];
+  if (!cb) return false;
+  if (cb.disabledUntil > Date.now()) return true;
+  // Cooldown expired — reset
+  if (cb.disabledUntil > 0) {
+    cb.disabledUntil = 0;
+    cb.failures = 0;
+  }
+  return false;
+}
+
+/**
+ * FEA-003: Get the ordered list of fallback providers to try when the primary
+ * provider hits a rate limit. Returns all configured providers except the
+ * primary, in CLOUD_DETECT_ORDER, filtering out circuit-broken ones.
+ *
+ * @param {string} primaryProvider - The provider that failed.
+ * @returns {string[]} Ordered list of fallback provider IDs.
+ */
+function getFallbackProviders(primaryProvider) {
+  const allProviders = [...CLOUD_DETECT_ORDER, "local"];
+  return allProviders.filter(p =>
+    p !== primaryProvider &&
+    isProviderUsable(p) &&
+    !isCircuitBreakerOpen(p) &&
+    (p !== "local" || hasOllamaConfig()),
+  );
+}
+
 // ── Core API call ─────────────────────────────────────────────────────────────
 
 async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
@@ -701,12 +805,17 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
  * Generate text from an AI provider (single-shot, non-streaming).
  * Automatically detects the active provider and routes the request.
  *
+ * FEA-003: On rate-limit errors, automatically falls back to the next
+ * configured provider in CLOUD_DETECT_ORDER before giving up. Each
+ * provider has a circuit breaker that disables it for 5 minutes after
+ * 3 consecutive rate-limit failures.
+ *
  * @param {string|{system: string, user: string}} prompt - Plain string or structured `{ system, user }` messages.
  * @param {Object}      [options]
  * @param {number}      [options.maxTokens] - Max output tokens (default 16384).
  * @param {AbortSignal} [options.signal]    - Abort signal for cancellation.
  * @returns {Promise<string>} The generated text response.
- * @throws {Error} If no AI provider is configured.
+ * @throws {Error} If no AI provider is configured or all providers fail.
  */
 export async function generateText(prompt, options) {
   const provider = detectProvider();
@@ -718,7 +827,44 @@ export async function generateText(prompt, options) {
       "         Optionally: OLLAMA_MODEL=mistral:7b  OLLAMA_BASE_URL=http://localhost:11434"
     );
   }
-  return callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+
+  // ── FEA-003: Try primary provider, then fall back on rate-limit errors ──
+  try {
+    const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+    recordProviderSuccess(provider);
+    return result;
+  } catch (err) {
+    if (!isRateLimitError(err)) throw err;
+
+    // Primary provider hit rate limit — record failure and try fallbacks
+    recordProviderFailure(provider);
+    const fallbacks = getFallbackProviders(provider);
+
+    if (fallbacks.length === 0) {
+      // No fallbacks available — rethrow the original error
+      throw err;
+    }
+
+    for (const fallbackProvider of fallbacks) {
+      console.warn(formatLogLine("warn", null, `[aiProvider] Rate limit on ${provider} — falling back to ${fallbackProvider}`));
+      try {
+        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+        recordProviderSuccess(fallbackProvider);
+        return result;
+      } catch (fallbackErr) {
+        if (isRateLimitError(fallbackErr)) {
+          recordProviderFailure(fallbackProvider);
+          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} also rate-limited — trying next`));
+          continue;
+        }
+        // Non-rate-limit error from fallback — throw it
+        throw fallbackErr;
+      }
+    }
+
+    // All fallbacks exhausted — throw the original error
+    throw err;
+  }
 }
 
 /**
@@ -743,6 +889,13 @@ export function parseJSON(text) {
  *
  * Falls back to a single blocking call (Google / Ollama) that delivers
  * the entire response as one synthetic "token".
+ *
+ * NOTE: Unlike {@link generateText}, this function does NOT implement the
+ * FEA-003 provider fallback chain. If the primary provider is rate-limited,
+ * the error propagates directly. Google and Ollama paths delegate to
+ * `generateText()` which does have fallback, but Anthropic/OpenAI streaming
+ * paths do not. This is intentional — streaming callers (chat) need a
+ * consistent provider for multi-turn context.
  *
  * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
  * @param {function(string): void} onToken - Callback invoked for each token.

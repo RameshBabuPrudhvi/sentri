@@ -1,8 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, X, RefreshCw } from "lucide-react";
+import { Play, X, RefreshCw, Smartphone } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
+
+// DIF-003: Curated device presets — mirrors DEVICE_PRESETS in backend/src/runner/config.js.
+// Kept as a static list to avoid an extra API call. Must stay in sync with the backend.
+const DEVICE_PRESETS = [
+  { label: "Desktop (default)", value: "" },
+  { label: "iPhone 14", value: "iPhone 14" },
+  { label: "iPhone 14 Pro Max", value: "iPhone 14 Pro Max" },
+  { label: "iPhone 12", value: "iPhone 12" },
+  { label: "iPad (gen 7)", value: "iPad (gen 7)" },
+  { label: "iPad Pro 11", value: "iPad Pro 11" },
+  { label: "Galaxy S9+", value: "Galaxy S9+" },
+  { label: "Pixel 7", value: "Pixel 7" },
+  { label: "Pixel 5", value: "Pixel 5" },
+  { label: "Galaxy Tab S4", value: "Galaxy Tab S4" },
+  { label: "Desktop Chrome HiDPI", value: "Desktop Chrome HiDPI" },
+  { label: "Desktop Firefox HiDPI", value: "Desktop Firefox HiDPI" },
+];
 
 /**
  * Shared modal for running regression tests for a project.
@@ -15,6 +32,7 @@ import ModalShell from "../shared/ModalShell.jsx";
  */
 export default function RunRegressionModal({ projects, onClose, defaultProjectId }) {
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
+  const [device, setDevice] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -29,7 +47,8 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
     setError(null);
     setRunning(true);
     try {
-      const { runId } = await api.runTests(projectId);
+      const body = device ? { device } : undefined;
+      const { runId } = await api.runTests(projectId, body);
       onClose();
       navigate(`/runs/${runId}`);
     } catch (err) {
@@ -75,6 +94,24 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
             </select>
           </div>
         )}
+
+        {/* DIF-003: Device emulation selector */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Smartphone size={13} />
+            Device
+          </label>
+          <select
+            className="input"
+            value={device}
+            onChange={(e) => setDevice(e.target.value)}
+            style={{ height: 38 }}
+          >
+            {DEVICE_PRESETS.map((d) => (
+              <option key={d.value} value={d.value}>{d.label}</option>
+            ))}
+          </select>
+        </div>
 
         {error && (
           <div className="alert-error" style={{ marginBottom: 16 }}>

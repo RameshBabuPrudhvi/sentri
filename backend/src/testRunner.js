@@ -80,7 +80,7 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, { parallelWorkers, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, device, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
 
@@ -212,7 +212,7 @@ export async function runTests(project, tests, run, { parallelWorkers, signal } 
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const result = await executeTest(test, browser, runId, i, runStart);
+        const result = await executeTest(test, browser, runId, i, runStart, { device });
         structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
         processResult(test, result);
       } catch (err) {

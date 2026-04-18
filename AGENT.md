@@ -148,6 +148,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `ssrfGuard.js` | `validateUrl()`, `safeFetch()`, `isPrivateIp()` | SSRF protection for outbound HTTP requests to user-configured URLs (notification webhooks, CI/CD callback URLs) |
 | `notifications.js` | `fireNotifications(run, project)` | Failure notification dispatcher — Teams Adaptive Card, HTML email, generic webhook; best-effort, never affects run outcome |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
+| `../middleware/demoQuota.js` | `demoQuota(op)`, `isDemoEnabled`, `getDemoQuotaStatus(userId)` | Per-user daily quota enforcement for demo mode (`DEMO_GOOGLE_API_KEY`). Applied to crawl, run, and generate routes. BYOK users bypass all quotas |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
 
@@ -201,7 +202,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | Module | What it provides | When to use |
 |---|---|---|
 | `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
-| `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
+| `src/utils/apiBase.js` | `API_BASE`, `API_VERSION`, `API_PATH`, `parseJsonResponse()` | Base URL resolution, versioned API path, safe JSON parsing |
 | `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
 | `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
 | `src/utils/formatters.js` | `fmtMs()`, `fmtDate()`, `fmtDateTime()`, `fmtRelativeDate()`, `fmtDateTimeMedium()`, `fmtFutureRelative()`, `fmtDuration()`, `passRateColor()` | All date, time, duration, and colour formatting across pages and components |
@@ -348,7 +349,7 @@ console.error(`API key: ${apiKey}`);
 - 4xx errors return `{ error: string }` with a descriptive message.
 - 5xx errors return `{ error: "Internal server error" }` — never leak stack traces to the client.
 - Validate all user-supplied input at the route boundary using `utils/validate.js` before touching the DB.
-- All routes except `/api/auth/*`, `/health`, and `/api/projects/:id/trigger*` require `requireAuth` middleware (re-exported from `routes/auth.js`, delegates to `middleware/authenticate.js`). The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use `requireTrigger` from `middleware/authenticate.js` for per-project Bearer token authentication (ENH-011). Both middlewares are produced by the same `authenticate()` strategy factory — see "Authentication Architecture" below.
+- All routes except `/api/v1/auth/*`, `/health`, and `/api/v1/projects/:id/trigger*` require `requireAuth` middleware (re-exported from `routes/auth.js`, delegates to `middleware/authenticate.js`). The trigger endpoints (`POST /trigger` and `GET /trigger/runs/:runId`) use `requireTrigger` from `middleware/authenticate.js` for per-project Bearer token authentication (ENH-011). Both middlewares are produced by the same `authenticate()` strategy factory — see "Authentication Architecture" below. All routes are mounted under `API_PREFIX` (`/api/v1`) in `index.js` (INF-005).
 - After `requireAuth`, the `workspaceScope` middleware (`middleware/workspaceScope.js`) resolves `req.workspaceId` and `req.userRole` from the database on every request (ACL-001). All entity queries must be scoped to `req.workspaceId`.
 - Mutating routes are further guarded by `requireRole(minimumRole)` from `middleware/requireRole.js` (ACL-002). The role hierarchy is `admin` > `qa_lead` > `viewer`. See the endpoint tables in each route module for per-route minimum roles.
 
@@ -960,6 +961,10 @@ The following are **not yet implemented** but should be addressed before product
 | `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution (INF-003). Ignored when Redis/BullMQ is not available. |
 | `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads (e.g. `https://sentri.example.com`). Falls back to `CORS_ORIGIN`, then `http://localhost:3000`. |
 | `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location. In Docker, set to `/usr/share/frontend/index.html` (shared volume). |
+| `DEMO_GOOGLE_API_KEY` | No | — | Platform-owned Gemini API key for zero-config trial. Enables demo mode with per-user daily quotas. See `middleware/demoQuota.js`. |
+| `DEMO_DAILY_CRAWLS` | No | `2` | Max crawls per user per day in demo mode |
+| `DEMO_DAILY_RUNS` | No | `3` | Max test runs per user per day in demo mode |
+| `DEMO_DAILY_GENERATIONS` | No | `5` | Max AI test generations per user per day in demo mode |
 
 ---
 
@@ -1110,6 +1115,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not add large dependencies** without justification. Check bundle size impact for frontend packages and document the rationale in the PR.
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
 - **Do not hardcode `SameSite=Strict` on cookies.** Always use `cookieSameSite()` from `middleware/appSetup.js` — the production deployment is cross-origin (GitHub Pages + Render) and requires `SameSite=None; Secure`.
+- **Do not hardcode `/api/v1/` in frontend code.** Use `API_PATH` from `utils/apiBase.js` for all API URL construction. The backend uses `API_PREFIX` in `index.js`. Changing `API_VERSION` in one place bumps the entire stack — see INF-005.
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.

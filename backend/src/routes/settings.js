@@ -1,15 +1,15 @@
 /**
  * @module routes/settings
- * @description Config and Settings routes — AI provider management. Mounted at `/api`.
+ * @description Config and Settings routes — AI provider management. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                       | Description                              |
- * |----------|----------------------------|------------------------------------------|
- * | `GET`    | `/api/config`              | Active AI provider info for the UI badge |
- * | `GET`    | `/api/settings`            | Masked API key status per provider       |
- * | `POST`   | `/api/settings`            | Save an API key or activate Ollama       |
- * | `DELETE` | `/api/settings/:provider`  | Remove a key or deactivate Ollama        |
- * | `GET`    | `/api/ollama/status`       | Check Ollama connectivity + list models  |
+ * | Method   | Path                          | Description                              |
+ * |----------|-------------------------------|------------------------------------------|
+ * | `GET`    | `/api/v1/config`              | Active AI provider info for the UI badge |
+ * | `GET`    | `/api/v1/settings`            | Masked API key status per provider       |
+ * | `POST`   | `/api/v1/settings`            | Save an API key or activate Ollama       |
+ * | `DELETE` | `/api/v1/settings/:provider`  | Remove a key or deactivate Ollama        |
+ * | `GET`    | `/api/v1/ollama/status`       | Check Ollama connectivity + list models  |
  */
 
 import { Router } from "express";
@@ -17,20 +17,31 @@ import { logActivity } from "../utils/activityLogger.js";
 import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
+import { isDemoEnabled, getDemoQuotaStatus } from "../middleware/demoQuota.js";
 
 const router = Router();
 
 // GET /api/config — provider info for the LLM badge shown everywhere
-router.get("/config", (req, res) => {
+router.get("/config", async (req, res) => {
   const meta = getProviderMeta();
-  res.json({
+  const response = {
     provider: meta?.provider || null,
     providerName: meta?.name || "No provider configured",
     model: meta?.model || null,
     color: meta?.color || null,
     hasProvider: hasProvider(),
     supportedProviders: getSupportedProviders(),
-  });
+    // DEMO-MODE: Let the frontend know if the platform demo key is active
+    // so it can show quota info and "add your own key" prompts.
+    demoMode: isDemoEnabled,
+  };
+  // Include per-user quota status when in demo mode and user is authenticated
+  if (isDemoEnabled && req.authUser?.sub) {
+    try {
+      response.demoQuota = await getDemoQuotaStatus(req.authUser.sub);
+    } catch { /* non-fatal — Redis may be unavailable */ }
+  }
+  res.json(response);
 });
 
 // GET /api/settings — returns masked key status (never full keys)

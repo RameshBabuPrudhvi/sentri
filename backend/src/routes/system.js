@@ -1,19 +1,19 @@
 /**
  * @module routes/system
- * @description System info, activities, data management, and URL reachability. Mounted at `/api`.
+ * @description System info, activities, data management, and URL reachability. Mounted at `/api/v1` (INF-005).
  *
  * All queries are scoped to the authenticated user's workspace (ACL-001).
  *
  * ### Endpoints
- * | Method   | Path                       | Description                                | Min Role  |
- * |----------|----------------------------|--------------------------------------------|-----------|
- * | `GET`    | `/api/activities`          | Activity log (filterable by type, project)  | viewer    |
- * | `POST`   | `/api/test-connection`     | Verify a URL is reachable (SSRF-protected)  | qa_lead   |
- * | `GET`    | `/api/system`              | Uptime, Node/Playwright versions, DB counts | viewer    |
- * | `POST`   | `/api/system/client-error` | Log a frontend crash report                 | viewer    |
- * | `DELETE` | `/api/data/runs`           | Clear all run history (incl. soft-deleted)  | admin     |
- * | `DELETE` | `/api/data/activities`     | Clear activity log                          | admin     |
- * | `DELETE` | `/api/data/healing`        | Clear self-healing history                  | admin     |
+ * | Method   | Path                          | Description                                | Min Role  |
+ * |----------|-------------------------------|--------------------------------------------|-----------|
+ * | `GET`    | `/api/v1/activities`          | Activity log (filterable by type, project)  | viewer    |
+ * | `POST`   | `/api/v1/test-connection`     | Verify a URL is reachable (SSRF-protected)  | qa_lead   |
+ * | `GET`    | `/api/v1/system`              | Uptime, Node/Playwright versions, DB counts | viewer    |
+ * | `POST`   | `/api/v1/system/client-error` | Log a frontend crash report                 | viewer    |
+ * | `DELETE` | `/api/v1/data/runs`           | Clear all run history (incl. soft-deleted)  | admin     |
+ * | `DELETE` | `/api/v1/data/activities`     | Clear activity log                          | admin     |
+ * | `DELETE` | `/api/v1/data/healing`        | Clear self-healing history                  | admin     |
  */
 
 import { Router } from "express";

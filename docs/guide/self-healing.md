@@ -38,4 +38,4 @@ The highest-priority failing tests are auto-regenerated with context-aware fix i
 To reset the healing history and force the waterfall to start fresh:
 
 - **UI:** Settings → Data Management → Clear Self-Healing History
-- **API:** `DELETE /api/data/healing`
+- **API:** `DELETE /api/v1/data/healing`

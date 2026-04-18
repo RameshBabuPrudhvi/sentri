@@ -1,20 +1,20 @@
 /**
  * @module routes/runs
  * @description Run routes — crawl, test execution, abort, listing, and CI/CD triggers.
- * Mounted at `/api`.
+ * Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                                     | Description                         |
- * |----------|------------------------------------------|-------------------------------------|
- * | `POST`   | `/api/projects/:id/crawl`                | Start crawl + AI test generation    |
- * | `POST`   | `/api/projects/:id/run`                  | Execute all approved tests          |
- * | `GET`    | `/api/projects/:id/runs`                 | List runs for a project             |
- * | `GET`    | `/api/runs/:runId`                       | Get run detail                      |
- * | `POST`   | `/api/runs/:runId/abort`                 | Abort a running crawl or test run   |
- * | `POST`   | `/api/projects/:id/trigger`              | CI/CD token-authenticated test run  |
- * | `GET`    | `/api/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
- * | `POST`   | `/api/projects/:id/trigger-tokens`       | Create a new trigger token          |
- * | `DELETE` | `/api/projects/:id/trigger-tokens/:tid`  | Revoke a trigger token              |
+ * | Method   | Path                                        | Description                         |
+ * |----------|---------------------------------------------|-------------------------------------|
+ * | `POST`   | `/api/v1/projects/:id/crawl`                | Start crawl + AI test generation    |
+ * | `POST`   | `/api/v1/projects/:id/run`                  | Execute all approved tests          |
+ * | `GET`    | `/api/v1/projects/:id/runs`                 | List runs for a project             |
+ * | `GET`    | `/api/v1/runs/:runId`                       | Get run detail                      |
+ * | `POST`   | `/api/v1/runs/:runId/abort`                 | Abort a running crawl or test run   |
+ * | `POST`   | `/api/v1/projects/:id/trigger`              | CI/CD token-authenticated test run  |
+ * | `GET`    | `/api/v1/projects/:id/trigger-tokens`       | List trigger tokens for a project   |
+ * | `POST`   | `/api/v1/projects/:id/trigger-tokens`       | Create a new trigger token          |
+ * | `DELETE` | `/api/v1/projects/:id/trigger-tokens/:tid`  | Revoke a trigger token              |
  */
 
 import { Router } from "express";
@@ -32,6 +32,7 @@ import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
+import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
@@ -41,7 +42,7 @@ const router = Router();
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
-router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -124,7 +125,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, a
 
 // ─── Run Tests ────────────────────────────────────────────────────────────────
 
-router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -139,8 +140,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  // Extract parallel workers from dials config (if provided)
-  const { dialsConfig } = req.body || {};
+  // Extract parallel workers and device emulation from request body / dials config
+  const { dialsConfig, device } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
@@ -157,6 +158,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
     failed: 0,
     total: tests.length,
     parallelWorkers,
+    device: device || null,
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
   };
   runRepo.create(run);
@@ -176,7 +178,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, device: device || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -187,7 +189,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, signal }),
+      (signal) => runTests(project, tests, run, { parallelWorkers, device, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

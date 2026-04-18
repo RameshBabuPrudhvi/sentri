@@ -2,11 +2,13 @@
 
 The Sentri backend exposes a RESTful JSON API on port `3001` by default.
 
-**Base URL:** `http://localhost:3001/api`
+**Base URL:** `http://localhost:3001/api/v1`
+
+> **Versioning (INF-005):** All endpoints are served under `/api/v1/`. Legacy `/api/*` paths are 308-redirected for backward compatibility (preserves HTTP method).
 
 ## Authentication
 
-Protected endpoints use **HttpOnly cookie-based auth**. After signing in via [`POST /api/auth/login`](/api/auth) or an OAuth callback, the server sets an `access_token` cookie that the browser sends automatically on every request.
+Protected endpoints use **HttpOnly cookie-based auth**. After signing in via [`POST /api/v1/auth/login`](/api/auth) or an OAuth callback, the server sets an `access_token` cookie that the browser sends automatically on every request.
 
 All mutating requests (POST, PATCH, PUT, DELETE) must also include the CSRF token in the `X-CSRF-Token` header (read from the `_csrf` cookie).
 
@@ -44,8 +46,8 @@ Three tiers of rate limiting protect the API:
 |---|---|---|---|
 | **General** | All `/api/*` routes | 300 req / 15 min per IP | Every API request |
 | **Auth** | Login, forgot-password, reset-password | 5–10 req / 15 min per IP | Auth endpoints only |
-| **Expensive ops** | Crawl, test run | 20 req / hr per IP | `POST /api/projects/:id/crawl`, `/run`, `/tests/:id/run` |
-| **AI generation** | Test generation | 30 req / hr per IP | `POST /api/projects/:id/tests/generate` |
+| **Expensive ops** | Crawl, test run | 20 req / hr per IP | `POST /api/v1/projects/:id/crawl`, `/run`, `/tests/:id/run` |
+| **AI generation** | Test generation | 30 req / hr per IP | `POST /api/v1/projects/:id/tests/generate` |
 
 When exceeded:
 
@@ -56,7 +58,7 @@ Retry-After: <seconds>
 
 ### SSE Event Stream
 
-Run events are streamed via Server-Sent Events at `GET /api/runs/:runId/events`. Event types:
+Run events are streamed via Server-Sent Events at `GET /api/v1/runs/:runId/events`. Event types:
 
 | Event | Description |
 |---|---|

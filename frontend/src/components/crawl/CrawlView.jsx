@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Map, List } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
@@ -7,6 +7,7 @@ import PipelineCard from "../run/PipelineCard.jsx";
 import GenerationSuccessBanner from "../generate/GenerationSuccessBanner.jsx";
 import ActivityLogCard from "../run/ActivityLogCard.jsx";
 import RunSidebar from "../run/RunSidebar.jsx";
+import { api } from "../../api.js";
 
 // Each stage maps to a 1-based step index set authoritatively by the
 // backend via run.currentStep. No fragile log-string scraping needed.
@@ -25,6 +26,18 @@ export default function CrawlView({ run, isRunning }) {
   const navigate = useNavigate();
   const [graphView, setGraphView] = React.useState("graph"); // "graph" | "list"
   const [selectedPage, setSelectedPage] = React.useState(null);
+
+  // DIF-011: Fetch testsByUrl from dashboard API for coverage heatmap.
+  // Only fetch when the crawl is NOT running (avoids hitting the heavy
+  // dashboard endpoint on every status toggle). Re-fetches when a run
+  // finishes so the heatmap reflects newly generated tests.
+  const [testsByUrl, setTestsByUrl] = useState(null);
+  useEffect(() => {
+    if (isRunning) return; // skip while crawl is active
+    api.getDashboard()
+      .then(d => { if (d?.testsByUrl) setTestsByUrl(d.testsByUrl); })
+      .catch(() => { /* non-fatal — heatmap falls back to legacy mode */ });
+  }, [isRunning]);
 
   const logs = useLogBuffer(run);
   const ps = run?.pipelineStats || {};
@@ -130,6 +143,7 @@ export default function CrawlView({ run, isRunning }) {
                 activePage={activePage}
                 isRunning={isRunning}
                 onNodeClick={(page) => setSelectedPage(p => p?.url === page.url ? null : page)}
+                testsByUrl={testsByUrl}
               />
             ) : (
               /* List view */

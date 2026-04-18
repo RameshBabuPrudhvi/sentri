@@ -1,20 +1,20 @@
 /**
  * @module routes/projects
- * @description Project CRUD routes. Mounted at `/api/projects`.
+ * @description Project CRUD routes. Mounted at `/api/v1/projects` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                         | Description                                            |
- * |----------|------------------------------|--------------------------------------------------------|
- * | `POST`   | `/api/projects`              | Create a project                                       |
- * | `GET`    | `/api/projects`              | List all non-deleted projects                          |
- * | `GET`    | `/api/projects/:id`          | Get a single project                                   |
- * | `DELETE` | `/api/projects/:id`          | Soft-delete project + cascade soft-delete its data     |
- * | `GET`    | `/api/projects/:id/schedule` | Get the cron schedule for a project                    |
- * | `PATCH`  | `/api/projects/:id/schedule` | Create or update the cron schedule for a project       |
- * | `DELETE` | `/api/projects/:id/schedule` | Remove the cron schedule for a project                 |
- * | `GET`    | `/api/projects/:id/notifications` | Get notification settings for a project          |
- * | `PATCH`  | `/api/projects/:id/notifications` | Create or update notification settings            |
- * | `DELETE` | `/api/projects/:id/notifications` | Remove notification settings for a project        |
+ * | Method   | Path                              | Description                                            |
+ * |----------|-----------------------------------|--------------------------------------------------------|
+ * | `POST`   | `/api/v1/projects`                | Create a project                                       |
+ * | `GET`    | `/api/v1/projects`                | List all non-deleted projects                          |
+ * | `GET`    | `/api/v1/projects/:id`            | Get a single project                                   |
+ * | `DELETE` | `/api/v1/projects/:id`            | Soft-delete project + cascade soft-delete its data     |
+ * | `GET`    | `/api/v1/projects/:id/schedule`   | Get the cron schedule for a project                    |
+ * | `PATCH`  | `/api/v1/projects/:id/schedule`   | Create or update the cron schedule for a project       |
+ * | `DELETE` | `/api/v1/projects/:id/schedule`   | Remove the cron schedule for a project                 |
+ * | `GET`    | `/api/v1/projects/:id/notifications` | Get notification settings for a project             |
+ * | `PATCH`  | `/api/v1/projects/:id/notifications` | Create or update notification settings              |
+ * | `DELETE` | `/api/v1/projects/:id/notifications` | Remove notification settings for a project          |
  */
 
 import { Router } from "express";

@@ -1,5 +1,7 @@
 # Authentication API
 
+> All auth endpoints are under `/api/v1/auth/` (INF-005). Legacy `/api/auth/*` paths are 308-redirected.
+
 ## Cookie-Based Auth
 
 All auth endpoints set JWT tokens in **HttpOnly; Secure; SameSite=Strict** cookies. The token is never returned in response bodies. A companion `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX.
@@ -9,7 +11,7 @@ All mutating endpoints are protected by **CSRF double-submit cookie** validation
 ## Register
 
 ```
-POST /api/auth/register
+POST /api/v1/auth/register
 ```
 
 **Body:**
@@ -43,7 +45,7 @@ The user is created with `emailVerified = 0` and must verify their email before 
 ## Verify Email
 
 ```
-GET /api/auth/verify?token=<verification-token>
+GET /api/v1/auth/verify?token=<verification-token>
 ```
 
 Called when the user clicks the verification link in their email. Marks the user as verified and invalidates any remaining unused tokens.
@@ -58,7 +60,7 @@ Returns `400` for invalid, expired, or already-used tokens.
 ## Resend Verification Email
 
 ```
-POST /api/auth/resend-verification
+POST /api/v1/auth/resend-verification
 ```
 
 **Body:**
@@ -76,7 +78,7 @@ Rate limited to **5 requests per IP per 15 minutes** (shares bucket with forgot-
 ## Sign In
 
 ```
-POST /api/auth/login
+POST /api/v1/auth/login
 ```
 
 **Body:**
@@ -116,7 +118,7 @@ Rate limited to **10 attempts per IP per 15 minutes**.
 ## Sign Out
 
 ```
-POST /api/auth/logout
+POST /api/v1/auth/logout
 ```
 
 Requires a valid `access_token` cookie. Revokes the token server-side and clears auth cookies.
@@ -124,7 +126,7 @@ Requires a valid `access_token` cookie. Revokes the token server-side and clears
 ## Refresh Session
 
 ```
-POST /api/auth/refresh
+POST /api/v1/auth/refresh
 ```
 
 Requires a valid `access_token` cookie. Revokes the old token, issues a new one, and resets cookie TTL. Called proactively by the frontend 5 minutes before expiry.
@@ -134,7 +136,7 @@ Requires a valid `access_token` cookie. Revokes the old token, issues a new one,
 ## Get Current User
 
 ```
-GET /api/auth/me
+GET /api/v1/auth/me
 ```
 
 Requires a valid `access_token` cookie (or `Authorization: Bearer` header as fallback).
@@ -142,7 +144,7 @@ Requires a valid `access_token` cookie (or `Authorization: Bearer` header as fal
 ## OAuth — GitHub
 
 ```
-GET /api/auth/github/callback?code=<code>
+GET /api/v1/auth/github/callback?code=<code>
 ```
 
 Exchanges a GitHub OAuth code for a user profile and sets auth cookies. Requires `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` env vars on the server.
@@ -150,7 +152,7 @@ Exchanges a GitHub OAuth code for a user profile and sets auth cookies. Requires
 ## OAuth — Google
 
 ```
-GET /api/auth/google/callback?code=<code>
+GET /api/v1/auth/google/callback?code=<code>
 ```
 
 Exchanges a Google OAuth code for a user profile and sets auth cookies. Requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` env vars on the server.
@@ -160,7 +162,7 @@ Exchanges a Google OAuth code for a user profile and sets auth cookies. Requires
 ### Request Reset Token
 
 ```
-POST /api/auth/forgot-password
+POST /api/v1/auth/forgot-password
 ```
 
 **Body:**
@@ -178,7 +180,7 @@ Rate limited to **5 requests per IP per 15 minutes**. Tokens are persisted in th
 ### Reset Password
 
 ```
-POST /api/auth/reset-password
+POST /api/v1/auth/reset-password
 ```
 
 **Body:**

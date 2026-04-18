@@ -62,6 +62,12 @@ The following items have been verified complete against the codebase and are **n
 | FEA-001 | Teams / email / webhook failure notifications | PR #92 |
 | SEC-002 | Nonce-based Content Security Policy | PR #92 |
 | SEC-003 | GDPR / CCPA account data export and deletion | PR #92 |
+| INF-005 | API versioning (`/api/v1/`) with 308 redirects | PR #94 |
+| FEA-003 | AI provider fallback chain + circuit breaker | PR #94 |
+| DIF-003 | Mobile viewport / device emulation | PR #94 |
+| DIF-011 | Coverage heatmap on site graph | PR #94 |
+| DIF-014 | Cursor overlay on live browser view | PR #94 |
+| DIF-016 | Step-level timing and per-step screenshots | PR #94 |
 
 ---
 
@@ -293,11 +299,11 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-005 — API versioning (`/api/v1/`) 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** S | **Source:** Audit
 
 **Problem:** All routes are mounted at `/api/*` with no version prefix. Any breaking API change will immediately break all consumers — CI/CD integrations, GitHub Actions, external webhooks — with no safe migration path.
 
-**Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 301 redirects from `/api/*` to `/api/v1/*` for backward compatibility during the transition window.
+**Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 308 redirects from `/api/*` to `/api/v1/*` for backward compatibility during the transition window (308 preserves HTTP method on redirect).
 
 **Files to change:**
 - `backend/src/index.js` — update route mount paths
@@ -310,7 +316,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### FEA-003 — AI provider fallback chain on rate limits 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
 **Problem:** If the primary AI provider returns a rate limit error, the pipeline fails after `LLM_MAX_RETRIES` attempts with no fallback. If Anthropic is temporarily rate-limited, all test generation stops — even if OpenAI or Ollama is configured and available. There is no circuit breaker.
 
@@ -388,7 +394,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-003 — Mobile viewport / device emulation 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** S | **Source:** Competitive
 
 **Problem:** There is no device emulation. Playwright ships with 50+ device profiles (`playwright.devices`) covering iPhone, Galaxy, iPad, and desktop variants. A device selector is high-value, low-effort, and a standard evaluation question for any QA platform.
 
@@ -457,13 +463,13 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-### DIF-016 — Step-level timing waterfall 🔵 Medium
+### DIF-016 — Step-level timing and per-step screenshots 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
-**Problem:** Test results show pass/fail per test but not a timeline of how long each step took. The most common debugging question — "where is my test slow?" — requires reading raw logs. Step timing data is not currently collected.
+**Problem:** Test results show pass/fail per test but not a timeline of how long each step took. The most common debugging question — "where is my test slow?" — requires reading raw logs. Step timing data is not currently collected. Additionally, clicking different steps in StepResultsView always shows the same end-of-test screenshot — users cannot see what the page looked like at each step.
 
-**Fix:** Record `{ step, durationMs, startedAt }` for each step in `codeExecutor.js` and store as `stepTimings` on the test result. Render as a horizontal waterfall bar chart in `StepResultsView.jsx`.
+**Fix:** Inject `await __captureStep(N)` calls after each `// Step N:` comment in the generated code. Each capture records a screenshot and timing data (`{ step, durationMs, completedAt }`). StepResultsView shows the per-step screenshot when a step is clicked (falls back to the final screenshot for tests without step markers). Real per-step timing replaces the approximate linear interpolation.
 
 **Files to change:**
 - `backend/src/runner/executeTest.js` — record step start/end timestamps
@@ -567,7 +573,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-011 — Coverage heatmap on site graph 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** S | **Source:** Competitive
 
 **Problem:** The site graph shows crawled pages but gives no signal about which pages have test coverage. Teams cannot identify gaps visually without reading a table.
 
@@ -620,7 +626,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-014 — Cursor overlay on live browser view 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Assrt (M-04)
+**Status:** ✅ Complete | **Effort:** S | **Source:** Assrt (M-04)
 
 **Problem:** Sentri's live CDP screencast shows the browser but gives no visual indication of what the test is currently doing. Viewers cannot tell which element is about to be clicked, filled, or asserted — making live runs difficult to follow.
 
@@ -1196,7 +1202,7 @@ The following items have been verified complete against the codebase and are **n
 | Parallel execution | ✅ 1–10 workers | ✅ Cloud | ✅ Cloud | ✅ Cloud | ✅ CLI sharding |
 | Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
-| Mobile / device emulation | ❌ → DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
+| Mobile / device emulation | ✅ DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 <!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
@@ -1209,7 +1215,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close first:** FEA-001 · DIF-001 · DIF-002 · DIF-015 (recorder)
+**Critical gaps to close first:** DIF-001 (visual regression) · DIF-002 (cross-browser) · DIF-015 (recorder)
 
 ---
 
@@ -1217,10 +1223,10 @@ The following items have been verified complete against the codebase and are **n
 
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | SEC-002, SEC-003 | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | INF-004, INF-005 |
+| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | ~~SEC-002~~ ✅, ~~SEC-003~~ ✅ | SEC-004, SEC-005 |
+| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | INF-004, ~~INF-005~~ ✅ |
 | Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
-| Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002–003 |
+| Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
 | Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
@@ -1233,10 +1239,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`SEC-004` → `INF-004` → `INF-005` → `FEA-002`
+`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export) → `INF-004` (OpenAPI spec)
 
 **Lowest effort / highest immediate value:**
-INF-005 (S) · DIF-003 (S) · DIF-011 (S) · DIF-014 (S) · AUTO-007 (S) · AUTO-013 (S)
+AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 

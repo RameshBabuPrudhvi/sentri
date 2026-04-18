@@ -18,7 +18,7 @@
 
 - [x] ~~Redis for rate limiting, token revocation, and SSE pub/sub~~ — Done (INF-002). Set `REDIS_URL=redis://…` to enable. Install `ioredis` + `rate-limit-redis`. Falls back to in-memory stores when not configured.
 - [x] ~~Cron-based auto-runs~~ — Done (ENH-006). Configure per-project schedules via the Automation page.
-- [x] ~~CI/CD webhook trigger~~ — Done (ENH-011). `POST /api/projects/:id/trigger` with per-project Bearer tokens.
+- [x] ~~CI/CD webhook trigger~~ — Done (ENH-011). `POST /api/v1/projects/:id/trigger` with per-project Bearer tokens.
 - [x] ~~Email verification on registration~~ — Done (SEC-001). Configure `RESEND_API_KEY` or `SMTP_HOST` for transactional email.
 - [x] ~~Graceful shutdown~~ — Done (MAINT-013). Drains in-flight runs on SIGTERM/SIGINT.
 - [x] ~~BullMQ durable background run execution~~ — Done (INF-003). When `REDIS_URL` is set and `bullmq` is installed, runs execute via a durable job queue with crash recovery, retry, and global concurrency control (`MAX_WORKERS`). Falls back to in-process execution without Redis.

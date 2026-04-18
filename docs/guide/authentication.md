@@ -49,7 +49,7 @@ A companion `token_exp` cookie (Non-HttpOnly) exposes only the numeric expiry ti
 All mutating API requests are protected by a **CSRF double-submit cookie** (`_csrf`). The frontend reads this cookie and sends its value in the `X-CSRF-Token` header.
 
 The `AuthContext` provider handles:
-- Proactive session refresh (5 minutes before expiry via `POST /api/auth/refresh`)
+- Proactive session refresh (5 minutes before expiry via `POST /api/v1/auth/refresh`)
 - 401 response interception → automatic session clear and redirect
 - Server-side token revocation on sign-out (clears cookies)
 

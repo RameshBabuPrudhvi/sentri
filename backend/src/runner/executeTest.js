@@ -24,8 +24,9 @@ import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
 import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
-import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR } from "./config.js";
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { injectCursorOverlay } from "./cursorOverlay.js";
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -163,12 +164,20 @@ function formatTestError(err) {
 }
 
 /**
- * executeTest(test, browser, runId, stepIndex, runStart, db) → result object
+ * executeTest(test, browser, runId, stepIndex, runStart, opts) → result object
  *
  * Runs a single test case inside a fresh browser context and returns a
  * result object suitable for pushing into run.results.
+ *
+ * @param {Object}  test
+ * @param {Object}  browser      - Playwright Browser instance.
+ * @param {string}  runId
+ * @param {number}  stepIndex
+ * @param {number}  runStart     - `Date.now()` when the run started.
+ * @param {Object}  [opts]
+ * @param {string}  [opts.device] - DIF-003: Playwright device name (e.g. `"iPhone 14"`).
  */
-export async function executeTest(test, browser, runId, stepIndex, runStart) {
+export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
   // Use the cached _isApi flag set by testRunner.js (avoids re-parsing).
   // Fall back to isApiTest() for callers that bypass the runner (e.g. tests).
@@ -188,10 +197,17 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
   const testVideoDir = path.join(VIDEOS_DIR, runId, `step${stepIndex}`);
   if (!fs.existsSync(testVideoDir)) fs.mkdirSync(testVideoDir, { recursive: true });
 
+  // DIF-003: Resolve device emulation descriptor (viewport, userAgent, touch, etc.)
+  const deviceDescriptor = resolveDevice(opts.device);
+  const effectiveViewport = deviceDescriptor?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
+
   const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    recordVideo: { dir: testVideoDir, size: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT } },
-    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+    // Spread device descriptor first so explicit overrides below take precedence
+    ...(deviceDescriptor || {}),
+    // Always override these regardless of device profile
+    userAgent: deviceDescriptor?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    recordVideo: { dir: testVideoDir, size: { width: effectiveViewport.width, height: effectiveViewport.height } },
+    viewport: effectiveViewport,
     permissions: ["geolocation", "notifications"],
     ignoreHTTPSErrors: true,
     // Enable downloads so page.waitForEvent('download') works (#42)
@@ -206,6 +222,12 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
   page.on("dialog", (dialog) => {
     dialog.accept().catch(() => {});
   });
+
+  // DIF-014: Inject animated cursor overlay so the live CDP screencast shows
+  // what the test is doing (click ripple, keystroke toast, hover dot).
+  // Re-injected after each navigation via the page "load" event.
+  await injectCursorOverlay(page);
+  page.on("load", () => { injectCursorOverlay(page).catch(() => {}); });
 
   // Start CDP screencast (returns cleanup fn or null)
   const stopScreencast = await startScreencast(page, runId);
@@ -229,6 +251,8 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
     consoleLogs: [],
     domSnapshot: null,
     boundingBoxes: [],
+    stepCaptures: [],   // DIF-016: per-step screenshots
+    stepTimings: [],    // DIF-016: per-step timing data
   };
 
   const start = Date.now();
@@ -268,8 +292,19 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
 
         const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
         const healingHints = getHealingHistoryForTest(healingScopeId);
-        const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints);
+        const codeResult = await runGeneratedCode(page, context, test.playwrightCode, expect, healingHints, {
+          onStepCapture: async (stepNumber, _page) => {
+            try {
+              const shot = await captureScreenshot(_page, runId, stepIndex, { stepNumber });
+              return { screenshot: shot.base64, screenshotPath: shot.artifactPath };
+            } catch { return null; }
+          },
+        });
         persistHealingEvents(healingScopeId, codeResult.healingEvents);
+
+        // Collect per-step captures and timings from the instrumented run
+        result.stepCaptures = codeResult.stepCaptures || [];
+        result.stepTimings = codeResult.stepTimings || [];
 
       } else {
         // ── FALLBACK: No parseable code — run a basic smoke test ───────────
@@ -320,6 +355,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart) {
     // Persist healing events from the failed run
     const healingScopeId = `${test.id}@v${test.codeVersion || 0}`;
     persistHealingEvents(healingScopeId, err.__healingEvents);
+
+    // Collect any per-step captures/timings gathered before the failure
+    result.stepCaptures = err.__stepCaptures || [];
+    result.stepTimings = err.__stepTimings || [];
 
     // Screenshot the failure state
     try {

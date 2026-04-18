@@ -1,11 +1,11 @@
 /**
  * @module routes/dashboard
- * @description Dashboard analytics endpoint. Mounted at `/api`.
+ * @description Dashboard analytics endpoint. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method | Path              | Description                                                |
- * |--------|-------------------|------------------------------------------------------------|
- * | `GET`  | `/api/dashboard`  | Pass rate, defects, flaky tests, MTTR, growth, and more    |
+ * | Method | Path                 | Description                                                |
+ * |--------|----------------------|------------------------------------------------------------|
+ * | `GET`  | `/api/v1/dashboard`  | Pass rate, defects, flaky tests, MTTR, growth, and more    |
  */
 
 import { Router } from "express";
@@ -178,6 +178,15 @@ router.get("/dashboard", (req, res) => {
     ? Math.round(recoveryDeltas.reduce((s, d) => s + d, 0) / recoveryDeltas.length)
     : null;
 
+  // ── DIF-011: Test density per URL for coverage heatmap ────────────────────
+  // Counts approved tests per sourceUrl so the SiteGraph can colour nodes
+  // by coverage density: 0 = red, 1–2 = amber, 3+ = green.
+  const testsByUrl = {};
+  for (const t of tests) {
+    if (t.reviewStatus !== "approved" || !t.sourceUrl) continue;
+    testsByUrl[t.sourceUrl] = (testsByUrl[t.sourceUrl] || 0) + 1;
+  }
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -199,6 +208,7 @@ router.get("/dashboard", (req, res) => {
     flakyTestCount,
     testGrowth,
     mttrMs,
+    testsByUrl,
   });
 });
 

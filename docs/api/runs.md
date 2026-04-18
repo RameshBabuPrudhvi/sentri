@@ -1,9 +1,11 @@
 # Runs API
 
+> All run endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 308-redirected.
+
 ## Start a Crawl + Generate Run
 
 ```
-POST /api/projects/:id/crawl
+POST /api/v1/projects/:id/crawl
 ```
 
 **Body (optional):**
@@ -16,15 +18,38 @@ Starts the 8-stage AI pipeline: crawl → filter → classify → plan → gener
 ## Execute All Approved Tests
 
 ```
-POST /api/projects/:id/run
+POST /api/v1/projects/:id/run
 ```
 
 **Body (optional):**
 ```json
-{ "dialsConfig": { "parallelWorkers": 4 } }
+{ "dialsConfig": { "parallelWorkers": 4 }, "device": "iPhone 14" }
 ```
 
 Runs all approved tests for the project. When `parallelWorkers > 1`, tests execute concurrently in isolated browser contexts within a single Chromium instance (1–10, default 1).
+
+### Device emulation (DIF-003)
+
+Pass a `device` field in the request body to run tests with a Playwright device profile. The device name is looked up in [`playwright.devices`](https://playwright.dev/docs/emulation#devices) and applies viewport, user agent, touch emulation, and device scale factor to the browser context.
+
+Available presets (also shown in the UI dropdown):
+
+| Label | Value |
+|---|---|
+| Desktop (default) | `""` (omit or empty) |
+| iPhone 14 | `"iPhone 14"` |
+| iPhone 14 Pro Max | `"iPhone 14 Pro Max"` |
+| iPhone 12 | `"iPhone 12"` |
+| iPad (gen 7) | `"iPad (gen 7)"` |
+| iPad Pro 11 | `"iPad Pro 11"` |
+| Galaxy S9+ | `"Galaxy S9+"` |
+| Pixel 7 | `"Pixel 7"` |
+| Pixel 5 | `"Pixel 5"` |
+| Galaxy Tab S4 | `"Galaxy Tab S4"` |
+| Desktop Chrome HiDPI | `"Desktop Chrome HiDPI"` |
+| Desktop Firefox HiDPI | `"Desktop Firefox HiDPI"` |
+
+Any name from `playwright.devices` is accepted — the presets above are a curated subset for the UI.
 
 **Response:**
 ```json
@@ -36,13 +61,13 @@ The run record includes `parallelWorkers` so the frontend and logs can show whic
 ## List Runs for a Project
 
 ```
-GET /api/projects/:id/runs
+GET /api/v1/projects/:id/runs
 ```
 
 Returns non-deleted runs sorted newest-first. Supports optional pagination:
 
 ```
-GET /api/projects/:id/runs?page=1&pageSize=10
+GET /api/v1/projects/:id/runs?page=1&pageSize=10
 ```
 
 When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible). Default `pageSize` is 10 (max 200).
@@ -50,7 +75,7 @@ When `page` or `pageSize` is provided, the response shape changes to `{ data: []
 ## Get Run Detail
 
 ```
-GET /api/runs/:runId
+GET /api/v1/runs/:runId
 ```
 
 Includes per-test results, screenshots, timing, and failure classification.
@@ -58,7 +83,7 @@ Includes per-test results, screenshots, timing, and failure classification.
 ## SSE Event Stream
 
 ```
-GET /api/runs/:runId/events
+GET /api/v1/runs/:runId/events
 ```
 
 Server-Sent Events stream. Stays open while the run is in progress. Event types:
@@ -74,7 +99,7 @@ Server-Sent Events stream. Stays open while the run is in progress. Event types:
 ### Client Example
 
 ```js
-const es = new EventSource('/api/runs/RUN-1/events');
+const es = new EventSource('/api/v1/runs/RUN-1/events');
 es.addEventListener('log', (e) => console.log(JSON.parse(e.data)));
 es.addEventListener('result', (e) => console.log(JSON.parse(e.data)));
 es.addEventListener('done', (e) => { console.log(JSON.parse(e.data)); es.close(); });
@@ -83,7 +108,7 @@ es.addEventListener('done', (e) => { console.log(JSON.parse(e.data)); es.close()
 ## Abort a Run
 
 ```
-POST /api/runs/:runId/abort
+POST /api/v1/runs/:runId/abort
 ```
 
 Sends `AbortSignal` through the entire pipeline — AI calls, browser operations, and feedback loops halt immediately.

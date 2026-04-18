@@ -181,17 +181,20 @@ const CSRF_HEADER_NAME  = "x-csrf-token";
 
 // These paths receive mutations but are either public (login, register) or
 // use the cookie as the auth mechanism itself (logout clears it on the server).
-const CSRF_EXEMPT_PATHS = new Set([
-  "/api/auth/login",
-  "/api/auth/register",
-  "/api/auth/logout",          // logout is safe — attacker gains nothing by logging you out
-  "/api/auth/refresh",         // refresh reads cookie for auth — no CSRF risk
-  "/api/auth/forgot-password",
-  "/api/auth/reset-password",
-  "/api/auth/resend-verification", // public endpoint — user may have stale auth cookie
-  "/api/auth/github/callback",
-  "/api/auth/google/callback",
-]);
+// INF-005: Both /api/v1/ and legacy /api/ paths are exempt so CSRF doesn't
+// block requests that arrive before the 308 redirect fires (e.g. form POSTs).
+// Generated from a single list to avoid drift when adding new exempt paths.
+const _CSRF_EXEMPT_AUTH_SUFFIXES = [
+  "login", "register", "logout", "refresh",
+  "forgot-password", "reset-password", "resend-verification",
+  "github/callback", "google/callback",
+];
+const CSRF_EXEMPT_PATHS = new Set(
+  _CSRF_EXEMPT_AUTH_SUFFIXES.flatMap(s => [
+    `/api/v1/auth/${s}`,   // versioned (INF-005)
+    `/api/auth/${s}`,      // legacy backward compat — remove after migration window
+  ]),
+);
 
 export function csrfMiddleware(req, res, next) {
   // Step 1: Ensure the CSRF cookie exists on every response.
@@ -337,7 +340,8 @@ export const aiGenerationLimiter = rateLimit({
   },
 });
 
-// Apply the general limiter to all /api/* routes.
+// Apply the general limiter to all /api/* routes (covers both /api/v1/* and
+// legacy /api/* redirect paths — INF-005).
 // The tighter per-operation limiters are applied at the route level in
 // routes/runs.js and routes/tests.js via the exported limiters above.
 app.use("/api", generalApiLimiter);

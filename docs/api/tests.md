@@ -1,15 +1,17 @@
 # Tests API
 
+> All test endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 308-redirected.
+
 ## List Tests for a Project
 
 ```
-GET /api/projects/:id/tests
+GET /api/v1/projects/:id/tests
 ```
 
 Returns non-deleted tests for the project. Supports optional pagination:
 
 ```
-GET /api/projects/:id/tests?page=1&pageSize=10
+GET /api/v1/projects/:id/tests?page=1&pageSize=10
 ```
 
 When `page` or `pageSize` is provided, the response shape changes to `{ data: [], meta: { total, page, pageSize, hasMore } }`. Without pagination params, returns a flat array (backward-compatible). Default `pageSize` is 10 (max 200).
@@ -24,13 +26,13 @@ When `page` or `pageSize` is provided, the response shape changes to `{ data: []
 
 Example with filters:
 ```
-GET /api/projects/:id/tests?page=1&pageSize=10&reviewStatus=draft&category=ui&search=login
+GET /api/v1/projects/:id/tests?page=1&pageSize=10&reviewStatus=draft&category=ui&search=login
 ```
 
 ## List All Tests
 
 ```
-GET /api/tests
+GET /api/v1/tests
 ```
 
 Returns all non-deleted tests across all projects. Supports the same `?page=N&pageSize=N` pagination as above.
@@ -38,13 +40,13 @@ Returns all non-deleted tests across all projects. Supports the same `?page=N&pa
 ## Get a Test
 
 ```
-GET /api/tests/:testId
+GET /api/v1/tests/:testId
 ```
 
 ## Create a Manual Test
 
 ```
-POST /api/projects/:id/tests
+POST /api/v1/projects/:id/tests
 ```
 
 **Body:**
@@ -64,7 +66,7 @@ Test is saved as **Draft** — must be approved before it runs in regression.
 ## Generate Test from Description
 
 ```
-POST /api/projects/:id/tests/generate
+POST /api/v1/projects/:id/tests/generate
 ```
 
 **Body:**
@@ -81,35 +83,35 @@ Returns a `runId` to track generation progress via SSE.
 ## Edit a Test
 
 ```
-PATCH /api/tests/:testId
+PATCH /api/v1/tests/:testId
 ```
 
 ## Delete a Test
 
 ```
-DELETE /api/projects/:id/tests/:testId
+DELETE /api/v1/projects/:id/tests/:testId
 ```
 
-Soft-deletes the test (moves it to the Recycle Bin). Restore via `POST /api/restore/test/:testId`.
+Soft-deletes the test (moves it to the Recycle Bin). Restore via `POST /api/v1/restore/test/:testId`.
 
 ## Run a Single Test
 
 ```
-POST /api/tests/:testId/run
+POST /api/v1/tests/:testId/run
 ```
 
 ## Review Actions
 
 | Method | Endpoint | Action |
 |---|---|---|
-| `PATCH` | `/api/projects/:id/tests/:testId/approve` | Draft → Approved |
-| `PATCH` | `/api/projects/:id/tests/:testId/reject` | Draft → Rejected |
-| `PATCH` | `/api/projects/:id/tests/:testId/restore` | Any → Draft |
+| `PATCH` | `/api/v1/projects/:id/tests/:testId/approve` | Draft → Approved |
+| `PATCH` | `/api/v1/projects/:id/tests/:testId/reject` | Draft → Rejected |
+| `PATCH` | `/api/v1/projects/:id/tests/:testId/restore` | Any → Draft |
 
 ## Bulk Actions
 
 ```
-POST /api/projects/:id/tests/bulk
+POST /api/v1/projects/:id/tests/bulk
 ```
 
 **Body:**
@@ -125,7 +127,7 @@ The `"delete"` action soft-deletes tests (moves them to the Recycle Bin).
 ## Test Counts
 
 ```
-GET /api/projects/:id/tests/counts
+GET /api/v1/projects/:id/tests/counts
 ```
 
 Lightweight endpoint returning per-status test counts without fetching row data. Used by the frontend for filter pills, tab badges, and stats.
@@ -149,7 +151,7 @@ Lightweight endpoint returning per-status test counts without fetching row data.
 ### Zephyr Scale CSV
 
 ```
-GET /api/projects/:id/tests/export/zephyr?status=approved
+GET /api/v1/projects/:id/tests/export/zephyr?status=approved
 ```
 
 Returns a CSV file formatted for Zephyr Scale import. Optional `status` filter.
@@ -157,7 +159,7 @@ Returns a CSV file formatted for Zephyr Scale import. Optional `status` filter.
 ### TestRail CSV
 
 ```
-GET /api/projects/:id/tests/export/testrail?status=approved
+GET /api/v1/projects/:id/tests/export/testrail?status=approved
 ```
 
 Returns a CSV file formatted for TestRail bulk import. Optional `status` filter.
@@ -165,7 +167,7 @@ Returns a CSV file formatted for TestRail bulk import. Optional `status` filter.
 ### Traceability Matrix
 
 ```
-GET /api/projects/:id/tests/traceability
+GET /api/v1/projects/:id/tests/traceability
 ```
 
 Returns a JSON traceability matrix grouping tests by `linkedIssueKey`, with an `unlinked` array for tests without issue links.

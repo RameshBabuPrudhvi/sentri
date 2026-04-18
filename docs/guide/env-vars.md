@@ -21,6 +21,15 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `OLLAMA_MAX_PREDICT` | `4096` | Max output tokens for Ollama |
 | `OLLAMA_TIMEOUT_MS` | `120000` | Timeout for Ollama calls (ms) |
 
+### Demo Mode
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEMO_GOOGLE_API_KEY` | — | Platform-owned Gemini API key for zero-config trial. When set, users without their own AI key can try Sentri immediately using the shared key, subject to per-user daily quotas |
+| `DEMO_DAILY_CRAWLS` | `2` | Max crawls per user per day in demo mode |
+| `DEMO_DAILY_RUNS` | `3` | Max test runs per user per day in demo mode |
+| `DEMO_DAILY_GENERATIONS` | `5` | Max AI test generations per user per day in demo mode |
+
 ### LLM Retry & Tokens
 
 | Variable | Default | Description |
@@ -49,6 +58,42 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `PG_POOL_SIZE` | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
 | `REDIS_URL` | — | Redis connection URL (e.g. `redis://localhost:6379`). When set, enables shared rate limiting, cross-instance token revocation, SSE pub/sub, and BullMQ job queue. Requires `ioredis`. For Redis-backed rate limiting also install `rate-limit-redis` |
 | `MAX_WORKERS` | `2` | Global concurrency limit for BullMQ run execution (INF-003). Each slot processes one crawl or test run at a time. Ignored when Redis/BullMQ is not available |
+
+#### Local Redis setup
+
+Redis is **optional** for local development — without it, Sentri uses in-memory stores for rate limiting, token revocation, and SSE. To enable Redis locally:
+
+```bash
+# macOS (Homebrew)
+brew install redis && redis-server
+
+# Or via Docker (any platform)
+docker run -d --name sentri-redis -p 6379:6379 redis:7-alpine
+```
+
+Then in `backend/.env`:
+```bash
+REDIS_URL=redis://localhost:6379
+```
+
+Install the required npm packages:
+```bash
+cd backend
+npm install ioredis rate-limit-redis
+```
+
+#### Local BullMQ setup
+
+BullMQ provides **durable job queue execution** for crawls and test runs (INF-003). Without it, runs execute in-process — which is fine for local development but means runs are lost if the server crashes mid-execution.
+
+To enable BullMQ locally, ensure Redis is running (see above), then:
+
+```bash
+cd backend
+npm install bullmq
+```
+
+BullMQ is detected automatically when both `REDIS_URL` is set and the `bullmq` package is installed. Set `MAX_WORKERS` to control how many runs can execute concurrently (default: 2).
 
 ### Email (Transactional)
 

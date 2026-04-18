@@ -1,26 +1,26 @@
 /**
  * @module routes/tests
- * @description Test CRUD, AI generation, single-test run, review, bulk actions, and export. Mounted at `/api`.
+ * @description Test CRUD, AI generation, single-test run, review, bulk actions, and export. Mounted at `/api/v1` (INF-005).
  *
  * ### Endpoints
- * | Method   | Path                                          | Description                         |
- * |----------|-----------------------------------------------|-------------------------------------|
- * | `GET`    | `/api/projects/:id/tests`                     | List tests for a project            |
- * | `GET`    | `/api/tests`                                  | List all tests                      |
- * | `GET`    | `/api/tests/:testId`                          | Get a single test                   |
- * | `PATCH`  | `/api/tests/:testId`                          | Edit test (steps, name, code, etc.) |
- * | `POST`   | `/api/projects/:id/tests`                     | Create a manual test (Draft)        |
- * | `DELETE` | `/api/projects/:id/tests/:testId`             | Delete a test                       |
- * | `POST`   | `/api/projects/:id/tests/generate`            | AI-generate test(s) from description|
- * | `POST`   | `/api/tests/:testId/run`                      | Run a single test                   |
- * | `PATCH`  | `/api/projects/:id/tests/:testId/approve`     | Approve (Draft → Approved)          |
- * | `PATCH`  | `/api/projects/:id/tests/:testId/reject`      | Reject                              |
- * | `PATCH`  | `/api/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
- * | `POST`   | `/api/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
- * | `GET`    | `/api/projects/:id/tests/counts`              | Per-status test counts              |
- * | `GET`    | `/api/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
- * | `GET`    | `/api/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
- * | `GET`    | `/api/projects/:id/tests/traceability`        | Traceability matrix                 |
+ * | Method   | Path                                             | Description                         |
+ * |----------|--------------------------------------------------|-------------------------------------|
+ * | `GET`    | `/api/v1/projects/:id/tests`                     | List tests for a project            |
+ * | `GET`    | `/api/v1/tests`                                  | List all tests                      |
+ * | `GET`    | `/api/v1/tests/:testId`                          | Get a single test                   |
+ * | `PATCH`  | `/api/v1/tests/:testId`                          | Edit test (steps, name, code, etc.) |
+ * | `POST`   | `/api/v1/projects/:id/tests`                     | Create a manual test (Draft)        |
+ * | `DELETE` | `/api/v1/projects/:id/tests/:testId`             | Delete a test                       |
+ * | `POST`   | `/api/v1/projects/:id/tests/generate`            | AI-generate test(s) from description|
+ * | `POST`   | `/api/v1/tests/:testId/run`                      | Run a single test                   |
+ * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/approve`     | Approve (Draft → Approved)          |
+ * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/reject`      | Reject                              |
+ * | `PATCH`  | `/api/v1/projects/:id/tests/:testId/restore`     | Restore to Draft                    |
+ * | `POST`   | `/api/v1/projects/:id/tests/bulk`                | Bulk approve/reject/restore/delete  |
+ * | `GET`    | `/api/v1/projects/:id/tests/counts`              | Per-status test counts              |
+ * | `GET`    | `/api/v1/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
+ * | `GET`    | `/api/v1/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
+ * | `GET`    | `/api/v1/projects/:id/tests/traceability`        | Traceability matrix                 |
  */
 
 import { Router } from "express";
@@ -40,6 +40,7 @@ import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
+import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 
@@ -369,7 +370,7 @@ router.delete("/projects/:id/tests/:testId", requireRole("qa_lead"), (req, res) 
 
 // ─── AI-powered test generation (pipeline-based) ──────────────────────────────
 
-router.post("/projects/:id/tests/generate", requireRole("qa_lead"), aiGenerationLimiter, async (req, res) => {
+router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("generation"), aiGenerationLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
@@ -473,7 +474,7 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), aiGeneration
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
-router.post("/tests/:testId/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 
