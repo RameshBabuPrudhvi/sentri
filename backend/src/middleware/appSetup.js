@@ -48,14 +48,22 @@ app.set("trust proxy", 1);
 // ─── Global middleware ────────────────────────────────────────────────────────
 
 // Security headers: X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.
-// CSP is configured with a baseline policy that allows the SPA to function while
-// blocking inline script injection (XSS mitigation). Tighten further in production
-// by replacing 'unsafe-inline' with nonce-based or hash-based script allowlisting.
+// SEC-002: Generate a per-request nonce and allow scripts via `'nonce-<value>'`
+// instead of `'unsafe-inline'`. This keeps inline bootstrap scripts functional
+// while preserving CSP's XSS protections.
+app.use((req, res, next) => {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  res.locals.cspNonce = nonce;
+  // Exposed for reverse proxies / edge HTML rewriters that inject nonce attrs.
+  res.setHeader("X-CSP-Nonce", nonce);
+  next();
+});
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'"],   // needed by Vite in dev; replace with nonces in prod
+      scriptSrc:      ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
       styleSrc:       ["'self'", "'unsafe-inline'"],   // inline styles used throughout the SPA
       imgSrc:         ["'self'", "data:", "blob:"],    // data: for canvas favicons, blob: for screenshots
       connectSrc:     ["'self'"],                      // API + SSE calls — same origin only
