@@ -158,22 +158,12 @@ async function processJob(job) {
     workerAbortControllers.delete(runId);
 
     if (err.name === "AbortError" || signal.aborted || run.status === "aborted") {
-      // The abort endpoint already wrote status="aborted" to the DB via
-      // runRepo.update().  The worker's in-memory `run` object still has
-      // status="running" because the abort endpoint cannot mutate it (unlike
-      // the in-process path which shares a reference).  Re-read the DB row
-      // to get the authoritative status, then merge any results the worker
-      // accumulated before the abort so they aren't lost.
-      const dbRun = runRepo.getById(runId);
-      if (dbRun) {
-        // Preserve the abort endpoint's status/finishedAt/error while
-        // flushing the worker's accumulated results and counts.
-        if (Array.isArray(run.results) && run.results.length > 0) {
-          runRepo.update(runId, { results: run.results, passed: run.passed, failed: run.failed });
-        }
-      } else {
-        runRepo.save(run);
-      }
+      // The abort endpoint (runs.js) is the single owner of abort state:
+      // it writes status="aborted", adds "skipped" entries for unexecuted
+      // tests, and persists everything to the DB.  The worker must NOT
+      // write its in-memory `run` back — doing so would race with the
+      // abort endpoint and could overwrite the "skipped" entries with the
+      // worker's stale results snapshot.  Simply bail out.
       return;
     }
 
