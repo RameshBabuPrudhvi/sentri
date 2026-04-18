@@ -183,27 +183,18 @@ const CSRF_HEADER_NAME  = "x-csrf-token";
 // use the cookie as the auth mechanism itself (logout clears it on the server).
 // INF-005: Both /api/v1/ and legacy /api/ paths are exempt so CSRF doesn't
 // block requests that arrive before the 301 redirect fires (e.g. form POSTs).
-const CSRF_EXEMPT_PATHS = new Set([
-  "/api/v1/auth/login",
-  "/api/v1/auth/register",
-  "/api/v1/auth/logout",
-  "/api/v1/auth/refresh",
-  "/api/v1/auth/forgot-password",
-  "/api/v1/auth/reset-password",
-  "/api/v1/auth/resend-verification",
-  "/api/v1/auth/github/callback",
-  "/api/v1/auth/google/callback",
-  // Legacy paths (INF-005 backward compat — remove after migration window)
-  "/api/auth/login",
-  "/api/auth/register",
-  "/api/auth/logout",
-  "/api/auth/refresh",
-  "/api/auth/forgot-password",
-  "/api/auth/reset-password",
-  "/api/auth/resend-verification",
-  "/api/auth/github/callback",
-  "/api/auth/google/callback",
-]);
+// Generated from a single list to avoid drift when adding new exempt paths.
+const _CSRF_EXEMPT_AUTH_SUFFIXES = [
+  "login", "register", "logout", "refresh",
+  "forgot-password", "reset-password", "resend-verification",
+  "github/callback", "google/callback",
+];
+const CSRF_EXEMPT_PATHS = new Set(
+  _CSRF_EXEMPT_AUTH_SUFFIXES.flatMap(s => [
+    `/api/v1/auth/${s}`,   // versioned (INF-005)
+    `/api/auth/${s}`,      // legacy backward compat — remove after migration window
+  ]),
+);
 
 export function csrfMiddleware(req, res, next) {
   // Step 1: Ensure the CSRF cookie exists on every response.

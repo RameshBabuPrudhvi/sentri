@@ -13,7 +13,7 @@
 
 import React from "react";
 import { getCsrfToken } from "../../utils/csrf.js";
-import { API_BASE } from "../../utils/apiBase.js";
+import { API_PATH } from "../../utils/apiBase.js";
 
 /**
  * @typedef {Object} ErrorBoundaryState
@@ -59,7 +59,7 @@ export default class ErrorBoundary extends React.Component {
     // the user doesn't report them. Failures are silently swallowed so
     // the error boundary itself never throws.
     try {
-      fetch(`${API_BASE}/api/v1/system/client-error`, {
+      fetch(`${API_PATH}/system/client-error`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

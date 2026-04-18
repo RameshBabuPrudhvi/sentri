@@ -179,37 +179,42 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 // If you need it for integration tests, mount it in your test setup file
 // directly on a test-only Express instance — never in this production entry point.
 
-// ─── Mount route modules (INF-005: /api/v1/ prefix) ──────────────────────────
-// Auth routes are public (login, register, OAuth callbacks)
-app.use("/api/v1/auth", authRouter);
+// ─── INF-005: Versioned API prefix ────────────────────────────────────────────
+// Single source of truth for the API version. Change this one constant to bump
+// all route mounts — no other backend file needs to change.
+const API_VERSION = "v1";
+const API_PREFIX = `/api/${API_VERSION}`;
 
-// CI/CD trigger endpoint (/api/v1/projects/:id/trigger) uses its own token-based
-// auth — it must be mounted WITHOUT requireAuth so CI pipelines can call it
-// with a project token rather than a user JWT.
-app.use("/api/v1", triggerRouter);
+// ─── Mount route modules (INF-005: ${API_PREFIX} prefix) ─────────────────────
+// Auth routes are public (login, register, OAuth callbacks)
+app.use(`${API_PREFIX}/auth`, authRouter);
+
+// CI/CD trigger endpoint uses its own token-based auth — it must be mounted
+// WITHOUT requireAuth so CI pipelines can call it with a project token.
+app.use(API_PREFIX, triggerRouter);
 
 // All other API routes require a valid JWT token + workspace context (ACL-001).
 // workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
-app.use("/api/v1/projects", requireAuth, workspaceScope, projectsRouter);
-app.use("/api/v1", requireAuth, workspaceScope, testsRouter);
-app.use("/api/v1", requireAuth, workspaceScope, runsRouter);
-app.use("/api/v1", requireAuth, workspaceScope, sseRouter);
-app.use("/api/v1", requireAuth, workspaceScope, dashboardRouter);
-app.use("/api/v1", requireAuth, workspaceScope, settingsRouter);
-app.use("/api/v1", requireAuth, workspaceScope, systemRouter);
-app.use("/api/v1", requireAuth, workspaceScope, chatRouter);
-app.use("/api/v1", requireAuth, workspaceScope, testFixRouter);
-app.use("/api/v1", requireAuth, workspaceScope, recycleBinRouter);
-app.use("/api/v1/workspaces", requireAuth, workspaceScope, workspacesRouter);
+app.use(`${API_PREFIX}/projects`, requireAuth, workspaceScope, projectsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, testsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, runsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, sseRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, dashboardRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, settingsRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, systemRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, chatRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, testFixRouter);
+app.use(API_PREFIX, requireAuth, workspaceScope, recycleBinRouter);
+app.use(`${API_PREFIX}/workspaces`, requireAuth, workspaceScope, workspacesRouter);
 
 // ─── INF-005: Legacy /api/* → /api/v1/* 301 redirects ────────────────────────
 // Backward compatibility during the transition window. CI/CD integrations,
 // GitHub Actions, and external webhooks using the old /api/* paths will be
 // redirected to the versioned endpoint. Remove after all consumers migrate.
 app.use("/api", (req, res, next) => {
-  // Skip if already under /api/v1 (shouldn't happen — mounted after v1 routes)
-  if (req.path.startsWith("/v1")) return next();
-  const newUrl = `/api/v1${req.path}${req._parsedUrl?.search || ""}`;
+  // Skip if already under the versioned prefix
+  if (req.path.startsWith(`/${API_VERSION}`)) return next();
+  const newUrl = `${API_PREFIX}${req.path}${req._parsedUrl?.search || ""}`;
   res.redirect(301, newUrl);
 });
 

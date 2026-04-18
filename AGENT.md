@@ -201,7 +201,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | Module | What it provides | When to use |
 |---|---|---|
 | `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
-| `src/utils/apiBase.js` | `API_BASE`, `parseJsonResponse()` | Base URL resolution, safe JSON parsing |
+| `src/utils/apiBase.js` | `API_BASE`, `API_VERSION`, `API_PATH`, `parseJsonResponse()` | Base URL resolution, versioned API path, safe JSON parsing |
 | `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
 | `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
 | `src/utils/formatters.js` | `fmtMs()`, `fmtDate()`, `fmtDateTime()`, `fmtRelativeDate()`, `fmtDateTimeMedium()`, `fmtFutureRelative()`, `fmtDuration()`, `passRateColor()` | All date, time, duration, and colour formatting across pages and components |
@@ -1110,6 +1110,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not add large dependencies** without justification. Check bundle size impact for frontend packages and document the rationale in the PR.
 - **Do not duplicate shared utilities.** Check `backend/src/utils/` and `frontend/src/utils/` before writing helpers like `escapeHtml`, `formatDuration`, `debounce`, etc. If a helper exists, import it. If it doesn't, create it in the shared `utils/` directory — not inline in a component.
 - **Do not hardcode `SameSite=Strict` on cookies.** Always use `cookieSameSite()` from `middleware/appSetup.js` — the production deployment is cross-origin (GitHub Pages + Render) and requires `SameSite=None; Secure`.
+- **Do not hardcode `/api/v1/` in frontend code.** Use `API_PATH` from `utils/apiBase.js` for all API URL construction. The backend uses `API_PREFIX` in `index.js`. Changing `API_VERSION` in one place bumps the entire stack — see INF-005.
 - **Do not reinvent CSS classes.** Check `components.css` and `utilities.css` before adding new styles. Use `.btn`, `.card`, `.badge`, `.modal-*`, `.input`, `.flex-*`, `.text-*` etc. instead of writing equivalent inline styles or new classes.
 - **Do not add CSS to `index.css` directly.** New styles go into the appropriate ITCSS partial (`components.css`, `features/*.css`, `pages/*.css`, or `utilities.css`) and are imported from `index.css`.
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
