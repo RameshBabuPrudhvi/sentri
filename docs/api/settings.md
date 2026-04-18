@@ -1,9 +1,11 @@
 # Settings API
 
+> All settings endpoints are under `/api/v1/` (INF-005). Legacy `/api/*` paths are 301-redirected.
+
 ## Get Active Provider Config
 
 ```
-GET /api/config
+GET /api/v1/config
 ```
 
 Returns the currently active AI provider info:
@@ -20,7 +22,7 @@ Returns the currently active AI provider info:
 ## Get Provider Key Status
 
 ```
-GET /api/settings
+GET /api/v1/settings
 ```
 
 Returns masked keys and active provider (never returns full keys):
@@ -39,7 +41,7 @@ Returns masked keys and active provider (never returns full keys):
 ## Set an API Key
 
 ```
-POST /api/settings
+POST /api/v1/settings
 ```
 
 **Cloud provider:**
@@ -55,13 +57,13 @@ POST /api/settings
 ## Remove a Provider Key
 
 ```
-DELETE /api/settings/:provider
+DELETE /api/v1/settings/:provider
 ```
 
 ## Check Ollama Status
 
 ```
-GET /api/ollama/status
+GET /api/v1/ollama/status
 ```
 
 Returns connectivity status and available models:
@@ -77,22 +79,22 @@ Returns connectivity status and available models:
 ## System Info
 
 ```
-GET /api/system
+GET /api/v1/system
 ```
 
 ## Dashboard Analytics
 
 ```
-GET /api/dashboard
+GET /api/v1/dashboard
 ```
 
 ## Data Management
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `DELETE` | `/api/data/runs` | Permanently clear all run history |
-| `DELETE` | `/api/data/activities` | Clear activity log |
-| `DELETE` | `/api/data/healing` | Clear self-healing history |
+| `DELETE` | `/api/v1/data/runs` | Permanently clear all run history |
+| `DELETE` | `/api/v1/data/activities` | Clear activity log |
+| `DELETE` | `/api/v1/data/healing` | Clear self-healing history |
 
 ## Recycle Bin
 
@@ -100,9 +102,9 @@ Deleted projects, tests, and runs are soft-deleted (moved to the Recycle Bin) ra
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/recycle-bin` | List all soft-deleted entities grouped by type |
-| `POST` | `/api/restore/:type/:id` | Restore a soft-deleted entity (`type`: `project`, `test`, or `run`) |
-| `DELETE` | `/api/purge/:type/:id` | Permanently delete a soft-deleted entity |
+| `GET` | `/api/v1/recycle-bin` | List all soft-deleted entities grouped by type |
+| `POST` | `/api/v1/restore/:type/:id` | Restore a soft-deleted entity (`type`: `project`, `test`, or `run`) |
+| `DELETE` | `/api/v1/purge/:type/:id` | Permanently delete a soft-deleted entity |
 
 **Restore behavior:**
 - Restoring a **project** cascade-restores its tests and runs that were deleted at the same time. Items individually deleted before the project are left in the recycle bin.
