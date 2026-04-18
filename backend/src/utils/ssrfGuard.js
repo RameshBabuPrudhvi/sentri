@@ -76,6 +76,43 @@ export function isPrivateIp(ip) {
   return false;
 }
 
+// ─── DNS resolution check (shared by validateUrl and safeFetch) ───────────────
+
+/**
+ * Resolve a hostname via DNS and check all addresses for private/reserved IPs.
+ *
+ * Skips resolution for bare IP addresses (already checked by the caller via
+ * `isPrivateIp`). Resolves both A and AAAA records to prevent bypass via a
+ * safe A record paired with a private AAAA record.
+ *
+ * @param {string} host - Lowercase hostname to resolve.
+ * @returns {Promise<string|null>} null if safe, or an error message string.
+ */
+async function resolveAndCheckDns(host) {
+  // Skip for bare IP addresses — already checked by isPrivateIp in the caller.
+  if (ipv4ToInt(host) !== null || host.includes(":")) return null;
+
+  try {
+    const [v4addrs, v6addrs] = await Promise.all([
+      dns.promises.resolve4(host).catch(() => []),
+      dns.promises.resolve6(host).catch(() => []),
+    ]);
+    const allAddrs = [...v4addrs, ...v6addrs];
+    if (allAddrs.length === 0) {
+      return "URL hostname could not be resolved.";
+    }
+    for (const addr of allAddrs) {
+      if (isPrivateIp(addr)) {
+        return "URL resolves to a private or reserved IP address.";
+      }
+    }
+  } catch {
+    return "URL hostname could not be resolved.";
+  }
+
+  return null;
+}
+
 // ─── URL validation ───────────────────────────────────────────────────────────
 
 /**
@@ -103,28 +140,7 @@ export async function validateUrl(raw) {
     return "URL must not target a private or reserved IP address.";
   }
 
-  // Resolve DNS to catch domains pointing to private IPs.
-  if (ipv4ToInt(host) === null && !host.includes(":")) {
-    try {
-      const [v4addrs, v6addrs] = await Promise.all([
-        dns.promises.resolve4(host).catch(() => []),
-        dns.promises.resolve6(host).catch(() => []),
-      ]);
-      const allAddrs = [...v4addrs, ...v6addrs];
-      if (allAddrs.length === 0) {
-        return "URL hostname could not be resolved.";
-      }
-      for (const addr of allAddrs) {
-        if (isPrivateIp(addr)) {
-          return "URL resolves to a private or reserved IP address.";
-        }
-      }
-    } catch {
-      return "URL hostname could not be resolved.";
-    }
-  }
-
-  return null; // valid
+  return resolveAndCheckDns(host);
 }
 
 // ─── Safe fetch ───────────────────────────────────────────────────────────────
@@ -143,26 +159,8 @@ export async function validateUrl(raw) {
 export async function safeFetch(url, options = {}) {
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase();
-  if (ipv4ToInt(host) === null && !host.includes(":")) {
-    try {
-      const [v4addrs, v6addrs] = await Promise.all([
-        dns.promises.resolve4(host).catch(() => []),
-        dns.promises.resolve6(host).catch(() => []),
-      ]);
-      const allAddrs = [...v4addrs, ...v6addrs];
-      if (allAddrs.length === 0) {
-        throw new Error("Hostname no longer resolves — aborting fetch.");
-      }
-      for (const addr of allAddrs) {
-        if (isPrivateIp(addr)) {
-          throw new Error("DNS rebinding detected — hostname resolves to private IP.");
-        }
-      }
-    } catch (err) {
-      if (err.message.includes("rebinding") || err.message.includes("no longer resolves")) throw err;
-      throw new Error("Hostname could not be resolved at fetch time.");
-    }
-  }
+  const dnsErr = await resolveAndCheckDns(host);
+  if (dnsErr) throw new Error(dnsErr);
 
   return fetch(url, {
     ...options,

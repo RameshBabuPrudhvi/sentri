@@ -19,67 +19,22 @@
 
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { app } from "../src/middleware/appSetup.js";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
-import { workspaceScope } from "../src/middleware/workspaceScope.js";
 import projectsRouter from "../src/routes/projects.js";
-import { getDatabase } from "../src/database/sqlite.js";
+import { createTestContext } from "./helpers/test-base.js";
+
+const t = createTestContext();
+const { req: apiReq } = t;
+const { test, summary } = t.createTestRunner();
 
 // ─── Mount routes once ────────────────────────────────────────────────────────
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
-  app.use("/api/auth", authRouter);
-  app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
+  t.app.use("/api/auth", authRouter);
+  t.app.use("/api/projects", requireAuth, t.workspaceScope, projectsRouter);
   mounted = true;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractCookie(res, name) {
-  const raw = res.headers.getSetCookie?.() || [];
-  for (const c of raw) {
-    const match = c.match(new RegExp(`^${name}=([^;]+)`));
-    if (match) return match[1];
-  }
-  return null;
-}
-
-let csrfToken = null;
-
-async function apiReq(base, path, { method = "GET", cookie, body } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (cookie) headers.Cookie = cookie;
-  if (csrfToken) {
-    headers["X-CSRF-Token"] = csrfToken;
-    headers.Cookie = (headers.Cookie ? headers.Cookie + "; " : "") + `_csrf=${csrfToken}`;
-  }
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const csrf = extractCookie(res, "_csrf");
-  if (csrf) csrfToken = csrf;
-  const json = await res.json().catch(() => ({}));
-  return { res, json };
-}
-
-// ─── Test runner ──────────────────────────────────────────────────────────────
-
-let passed = 0;
-let failed = 0;
-
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log("  \u2713 " + name);
-  } catch (err) {
-    failed++;
-    console.error("  \u2717 " + name + ": " + err.message);
-  }
 }
 
 // ─── SSRF rejection cases (table-driven) ──────────────────────────────────────
@@ -105,7 +60,7 @@ const SSRF_REJECT_CASES = [
 
 async function main() {
   mountRoutesOnce();
-  const server = createServer(app);
+  const server = createServer(t.app);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const base = "http://127.0.0.1:" + server.address().port;
 
@@ -113,21 +68,12 @@ async function main() {
     // ── Setup: register, verify, login, create project ────────────────────
     const email = `notif-${Date.now()}@test.local`;
 
-    let out = await apiReq(base, "/api/auth/register", {
-      method: "POST", body: { name: "Notif Tester", email, password: "Password123!" },
+    const { token } = await t.registerAndLogin(base, {
+      name: "Notif Tester", email, password: "Password123!",
     });
-    assert.equal(out.res.status, 201);
+    const authCookie = "access_token=" + token;
 
-    const db = getDatabase();
-    db.prepare("UPDATE users SET emailVerified = 1 WHERE email = ?").run(email);
-
-    out = await apiReq(base, "/api/auth/login", {
-      method: "POST", body: { email, password: "Password123!" },
-    });
-    const accessToken = extractCookie(out.res, "access_token");
-    const authCookie = "access_token=" + accessToken;
-
-    out = await apiReq(base, "/api/projects", {
+    let out = await apiReq(base, "/api/projects", {
       method: "POST", cookie: authCookie,
       body: { name: "Notif Project", url: "https://example.com" },
     });
@@ -259,9 +205,7 @@ async function main() {
 
     // ── Results ───────────────────────────────────────────────────────────
 
-    console.log(`\n  ${passed} passed, ${failed} failed\n`);
-    if (failed > 0) process.exit(1);
-    console.log("\uD83C\uDF89 All notifications-api integration tests passed!");
+    summary("notifications-api integration");
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

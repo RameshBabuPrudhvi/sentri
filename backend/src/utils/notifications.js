@@ -20,7 +20,7 @@
  */
 
 import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
-import { sendEmail } from "./emailSender.js";
+import { sendEmail, escapeHtml } from "./emailSender.js";
 import { formatLogLine } from "./logFormatter.js";
 import { safeFetch } from "./ssrfGuard.js";
 
@@ -233,24 +233,6 @@ async function sendWebhookNotification(url, run, project) {
     const body = await res.text().catch(() => "");
     throw new Error(`Webhook returned ${res.status}: ${body.slice(0, 200)}`);
   }
-}
-
-// ─── HTML escape (local — avoids importing from emailSender) ──────────────────
-
-/**
- * Escape HTML special characters.
- *
- * @param {string} str
- * @returns {string}
- */
-function escapeHtml(str) {
-  if (typeof str !== "string") return "";
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
