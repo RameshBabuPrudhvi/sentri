@@ -1239,10 +1239,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-001` (visual regression) → `DIF-002` (cross-browser) + `AUTO-007` (locale/geo) → `DIF-006` (Playwright export) → `INF-004` (OpenAPI spec)
+`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export) → `INF-004` (OpenAPI spec)
 
 **Lowest effort / highest immediate value:**
-AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-001 (L)
+AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 
