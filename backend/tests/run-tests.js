@@ -38,6 +38,9 @@ const files = [
   "tests/email-verification.test.js",
   "tests/account-compliance.test.js",
   "tests/postgres-adapter.test.js",
+  "tests/device-emulation.test.js",
+  "tests/ai-fallback.test.js",
+  "tests/api-versioning.test.js",
 ];
 
 let passed = 0;
