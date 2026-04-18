@@ -31,10 +31,17 @@ import { redis, isRedisAvailable } from "../utils/redisClient.js";
 /** @type {boolean} Demo mode is active when a platform-owned key is set. */
 export const isDemoEnabled = !!process.env.DEMO_GOOGLE_API_KEY;
 
+// Use a helper that distinguishes "env var set to 0" (valid — disables the
+// operation) from "env var missing/unparseable" (fall back to default).
+// `parseInt("0")` → 0, which `||` would treat as falsy and replace with the
+// default. `??` alone doesn't help because `parseInt(undefined)` → NaN, and
+// NaN is not null/undefined so `??` would keep it.
+const _intOr = (envVal, fallback) => { const n = parseInt(envVal, 10); return Number.isFinite(n) ? n : fallback; };
+
 const DAILY_LIMITS = {
-  crawl:      parseInt(process.env.DEMO_DAILY_CRAWLS, 10)      || 2,
-  run:        parseInt(process.env.DEMO_DAILY_RUNS, 10)         || 3,
-  generation: parseInt(process.env.DEMO_DAILY_GENERATIONS, 10)  || 5,
+  crawl:      _intOr(process.env.DEMO_DAILY_CRAWLS, 2),
+  run:        _intOr(process.env.DEMO_DAILY_RUNS, 3),
+  generation: _intOr(process.env.DEMO_DAILY_GENERATIONS, 5),
 };
 
 // ── In-memory counter store (fallback when Redis is unavailable) ──────────────
