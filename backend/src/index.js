@@ -27,6 +27,8 @@ import { loadKeysFromDatabase } from "./aiProvider.js";
 import { initScheduler, stopAllTasks } from "./scheduler.js";
 import { closeRedis } from "./utils/redisClient.js";
 import { ensureDefaultWorkspaces } from "./database/repositories/workspaceRepo.js";
+import { closeQueue } from "./queue.js";
+import { startWorker, stopWorker } from "./workers/runWorker.js";
 
 // ─── App + global middleware ──────────────────────────────────────────────────
 import { app } from "./middleware/appSetup.js";
@@ -91,6 +93,9 @@ ensureDefaultWorkspaces();
 // 6. Initialise cron-based test scheduler (ENH-006)
 //    Must run after DB init so scheduleRepo can read the schedules table.
 initScheduler();
+// 7. Start BullMQ worker for durable run execution (INF-003)
+//    No-op if Redis/BullMQ is not available — falls back to in-process execution.
+startWorker();
 
 // ─── Graceful shutdown (MAINT-013) ────────────────────────────────────────────
 // Instead of killing the process immediately, drain in-flight runs so they
@@ -147,10 +152,14 @@ async function gracefulShutdown(signal) {
       runAbortControllers.clear();
     }
 
-    // 5. Close Redis connections (INF-002)
+    // 5. Stop BullMQ worker and close queue (INF-003)
+    await stopWorker();
+    await closeQueue();
+
+    // 6. Close Redis connections (INF-002)
     await closeRedis();
 
-    // 6. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
+    // 7. Close database cleanly (WAL checkpoint for SQLite, pool drain for PostgreSQL)
     await closeDatabase();
     console.log(formatLogLine("info", null, "[shutdown] Graceful shutdown complete"));
     process.exit(0);

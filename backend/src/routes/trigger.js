@@ -30,6 +30,7 @@ import { runTests } from "../testRunner.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { requireTrigger } from "../middleware/authenticate.js";
+import { fireNotifications } from "../utils/notifications.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence:
@@ -333,7 +334,10 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
       // (completed, failed, aborted) so CI pipelines always get notified.
       // Uses safeFetchCallback which re-resolves DNS (mitigates rebinding)
       // and blocks redirects (mitigates open-redirect SSRF bypass).
-      onComplete: (finishedRun) => {
+      onComplete: async (finishedRun) => {
+        // FEA-001: Fire failure notifications — best-effort
+        try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
+
         if (!callbackUrl || typeof callbackUrl !== "string") return;
         const payload = JSON.stringify({
           runId,

@@ -35,6 +35,7 @@ import { runTests } from "./testRunner.js";
 import { logActivity } from "./utils/activityLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { formatLogLine } from "./utils/logFormatter.js";
+import { fireNotifications } from "./utils/notifications.js";
 
 // ─── Task registry ─────────────────────────────────────────────────────────────
 // Maps projectId → node-cron ScheduledTask
@@ -275,13 +276,15 @@ async function fireScheduledRun(projectId) {
         projectName: project.name,
         detail: `Scheduled run failed: ${classifyError(err, "run").message}`,
       }),
-      onComplete: () => {
+      onComplete: async (finishedRun) => {
         // Record lastRunAt and update nextRunAt
         const schedule = scheduleRepo.getByProjectId(projectId);
         if (schedule) {
           const nextRunAt = getNextRunAt(schedule.cronExpr, schedule.timezone);
           scheduleRepo.updateRunTimes(projectId, new Date().toISOString(), nextRunAt);
         }
+        // FEA-001: Fire failure notifications — best-effort
+        try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
       },
     },
   );

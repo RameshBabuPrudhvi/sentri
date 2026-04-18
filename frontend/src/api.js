@@ -235,6 +235,27 @@ export const api = {
    */
   deleteTriggerToken: (projectId, tokenId) => req("DELETE", `/projects/${projectId}/trigger-tokens/${tokenId}`),
 
+  // ── Notifications (FEA-001) ──────────────────────────────────────────────────
+  /**
+   * Get the notification settings for a project, or null if none exist.
+   * @param {string} projectId
+   * @returns {Promise<{notifications: Object|null}>}
+   */
+  getNotifications: (projectId) => req("GET", `/projects/${projectId}/notifications`),
+  /**
+   * Create or update notification settings for a project.
+   * @param {string} projectId
+   * @param {{ teamsWebhookUrl: string, emailRecipients: string, webhookUrl: string, enabled: boolean }} body
+   * @returns {Promise<{ok: boolean, notifications: Object}>}
+   */
+  upsertNotifications: (projectId, body) => req("PATCH", `/projects/${projectId}/notifications`, body),
+  /**
+   * Remove notification settings for a project.
+   * @param {string} projectId
+   * @returns {Promise<{ok: boolean}>}
+   */
+  deleteNotifications: (projectId) => req("DELETE", `/projects/${projectId}/notifications`),
+
   // ── Schedules (ENH-006) ─────────────────────────────────────────────────────
   /**
    * Get the cron schedule for a project, or null if none exists.
