@@ -41,7 +41,9 @@ import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo
 import * as verificationTokenRepo from "../database/repositories/verificationTokenRepo.js";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as accountRepo from "../database/repositories/accountRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
@@ -531,11 +533,28 @@ router.delete("/account", requireAuth, async (req, res) => {
     }
   }
 
+  // Collect owned project IDs before deletion so we can stop their in-memory
+  // cron tasks afterwards. deleteAccount() removes the DB rows but cannot
+  // reach the process-local scheduler task Map.
+  const db = getDatabase();
+  const ownedWsRows = db.prepare("SELECT id FROM workspaces WHERE ownerId = ?").all(user.id);
+  const ownedWsIds = ownedWsRows.map(w => w.id);
+  let ownedProjectIds = [];
+  if (ownedWsIds.length > 0) {
+    const wsph = ownedWsIds.map(() => "?").join(", ");
+    ownedProjectIds = db.prepare(`SELECT id FROM projects WHERE workspaceId IN (${wsph})`).all(...ownedWsIds).map(p => p.id);
+  }
+
   try {
     accountRepo.deleteAccount(user.id);
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/account] Delete failed for user ${user.id}: ${err.message}`));
     return res.status(500).json({ error: "Failed to delete account." });
+  }
+
+  // Stop in-memory cron tasks for deleted projects (no-op if no schedule existed).
+  for (const projectId of ownedProjectIds) {
+    stopSchedule(projectId);
   }
 
   // Revoke the current JWT so it cannot be reused from another tab or replay.

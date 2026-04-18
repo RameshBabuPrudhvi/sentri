@@ -79,6 +79,7 @@ export function buildUserResponse(user, workspaceIdHint) {
     email: user.email,
     role: user.role,
     avatar: user.avatar || null,
+    hasPassword: !!user.passwordHash,
   };
 
   const workspaces = workspaceRepo.getByUserId(user.id);

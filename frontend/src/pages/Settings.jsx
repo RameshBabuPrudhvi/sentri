@@ -930,11 +930,14 @@ function RecycleBinTab() {
 }
 
 function AccountTab() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // OAuth-only users have no password — skip the password confirmation field.
+  const needsPassword = user?.hasPassword !== false;
 
   // Auto-disarm delete confirmation after 5s; clean up on unmount.
   useEffect(() => {
@@ -944,14 +947,14 @@ function AccountTab() {
   }, [confirmDelete]);
 
   async function handleExport() {
-    if (!password.trim()) {
+    if (needsPassword && !password.trim()) {
       setStatus({ type: "err", text: "Enter your password to export account data." });
       return;
     }
     setBusy(true);
     setStatus(null);
     try {
-      const data = await api.exportAccountData(password.trim());
+      const data = await api.exportAccountData(needsPassword ? password.trim() : "");
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -968,7 +971,7 @@ function AccountTab() {
   }
 
   async function handleDelete() {
-    if (!password.trim()) {
+    if (needsPassword && !password.trim()) {
       setStatus({ type: "err", text: "Enter your password to delete your account." });
       return;
     }
@@ -979,7 +982,7 @@ function AccountTab() {
     setBusy(true);
     setStatus(null);
     try {
-      await api.deleteAccount(password.trim());
+      await api.deleteAccount(needsPassword ? password.trim() : "");
       await logout();
     } catch (err) {
       setStatus({ type: "err", text: err.message || "Account deletion failed." });
@@ -993,17 +996,23 @@ function AccountTab() {
     <div className="flex-col gap-lg">
       <SectionTitle icon={<Shield size={16} color="var(--red)" />} title="Account & Privacy" sub="Export your data or permanently delete your account." />
       <div className="card card-padded flex-col gap-md">
-        <label className="text-sm font-semi">
-          Confirm password
-          <input
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your current password"
-            style={{ marginTop: 8 }}
-          />
-        </label>
+        {needsPassword ? (
+          <label className="text-sm font-semi">
+            Confirm password
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your current password"
+              style={{ marginTop: 8 }}
+            />
+          </label>
+        ) : (
+          <div className="text-sm text-muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Info size={13} /> You signed in via OAuth — no password confirmation needed.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn btn-ghost btn-sm" disabled={busy} onClick={handleExport}>
             {busy ? <RefreshCw size={13} className="spin" /> : <ExternalLink size={13} />} Export account data
