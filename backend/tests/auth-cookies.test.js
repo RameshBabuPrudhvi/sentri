@@ -104,6 +104,8 @@ async function main() {
     });
     assert.equal(res.status, 200, "Switch should succeed for owned workspace");
     const switchCookies = parseCookies(res);
+    // Carry forward the _csrf cookie from login (switch response only sets auth cookies)
+    if (csrfCookie && !switchCookies._csrf) switchCookies._csrf = csrfCookie;
     const switchedCookieHeader = buildCookieHeader(switchCookies);
     const switchedToken = switchCookies.access_token.value;
     const switchedUser = (await res.json()).user;
@@ -119,15 +121,16 @@ async function main() {
     assert.notEqual(switchedMe.workspaceId, originalWorkspaceId, "Switched workspace should differ from original");
 
     // ── CSRF: GET should work without X-CSRF-Token ────────────────────────
+    // Use switchedCookieHeader — the original token was revoked by workspace switch.
     res = await fetch(`${base}/api/projects`, {
-      headers: { Cookie: cookieHeader },
+      headers: { Cookie: switchedCookieHeader },
     });
     assert.equal(res.status, 200, "GET should not require CSRF token");
 
     // ── CSRF: POST should fail without X-CSRF-Token ───────────────────────
     res = await fetch(`${base}/api/projects`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookieHeader },
+      headers: { "Content-Type": "application/json", Cookie: switchedCookieHeader },
       body: JSON.stringify({ name: "No CSRF", url: "https://example.com" }),
     });
     assert.equal(res.status, 403, "POST without CSRF token should be 403");
@@ -139,7 +142,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieHeader,
+        Cookie: switchedCookieHeader,
         "X-CSRF-Token": csrfCookie.value,
       },
       body: JSON.stringify({ name: "With CSRF", url: "https://example.com" }),
@@ -151,7 +154,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieHeader,
+        Cookie: switchedCookieHeader,
         "X-CSRF-Token": "wrong-token",
       },
       body: JSON.stringify({ name: "Bad CSRF", url: "https://example.com" }),
