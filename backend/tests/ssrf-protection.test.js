@@ -46,29 +46,23 @@ function test(name, fn) {
   }
 }
 
-// ─── ipv4ToInt ────────────────────────────────────────────────────────────────
+// ─── isPrivateIp — IPv4 edge cases (covers ipv4ToInt parsing) ─────────────────
+// ipv4ToInt is a module-private helper in ssrfGuard.js. We test its behaviour
+// indirectly through isPrivateIp, which returns false for non-IP strings.
 
-console.log("\n── ipv4ToInt ──");
+console.log("\n── isPrivateIp — IPv4 parsing edge cases ──");
 
-test("parses 0.0.0.0 as 0", () => {
-  assert.equal(ipv4ToInt("0.0.0.0"), 0);
+test("non-IP strings are not treated as private", () => {
+  assert.equal(isPrivateIp("example.com"), false);
+  assert.equal(isPrivateIp("not-an-ip"), false);
 });
 
-test("parses 255.255.255.255 as 4294967295", () => {
-  assert.equal(ipv4ToInt("255.255.255.255"), 4294967295);
+test("partial IPs are not treated as private", () => {
+  assert.equal(isPrivateIp("192.168.1"), false);
 });
 
-test("parses 192.168.1.1 correctly", () => {
-  assert.equal(ipv4ToInt("192.168.1.1"), 0xC0A80101);
-});
-
-test("returns null for non-IP strings", () => {
-  assert.equal(ipv4ToInt("example.com"), null);
-  assert.equal(ipv4ToInt("not-an-ip"), null);
-});
-
-test("returns null for partial IPs", () => {
-  assert.equal(ipv4ToInt("192.168.1"), null);
+test("255.255.255.255 is not in a private range", () => {
+  assert.equal(isPrivateIp("255.255.255.255"), false);
 });
 
 // ─── isPrivateIp — IPv4 private ranges ────────────────────────────────────────
