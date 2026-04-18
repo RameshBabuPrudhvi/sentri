@@ -32,6 +32,7 @@ import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
+import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
@@ -41,7 +42,7 @@ const router = Router();
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
-router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);
@@ -124,7 +125,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), expensiveOpLimiter, a
 
 // ─── Run Tests ────────────────────────────────────────────────────────────────
 
-router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expensiveOpLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existingRun = runRepo.findActiveByProjectId(project.id);

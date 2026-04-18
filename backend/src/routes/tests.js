@@ -40,6 +40,7 @@ import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
+import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 
@@ -369,7 +370,7 @@ router.delete("/projects/:id/tests/:testId", requireRole("qa_lead"), (req, res) 
 
 // ─── AI-powered test generation (pipeline-based) ──────────────────────────────
 
-router.post("/projects/:id/tests/generate", requireRole("qa_lead"), aiGenerationLimiter, async (req, res) => {
+router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("generation"), aiGenerationLimiter, async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
@@ -473,7 +474,7 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), aiGeneration
 });
 
 // ── Run a single test by ID ───────────────────────────────────────────────────
-router.post("/tests/:testId/run", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expensiveOpLimiter, async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
 

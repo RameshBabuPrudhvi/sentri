@@ -139,7 +139,15 @@ function getKey(envName) {
   // takes precedence over the env var. Previously `||` made "" falsy, falling
   // through to process.env and making runtime deactivation impossible.
   if (envName in runtimeKeys) return runtimeKeys[envName];
-  return process.env[envName] || "";
+  const envVal = process.env[envName] || "";
+  if (envVal) return envVal;
+  // DEMO-MODE: Fall back to the platform-owned demo key for Google when no
+  // user key is configured. This lets users try Sentri without bringing their
+  // own API key. The demo key is rate-limited per-user by demoQuota middleware.
+  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) {
+    return process.env.DEMO_GOOGLE_API_KEY;
+  }
+  return "";
 }
 
 function getOllamaBaseUrl() {
@@ -204,7 +212,10 @@ function isProviderUsable(provider) {
   if (!envName) return false;
   // Runtime key of "" means explicitly cleared — respect that
   if (envName in runtimeKeys) return runtimeKeys[envName].length > 0;
-  return !!(process.env[envName]);
+  if (process.env[envName]) return true;
+  // DEMO-MODE: Google is usable when the demo key is set
+  if (envName === "GOOGLE_API_KEY" && process.env.DEMO_GOOGLE_API_KEY) return true;
+  return false;
 }
 
 /** True if Ollama has any config (runtime or env) hinting it should be auto-detected. */
@@ -265,9 +276,12 @@ export function getProviderMeta() {
  */
 export function getConfiguredKeys() {
   const result = { activeProvider: getProvider() };
-  // Cloud providers — masked keys via the shared map
+  // Cloud providers — masked keys via the shared map.
+  // Exclude the demo key fallback so the Settings UI (and demoQuota BYOK
+  // detection) only reflects keys the user explicitly configured.
   for (const [id, envName] of Object.entries(CLOUD_KEY_MAP)) {
-    result[id] = maskKey(getKey(envName));
+    const userKey = getUserConfiguredKey(envName);
+    result[id] = maskKey(userKey);
   }
   // Ollama-specific fields (never sensitive, no masking needed)
   result.ollamaBaseUrl = getOllamaBaseUrl();
@@ -276,6 +290,17 @@ export function getConfiguredKeys() {
   // the dropdown from showing Ollama as "saved" when it's just the default URL.
   result.ollamaConfigured = !runtimeOllamaDisabled && hasOllamaConfig();
   return result;
+}
+
+/**
+ * Get a user-configured key WITHOUT the demo fallback.
+ * Used by getConfiguredKeys() so BYOK detection is accurate.
+ * @param {string} envName
+ * @returns {string}
+ */
+function getUserConfiguredKey(envName) {
+  if (envName in runtimeKeys) return runtimeKeys[envName];
+  return process.env[envName] || "";
 }
 
 function maskKey(key) {

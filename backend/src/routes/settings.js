@@ -17,20 +17,29 @@ import { logActivity } from "../utils/activityLogger.js";
 import { hasProvider, setRuntimeKey, setRuntimeOllama, setActiveProvider, checkOllamaConnection, getProviderMeta, getConfiguredKeys, getProvider, getSupportedProviders } from "../aiProvider.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
+import { isDemoEnabled, getDemoQuotaStatus } from "../middleware/demoQuota.js";
 
 const router = Router();
 
 // GET /api/config — provider info for the LLM badge shown everywhere
-router.get("/config", (req, res) => {
+router.get("/config", async (req, res) => {
   const meta = getProviderMeta();
-  res.json({
+  const response = {
     provider: meta?.provider || null,
     providerName: meta?.name || "No provider configured",
     model: meta?.model || null,
     color: meta?.color || null,
     hasProvider: hasProvider(),
     supportedProviders: getSupportedProviders(),
-  });
+    // DEMO-MODE: Let the frontend know if the platform demo key is active
+    // so it can show quota info and "add your own key" prompts.
+    demoMode: isDemoEnabled,
+  };
+  // Include per-user quota status when in demo mode and user is authenticated
+  if (isDemoEnabled && req.authUser?.sub) {
+    response.demoQuota = await getDemoQuotaStatus(req.authUser.sub);
+  }
+  res.json(response);
 });
 
 // GET /api/settings — returns masked key status (never full keys)
