@@ -21,6 +21,15 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 | `OLLAMA_MAX_PREDICT` | `4096` | Max output tokens for Ollama |
 | `OLLAMA_TIMEOUT_MS` | `120000` | Timeout for Ollama calls (ms) |
 
+### Demo Mode
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEMO_GOOGLE_API_KEY` | — | Platform-owned Gemini API key for zero-config trial. When set, users without their own AI key can try Sentri immediately using the shared key, subject to per-user daily quotas |
+| `DEMO_DAILY_CRAWLS` | `2` | Max crawls per user per day in demo mode |
+| `DEMO_DAILY_RUNS` | `3` | Max test runs per user per day in demo mode |
+| `DEMO_DAILY_GENERATIONS` | `5` | Max AI test generations per user per day in demo mode |
+
 ### LLM Retry & Tokens
 
 | Variable | Default | Description |

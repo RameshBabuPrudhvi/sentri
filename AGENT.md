@@ -148,6 +148,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `ssrfGuard.js` | `validateUrl()`, `safeFetch()`, `isPrivateIp()` | SSRF protection for outbound HTTP requests to user-configured URLs (notification webhooks, CI/CD callback URLs) |
 | `notifications.js` | `fireNotifications(run, project)` | Failure notification dispatcher — Teams Adaptive Card, HTML email, generic webhook; best-effort, never affects run outcome |
 | `projectSanitiser.js` | `sanitiseProjectForClient(project)` | Stripping encrypted credentials before sending project to client (used by project routes and recycle bin) |
+| `../middleware/demoQuota.js` | `demoQuota(op)`, `isDemoEnabled`, `getDemoQuotaStatus(userId)` | Per-user daily quota enforcement for demo mode (`DEMO_GOOGLE_API_KEY`). Applied to crawl, run, and generate routes. BYOK users bypass all quotas |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
 
@@ -960,6 +961,10 @@ The following are **not yet implemented** but should be addressed before product
 | `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution (INF-003). Ignored when Redis/BullMQ is not available. |
 | `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads (e.g. `https://sentri.example.com`). Falls back to `CORS_ORIGIN`, then `http://localhost:3000`. |
 | `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location. In Docker, set to `/usr/share/frontend/index.html` (shared volume). |
+| `DEMO_GOOGLE_API_KEY` | No | — | Platform-owned Gemini API key for zero-config trial. Enables demo mode with per-user daily quotas. See `middleware/demoQuota.js`. |
+| `DEMO_DAILY_CRAWLS` | No | `2` | Max crawls per user per day in demo mode |
+| `DEMO_DAILY_RUNS` | No | `3` | Max test runs per user per day in demo mode |
+| `DEMO_DAILY_GENERATIONS` | No | `5` | Max AI test generations per user per day in demo mode |
 
 ---
 

@@ -243,6 +243,8 @@ GITHUB_PAGES=true VITE_API_URL=https://your-app.onrender.com npm run build
 
 Set on Render: `NODE_ENV=production`, `JWT_SECRET=<openssl rand -base64 48>`, plus your AI provider key.
 
+**Demo mode (optional):** Set `DEMO_GOOGLE_API_KEY` on Render with a [free Gemini API key](https://aistudio.google.com/apikey) to let new users try Sentri without bringing their own key. Per-user daily quotas (2 crawls, 3 runs, 5 AI generations) prevent abuse. Users who add their own key bypass all quotas. See `DEMO_DAILY_CRAWLS`, `DEMO_DAILY_RUNS`, `DEMO_DAILY_GENERATIONS` to customise limits.
+
 See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/guide/github-pages-render.html) for details.
 
 ---
