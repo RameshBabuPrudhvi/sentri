@@ -16,7 +16,6 @@ frontend/          React 18 SPA (Vite, no framework beyond React Router)
 backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
   src/
     index.js               Entry point — DB init, route mounting, process guards
-    db.js                  DEPRECATED — emptied stub; all consumers migrated to repository modules
     database/
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
@@ -424,7 +423,6 @@ Sentri supports **SQLite** (default, via `better-sqlite3`) and **PostgreSQL** (v
 Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `pragma`, `close`, `dialect`) so all repository modules work unchanged. The adapter is selected at startup by `database/sqlite.js` (the module name is kept for backward compatibility).
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
-- **`db.js` is deprecated** — the file has been emptied. All consumers have been migrated to use repository modules directly. Do not import `getDb()` or `saveDb()` in new code.
 - **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo`, `notificationSettingsRepo`, `accountRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
@@ -1101,7 +1099,7 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not change the `healingHistory` key schema** (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 - **Do not add polling** to the frontend for run status — use the existing SSE infrastructure (`useRunSSE`).
 - **Do not add a new test framework** to either package. Backend tests use `node:assert/strict`; keep it that way.
-- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`. Do not import `getDb()` or `saveDb()` from `db.js` — the file is deprecated and emptied.
+- **Do not write raw SQL in route handlers** — always go through repository modules in `database/repositories/`.
 - **Do not skip `throwIfAborted(signal)`** in pipeline or runner stages — it breaks the abort/cancel feature.
 - **Do not use `dangerouslySetInnerHTML`** without escaping all dynamic content first. AI/user-generated text must be sanitised before DOM insertion to prevent XSS.
 - **Do not leak internal error details** to clients. Catch SDK/provider errors and return generic messages via `classifyError()`. Log the real error server-side with `formatLogLine()`.

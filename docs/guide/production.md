@@ -11,7 +11,7 @@
 
 ## Database
 
-- [x] ~~Replace in-memory `db.js` with SQLite~~ — Done (better-sqlite3 with WAL mode, auto-migration from legacy JSON)
+- [x] ~~SQLite database~~ — Done (better-sqlite3 with WAL mode)
 - [x] ~~PostgreSQL support~~ — Done (INF-001). Set `DATABASE_URL=postgres://…` to use PostgreSQL instead of SQLite. Install `pg` + `pg-native` (or `deasync` as fallback). Both backends use the same adapter interface — no code changes needed.
 
 ## Infrastructure
