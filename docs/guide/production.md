@@ -21,9 +21,9 @@
 - [x] ~~CI/CD webhook trigger~~ — Done (ENH-011). `POST /api/projects/:id/trigger` with per-project Bearer tokens.
 - [x] ~~Email verification on registration~~ — Done (SEC-001). Configure `RESEND_API_KEY` or `SMTP_HOST` for transactional email.
 - [x] ~~Graceful shutdown~~ — Done (MAINT-013). Drains in-flight runs on SIGTERM/SIGINT.
-- [ ] Add BullMQ for durable background run execution (INF-003 — requires Redis)
+- [x] ~~BullMQ durable background run execution~~ — Done (INF-003). When `REDIS_URL` is set and `bullmq` is installed, runs execute via a durable job queue with crash recovery, retry, and global concurrency control (`MAX_WORKERS`). Falls back to in-process execution without Redis.
+- [x] ~~Failure notifications (Teams/email/webhook)~~ — Done (FEA-001). Configure per-project via `PATCH /api/projects/:id/notifications`. Dispatches on run completion with failures.
 - [ ] Store videos and screenshots to S3/R2 instead of local disk (MNT-006)
-- [ ] Send Slack/email alerts on test failures (FEA-001)
 - [x] ~~Workspace/organisation scoping for multi-tenancy~~ — Done (ACL-001). Every entity is scoped to a workspace via `workspaceId`. Workspaces auto-created on first login. Existing data backfilled on startup.
 - [x] ~~Role-based access control~~ — Done (ACL-002). Three roles: Admin / QA Lead / Viewer. `requireRole()` middleware guards all mutating routes. Frontend gates Settings to admins and hides actions for insufficient roles.
 
@@ -40,5 +40,5 @@
 - [x] Artifact serving protected by HMAC-SHA256 signed URLs (ENH-007)
 - [x] Gitleaks secrets scanning in CI (ENH-030)
 - [x] DB-backed password reset tokens with atomic one-time claim (ENH-013)
-- [ ] Nonce-based Content Security Policy — replace `'unsafe-inline'` (SEC-002)
-- [ ] GDPR/CCPA account data export and deletion (SEC-003)
+- [x] ~~Nonce-based Content Security Policy~~ — Done (SEC-002). Per-request nonce replaces `'unsafe-inline'` in `script-src`. Vite plugin injects `nonce="__CSP_NONCE__"` on `<script>` tags; `serveIndexWithNonce()` replaces at serve-time.
+- [x] ~~GDPR/CCPA account data export and deletion~~ — Done (SEC-003). `GET /api/auth/export` (JSON archive) and `DELETE /api/auth/account` (cascade hard-delete). Both require password confirmation.
