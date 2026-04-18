@@ -293,7 +293,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-005 — API versioning (`/api/v1/`) 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** S | **Source:** Audit
 
 **Problem:** All routes are mounted at `/api/*` with no version prefix. Any breaking API change will immediately break all consumers — CI/CD integrations, GitHub Actions, external webhooks — with no safe migration path.
 
@@ -310,7 +310,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### FEA-003 — AI provider fallback chain on rate limits 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** M | **Source:** Audit
 
 **Problem:** If the primary AI provider returns a rate limit error, the pipeline fails after `LLM_MAX_RETRIES` attempts with no fallback. If Anthropic is temporarily rate-limited, all test generation stops — even if OpenAI or Ollama is configured and available. There is no circuit breaker.
 
@@ -388,7 +388,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-003 — Mobile viewport / device emulation 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive
+**Status:** 🔄 In Progress | **Effort:** S | **Source:** Competitive
 
 **Problem:** There is no device emulation. Playwright ships with 50+ device profiles (`playwright.devices`) covering iPhone, Galaxy, iPad, and desktop variants. A device selector is high-value, low-effort, and a standard evaluation question for any QA platform.
 
@@ -567,7 +567,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-011 — Coverage heatmap on site graph 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive
+**Status:** 🔄 In Progress | **Effort:** S | **Source:** Competitive
 
 **Problem:** The site graph shows crawled pages but gives no signal about which pages have test coverage. Teams cannot identify gaps visually without reading a table.
 
@@ -620,7 +620,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-014 — Cursor overlay on live browser view 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Assrt (M-04)
+**Status:** 🔄 In Progress | **Effort:** S | **Source:** Assrt (M-04)
 
 **Problem:** Sentri's live CDP screencast shows the browser but gives no visual indication of what the test is currently doing. Viewers cannot tell which element is about to be clicked, filled, or asserted — making live runs difficult to follow.
 
