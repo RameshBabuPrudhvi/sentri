@@ -32,7 +32,9 @@ import { safeFetch } from "./ssrfGuard.js";
  * @returns {string}
  */
 function getAppUrl() {
-  return process.env.APP_URL || process.env.CORS_ORIGIN || "http://localhost:3000";
+  if (process.env.APP_URL) return process.env.APP_URL;
+  const corsOrigin = process.env.CORS_ORIGIN || "";
+  return corsOrigin.split(",")[0].trim() || "http://localhost:3000";
 }
 
 /**

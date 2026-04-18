@@ -160,12 +160,15 @@ router.post("/projects/:id/run", requireRole("qa_lead"), expensiveOpLimiter, asy
   });
 
   if (isQueueAvailable()) {
-    // INF-003: Enqueue via BullMQ for durable execution
+    // INF-003: Enqueue via BullMQ for durable execution.
+    // Snapshot approved test IDs at enqueue time so retries use the same
+    // set — prevents mismatch between run.total/testQueue and the actual
+    // tests executed if approvals change between attempts.
     await runQueue.add("test_run", {
       runId,
       projectId: project.id,
       type: "test_run",
-      options: { parallelWorkers, actorInfo: actor(req) },
+      options: { parallelWorkers, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
     }, { jobId: runId });
   } else {
     // Fallback: in-process execution (no Redis)

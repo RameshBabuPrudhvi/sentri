@@ -453,14 +453,26 @@ router.get("/me", requireAuth, (req, res) => {
 // ─── Account export / deletion (SEC-003) ─────────────────────────────────────
 
 /**
+ * Check whether a user registered via OAuth only (no password set).
+ *
+ * @param {Object} user
+ * @returns {boolean}
+ */
+function isOAuthOnlyUser(user) {
+  return !user?.passwordHash;
+}
+
+/**
  * Verify the authenticated user's password for sensitive account actions.
+ * For OAuth-only users (no passwordHash), password verification is skipped
+ * — the OAuth session itself serves as proof of identity.
  *
  * @param {Object} user
  * @param {string} password
  * @returns {Promise<boolean>}
  */
 async function verifyAccountPassword(user, password) {
-  if (!user?.passwordHash) return false;
+  if (isOAuthOnlyUser(user)) return true;
   if (typeof password !== "string" || !password) return false;
   return verifyPassword(password, user.passwordHash);
 }
@@ -478,13 +490,16 @@ router.get("/export", requireAuth, async (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
 
-  const password = req.headers["x-account-password"];
-  if (typeof password !== "string" || !password) {
-    return res.status(400).json({ error: "Password confirmation is required." });
-  }
-  const valid = await verifyAccountPassword(user, password);
-  if (!valid) {
-    return res.status(403).json({ error: "Password confirmation failed." });
+  // OAuth-only users have no password — skip confirmation (session is proof).
+  if (!isOAuthOnlyUser(user)) {
+    const password = req.headers["x-account-password"];
+    if (typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "Password confirmation is required." });
+    }
+    const valid = await verifyAccountPassword(user, password);
+    if (!valid) {
+      return res.status(403).json({ error: "Password confirmation failed." });
+    }
   }
 
   const data = accountRepo.buildAccountExport(user.id);
@@ -504,13 +519,16 @@ router.delete("/account", requireAuth, async (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(404).json({ error: "User not found." });
 
-  const password = req.body?.password;
-  if (typeof password !== "string" || !password) {
-    return res.status(400).json({ error: "Password confirmation is required." });
-  }
-  const valid = await verifyAccountPassword(user, password);
-  if (!valid) {
-    return res.status(403).json({ error: "Password confirmation failed." });
+  // OAuth-only users have no password — skip confirmation (session is proof).
+  if (!isOAuthOnlyUser(user)) {
+    const password = req.body?.password;
+    if (typeof password !== "string" || !password) {
+      return res.status(400).json({ error: "Password confirmation is required." });
+    }
+    const valid = await verifyAccountPassword(user, password);
+    if (!valid) {
+      return res.status(403).json({ error: "Password confirmation failed." });
+    }
   }
 
   try {
@@ -520,6 +538,9 @@ router.delete("/account", requireAuth, async (req, res) => {
     return res.status(500).json({ error: "Failed to delete account." });
   }
 
+  // Revoke the current JWT so it cannot be reused from another tab or replay.
+  const { jti, exp } = req.authUser;
+  if (jti) revokedTokens.set(jti, exp);
   clearAuthCookies(res);
   return res.json({ ok: true, message: "Account and owned data deleted." });
 });

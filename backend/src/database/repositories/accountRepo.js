@@ -65,6 +65,8 @@ export function buildAccountExport(userId) {
       activities: [],
       notificationSettings: [],
       schedules: [],
+      webhookTokens: [],
+      healingHistory: [],
     };
   }
 
@@ -79,11 +81,27 @@ export function buildAccountExport(userId) {
 
   let notificationSettings = [];
   let schedules = [];
+  let webhookTokens = [];
   if (projectIds.length > 0) {
     const pph = placeholders(projectIds);
     notificationSettings = db.prepare(`SELECT * FROM notification_settings WHERE projectId IN (${pph})`).all(...projectIds)
       .map((row) => ({ ...row, enabled: !!row.enabled }));
     schedules = db.prepare(`SELECT * FROM schedules WHERE projectId IN (${pph})`).all(...projectIds);
+    webhookTokens = db.prepare(`SELECT id, projectId, label, createdAt, lastUsedAt FROM webhook_tokens WHERE projectId IN (${pph})`).all(...projectIds);
+  }
+
+  // Collect healing_history entries for all tests in owned workspaces.
+  // Keys are formatted as "<testId>::<action>::<label>".
+  const testIds = tests.map((t) => t.id);
+  let healingHistory = [];
+  if (testIds.length > 0) {
+    const clauses = [];
+    const params = [];
+    for (const tid of testIds) {
+      clauses.push("key LIKE ?", "key LIKE ?");
+      params.push(`${tid}::%`, `${tid}@v%::%`);
+    }
+    healingHistory = db.prepare(`SELECT * FROM healing_history WHERE ${clauses.join(" OR ")}`).all(...params);
   }
 
   return {
@@ -98,6 +116,8 @@ export function buildAccountExport(userId) {
     activities,
     notificationSettings,
     schedules,
+    webhookTokens,
+    healingHistory,
   };
 }
 
@@ -108,10 +128,11 @@ export function buildAccountExport(userId) {
  * transaction.  This is the GDPR Article 17 "right to erasure" implementation.
  *
  * Cascade order:
- * 1. Per-project children: notification_settings, schedules
- * 2. Per-workspace children: activities, run_logs → runs, tests, projects
- * 3. Workspace membership and workspace rows
- * 4. User-level rows: workspace_members (non-owned), oauth_ids,
+ * 1. Per-project children: notification_settings, schedules, webhook_tokens
+ * 2. Per-test children: healing_history
+ * 3. Per-workspace children: activities, run_logs → runs, tests, projects
+ * 4. Workspace membership and workspace rows
+ * 5. User-level rows: workspace_members (non-owned), oauth_ids,
  *    password_reset_tokens, verification_tokens, users
  *
  * @param {string} userId
@@ -139,6 +160,20 @@ export function deleteAccount(userId) {
         const pph = placeholders(ownedProjectIds);
         db.prepare(`DELETE FROM notification_settings WHERE projectId IN (${pph})`).run(...ownedProjectIds);
         db.prepare(`DELETE FROM schedules WHERE projectId IN (${pph})`).run(...ownedProjectIds);
+        db.prepare(`DELETE FROM webhook_tokens WHERE projectId IN (${pph})`).run(...ownedProjectIds);
+      }
+
+      // Delete healing_history for all tests in owned workspaces.
+      // Use direct SQL instead of healingRepo.deleteByTestIds() to avoid
+      // a nested transaction (that helper wraps deletes in its own txn).
+      const ownedTestRows = db.prepare(`SELECT id FROM tests WHERE workspaceId IN (${wsph})`).all(...ownedWorkspaceIds);
+      const ownedTestIds = ownedTestRows.map((t) => t.id);
+      if (ownedTestIds.length > 0) {
+        const healStmt = db.prepare("DELETE FROM healing_history WHERE key LIKE ?");
+        for (const tid of ownedTestIds) {
+          healStmt.run(`${tid}::%`);
+          healStmt.run(`${tid}@v%::%`);
+        }
       }
 
       // Delete run_logs for all runs in owned workspaces

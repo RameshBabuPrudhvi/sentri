@@ -110,8 +110,18 @@ async function processJob(job) {
         });
       }
     } else if (type === "test_run") {
-      const tests = testRepo.getByProjectId(project.id)
-        .filter(t => t.reviewStatus === "approved");
+      // Use the snapshotted test IDs from enqueue time (options.testIds) so
+      // retries execute the same set of tests as the original attempt.
+      // Falls back to a fresh DB query for jobs enqueued before this fix.
+      let tests;
+      if (Array.isArray(options.testIds) && options.testIds.length > 0) {
+        const allTests = testRepo.getByProjectId(project.id);
+        const idSet = new Set(options.testIds);
+        tests = allTests.filter(t => idSet.has(t.id));
+      } else {
+        tests = testRepo.getByProjectId(project.id)
+          .filter(t => t.reviewStatus === "approved");
+      }
 
       await runTests(project, tests, run, {
         parallelWorkers: options.parallelWorkers || 1,
