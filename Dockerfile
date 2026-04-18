@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
   libpango-1.0-0 \
   libcairo2 \
   build-essential \
-  python3 \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
