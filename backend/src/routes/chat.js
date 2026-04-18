@@ -359,9 +359,8 @@ router.post("/chat", async (req, res) => {
   const isLocal = isLocalProvider();
   const projects = projectRepo.getAll(req.workspaceId);
   const projectIds = projects.map((p) => p.id);
-  const projectIdSet = new Set(projectIds);
   const tests = testRepo.getAllByProjectIds(projectIds);
-  const runs = runRepo.getAllWithResults().filter((r) => projectIdSet.has(r.projectId));
+  const runs = runRepo.getWithResultsByProjectIds(projectIds);
   const projectsById = {};
   for (const p of projects) projectsById[p.id] = p;
   const testsById = {};
