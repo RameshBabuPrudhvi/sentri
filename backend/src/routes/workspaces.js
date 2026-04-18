@@ -87,7 +87,7 @@ router.get("/", (req, res) => {
  * @param {Object} req.body
  * @param {string} req.body.workspaceId — The workspace to switch to.
  */
- router.post("/switch", (req, res) => {
+router.post("/switch", (req, res) => {
   const { workspaceId: targetId } = req.body;
   if (!targetId || typeof targetId !== "string") {
     return res.status(400).json({ error: "workspaceId is required." });

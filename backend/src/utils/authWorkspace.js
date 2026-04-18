@@ -20,6 +20,16 @@ function resolveCurrentWorkspace(workspaces, hint) {
 }
 
 /**
+ * @typedef {Object} JwtPayload
+ * @property {string}            sub
+ * @property {string}            email
+ * @property {string}            name
+ * @property {string}            role
+ * @property {string}            jti
+ * @property {string}            [workspaceId] - Present when the user has workspaces.
+ */
+
+/**
  * Build a JWT payload with a workspace hint.
  *
  * The JWT carries `workspaceId` as a routing hint only. Authorization is always
@@ -27,7 +37,7 @@ function resolveCurrentWorkspace(workspaces, hint) {
  *
  * @param {Object} user - User row from the database.
  * @param {string} [workspaceIdHint] - Preferred current workspace ID.
- * @returns {{ sub: string, email: string, name: string, role: string, jti: string, workspaceId: (string|undefined) }}
+ * @returns {JwtPayload}
  */
 export function buildJwtPayload(user, workspaceIdHint) {
   const jti = crypto.randomUUID();
