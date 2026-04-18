@@ -905,14 +905,14 @@ The following have been implemented and are no longer open:
 - **Per-user audit trail** ✅: Every activity log entry records `userId` and `userName` (migration 004). The `actor(req)` utility in `utils/actor.js` extracts identity from `req.authUser` (JWT payload includes `name`). Bulk approve/reject/restore actions log per-test entries with the acting user's identity.
 - **Artifact authentication** ✅: The `/artifacts` route is protected by HMAC-SHA256 signed `?token=&exp=` query-param tokens (1 hour TTL, configurable via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` is required in production; dev uses a random per-process secret. `signArtifactUrl()` in `middleware/appSetup.js` generates signed URLs; all artifact producers (screenshots, videos, traces) use it. `Cache-Control: private, no-store` prevents browsers from caching expiring URLs.
 - **Secrets scanning** ✅: Gitleaks runs on every PR and push to `main` via the `secrets` CI job (`.github/workflows/ci.yml`). Both `lint` and `build` jobs depend on it, gating the entire pipeline. Configuration in `.github/.gitleaks.toml` extends the default ruleset with allowlists for CI placeholders and `.env.example` files.
+- **Nonce-based CSP** ✅: Per-request nonce generated via `crypto.randomBytes(16)` in `middleware/appSetup.js`, passed to Helmet CSP `scriptSrc` as `'nonce-<value>'`. Vite `transformIndexHtml` plugin injects `nonce="__CSP_NONCE__"` on all `<script>` tags; `serveIndexWithNonce()` replaces the placeholder at serve-time. `'unsafe-inline'` removed from `scriptSrc` (SEC-002).
+- **GDPR/CCPA account export & deletion** ✅: `GET /api/auth/export` returns a JSON archive of all user-owned data (workspaces, projects, tests, runs, activities, schedules, notification settings) with `passwordHash` stripped. `DELETE /api/auth/account` hard-deletes the user and all owned data in a single transaction. Both require password confirmation (403 on mismatch). Frontend Account tab in Settings with two-click confirm flow (SEC-003).
 
 ### Known Security Gaps (TODO)
 
 The following are **not yet implemented** but should be addressed before production:
 
 - **Error tracking**: No external error tracking (Sentry, etc.) is configured. Errors are only visible in server logs and browser console.
-- **Nonce-based CSP**: `'unsafe-inline'` should be replaced with nonce-based script allowlisting (SEC-002).
-- **GDPR/CCPA**: No account data export or deletion endpoints exist yet (SEC-003).
 
 ---
 

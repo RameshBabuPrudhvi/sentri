@@ -40,7 +40,7 @@ import * as userRepo from "../database/repositories/userRepo.js";
 import * as resetTokenRepo from "../database/repositories/passwordResetTokenRepo.js";
 import * as verificationTokenRepo from "../database/repositories/verificationTokenRepo.js";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
-import { getDatabase } from "../database/sqlite.js";
+import * as accountRepo from "../database/repositories/accountRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
@@ -466,80 +466,13 @@ async function verifyAccountPassword(user, password) {
 }
 
 /**
- * Build an export payload for all user-owned account data.
- *
- * Scope:
- * - User profile
- * - Workspaces owned by the user
- * - Owned workspace members
- * - Projects/tests/runs/activities in owned workspaces
- * - Notification settings and schedules for owned projects
- *
- * @param {string} userId
- * @returns {Object}
- */
-function buildAccountExport(userId) {
-  const db = getDatabase();
-  const user = userRepo.getById(userId);
-  const ownedWorkspaces = db.prepare("SELECT * FROM workspaces WHERE ownerId = ? ORDER BY createdAt ASC").all(userId);
-  const ownedWorkspaceIds = ownedWorkspaces.map((w) => w.id);
-  const membershipRows = db.prepare("SELECT * FROM workspace_members WHERE userId = ? ORDER BY joinedAt ASC").all(userId);
-
-  if (ownedWorkspaceIds.length === 0) {
-    return {
-      exportedAt: new Date().toISOString(),
-      user,
-      ownedWorkspaces: [],
-      memberships: membershipRows,
-      workspaceMembers: [],
-      projects: [],
-      tests: [],
-      runs: [],
-      activities: [],
-      notificationSettings: [],
-      schedules: [],
-    };
-  }
-
-  const placeholders = ownedWorkspaceIds.map(() => "?").join(", ");
-  const projects = db.prepare(`SELECT * FROM projects WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-  const projectIds = projects.map((p) => p.id);
-  const projectPlaceholders = projectIds.length ? projectIds.map(() => "?").join(", ") : "";
-
-  const tests = db.prepare(`SELECT * FROM tests WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-  const runs = db.prepare(`SELECT * FROM runs WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-  const activities = db.prepare(`SELECT * FROM activities WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-  const workspaceMembers = db.prepare(`SELECT * FROM workspace_members WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-  const notificationSettings = projectIds.length
-    ? db.prepare(`SELECT * FROM notification_settings WHERE projectId IN (${projectPlaceholders})`).all(...projectIds)
-    : [];
-  const schedules = projectIds.length
-    ? db.prepare(`SELECT * FROM schedules WHERE projectId IN (${projectPlaceholders})`).all(...projectIds)
-    : [];
-
-  return {
-    exportedAt: new Date().toISOString(),
-    user,
-    ownedWorkspaces,
-    memberships: membershipRows,
-    workspaceMembers,
-    projects,
-    tests,
-    runs,
-    activities,
-    notificationSettings,
-    schedules,
-  };
-}
-
-/**
  * Export all user-owned account data as JSON (GDPR/CCPA data portability).
  * Requires password confirmation via `x-account-password` header.
  *
  * @route GET /api/auth/export
  * @returns {200} JSON export payload.
  * @returns {400} Missing password.
- * @returns {401} Invalid password.
+ * @returns {403} Invalid password.
  */
 router.get("/export", requireAuth, async (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
@@ -551,10 +484,10 @@ router.get("/export", requireAuth, async (req, res) => {
   }
   const valid = await verifyAccountPassword(user, password);
   if (!valid) {
-    return res.status(401).json({ error: "Password confirmation failed." });
+    return res.status(403).json({ error: "Password confirmation failed." });
   }
 
-  const data = buildAccountExport(user.id);
+  const data = accountRepo.buildAccountExport(user.id);
   return res.json(data);
 });
 
@@ -577,40 +510,11 @@ router.delete("/account", requireAuth, async (req, res) => {
   }
   const valid = await verifyAccountPassword(user, password);
   if (!valid) {
-    return res.status(401).json({ error: "Password confirmation failed." });
+    return res.status(403).json({ error: "Password confirmation failed." });
   }
 
-  const db = getDatabase();
-  const removeAccount = db.transaction(() => {
-    const ownedWorkspaceRows = db.prepare("SELECT id FROM workspaces WHERE ownerId = ?").all(user.id);
-    const ownedWorkspaceIds = ownedWorkspaceRows.map((w) => w.id);
-
-    if (ownedWorkspaceIds.length > 0) {
-      const placeholders = ownedWorkspaceIds.map(() => "?").join(", ");
-      const ownedProjectRows = db.prepare(`SELECT id FROM projects WHERE workspaceId IN (${placeholders})`).all(...ownedWorkspaceIds);
-      const ownedProjectIds = ownedProjectRows.map((p) => p.id);
-      if (ownedProjectIds.length > 0) {
-        const projectPlaceholders = ownedProjectIds.map(() => "?").join(", ");
-        db.prepare(`DELETE FROM notification_settings WHERE projectId IN (${projectPlaceholders})`).run(...ownedProjectIds);
-        db.prepare(`DELETE FROM schedules WHERE projectId IN (${projectPlaceholders})`).run(...ownedProjectIds);
-      }
-      db.prepare(`DELETE FROM activities WHERE workspaceId IN (${placeholders})`).run(...ownedWorkspaceIds);
-      db.prepare(`DELETE FROM runs WHERE workspaceId IN (${placeholders})`).run(...ownedWorkspaceIds);
-      db.prepare(`DELETE FROM tests WHERE workspaceId IN (${placeholders})`).run(...ownedWorkspaceIds);
-      db.prepare(`DELETE FROM projects WHERE workspaceId IN (${placeholders})`).run(...ownedWorkspaceIds);
-      db.prepare(`DELETE FROM workspace_members WHERE workspaceId IN (${placeholders})`).run(...ownedWorkspaceIds);
-      db.prepare(`DELETE FROM workspaces WHERE id IN (${placeholders})`).run(...ownedWorkspaceIds);
-    }
-
-    db.prepare("DELETE FROM workspace_members WHERE userId = ?").run(user.id);
-    db.prepare("DELETE FROM oauth_ids WHERE userId = ?").run(user.id);
-    db.prepare("DELETE FROM password_reset_tokens WHERE userId = ?").run(user.id);
-    db.prepare("DELETE FROM verification_tokens WHERE userId = ?").run(user.id);
-    db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
-  });
-
   try {
-    removeAccount();
+    accountRepo.deleteAccount(user.id);
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/account] Delete failed for user ${user.id}: ${err.message}`));
     return res.status(500).json({ error: "Failed to delete account." });

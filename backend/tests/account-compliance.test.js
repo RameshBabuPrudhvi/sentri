@@ -97,6 +97,7 @@ async function main() {
     }).then(async (res) => ({ res, json: await res.json().catch(() => ({})) }));
     assert.equal(out.res.status, 200);
     assert.equal(out.json.user.email, email);
+    assert.equal(out.json.user.passwordHash, undefined, "Export must not include passwordHash");
     assert.ok(Array.isArray(out.json.projects), "Export payload should include projects array");
 
     // Recreate project to verify delete cascade on owned data.
@@ -108,13 +109,13 @@ async function main() {
     assert.equal(out.res.status, 201);
     const doomedProjectId = out.json.id;
 
-    // SEC-003 delete: wrong password fails, correct password succeeds.
+    // SEC-003 delete: wrong password fails (403, not 401 — avoids logout redirect).
     out = await req(base, "/api/auth/account", {
       method: "DELETE",
       token,
       body: { password: "WrongPass123!" },
     });
-    assert.equal(out.res.status, 401);
+    assert.equal(out.res.status, 403);
 
     out = await req(base, "/api/auth/account", {
       method: "DELETE",

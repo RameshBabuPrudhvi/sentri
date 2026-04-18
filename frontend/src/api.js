@@ -389,9 +389,10 @@ export const api = {
       handleUnauthorized();
       throw new Error("Session expired. Please sign in again.");
     }
+    // 403 = wrong password confirmation — do NOT trigger logout redirect.
     if (!res.ok) {
       const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
-      throw new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
+      throw new Error(err.error || res.statusText || "Request failed");
     }
     return parseJsonResponse(res);
   },
