@@ -2,15 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main,develop]
+    branches: [main, develop]
 
-# Deduplicate runs: when a push triggers both a `push` event (because
-# `develop` is listed) and a `pull_request` event (because there's an open
-# PR), cancel the redundant run.  For PRs the group key uses the PR number;
-# for direct pushes it uses the commit SHA so concurrent main-branch pushes
-# aren't cancelled.
+# Cancel outdated runs for the same PR when new commits are pushed.
+# Direct pushes to main use the SHA as the group key so they don't collide.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
