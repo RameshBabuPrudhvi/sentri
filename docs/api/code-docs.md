@@ -33,7 +33,7 @@ Auto-generated documentation for every module, function, and type in the codebas
 | Module | Description |
 |---|---|
 | `api.js` | Centralised API client — every `api.*` method documented with params/returns |
-| `utils/api.js` | `API_BASE` constant and `parseJsonResponse` helper |
+| `utils/apiBase.js` | `API_BASE`, `API_VERSION`, `API_PATH` constants and `parseJsonResponse` helper |
 | `context/AuthContext.jsx` | `AuthProvider`, `useAuth()` hook, `login()`, `logout()`, `authFetch()` |
 
 ## Regenerating Locally
