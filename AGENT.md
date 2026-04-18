@@ -96,6 +96,39 @@ export async function doThing(name, opts) { … }
 - Document `@typedef` for all non-trivial object shapes.
 - Internal helpers that are not exported do not need JSDoc but benefit from a brief inline comment.
 
+#### JSDoc type syntax rules
+
+**This project uses JSDoc (not TypeScript).** The CI pipeline runs `jsdoc` to generate documentation, and it will **fail** on TypeScript-only syntax. The most common mistake is using TypeScript-style optional properties (`prop?: type`) in record types — JSDoc does not support `?:`.
+
+| Need | ✅ JSDoc syntax | ❌ TypeScript syntax (breaks CI) |
+|---|---|---|
+| Optional param | `@param {string} [name]` | `@param {string?} name` |
+| Optional property in record | Use `@typedef` with `@property {string} [prop]` | `{ prop?: string }` inline |
+| Nullable type | `{string\|null}` or `{?string}` | `{string?}` |
+| Union type | `{string\|number}` | `{string \| number}` (works but prefer `\|`) |
+| Complex return shape | Define a `@typedef` and reference it in `@returns` | Inline `{{ prop?: type }}` record |
+
+**When a return type has optional properties, always use `@typedef`:**
+
+```js
+// ✅ Correct — @typedef with optional properties using [brackets]
+/**
+ * @typedef {Object} UserResponse
+ * @property {string}      id
+ * @property {string}      [workspaceId]   - Present when user has workspaces.
+ * @property {string|null} avatar
+ */
+
+/** @returns {UserResponse} */
+export function buildUserResponse(user) { … }
+
+// ❌ Wrong — TypeScript optional syntax breaks jsdoc parser
+/** @returns {{ id: string, workspaceId?: string, avatar: string | null }} */
+export function buildUserResponse(user) { … }
+```
+
+Simple record types without optional properties are fine inline: `@returns {{ id: string, name: string }}`.
+
 ### DRY — No Duplication
 
 Before writing new code, check whether a shared utility, component, or CSS class already exists. Duplicating logic that belongs in a shared module is a common agent mistake.
@@ -1078,3 +1111,4 @@ Sentri follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) stan
 - **Do not skip the changelog.** Every PR with user-visible features, fixes, or security changes must add entries to the `## [Unreleased]` section of `docs/changelog.md` following the [Keep a Changelog](https://keepachangelog.com/) format. See the Versioning & Releases section for format rules.
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See the Testing section for the full requirements table.
 - **Do not duplicate test helpers.** Integration test utilities (`extractCookie`, `resetDb`, `req` with CSRF, `registerAndLogin`, `setupEnv`, `createTestRunner`) live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.
+- **Do not use TypeScript syntax in JSDoc comments.** This project uses plain JSDoc, not TypeScript. The CI pipeline runs `jsdoc` and will **fail** on TS-only syntax. In particular: never use `prop?: type` (optional property) in inline record types — use `@typedef` with `@property {type} [prop]` instead. Never use `type?` for nullable — use `{type|null}` or `{?type}`. See the "JSDoc type syntax rules" section for the full reference.
