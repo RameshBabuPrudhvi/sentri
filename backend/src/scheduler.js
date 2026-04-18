@@ -253,6 +253,7 @@ async function fireScheduledRun(projectId) {
     type: "scheduled_run.start",
     projectId: project.id,
     projectName: project.name,
+    workspaceId: project.workspaceId || null,
     detail: `Scheduled test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
@@ -267,6 +268,7 @@ async function fireScheduledRun(projectId) {
           type: "scheduled_run.complete",
           projectId: project.id,
           projectName: project.name,
+          workspaceId: project.workspaceId || null,
           detail: `Scheduled run completed — ${run.passed || 0} passed, ${run.failed || 0} failed`,
         });
       },
@@ -274,6 +276,7 @@ async function fireScheduledRun(projectId) {
         type: "scheduled_run.fail",
         projectId: project.id,
         projectName: project.name,
+        workspaceId: project.workspaceId || null,
         detail: `Scheduled run failed: ${classifyError(err, "run").message}`,
       }),
       onComplete: async (finishedRun) => {
