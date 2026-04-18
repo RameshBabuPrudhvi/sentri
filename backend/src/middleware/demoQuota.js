@@ -150,7 +150,7 @@ export function demoQuota(operation) {
         demoLimit: true,
         operation,
         limit,
-        used: current,
+        used: Math.min(current, limit),
       });
     }
 
@@ -169,7 +169,11 @@ export async function getDemoQuotaStatus(userId) {
   if (!isDemoEnabled) return null;
   const status = {};
   for (const [op, limit] of Object.entries(DAILY_LIMITS)) {
-    const used = await getCount(userId, op);
+    const raw = await getCount(userId, op);
+    // Cap at limit — the increment-first enforcement pattern can push the
+    // counter above the limit for rejected requests (each rejected attempt
+    // still increments). The frontend should never see used > limit.
+    const used = Math.min(raw, limit);
     status[op] = { used, limit, remaining: Math.max(0, limit - used) };
   }
   return status;
