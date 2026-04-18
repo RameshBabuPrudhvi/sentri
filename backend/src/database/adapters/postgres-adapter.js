@@ -317,6 +317,8 @@ const _COL_MAP = buildColumnMap([
   "appliedAt", "durationMs",
   // information_schema queries
   "column_name", "data_type",
+  // notification_settings (FEA-001)
+  "teamsWebhookUrl", "emailRecipients", "webhookUrl",
   // workspaces (ACL-001)
   "ownerId",
   // workspace_members (ACL-001)
