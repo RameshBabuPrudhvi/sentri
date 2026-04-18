@@ -339,6 +339,7 @@ router.post("/projects/:id/tests", requireRole("qa_lead"), (req, res) => {
     modelUsed: null,
     linkedIssueKey: null,
     tags: [],
+    workspaceId: project.workspaceId || null,
   };
 
   testRepo.create(test);
@@ -442,6 +443,7 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
       } : null,
       requestedAt: new Date().toISOString(),
     },
+    workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
   logActivity({ ...actor(req),
@@ -494,6 +496,7 @@ router.post("/tests/:testId/run", requireRole("qa_lead"), demoQuota("run"), expe
     failed: 0,
     total: 1,
     testQueue: [{ id: test.id, name: test.name, steps: test.steps || [] }],
+    workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
   logActivity({ ...actor(req),

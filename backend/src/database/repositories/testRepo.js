@@ -58,7 +58,7 @@ const INSERT_COLS = [
   "isJourneyTest", "journeyType", "assertionEnhanced", "reviewStatus",
   "reviewedAt", "promptVersion", "modelUsed", "linkedIssueKey", "tags",
   "generatedFrom", "isApiTest", "scenario", "codeRegeneratedAt",
-  "aiFixAppliedAt", "codeVersion",
+  "aiFixAppliedAt", "codeVersion", "workspaceId",
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})

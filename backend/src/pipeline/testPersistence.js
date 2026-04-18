@@ -56,6 +56,8 @@ export function persistGeneratedTests(validatedTests, project, run, defaults = {
       tags: Array.isArray(t.tags) ? t.tags : [],
       // API test marker — "api_har_capture" when generated from captured network traffic
       generatedFrom: t._generatedFrom || null,
+      // ACL-001: Workspace scope — inherit from the project
+      workspaceId: project.workspaceId || null,
     };
     testRepo.create(test);
     run.tests.push(testId);

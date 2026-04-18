@@ -246,6 +246,7 @@ async function fireScheduledRun(projectId) {
     total: tests.length,
     parallelWorkers,
     testQueue: tests.map(t => ({ id: t.id, name: t.name, steps: t.steps || [] })),
+    workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
 

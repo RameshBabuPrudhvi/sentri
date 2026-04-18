@@ -71,7 +71,7 @@ const INSERT_COLS = [
   "pagesFound", "parallelWorkers", "tracePath", "videoPath", "videoSegments",
   "tests", "results", "testQueue", "generateInput", "promptAudit",
   "pipelineStats", "feedbackLoop", "currentStep",
-  "rateLimitError", "qualityAnalytics",
+  "rateLimitError", "qualityAnalytics", "workspaceId",
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

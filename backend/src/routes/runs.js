@@ -75,6 +75,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     logs: [],
     tests: [],
     pagesFound: 0,
+    workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
 
@@ -160,6 +161,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     parallelWorkers,
     device: device || null,
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
+    workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
 
