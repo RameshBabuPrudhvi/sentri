@@ -82,7 +82,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     const poll = async () => {
       if (doneRef.current) return;
       try {
-        const res = await fetch(`${API_BASE}/api/runs/${runId}`, { credentials: "include" });
+        const res = await fetch(`${API_BASE}/api/v1/runs/${runId}`, { credentials: "include" });
         if (res.ok) {
           const run = await res.json();
           onEventRef.current?.({ type: "snapshot", run });
@@ -106,7 +106,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     // EventSource sends cookies automatically for same-origin requests.
     // The HttpOnly auth cookie is included by the browser without JS intervention.
     // For cross-origin setups, withCredentials ensures cookies are sent.
-    const sseUrl = `${API_BASE}/api/runs/${runId}/events`;
+    const sseUrl = `${API_BASE}/api/v1/runs/${runId}/events`;
     const es = new EventSource(sseUrl, { withCredentials: true });
     esRef.current = es;
 

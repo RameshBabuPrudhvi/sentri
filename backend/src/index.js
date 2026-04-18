@@ -3,19 +3,22 @@
  * @description Server entry point. Initialises the database, mounts all route
  * modules on the Express app, and starts listening.
  *
- * ### Mounted routes
- * | Prefix             | Module              |
- * |--------------------|---------------------|
- * | `/api/projects`    | `routes/projects`   |
- * | `/api` (tests)     | `routes/tests`      |
- * | `/api` (runs)      | `routes/runs`       |
- * | `/api` (SSE)       | `routes/sse`        |
- * | `/api` (dashboard) | `routes/dashboard`  |
- * | `/api` (settings)  | `routes/settings`   |
- * | `/api` (system)    | `routes/system`     |
- * | `/api` (testFix)   | `routes/testFix`    |
- * | `/api/auth`        | `routes/auth`       |
- * | `/health`          | Health check        |
+ * ### Mounted routes (INF-005: all under `/api/v1/`)
+ * | Prefix                 | Module              |
+ * |------------------------|---------------------|
+ * | `/api/v1/projects`     | `routes/projects`   |
+ * | `/api/v1` (tests)      | `routes/tests`      |
+ * | `/api/v1` (runs)       | `routes/runs`       |
+ * | `/api/v1` (SSE)        | `routes/sse`        |
+ * | `/api/v1` (dashboard)  | `routes/dashboard`  |
+ * | `/api/v1` (settings)   | `routes/settings`   |
+ * | `/api/v1` (system)     | `routes/system`     |
+ * | `/api/v1` (testFix)    | `routes/testFix`    |
+ * | `/api/v1/auth`         | `routes/auth`       |
+ * | `/health`              | Health check        |
+ *
+ * Legacy `/api/*` paths are 301-redirected to `/api/v1/*` for backward
+ * compatibility during the transition window (INF-005).
  */
 
 import dotenv from "dotenv";
@@ -176,28 +179,39 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 // If you need it for integration tests, mount it in your test setup file
 // directly on a test-only Express instance — never in this production entry point.
 
-// ─── Mount route modules ──────────────────────────────────────────────────────
+// ─── Mount route modules (INF-005: /api/v1/ prefix) ──────────────────────────
 // Auth routes are public (login, register, OAuth callbacks)
-app.use("/api/auth", authRouter);
+app.use("/api/v1/auth", authRouter);
 
-// CI/CD trigger endpoint (/api/projects/:id/trigger) uses its own token-based
+// CI/CD trigger endpoint (/api/v1/projects/:id/trigger) uses its own token-based
 // auth — it must be mounted WITHOUT requireAuth so CI pipelines can call it
 // with a project token rather than a user JWT.
-app.use("/api", triggerRouter);
+app.use("/api/v1", triggerRouter);
 
 // All other API routes require a valid JWT token + workspace context (ACL-001).
 // workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
-app.use("/api/projects", requireAuth, workspaceScope, projectsRouter);
-app.use("/api", requireAuth, workspaceScope, testsRouter);
-app.use("/api", requireAuth, workspaceScope, runsRouter);
-app.use("/api", requireAuth, workspaceScope, sseRouter);
-app.use("/api", requireAuth, workspaceScope, dashboardRouter);
-app.use("/api", requireAuth, workspaceScope, settingsRouter);
-app.use("/api", requireAuth, workspaceScope, systemRouter);
-app.use("/api", requireAuth, workspaceScope, chatRouter);
-app.use("/api", requireAuth, workspaceScope, testFixRouter);
-app.use("/api", requireAuth, workspaceScope, recycleBinRouter);
-app.use("/api/workspaces", requireAuth, workspaceScope, workspacesRouter);
+app.use("/api/v1/projects", requireAuth, workspaceScope, projectsRouter);
+app.use("/api/v1", requireAuth, workspaceScope, testsRouter);
+app.use("/api/v1", requireAuth, workspaceScope, runsRouter);
+app.use("/api/v1", requireAuth, workspaceScope, sseRouter);
+app.use("/api/v1", requireAuth, workspaceScope, dashboardRouter);
+app.use("/api/v1", requireAuth, workspaceScope, settingsRouter);
+app.use("/api/v1", requireAuth, workspaceScope, systemRouter);
+app.use("/api/v1", requireAuth, workspaceScope, chatRouter);
+app.use("/api/v1", requireAuth, workspaceScope, testFixRouter);
+app.use("/api/v1", requireAuth, workspaceScope, recycleBinRouter);
+app.use("/api/v1/workspaces", requireAuth, workspaceScope, workspacesRouter);
+
+// ─── INF-005: Legacy /api/* → /api/v1/* 301 redirects ────────────────────────
+// Backward compatibility during the transition window. CI/CD integrations,
+// GitHub Actions, and external webhooks using the old /api/* paths will be
+// redirected to the versioned endpoint. Remove after all consumers migrate.
+app.use("/api", (req, res, next) => {
+  // Skip if already under /api/v1 (shouldn't happen — mounted after v1 routes)
+  if (req.path.startsWith("/v1")) return next();
+  const newUrl = `/api/v1${req.path}${req._parsedUrl?.search || ""}`;
+  res.redirect(301, newUrl);
+});
 
 // ─── Health probes (root-level, not under /api, no auth required) ────────────
 // GET /health  — liveness: is the process alive?
@@ -276,6 +290,7 @@ app.get("/health/ready", async (_req, res) => {
 // Express's default 404 handler and return a proper JSON error instead of HTML.
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/") || req.path.startsWith("/artifacts/")) return next();
+  if (req.path.startsWith("/health")) return next();
   serveIndexWithNonce(req, res);
 });
 

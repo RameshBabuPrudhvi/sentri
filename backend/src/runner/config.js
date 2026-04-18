@@ -15,7 +15,7 @@
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
-import { chromium } from "playwright";
+import { chromium, devices } from "playwright";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,3 +81,42 @@ export const SHOTS_DIR     = path.join(ARTIFACTS_DIR, "screenshots");
 [ARTIFACTS_DIR, VIDEOS_DIR, TRACES_DIR, SHOTS_DIR].forEach((d) => {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
+
+// ── DIF-003: Device emulation ─────────────────────────────────────────────────
+// Playwright ships 50+ device profiles. We expose a curated subset for the
+// run config dropdown plus accept any name from `playwright.devices`.
+
+/**
+ * Curated device profiles for the UI dropdown.
+ * Each entry maps a display label to its Playwright `devices` key.
+ * @type {Array<{label: string, value: string}>}
+ */
+export const DEVICE_PRESETS = [
+  { label: "Desktop (default)",       value: "" },
+  { label: "iPhone 14",              value: "iPhone 14" },
+  { label: "iPhone 14 Pro Max",      value: "iPhone 14 Pro Max" },
+  { label: "iPhone 12",              value: "iPhone 12" },
+  { label: "iPad (gen 7)",           value: "iPad (gen 7)" },
+  { label: "iPad Pro 11",            value: "iPad Pro 11" },
+  { label: "Galaxy S9+",             value: "Galaxy S9+" },
+  { label: "Pixel 7",               value: "Pixel 7" },
+  { label: "Pixel 5",               value: "Pixel 5" },
+  { label: "Galaxy Tab S4",         value: "Galaxy Tab S4" },
+  { label: "Desktop Chrome HiDPI",  value: "Desktop Chrome HiDPI" },
+  { label: "Desktop Firefox HiDPI", value: "Desktop Firefox HiDPI" },
+];
+
+/**
+ * Resolve a device name to a Playwright device descriptor.
+ * Returns `null` for empty/unknown names (caller should use default context).
+ *
+ * @param {string} deviceName - A key from `playwright.devices` (e.g. `"iPhone 14"`).
+ * @returns {Object|null} Playwright device descriptor with viewport, userAgent, etc.
+ */
+export function resolveDevice(deviceName) {
+  if (!deviceName) return null;
+  const descriptor = devices[deviceName];
+  if (!descriptor) return null;
+  return descriptor;
+}
+

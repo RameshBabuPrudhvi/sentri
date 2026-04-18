@@ -601,6 +601,78 @@ function normaliseMessages(promptOrMessages) {
   return { system: system || null, user, combined };
 }
 
+// ── FEA-003: Circuit breaker per provider ─────────────────────────────────────
+// When a provider hits 3 consecutive rate-limit failures, disable it for 5 min.
+// This prevents burning retry budget on a provider that is clearly overloaded.
+
+/** @type {Object<string, {failures: number, disabledUntil: number}>} */
+const circuitBreakers = {};
+
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Record a rate-limit failure for a provider. If the threshold is reached,
+ * the provider is disabled for CIRCUIT_BREAKER_COOLDOWN_MS.
+ *
+ * @param {string} provider
+ */
+function recordProviderFailure(provider) {
+  if (!circuitBreakers[provider]) circuitBreakers[provider] = { failures: 0, disabledUntil: 0 };
+  circuitBreakers[provider].failures += 1;
+  if (circuitBreakers[provider].failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreakers[provider].disabledUntil = Date.now() + CIRCUIT_BREAKER_COOLDOWN_MS;
+    console.warn(formatLogLine("warn", null, `[aiProvider] Circuit breaker tripped for ${provider} — disabled for ${CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s after ${CIRCUIT_BREAKER_THRESHOLD} consecutive rate-limit failures`));
+  }
+}
+
+/**
+ * Record a successful call — resets the failure counter.
+ *
+ * @param {string} provider
+ */
+function recordProviderSuccess(provider) {
+  if (circuitBreakers[provider]) {
+    circuitBreakers[provider].failures = 0;
+  }
+}
+
+/**
+ * Check whether a provider's circuit breaker is open (disabled).
+ *
+ * @param {string} provider
+ * @returns {boolean} `true` if the provider is temporarily disabled.
+ */
+function isCircuitBreakerOpen(provider) {
+  const cb = circuitBreakers[provider];
+  if (!cb) return false;
+  if (cb.disabledUntil > Date.now()) return true;
+  // Cooldown expired — reset
+  if (cb.disabledUntil > 0) {
+    cb.disabledUntil = 0;
+    cb.failures = 0;
+  }
+  return false;
+}
+
+/**
+ * FEA-003: Get the ordered list of fallback providers to try when the primary
+ * provider hits a rate limit. Returns all configured providers except the
+ * primary, in CLOUD_DETECT_ORDER, filtering out circuit-broken ones.
+ *
+ * @param {string} primaryProvider - The provider that failed.
+ * @returns {string[]} Ordered list of fallback provider IDs.
+ */
+function getFallbackProviders(primaryProvider) {
+  const allProviders = [...CLOUD_DETECT_ORDER, "local"];
+  return allProviders.filter(p =>
+    p !== primaryProvider &&
+    isProviderUsable(p) &&
+    !isCircuitBreakerOpen(p) &&
+    (p !== "local" || hasOllamaConfig()),
+  );
+}
+
 // ── Core API call ─────────────────────────────────────────────────────────────
 
 async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
@@ -701,12 +773,17 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
  * Generate text from an AI provider (single-shot, non-streaming).
  * Automatically detects the active provider and routes the request.
  *
+ * FEA-003: On rate-limit errors, automatically falls back to the next
+ * configured provider in CLOUD_DETECT_ORDER before giving up. Each
+ * provider has a circuit breaker that disables it for 5 minutes after
+ * 3 consecutive rate-limit failures.
+ *
  * @param {string|{system: string, user: string}} prompt - Plain string or structured `{ system, user }` messages.
  * @param {Object}      [options]
  * @param {number}      [options.maxTokens] - Max output tokens (default 16384).
  * @param {AbortSignal} [options.signal]    - Abort signal for cancellation.
  * @returns {Promise<string>} The generated text response.
- * @throws {Error} If no AI provider is configured.
+ * @throws {Error} If no AI provider is configured or all providers fail.
  */
 export async function generateText(prompt, options) {
   const provider = detectProvider();
@@ -718,7 +795,44 @@ export async function generateText(prompt, options) {
       "         Optionally: OLLAMA_MODEL=mistral:7b  OLLAMA_BASE_URL=http://localhost:11434"
     );
   }
-  return callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+
+  // ── FEA-003: Try primary provider, then fall back on rate-limit errors ──
+  try {
+    const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+    recordProviderSuccess(provider);
+    return result;
+  } catch (err) {
+    if (!isRateLimitError(err)) throw err;
+
+    // Primary provider hit rate limit — record failure and try fallbacks
+    recordProviderFailure(provider);
+    const fallbacks = getFallbackProviders(provider);
+
+    if (fallbacks.length === 0) {
+      // No fallbacks available — rethrow the original error
+      throw err;
+    }
+
+    for (const fallbackProvider of fallbacks) {
+      console.warn(formatLogLine("warn", null, `[aiProvider] Rate limit on ${provider} — falling back to ${fallbackProvider}`));
+      try {
+        const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
+        recordProviderSuccess(fallbackProvider);
+        return result;
+      } catch (fallbackErr) {
+        if (isRateLimitError(fallbackErr)) {
+          recordProviderFailure(fallbackProvider);
+          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} also rate-limited — trying next`));
+          continue;
+        }
+        // Non-rate-limit error from fallback — throw it
+        throw fallbackErr;
+      }
+    }
+
+    // All fallbacks exhausted — throw the original error
+    throw err;
+  }
 }
 
 /**
