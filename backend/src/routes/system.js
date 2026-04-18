@@ -130,16 +130,17 @@ router.get("/system", async (req, res) => {
 
   const projects = projectRepo.getAll(req.workspaceId);
   const projectIds = projects.map((p) => p.id);
-  const tests = testRepo.getAllByProjectIds(projectIds);
-  const testIds = tests.map((t) => t.id);
+  // Use SQL-level counts instead of loading all test rows into memory.
+  const testCount = testRepo.countByProjectIds(projectIds);
+  const approvedTests = testRepo.countApprovedByProjectIds(projectIds);
+  const draftTests = testRepo.countDraftByProjectIds(projectIds);
+  // Healing counts need test IDs — use the lightweight ID-only query.
+  const testIds = testRepo.getAllIdsByProjectIdsIncludeDeleted(projectIds);
 
   const projectCount = projects.length;
-  const testCount = tests.length;
   const runCount = runRepo.countByProjectIds(projectIds);
   const activityCount = activityRepo.countFiltered({ workspaceId: req.workspaceId });
   const healingEntries = healingRepo.countByTestIds(testIds);
-  const approvedTests = tests.filter((t) => t.reviewStatus === "approved").length;
-  const draftTests = tests.filter((t) => (t.reviewStatus || "draft") === "draft").length;
 
   res.json({
     projects:     projectCount,
