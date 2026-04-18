@@ -143,7 +143,7 @@ export function demoQuota(operation) {
     if (!userId) return next(); // unauthenticated — let auth middleware handle it
 
     const limit = DAILY_LIMITS[operation];
-    if (!limit) return next(); // unknown operation — no quota
+    if (limit == null) return next(); // unknown operation — no quota
 
     // Atomic increment-then-check: INCR first, then reject if over limit.
     // This prevents the TOCTOU race where two concurrent requests both read
