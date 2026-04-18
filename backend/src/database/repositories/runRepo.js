@@ -165,14 +165,39 @@ export function getAllLeanPaged(page, pageSize) {
  */
 export function getAllWithResults() {
   const db = getDatabase();
-  return db.prepare(`SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs WHERE deletedAt IS NULL`).all().map(row => {
-    if (row.results) {
-      try { row.results = JSON.parse(row.results); } catch { row.results = []; }
-    } else {
-      row.results = [];
-    }
-    return parseLeanJson(row);
-  });
+  return db.prepare(`SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs WHERE deletedAt IS NULL`).all().map(parseResultsAndLean);
+}
+
+/**
+ * Get non-deleted runs with results + feedbackLoop for a set of project IDs.
+ * Workspace-scoped alternative to {@link getAllWithResults} — queries only the
+ * rows belonging to the given projects instead of loading the entire table.
+ *
+ * @param {string[]} projectIds
+ * @returns {Object[]}
+ */
+export function getWithResultsByProjectIds(projectIds) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  return db.prepare(
+    `SELECT ${LEAN_COLS}, results, feedbackLoop FROM runs WHERE projectId IN (${placeholders}) AND deletedAt IS NULL`
+  ).all(...projectIds).map(parseResultsAndLean);
+}
+
+/**
+ * Parse results JSON + lean JSON columns on a row.
+ * Shared by {@link getAllWithResults} and {@link getWithResultsByProjectIds}.
+ * @param {Object} row
+ * @returns {Object}
+ */
+function parseResultsAndLean(row) {
+  if (row.results) {
+    try { row.results = JSON.parse(row.results); } catch { row.results = []; }
+  } else {
+    row.results = [];
+  }
+  return parseLeanJson(row);
 }
 
 /**
