@@ -8,6 +8,7 @@
  * ### Exports
  * - {@link app} — The Express application instance.
  * - {@link ARTIFACTS_DIR} — Absolute path to the Playwright artifacts directory.
+ * - {@link serveIndexWithNonce} — SPA fallback handler that injects the CSP nonce (SEC-002).
  *
  * @example
  * import { app, ARTIFACTS_DIR } from "./middleware/appSetup.js";
@@ -19,6 +20,7 @@ import cors from "cors";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import crypto from "crypto";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -48,14 +50,20 @@ app.set("trust proxy", 1);
 // ─── Global middleware ────────────────────────────────────────────────────────
 
 // Security headers: X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.
-// CSP is configured with a baseline policy that allows the SPA to function while
-// blocking inline script injection (XSS mitigation). Tighten further in production
-// by replacing 'unsafe-inline' with nonce-based or hash-based script allowlisting.
+// SEC-002: Generate a per-request nonce and allow scripts via `'nonce-<value>'`
+// instead of `'unsafe-inline'`. This keeps inline bootstrap scripts functional
+// while preserving CSP's XSS protections.
+app.use((req, res, next) => {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  res.locals.cspNonce = nonce;
+  next();
+});
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'"],   // needed by Vite in dev; replace with nonces in prod
+      scriptSrc:      ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
       styleSrc:       ["'self'", "'unsafe-inline'"],   // inline styles used throughout the SPA
       imgSrc:         ["'self'", "data:", "blob:"],    // data: for canvas favicons, blob: for screenshots
       connectSrc:     ["'self'"],                      // API + SSE calls — same origin only
@@ -462,3 +470,54 @@ app.use("/artifacts", (req, res, next) => {
     res.setHeader("Cache-Control", "private, no-store");
   },
 }));
+
+// ─── SEC-002: Serve index.html with nonce placeholder replaced ───────────────
+// In production the Vite-built SPA is served as static files. The build output
+// contains `nonce="__CSP_NONCE__"` placeholders on all `<script>` tags (injected
+// by the `cspNoncePlugin` in `vite.config.js`). This middleware replaces the
+// placeholder with the real per-request nonce so the scripts pass CSP validation.
+//
+// The replacement is done on-the-fly for `index.html` only — it is a small file
+// and the string replace is negligible. All other static assets are served as-is.
+
+/** @type {string|null} Cached index.html template with `__CSP_NONCE__` placeholders. */
+let _indexHtmlTemplate = null;
+
+/**
+ * Read and cache the built `index.html` from the frontend dist directory.
+ * Returns `null` when the file does not exist (e.g. dev mode where Vite serves).
+ *
+ * @returns {string|null}
+ */
+function getIndexHtmlTemplate() {
+  if (_indexHtmlTemplate !== null) return _indexHtmlTemplate;
+  const distIndex = path.join(__dirname, "..", "..", "..", "frontend", "dist", "index.html");
+  try {
+    _indexHtmlTemplate = fs.readFileSync(distIndex, "utf-8");
+  } catch {
+    _indexHtmlTemplate = "";
+  }
+  return _indexHtmlTemplate || null;
+}
+
+/**
+ * Middleware that serves `index.html` with `__CSP_NONCE__` replaced by the
+ * per-request nonce from `res.locals.cspNonce`.
+ *
+ * Must be mounted **after** all API routes and static file middleware so it
+ * only catches SPA navigation requests (HTML pages, not API calls or assets).
+ *
+ * @param {Object} req
+ * @param {Object} res
+ */
+export function serveIndexWithNonce(req, res) {
+  const template = getIndexHtmlTemplate();
+  if (!template) {
+    return res.status(404).send("Frontend build not found.");
+  }
+  const nonce = res.locals.cspNonce || "";
+  const html = template.replaceAll("__CSP_NONCE__", nonce);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(html);
+}

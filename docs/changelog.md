@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DB**: Migration 004 — `notification_settings` table with per-project Teams webhook URL, email recipients, generic webhook URL, and enabled flag (FEA-001) (#92)
 - **Backend**: Failure notifications fire automatically on run completion (with failures) for all run types: manual, scheduled, CI/CD triggered, and BullMQ worker-processed (FEA-001) (#92)
 - **Frontend**: `api.getNotifications()`, `api.upsertNotifications()`, `api.deleteNotifications()` — notification settings API methods (FEA-001) (#92)
+- **API**: `GET /api/auth/export` — export all user-owned account data as JSON (workspaces, projects, tests, runs, activities, schedules, notification settings) for GDPR/CCPA data portability; requires password confirmation via `X-Account-Password` header (SEC-003) (#93)
+- **API**: `DELETE /api/auth/account` — hard-delete user account and all owned workspace data in a single transaction for GDPR right to erasure; requires password confirmation in request body (SEC-003) (#93)
+- **Backend**: `accountRepo.js` — repository module encapsulating account export and cascade deletion queries (SEC-003) (#93)
+- **Frontend**: Account tab in Settings with password-confirmed "Export account data" (JSON download) and "Delete account" (two-click confirm with 5s auto-disarm) actions (SEC-003) (#93)
+- **Frontend**: `api.exportAccountData(password)` and `api.deleteAccount(password)` client methods (SEC-003) (#93)
+
+### Security
+- **CSP**: Replaced `'unsafe-inline'` in `script-src` with per-request cryptographic nonce — generates `crypto.randomBytes(16)` nonce per request, passes it to Helmet CSP directive, and injects `nonce="__CSP_NONCE__"` placeholder on all `<script>` tags via Vite plugin; `serveIndexWithNonce()` replaces the placeholder at serve-time (SEC-002) (#93)
+- **Account**: Account export strips `passwordHash` from the user profile before including it in the JSON payload — prevents offline brute-force attacks if the export file is shared (SEC-003) (#93)
+- **Account**: Password confirmation failures on export/delete return 403 (not 401) to prevent the frontend from misinterpreting them as session expiry and triggering an unexpected logout redirect (SEC-003) (#93)
 
 ## [1.5.0] — 2026-04-17
 

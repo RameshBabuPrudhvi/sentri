@@ -100,7 +100,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### SEC-002 — Nonce-based Content Security Policy 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (GAP-03)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-03)
 
 **Problem:** `appSetup.js:55` uses `'unsafe-inline'` for both `scriptSrc` and `styleSrc`. An inline comment acknowledges "replace with nonces in prod." Without nonces, any XSS injection can execute inline scripts — CSP provides no real protection.
 
@@ -117,7 +117,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### SEC-003 — GDPR / CCPA account data export and deletion 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (GAP-04)
+**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-04)
 
 **Problem:** There is no way for a user to export their data or delete their account. GDPR Article 17 (right to erasure) and Article 20 (data portability) are legal requirements for EU deployments. CCPA creates equivalent expectations for US users.
 

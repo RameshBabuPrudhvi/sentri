@@ -525,6 +525,7 @@ const SETTINGS_TABS = [
   { key: "providers",   label: "AI Providers",  icon: <Zap size={14} /> },
   { key: "members",     label: "Members",       icon: <Users size={14} /> },
   { key: "execution",   label: "Execution",     icon: <Cpu size={14} /> },
+  { key: "account",     label: "Account",       icon: <Shield size={14} /> },
   { key: "data",        label: "Data",          icon: <Database size={14} /> },
   { key: "recycle-bin", label: "Recycle Bin",   icon: <Trash2 size={14} /> },
   { key: "system",      label: "System",        icon: <Server size={14} /> },
@@ -928,6 +929,94 @@ function RecycleBinTab() {
   );
 }
 
+function AccountTab() {
+  const { logout } = useAuth();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function handleExport() {
+    if (!password.trim()) {
+      setStatus({ type: "err", text: "Enter your password to export account data." });
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const data = await api.exportAccountData(password.trim());
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `sentri-account-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+      setStatus({ type: "ok", text: "Account export downloaded." });
+    } catch (err) {
+      setStatus({ type: "err", text: err.message || "Export failed." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!password.trim()) {
+      setStatus({ type: "err", text: "Enter your password to delete your account." });
+      return;
+    }
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 5000);
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api.deleteAccount(password.trim());
+      await logout();
+    } catch (err) {
+      setStatus({ type: "err", text: err.message || "Account deletion failed." });
+    } finally {
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  }
+
+  return (
+    <div className="flex-col gap-lg">
+      <SectionTitle icon={<Shield size={16} color="var(--red)" />} title="Account & Privacy" sub="Export your data or permanently delete your account." />
+      <div className="card card-padded flex-col gap-md">
+        <label className="text-sm font-semi">
+          Confirm password
+          <input
+            className="input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Enter your current password"
+            style={{ marginTop: 8 }}
+          />
+        </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={handleExport}>
+            {busy ? <RefreshCw size={13} className="spin" /> : <ExternalLink size={13} />} Export account data
+          </button>
+          <button className={`btn btn-sm ${confirmDelete ? "btn-danger" : "btn-ghost"}`} disabled={busy} onClick={handleDelete}>
+            {busy ? <RefreshCw size={13} className="spin" /> : <Trash2 size={13} />}
+            {confirmDelete ? "Confirm delete account" : "Delete account"}
+          </button>
+        </div>
+        {status && (
+          <div className={status.type === "ok" ? "st-status-ok" : "st-status-err"}>
+            {status.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {status.text}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   usePageTitle("Settings");
   const navigate = useNavigate();
@@ -1084,6 +1173,9 @@ export default function Settings() {
         These values are compiled into the self-healing runtime. To customise, edit <span className="text-mono" style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>backend/src/selfHealing.js</span>
       </div>
       </>}
+
+      {/* ── Tab: Account ── */}
+      {tab === "account" && <AccountTab />}
 
       {/* ── Tab: Data ── */}
       {tab === "data" && <>

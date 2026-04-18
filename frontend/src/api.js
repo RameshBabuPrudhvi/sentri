@@ -370,6 +370,39 @@ export const api = {
    */
   resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
 
+  // ── Account data portability / deletion (SEC-003) ───────────────────────────
+  /**
+   * Export account data as JSON. Password confirmation is required.
+   * @param {string} password
+   * @returns {Promise<Object>}
+   */
+  exportAccountData: async (password) => {
+    const res = await fetch(`${BASE}/auth/export`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Account-Password": password,
+      },
+      credentials: "include",
+    });
+    if (res.status === 401) {
+      handleUnauthorized();
+      throw new Error("Session expired. Please sign in again.");
+    }
+    // 403 = wrong password confirmation — do NOT trigger logout redirect.
+    if (!res.ok) {
+      const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText || "Request failed");
+    }
+    return parseJsonResponse(res);
+  },
+  /**
+   * Delete user account and owned data. Password confirmation is required.
+   * @param {string} password
+   * @returns {Promise<{ok: boolean, message: string}>}
+   */
+  deleteAccount: (password) => req("DELETE", "/auth/account", { password }),
+
   // ── Workspace & Members (ACL-001, ACL-002) ───────────────────────────────────
   /** @returns {Promise<Object>} Current workspace details. */
   getWorkspace:      ()              => req("GET",    "/workspaces/current"),

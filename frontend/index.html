@@ -10,7 +10,7 @@
   </head>
   <body>
     <!-- GitHub Pages SPA restore — pairs with public/404.html redirect -->
-    <script>
+    <script nonce="__CSP_NONCE__">
       (function(l) {
         if (l.search[1] === '/') {
           var decoded = l.search.slice(1).split('&').map(function(s) {
@@ -23,13 +23,13 @@
       }(window.location));
     </script>
     <!-- Theme: apply saved preference before first paint to prevent FOWT -->
-    <script>
+    <script nonce="__CSP_NONCE__">
       (function(){
         var t=localStorage.getItem('app_theme');
         if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t;}
       })();
     </script>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script nonce="__CSP_NONCE__" type="module" src="/src/main.jsx"></script>
   </body>
 </html>
