@@ -153,6 +153,12 @@ test("Allow: / with Disallow: / allows everything (Allow is more specific or equ
   assert.equal(isAllowed("https://example.com/other", rules), false);
 });
 
+test("Allow takes precedence over Disallow at equal specificity (RFC 9309)", () => {
+  const rules = parseRobotsTxt("User-agent: *\nDisallow: /admin/\nAllow: /admin/");
+  // Both rules have the same pattern length — Allow should win per RFC 9309
+  assert.equal(isAllowed("https://example.com/admin/page", rules), true);
+});
+
 // ── sitemap.xml parsing ──────────────────────────────────────────────────────
 
 console.log("\n🗺️  sitemap.xml parsing");

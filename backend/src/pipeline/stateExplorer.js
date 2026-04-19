@@ -406,8 +406,14 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
       const storedSnapshot = ctx.snapshotsByFp.get(currentFp);
       if (!storedSnapshot || storedSnapshot.url !== currentUrl) {
         try {
-          const { fp: freshFp, isNovel } = await captureState(page, ctx);
+          const { snapshot: freshSnap, fp: freshFp, isNovel } = await captureState(page, ctx);
           activeFp = freshFp;
+          // When the per-URL cap is hit, captureState returns isNovel:false
+          // without storing the snapshot in snapshotsByFp. Store it so
+          // discoverActions and downstream lookups don't receive undefined.
+          if (!ctx.snapshotsByFp.has(freshFp)) {
+            ctx.snapshotsByFp.set(freshFp, freshSnap);
+          }
           if (isNovel && !statesEqual(freshFp, currentFp)) {
             ctx.edges.push({ fromFp: currentFp, action: { type: "click", element: { tag: "a", text: currentUrl }, selectors: [] }, toFp: freshFp });
             syncRunPages(run, ctx.snapshots);

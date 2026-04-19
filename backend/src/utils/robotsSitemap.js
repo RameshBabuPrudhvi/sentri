@@ -89,8 +89,9 @@ export function parseRobotsTxt(text) {
   const wildcard = groups.get("*");
   const rules = sentri || wildcard || [];
 
-  // Sort by pattern length descending — longest match wins
-  rules.sort((a, b) => b.pattern.length - a.pattern.length);
+  // Sort by pattern length descending — longest match wins.
+  // At equal length, Allow takes precedence over Disallow per RFC 9309.
+  rules.sort((a, b) => b.pattern.length - a.pattern.length || (b.allow ? 1 : 0) - (a.allow ? 1 : 0));
 
   return { rules, sitemaps };
 }
