@@ -328,6 +328,24 @@ export function buildUserJourneys(classifiedPages, snapshotsByUrl = {}) {
     const classifiedByUrl = {};
     for (const cp of classifiedPages) classifiedByUrl[cp.url] = cp;
 
+    // outboundLinks in pageSnapshot.js are normalised with ALL query params
+    // stripped (u.search = ""), but classifiedByUrl keys may include significant
+    // query params (e.g. /products?category=electronics). Build a secondary
+    // lookup that maps param-stripped URLs to classified pages so the adjacency
+    // map can resolve outbound links correctly (#52 consistency fix).
+    const classifiedByStrippedUrl = {};
+    for (const cp of classifiedPages) {
+      try {
+        const u = new URL(cp.url);
+        u.search = "";
+        u.hash = "";
+        const stripped = u.toString();
+        // First match wins — avoids overwriting when multiple param variants
+        // map to the same stripped URL (the adjacency just needs any match).
+        if (!classifiedByStrippedUrl[stripped]) classifiedByStrippedUrl[stripped] = cp;
+      } catch { classifiedByStrippedUrl[cp.url] = cp; }
+    }
+
     // Build adjacency: page URL → set of classified page URLs it links to
     const adjacency = {};
     for (const cp of classifiedPages) {
@@ -335,8 +353,10 @@ export function buildUserJourneys(classifiedPages, snapshotsByUrl = {}) {
       if (!snap?.outboundLinks) continue;
       adjacency[cp.url] = new Set();
       for (const link of snap.outboundLinks) {
-        if (classifiedByUrl[link] && link !== cp.url) {
-          adjacency[cp.url].add(link);
+        // outboundLinks are param-stripped, so look up in the stripped index
+        const target = classifiedByStrippedUrl[link];
+        if (target && target.url !== cp.url) {
+          adjacency[cp.url].add(target.url);
         }
       }
     }
@@ -394,11 +414,17 @@ export function buildUserJourneys(classifiedPages, snapshotsByUrl = {}) {
     const snap = snapshotsByUrl[formPage.url];
     if (!snap?.outboundLinks) continue;
     for (const link of snap.outboundLinks) {
-      const target = classifiedPages.find(p =>
-        p.url === link &&
-        !usedUrls.has(p.url) &&
-        (p.dominantIntent === "CONTENT" || p.dominantIntent === "NAVIGATION")
-      );
+      // outboundLinks are param-stripped; use stripped lookup (#52 consistency fix)
+      const target = classifiedPages.find(p => {
+        try {
+          const u = new URL(p.url);
+          u.search = "";
+          u.hash = "";
+          return u.toString() === link &&
+            !usedUrls.has(p.url) &&
+            (p.dominantIntent === "CONTENT" || p.dominantIntent === "NAVIGATION");
+        } catch { return false; }
+      });
       if (target) {
         journeys.push({
           name: "Form Submission Flow",
