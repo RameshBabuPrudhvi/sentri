@@ -94,6 +94,20 @@ Disallow:`;
   assert.equal(rules.length, 0);
 });
 
+test("strips inline comments from directive values", () => {
+  const txt = `User-agent: *
+Disallow: /admin/ # admin area
+Allow: /admin/public/ # public section`;
+  const { rules } = parseRobotsTxt(txt);
+  assert.equal(rules.length, 2);
+  assert.ok(rules.some(r => r.pattern === "/admin/" && !r.allow), "Disallow pattern should be /admin/ without comment");
+  assert.ok(rules.some(r => r.pattern === "/admin/public/" && r.allow), "Allow pattern should be /admin/public/ without comment");
+  // Verify isAllowed works correctly with stripped comments
+  const robotsRules = { rules, sitemaps: [] };
+  assert.equal(isAllowed("https://example.com/admin/settings", robotsRules), false);
+  assert.equal(isAllowed("https://example.com/admin/public/page", robotsRules), true);
+});
+
 // ── isAllowed ────────────────────────────────────────────────────────────────
 
 console.log("\n🚫 isAllowed checks");
@@ -172,6 +186,38 @@ test("handles empty/malformed XML gracefully", () => {
   const { urls, childSitemaps } = parseSitemapXml("");
   assert.equal(urls.length, 0);
   assert.equal(childSitemaps.length, 0);
+});
+
+test("extracts URLs when <loc> is not the first child element", () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <loc>https://example.com/page1</loc>
+  </url>
+  <url>
+    <priority>0.8</priority>
+    <loc>https://example.com/page2</loc>
+    <lastmod>2024-02-01</lastmod>
+  </url>
+</urlset>`;
+  const { urls } = parseSitemapXml(xml);
+  assert.equal(urls.length, 2);
+  assert.ok(urls.includes("https://example.com/page1"));
+  assert.ok(urls.includes("https://example.com/page2"));
+});
+
+test("extracts child sitemaps when <loc> is not the first child", () => {
+  const xml = `<sitemapindex>
+  <sitemap>
+    <lastmod>2024-01-01</lastmod>
+    <loc>https://example.com/sitemap-pages.xml</loc>
+  </sitemap>
+</sitemapindex>`;
+  const { childSitemaps } = parseSitemapXml(xml);
+  assert.equal(childSitemaps.length, 1);
+  assert.ok(childSitemaps.includes("https://example.com/sitemap-pages.xml"));
 });
 
 test("handles mixed sitemap with whitespace in loc", () => {

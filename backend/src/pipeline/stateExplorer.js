@@ -397,9 +397,30 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
       }
       if (!navOk) continue;
 
-      const actions = discoverActions(ctx.snapshotsByFp.get(currentFp));
+      // Sitemap-seeded queue items carry the homepage fingerprint as a
+      // placeholder because the target page hasn't been visited yet. Detect
+      // this by comparing the snapshot URL stored for currentFp with the
+      // actual currentUrl. When they differ, capture a fresh state so
+      // discoverActions receives the correct page's DOM (#53 bug fix).
+      let activeFp = currentFp;
+      const storedSnapshot = ctx.snapshotsByFp.get(currentFp);
+      if (!storedSnapshot || storedSnapshot.url !== currentUrl) {
+        try {
+          const { fp: freshFp, isNovel } = await captureState(page, ctx);
+          activeFp = freshFp;
+          if (isNovel && !statesEqual(freshFp, currentFp)) {
+            ctx.edges.push({ fromFp: currentFp, action: { type: "click", element: { tag: "a", text: currentUrl }, selectors: [] }, toFp: freshFp });
+            syncRunPages(run, ctx.snapshots);
+            log(run, `   📸 Captured fresh state for ${currentUrl} [${freshFp.slice(0, 8)}]`);
+          }
+        } catch (err) {
+          logWarn(run, `   Snapshot failed for sitemap URL ${currentUrl}: ${err.message}`);
+        }
+      }
+
+      const actions = discoverActions(ctx.snapshotsByFp.get(activeFp));
       const { formGroups, standalone } = groupActionsByForm(actions);
-      log(run, `🎯 [${currentFp.slice(0, 8)}] depth=${depth}: ${actions.length} actions (${formGroups.size} forms)`);
+      log(run, `🎯 [${activeFp.slice(0, 8)}] depth=${depth}: ${actions.length} actions (${formGroups.size} forms)`);
 
       for (const [formId, formActions] of formGroups) {
         throwIfAborted(signal);
@@ -412,7 +433,7 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         // standard form filler. This lets Sentri complete flows that would
         // otherwise be blocked by an email verification step.
         let executedActions = [];
-        const currentSnapshot = ctx.snapshotsByFp.get(currentFp);
+        const currentSnapshot = ctx.snapshotsByFp.get(activeFp);
         if (detectSignupIntent(currentSnapshot, formActions)) {
           log(run, `   📧 Signup form detected — using disposable email flow`);
           let mailbox = null;
@@ -475,9 +496,9 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
           }
           try {
             const { fp: resultFp, isNovel } = await captureState(page, ctx);
-            if (!statesEqual(resultFp, currentFp)) {
+            if (!statesEqual(resultFp, activeFp)) {
               // Record an edge only for actions that were actually executed
-              for (const act of executedActions) ctx.edges.push({ fromFp: currentFp, action: act, toFp: resultFp });
+              for (const act of executedActions) ctx.edges.push({ fromFp: activeFp, action: act, toFp: resultFp });
               if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
             }
           } catch (err) { logWarn(run, `   Snapshot failed after form: ${err.message}`); }
@@ -502,15 +523,15 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
         explored++;
         try {
           const { fp: resultFp, isNovel } = await captureState(page, ctx);
-          if (!statesEqual(resultFp, currentFp)) {
-            ctx.edges.push({ fromFp: currentFp, action, toFp: resultFp });
+          if (!statesEqual(resultFp, activeFp)) {
+            ctx.edges.push({ fromFp: activeFp, action, toFp: resultFp });
             if (isNovel) { enqueueIfNew(ctx, resultFp, ctx.snapshotsByFp.get(resultFp).url, depth + 1); syncRunPages(run, ctx.snapshots); log(run, `   ✨ New state: ${ctx.snapshotsByFp.get(resultFp).url} [${resultFp.slice(0, 8)}]`); }
           }
         } catch (err) { logWarn(run, `   Snapshot failed after action: ${err.message}`); }
         await restorePage(page, beforeUrl, currentUrl, limits.actionTimeout);
       }
 
-      await crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal);
+      await crawlLinks(page, activeFp, currentUrl, depth, project, ctx, run, signal);
     }
     await page.close().catch(() => {});
 

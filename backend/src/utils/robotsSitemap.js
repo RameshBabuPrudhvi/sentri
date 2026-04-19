@@ -56,7 +56,7 @@ export function parseRobotsTxt(text) {
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
     const directive = line.slice(0, colonIdx).trim().toLowerCase();
-    const value = line.slice(colonIdx + 1).trim();
+    const value = line.slice(colonIdx + 1).split("#")[0].trim();
 
     if (directive === "sitemap") {
       if (value) sitemaps.push(value);
@@ -166,7 +166,10 @@ export function parseSitemapXml(xml) {
   const childSitemaps = [];
 
   // Extract <loc> values from <url> entries (leaf sitemap)
-  const urlLocRe = /<url>\s*<loc>\s*([^<]+?)\s*<\/loc>/gi;
+  // Use [\s\S]*? to allow intervening child elements (e.g. <lastmod>)
+  // between <url> and <loc>, since the XML sitemap spec does not mandate
+  // element order.
+  const urlLocRe = /<url>[\s\S]*?<loc>\s*([^<]+?)\s*<\/loc>/gi;
   let match;
   while ((match = urlLocRe.exec(xml)) !== null) {
     const loc = match[1].trim();
@@ -174,7 +177,7 @@ export function parseSitemapXml(xml) {
   }
 
   // Extract <loc> values from <sitemap> entries (sitemap index)
-  const sitemapLocRe = /<sitemap>\s*<loc>\s*([^<]+?)\s*<\/loc>/gi;
+  const sitemapLocRe = /<sitemap>[\s\S]*?<loc>\s*([^<]+?)\s*<\/loc>/gi;
   while ((match = sitemapLocRe.exec(xml)) !== null) {
     const loc = match[1].trim();
     if (loc.startsWith("http")) childSitemaps.push(loc);
@@ -198,7 +201,8 @@ export function parseSitemapXml(xml) {
  * @returns {Promise<string[]>} — deduplicated list of page URLs
  */
 export async function loadSitemapUrls(baseUrl, declaredSitemaps = [], { timeoutMs = 5000, maxUrls = 200 } = {}) {
-  const origin = new URL(baseUrl).origin;
+  let origin;
+  try { origin = new URL(baseUrl).origin; } catch { return []; }
   const sitemapUrls = declaredSitemaps.length > 0
     ? [...declaredSitemaps]
     : [`${origin}/sitemap.xml`];

@@ -118,13 +118,14 @@ export async function crawlPages(project, run, { signal } = {}) {
       if (!item) break;
       const { url, depth } = item;
 
-      crawlQueue.markVisited(url);
-
       // robots.txt compliance (#53) — skip disallowed paths
+      // Check BEFORE markVisited so disallowed URLs don't consume crawl budget.
       if (!isAllowed(url, robotsRules)) {
         log(run, `🚫 Skipping (robots.txt): ${url}`);
         continue;
       }
+
+      crawlQueue.markVisited(url);
 
       const pathPattern = extractPathPattern(url);
       if (pathPatternsSeen.has(pathPattern) && depth > 0) {
