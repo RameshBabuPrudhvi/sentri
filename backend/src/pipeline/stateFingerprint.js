@@ -21,7 +21,7 @@
  * - {@link statesEqual} — `(fp1, fp2) → boolean`
  */
 
-import { fingerprintStructure } from "./smartCrawl.js";
+import { fingerprintStructure, SIGNIFICANT_PARAMS, NOISE_PARAMS } from "./smartCrawl.js";
 
 /**
  * Simple deterministic hash — reuses the same algorithm as
@@ -39,30 +39,6 @@ function simpleHash(str) {
   }
   return Math.abs(hash).toString(36);
 }
-
-// ── Query parameter handling (#52 defect #1) ─────────────────────────────────
-
-/**
- * Query parameter names that carry state-significant meaning.
- * These are included in the route fingerprint; all others are stripped to
- * avoid fingerprint explosion from tracking tokens, cache busters, etc.
- */
-const SIGNIFICANT_PARAMS = new Set([
-  "category", "sort", "order", "view", "tab", "page", "filter",
-  "type", "status", "q", "query", "search", "mode", "step",
-  "section", "panel", "lang", "locale",
-]);
-
-/**
- * Query parameter patterns that are always noise (session tokens, analytics,
- * cache busters). These are stripped even if they happen to match a
- * significant name in a future extension.
- */
-const NOISE_PARAMS = [
-  /^utm_/i, /^fbclid$/i, /^gclid$/i, /^_ga$/i, /^mc_/i,
-  /^ref$/i, /^source$/i, /token/i, /session/i, /nonce/i,
-  /timestamp/i, /^_$/i, /^cb$/i, /^t$/i,
-];
 
 /**
  * Extract the route portion of a URL with significant query params.

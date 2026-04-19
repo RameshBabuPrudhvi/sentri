@@ -157,9 +157,9 @@ export function extractPathPattern(url) {
 
 /**
  * Query parameter names that carry state-significant meaning.
- * Shared with stateFingerprint.js — keep in sync.
+ * Exported so stateFingerprint.js can reuse the same set (DRY).
  */
-const SIGNIFICANT_PARAMS = new Set([
+export const SIGNIFICANT_PARAMS = new Set([
   "category", "sort", "order", "view", "tab", "page", "filter",
   "type", "status", "q", "query", "search", "mode", "step",
   "section", "panel", "lang", "locale",
@@ -167,9 +167,9 @@ const SIGNIFICANT_PARAMS = new Set([
 
 /**
  * Query parameter patterns that are always noise.
- * Shared with stateFingerprint.js — keep in sync.
+ * Exported so stateFingerprint.js can reuse the same list (DRY).
  */
-const NOISE_PARAMS = [
+export const NOISE_PARAMS = [
   /^utm_/i, /^fbclid$/i, /^gclid$/i, /^_ga$/i, /^mc_/i,
   /^ref$/i, /^source$/i, /token/i, /session/i, /nonce/i,
   /timestamp/i, /^_$/i, /^cb$/i, /^t$/i,
