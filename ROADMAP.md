@@ -1,6 +1,6 @@
 # Sentri — Engineering Roadmap
 
-> **Last revised:** April 2026 · `sentri_v1_4` branch `feat/platform-automation`
+> **Last revised:** April 2026 · `sentri_v1_4` 
 > **Stack:** Node.js 20 (ESM) · Express 4 · SQLite → PostgreSQL · Playwright · React 18 · Vite 6
 >
 > This document is the single source of truth for all planned and in-progress engineering work.
