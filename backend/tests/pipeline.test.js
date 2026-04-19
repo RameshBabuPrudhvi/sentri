@@ -11,7 +11,7 @@ import { classifyElement, classifyPage, buildUserJourneys } from "../src/pipelin
 import { hashTest, scoreTest, deduplicateTests, deduplicateAcrossRuns } from "../src/pipeline/deduplicator.js";
 import { hasStrongAssertions, hasWeakAssertions, hasNoAssertions, enhanceTest } from "../src/pipeline/assertionEnhancer.js";
 import { classifyFailure, detectFlakiness } from "../src/pipeline/feedbackLoop.js";
-import { scoreUrl, fingerprintStructure, extractPathPattern, SmartCrawlQueue } from "../src/pipeline/smartCrawl.js";
+import { scoreUrl, fingerprintStructure, extractPathPattern, extractPathPatternWithParams, stripNoiseParams, SmartCrawlQueue } from "../src/pipeline/smartCrawl.js";
 import { fingerprintState, statesEqual } from "../src/pipeline/stateFingerprint.js";
 import { validateTest } from "../src/pipeline/testValidator.js";
 
@@ -359,6 +359,39 @@ test("extractPathPattern normalizes numeric IDs", () => {
   const p1 = extractPathPattern("http://example.com/products/123");
   const p2 = extractPathPattern("http://example.com/products/456");
   assert.equal(p1, p2, "Different product IDs should produce same pattern");
+});
+
+test("extractPathPatternWithParams includes significant query params", () => {
+  const p1 = extractPathPatternWithParams("http://example.com/products?category=electronics&sort=price");
+  const p2 = extractPathPatternWithParams("http://example.com/products?category=books&sort=price");
+  assert.notEqual(p1, p2, "Different category params should produce different patterns");
+});
+
+test("extractPathPatternWithParams ignores noise params", () => {
+  const p1 = extractPathPatternWithParams("http://example.com/products?utm_source=google&category=electronics");
+  const p2 = extractPathPatternWithParams("http://example.com/products?utm_source=twitter&category=electronics");
+  assert.equal(p1, p2, "UTM params should not affect the pattern");
+});
+
+test("extractPathPatternWithParams normalizes numeric IDs like extractPathPattern", () => {
+  const p1 = extractPathPatternWithParams("http://example.com/users/123?tab=settings");
+  const p2 = extractPathPatternWithParams("http://example.com/users/456?tab=settings");
+  assert.equal(p1, p2, "Numeric IDs should be normalised even with query params");
+});
+
+test("extractPathPatternWithParams sorts params deterministically", () => {
+  const p1 = extractPathPatternWithParams("http://example.com/page?sort=price&category=books");
+  const p2 = extractPathPatternWithParams("http://example.com/page?category=books&sort=price");
+  assert.equal(p1, p2, "Param order should not matter — sorted alphabetically");
+});
+
+test("stripNoiseParams removes UTM and session params", () => {
+  const u = new URL("http://example.com/page?utm_source=google&category=books&session_id=abc&sort=price");
+  stripNoiseParams(u);
+  assert.equal(u.searchParams.has("utm_source"), false, "utm_source should be stripped");
+  assert.equal(u.searchParams.has("session_id"), false, "session_id should be stripped");
+  assert.equal(u.searchParams.get("category"), "books", "category should be preserved");
+  assert.equal(u.searchParams.get("sort"), "price", "sort should be preserved");
 });
 
 test("fingerprintStructure produces same hash for same structure", () => {

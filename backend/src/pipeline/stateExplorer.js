@@ -30,7 +30,7 @@ import { fingerprintState, statesEqual } from "./stateFingerprint.js";
 import { discoverActions, detectSignupIntent } from "./actionDiscovery.js";
 import { fillEmailVerificationFlow, waitForVerification, dispose } from "../utils/disposableEmail.js";
 import { extractFlows, flowToJourney } from "./flowGraph.js";
-import { extractPathPattern } from "./smartCrawl.js";
+import { extractPathPatternWithParams, stripNoiseParams } from "./smartCrawl.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
@@ -236,19 +236,11 @@ async function restorePage(page, beforeUrl, fallbackUrl, actionTimeout) {
 }
 
 function enqueueIfNew(ctx, fp, url, depth) {
-  const pathPattern = extractPathPattern(url);
+  const pathPattern = extractPathPatternWithParams(url);
   if (ctx.pathPatternsSeen.has(pathPattern)) return;
   ctx.pathPatternsSeen.add(pathPattern);
   ctx.queue.push({ fp, url, depth });
 }
-
-// Query parameter patterns considered noise — stripped from crawled links so
-// significant params (category, sort, etc.) are preserved (#52 defect #1).
-const NOISE_PARAM_RE = [
-  /^utm_/i, /^fbclid$/i, /^gclid$/i, /^_ga$/i, /^mc_/i,
-  /^ref$/i, /^source$/i, /token/i, /session/i, /nonce/i,
-  /timestamp/i, /^_$/i, /^cb$/i, /^t$/i,
-];
 
 async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal) {
   if (depth >= ctx.limits.maxDepth || ctx.states.size >= ctx.limits.maxStates) return;
@@ -261,16 +253,14 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
       const u = new URL(href, currentUrl);
       u.hash = "";
       // Strip only noise query params; preserve significant ones (#52 defect #1).
-      // This ensures /products?category=electronics and /products?category=books
-      // are explored as distinct states rather than being collapsed.
-      for (const key of [...u.searchParams.keys()]) {
-        if (NOISE_PARAM_RE.some(re => re.test(key))) u.searchParams.delete(key);
-      }
+      stripNoiseParams(u);
       const normalized = u.toString();
       if (!isSameEffectiveOrigin(normalized, ctx.resolvedOrigin || project.url)) continue;
       // robots.txt compliance (#53) — skip disallowed paths
       if (!isAllowed(normalized, ctx.robotsRules)) continue;
-      const pathPattern = extractPathPattern(normalized);
+      // Use param-aware pattern so /products?category=A and ?category=B
+      // are treated as distinct pages (#52 defect #1, Devin review fix).
+      const pathPattern = extractPathPatternWithParams(normalized);
       if (ctx.pathPatternsSeen.has(pathPattern)) continue;
       await page.goto(normalized, { waitUntil: "domcontentloaded", timeout: 15000 });
       await waitForSettle(page, ctx.limits.actionTimeout);

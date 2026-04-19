@@ -8,7 +8,7 @@
  */
 
 import { throwIfAborted } from "../utils/abortHelper.js";
-import { SmartCrawlQueue, fingerprintStructure, extractPathPattern } from "./smartCrawl.js";
+import { SmartCrawlQueue, fingerprintStructure, extractPathPattern, stripNoiseParams } from "./smartCrawl.js";
 import { takeSnapshot } from "./pageSnapshot.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
@@ -240,11 +240,13 @@ export async function crawlPages(project, run, { signal } = {}) {
             try {
               const u = new URL(href, url);
               u.hash = "";
-              u.search = "";
+              // Strip only noise query params; preserve significant ones (#52)
+              stripNoiseParams(u);
               const normalized = u.toString();
-              if (isSameEffectiveOrigin(normalized, resolvedOrigin)) {
-                crawlQueue.enqueue(normalized, depth + 1);
-              }
+              if (!isSameEffectiveOrigin(normalized, resolvedOrigin)) continue;
+              // robots.txt compliance (#53) — skip disallowed before enqueuing
+              if (!isAllowed(normalized, robotsRules)) continue;
+              crawlQueue.enqueue(normalized, depth + 1);
             } catch {}
           }
         }

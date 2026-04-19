@@ -152,3 +152,76 @@ export function extractPathPattern(url) {
     return `${u.hostname}${pattern}`;
   } catch { return url; }
 }
+
+// ── Query-param-aware path deduplication (#52 defect #1) ─────────────────────
+
+/**
+ * Query parameter names that carry state-significant meaning.
+ * Shared with stateFingerprint.js — keep in sync.
+ */
+const SIGNIFICANT_PARAMS = new Set([
+  "category", "sort", "order", "view", "tab", "page", "filter",
+  "type", "status", "q", "query", "search", "mode", "step",
+  "section", "panel", "lang", "locale",
+]);
+
+/**
+ * Query parameter patterns that are always noise.
+ * Shared with stateFingerprint.js — keep in sync.
+ */
+const NOISE_PARAMS = [
+  /^utm_/i, /^fbclid$/i, /^gclid$/i, /^_ga$/i, /^mc_/i,
+  /^ref$/i, /^source$/i, /token/i, /session/i, /nonce/i,
+  /timestamp/i, /^_$/i, /^cb$/i, /^t$/i,
+];
+
+/**
+ * extractPathPatternWithParams(url) → string
+ *
+ * Like {@link extractPathPattern} but includes significant query parameters
+ * in the pattern so `/products?category=electronics` and
+ * `/products?category=books` produce different patterns.
+ *
+ * Used by the state explorer where query params are preserved (#52 defect #1).
+ * The original {@link extractPathPattern} (without params) is still used by
+ * crawlBrowser.js where query params are stripped before pattern extraction.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function extractPathPatternWithParams(url) {
+  try {
+    const u = new URL(url);
+    const pattern = u.pathname
+      .split("/")
+      .map(segment => /^\d+$/.test(segment) ? ":id" : segment)
+      .join("/");
+
+    // Include significant query params in sorted order
+    const sigParams = [];
+    for (const [key, value] of u.searchParams) {
+      if (NOISE_PARAMS.some(re => re.test(key))) continue;
+      if (SIGNIFICANT_PARAMS.has(key.toLowerCase())) {
+        sigParams.push(`${key.toLowerCase()}=${value}`);
+      }
+    }
+    sigParams.sort();
+    const qStr = sigParams.length > 0 ? `?${sigParams.join("&")}` : "";
+
+    return `${u.hostname}${pattern}${qStr}`;
+  } catch { return url; }
+}
+
+/**
+ * Strip noise query parameters from a URL, preserving significant ones.
+ *
+ * Shared utility for both crawlBrowser.js and stateExplorer.js so link
+ * normalisation is consistent across crawl modes (#52 defect #1).
+ *
+ * @param {URL} u — mutable URL object (modified in place)
+ */
+export function stripNoiseParams(u) {
+  for (const key of [...u.searchParams.keys()]) {
+    if (NOISE_PARAMS.some(re => re.test(key))) u.searchParams.delete(key);
+  }
+}
