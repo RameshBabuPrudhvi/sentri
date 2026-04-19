@@ -14,6 +14,7 @@ import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
+import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
@@ -95,6 +96,21 @@ export async function crawlPages(project, run, { signal } = {}) {
     // ── HAR capture: attach AFTER redirect so it uses the resolved origin ──
     harCapture = createHarCapture(context, resolvedOrigin);
 
+    // ── robots.txt + sitemap.xml (#53) ──────────────────────────────────────
+    const robotsRules = await loadRobotsRules(resolvedOrigin);
+    if (robotsRules.rules.length > 0) {
+      log(run, `🤖 robots.txt: ${robotsRules.rules.length} rule(s) loaded — restricted paths will be skipped`);
+    }
+    const sitemapUrls = await loadSitemapUrls(resolvedOrigin, robotsRules.sitemaps);
+    if (sitemapUrls.length > 0) {
+      log(run, `🗺️  sitemap.xml: ${sitemapUrls.length} URL(s) discovered — seeding crawl queue`);
+      for (const sitemapUrl of sitemapUrls) {
+        if (isSameEffectiveOrigin(sitemapUrl, resolvedOrigin) && isAllowed(sitemapUrl, robotsRules)) {
+          crawlQueue.enqueue(sitemapUrl, 1);
+        }
+      }
+    }
+
     // ── Crawl loop ──────────────────────────────────────────────────────────
     while (crawlQueue.hasMore() && crawlQueue.visitedCount < MAX_PAGES) {
       if (signal?.aborted) { throwIfAborted(signal); }
@@ -103,6 +119,12 @@ export async function crawlPages(project, run, { signal } = {}) {
       const { url, depth } = item;
 
       crawlQueue.markVisited(url);
+
+      // robots.txt compliance (#53) — skip disallowed paths
+      if (!isAllowed(url, robotsRules)) {
+        log(run, `🚫 Skipping (robots.txt): ${url}`);
+        continue;
+      }
 
       const pathPattern = extractPathPattern(url);
       if (pathPatternsSeen.has(pathPattern) && depth > 0) {

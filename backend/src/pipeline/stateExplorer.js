@@ -35,6 +35,7 @@ import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
+import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
 
 // Defaults — overridden per-run by tuning values from Test Dials
 const DEFAULT_MAX_STATES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -267,6 +268,8 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
       }
       const normalized = u.toString();
       if (!isSameEffectiveOrigin(normalized, ctx.resolvedOrigin || project.url)) continue;
+      // robots.txt compliance (#53) — skip disallowed paths
+      if (!isAllowed(normalized, ctx.robotsRules)) continue;
       const pathPattern = extractPathPattern(normalized);
       if (ctx.pathPatternsSeen.has(pathPattern)) continue;
       await page.goto(normalized, { waitUntil: "domcontentloaded", timeout: 15000 });
@@ -347,11 +350,31 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
     // ── HAR capture: attach after redirect so it uses the resolved origin ──
     harCapture = createHarCapture(context, resolvedUrl);
 
+    // ── robots.txt + sitemap.xml (#53) ──────────────────────────────────────
+    const robotsRules = await loadRobotsRules(resolvedUrl);
+    ctx.robotsRules = robotsRules;
+    if (robotsRules.rules.length > 0) {
+      log(run, `🤖 robots.txt: ${robotsRules.rules.length} rule(s) loaded — restricted paths will be skipped`);
+    }
+    const sitemapUrls = await loadSitemapUrls(resolvedUrl, robotsRules.sitemaps);
+    if (sitemapUrls.length > 0) {
+      log(run, `🗺️  sitemap.xml: ${sitemapUrls.length} URL(s) discovered — seeding exploration queue`);
+    }
+
     const { fp: initialFp } = await captureState(page, ctx);
     startState = initialFp;
     ctx.queue.push({ fp: initialFp, url: resolvedUrl, depth: 0 });
     syncRunPages(run, ctx.snapshots);
     log(run, `🔍 Initial state: ${resolvedUrl} [${initialFp.slice(0, 8)}]`);
+
+    // Seed sitemap URLs into the exploration queue (#53)
+    if (sitemapUrls.length > 0) {
+      for (const smUrl of sitemapUrls) {
+        if (isSameEffectiveOrigin(smUrl, resolvedUrl) && isAllowed(smUrl, robotsRules)) {
+          enqueueIfNew(ctx, initialFp, smUrl, 1);
+        }
+      }
+    }
 
     while (ctx.queue.length > 0 && ctx.states.size < limits.maxStates) {
       throwIfAborted(signal);

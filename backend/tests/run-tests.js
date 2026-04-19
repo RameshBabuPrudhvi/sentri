@@ -41,6 +41,7 @@ const files = [
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",
   "tests/api-versioning.test.js",
+  "tests/robots-sitemap.test.js",
 ];
 
 let passed = 0;
