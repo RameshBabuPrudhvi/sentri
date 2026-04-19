@@ -129,6 +129,37 @@ export async function takeSnapshot(page) {
       hasModals: document.querySelectorAll("[role='dialog'], .modal, [aria-modal='true']").length > 0,
       hasTabs: document.querySelectorAll("[role='tablist'], [role='tab']").length > 0,
       hasTable: document.querySelectorAll("table, [role='grid']").length > 0,
+      // Extended component inventory (#52 defect #3)
+      hasSidebar: document.querySelectorAll(
+        "aside, [role='complementary'], nav.sidebar, .sidebar, [class*='sidebar'], [class*='side-nav'], [class*='drawer']"
+      ).length > 0,
+      hasDropdown: document.querySelectorAll(
+        "[role='listbox'], [role='menu'], .dropdown-menu, [class*='dropdown'], [class*='popover'], [aria-expanded='true']"
+      ).length > 0,
+      hasToast: document.querySelectorAll(
+        "[role='alert'], [role='status'], .toast, [class*='toast'], [class*='notification'], [class*='snackbar']"
+      ).length > 0,
+      hasAccordion: document.querySelectorAll(
+        "[role='region'][aria-labelledby], details, .accordion, [class*='accordion'], [class*='collapsible']"
+      ).length > 0,
+      // SPA loading / error / empty states (#52 defect #4)
+      hasSpinner: document.querySelectorAll(
+        "[role='progressbar'], .spinner, [class*='spinner'], [class*='loading'], .skeleton, [class*='skeleton']"
+      ).length > 0,
+      hasErrorState: document.querySelectorAll(
+        "[role='alert'][class*='error'], .error-boundary, [class*='error-message'], [class*='error-state']"
+      ).length > 0,
+      hasEmptyState: document.querySelectorAll(
+        ".empty-state, [class*='empty-state'], [class*='no-results'], [class*='no-data'], [class*='zero-state']"
+      ).length > 0,
+      // SPA framework detection (#52 defect #4)
+      spaFramework: (function detectSpaFramework() {
+        if (document.querySelector("[data-reactroot], #__next, #root[data-reactroot]") || window.__REACT_DEVTOOLS_GLOBAL_HOOK__) return "react";
+        if (document.querySelector("[data-v-], [data-server-rendered]") || window.__VUE__) return "vue";
+        if (document.querySelector("[ng-version], [_nghost], [_ngcontent]") || window.ng) return "angular";
+        if (document.querySelector("[data-svelte], .svelte-") || window.__svelte) return "svelte";
+        return "";
+      })(),
       metaDescription: document.querySelector('meta[name="description"]')?.content?.slice(0, 120) || "",
       // Outbound same-origin links — used by buildUserJourneys() for link-graph
       // journey discovery. Normalised (no hash, no query) and deduped.

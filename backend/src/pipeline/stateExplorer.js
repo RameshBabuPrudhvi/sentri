@@ -157,20 +157,54 @@ async function executeFormGroup(page, formActions, actionTimeout) {
   return executed;
 }
 
-// Max states allowed per URL — prevents the same page with trivial dynamic
-// differences from consuming the entire state budget.
-const MAX_STATES_PER_URL = 3;
+// ── Per-URL state cap (#52 defect #6) ────────────────────────────────────────
+// Base cap per URL path pattern. The actual cap scales up when existing states
+// at the same URL are structurally diverse (different DOM structure or component
+// inventory), which indicates a multi-step wizard or SPA with meaningful
+// in-page state changes. This replaces the previous hard cap of 3.
+const BASE_STATES_PER_URL = 3;
+const MAX_STATES_PER_URL  = 8;
+
+/**
+ * Compute the effective per-URL state cap based on fingerprint diversity.
+ *
+ * If the existing states at this URL all have different DOM structures or
+ * component inventories, the cap is raised to allow deeper exploration of
+ * multi-step wizards and SPA flows. If the states are structurally similar
+ * (same DOM, different timestamps), the base cap applies.
+ *
+ * @param {Array} existingSnapshots — snapshots already captured at this URL
+ * @returns {number} effective cap for this URL
+ */
+function effectiveUrlCap(existingSnapshots) {
+  if (existingSnapshots.length < BASE_STATES_PER_URL) return BASE_STATES_PER_URL;
+  // Count distinct structural fingerprints among existing states at this URL
+  const structures = new Set(existingSnapshots.map(s => {
+    const tags = (s.elements || []).map(el => `${el.tag}:${el.type || ""}`).sort().join(",");
+    const components = [
+      s.hasModals ? "m" : "", s.hasTabs ? "t" : "", s.hasSidebar ? "s" : "",
+      s.hasDropdown ? "d" : "", s.hasToast ? "o" : "", s.hasAccordion ? "a" : "",
+    ].filter(Boolean).join("");
+    return `${tags}|${components}`;
+  }));
+  // If every existing state is structurally unique, raise the cap
+  if (structures.size >= existingSnapshots.length) {
+    return Math.min(existingSnapshots.length + BASE_STATES_PER_URL, MAX_STATES_PER_URL);
+  }
+  return BASE_STATES_PER_URL;
+}
 
 async function captureState(page, ctx) {
   const snapshot = await takeSnapshot(page);
   const fp = fingerprintState(snapshot);
   const isNovel = !ctx.states.has(fp);
   if (isNovel) {
-    // Per-URL cap: if we already have MAX_STATES_PER_URL states for this URL,
-    // treat this as a duplicate to avoid budget waste on trivially different
-    // snapshots of the same page (timestamps, personalisation, A/B tests).
-    const urlStateCount = ctx.snapshots.filter(s => s.url === snapshot.url).length;
-    if (urlStateCount >= MAX_STATES_PER_URL) {
+    // Per-URL cap: check against the diversity-aware cap to avoid budget waste
+    // on trivially different snapshots while still allowing multi-step wizards
+    // and SPA flows to be fully explored (#52 defect #6).
+    const existingAtUrl = ctx.snapshots.filter(s => s.url === snapshot.url);
+    const cap = effectiveUrlCap(existingAtUrl);
+    if (existingAtUrl.length >= cap) {
       return { snapshot, fp, isNovel: false };
     }
     ctx.states.add(fp);
@@ -207,6 +241,14 @@ function enqueueIfNew(ctx, fp, url, depth) {
   ctx.queue.push({ fp, url, depth });
 }
 
+// Query parameter patterns considered noise — stripped from crawled links so
+// significant params (category, sort, etc.) are preserved (#52 defect #1).
+const NOISE_PARAM_RE = [
+  /^utm_/i, /^fbclid$/i, /^gclid$/i, /^_ga$/i, /^mc_/i,
+  /^ref$/i, /^source$/i, /token/i, /session/i, /nonce/i,
+  /timestamp/i, /^_$/i, /^cb$/i, /^t$/i,
+];
+
 async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run, signal) {
   if (depth >= ctx.limits.maxDepth || ctx.states.size >= ctx.limits.maxStates) return;
   let links;
@@ -216,7 +258,13 @@ async function crawlLinks(page, currentFp, currentUrl, depth, project, ctx, run,
     if (ctx.states.size >= ctx.limits.maxStates) break;
     try {
       const u = new URL(href, currentUrl);
-      u.hash = ""; u.search = "";
+      u.hash = "";
+      // Strip only noise query params; preserve significant ones (#52 defect #1).
+      // This ensures /products?category=electronics and /products?category=books
+      // are explored as distinct states rather than being collapsed.
+      for (const key of [...u.searchParams.keys()]) {
+        if (NOISE_PARAM_RE.some(re => re.test(key))) u.searchParams.delete(key);
+      }
       const normalized = u.toString();
       if (!isSameEffectiveOrigin(normalized, ctx.resolvedOrigin || project.url)) continue;
       const pathPattern = extractPathPattern(normalized);
