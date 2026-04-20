@@ -304,10 +304,10 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  // For in-process runs (entry path), write the full abort status now.
   // For BullMQ runs (workerController path), the DB was already updated
-  // above before signaling the worker — only persist skipped results here.
-  if (entry) {
+  // above before signaling the worker. For all other paths (in-process or
+  // stale runs with no live controller), write the abort status now.
+  if (!workerController) {
     runRepo.update(req.params.runId, {
       status: "aborted",
       finishedAt: new Date().toISOString(),

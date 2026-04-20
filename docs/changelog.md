@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Frontend**: `ForgotPassword.jsx` and `Login.jsx` now use `api.js` methods (`api.forgotPassword`, `api.resetPassword`, `api.verifyEmail`, `api.oauthCallback`, `api.login`, `api.register`) instead of raw `fetch()` — enforces AGENT.md convention that all backend calls go through `api.js` for CSRF injection, 401 handling, and timeout logic (#97)
 - **Frontend**: `api.js` — added `login`, `register`, `forgotPassword`, `resetPassword`, `verifyEmail`, and `oauthCallback` methods; added explanatory comment on `exportAccountData` documenting why it intentionally bypasses `req()` (#97)
-- **DB**: Renamed migration `004_notification_settings.sql` → `005_notification_settings.sql` to resolve numbering collision with `004_workspaces_rbac.sql`; old file kept as no-op for existing databases (#97)
+- **DB**: Documented migration numbering anomaly — `004_notification_settings.sql` and `004_workspaces_rbac.sql` share the `004_` prefix; added note explaining alphabetical sort ensures safe execution order (#97)
 - **Backend**: `STRATEGY_VERSION` in `selfHealing.js` is now exported so tests can validate it is bumped when strategies change (#97)
 - **Backend**: Abort endpoint now writes `status: "aborted"` to DB before signaling the BullMQ worker — closes race window where the worker's completion write could overwrite the abort (#97)
 

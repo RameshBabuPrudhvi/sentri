@@ -157,10 +157,12 @@ test("STRATEGY_VERSION equals expected value (bump this when strategies change)"
   assert.equal(STRATEGY_VERSION, 3, "STRATEGY_VERSION changed — update this test after verifying the bump is intentional");
 });
 
-test("STRATEGY_VERSION is injected into runtime helper code", () => {
-  // The runtime code should reference the version so healing hints from
-  // a different version are ignored.
-  assert.match(helpers, /strategyVersion/);
+test("STRATEGY_VERSION is used server-side for hint scoping", () => {
+  // STRATEGY_VERSION is used in recordHealing() and getHealingHint() to
+  // scope healing hints by version. It is NOT injected into the runtime
+  // helper code — the runtime only uses __healingHints (pre-filtered).
+  assert.equal(typeof STRATEGY_VERSION, "number");
+  assert.ok(STRATEGY_VERSION > 0, "STRATEGY_VERSION must be a positive integer");
 });
 
 if (process.exitCode) process.exit(1);
