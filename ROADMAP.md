@@ -1258,3 +1258,4 @@ Before starting any item:
 6. Add an entry to `docs/changelog.md` under `## [Unreleased]` following the Keep a Changelog format
 
 For items with explicit **See also** cross-references (MNT-001/MNT-002, DIF-006/MNT-005), coordinate branch timing in sprint planning to avoid merge conflicts on shared files (`selfHealing.js`, `exportFormats.js`).
+
