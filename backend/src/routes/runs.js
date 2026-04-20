@@ -277,6 +277,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     runRepo.update(req.params.runId, {
       status: "aborted",
       finishedAt: new Date().toISOString(),
+      duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
       error: "Aborted by user",
     });
     workerController.abort();

@@ -59,7 +59,7 @@ function handleUnauthorized() {
  * @throws  {Error} On timeout, network failure, non-JSON response, or HTTP error status.
  * @private
  */
-async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
+async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
@@ -89,14 +89,19 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT) {
   }
   clearTimeout(timer);
 
-  if (res.status === 401) {
+  if (res.status === 401 && !opts.skipUnauthorizedRedirect) {
     handleUnauthorized();
     throw new Error("Session expired. Please sign in again.");
   }
 
   if (!res.ok) {
     const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
-    throw new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
+    const error = new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
+    // Attach the parsed response body so callers can inspect structured
+    // fields (e.g. `error.body.code === "EMAIL_NOT_VERIFIED"`).
+    error.body = err;
+    error.status = res.status;
+    throw error;
   }
   return parseJsonResponse(res);
 }
@@ -363,18 +368,21 @@ export const api = {
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 
   // ── Auth (login, register, forgot/reset password, verify, OAuth) ─────────────
+  // These endpoints intentionally return 401/403 for invalid credentials or
+  // unverified accounts — NOT expired sessions. skipUnauthorizedRedirect
+  // prevents req() from intercepting 401 and showing "Session expired".
   /**
    * Log in with email and password.
    * @param {{ email: string, password: string }} body
    * @returns {Promise<Object>}
    */
-  login: (body) => req("POST", "/auth/login", body),
+  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Register a new account.
    * @param {{ name: string, email: string, password: string }} body
    * @returns {Promise<Object>}
    */
-  register: (body) => req("POST", "/auth/register", body),
+  register: (body) => req("POST", "/auth/register", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Request a password reset link for the given email.
    * @param {string} email
@@ -393,14 +401,14 @@ export const api = {
    * @param {string} token
    * @returns {Promise<Object>}
    */
-  verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`),
+  verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Exchange an OAuth authorization code for a session.
    * @param {string} provider - `"github"` or `"google"`.
    * @param {string} code     - Authorization code from the OAuth redirect.
    * @returns {Promise<Object>}
    */
-  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${code}`),
+  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
 
   // ── Email verification (SEC-001) ──────────────────────────────────────────────
   /**

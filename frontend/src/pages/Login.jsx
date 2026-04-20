@@ -172,14 +172,12 @@ export default function Login() {
       try {
         data = mode === "login" ? await api.login(body) : await api.register(body);
       } catch (fetchErr) {
-        // SEC-001: The api.js req() wrapper throws on non-ok responses.
-        // For EMAIL_NOT_VERIFIED we need the response body, but req() already
-        // parsed it. The error message is embedded in the thrown Error.
-        // Re-check by attempting a login and inspecting the structured error.
-        // Since req() doesn't expose the parsed body on error, we surface the
-        // verify-email prompt based on the error message pattern.
-        if (mode === "login" && fetchErr.message && fetchErr.message.includes("verify")) {
-          setVerifyEmail(email);
+        // SEC-001: Handle unverified email on login attempt.
+        // req() attaches the parsed response body as error.body so we can
+        // inspect the structured `code` field from the backend (stable API
+        // contract) instead of fragile string matching on the error message.
+        if (fetchErr.body?.code === "EMAIL_NOT_VERIFIED") {
+          setVerifyEmail(fetchErr.body.email || email);
         }
         throw fetchErr;
       }
