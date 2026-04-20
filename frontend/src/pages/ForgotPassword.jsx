@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AppLogo from "../components/layout/AppLogo.jsx";
-import { API_PATH, parseJsonResponse } from "../utils/apiBase.js";
+import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import "../styles/pages/login.css";
 
@@ -59,9 +59,7 @@ export default function ForgotPassword() {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { setError("Please enter a valid email address."); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_PATH}/auth/forgot-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ email }) });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      const data = await api.forgotPassword(email);
       setSuccess(data.message || "If an account with that email exists, a reset link has been generated.");
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -73,9 +71,7 @@ export default function ForgotPassword() {
     if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_PATH}/auth/reset-password`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ token, newPassword }) });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      const data = await api.resetPassword(token, newPassword);
       setSuccess(data.message || "Password has been reset successfully.");
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }

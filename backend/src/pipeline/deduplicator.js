@@ -11,6 +11,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 /**
  * fingerprintHash(str) → 16-char hex string (64-bit via SHA-256 truncation)
@@ -281,6 +282,11 @@ export function scoreTest(test) {
  *   3. Semantic TF-IDF     — cosine similarity ≥ 0.65 on name+desc+steps (defects #1, #2)
  */
 export function deduplicateTests(tests) {
+  if (tests.length > 200) {
+    console.warn(formatLogLine("warn", null,
+      `[deduplicator] Large batch (${tests.length} tests) — O(n²) dedup stages may be slow`));
+  }
+
   const hashMap = new Map(); // hash → best test so far (layer 1)
   const retained = [];       // tests that survived layer 1, pending layers 2+
 
@@ -377,6 +383,12 @@ export function deduplicateTests(tests) {
  *   4. Semantic TF-IDF     — cosine ≥ 0.65 on name+desc+steps (defects #1, #2)
  */
 export function deduplicateAcrossRuns(newTests, existingTests) {
+  const crossProduct = existingTests.length * newTests.length;
+  if (crossProduct > 40_000) {
+    console.warn(formatLogLine("warn", null,
+      `[deduplicator] Large cross-run dedup (${newTests.length} new × ${existingTests.length} existing = ${crossProduct} comparisons) — O(n²) stages may be slow`));
+  }
+
   const existingHashes = new Set(existingTests.map(hashTest));
   const existingNames = new Set(existingTests.map(t => normalizeText(t.name)));
 

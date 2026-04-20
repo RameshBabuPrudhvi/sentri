@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Frontend**: `ForgotPassword.jsx` and `Login.jsx` now use `api.js` methods (`api.forgotPassword`, `api.resetPassword`, `api.verifyEmail`, `api.oauthCallback`, `api.login`, `api.register`) instead of raw `fetch()` — enforces AGENT.md convention that all backend calls go through `api.js` for CSRF injection, 401 handling, and timeout logic (#97)
+- **Frontend**: `api.js` — added `login`, `register`, `forgotPassword`, `resetPassword`, `verifyEmail`, and `oauthCallback` methods; added explanatory comment on `exportAccountData` documenting why it intentionally bypasses `req()` (#97)
+- **DB**: Renamed migration `004_notification_settings.sql` → `005_notification_settings.sql` to resolve numbering collision with `004_workspaces_rbac.sql`; old file kept as no-op for existing databases (#97)
+- **Backend**: `STRATEGY_VERSION` in `selfHealing.js` is now exported so tests can validate it is bumped when strategies change (#97)
+- **Backend**: Abort endpoint now writes `status: "aborted"` to DB before signaling the BullMQ worker — closes race window where the worker's completion write could overwrite the abort (#97)
+
+### Added
+- **Backend**: Batch-size warning logs in `deduplicator.js` — warns when `deduplicateTests` receives >200 tests or `deduplicateAcrossRuns` cross-product exceeds 40,000 comparisons (O(n²) observability) (#97)
+- **Tests**: `STRATEGY_VERSION` consistency test in `self-healing.test.js` — fails if the version is changed without updating the expected value, catching unbumped strategy changes (#97)
+- **Docs**: `TODO(AUTO-005)` guard comments on `fireNotifications` callsites in `runs.js` — documents that notifications must be gated behind retry exhaustion when test-level retry (AUTO-005) is implemented (#97)
+- **Docs**: `AGENT.md` repository list updated — added missing `apiKeyRepo` and `verificationTokenRepo` to both the directory tree and Repositories list (#97)
+
 ## [1.6.0] — 2026-04-19
 
 ### Added

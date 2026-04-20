@@ -362,6 +362,46 @@ export const api = {
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 
+  // ── Auth (login, register, forgot/reset password, verify, OAuth) ─────────────
+  /**
+   * Log in with email and password.
+   * @param {{ email: string, password: string }} body
+   * @returns {Promise<Object>}
+   */
+  login: (body) => req("POST", "/auth/login", body),
+  /**
+   * Register a new account.
+   * @param {{ name: string, email: string, password: string }} body
+   * @returns {Promise<Object>}
+   */
+  register: (body) => req("POST", "/auth/register", body),
+  /**
+   * Request a password reset link for the given email.
+   * @param {string} email
+   * @returns {Promise<Object>}
+   */
+  forgotPassword: (email) => req("POST", "/auth/forgot-password", { email }),
+  /**
+   * Reset password using a token from the reset email.
+   * @param {string} token
+   * @param {string} newPassword
+   * @returns {Promise<Object>}
+   */
+  resetPassword: (token, newPassword) => req("POST", "/auth/reset-password", { token, newPassword }),
+  /**
+   * Verify an email address using a signed token from the verification email.
+   * @param {string} token
+   * @returns {Promise<Object>}
+   */
+  verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`),
+  /**
+   * Exchange an OAuth authorization code for a session.
+   * @param {string} provider - `"github"` or `"google"`.
+   * @param {string} code     - Authorization code from the OAuth redirect.
+   * @returns {Promise<Object>}
+   */
+  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${code}`),
+
   // ── Email verification (SEC-001) ──────────────────────────────────────────────
   /**
    * Resend the email verification link for an unverified account.
@@ -373,6 +413,12 @@ export const api = {
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**
    * Export account data as JSON. Password confirmation is required.
+   *
+   * NOTE: This intentionally bypasses `req()` because it needs a custom
+   * `X-Account-Password` header for password confirmation. It replicates
+   * the 401 handling via `handleUnauthorized()` and includes
+   * `credentials: "include"` for the HttpOnly auth cookie.
+   *
    * @param {string} password
    * @returns {Promise<Object>}
    */

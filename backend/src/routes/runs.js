@@ -114,7 +114,10 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // FEA-001: Fire failure notifications — best-effort
+          // TODO(AUTO-005): When test-level retry is implemented, gate this call
+          // so notifications only fire after all retries are exhausted. Currently
+          // fires on first failure, which will cause premature alerts if retries
+          // are added without updating this callsite.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
@@ -203,7 +206,10 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // FEA-001: Fire failure notifications — best-effort
+          // TODO(AUTO-005): When test-level retry is implemented, gate this call
+          // so notifications only fire after all retries are exhausted. Currently
+          // fires on first failure, which will cause premature alerts if retries
+          // are added without updating this callsite.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
@@ -265,9 +271,14 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
   } else if (workerController) {
-    // BullMQ-processed run: signal the worker's AbortController.
-    // The worker's catch block checks signal.aborted (set synchronously
-    // by controller.abort()) and skips terminal side-effects.
+    // BullMQ-processed run: write abort status to DB BEFORE signaling the
+    // worker to prevent a race where the worker's completion write overwrites
+    // the abort status between signal and the worker's catch block.
+    runRepo.update(req.params.runId, {
+      status: "aborted",
+      finishedAt: new Date().toISOString(),
+      error: "Aborted by user",
+    });
     workerController.abort();
     workerAbortControllers.delete(req.params.runId);
   }
@@ -293,12 +304,17 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  runRepo.update(req.params.runId, {
-    status: "aborted",
-    finishedAt: new Date().toISOString(),
-    duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
-    error: "Aborted by user",
-  });
+  // For in-process runs (entry path), write the full abort status now.
+  // For BullMQ runs (workerController path), the DB was already updated
+  // above before signaling the worker — only persist skipped results here.
+  if (entry) {
+    runRepo.update(req.params.runId, {
+      status: "aborted",
+      finishedAt: new Date().toISOString(),
+      duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
+      error: "Aborted by user",
+    });
+  }
   // Persist the updated results (with skipped entries) to SQLite
   if (liveRun.results) {
     runRepo.update(req.params.runId, { results: liveRun.results });
