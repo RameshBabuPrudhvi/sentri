@@ -294,8 +294,21 @@ app.get(`${API_PREFIX}/openapi.json`, (_req, res) => {
 });
 
 // GET /api/docs — interactive Swagger UI (no auth required).
-// Uses the public swagger-ui CDN to avoid adding a dependency.
-app.get("/api/docs", (_req, res) => {
+// Uses the public swagger-ui CDN. The inline <script> uses the per-request
+// CSP nonce so it passes the nonce-based CSP policy (SEC-002). External
+// scripts/styles from unpkg.com are allowed via the CSP override below.
+app.get("/api/docs", (req, res) => {
+  const nonce = res.locals.cspNonce || "";
+  // Override the global CSP for this single page to allow the CDN resources.
+  // This is scoped to /api/docs only — all other pages use the strict policy.
+  res.setHeader("Content-Security-Policy",
+    `default-src 'self'; ` +
+    `script-src 'self' 'nonce-${nonce}' https://unpkg.com; ` +
+    `style-src 'self' 'unsafe-inline' https://unpkg.com; ` +
+    `img-src 'self' data:; ` +
+    `connect-src 'self'; ` +
+    `frame-ancestors 'none'`
+  );
   res.setHeader("Content-Type", "text/html");
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -306,8 +319,8 @@ app.get("/api/docs", (_req, res) => {
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" nonce="${nonce}"></script>
+  <script nonce="${nonce}">
     SwaggerUIBundle({
       url: "/api/v1/openapi.json",
       dom_id: "#swagger-ui",

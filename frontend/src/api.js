@@ -96,7 +96,7 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
 
   if (!res.ok) {
     const err = await parseJsonResponse(res).catch(() => ({ error: res.statusText }));
-    const error = new Error(`[${res.status}] ${err.error || res.statusText || "Request failed"}`);
+    const error = new Error(err.error || res.statusText || "Request failed");
     // Attach the parsed response body so callers can inspect structured
     // fields (e.g. `error.body.code === "EMAIL_NOT_VERIFIED"`).
     error.body = err;
