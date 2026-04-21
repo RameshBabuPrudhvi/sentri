@@ -282,7 +282,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-004 — OpenAPI specification and Swagger UI 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete | **Effort:** M | **Source:** Audit
 
 **Problem:** There is no machine-readable API contract. This blocks CI/CD integration auto-generation, external tooling (Postman collections), and third-party plugins. It also makes engineer onboarding harder — the only documentation is inline JSDoc comments.
 
@@ -1224,7 +1224,7 @@ The following items have been verified complete against the codebase and are **n
 | Category | Items | Blockers | 🟡 High | 🔵/🟢 |
 |----------|-------|---------|---------|-------|
 | Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | ~~SEC-002~~ ✅, ~~SEC-003~~ ✅ | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | INF-004, ~~INF-005~~ ✅ |
+| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | ~~INF-004~~ ✅, ~~INF-005~~ ✅ |
 | Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
@@ -1239,7 +1239,7 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export) → `INF-004` (OpenAPI spec)
+`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export)
 
 **Lowest effort / highest immediate value:**
 AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)

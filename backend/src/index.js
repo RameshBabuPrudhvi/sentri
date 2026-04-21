@@ -52,6 +52,7 @@ import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
 import recycleBinRouter from "./routes/recycleBin.js";
 import workspacesRouter from "./routes/workspaces.js";
+import { spec as openapiSpec } from "./openapi.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -286,6 +287,39 @@ app.get("/health/ready", async (_req, res) => {
   res.status(allOk ? 200 : 503).json({ ok: allOk, checks });
 });
 
+// ─── INF-004: OpenAPI spec + Swagger UI ───────────────────────────────────────
+// GET /api/v1/openapi.json — machine-readable spec (no auth required).
+app.get(`${API_PREFIX}/openapi.json`, (_req, res) => {
+  res.json(openapiSpec);
+});
+
+// GET /api/docs — interactive Swagger UI (no auth required).
+// Uses the public swagger-ui CDN to avoid adding a dependency.
+app.get("/api/docs", (_req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sentri API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/api/v1/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+    });
+  </script>
+</body>
+</html>`);
+});
+
 // ─── SPA fallback (SEC-002: nonce injection) ─────────────────────────────────
 // In Docker, nginx proxies unmatched paths to the backend via @backend_spa.
 // This catch-all serves the Vite-built index.html with __CSP_NONCE__ replaced
@@ -296,7 +330,7 @@ app.get("/health/ready", async (_req, res) => {
 // Express's default 404 handler and return a proper JSON error instead of HTML.
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/") || req.path.startsWith("/artifacts/")) return next();
-  if (req.path.startsWith("/health")) return next();
+  if (req.path.startsWith("/health") || req.path === "/api/docs") return next();
   serveIndexWithNonce(req, res);
 });
 

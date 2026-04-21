@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tests**: `STRATEGY_VERSION` consistency test in `self-healing.test.js` — fails if the version is changed without updating the expected value, catching unbumped strategy changes (#97)
 - **Docs**: `TODO(AUTO-005)` guard comments on `fireNotifications` callsites in `runs.js` — documents that notifications must be gated behind retry exhaustion when test-level retry (AUTO-005) is implemented (#97)
 - **Docs**: `AGENT.md` repository list updated — added missing `apiKeyRepo` and `verificationTokenRepo` to both the directory tree and Repositories list (#97)
+- **API**: OpenAPI 3.1 specification served at `GET /api/v1/openapi.json`; interactive Swagger UI at `/api/docs` using CDN-hosted swagger-ui-dist (INF-004) (#97)
 
 ## [1.6.0] — 2026-04-19
 
