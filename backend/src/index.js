@@ -194,6 +194,53 @@ app.use(`${API_PREFIX}/auth`, authRouter);
 // WITHOUT requireAuth so CI pipelines can call it with a project token.
 app.use(API_PREFIX, triggerRouter);
 
+// ─── INF-004: OpenAPI spec + Swagger UI (public, no auth) ────────────────────
+// Mounted BEFORE requireAuth and the legacy /api redirect so they are reachable
+// by unauthenticated clients (Swagger UI, external tooling, Postman).
+app.get(`${API_PREFIX}/openapi.json`, (_req, res) => {
+  res.json(openapiSpec);
+});
+
+// GET /api/docs — interactive Swagger UI (no auth required).
+// Uses the public swagger-ui CDN. The inline <script> uses the per-request
+// CSP nonce so it passes the nonce-based CSP policy (SEC-002). External
+// scripts/styles from unpkg.com are allowed via the CSP override below.
+app.get("/api/docs", (req, res) => {
+  const nonce = res.locals.cspNonce || "";
+  // Override the global CSP for this single page to allow the CDN resources.
+  // This is scoped to /api/docs only — all other pages use the strict policy.
+  res.setHeader("Content-Security-Policy",
+    `default-src 'self'; ` +
+    `script-src 'self' 'nonce-${nonce}' https://unpkg.com; ` +
+    `style-src 'self' 'unsafe-inline' https://unpkg.com; ` +
+    `img-src 'self' data:; ` +
+    `connect-src 'self'; ` +
+    `frame-ancestors 'none'`
+  );
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sentri API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" nonce="${nonce}"></script>
+  <script nonce="${nonce}">
+    SwaggerUIBundle({
+      url: "/api/v1/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+    });
+  </script>
+</body>
+</html>`);
+});
+
 // All other API routes require a valid JWT token + workspace context (ACL-001).
 // workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
 app.use(`${API_PREFIX}/projects`, requireAuth, workspaceScope, projectsRouter);
@@ -285,52 +332,6 @@ app.get("/health/ready", async (_req, res) => {
   }
 
   res.status(allOk ? 200 : 503).json({ ok: allOk, checks });
-});
-
-// ─── INF-004: OpenAPI spec + Swagger UI ───────────────────────────────────────
-// GET /api/v1/openapi.json — machine-readable spec (no auth required).
-app.get(`${API_PREFIX}/openapi.json`, (_req, res) => {
-  res.json(openapiSpec);
-});
-
-// GET /api/docs — interactive Swagger UI (no auth required).
-// Uses the public swagger-ui CDN. The inline <script> uses the per-request
-// CSP nonce so it passes the nonce-based CSP policy (SEC-002). External
-// scripts/styles from unpkg.com are allowed via the CSP override below.
-app.get("/api/docs", (req, res) => {
-  const nonce = res.locals.cspNonce || "";
-  // Override the global CSP for this single page to allow the CDN resources.
-  // This is scoped to /api/docs only — all other pages use the strict policy.
-  res.setHeader("Content-Security-Policy",
-    `default-src 'self'; ` +
-    `script-src 'self' 'nonce-${nonce}' https://unpkg.com; ` +
-    `style-src 'self' 'unsafe-inline' https://unpkg.com; ` +
-    `img-src 'self' data:; ` +
-    `connect-src 'self'; ` +
-    `frame-ancestors 'none'`
-  );
-  res.setHeader("Content-Type", "text/html");
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Sentri API — Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" nonce="${nonce}"></script>
-  <script nonce="${nonce}">
-    SwaggerUIBundle({
-      url: "/api/v1/openapi.json",
-      dom_id: "#swagger-ui",
-      deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
-      layout: "BaseLayout",
-    });
-  </script>
-</body>
-</html>`);
 });
 
 // ─── SPA fallback (SEC-002: nonce injection) ─────────────────────────────────
