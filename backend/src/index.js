@@ -230,7 +230,7 @@ app.get("/api/docs", (req, res) => {
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" nonce="${nonce}"></script>
   <script nonce="${nonce}">
     SwaggerUIBundle({
-      url: "/api/v1/openapi.json",
+      url: "${API_PREFIX}/openapi.json",
       dom_id: "#swagger-ui",
       deepLinking: true,
       presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
