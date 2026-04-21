@@ -70,7 +70,7 @@ export const spec = {
     "/tests/{testId}/fix": { parameters: [P("testId")], post: { tags: ["Tests"], summary: "AI-fix (SSE)", responses: ok("SSE stream") } },
     "/tests/{testId}/apply-fix": { parameters: [P("testId")], post: { tags: ["Tests"], summary: "Apply fix", responses: ok() } },
     "/projects/{id}/crawl": { parameters: pid, post: { tags: ["Runs"], summary: "Start crawl", responses: ok() } },
-    "/projects/{id}/run": { parameters: pid, post: { tags: ["Runs"], summary: "Run approved tests", responses: ok() } },
+    "/projects/{id}/run": { parameters: pid, post: { tags: ["Runs"], summary: "Run approved tests", requestBody: { content: { "application/json": { schema: { type: "object", properties: { device: { type: "string", description: "Playwright device name (DIF-003)" }, locale: { type: "string", description: "BCP 47 locale (AUTO-007)", example: "fr-FR" }, timezoneId: { type: "string", description: "IANA timezone (AUTO-007)", example: "Europe/Paris" }, geolocation: { type: "object", properties: { latitude: { type: "number" }, longitude: { type: "number" } }, description: "GPS coordinates (AUTO-007)" } } } } } }, responses: ok() } },
     "/projects/{id}/runs": { parameters: pid, get: { tags: ["Runs"], summary: "List runs", responses: ok() } },
     "/runs/{runId}": { parameters: [P("runId")], get: { tags: ["Runs"], summary: "Get run", responses: ok() } },
     "/runs/{runId}/abort": { parameters: [P("runId")], post: { tags: ["Runs"], summary: "Abort", responses: ok() } },

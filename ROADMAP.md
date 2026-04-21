@@ -753,7 +753,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### AUTO-007 — Geolocation / locale / timezone testing 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete | **Effort:** S | **Source:** Competitive Gap Analysis
 
 **Problem:** `executeTest.js:195` sets `permissions: ["geolocation"]` but never sets an actual geolocation value, locale, or timezone. Playwright supports full geolocation, locale, and timezone context options. For international applications, locale-sensitive UI behaviour is essential to test.
 

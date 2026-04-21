@@ -175,7 +175,10 @@ function formatTestError(err) {
  * @param {number}  stepIndex
  * @param {number}  runStart     - `Date.now()` when the run started.
  * @param {Object}  [opts]
- * @param {string}  [opts.device] - DIF-003: Playwright device name (e.g. `"iPhone 14"`).
+ * @param {string}  [opts.device]     - DIF-003: Playwright device name (e.g. `"iPhone 14"`).
+ * @param {string}  [opts.locale]     - AUTO-007: BCP 47 locale (e.g. `"fr-FR"`).
+ * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
+ * @param {Object}  [opts.geolocation] - AUTO-007: `{ latitude, longitude }`.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -201,6 +204,11 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   const deviceDescriptor = resolveDevice(opts.device);
   const effectiveViewport = deviceDescriptor?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
 
+  // AUTO-007: Resolve locale, timezone, and geolocation from run config
+  const contextLocale = opts.locale || deviceDescriptor?.locale || undefined;
+  const contextTimezone = opts.timezoneId || undefined;
+  const contextGeolocation = opts.geolocation || undefined;
+
   const context = await browser.newContext({
     // Spread device descriptor first so explicit overrides below take precedence
     ...(deviceDescriptor || {}),
@@ -212,6 +220,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     ignoreHTTPSErrors: true,
     // Enable downloads so page.waitForEvent('download') works (#42)
     acceptDownloads: true,
+    // AUTO-007: Locale, timezone, and geolocation context options
+    ...(contextLocale ? { locale: contextLocale } : {}),
+    ...(contextTimezone ? { timezoneId: contextTimezone } : {}),
+    ...(contextGeolocation ? { geolocation: contextGeolocation } : {}),
   });
 
   const page = await context.newPage();

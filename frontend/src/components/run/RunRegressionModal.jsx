@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, X, RefreshCw, Smartphone } from "lucide-react";
+import { Play, X, RefreshCw, Smartphone, Globe } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
 
@@ -21,6 +21,38 @@ const DEVICE_PRESETS = [
   { label: "Desktop Firefox HiDPI", value: "Desktop Firefox HiDPI" },
 ];
 
+// AUTO-007: Common locale + timezone presets for the run modal.
+const LOCALE_PRESETS = [
+  { label: "Default", value: "" },
+  { label: "English (US)", value: "en-US" },
+  { label: "English (UK)", value: "en-GB" },
+  { label: "French", value: "fr-FR" },
+  { label: "German", value: "de-DE" },
+  { label: "Spanish", value: "es-ES" },
+  { label: "Portuguese (BR)", value: "pt-BR" },
+  { label: "Japanese", value: "ja-JP" },
+  { label: "Korean", value: "ko-KR" },
+  { label: "Chinese (Simplified)", value: "zh-CN" },
+  { label: "Arabic", value: "ar-SA" },
+  { label: "Hindi", value: "hi-IN" },
+];
+
+const TIMEZONE_PRESETS = [
+  { label: "Default", value: "" },
+  { label: "UTC", value: "UTC" },
+  { label: "US Eastern", value: "America/New_York" },
+  { label: "US Pacific", value: "America/Los_Angeles" },
+  { label: "London", value: "Europe/London" },
+  { label: "Paris", value: "Europe/Paris" },
+  { label: "Berlin", value: "Europe/Berlin" },
+  { label: "Tokyo", value: "Asia/Tokyo" },
+  { label: "Shanghai", value: "Asia/Shanghai" },
+  { label: "Sydney", value: "Australia/Sydney" },
+  { label: "São Paulo", value: "America/Sao_Paulo" },
+  { label: "Dubai", value: "Asia/Dubai" },
+  { label: "Mumbai", value: "Asia/Kolkata" },
+];
+
 /**
  * Shared modal for running regression tests for a project.
  * Replaces the duplicate RunAllModal (Tests.jsx) and RunModal (Runs.jsx).
@@ -33,6 +65,8 @@ const DEVICE_PRESETS = [
 export default function RunRegressionModal({ projects, onClose, defaultProjectId }) {
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
   const [device, setDevice] = useState("");
+  const [locale, setLocale] = useState("");
+  const [timezoneId, setTimezoneId] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -47,8 +81,11 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
     setError(null);
     setRunning(true);
     try {
-      const body = device ? { device } : undefined;
-      const { runId } = await api.runTests(projectId, body);
+      const body = {};
+      if (device) body.device = device;
+      if (locale) body.locale = locale;
+      if (timezoneId) body.timezoneId = timezoneId;
+      const { runId } = await api.runTests(projectId, Object.keys(body).length > 0 ? body : undefined);
       onClose();
       navigate(`/runs/${runId}`);
     } catch (err) {
@@ -111,6 +148,42 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
               <option key={d.value} value={d.value}>{d.label}</option>
             ))}
           </select>
+        </div>
+
+        {/* AUTO-007: Locale and timezone selectors */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <Globe size={13} />
+              Locale
+            </label>
+            <select
+              className="input"
+              value={locale}
+              onChange={(e) => setLocale(e.target.value)}
+              style={{ height: 38 }}
+            >
+              {LOCALE_PRESETS.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <Globe size={13} />
+              Timezone
+            </label>
+            <select
+              className="input"
+              value={timezoneId}
+              onChange={(e) => setTimezoneId(e.target.value)}
+              style={{ height: 38 }}
+            >
+              {TIMEZONE_PRESETS.map((tz) => (
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {error && (

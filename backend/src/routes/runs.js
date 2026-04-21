@@ -144,8 +144,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  // Extract parallel workers and device emulation from request body / dials config
-  const { dialsConfig, device } = req.body || {};
+  // Extract parallel workers, device emulation, and locale/geo from request body / dials config
+  const { dialsConfig, device, locale, timezoneId, geolocation } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
@@ -183,7 +183,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, device: device || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -194,7 +194,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, device, signal }),
+      (signal) => runTests(project, tests, run, { parallelWorkers, device, locale, timezoneId, geolocation, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

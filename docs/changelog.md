@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs**: `TODO(AUTO-005)` guard comments on `fireNotifications` callsites in `runs.js` — documents that notifications must be gated behind retry exhaustion when test-level retry (AUTO-005) is implemented (#97)
 - **Docs**: `AGENT.md` repository list updated — added missing `apiKeyRepo` and `verificationTokenRepo` to both the directory tree and Repositories list (#97)
 - **API**: OpenAPI 3.1 specification served at `GET /api/v1/openapi.json`; interactive Swagger UI at `/api/docs` using CDN-hosted swagger-ui-dist (INF-004) (#97)
+- **Runner**: Geolocation, locale, and timezone testing — pass optional `locale` (BCP 47), `timezoneId` (IANA), and `geolocation` (`{latitude, longitude}`) in run config; applied to the Playwright browser context so tests execute under the specified international settings; locale/timezone dropdowns added to the Run Regression modal (AUTO-007) (#97)
 
 ## [1.6.0] — 2026-04-19
 
