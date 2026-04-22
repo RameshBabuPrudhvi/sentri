@@ -18,7 +18,7 @@
  */
 
 import { API_BASE, API_PATH, parseJsonResponse } from "./utils/apiBase.js";
-import { getCsrfToken } from "./utils/csrf.js";
+import { getCsrfToken, setCsrfToken } from "./utils/csrf.js";
 
 /** @type {string} Full base URL for API endpoints. Derived from {@link API_PATH} in `apiBase.js`. */
 const BASE = API_PATH;
@@ -88,6 +88,12 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
     throw err;
   }
   clearTimeout(timer);
+
+  // Cross-origin: capture the CSRF token from the response header so
+  // subsequent mutating requests can include it.  In same-origin deploys
+  // this header is absent and setCsrfToken is a no-op.
+  const csrfHeader = res.headers.get("X-CSRF-Token");
+  if (csrfHeader) setCsrfToken(csrfHeader);
 
   if (res.status === 401 && !opts.skipUnauthorizedRedirect) {
     handleUnauthorized();
@@ -346,6 +352,8 @@ export const api = {
     }
     // Cross-origin: fetch with credentials and trigger Blob download
     const res = await fetch(url, { credentials: "include" });
+    const csrfHdr = res.headers.get("X-CSRF-Token");
+    if (csrfHdr) setCsrfToken(csrfHdr);
     if (res.status === 401) { handleUnauthorized(); throw new Error("Session expired."); }
     if (!res.ok) throw new Error(`Export failed (${res.status})`);
     const blob = await res.blob();
@@ -439,6 +447,9 @@ export const api = {
       },
       credentials: "include",
     });
+    // Capture CSRF token from response header (cross-origin support)
+    const csrfHdr = res.headers.get("X-CSRF-Token");
+    if (csrfHdr) setCsrfToken(csrfHdr);
     if (res.status === 401) {
       handleUnauthorized();
       throw new Error("Session expired. Please sign in again.");
@@ -517,6 +528,9 @@ export const api = {
       credentials: "include",
       signal,
     });
+    // Capture CSRF token from response header (cross-origin support)
+    const csrfHeader = res.headers.get("X-CSRF-Token");
+    if (csrfHeader) setCsrfToken(csrfHeader);
     if (res.status === 401) {
       handleUnauthorized();
       throw new Error("Session expired. Please sign in again.");
@@ -589,6 +603,9 @@ export const api = {
       credentials: "include",
       signal,
     });
+    // Capture CSRF token from response header (cross-origin support)
+    const csrfHeader = res.headers.get("X-CSRF-Token");
+    if (csrfHeader) setCsrfToken(csrfHeader);
     if (res.status === 401) {
       handleUnauthorized();
       throw new Error("Session expired. Please sign in again.");

@@ -92,6 +92,10 @@ if (corsOrigin === "*" && process.env.NODE_ENV === "production") {
 app.use(cors({
   origin: corsOrigin === "*" ? true : corsOrigin.split(",").map(o => o.trim()),
   credentials: true,
+  // Expose the CSRF token response header so the frontend can read it via
+  // fetch().  In cross-origin deployments document.cookie cannot see cookies
+  // set by the backend domain, so the token is echoed in this header instead.
+  exposedHeaders: ["X-CSRF-Token"],
 }));
 
 // ─── Cross-origin cookie helper ──────────────────────────────────────────────
@@ -209,10 +213,19 @@ export function csrfMiddleware(req, res, next) {
     // cookie the CSRF token can never expire before the auth session does.
     // The CSRF token is not a secret — it's Non-HttpOnly by design so JS can
     // read it for the double-submit header. A long-lived cookie is safe here.
-    res.setHeader("Set-Cookie",
+    res.appendHeader("Set-Cookie",
       `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/${cookieSameSite()}`
     );
     req.cookies[CSRF_COOKIE_NAME] = csrfToken; // make it available for this request
+  }
+
+  // Cross-origin deployments (e.g. GitHub Pages + Render): the _csrf cookie is
+  // set on the backend's domain, so `document.cookie` on the frontend origin
+  // cannot read it.  Expose the token in a custom response header that the
+  // frontend can read via `fetch()` response headers.  The header is listed in
+  // Access-Control-Expose-Headers so it survives CORS.
+  if (isCrossOrigin) {
+    res.setHeader("X-CSRF-Token", csrfToken);
   }
 
   // Step 2: Validate the header on mutating requests.
