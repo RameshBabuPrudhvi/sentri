@@ -17,6 +17,9 @@ import { structuredLog } from "../utils/logFormatter.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import { computeAndPersistFlakyScores } from "../utils/flakyDetector.js";
 
+/** Maximum time the AI feedback loop is allowed to run before being abandoned. */
+const FEEDBACK_TIMEOUT_MS = parseInt(process.env.FEEDBACK_TIMEOUT_MS, 10) || 60_000;
+
 /**
  * runFeedbackLoop(run, tests, signal)
  *
@@ -25,6 +28,10 @@ import { computeAndPersistFlakyScores } from "../utils/flakyDetector.js";
  *   - There are no failures
  *   - The run was aborted
  *   - No AI provider is configured
+ *   - The AI provider is degraded (rate-limited / circuit-broken)
+ *
+ * The AI portion is wrapped in a timeout (FEEDBACK_TIMEOUT_MS, default 60s)
+ * so it can never block run completion indefinitely.
  *
  * @param {object}       run    — mutable run record
  * @param {Array}        tests  — the test objects that were executed
@@ -44,8 +51,17 @@ export async function runFeedbackLoop(run, tests, signal) {
   if (run.failed === 0 || isRunAborted(run, signal)) return;
 
   try {
-    const { hasProvider } = await import("../aiProvider.js");
+    const { hasProvider, isProviderDegraded } = await import("../aiProvider.js");
     if (!hasProvider()) return;
+
+    // Skip AI feedback when the provider is degraded (rate-limited primary with
+    // a sticky fallback active, or circuit breaker open).  The feedback loop
+    // makes multiple sequential AI calls that would each burn minutes retrying
+    // the rate-limited provider, blocking run completion.
+    if (isProviderDegraded() || run.rateLimitError) {
+      log(run, `⏭️  Skipping AI feedback loop — provider is degraded (rate limit active). Failure analysis logged above.`);
+      return;
+    }
 
     structuredLog("feedback.start", { runId: run.id, failures: run.failed });
     log(run, `🔄 Feedback loop: analyzing ${run.failed} failure(s)...`);
@@ -77,7 +93,14 @@ export async function runFeedbackLoop(run, tests, signal) {
       log(run, `📊 Failure breakdown: ${breakdown}`);
     }
 
-    const feedback = await applyFeedbackLoop(run, { signal });
+    // Wrap the AI-heavy feedback loop in a timeout so it can never block run
+    // completion indefinitely (e.g. when Ollama hangs on an oversized prompt).
+    const feedback = await Promise.race([
+      applyFeedbackLoop(run, { signal }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Feedback loop timed out after ${FEEDBACK_TIMEOUT_MS / 1000}s`)), FEEDBACK_TIMEOUT_MS)
+      ),
+    ]);
     structuredLog("feedback.complete", { runId: run.id, improved: feedback.improved, skipped: feedback.skipped, failures: run.failed });
     if (feedback.improved > 0) {
       logSuccess(run, `Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);

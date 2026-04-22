@@ -16,7 +16,7 @@
  * - {@link generateText} — Single-shot text generation.
  * - {@link streamText} — Token-streaming text generation (Anthropic/OpenAI; fallback for others).
  * - {@link parseJSON} — Parse AI response text as JSON (strips markdown fences).
- * - {@link getProvider}, {@link hasProvider}, {@link isLocalProvider}, {@link getProviderName}, {@link getProviderMeta} — Provider detection.
+ * - {@link getProvider}, {@link hasProvider}, {@link isLocalProvider}, {@link isProviderDegraded}, {@link getProviderName}, {@link getProviderMeta} — Provider detection.
  * - {@link setRuntimeKey}, {@link setRuntimeOllama}, {@link setActiveProvider} — Runtime configuration (Settings page).
  * - {@link getConfiguredKeys} — Masked key status for the Settings UI.
  * - {@link getSupportedProviders} — All provider names/models for the UI (derived from runtime config).
@@ -50,6 +50,18 @@ let runtimeOllamaDisabled = false;
 // without re-entering keys. Cleared when the selected provider loses its key.
 let runtimeActiveProvider = null;
 
+// ── Sticky fallback override ──────────────────────────────────────────────────
+// When a rate-limit fallback succeeds, this is set to the fallback provider so
+// all subsequent generateText() calls in the same pipeline skip the rate-limited
+// primary and go directly to the working fallback.  Auto-expires after
+// STICKY_FALLBACK_TTL_MS so normal provider selection resumes once the rate
+// limit window resets.  Cleared by setActiveProvider() (user explicitly picks
+// a provider via the dropdown) and by setRuntimeKey() (user enters a new key).
+let _stickyFallbackProvider = null;
+let _stickyFallbackExpiry   = 0;
+
+const STICKY_FALLBACK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 /**
  * Override the active provider selection (used by the quick-switch dropdown).
  * The provider must already have a valid key/config — this does not set any key.
@@ -57,6 +69,9 @@ let runtimeActiveProvider = null;
  */
 export function setActiveProvider(provider) {
   runtimeActiveProvider = provider || null;
+  // User explicitly chose a provider — clear any sticky fallback
+  _stickyFallbackProvider = null;
+  _stickyFallbackExpiry   = 0;
 }
 
 // Maps cloud provider IDs to their env-var names (single source of truth)
@@ -105,6 +120,9 @@ export function setRuntimeKey(provider, key) {
     circuitBreakers[provider].failures = 0;
     circuitBreakers[provider].disabledUntil = 0;
   }
+  // Clear sticky fallback — user is configuring a provider, let detection re-evaluate
+  _stickyFallbackProvider = null;
+  _stickyFallbackExpiry   = 0;
   try {
     if (key) {
       apiKeyRepo.set(provider, key);
@@ -240,6 +258,21 @@ function detectProvider() {
     runtimeActiveProvider = null;
   }
 
+  // ── Sticky fallback from a previous rate-limit event ─────────────────────
+  // When generateText() falls back to another provider, it pins the fallback
+  // here so subsequent calls skip the rate-limited primary.  Auto-expires
+  // after STICKY_FALLBACK_TTL_MS.
+  if (_stickyFallbackProvider && Date.now() < _stickyFallbackExpiry) {
+    if (isProviderUsable(_stickyFallbackProvider)) return _stickyFallbackProvider;
+    // Fallback no longer usable — clear and fall through
+    _stickyFallbackProvider = null;
+    _stickyFallbackExpiry   = 0;
+  } else if (_stickyFallbackProvider) {
+    // Expired — clear
+    _stickyFallbackProvider = null;
+    _stickyFallbackExpiry   = 0;
+  }
+
   // ── AI_PROVIDER env var (explicit static config) ─────────────────────────
   const forced = process.env.AI_PROVIDER?.toLowerCase();
   if (forced) {
@@ -264,6 +297,18 @@ export function getProvider()     { try { return detectProvider(); } catch { ret
 export function hasProvider()     { return getProvider() !== null; }
 /** @returns {boolean} `true` if the active provider is Ollama (local). */
 export function isLocalProvider() { return getProvider() === "local"; }
+/**
+ * `true` when the AI provider is operating in a degraded state — either a
+ * sticky fallback is active (primary was rate-limited) or the primary
+ * provider's circuit breaker is open.  Used by the feedback loop to skip
+ * expensive AI calls that would block run completion.
+ * @returns {boolean}
+ */
+export function isProviderDegraded() {
+  if (_stickyFallbackProvider && Date.now() < _stickyFallbackExpiry) return true;
+  const primary = getProvider();
+  return primary ? isCircuitBreakerOpen(primary) : false;
+}
 /** @returns {string} Human-readable provider name (e.g. `"Claude Sonnet"`), or `"No provider configured"`. */
 export function getProviderName() {
   const p = getProvider();
@@ -634,13 +679,16 @@ function normaliseMessages(promptOrMessages) {
 }
 
 // ── FEA-003: Circuit breaker per provider ─────────────────────────────────────
-// When a provider hits 3 consecutive rate-limit failures, disable it for 5 min.
-// This prevents burning retry budget on a provider that is clearly overloaded.
+// When a provider hits a rate-limit failure that survived all internal retries
+// in withRetry(), disable it for 5 min.  Threshold is 1 (not 3) because
+// withRetry() already retried MAX_RETRIES times internally — the error that
+// reaches generateText() represents a confirmed, durable rate limit, not a
+// transient blip.
 
 /** @type {Object<string, {failures: number, disabledUntil: number}>} */
 const circuitBreakers = {};
 
-const CIRCUIT_BREAKER_THRESHOLD = 3;
+const CIRCUIT_BREAKER_THRESHOLD = 1;
 const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -850,6 +898,12 @@ export async function generateText(prompt, options) {
       try {
         const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
         recordProviderSuccess(fallbackProvider);
+        // ── Sticky fallback: pin this provider so subsequent calls in the same
+        // pipeline skip the rate-limited primary entirely.  Expires after
+        // STICKY_FALLBACK_TTL_MS so normal selection resumes once the quota resets.
+        _stickyFallbackProvider = fallbackProvider;
+        _stickyFallbackExpiry   = Date.now() + STICKY_FALLBACK_TTL_MS;
+        console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
         if (isRateLimitError(fallbackErr)) {
