@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-04-22
+
 ### Changed
 - **Frontend**: `ForgotPassword.jsx` and `Login.jsx` now use `api.js` methods (`api.forgotPassword`, `api.resetPassword`, `api.verifyEmail`, `api.oauthCallback`, `api.login`, `api.register`) instead of raw `fetch()` — enforces AGENT.md convention that all backend calls go through `api.js` for CSRF injection, 401 handling, and timeout logic (#97)
 - **Frontend**: `api.js` — added `login`, `register`, `forgotPassword`, `resetPassword`, `verifyEmail`, and `oauthCallback` methods; added explanatory comment on `exportAccountData` documenting why it intentionally bypasses `req()` (#97)
