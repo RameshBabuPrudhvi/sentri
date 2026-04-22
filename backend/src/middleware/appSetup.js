@@ -213,7 +213,11 @@ export function csrfMiddleware(req, res, next) {
     // cookie the CSRF token can never expire before the auth session does.
     // The CSRF token is not a secret — it's Non-HttpOnly by design so JS can
     // read it for the double-submit header. A long-lived cookie is safe here.
-    res.appendHeader("Set-Cookie",
+    // Use Express's res.append() (available since Express 4.x) instead of
+    // Node's res.appendHeader() (added in Node 18.3.0) to avoid breaking
+    // deployments on older Node versions.  res.append() correctly appends
+    // to existing Set-Cookie headers without overwriting them.
+    res.append("Set-Cookie",
       `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/${cookieSameSite()}`
     );
     req.cookies[CSRF_COOKIE_NAME] = csrfToken; // make it available for this request

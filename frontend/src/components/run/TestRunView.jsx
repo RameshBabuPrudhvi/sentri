@@ -494,7 +494,21 @@ export default function TestRunView({ run, frames = [] }) {
           </div>
         </div>
 
-        <div ref={listRef} aria-live="polite" style={{ overflowY: "auto", flex: 1 }}>
+        {/* MNT-007: Visually-hidden live region announces only the latest
+            result to screen readers, avoiding the excessive noise that
+            aria-live on the full scrolling list would cause. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}
+        >
+          {results.length > 0 && (() => {
+            const latest = results[results.length - 1];
+            const name = cleanTestName(latest.testName || latest.name) || `Test ${results.length}`;
+            return `${name}: ${latest.status}. ${results.length} of ${total} completed.`;
+          })()}
+        </div>
+        <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
           {results.map((result, ci) => (
             <TestCaseRow
               key={ci}

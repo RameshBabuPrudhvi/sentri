@@ -257,6 +257,54 @@ export default function Dashboard() {
             );
           })()}
 
+          {/* ── Row 3b: Top Flaky Tests panel (DIF-004) ── */}
+          {(data?.topFlakyTests?.length ?? 0) > 0 && (
+            <div className="card card-padded mb-md">
+              <div className="flex-between" style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <AlertTriangle size={14} color="var(--amber)" />
+                  <span className="section-title" style={{ marginBottom: 0 }}>Top Flaky Tests</span>
+                </div>
+                <span className="text-xs text-muted">{data.topFlakyTests.length} test{data.topFlakyTests.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="flex-col gap-sm">
+                {data.topFlakyTests.map(ft => (
+                  <div
+                    key={ft.testId}
+                    className="list-row"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/tests/${ft.testId}`)}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, fontSize: "0.875rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ft.name}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <div style={{
+                        width: 60, height: 6, background: "var(--bg3)", borderRadius: 99, overflow: "hidden",
+                      }}>
+                        <div style={{
+                          height: "100%", width: `${ft.flakyScore}%`,
+                          background: ft.flakyScore >= 40 ? "var(--red)" : "var(--amber)",
+                          borderRadius: 99, transition: "width 0.4s ease",
+                        }} />
+                      </div>
+                      <span style={{
+                        fontSize: "0.75rem", fontWeight: 700, fontFamily: "var(--font-mono)",
+                        color: ft.flakyScore >= 40 ? "var(--red)" : "var(--amber)",
+                        minWidth: 32, textAlign: "right",
+                      }}>
+                        {ft.flakyScore}%
+                      </span>
+                      <ArrowRight size={14} color="var(--text3)" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── Row 4: Run Status Distribution ── */}
           {data?.totalRuns > 0 && (() => {
             const segs = [

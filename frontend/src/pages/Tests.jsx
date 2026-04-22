@@ -4,7 +4,7 @@ import {
   Search, Download, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
   AlertCircle, ArrowUpDown, Trash2,
-  ThumbsUp, ThumbsDown,
+  ThumbsUp, ThumbsDown, AlertTriangle,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
@@ -16,7 +16,7 @@ import ModalShell from "../components/shared/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
 import { exportCsv } from "../utils/exportCsv.js";
-import { StatusBadge, ScenarioBadges } from "../components/shared/TestBadges.jsx";
+import { StatusBadge, ScenarioBadges, StaleBadge, FlakyBadge } from "../components/shared/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination from "../components/shared/TablePagination.jsx";
 
@@ -213,11 +213,13 @@ export default function Tests() {
   const filter        = searchParams.get("status")   || "All";
   const reviewFilter  = searchParams.get("review")   || "All Tests";
   const categoryFilter= searchParams.get("category") || "All";
+  const staleFilter   = searchParams.get("stale")    === "true";
 
   const setSearch        = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("q", v) : n.delete("q"); return n; }, { replace: true }), [setSearchParams]);
   const setFilter        = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("status", v) : n.delete("status"); return n; }, { replace: true }), [setSearchParams]);
   const setReviewFilter  = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All Tests" ? n.set("review", v) : n.delete("review"); return n; }, { replace: true }), [setSearchParams]);
   const setCategoryFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("category", v) : n.delete("category"); return n; }, { replace: true }), [setSearchParams]);
+  const setStaleFilter   = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("stale", "true") : n.delete("stale"); return n; }, { replace: true }), [setSearchParams]);
 
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -305,7 +307,8 @@ export default function Tests() {
         categoryFilter === "All" ? true :
         categoryFilter === "API" ? isApiTest(t) :
         categoryFilter === "UI" ? !isApiTest(t) : true;
-      return matchReview && matchSearch && matchFilter && matchCategory;
+      const matchStale = !staleFilter || t.isStale;
+      return matchReview && matchSearch && matchFilter && matchCategory && matchStale;
     });
     // Sorting
     if (sortCol) {
@@ -323,14 +326,14 @@ export default function Tests() {
       });
     }
     return list;
-  }, [tests, reviewFilter, search, filter, categoryFilter, sortCol, sortDir, projMap]);
+  }, [tests, reviewFilter, search, filter, categoryFilter, staleFilter, sortCol, sortDir, projMap]);
 
   // ── Pagination ─────────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Reset page when filters change
-  useEffect(() => { setPage(1); }, [search, filter, reviewFilter, categoryFilter]);
+  useEffect(() => { setPage(1); }, [search, filter, reviewFilter, categoryFilter, staleFilter]);
 
   // ── Sorting ────────────────────────────────────────────────────────────────
   function toggleSort(col) {
@@ -827,13 +830,46 @@ export default function Tests() {
               );
             })}
 
+            {/* Divider */}
+            <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
+
+            {/* Stale filter (AUTO-013) */}
+            <button
+              title={`Stale tests · ${tests.filter(t => t.isStale).length} test${tests.filter(t => t.isStale).length !== 1 ? "s" : ""} · click again to clear`}
+              onClick={() => setStaleFilter(!staleFilter)}
+              style={{
+                position: "relative",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "0 8px", height: 28, borderRadius: 6, border: "none",
+                cursor: "pointer", transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+                fontSize: "0.68rem", fontWeight: 600, whiteSpace: "nowrap", gap: 4,
+                background: staleFilter ? "rgba(100,116,139,0.12)" : "transparent",
+                color:      staleFilter ? "#64748b"                : "var(--text3)",
+                boxShadow:  staleFilter ? "0 0 0 1.5px #64748b55"  : "none",
+              }}
+            >
+              <Clock size={12} /> Stale
+              {staleFilter && (
+                <span style={{
+                  marginLeft: 2,
+                  minWidth: 14, height: 14, borderRadius: 7,
+                  background: "#64748b", color: "#fff",
+                  fontSize: "0.55rem", fontWeight: 700,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  lineHeight: 1, padding: "0 2px",
+                }}>
+                  {tests.filter(t => t.isStale).length > 99 ? "99+" : tests.filter(t => t.isStale).length}
+                </span>
+              )}
+            </button>
+
             {/* Clear-all button — only visible when any filter is active */}
-            {(filter !== "All" || reviewFilter !== "All Tests" || categoryFilter !== "All") && (
+            {(filter !== "All" || reviewFilter !== "All Tests" || categoryFilter !== "All" || staleFilter) && (
               <>
                 <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 3px", flexShrink: 0 }} />
                 <button
                   title="Clear all filters"
-                  onClick={() => { setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); }}
+                  onClick={() => { setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); setStaleFilter(false); }}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 28, height: 28, borderRadius: 6, border: "none",
@@ -862,7 +898,7 @@ export default function Tests() {
             reviewFilter={reviewFilter}
             onCreateTest={() => setShowCreateModal(true)}
             onClearSearch={() => setSearch("")}
-            onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); }}
+            onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); setStaleFilter(false); }}
             navigate={navigate}
           />
         ) : (
