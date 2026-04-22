@@ -1,4 +1,4 @@
--- Migration 006: Stale test detection (AUTO-013) + Flaky score (DIF-004)
+-- 005: Stale test detection (AUTO-013) + Flaky score (DIF-004)
 --
 -- isStale: boolean flag for tests not run in STALE_TEST_DAYS (default 90).
 --   A weekly cron job in scheduler.js detects and flags stale tests.
