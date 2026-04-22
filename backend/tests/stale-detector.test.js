@@ -30,9 +30,10 @@ const db = getDatabase();
 function resetDb() {
   db.exec("DELETE FROM tests");
   db.exec("DELETE FROM projects");
-  db.exec("DELETE FROM counters");
-  db.exec("INSERT OR REPLACE INTO counters(name, value) VALUES ('test', 0)");
-  db.exec("INSERT OR REPLACE INTO counters(name, value) VALUES ('project', 0)");
+  // Reset only the counters we use — do NOT delete all counters or the
+  // smoke test that runs after the test suite will fail (missing 'workspace'
+  // counter seeded by migration 004).
+  db.exec("UPDATE counters SET value = 0 WHERE name IN ('test', 'project')");
 }
 
 const now = new Date().toISOString();
