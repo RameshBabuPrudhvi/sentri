@@ -476,14 +476,16 @@ export function bulkSetStale(testIds, isStale) {
  * Called before re-evaluating staleness so previously-stale tests that
  * have since been run are unflagged.
  * @param {string[]} projectIds
+ * @returns {number} Number of tests that had their stale flag cleared.
  */
 export function clearStaleByProjectIds(projectIds) {
-  if (!projectIds || projectIds.length === 0) return;
+  if (!projectIds || projectIds.length === 0) return 0;
   const db = getDatabase();
   const placeholders = projectIds.map(() => "?").join(", ");
-  db.prepare(
+  const info = db.prepare(
     `UPDATE tests SET isStale = 0 WHERE projectId IN (${placeholders}) AND isStale = 1 AND deletedAt IS NULL`
   ).run(...projectIds);
+  return info.changes;
 }
 
 // ─── Counts ───────────────────────────────────────────────────────────────────

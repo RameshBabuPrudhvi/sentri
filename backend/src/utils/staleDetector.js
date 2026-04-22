@@ -36,7 +36,7 @@ export function detectStaleTests(projectIds) {
   if (ids.length === 0) return { flagged: 0, cleared: 0, staleDays: STALE_DAYS };
 
   // Step 1: Clear stale flags so re-run tests are unflagged
-  testRepo.clearStaleByProjectIds(ids);
+  const cleared = testRepo.clearStaleByProjectIds(ids);
 
   // Step 2: Find tests that are stale by age
   const staleIds = testRepo.findStaleByAge(ids, STALE_DAYS);
@@ -47,8 +47,8 @@ export function detectStaleTests(projectIds) {
   }
 
   console.log(formatLogLine("info", null,
-    `[stale-detector] Flagged ${staleIds.length} stale test(s) across ${ids.length} project(s) (threshold: ${STALE_DAYS} days)`
+    `[stale-detector] Flagged ${staleIds.length} stale test(s), cleared ${cleared} across ${ids.length} project(s) (threshold: ${STALE_DAYS} days)`
   ));
 
-  return { flagged: staleIds.length, cleared: 0, staleDays: STALE_DAYS };
+  return { flagged: staleIds.length, cleared, staleDays: STALE_DAYS };
 }

@@ -21,10 +21,16 @@ const VARIANTS = {
 export default function OutcomeBanner({ variant = "success", title, subtitle, style, children }) {
   const v = VARIANTS[variant] || VARIANTS.success;
 
+  // WAI-ARIA: role="alert" implies aria-live="assertive" — use it for
+  // error/warning (urgent).  role="status" implies aria-live="polite" —
+  // use it for success (non-urgent).  Never combine role="alert" with
+  // aria-live="polite" as they contradict each other.
+  const isUrgent = variant === "error" || variant === "warning";
+
   return (
     <div
-      role="alert"
-      aria-live="polite"
+      role={isUrgent ? "alert" : "status"}
+      aria-live={isUrgent ? "assertive" : "polite"}
       style={{
         padding: "16px 18px", background: v.bg,
         border: `1px solid ${v.border}`, borderRadius: "var(--radius)",
