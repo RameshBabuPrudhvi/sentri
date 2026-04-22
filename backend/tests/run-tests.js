@@ -42,6 +42,8 @@ const files = [
   "tests/ai-fallback.test.js",
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
+  "tests/openapi.test.js",
+  "tests/locale-timezone.test.js",
 ];
 
 let passed = 0;

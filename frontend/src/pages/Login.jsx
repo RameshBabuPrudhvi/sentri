@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/layout/AppLogo.jsx";
-import { API_PATH, parseJsonResponse } from "../utils/apiBase.js";
 import { api } from "../api.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import "../styles/pages/login.css";
@@ -104,9 +103,7 @@ export default function Login() {
   async function handleVerifyToken(token) {
     setLoading(true); setError(""); setSuccess("");
     try {
-      const res = await fetch(`${API_PATH}/auth/verify?token=${encodeURIComponent(token)}`, { credentials: "include" });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "Verification failed");
+      const data = await api.verifyEmail(token);
       setSuccess(data.message || "Email verified successfully! You can now sign in.");
       setMode("login");
     } catch (e) { setError(e.message); }
@@ -137,9 +134,7 @@ export default function Login() {
       if (!returnedState || returnedState !== savedState) {
         throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
       }
-      const res = await fetch(`${API_PATH}/auth/${provider}/callback?code=${code}`, { credentials: "include" });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) throw new Error(data.error || "OAuth sign-in failed");
+      const data = await api.oauthCallback(provider, code);
       login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
     } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
@@ -172,16 +167,19 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const endpoint = mode === "login" ? `${API_PATH}/auth/login` : `${API_PATH}/auth/register`;
       const body = mode === "login" ? { email, password } : { name, email, password };
-      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
-      const data = await parseJsonResponse(res);
-      if (!res.ok) {
-        // SEC-001: Handle unverified email on login attempt
-        if (data.code === "EMAIL_NOT_VERIFIED" && data.email) {
-          setVerifyEmail(data.email);
+      let data;
+      try {
+        data = mode === "login" ? await api.login(body) : await api.register(body);
+      } catch (fetchErr) {
+        // SEC-001: Handle unverified email on login attempt.
+        // req() attaches the parsed response body as error.body so we can
+        // inspect the structured `code` field from the backend (stable API
+        // contract) instead of fragile string matching on the error message.
+        if (fetchErr.body?.code === "EMAIL_NOT_VERIFIED") {
+          setVerifyEmail(fetchErr.body.email || email);
         }
-        throw new Error(data.error || "Something went wrong");
+        throw fetchErr;
       }
       if (mode === "register") {
         if (data.requiresVerification) {

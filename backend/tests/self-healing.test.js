@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES } from "../src/selfHealing.js";
+import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, STRATEGY_VERSION } from "../src/selfHealing.js";
 
 function test(name, fn) {
   try {
@@ -145,6 +145,24 @@ test("SELF_HEALING_PROMPT_RULES lists page.selectOption as forbidden", () => {
 
 test("SELF_HEALING_PROMPT_RULES lists page.locator().check as forbidden", () => {
   assert.match(SELF_HEALING_PROMPT_RULES, /page\.locator\(\.\.\.\)\.check/);
+});
+
+// ── STRATEGY_VERSION consistency ─────────────────────────────────────────────
+
+console.log("\n🔢 STRATEGY_VERSION consistency");
+
+test("STRATEGY_VERSION equals expected value (bump this when strategies change)", () => {
+  // If this test fails, you changed the strategies array in selfHealing.js.
+  // Bump STRATEGY_VERSION in selfHealing.js and update the expected value here.
+  assert.equal(STRATEGY_VERSION, 3, "STRATEGY_VERSION changed — update this test after verifying the bump is intentional");
+});
+
+test("STRATEGY_VERSION is used server-side for hint scoping", () => {
+  // STRATEGY_VERSION is used in recordHealing() and getHealingHint() to
+  // scope healing hints by version. It is NOT injected into the runtime
+  // helper code — the runtime only uses __healingHints (pre-filtered).
+  assert.equal(typeof STRATEGY_VERSION, "number");
+  assert.ok(STRATEGY_VERSION > 0, "STRATEGY_VERSION must be a positive integer");
 });
 
 if (process.exitCode) process.exit(1);

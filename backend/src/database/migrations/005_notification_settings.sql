@@ -1,0 +1,6 @@
+-- Migration 005: intentionally empty (no-op)
+--
+-- This file was created during a migration renumbering attempt but reverted.
+-- It is kept as an empty migration so databases that already recorded
+-- "005_notification_settings" in schema_migrations do not encounter errors.
+-- The actual notification_settings schema lives in 004_notification_settings.sql.

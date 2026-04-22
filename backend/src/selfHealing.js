@@ -120,7 +120,7 @@ const HEALING_VISIBLE_WAIT_CAP = parseInt(process.env.HEALING_VISIBLE_WAIT_CAP, 
 // (e.g. adding/removing/reordering strategies in safeClick, safeFill, etc.).
 // Healing hints recorded with a different version are ignored so stale
 // strategyIndex values don't point to the wrong strategy after an upgrade.
-const STRATEGY_VERSION = 3;
+export const STRATEGY_VERSION = 3;
 
 /**
  * Generate the self-healing runtime helper code as a string for injection

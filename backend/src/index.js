@@ -52,6 +52,7 @@ import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
 import recycleBinRouter from "./routes/recycleBin.js";
 import workspacesRouter from "./routes/workspaces.js";
+import { spec as openapiSpec } from "./openapi.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
 // during incremental migration (runLogger.js, crawler.js, testRunner.js).
@@ -193,6 +194,53 @@ app.use(`${API_PREFIX}/auth`, authRouter);
 // WITHOUT requireAuth so CI pipelines can call it with a project token.
 app.use(API_PREFIX, triggerRouter);
 
+// ─── INF-004: OpenAPI spec + Swagger UI (public, no auth) ────────────────────
+// Mounted BEFORE requireAuth and the legacy /api redirect so they are reachable
+// by unauthenticated clients (Swagger UI, external tooling, Postman).
+app.get(`${API_PREFIX}/openapi.json`, (_req, res) => {
+  res.json(openapiSpec);
+});
+
+// GET /api/docs — interactive Swagger UI (no auth required).
+// Uses the public swagger-ui CDN. The inline <script> uses the per-request
+// CSP nonce so it passes the nonce-based CSP policy (SEC-002). External
+// scripts/styles from unpkg.com are allowed via the CSP override below.
+app.get("/api/docs", (req, res) => {
+  const nonce = res.locals.cspNonce || "";
+  // Override the global CSP for this single page to allow the CDN resources.
+  // This is scoped to /api/docs only — all other pages use the strict policy.
+  res.setHeader("Content-Security-Policy",
+    `default-src 'self'; ` +
+    `script-src 'self' 'nonce-${nonce}' https://unpkg.com; ` +
+    `style-src 'self' 'unsafe-inline' https://unpkg.com; ` +
+    `img-src 'self' data:; ` +
+    `connect-src 'self'; ` +
+    `frame-ancestors 'none'`
+  );
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sentri API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" nonce="${nonce}"></script>
+  <script nonce="${nonce}">
+    SwaggerUIBundle({
+      url: "${API_PREFIX}/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: "BaseLayout",
+    });
+  </script>
+</body>
+</html>`);
+});
+
 // All other API routes require a valid JWT token + workspace context (ACL-001).
 // workspaceScope injects req.workspaceId and req.userRole from the JWT or DB.
 app.use(`${API_PREFIX}/projects`, requireAuth, workspaceScope, projectsRouter);
@@ -296,7 +344,7 @@ app.get("/health/ready", async (_req, res) => {
 // Express's default 404 handler and return a proper JSON error instead of HTML.
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api/") || req.path.startsWith("/artifacts/")) return next();
-  if (req.path.startsWith("/health")) return next();
+  if (req.path.startsWith("/health") || req.path === "/api/docs") return next();
   serveIndexWithNonce(req, res);
 });
 

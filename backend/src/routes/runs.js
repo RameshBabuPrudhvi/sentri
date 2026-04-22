@@ -114,7 +114,10 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // FEA-001: Fire failure notifications — best-effort
+          // TODO(AUTO-005): When test-level retry is implemented, gate this call
+          // so notifications only fire after all retries are exhausted. Currently
+          // fires on first failure, which will cause premature alerts if retries
+          // are added without updating this callsite.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
@@ -141,8 +144,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  // Extract parallel workers and device emulation from request body / dials config
-  const { dialsConfig, device } = req.body || {};
+  // Extract parallel workers, device emulation, and locale/geo from request body / dials config
+  const { dialsConfig, device, locale, timezoneId, geolocation } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
 
@@ -180,7 +183,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, device: device || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -191,7 +194,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, device, signal }),
+      (signal) => runTests(project, tests, run, { parallelWorkers, device, locale, timezoneId, geolocation, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,
@@ -203,7 +206,10 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // FEA-001: Fire failure notifications — best-effort
+          // TODO(AUTO-005): When test-level retry is implemented, gate this call
+          // so notifications only fire after all retries are exhausted. Currently
+          // fires on first failure, which will cause premature alerts if retries
+          // are added without updating this callsite.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
@@ -265,9 +271,15 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
   } else if (workerController) {
-    // BullMQ-processed run: signal the worker's AbortController.
-    // The worker's catch block checks signal.aborted (set synchronously
-    // by controller.abort()) and skips terminal side-effects.
+    // BullMQ-processed run: write abort status to DB BEFORE signaling the
+    // worker to prevent a race where the worker's completion write overwrites
+    // the abort status between signal and the worker's catch block.
+    runRepo.update(req.params.runId, {
+      status: "aborted",
+      finishedAt: new Date().toISOString(),
+      duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
+      error: "Aborted by user",
+    });
     workerController.abort();
     workerAbortControllers.delete(req.params.runId);
   }
@@ -293,12 +305,17 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  runRepo.update(req.params.runId, {
-    status: "aborted",
-    finishedAt: new Date().toISOString(),
-    duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
-    error: "Aborted by user",
-  });
+  // For BullMQ runs (workerController path), the DB was already updated
+  // above before signaling the worker. For all other paths (in-process or
+  // stale runs with no live controller), write the abort status now.
+  if (!workerController) {
+    runRepo.update(req.params.runId, {
+      status: "aborted",
+      finishedAt: new Date().toISOString(),
+      duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
+      error: "Aborted by user",
+    });
+  }
   // Persist the updated results (with skipped entries) to SQLite
   if (liveRun.results) {
     runRepo.update(req.params.runId, { results: liveRun.results });
