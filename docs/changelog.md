@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tests**: Stale test detection and cleanup — approved tests not run in 90 days (configurable via `STALE_TEST_DAYS`) are automatically flagged as stale by a weekly background job; `isStale` badge shown in test lists; filter by stale tests in the Tests page; manual trigger via stale detector utility (AUTO-013) (#99)
+- **API**: `isStale` filter support on `GET /api/v1/projects/:id/tests?stale=true` — returns only stale tests for cleanup review (AUTO-013) (#99)
+- **DB**: Migration 006 — adds `isStale` boolean column to `tests` table with index (AUTO-013) (#99)
+
+### Fixed
+- **Auth**: CSRF token now works in cross-origin deployments (GitHub Pages + Render) — the `_csrf` cookie set by the backend domain was invisible to `document.cookie` on the frontend origin; backend now echoes the token in `X-CSRF-Token` response header with `Access-Control-Expose-Headers`, and the frontend caches it in memory via `setCsrfToken()` (#99)
+- **Auth**: CSRF `Set-Cookie` changed from `setHeader` to `appendHeader` — prevents the `_csrf` cookie from being overwritten by later cookie-setting code in the same response (#99)
+
+### Changed
+- **Accessibility**: `role="alert"` and `aria-live="polite"` added to `OutcomeBanner`, test error display in `TestRunView`, and test result list for screen reader announcements (MNT-007) (#99)
+
 ## [1.6.1] — 2026-04-22
 
 ### Changed

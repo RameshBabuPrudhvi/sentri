@@ -284,14 +284,17 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
           </div>
         )}
 
-        {/* Error */}
+        {/* Error — MNT-007: role="alert" announces failures to screen readers */}
         {result.status === "failed" && result.error && (
-          <div style={{
-            padding: "10px 14px", background: "var(--red-bg)", borderRadius: 8,
-            border: "1px solid #fca5a5", fontSize: "0.76rem", color: "var(--red)",
-            fontFamily: "var(--font-mono)", lineHeight: 1.6,
-            whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 12,
-          }}>
+          <div
+            role="alert"
+            style={{
+              padding: "10px 14px", background: "var(--red-bg)", borderRadius: 8,
+              border: "1px solid #fca5a5", fontSize: "0.76rem", color: "var(--red)",
+              fontFamily: "var(--font-mono)", lineHeight: 1.6,
+              whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 12,
+            }}
+          >
             <div style={{ fontWeight: 700, marginBottom: 6, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               Error
             </div>
@@ -491,7 +494,7 @@ export default function TestRunView({ run, frames = [] }) {
           </div>
         </div>
 
-        <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
+        <div ref={listRef} aria-live="polite" style={{ overflowY: "auto", flex: 1 }}>
           {results.map((result, ci) => (
             <TestCaseRow
               key={ci}

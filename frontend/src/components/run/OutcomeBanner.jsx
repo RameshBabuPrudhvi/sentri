@@ -22,13 +22,17 @@ export default function OutcomeBanner({ variant = "success", title, subtitle, st
   const v = VARIANTS[variant] || VARIANTS.success;
 
   return (
-    <div style={{
-      padding: "16px 18px", background: v.bg,
-      border: `1px solid ${v.border}`, borderRadius: "var(--radius)",
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      gap: 12, flexWrap: "wrap",
-      ...style,
-    }}>
+    <div
+      role="alert"
+      aria-live="polite"
+      style={{
+        padding: "16px 18px", background: v.bg,
+        border: `1px solid ${v.border}`, borderRadius: "var(--radius)",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12, flexWrap: "wrap",
+        ...style,
+      }}
+    >
       <div>
         <div style={{ fontWeight: 700, fontSize: "0.9rem", color: v.color, marginBottom: 3 }}>
           {title}

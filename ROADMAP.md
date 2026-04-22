@@ -855,7 +855,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### AUTO-013 — Stale test detection and cleanup 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete | **Effort:** S | **Source:** Competitive Gap Analysis
 
 **Problem:** Tests that haven't been run in 90 days, or that target pages which no longer appear in the site map, accumulate silently. `lastRunAt` exists on tests but is never used for lifecycle management. Stale tests inflate test counts and degrade suite signal quality.
 
@@ -1151,7 +1151,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-007 — ARIA live regions for real-time updates 🔵 Medium
 
-**Status:** 🔲 Planned (partially implemented in `ProviderBanner`) | **Effort:** S | **Source:** Quality Review (UX-06, UX-07)
+**Status:** ✅ Complete | **Effort:** S | **Source:** Quality Review (UX-06, UX-07)
 
 **Problem:** SSE-driven log streams, run status changes, and toast notifications update the DOM without announcing changes to screen readers. `ProviderBanner` already implements `role="alert"` and `aria-live="polite"` correctly — this pattern must be extended to the run log panel, run status badge, and modal components which currently lack it.
 

@@ -965,6 +965,7 @@ The following are **not yet implemented** but should be addressed before product
 | `DEMO_DAILY_CRAWLS` | No | `2` | Max crawls per user per day in demo mode |
 | `DEMO_DAILY_RUNS` | No | `3` | Max test runs per user per day in demo mode |
 | `DEMO_DAILY_GENERATIONS` | No | `5` | Max AI test generations per user per day in demo mode |
+| `STALE_TEST_DAYS` | No | `90` | Days since last run before an approved test is flagged stale (AUTO-013) |
 
 ---
 
