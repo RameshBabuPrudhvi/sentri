@@ -15,6 +15,7 @@ import { isRunAborted } from "../utils/abortHelper.js";
 import { log, logWarn, logSuccess } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
 import * as testRepo from "../database/repositories/testRepo.js";
+import { computeAndPersistFlakyScores } from "../utils/flakyDetector.js";
 
 /**
  * runFeedbackLoop(run, tests, signal)
@@ -30,6 +31,16 @@ import * as testRepo from "../database/repositories/testRepo.js";
  * @param {AbortSignal}  [signal]
  */
 export async function runFeedbackLoop(run, tests, signal) {
+  // DIF-004: Always compute flaky scores after a test run, even if all passed.
+  // This runs before the AI feedback loop since it's lightweight (no LLM calls).
+  try {
+    if (run.projectId) {
+      computeAndPersistFlakyScores(run.projectId);
+    }
+  } catch (err) {
+    logWarn(run, `Flaky score computation failed: ${err.message}`);
+  }
+
   if (run.failed === 0 || isRunAborted(run, signal)) return;
 
   try {

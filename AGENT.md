@@ -152,6 +152,7 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
 | `staleDetector.js` | `detectStaleTests(projectIds?)` | Flag approved tests not run in `STALE_TEST_DAYS` (default 90) as stale (AUTO-013). Called by the weekly cron job in `scheduler.js`. |
+| `flakyDetector.js` | `computeAndPersistFlakyScores(projectId)`, `getTopFlakyTests(projectIds, limit?)` | Compute flaky scores (0–100) from run history and persist to `tests.flakyScore` (DIF-004). Called after every test run via `feedbackIntegration.js`. |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 

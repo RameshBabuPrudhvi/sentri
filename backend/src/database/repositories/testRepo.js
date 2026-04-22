@@ -58,7 +58,7 @@ const INSERT_COLS = [
   "isJourneyTest", "journeyType", "assertionEnhanced", "reviewStatus",
   "reviewedAt", "promptVersion", "modelUsed", "linkedIssueKey", "tags",
   "generatedFrom", "isApiTest", "scenario", "codeRegeneratedAt",
-  "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale",
+  "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale", "flakyScore",
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
@@ -275,6 +275,7 @@ export function create(test) {
   if (params.priority == null) params.priority = "medium";
   if (params.codeVersion == null) params.codeVersion = 0;
   if (params.isStale == null) params.isStale = 0;
+  if (params.flakyScore == null) params.flakyScore = 0;
   db.prepare(INSERT_SQL).run(params);
 }
 

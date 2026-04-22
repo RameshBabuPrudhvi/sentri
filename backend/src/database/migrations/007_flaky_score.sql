@@ -1,0 +1,2 @@
+-- Migration 007: intentionally empty (no-op)
+-- flakyScore was merged into migration 006 alongside isStale.

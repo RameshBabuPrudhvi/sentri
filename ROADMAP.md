@@ -70,6 +70,7 @@ The following items have been verified complete against the codebase and are **n
 | DIF-016 | Step-level timing and per-step screenshots | PR #94 |
 | AUTO-013 | Stale test detection and cleanup | PR #99 |
 | MNT-007 | ARIA live regions for real-time updates | PR #99 |
+| DIF-004 | Flaky test detection and reporting | PR #99 |
 
 ---
 
@@ -413,7 +414,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-004 — Flaky test detection and reporting 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
 **Problem:** There is no mechanism to identify tests that alternate between passing and failing across runs. Flaky tests erode trust in the test suite and consume engineering time investigating non-reproducible failures. The run result data to detect them already exists in the database but is never surfaced.
 
@@ -1209,7 +1210,7 @@ The following items have been verified complete against the codebase and are **n
 <!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
-| Flaky test detection | ❌ → DIF-004 | ✅ | ✅ | ✅ | ❌ |
+| Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
 | Accessibility testing | ❌ → AUTO-016 | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
