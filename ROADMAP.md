@@ -68,6 +68,8 @@ The following items have been verified complete against the codebase and are **n
 | DIF-011 | Coverage heatmap on site graph | PR #94 |
 | DIF-014 | Cursor overlay on live browser view | PR #94 |
 | DIF-016 | Step-level timing and per-step screenshots | PR #94 |
+| AUTO-013 | Stale test detection and cleanup | PR #99 |
+| MNT-007 | ARIA live regions for real-time updates | PR #99 |
 
 ---
 
