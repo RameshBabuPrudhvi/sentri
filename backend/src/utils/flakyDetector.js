@@ -38,12 +38,12 @@ const MIN_RESULTS = 2;
  * @returns {{ updated: number, flaky: number }}
  */
 export function computeAndPersistFlakyScores(projectId, maxRuns = 20) {
-  // Fetch recent completed test runs with results
-  const allRuns = runRepo.getByProjectId(projectId);
-  const completedRuns = allRuns
-    .filter(r => (r.type === "test_run" || r.type === "run") && r.status === "completed" && r.results?.length)
-    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
-    .slice(0, maxRuns);
+  // Fetch recent completed test runs with results — lean query that only
+  // selects the 5 columns we need (id, type, status, startedAt, results)
+  // with SQL-level filtering and LIMIT.  The previous implementation loaded
+  // ALL columns for ALL runs via getByProjectId() then filtered in JS,
+  // which parsed megabytes of unused JSON blobs on every test run completion.
+  const completedRuns = runRepo.getRecentCompletedWithResults(projectId, maxRuns);
 
   if (completedRuns.length < MIN_RESULTS) {
     return { updated: 0, flaky: 0 };
