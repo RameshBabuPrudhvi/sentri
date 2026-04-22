@@ -1,4 +1,4 @@
--- Migration 004: Workspaces + RBAC (ACL-001, ACL-002)
+-- Migration 005: Workspaces + RBAC (ACL-001, ACL-002)
 --
 -- ACL-001 — Multi-tenancy: workspace ownership on all entities
 -- Adds a `workspaces` table and a `workspaceId` foreign key to projects,
