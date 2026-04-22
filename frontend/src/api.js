@@ -163,6 +163,7 @@ export const api = {
     if (filters.reviewStatus && filters.reviewStatus !== "all") params.set("reviewStatus", filters.reviewStatus);
     if (filters.category && filters.category !== "all") params.set("category", filters.category);
     if (filters.search) params.set("search", filters.search);
+    if (filters.stale) params.set("stale", "true");
     return req("GET", `/projects/${id}/tests?${params}`);
   },
   /**

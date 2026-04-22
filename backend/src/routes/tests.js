@@ -53,12 +53,13 @@ router.get("/projects/:id/tests", (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const { page, pageSize, reviewStatus, category, search } = req.query;
+  const { page, pageSize, reviewStatus, category, search, stale } = req.query;
   if (page !== undefined || pageSize !== undefined) {
     const filters = {};
     if (reviewStatus && reviewStatus !== "all") filters.reviewStatus = reviewStatus;
     if (category && category !== "all") filters.category = category;
     if (search) filters.search = search;
+    if (stale === "true") filters.stale = true;
     return res.json(testRepo.getByProjectIdPaged(req.params.id, page, pageSize, filters));
   }
   res.json(testRepo.getByProjectId(req.params.id));
