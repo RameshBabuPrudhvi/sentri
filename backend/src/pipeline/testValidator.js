@@ -48,6 +48,8 @@ const VALID_PAGE_ACTIONS = new Set([
   // Locator terminal actions (called on locator, not page)
   "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
+  // Evaluate-on-selector variants (Ollama frequently uses these)
+  "$eval", "$$eval", "$", "$$", "$x",
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
@@ -116,6 +118,7 @@ const VALID_MATCHERS = new Set([
   "toBeNull", "toBeUndefined", "toBeNaN", "toBeGreaterThan",
   "toBeGreaterThanOrEqual", "toBeLessThan", "toBeLessThanOrEqual",
   "toContain", "toMatch", "toMatchObject", "toHaveLength", "toThrow",
+  "toHaveProperty",  // Jest/Node — common in API tests (body.toHaveProperty('key'))
   // Snapshot
   "toMatchSnapshot",
 ]);
