@@ -64,6 +64,27 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
 const sessions = new Map();
 
 /**
+ * @typedef {Object} CompletedRecording
+ * @property {string}  projectId
+ * @property {Array<RecordedAction>} actions
+ * @property {string}  playwrightCode
+ * @property {string}  url
+ * @property {number}  completedAt
+ * @property {"auto_timeout"|"manual"} reason
+ */
+
+/**
+ * Short-lived cache of recordings torn down by the MAX_RECORDING_MS safety-net
+ * timeout. Entries live for `COMPLETED_TTL_MS` so a user who clicks
+ * "Stop & Save" moments after the timeout fires can still recover their
+ * captured actions instead of losing them to a 500 error. Scoped to the in-
+ * process recorder so no external store is needed.
+ * @type {Map<string, CompletedRecording>}
+ */
+const completedSessions = new Map();
+const COMPLETED_TTL_MS = Math.max(10_000, parseInt(process.env.RECORDER_COMPLETED_TTL_MS || "120000", 10) || 120_000);
+
+/**
  * JS source injected into every page frame. It captures pointer/keyboard
  * events and relays them to Node via the `__sentriRecord` binding. We
  * de-duplicate by dispatch target + event type so that a single click
@@ -274,9 +295,23 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Defence-in-depth: if the client never calls stop/discard (e.g. tab
     // closed, network died) the browser would remain open forever. Force-kill
     // the session after `MAX_RECORDING_MS` so we never leak Chromium.
-    session.idleTimeout = setTimeout(() => {
+    session.idleTimeout = setTimeout(async () => {
       console.error(formatLogLine("warn", null, `[recorder] session ${sessionId} exceeded MAX_RECORDING_MS (${MAX_RECORDING_MS}ms) — auto-tearing down`));
-      stopRecording(sessionId).catch(() => { /* swallow — session may already be gone */ });
+      try {
+        const result = await stopRecording(sessionId);
+        // Stash the generated test so a user who hits "Stop & Save" right
+        // after the timeout fires doesn't lose their captured actions.
+        completedSessions.set(sessionId, {
+          projectId: session.projectId,
+          actions: result.actions,
+          playwrightCode: result.playwrightCode,
+          url: result.url,
+          completedAt: Date.now(),
+          reason: "auto_timeout",
+        });
+        const purge = setTimeout(() => completedSessions.delete(sessionId), COMPLETED_TTL_MS);
+        purge.unref?.();
+      } catch { /* session may already be gone; nothing to stash */ }
     }, MAX_RECORDING_MS);
     // Node's timer would keep the process alive; recorder sessions are
     // per-request resources, so let the event loop exit if everything else
@@ -305,6 +340,22 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
  */
 export function getRecording(sessionId) {
   return sessions.get(sessionId) || null;
+}
+
+/**
+ * Look up and remove a recording that was auto-torn-down by the safety-net
+ * timeout. Returns `null` if no such recording is cached (either never timed
+ * out, or the TTL has expired). The entry is removed on read so callers get
+ * at-most-once delivery of the captured actions.
+ *
+ * @param {string} sessionId
+ * @returns {CompletedRecording|null}
+ */
+export function takeCompletedRecording(sessionId) {
+  const entry = completedSessions.get(sessionId);
+  if (!entry) return null;
+  completedSessions.delete(sessionId);
+  return entry;
 }
 
 /**

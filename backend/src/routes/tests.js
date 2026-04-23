@@ -48,7 +48,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -884,7 +884,18 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   if (!project) return res.status(404).json({ error: "project not found" });
 
   const sess = getRecording(req.params.sessionId);
-  if (!sess || sess.projectId !== project.id) {
+  // When the `MAX_RECORDING_MS` safety-net timeout has already torn the
+  // session down, `getRecording` returns null but the generated test may
+  // still be waiting in the short-lived completed-recordings cache. Fall
+  // back to that cache so the user doesn't lose their captured actions to
+  // a race with the auto-teardown.
+  let autoCompleted = null;
+  if (!sess) {
+    autoCompleted = takeCompletedRecording(req.params.sessionId);
+    if (!autoCompleted || autoCompleted.projectId !== project.id) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+  } else if (sess.projectId !== project.id) {
     return res.status(404).json({ error: "recording session not found" });
   }
 
@@ -895,23 +906,44 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   const name = String(req.body?.name || "").trim() || `Recorded flow @ ${new Date().toISOString()}`;
 
   let stopResult;
-  try {
-    stopResult = await stopRecording(req.params.sessionId, { testName: name });
-  } catch (err) {
-    // Discard is a best-effort cleanup path. If the session was already torn
-    // down between `getRecording()` above and here — e.g. the
-    // `MAX_RECORDING_MS` safety-net timeout in `recorder.js` fired first —
-    // surface a success response instead of a 500, because the caller's
-    // intent (close the browser, don't persist a test) is already satisfied.
-    if (discard && /not found/i.test(err.message || "")) {
-      logActivity({ ...actor(req),
-        type: "test.record_discard", projectId: project.id, projectName: project.name,
-        detail: `Recording discarded after session auto-teardown (${req.params.sessionId})`, status: "success",
-      });
-      return res.json({ ok: true, discarded: true, alreadyStopped: true });
+  let recoveredFromAutoTimeout = false;
+  if (autoCompleted) {
+    // Session was already torn down by the auto-timeout; regenerate the
+    // Playwright body with the requested test name (the cached code was
+    // generated with a default name).
+    const playwrightCode = actionsToPlaywrightCode(name, autoCompleted.url, autoCompleted.actions);
+    stopResult = { actions: autoCompleted.actions, playwrightCode, url: autoCompleted.url };
+    recoveredFromAutoTimeout = true;
+  } else {
+    try {
+      stopResult = await stopRecording(req.params.sessionId, { testName: name });
+    } catch (err) {
+      // Race window between the `getRecording()` guard above and
+      // `stopRecording()` — the MAX_RECORDING_MS timeout may have fired in
+      // the interim. Try the completed-recordings cache one more time.
+      if (/not found/i.test(err.message || "")) {
+        const cached = takeCompletedRecording(req.params.sessionId);
+        if (cached && cached.projectId === project.id) {
+          const playwrightCode = actionsToPlaywrightCode(name, cached.url, cached.actions);
+          stopResult = { actions: cached.actions, playwrightCode, url: cached.url };
+          recoveredFromAutoTimeout = true;
+        }
+      }
+      if (!stopResult) {
+        // Discard is a best-effort cleanup path: if the session is already
+        // gone and we have nothing cached, the caller's intent (close the
+        // browser, don't persist a test) is already satisfied.
+        if (discard && /not found/i.test(err.message || "")) {
+          logActivity({ ...actor(req),
+            type: "test.record_discard", projectId: project.id, projectName: project.name,
+            detail: `Recording discarded after session auto-teardown (${req.params.sessionId})`, status: "success",
+          });
+          return res.json({ ok: true, discarded: true, alreadyStopped: true });
+        }
+        console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/stop] stopRecording failed: ${err.message}`));
+        return res.status(500).json({ error: "Internal server error" });
+      }
     }
-    console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/stop] stopRecording failed: ${err.message}`));
-    return res.status(500).json({ error: "Internal server error" });
   }
 
   if (discard) {
@@ -919,7 +951,7 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
       type: "test.record_discard", projectId: project.id, projectName: project.name,
       detail: `Recording discarded (${stopResult.actions?.length || 0} actions dropped)`, status: "success",
     });
-    return res.json({ ok: true, discarded: true });
+    return res.json({ ok: true, discarded: true, ...(recoveredFromAutoTimeout ? { alreadyStopped: true } : {}) });
   }
 
   if (!stopResult.actions || stopResult.actions.length === 0) {
@@ -960,7 +992,11 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     detail: `Recorder captured ${stopResult.actions.length} actions → Draft test`, status: "success",
   });
 
-  res.status(201).json({ test, actionCount: stopResult.actions.length });
+  res.status(201).json({
+    test,
+    actionCount: stopResult.actions.length,
+    ...(recoveredFromAutoTimeout ? { recoveredFromAutoTimeout: true } : {}),
+  });
 });
 
 /**
