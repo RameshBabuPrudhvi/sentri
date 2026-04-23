@@ -805,7 +805,10 @@ router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"
     });
     res.json({ ok: true, baselinePath, testId: test.id, stepNumber });
   } catch (err) {
-    res.status(500).json({ error: err.message || "failed to accept baseline" });
+    // Log the real error server-side; return a generic message to the client
+    // per AGENT.md ("5xx errors never leak internal details").
+    console.error(formatLogLine("error", null, `[POST baselines/accept] ${test.id}#${stepNumber}: ${err.message}`));
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -864,7 +867,8 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     });
     res.status(202).json({ sessionId, startUrl });
   } catch (err) {
-    res.status(500).json({ error: err.message || "failed to start recorder" });
+    console.error(formatLogLine("error", null, `[POST projects/${project.id}/record] startRecording failed: ${err.message}`));
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -884,13 +888,26 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     return res.status(404).json({ error: "recording session not found" });
   }
 
+  // `discard: true` tears down the browser without persisting a Draft test.
+  // Used by the RecorderModal's Cancel/Discard button so abandoned recordings
+  // do not leave junk tests in the DB.
+  const discard = req.body?.discard === true;
   const name = String(req.body?.name || "").trim() || `Recorded flow @ ${new Date().toISOString()}`;
 
   let stopResult;
   try {
     stopResult = await stopRecording(req.params.sessionId, { testName: name });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "failed to stop recorder" });
+    console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/stop] stopRecording failed: ${err.message}`));
+    return res.status(500).json({ error: "Internal server error" });
+  }
+
+  if (discard) {
+    logActivity({ ...actor(req),
+      type: "test.record_discard", projectId: project.id, projectName: project.name,
+      detail: `Recording discarded (${stopResult.actions?.length || 0} actions dropped)`, status: "success",
+    });
+    return res.json({ ok: true, discarded: true });
   }
 
   if (!stopResult.actions || stopResult.actions.length === 0) {

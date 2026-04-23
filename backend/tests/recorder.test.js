@@ -28,6 +28,31 @@ function test(name, fn) {
 
 console.log("\n🧪 recorder — actionsToPlaywrightCode");
 
+test("does not duplicate the initial goto that startRecording pushes as actions[0]", () => {
+  // startRecording always pushes `{ kind: "goto", url: startUrl }` as the
+  // first action. actionsToPlaywrightCode already emits `page.goto(startUrl)`
+  // at the top of the test body, so that first action must be suppressed to
+  // avoid two back-to-back navigations to the same URL.
+  const code = actionsToPlaywrightCode("Dedup", "https://example.com", [
+    { kind: "goto", url: "https://example.com", ts: 1 },
+    { kind: "click", selector: "#btn", ts: 2 },
+  ]);
+  const gotos = code.match(/await page\.goto\('https:\/\/example\.com'\);/g) || [];
+  assert.equal(gotos.length, 1, "only one goto to startUrl should be emitted");
+  assert.match(code, /await safeClick\(page, '#btn'\);/);
+});
+
+test("deduplicates consecutive gotos to the same URL", () => {
+  const code = actionsToPlaywrightCode("Consecutive", "https://example.com", [
+    { kind: "goto", url: "https://example.com", ts: 1 },
+    { kind: "goto", url: "https://example.com/dashboard", ts: 2 },
+    { kind: "goto", url: "https://example.com/dashboard", ts: 3 }, // framenavigated echo
+    { kind: "click", selector: "#ok", ts: 4 },
+  ]);
+  const dashGotos = code.match(/page\.goto\('https:\/\/example\.com\/dashboard'\)/g) || [];
+  assert.equal(dashGotos.length, 1, "consecutive gotos to the same URL collapse to one");
+});
+
 test("emits a runnable test skeleton even for zero actions", () => {
   const code = actionsToPlaywrightCode("Empty", "https://example.com", []);
   assert.match(code, /import \{ test, expect \} from '@playwright\/test';/);

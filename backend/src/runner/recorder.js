@@ -146,10 +146,17 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   const safeStartUrl = String(startUrl || "").replace(/'/g, "\\'");
   const lines = [];
   lines.push(`await page.goto('${safeStartUrl}');`);
+  // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
+  // (and `framenavigated` can echo the same URL). We emit the initial goto
+  // above, so suppress any subsequent consecutive gotos to the same URL to
+  // avoid duplicate navigation in the generated script.
+  let lastGotoUrl = String(startUrl || "");
   let stepNo = 1;
   for (const a of actions) {
     const sel = (a.selector || "").replace(/'/g, "\\'");
     if (a.kind === "goto" && a.url) {
+      if (a.url === lastGotoUrl) continue;
+      lastGotoUrl = a.url;
       const safeUrl = String(a.url).replace(/'/g, "\\'");
       lines.push(`// Step ${stepNo}: Navigate`);
       lines.push(`await page.goto('${safeUrl}');`);

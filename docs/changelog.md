@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config**: `VISUAL_DIFF_THRESHOLD` and `VISUAL_DIFF_PIXEL_TOLERANCE` can now be set to `0` — previous `parseFloat(env) || default` treated `0` as falsy and silently fell back to the default, making zero-tolerance visual regression detection impossible (#103).
 - **Recorder**: URLs interpolated into generated Playwright code are now single-quote escaped, matching the existing selector/value escaping. Captured URLs containing `'` no longer produce syntactically broken test scripts (#103).
 - **Recorder**: `startRecording` no longer leaks a Chromium process when mid-setup calls (`exposeBinding`, `addInitScript`, `page.goto`, `startScreencast`) throw. The session is only published to the active-sessions map after all async setup succeeds, and any partially-initialised browser / context / page is closed on failure (#103).
+- **Recorder**: `actionsToPlaywrightCode` no longer emits a duplicate `page.goto(startUrl)` at the top of generated scripts. The initial `goto` that `startRecording` records as `actions[0]` (plus any `framenavigated` echoes) is collapsed against the hard-coded header goto (#103).
+- **Recorder UI**: Clicking *Discard* in the recorder modal no longer persists a junk "discarded" Draft test. The frontend now calls a dedicated `recordDiscard` endpoint (`POST /projects/:id/record/:sessionId/stop` with `{ discard: true }`) that tears down the browser server-side without writing to the test table (#103).
+- **Routes**: `POST /tests/:testId/baselines/:stepNumber/accept`, `POST /projects/:id/record`, and `POST /projects/:id/record/:sessionId/stop` now return `{ error: "Internal server error" }` on 500s and log the real error server-side via `formatLogLine`, matching the repo-wide AGENT.md error-handling convention (#103).
 
 ## [1.6.3] — 2026-04-23
 

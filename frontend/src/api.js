@@ -253,6 +253,16 @@ export const api = {
   recordStop: (projectId, sessionId, body) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/stop`, body || {}),
   /**
+   * Abort an in-flight recording without persisting a Draft test. Used when
+   * the user clicks "Discard" in the RecorderModal — closes the browser
+   * server-side and returns `{ ok, discarded: true }`.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @returns {Promise<{ok: boolean, discarded: boolean}>}
+   */
+  recordDiscard: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/stop`, { discard: true }),
+  /**
    * Poll a live recording session for status and captured-action preview.
    * @param {string} projectId
    * @param {string} sessionId

@@ -107,10 +107,12 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   }
 
   function handleCancel() {
-    // If a session was started, attempt a best-effort stop so the browser
-    // doesn't stay open forever. We intentionally ignore the response.
+    // If a session was started, tear down the browser server-side via the
+    // dedicated discard path. `recordDiscard` tells the stop endpoint not to
+    // persist a Draft test, so an abandoned recording does not leave junk
+    // rows in the DB. Best-effort — any error is swallowed.
     if (sessionId) {
-      api.recordStop(projectId, sessionId, { name: "discarded" }).catch(() => {});
+      api.recordDiscard(projectId, sessionId).catch(() => {});
     }
     teardownStreams();
     setPhase("idle");
