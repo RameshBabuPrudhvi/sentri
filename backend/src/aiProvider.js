@@ -484,6 +484,44 @@ export function isRateLimitError(err) {
     || /\boverloaded/i.test(msg);
 }
 
+/**
+ * Detect transient server-side failures that warrant retry + provider
+ * fallback but aren't rate limits. Common examples:
+ *   - Google Gemini 503 "This model is currently experiencing high demand"
+ *   - Anthropic 503 "overloaded_error" (already matches isRateLimitError via /overloaded/)
+ *   - OpenAI 500/502/504 transient backend errors
+ *   - Provider-specific HTTP 5xx with "high demand", "service unavailable", "try again later"
+ *
+ * Distinct from isRateLimitError — these are not quota issues, they're
+ * temporary server outages. We retry with backoff and fall back to other
+ * providers, but don't trip the per-provider rate-limit circuit breaker
+ * (the provider's key is fine; the backend is struggling).
+ *
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isTransientServerError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  const status = err?.status || err?.statusCode || 0;
+  // HTTP 5xx except 501 (Not Implemented) — 500/502/503/504 are retriable
+  if (status >= 500 && status !== 501) return true;
+  return /\b50[0234]\b/.test(msg)
+    || /\bservice unavailable\b/i.test(msg)
+    || /\bhigh demand\b/i.test(msg)
+    || /\btry again later\b/i.test(msg)
+    || /\binternal server error\b/i.test(msg)
+    || /\bbad gateway\b/i.test(msg)
+    || /\bgateway timeout\b/i.test(msg);
+}
+
+/**
+ * True if the error should be retried — either a rate limit (quota issue)
+ * or a transient server error (provider outage).
+ */
+function isRetryableError(err) {
+  return isRateLimitError(err) || isTransientServerError(err);
+}
+
 function extractRetryAfter(err) {
   const match = (err?.message || "").match(/retry in (\d+(?:\.\d+)?)(s|ms)/i);
   if (match) {
@@ -499,14 +537,17 @@ async function withRetry(fn, label = "") {
       return await fn();
     } catch (err) {
       if (attempt === MAX_RETRIES) throw err;
-      if (!isRateLimitError(err)) throw err;
+      if (!isRetryableError(err)) throw err;
       const retryAfter = extractRetryAfter(err);
       // Honor server-requested Retry-After delays (cap at 2× MAX_BACKOFF_MS to
       // prevent absurd waits). Only cap computed exponential backoff at MAX_BACKOFF_MS.
       const delay = retryAfter
         ? Math.min(retryAfter, MAX_BACKOFF_MS * 2)
         : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-      console.warn(formatLogLine("warn", null, `Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
+      // Distinguish quota issues (rate limit) from backend overload (5xx) in logs
+      // so operators can tell whether to add quota or wait out an outage.
+      const reason = isRateLimitError(err) ? "Rate limit" : "Transient server error (5xx)";
+      console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
       await sleep(delay);
     }
   }
@@ -740,19 +781,30 @@ function isCircuitBreakerOpen(provider) {
 
 /**
  * FEA-003: Get the ordered list of fallback providers to try when the primary
- * provider hits a rate limit. Returns all configured providers except the
- * primary, in CLOUD_DETECT_ORDER, filtering out circuit-broken ones.
+ * provider hits a rate limit or transient error.
+ *
+ * **Same-tier only** — cloud primary falls back to other cloud providers;
+ * local primary has no fallback. This prevents cross-tier mismatches where
+ * a prompt built for cloud (~1600 chars, 128K context assumed) gets
+ * delivered to Ollama (4K context, needs >120s to process) and hits the
+ * chat timeout. Ollama is never a cross-tier rescue — the prompt shape,
+ * context window, and response latency are too different.
+ *
+ * To use Ollama as a primary, set `AI_PROVIDER=local` or pick it from
+ * the provider dropdown — detectProvider() will route all calls to Ollama
+ * with the correct tier-specific prompt.
  *
  * @param {string} primaryProvider - The provider that failed.
- * @returns {string[]} Ordered list of fallback provider IDs.
+ * @returns {string[]} Ordered list of same-tier fallback provider IDs.
  */
 function getFallbackProviders(primaryProvider) {
-  const allProviders = [...CLOUD_DETECT_ORDER, "local"];
-  return allProviders.filter(p =>
+  // Local tier has only one provider (Ollama) — no fallback possible.
+  if (primaryProvider === "local") return [];
+  // Cloud tier: try other cloud providers in detection order.
+  return CLOUD_DETECT_ORDER.filter(p =>
     p !== primaryProvider &&
     isProviderUsable(p) &&
-    !isCircuitBreakerOpen(p) &&
-    (p !== "local" || hasOllamaConfig()),
+    !isCircuitBreakerOpen(p),
   );
 }
 
@@ -879,42 +931,63 @@ export async function generateText(prompt, options) {
     );
   }
 
-  // ── FEA-003: Try primary provider, then fall back on rate-limit errors ──
+  // ── FEA-003: Try primary provider, then fall back on rate-limit OR transient 5xx errors ──
   try {
     const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
     recordProviderSuccess(provider);
     return result;
   } catch (err) {
-    if (!isRateLimitError(err)) throw err;
+    // Only fall back on retriable errors (rate limits or transient server errors).
+    // Auth errors, invalid prompts, etc. are programmer errors and should propagate.
+    if (!isRetryableError(err)) throw err;
 
-    // Primary provider hit rate limit — record failure and try fallbacks
-    recordProviderFailure(provider);
+    // Ollama (local) doesn't have rate limits — its errors (HTTP 500, context
+    // overflow, timeout) can match isRateLimitError() false positives (e.g.
+    // "overloaded" in error messages). Don't circuit-break local models;
+    // just rethrow so the caller's retry/error handling takes over.
+    if (provider === "local") throw err;
+
+    // Primary provider failed with a retriable error — record failure (rate limit only)
+    // and try fallbacks. Transient 5xx errors don't trip the circuit breaker because
+    // the quota is fine; the provider's backend is just temporarily overloaded.
+    const errType = isRateLimitError(err) ? "rate-limited" : "transient server error (5xx)";
+    if (isRateLimitError(err)) recordProviderFailure(provider);
     const fallbacks = getFallbackProviders(provider);
 
     if (fallbacks.length === 0) {
-      // No fallbacks available — rethrow the original error
+      // No fallbacks available — log why and rethrow so the caller (and user)
+      // can tell this was a real "nothing more we can do" situation, not a
+      // silent skip.
+      console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} after ${MAX_RETRIES + 1} attempts — no other provider configured for fallback. Giving up. Configure a second provider in Settings to enable automatic fallback.`));
       throw err;
     }
 
     for (const fallbackProvider of fallbacks) {
-      console.warn(formatLogLine("warn", null, `[aiProvider] Rate limit on ${provider} — falling back to ${fallbackProvider}`));
+      console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
         const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
         recordProviderSuccess(fallbackProvider);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
-        // pipeline skip the rate-limited primary entirely.  Expires after
-        // STICKY_FALLBACK_TTL_MS so normal selection resumes once the quota resets.
+        // pipeline skip the failing primary entirely.  Expires after
+        // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
+        // quota/outage window closes.
         _stickyFallbackProvider = fallbackProvider;
         _stickyFallbackExpiry   = Date.now() + STICKY_FALLBACK_TTL_MS;
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
-        if (isRateLimitError(fallbackErr)) {
-          recordProviderFailure(fallbackProvider);
-          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} also rate-limited — trying next`));
+        if (isRetryableError(fallbackErr)) {
+          // Only trip the circuit breaker for rate-limit failures on non-local
+          // providers. Transient 5xx errors don't disable the provider — the
+          // backend is temporarily overloaded, not permanently broken.
+          if (isRateLimitError(fallbackErr) && fallbackProvider !== "local") {
+            recordProviderFailure(fallbackProvider);
+          }
+          const fallbackErrType = isRateLimitError(fallbackErr) ? "rate-limited" : "transient server error (5xx)";
+          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} ${fallbackErrType} — trying next`));
           continue;
         }
-        // Non-rate-limit error from fallback — throw it
+        // Non-retriable error from fallback — throw it
         throw fallbackErr;
       }
     }
@@ -944,15 +1017,17 @@ export function parseJSON(text) {
  * Calls `onToken(string)` for each token as it arrives.
  * Returns the full accumulated text when the stream completes.
  *
- * Falls back to a single blocking call (Google / Ollama) that delivers
- * the entire response as one synthetic "token".
+ * ### Error handling
+ * If the streaming call fails with a retryable error (rate limit or
+ * transient 5xx) BEFORE any tokens are emitted, we transparently retry
+ * via `generateText()` — which applies the full FEA-003 retry + fallback
+ * chain and emits the full response as a single synthetic "token". Once
+ * tokens have started flowing we can't safely fall back (the user would
+ * see two partial responses), so mid-stream failures propagate as-is.
  *
- * NOTE: Unlike {@link generateText}, this function does NOT implement the
- * FEA-003 provider fallback chain. If the primary provider is rate-limited,
- * the error propagates directly. Google and Ollama paths delegate to
- * `generateText()` which does have fallback, but Anthropic/OpenAI streaming
- * paths do not. This is intentional — streaming callers (chat) need a
- * consistent provider for multi-turn context.
+ * Google and Ollama providers never start a real stream — they always
+ * delegate to `generateText()` (their SDKs don't support incremental
+ * streaming from this codebase), so they get fallback for free.
  *
  * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
  * @param {function(string): void} onToken - Callback invoked for each token.
@@ -967,50 +1042,79 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   if (!provider) throw new Error("No AI provider configured.");
 
   const { signal, responseFormat } = options;
-  const { system, user, combined } = normaliseMessages(promptOrMessages);
+  const { system, user } = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
 
+  // Helper — when a streaming call fails BEFORE any tokens have been emitted,
+  // fall back to non-streaming generateText() which has full FEA-003 retry
+  // + multi-provider fallback support. The result is delivered as one
+  // synthetic "token" (same pattern as Google/Ollama below).
+  async function fallbackToNonStreaming(err) {
+    console.warn(formatLogLine("warn", null, `[aiProvider] streamText ${provider} failed before any tokens (${err.message?.slice(0, 120)}) — retrying via non-streaming path with provider fallback.`));
+    const text = await generateText(promptOrMessages, { ...options, responseFormat });
+    onToken(text);
+    return text;
+  }
+
   if (provider === "anthropic") {
-    const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-    const params = {
-      model: buildProviderMeta().anthropic.model,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      messages: [{ role: "user", content: user }],
-    };
-    if (system) params.system = system;
-    const stream = client.messages.stream(params, { signal });
-    for await (const chunk of stream) {
-      throwIfAborted(signal);
-      if (chunk.type === "content_block_delta" && chunk.delta?.text) {
-        onToken(chunk.delta.text);
+    let tokensEmitted = 0;
+    try {
+      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+      const params = {
+        model: buildProviderMeta().anthropic.model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        messages: [{ role: "user", content: user }],
+      };
+      if (system) params.system = system;
+      const stream = client.messages.stream(params, { signal });
+      for await (const chunk of stream) {
+        throwIfAborted(signal);
+        if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+          onToken(chunk.delta.text);
+          tokensEmitted++;
+        }
       }
+      return (await stream.finalMessage()).content[0].text;
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      // Only fall back if no tokens were emitted — otherwise the user would see two partial responses.
+      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
+      throw err;
     }
-    return (await stream.finalMessage()).content[0].text;
   }
 
   if (provider === "openai") {
-    const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-    const messages = [];
-    if (system) messages.push({ role: "system", content: system });
-    messages.push({ role: "user", content: user });
-    const params = {
-      model: buildProviderMeta().openai.model,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      stream: true,
-      messages,
-    };
-    if (useJson) params.response_format = { type: "json_object" };
-    const stream = await client.chat.completions.create(params, { signal });
-    let full = "";
-    for await (const chunk of stream) {
-      throwIfAborted(signal);
-      const token = chunk.choices[0]?.delta?.content ?? "";
-      if (token) { full += token; onToken(token); }
+    let tokensEmitted = 0;
+    try {
+      const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+      const messages = [];
+      if (system) messages.push({ role: "system", content: system });
+      messages.push({ role: "user", content: user });
+      const params = {
+        model: buildProviderMeta().openai.model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        stream: true,
+        messages,
+      };
+      if (useJson) params.response_format = { type: "json_object" };
+      const stream = await client.chat.completions.create(params, { signal });
+      let full = "";
+      for await (const chunk of stream) {
+        throwIfAborted(signal);
+        const token = chunk.choices[0]?.delta?.content ?? "";
+        if (token) { full += token; onToken(token); tokensEmitted++; }
+      }
+      return full;
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
+      throw err;
     }
-    return full;
   }
 
-  // Google / Ollama — no streaming SDK; deliver whole response as one token
+  // Google / Ollama — no streaming SDK; deliver whole response as one token.
+  // generateText() handles retry + fallback internally so these providers
+  // get FEA-003 coverage for free.
   const text = await generateText(promptOrMessages, { ...options, responseFormat });
   onToken(text);
   return text;

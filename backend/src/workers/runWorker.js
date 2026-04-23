@@ -31,6 +31,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import { runTests } from "../testRunner.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
+import { captureProvider } from "../utils/activeRuns.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -47,7 +48,14 @@ if (process.env.REDIS_URL) {
 /** @type {Object|null} BullMQ Worker instance. */
 let _worker = null;
 
-/** @type {Map<string, AbortController>} runId → AbortController for active jobs. */
+/**
+ * Registry of active BullMQ-processed runs. The chat endpoint reads `.provider`
+ * to skip runs that aren't using Ollama when checking for concurrent LLM
+ * activity (prevents false-positive 503s when a cloud run is active and the
+ * user switches to Ollama).
+ *
+ * @type {Map<string, {controller: AbortController, provider: string|null}>}
+ */
 export const workerAbortControllers = new Map();
 
 const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
@@ -86,8 +94,12 @@ async function processJob(job) {
   }
 
   // Create an AbortController so the abort endpoint can cancel this job.
+  // Capture the active provider at job-start time so the chat busy guard
+  // can accurately filter to runs using Ollama (prevents false-positive
+  // "AI is busy" 503s when a cloud run is active and the user switches
+  // to Ollama).
   const abortController = new AbortController();
-  workerAbortControllers.set(runId, abortController);
+  workerAbortControllers.set(runId, { controller: abortController, provider: captureProvider() });
   const signal = abortController.signal;
 
   try {
@@ -280,8 +292,8 @@ export function startWorker() {
  */
 export async function stopWorker() {
   // Abort all in-flight jobs
-  for (const [runId, controller] of workerAbortControllers) {
-    controller.abort();
+  for (const [runId, entry] of workerAbortControllers) {
+    entry.controller.abort();
     workerAbortControllers.delete(runId);
   }
 

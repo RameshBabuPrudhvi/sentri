@@ -16,7 +16,9 @@
  * - {@link getHealingHistoryForTest} — Serialise healing history for runtime injection.
  * - {@link getSelfHealingHelperCode} — Generate the runtime helper code string.
  * - {@link applyHealingTransforms} — Rewrite Playwright code to use self-healing helpers.
- * - {@link SELF_HEALING_PROMPT_RULES} — Prompt rules for AI code generation.
+ * - {@link CORE_RULES} — Native Playwright rules for local models (~200 tokens).
+ * - {@link SELF_HEALING_PROMPT_RULES} — Full self-healing helper rules for cloud models.
+ * - {@link getPromptRules} — Tier-aware getter: returns CORE_RULES or full rules.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -716,6 +718,17 @@ export function getSelfHealingHelperCode(healingHints) {
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
       // Guard: same rationale as safeClick — undefined text matches random elements.
+      // If the AI passed a Playwright Locator object instead of a string (common
+      // Ollama mistake), fall back to asserting visibility on it directly rather
+      // than crashing with a confusing error.
+      if (text != null && typeof text === 'object') {
+        // Looks like a Locator — has waitFor and isVisible methods
+        if (typeof text.waitFor === 'function') {
+          await text.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT }).catch(() => {});
+          await expect(text).toBeVisible();
+          return;
+        }
+      }
       if (text == null || typeof text !== 'string' || !text.trim()) {
         throw new Error('safeExpect: text argument is required (got ' + typeof text + ')');
       }
@@ -1128,12 +1141,97 @@ export function applyHealingTransforms(code) {
     .replace(
       /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
       (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
+    )
+    // ── Additional transforms for patterns Ollama frequently produces ────────
+    // NOTE: expect(page.getByRole('role')).toBeVisible() without { name } is
+    // valid Playwright — left as-is (no transform needed).
+
+    // page.getByLabel(...).fill(val) with options object — e.g. { exact: true }
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.fill\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.getByLabel(...).click() with options — e.g. { exact: true }
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByText(...).click() with options — e.g. { exact: true }
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByText(...).fill(val) — Ollama sometimes chains fill on getByText
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\.fill\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.locator(...).first().click() — Ollama often adds .first()
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.first\(\)\.click\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
+    )
+    // page.locator(...).nth(N).click() — Ollama sometimes adds .nth()
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.nth\(\d+\)\.click\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
+    )
+    // page.getByRole(...).first().click() — chain with .first()
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.first\(\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // NOTE: expect(page.getByText('...', { exact: true })).toBeVisible() is already
+    // handled by the getByText assertion transform above (line 1123) which uses
+    // (?:,\s*\{[^}]*\})? to optionally match the options object.
+
+    // expect(page.locator(...).first()).toBeVisible() — locator with .first()
+    .replace(
+      /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\.first\(\)\)\.toBeVisible\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
+    )
+    // expect(page.locator(...).nth(N)).toBeVisible() — locator with .nth()
+    .replace(
+      /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\.nth\(\d+\)\)\.toBeVisible\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
     );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Prompt Rules (unchanged but stricter tone)
+// Prompt Rules — tiered for cloud vs local models (MNT-009)
 // ─────────────────────────────────────────────────────────────────────────────
+// CORE_RULES   (~200 tokens) — native Playwright instructions for local models.
+//              Local models write standard Playwright code; the transform engine
+//              (applyHealingTransforms) rewrites it to self-healing helpers at runtime.
+// SELF_HEALING_PROMPT_RULES — full exhaustive self-healing helper rules for cloud models.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const CORE_RULES = `
+Write standard Playwright code. The runtime automatically adds self-healing.
+
+INTERACTIONS — use standard Playwright methods:
+  await page.getByRole('button', { name: 'Submit' }).click()
+  await page.getByLabel('Email').fill('user@test.com')
+  await page.getByRole('combobox', { name: 'Country' }).selectOption('US')
+  await page.getByRole('checkbox', { name: 'Agree' }).check()
+  await page.getByText('Sign in').click()
+  await page.keyboard.press('Enter')
+
+ASSERTIONS — inline locators inside expect():
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  await expect(page.getByText('Welcome')).toBeVisible()
+  await expect(page.locator('.results')).toHaveCount(3)
+  await expect(page.locator('.results')).toContainText('search term')
+  await expect(page).toHaveURL(/hostname/i)  — hostname-only regex, never exact URL
+
+RULES:
+  ✓ Prefer getByRole, getByLabel, getByText, getByPlaceholder over CSS selectors
+  ✓ Always inline locators inside expect() — never assign to a variable
+  ✓ Use { waitUntil: 'domcontentloaded' } after page.goto — never networkidle
+  ✗ NEVER use page.click('selector') or page.fill('selector', val) — use locator chains
+  ✗ NEVER hard-code dynamic values (dates, IDs, counts) — use regex patterns`.trim();
+
+// Full self-healing helper rules for cloud models.
 export const SELF_HEALING_PROMPT_RULES = `
 STRICT RULE: Use ONLY self-healing helpers for ALL interactions AND visibility assertions.
 
@@ -1302,3 +1400,16 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ const results = page.locator(...);       ← inline: expect(page.locator(...)).toHaveCount(N)
   ✗ const searchButton = page.locator(...);  ← use safeClick(page, text) instead
 `.trim();
+
+/**
+ * Return the appropriate prompt rules for the given tier.
+ *
+ * - `"cloud"` — full exhaustive rules (`SELF_HEALING_PROMPT_RULES`)
+ * - `"local"` — compact core rules only (`CORE_RULES`)
+ *
+ * @param {"cloud"|"local"} tier - The prompt tier.
+ * @returns {string} Prompt rules string.
+ */
+export function getPromptRules(tier) {
+  return tier === "local" ? CORE_RULES : SELF_HEALING_PROMPT_RULES;
+}

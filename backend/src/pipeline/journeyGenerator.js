@@ -262,12 +262,12 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
   // Helper: call a generator and handle rate limit short-circuit.
   //
-  // When aiProvider.js exhausts all its internal retries and still gets a
-  // rate limit error, it surfaces that error here. Rather than immediately
-  // aborting every remaining call, we attempt one grace-period wait and
-  // retry — only setting rateLimitHit (permanent skip) if that also fails.
-  // This prevents a brief quota burst early in the run from silently
-  // discarding tests for all subsequent pages.
+  // When aiProvider.js exhausts all its internal retries (and fallback
+  // providers for rate-limit/5xx errors) it surfaces the error here.
+  // Rather than immediately aborting every remaining call, we attempt one
+  // grace-period wait and retry — only setting rateLimitHit (permanent
+  // skip) if that also fails. This prevents a brief quota burst early in
+  // the run from silently discarding tests for all subsequent pages.
   async function safeGenerate(label, fn) {
     if (rateLimitHit) return []; // permanently short-circuit after confirmed unrecoverable limit
     try {
@@ -314,8 +314,29 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     }
   }
 
+  // Cap journeys to avoid excessive LLM calls on small crawls.
+  // Respects the testCount dial: "one" wants minimal output (1 journey),
+  // "small" is conservative (2), "large" wants comprehensive (uncapped).
+  // Page count provides a secondary cap so 5-page crawls don't generate
+  // 4 journeys even when testCount is "ai_decides".
+  const testCountCap = testCount === "one" ? 1
+    : testCount === "small" ? 2
+    : testCount === "medium" ? 4
+    : testCount === "large" ? journeys.length
+    : null; // ai_decides — use page-count heuristic only
+  const pageCountCap = classifiedPages.length <= 5 ? 2
+    : classifiedPages.length <= 15 ? 4
+    : journeys.length;
+  const maxJourneys = testCountCap != null
+    ? (testCount === "large" ? testCountCap : Math.min(testCountCap, pageCountCap))
+    : pageCountCap;
+  const cappedJourneys = journeys.slice(0, maxJourneys);
+  if (cappedJourneys.length < journeys.length) {
+    onProgress?.(`📊 Capped journeys: ${cappedJourneys.length}/${journeys.length} (${classifiedPages.length} pages, testCount=${testCount})`);
+  }
+
   // 1. Generate journey tests (highest value — multi-page flows)
-  for (const journey of journeys) {
+  for (const journey of cappedJourneys) {
     throwIfAborted(signal);
     onProgress?.(`🗺️  Generating journey tests: ${journey.name}`);
     const journeyTests = await safeGenerate(`Journey "${journey.name}"`, () =>
@@ -327,7 +348,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
   }
 
   // Track which URLs are fully covered by journeys
-  const coveredUrls = new Set(journeys.flatMap(j => j.pages.map(p => p.url)));
+  const coveredUrls = new Set(cappedJourneys.flatMap(j => j.pages.map(p => p.url)));
 
   // 2. Comprehensive tests for HIGH-PRIORITY pages not covered by journeys
   for (const classifiedPage of classifiedPages) {
@@ -347,12 +368,26 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     }
   }
 
-  // 3. Comprehensive tests for ALL remaining pages (NAVIGATION, CONTENT, etc.)
+  // 3. Tests for remaining low-priority pages (NAVIGATION, CONTENT, etc.)
+  // Skip pages already covered by journeys — they add no value.
+  // Only generate for pages that have enough interactive elements to produce
+  // meaningful tests (≥3 elements). Static content pages with just links
+  // and headings produce low-quality tests that are almost always rejected.
   for (const classifiedPage of classifiedPages) {
     throwIfAborted(signal);
     if (classifiedPage.isHighPriority || coveredUrls.has(classifiedPage.url)) continue;
     const snapshot = snapshotsByUrl[classifiedPage.url];
     if (!snapshot) continue;
+
+    // Skip pages with too few interactive elements — they produce low-quality tests
+    const interactiveCount = (snapshot.elements || []).filter(e =>
+      e.tag === "button" || e.tag === "input" || e.tag === "select" || e.tag === "textarea"
+      || e.role === "button" || e.role === "link" || e.role === "textbox"
+    ).length;
+    if (interactiveCount < 3) {
+      onProgress?.(`⏭️  Skipping ${classifiedPage.url} — only ${interactiveCount} interactive elements`);
+      continue;
+    }
 
     onProgress?.(`📄 Generating tests for: ${classifiedPage.url} [${classifiedPage.dominantIntent}]`);
     const tests = await safeGenerate(`Tests for ${classifiedPage.url}`, () =>

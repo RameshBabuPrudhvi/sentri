@@ -302,7 +302,16 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     log(run, `🌐 No API endpoints captured — site made no fetch/XHR calls during ${mode === "state" ? "exploration" : "crawl"}. API test generation skipped.`);
     log(run, `💡 Tip: Use "State exploration" mode to trigger API calls via button clicks and form submissions.`);
   }
-  if (apiEndpoints.length > 0 && !genResult.rateLimitHit) {
+  // Skip API test generation for trivial traffic — sites like google.com
+  // emit a few GET requests for assets/telemetry that don't produce useful
+  // API contract tests. Only invest an LLM call when there are enough
+  // meaningful endpoints (≥4) or at least one mutation (POST/PUT/PATCH/DELETE).
+  const hasMutationEndpoints = apiEndpoints.some(ep => ep.method !== "GET");
+  const skipApiTests = apiEndpoints.length > 0 && apiEndpoints.length < 4 && !hasMutationEndpoints;
+  if (skipApiTests) {
+    log(run, `🌐 Only ${apiEndpoints.length} trivial GET endpoint(s) captured — skipping API test generation (need ≥4 endpoints or a mutation)`);
+  }
+  if (apiEndpoints.length > 0 && !skipApiTests && !genResult.rateLimitHit) {
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
     try {
@@ -356,10 +365,11 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       run.status = "completed_empty";
       logWarn(run, `Crawl completed but no tests were generated.`);
       logWarn(run, `Possible causes:`);
-      logWarn(run, `  1. Site requires authentication — add credentials in Project Settings`);
-      logWarn(run, `  2. Pages have no interactive elements — try a different start URL`);
-      logWarn(run, `  3. AI provider returned empty — check your API key in Settings`);
-      logWarn(run, `  4. Try "State exploration" mode to discover dynamic content`);
+      logWarn(run, `  1. AI provider is temporarily overloaded (503) — wait 5-10 min and Re-run, or configure multi-provider fallback in Settings`);
+      logWarn(run, `  2. Site requires authentication — add credentials in Project Settings`);
+      logWarn(run, `  3. Pages have no interactive elements — try a different start URL`);
+      logWarn(run, `  4. AI provider returned empty — check your API key in Settings`);
+      logWarn(run, `  5. Try "State exploration" mode to discover dynamic content`);
     } else if (run.rateLimitError) {
       logWarn(run, `Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
     } else {

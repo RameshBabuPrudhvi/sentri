@@ -48,6 +48,8 @@ const VALID_PAGE_ACTIONS = new Set([
   // Locator terminal actions (called on locator, not page)
   "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
+  // Evaluate-on-selector variants (Ollama frequently uses these)
+  "$eval", "$$eval", "$", "$$", "$x",
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
@@ -116,6 +118,7 @@ const VALID_MATCHERS = new Set([
   "toBeNull", "toBeUndefined", "toBeNaN", "toBeGreaterThan",
   "toBeGreaterThanOrEqual", "toBeLessThan", "toBeLessThanOrEqual",
   "toContain", "toMatch", "toMatchObject", "toHaveLength", "toThrow",
+  "toHaveProperty",  // Jest/Node — common in API tests (body.toHaveProperty('key'))
   // Snapshot
   "toMatchSnapshot",
 ]);
@@ -394,10 +397,18 @@ export function validateTest(test, projectUrl) {
         test.playwrightCode.includes("http://example.com")) {
       issues.push("playwrightCode uses placeholder example.com URL");
     }
-    // Must reference navigation — page.goto for UI tests, or request.newContext / api.get/post for API tests
+    // Must reference navigation — page.goto, click actions (which may navigate),
+    // or self-healing helpers. The runtime auto-navigates to sourceUrl when
+    // page.goto is absent (executeTest.js:322-324), so .click() on a link
+    // is also valid navigation evidence.
+    // API tests use request.newContext / api.get/post instead.
     const isApiTest = test._generatedFrom === "api_har_capture" || test._generatedFrom === "api_user_described"
       || test.playwrightCode.includes("request.newContext") || test.playwrightCode.includes("api.get") || test.playwrightCode.includes("api.post");
-    if (!isApiTest && !test.playwrightCode.includes("page.goto")) {
+    const hasNavigation = test.playwrightCode.includes("page.goto")
+      || test.playwrightCode.includes("safeClick")
+      || test.playwrightCode.includes(".click(")
+      || test.playwrightCode.includes("page.waitForURL");
+    if (!isApiTest && !hasNavigation) {
       issues.push("playwrightCode missing page.goto navigation");
     }
     // Syntax validation — catch malformed code at generation time rather than

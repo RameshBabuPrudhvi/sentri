@@ -27,6 +27,7 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
+import { hasActiveRunForProvider } from "../utils/activeRuns.js";
 
 const router = Router();
 
@@ -324,6 +325,16 @@ router.post("/chat", async (req, res) => {
   if (!hasProvider()) {
     return res.status(503).json({
       error: "No AI provider configured. Go to Settings to add an API key.",
+    });
+  }
+
+  // Ollama is single-threaded — concurrent requests cause hangs or crashes.
+  // Reject chat when an Ollama-backed run is already in progress (either the
+  // in-process runner or a BullMQ worker). Cloud runs don't block chat, even
+  // when the user has since switched to Ollama in Settings.
+  if (isLocalProvider() && hasActiveRunForProvider("local")) {
+    return res.status(503).json({
+      error: "AI is busy with an active run — Ollama can only process one request at a time. Wait for the run to finish, or abort it first, then try again.",
     });
   }
 

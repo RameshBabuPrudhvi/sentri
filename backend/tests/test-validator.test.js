@@ -257,12 +257,22 @@ test("https://example.com → 'playwrightCode uses placeholder example.com URL'"
   assert.ok(issues.some(i => i.includes("placeholder example.com URL")));
 });
 
-test("missing page.goto in UI test → 'playwrightCode missing page.goto navigation'", () => {
+test("missing any navigation in UI test → 'playwrightCode missing page.goto navigation'", () => {
+  // Code with no page.goto, no safeClick, no page.waitForURL — pure assertion only
+  const t = validTest({
+    playwrightCode: "test('x', async({ page }) => { await safeExpect(page, expect, 'Hello'); });",
+  });
+  const issues = validateTest(t, PROJECT_URL);
+  assert.ok(issues.some(i => i.includes("playwrightCode missing page.goto navigation")));
+});
+
+test("safeClick counts as valid navigation (no page.goto needed)", () => {
   const t = validTest({
     playwrightCode: "test('x', async({ page }) => { await safeClick(page, 'Login'); });",
   });
   const issues = validateTest(t, PROJECT_URL);
-  assert.ok(issues.some(i => i.includes("playwrightCode missing page.goto navigation")));
+  assert.equal(issues.filter(i => i.includes("page.goto")).length, 0,
+    `safeClick should count as navigation: ${JSON.stringify(issues)}`);
 });
 
 // ── 6. API test exemptions from page.goto requirement ────────────────────────

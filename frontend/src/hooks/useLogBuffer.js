@@ -32,7 +32,13 @@ export default function useLogBuffer(run) {
 
   useEffect(() => {
     const incoming = run?.logs || [];
-    if (incoming.length > bufferRef.current.length) {
+    // Use !== (not >) so the buffer stays in sync when a same-id refresh
+    // returns fewer logs than currently buffered — e.g. a manual Refresh
+    // during an active run where the DB-backed `run_logs` hasn't caught up
+    // with recently-streamed SSE tokens. Cross-run navigation (including
+    // re-runs, which have a new runId) is already handled by the
+    // runIdRef reset effect above.
+    if (incoming.length !== bufferRef.current.length) {
       bufferRef.current = incoming;
       setLogs([...incoming]);
     }

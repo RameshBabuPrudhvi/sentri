@@ -75,6 +75,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     logs: [],
     tests: [],
     pagesFound: 0,
+    generateInput: validatedDials ? { dialsConfig: validatedDials } : undefined,
     workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
@@ -257,7 +258,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   }
 
   const entry = runAbortControllers.get(req.params.runId);
-  const workerController = workerAbortControllers.get(req.params.runId);
+  const workerEntry = workerAbortControllers.get(req.params.runId);
   if (entry) {
     // Mutate the in-memory run object that the pipeline holds so that
     // finalizeRunIfNotAborted() and runRepo.save(run) see "aborted" and
@@ -270,7 +271,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
 
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
-  } else if (workerController) {
+  } else if (workerEntry) {
     // BullMQ-processed run: write abort status to DB BEFORE signaling the
     // worker to prevent a race where the worker's completion write overwrites
     // the abort status between signal and the worker's catch block.
@@ -280,17 +281,17 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
       duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
       error: "Aborted by user",
     });
-    workerController.abort();
+    workerEntry.controller.abort();
     workerAbortControllers.delete(req.params.runId);
   }
 
   // Mark queued tests that never executed as "skipped" so pass/fail/total
   // metrics are consistent (FLW-03).  Uses the live in-memory run when
   // available (has the latest results from processResult calls).
-  // For BullMQ runs (workerController path), re-read from DB after signalling
+  // For BullMQ runs (workerEntry path), re-read from DB after signalling
   // abort — testRunner flushes results to SQLite after each test, so the fresh
   // snapshot captures results completed between the initial read and the abort.
-  const liveRun = entry?.run || (workerController ? (runRepo.getById(req.params.runId) || run) : run);
+  const liveRun = entry?.run || (workerEntry ? (runRepo.getById(req.params.runId) || run) : run);
   if (Array.isArray(liveRun.results) && Array.isArray(liveRun.testQueue)) {
     const executedIds = new Set(liveRun.results.map(r => r.testId));
     for (const queued of liveRun.testQueue) {
@@ -305,10 +306,10 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  // For BullMQ runs (workerController path), the DB was already updated
+  // For BullMQ runs (workerEntry path), the DB was already updated
   // above before signaling the worker. For all other paths (in-process or
   // stale runs with no live controller), write the abort status now.
-  if (!workerController) {
+  if (!workerEntry) {
     runRepo.update(req.params.runId, {
       status: "aborted",
       finishedAt: new Date().toISOString(),

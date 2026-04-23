@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, STRATEGY_VERSION } from "../src/selfHealing.js";
+import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, CORE_RULES, getPromptRules, STRATEGY_VERSION } from "../src/selfHealing.js";
 
 function test(name, fn) {
   try {
@@ -163,6 +163,61 @@ test("STRATEGY_VERSION is used server-side for hint scoping", () => {
   // helper code — the runtime only uses __healingHints (pre-filtered).
   assert.equal(typeof STRATEGY_VERSION, "number");
   assert.ok(STRATEGY_VERSION > 0, "STRATEGY_VERSION must be a positive integer");
+});
+
+// ── Tiered prompt rules (MNT-009) ────────────────────────────────────────────
+
+console.log("\n🏷️  tiered prompt rules (MNT-009)");
+
+test("CORE_RULES is significantly shorter than full SELF_HEALING_PROMPT_RULES", () => {
+  // CORE_RULES should be ~10-15% of the full rules
+  assert.ok(CORE_RULES.length < SELF_HEALING_PROMPT_RULES.length * 0.3,
+    `CORE_RULES (${CORE_RULES.length} chars) should be <30% of full rules (${SELF_HEALING_PROMPT_RULES.length} chars)`);
+});
+
+test("CORE_RULES mentions native Playwright methods (getByRole, getByLabel, fill, click)", () => {
+  assert.match(CORE_RULES, /getByRole/);
+  assert.match(CORE_RULES, /getByLabel/);
+  assert.match(CORE_RULES, /\.click\(\)/);
+  assert.match(CORE_RULES, /\.fill\(/);
+  assert.match(CORE_RULES, /toBeVisible/);
+  assert.match(CORE_RULES, /selectOption/);
+  assert.match(CORE_RULES, /\.check\(\)/);
+});
+
+test("CORE_RULES does NOT mention custom safe helpers (native Playwright for local models)", () => {
+  assert.doesNotMatch(CORE_RULES, /safeClick/);
+  assert.doesNotMatch(CORE_RULES, /safeFill/);
+  assert.doesNotMatch(CORE_RULES, /safeExpect/);
+});
+
+test("CORE_RULES includes rules section", () => {
+  assert.match(CORE_RULES, /RULES/);
+  assert.match(CORE_RULES, /NEVER/);
+});
+
+test("getPromptRules('cloud') returns full rules", () => {
+  const rules = getPromptRules("cloud");
+  assert.equal(rules, SELF_HEALING_PROMPT_RULES);
+});
+
+test("getPromptRules('local') returns compact CORE_RULES", () => {
+  const rules = getPromptRules("local");
+  assert.equal(rules, CORE_RULES);
+});
+
+test("CORE_RULES is under 1500 characters (fits in local model context)", () => {
+  assert.ok(CORE_RULES.length < 1500,
+    `CORE_RULES is ${CORE_RULES.length} chars — should be <1500 for local model context`);
+});
+
+test("SELF_HEALING_PROMPT_RULES (full) still includes all content", () => {
+  // Ensure the full rules weren't accidentally truncated during the split
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeClick/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeDblClick/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeDrag/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /FORBIDDEN/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /page\.getByRole\(\.\.\.\)\.click\(\)/);
 });
 
 if (process.exitCode) process.exit(1);

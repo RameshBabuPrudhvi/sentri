@@ -146,7 +146,12 @@ function D3Graph({ pages, activePage, onNodeClick, d3, testsByUrl }) {
   const simRef = useRef(null);
 
   useEffect(() => {
-    if (!svgRef.current || !d3 || pages.length === 0) return;
+    // Always return a cleanup function that stops the simulation — even on
+    // early return. Without this, navigating away while pages.length === 0
+    // leaves the previous simulation running (ghost D3 animation).
+    if (!svgRef.current || !d3 || pages.length === 0) {
+      return () => { simRef.current?.stop(); };
+    }
 
     const W = svgRef.current.clientWidth || 560;
     const H = 360;

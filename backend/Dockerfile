@@ -2,6 +2,7 @@ FROM node:20-slim
 
 RUN apt-get update && apt-get install -y \
   chromium \
+  ffmpeg \
   libnss3 \
   libatk1.0-0 \
   libatk-bridge2.0-0 \
@@ -30,5 +31,5 @@ RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://localhost:3001/api/dashboard').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "src/index.js"]

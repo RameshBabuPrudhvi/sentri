@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **AI**: Tiered prompt system for local models (Ollama) — splits `SELF_HEALING_PROMPT_RULES` into compact `CORE_RULES` (~200 tokens) for local 7B models and full `EXTENDED_RULES` for cloud providers; all 4 prompt consumers (`outputSchema.js`, `testFix.js`, `feedbackLoop.js`) use tier-aware `getPromptRules(getTier())`; local system prompt total under 2000 characters (MNT-009) (#100)
+- **Frontend**: Re-run button on Run Detail page for crawl and generate runs — when a crawl or generate run is in a terminal state (completed, completed_empty, failed, interrupted, aborted), a "Re-run" button appears in the header that re-triggers the same operation and navigates to the new run (MNT-010) (#100)
+
+### Changed
+- **Pipeline**: Journey count capped for small crawls — ≤5 pages generates max 2 journeys (was unlimited), ≤15 pages max 4; reduces LLM calls from ~8 to ~3-4 for typical Ollama crawls (#100)
+- **Pipeline**: Low-priority pages (NAVIGATION, CONTENT) with fewer than 3 interactive elements are now skipped in test generation — these produced low-quality tests that were almost always rejected by validation (#100)
+- **Pipeline**: API test generation skipped for trivial traffic — sites with fewer than 4 GET-only endpoints (e.g. google.com telemetry) no longer waste an LLM call on low-value API contract tests (#100)
+- **AI**: Ollama exempted from circuit breaker — local models don't have rate limits; Ollama HTTP 500 / context overflow errors were falsely triggering the rate-limit circuit breaker (threshold=1), disabling all remaining LLM calls for 5 minutes (#100)
+
+### Fixed
+- **Runner**: Test execution no longer crashes when ffmpeg is missing — `executeTest.js` now catches the Playwright "Executable doesn't exist" error on `browser.newContext()` and retries without `recordVideo`, so tests run (without video) instead of failing immediately with a confusing ffmpeg error (#100)
+- **Docker**: Both `Dockerfile` and `backend/Dockerfile` now install `ffmpeg` via apt — required by Playwright for video recording (#100)
+- **Docs**: All setup guides (README, getting-started, github-pages-render) updated to `npx playwright install chromium ffmpeg` — previously only chromium was installed, causing test runs to crash on Render deployments (#100)
+- **Validator**: `page.goto` check relaxed — tests that navigate via `safeClick` (which triggers `page.waitForLoadState` internally) are no longer rejected as "missing page.goto navigation"; this was the #1 false-positive rejection reason across all AI providers (#100)
+- **Crawl**: Site map was always empty — `run.pages` was set in-memory during crawl but never persisted to DB; added `pages` TEXT column (migration 007), added to `runRepo.js` JSON_FIELDS/INSERT_COLS, and both `crawlBrowser.js` and `stateExplorer.js` now persist pages and emit SSE snapshots as pages are discovered (#100)
+- **SSE**: `useRunSSE` retryTimer race — if the backoff timer fired between cleanup and re-setup on navigation, a stale `connect()` for the old runId would fire; added `mountedRef` guard (#100)
+- **Frontend**: `useLogBuffer` showed stale logs from previous run when navigating to a re-run with fewer log entries — changed `>` to `!==` comparison so the buffer resets on any length change (#100)
+- **Frontend**: SiteGraph D3 simulation leaked on early return when `pages.length === 0` — now always returns a cleanup function that calls `sim.stop()`, preventing ghost animations (#100)
+- **AI Chat**: Ollama chat requests during an active crawl/generate run caused Ollama to hang (single-threaded model) — chat endpoint now returns 503 "AI is busy" when Ollama is the provider and an in-process run is active (#100)
+- **AI Chat**: Ollama busy guard now filters by the provider each active run is using — previously a cloud-provider (Anthropic/OpenAI/Google) run would incorrectly block chat when the user switched to Ollama mid-run. Each run's provider is captured at start time on both `runAbortControllers` (in-process) and `workerAbortControllers` (BullMQ) registries so the chat endpoint can accurately distinguish Ollama-using runs from cloud runs (#100)
+- **AI**: Provider outages (Gemini 503 "high demand", 502/504 transient errors) are now retried with exponential backoff and fallback to other configured providers — previously they were treated as non-retriable programmer errors, so a single Gemini outage caused every crawl/generate pipeline call to fail immediately. New `isTransientServerError()` classifier in `aiProvider.js` distinguishes provider outages (5xx) from rate limits (429/quota); both are retried and fall back, but outages don't trip the 5-minute circuit breaker. All retry + fallback logic stays contained in `generateText()` — downstream callers (`journeyGenerator`, `crawler`, feedback loop) don't need any changes (#100)
+- **Crawl**: `completed_empty` warning now mentions AI provider overload (503) as the first possible cause, pointing users at multi-provider fallback config instead of misleading them toward API key checks (#100)
+
 ## [1.6.2] — 2026-04-23
 
 ### Added

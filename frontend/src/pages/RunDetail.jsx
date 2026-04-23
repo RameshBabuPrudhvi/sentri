@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Wifi,
   Server,
+  RotateCcw,
 } from "lucide-react";
 import { api } from "../api.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
@@ -125,6 +126,7 @@ export default function RunDetail() {
   const [llmTokens, setLlmTokens] = useState("");
   usePageTitle(run ? `Run ${runId.slice(0, 6).toUpperCase()}` : "Run Detail");
   const [aborting, setAborting] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -150,6 +152,44 @@ export default function RunDetail() {
       setAborting(false);
     }
   }, [runId, aborting]);
+
+  // ── Re-run handler (MNT-010) ─────────────────────────────────────────────
+  // For crawl and generate runs in terminal states, re-trigger the same operation.
+  const handleRerun = useCallback(async () => {
+    if (rerunning || !run) return;
+    setRerunning(true);
+    try {
+      let result;
+      const input = run.generateInput || {};
+      if (run.type === "crawl") {
+        result = await api.crawl(run.projectId, input.dialsConfig ? { dialsConfig: input.dialsConfig } : undefined);
+      } else if (run.type === "generate") {
+        // Guard against missing/corrupted generateInput — the backend requires
+        // `name` for generate runs, so sending undefined would 400.
+        if (!input.name) {
+          addNotification({
+            type: "error",
+            title: "Re-run failed",
+            body: "Original generation input not found — please create a new generation instead.",
+          });
+          return;
+        }
+        result = await api.generateTest(run.projectId, {
+          name: input.name,
+          description: input.description,
+          dialsConfig: input.dialsConfig,
+        });
+      }
+      if (result?.runId) {
+        addNotification({ type: "success", title: "Re-run started", body: `New run ${result.runId} created` });
+        navigate(`/runs/${result.runId}`);
+      }
+    } catch (err) {
+      addNotification({ type: "error", title: "Re-run failed", body: err.message || "Unknown error" });
+    } finally {
+      setRerunning(false);
+    }
+  }, [run, rerunning, navigate, addNotification]);
 
   // Initial fetch — capture the run's status at load time so useRunSSE can
   // skip SSE entirely for already-finished runs (prevents spurious notifications).
@@ -281,6 +321,10 @@ export default function RunDetail() {
 
   const traceUrl = run.tracePath ?? null;
 
+  // MNT-010: Show re-run button for crawl/generate runs in terminal states
+  const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
+  const canRerun = (isCrawl || isGenerate) && TERMINAL_STATUSES.has(run.status);
+
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div
@@ -377,6 +421,19 @@ export default function RunDetail() {
                   ? <RefreshCw size={12} className="spin" />
                   : <StopCircle size={12} />}
                 {aborting ? "Stopping…" : "Stop Task"}
+              </button>
+            )}
+            {canRerun && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleRerun}
+                disabled={rerunning}
+                title={isCrawl ? "Re-run crawl & generate" : "Re-run AI generate"}
+              >
+                {rerunning
+                  ? <RefreshCw size={12} className="spin" />
+                  : <RotateCcw size={12} />}
+                {rerunning ? "Starting…" : "Re-run"}
               </button>
             )}
             {traceUrl && (

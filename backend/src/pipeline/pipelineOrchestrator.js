@@ -13,6 +13,7 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./deduplicator.js";
 import { enhanceTests } from "./assertionEnhancer.js";
 import { validateTest } from "./testValidator.js";
+import { applyHealingTransforms } from "../selfHealing.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
@@ -59,6 +60,25 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   const { tests: enhancedTests, enhancedCount } = enhanceTests(finalTests, snapshotsByUrl, classifiedPagesByUrl);
   log(run, `   ${enhancedCount} tests had assertions strengthened`);
   structuredLog("pipeline.enhance", { runId: run.id, enhanced: enhancedCount, total: enhancedTests.length });
+
+  // ── Step 6b: Apply self-healing transforms ────────────────────────────
+  // Rewrite raw Playwright calls (page.click, page.fill, page.getByRole().click())
+  // into self-healing helpers (safeClick, safeFill, safeExpect) BEFORE validation.
+  // Without this, the validator rejects code that uses raw Playwright methods —
+  // but at runtime executeTest.js applies the same transforms, so the code would
+  // actually work. This was the #1 cause of false-positive rejections, especially
+  // with Ollama which frequently ignores the "use safeClick" prompt instruction.
+  let healingTransformed = 0;
+  for (const t of enhancedTests) {
+    if (t.playwrightCode) {
+      const before = t.playwrightCode;
+      t.playwrightCode = applyHealingTransforms(t.playwrightCode);
+      if (t.playwrightCode !== before) healingTransformed++;
+    }
+  }
+  if (healingTransformed > 0) {
+    log(run, `🩹 ${healingTransformed} test(s) had raw Playwright calls rewritten to self-healing helpers`);
+  }
 
   // ── Step 7: Validate ────────────────────────────────────────────────────
   throwIfAborted(signal);

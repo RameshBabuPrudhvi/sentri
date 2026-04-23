@@ -18,7 +18,8 @@ import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { SELF_HEALING_PROMPT_RULES, applyHealingTransforms } from "../selfHealing.js";
+import { getPromptRules, applyHealingTransforms } from "../selfHealing.js";
+import { getTier } from "../pipeline/prompts/promptTiers.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 
@@ -26,8 +27,13 @@ const router = Router();
 
 /**
  * Build the system prompt for the test-fix AI call.
+ * Uses tier-aware prompt rules (MNT-009) — local models get compact rules.
+ *
+ * @returns {string} The system prompt.
  */
-const SYSTEM_PROMPT = `You are a Playwright test expert. Your job is to apply a MINIMAL, TARGETED fix to a failing Playwright test.
+function buildFixSystemPrompt() {
+  const rules = getPromptRules(getTier());
+  return `You are a Playwright test expert. Your job is to apply a MINIMAL, TARGETED fix to a failing Playwright test.
 
 CRITICAL — MINIMAL CHANGES ONLY:
 - Identify the SPECIFIC line(s) that caused the failure based on the error message.
@@ -46,7 +52,8 @@ Rules:
 - Keep the test name the same as the original.
 
 SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
-${SELF_HEALING_PROMPT_RULES}`;
+${rules}`;
+}
 
 /**
  * Build the user prompt with test code + failure context.
@@ -156,6 +163,8 @@ router.post("/tests/:testId/fix", requireRole("qa_lead"), async (req, res) => {
 
   const failureResult = runRepo.findLatestResultForTest(test.id);
 
+  console.log(formatLogLine("info", null, `[testFix] starting AI fix for ${test.id} ("${test.name}") — provider: ${isLocalProvider() ? "local/Ollama" : "cloud"}, hasFailureContext: ${!!failureResult}`));
+
   const userPrompt = buildUserPrompt(test, failureResult, project);
 
   // Set up SSE
@@ -195,7 +204,7 @@ router.post("/tests/:testId/fix", requireRole("qa_lead"), async (req, res) => {
 
     const startMs = Date.now();
     await streamText(
-      { system: SYSTEM_PROMPT, user: userPrompt },
+      { system: buildFixSystemPrompt(), user: userPrompt },
       (token) => {
         fixedCode += token;
         if (!res.writableEnded) {

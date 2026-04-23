@@ -66,6 +66,7 @@ const MAX_SSE_RETRIES  = 5;
 export function useRunSSE(runId, onEvent, initialStatus) {
   const onEventRef    = useRef(onEvent);
   const doneRef       = useRef(false);
+  const mountedRef    = useRef(true);  // Bug A fix: guard against stale retryTimer callbacks
   const esRef         = useRef(null);
   const retryTimer    = useRef(null);
   const pollTimer     = useRef(null);
@@ -134,7 +135,7 @@ export function useRunSSE(runId, onEvent, initialStatus) {
 
     es.onerror = (evt) => {
       es.close();
-      if (doneRef.current) return;
+      if (doneRef.current || !mountedRef.current) return;
 
       retryCount.current += 1;
 
@@ -182,12 +183,14 @@ export function useRunSSE(runId, onEvent, initialStatus) {
     }
 
     doneRef.current    = false;
+    mountedRef.current = true;
     retryCount.current = 0;
     setSseDown(false);
     setFaviconStatus("running");
     connect();
 
     return () => {
+      mountedRef.current = false;
       doneRef.current = true;
       clearTimeout(retryTimer.current);
       clearTimeout(pollTimer.current);

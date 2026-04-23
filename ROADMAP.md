@@ -71,6 +71,8 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-013 | Stale test detection and cleanup | PR #99 |
 | MNT-007 | ARIA live regions for real-time updates | PR #99 |
 | DIF-004 | Flaky test detection and reporting | PR #99 |
+| MNT-009 | Tiered prompt system for local models (Ollama) | PR #100 |
+| MNT-010 | Re-run button on Run Detail page for crawl/generate runs | PR #100 |
 
 ---
 
@@ -1169,7 +1171,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-009 — Tiered prompt system for local models (Ollama) 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
+**Status:** ✅ Complete | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
 
 **Problem:** Since deep validation was added (MAINT-012 / PR #57), Ollama-generated tests are rejected at near-100% rate. The `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` is ~170 lines / ~4K tokens. When embedded in the system prompt, the total exceeds 7B model context windows (~4K-8K effective tokens). The model produces hallucinated selectors, wrong function signatures, missing `await`, and syntax errors — all caught by the validator. Cloud models (Gemini, Claude, GPT-4o) handle the full prompt fine; only local models are affected.
 
@@ -1197,7 +1199,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-010 — Re-run button on Run Detail page for crawl/generate runs 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #99 UX review
+**Status:** ✅ Complete | **Effort:** S | **Source:** PR #99 UX review
 
 **Problem:** The Run Detail page has no "Re-run" or "Retry" button for crawl and generate runs. When a crawl fails, is interrupted, or produces 0 tests (e.g. rate limit, Ollama quality), the user must navigate back to the Tests page and re-trigger manually. The re-run button only exists for `test_run` type runs in `TestRunView.jsx:638-661`.
 
@@ -1207,6 +1209,24 @@ The following items have been verified complete against the codebase and are **n
 - `frontend/src/pages/RunDetail.jsx` — add re-run button with type-aware API call
 
 **Dependencies:** None
+
+---
+
+### MNT-011 — Persist crawl/generate dialsConfig on run record 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #100 Devin review
+
+**Problem:** The "Re-run" button on `RunDetail.jsx` (MNT-010) calls `api.crawl(projectId)` without passing any configuration body. The original crawl was started from `CrawlProjectModal.jsx` with `api.crawl(projectId, { dialsConfig })`, where `dialsConfig` includes the explore mode, explorer tuning parameters, test count, approach, format, and other dials. Without this config, the re-run uses server defaults — silently switching from state exploration back to link crawl mode, using different test counts, and producing completely different results than the original run.
+
+**Fix:** Store the `dialsConfig` on the run record in the backend when the crawl is initiated. Add a `dialsConfig` TEXT (JSON) column to the `runs` table. Populate it in `routes/runs.js` when creating the run. On re-run, `RunDetail.jsx` reads `run.dialsConfig` and passes it to `api.crawl(projectId, { dialsConfig: run.dialsConfig })`. Same pattern for generate runs with `run.generateInput`.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `dialsConfig` TEXT column to `runs`
+- `backend/src/database/repositories/runRepo.js` — add `dialsConfig` to `JSON_FIELDS` and `INSERT_COLS`
+- `backend/src/routes/runs.js` — store `dialsConfig` on the run record at creation time
+- `frontend/src/pages/RunDetail.jsx` — pass `run.dialsConfig` in `handleRerun`
+
+**Dependencies:** MNT-010 (re-run button must exist first)
 
 ---
 
@@ -1250,7 +1270,6 @@ The following items have been verified complete against the codebase and are **n
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ✅ DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
-<!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
@@ -1267,17 +1286,18 @@ The following items have been verified complete against the codebase and are **n
 
 ## Summary
 
-| Category | Items | Blockers | 🟡 High | 🔵/🟢 |
-|----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | ~~SEC-002~~ ✅, ~~SEC-003~~ ✅ | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | ~~INF-004~~ ✅, ~~INF-005~~ ✅ |
-| Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
-| Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
-| Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
-| Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–010 | MNT-009 | MNT-006 | Remainder |
+| Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
+|----------|------:|--------:|---------------:|----------:|-----------|
+| Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
+| Infrastructure | 5 | 5 | 0 | 0 | — |
+| Access Control | 2 | 2 | 0 | 0 | — |
+| Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
+| Differentiators | 16 | 5 | 0 | 11 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
+| Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
+| Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
+| **Totals** | **64** | **22** | **0** | **42** | |
 
-**Total active items:** 63 tracked items across 7 categories
+**Total tracked items:** 64 across 7 categories — **22 complete** (34%), **0 in progress**, **42 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1285,10 +1305,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`MNT-009` (tiered prompts for Ollama — 🔴 Blocker, Ollama currently generates 0 valid tests) → `DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
+`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
 
 **Lowest effort / highest immediate value:**
-MNT-009 (M) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
+DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 
