@@ -1167,6 +1167,34 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
+### MNT-009 — Tiered prompt system for local models (Ollama) 🔴 Blocker
+
+**Status:** 🔲 Planned | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
+
+**Problem:** Since deep validation was added (MAINT-012 / PR #57), Ollama-generated tests are rejected at near-100% rate. The `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` is ~170 lines / ~4K tokens. When embedded in the system prompt, the total exceeds 7B model context windows (~4K-8K effective tokens). The model produces hallucinated selectors, wrong function signatures, missing `await`, and syntax errors — all caught by the validator. Cloud models (Gemini, Claude, GPT-4o) handle the full prompt fine; only local models are affected.
+
+**Evidence:** RUN-7 on google.com with Ollama: 11 raw tests → 3 deduped → 8 rejected by validation → 0 saved.
+
+**Fix:** Split `SELF_HEALING_PROMPT_RULES` into `CORE_RULES` (~200 tokens, 6 essential helpers with correct signatures) and `EXTENDED_RULES` (~3800 tokens, exhaustive forbidden list). Create a `promptTiers.js` module with `cloud` and `local` tier configs. `getPromptRules(tier)` returns compact rules for local, full rules for cloud. All 4 prompt consumers (`outputSchema.js`, `testFix.js`, `feedbackLoop.js`, `tests.js`) use the tier-aware getter.
+
+**Files to change:**
+- New `backend/src/pipeline/prompts/promptTiers.js` — tier definitions + `getTier()`
+- `backend/src/selfHealing.js` — split rules into `CORE_RULES` + `EXTENDED_RULES`, export `getPromptRules(tier)`
+- `backend/src/pipeline/prompts/outputSchema.js` — use `getPromptRules(getTier())`
+- `backend/src/routes/testFix.js` — use `getPromptRules(getTier())`
+- `backend/src/pipeline/feedbackLoop.js` — use `getPromptRules(getTier())`, limit elements to `tier.maxElements`
+- `backend/tests/self-healing.test.js` — test both rule tiers
+
+**Acceptance criteria:**
+- Ollama (mistral:7b) generates ≥1 valid test from a crawl of google.com
+- Cloud providers still get the full exhaustive rules
+- Local system prompt total < 2000 tokens
+- Existing tests pass
+
+**Dependencies:** None
+
+---
+
 ### MNT-008 — ESLint + Prettier enforcement in CI 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (PRD-04)
@@ -1232,9 +1260,9 @@ The following items have been verified complete against the codebase and are **n
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
+| Maintenance | MNT-001–009 | MNT-009 | MNT-006 | Remainder |
 
-**Total active items:** 61 tracked items across 7 categories
+**Total active items:** 62 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1242,10 +1270,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export)
+`MNT-009` (tiered prompts for Ollama — 🔴 Blocker, Ollama currently generates 0 valid tests) → `DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
 
 **Lowest effort / highest immediate value:**
-AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
+MNT-009 (M) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 
