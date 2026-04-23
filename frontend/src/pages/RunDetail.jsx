@@ -164,6 +164,16 @@ export default function RunDetail() {
       if (run.type === "crawl") {
         result = await api.crawl(run.projectId, input.dialsConfig ? { dialsConfig: input.dialsConfig } : undefined);
       } else if (run.type === "generate") {
+        // Guard against missing/corrupted generateInput — the backend requires
+        // `name` for generate runs, so sending undefined would 400.
+        if (!input.name) {
+          addNotification({
+            type: "error",
+            title: "Re-run failed",
+            body: "Original generation input not found — please create a new generation instead.",
+          });
+          return;
+        }
         result = await api.generateTest(run.projectId, {
           name: input.name,
           description: input.description,
