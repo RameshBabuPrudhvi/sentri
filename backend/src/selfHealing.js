@@ -16,7 +16,10 @@
  * - {@link getHealingHistoryForTest} — Serialise healing history for runtime injection.
  * - {@link getSelfHealingHelperCode} — Generate the runtime helper code string.
  * - {@link applyHealingTransforms} — Rewrite Playwright code to use self-healing helpers.
- * - {@link SELF_HEALING_PROMPT_RULES} — Prompt rules for AI code generation.
+ * - {@link CORE_RULES} — Compact prompt rules for local models (~200 tokens).
+ * - {@link EXTENDED_RULES} — Additional helper rules for cloud models.
+ * - {@link SELF_HEALING_PROMPT_RULES} — Full combined prompt rules (backward compat).
+ * - {@link getPromptRules} — Tier-aware getter: returns CORE_RULES or full rules.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1132,8 +1135,51 @@ export function applyHealingTransforms(code) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Prompt Rules (unchanged but stricter tone)
+// Prompt Rules — tiered for cloud vs local models (MNT-009)
 // ─────────────────────────────────────────────────────────────────────────────
+// CORE_RULES   (~200 tokens) — essential helper signatures + key constraints.
+//              Safe for 7B local models with limited context windows.
+// EXTENDED_RULES (~3800 tokens) — exhaustive forbidden-pattern list, advanced
+//              usage patterns (iframes, dialogs, tabs, downloads, mouse/keyboard).
+//              Included only for cloud models with large context windows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const CORE_RULES = `
+Use ONLY self-healing helpers for ALL interactions and visibility assertions.
+
+INTERACTIONS — use these exclusively (all are async, always await):
+  await safeClick(page, text)            — click buttons, links, tabs
+  await safeFill(page, label, value)     — fill inputs (also replaces page.type)
+  await safeSelect(page, label, value)   — select/dropdown
+  await safeCheck(page, label)           — check checkbox/radio
+  await safeUncheck(page, label)         — uncheck checkbox/radio
+  await safeExpect(page, expect, text)   — assert element is visible
+
+ASSERTIONS — use page.locator() inline inside expect():
+  await expect(page.locator(...)).toHaveCount(N)
+  await expect(page.locator(...)).toContainText('...')
+  await expect(page).toHaveURL(/hostname/i)  — hostname-only regex, never exact URL
+
+FORBIDDEN — never use raw Playwright calls:
+  ✗ page.click / page.fill / page.type / page.check / page.uncheck / page.selectOption
+  ✗ page.locator(...).click() / .fill() / .check() / .type()
+  ✗ page.getByRole(...).click() / .fill()
+  ✗ expect(page.getByRole(...)).toBeVisible()  — use safeExpect instead
+  ✗ const el = page.locator(...)  — always inline inside expect() or use safe helpers`.trim();
+
+export const EXTENDED_RULES = `
+ADDITIONAL HELPERS:
+  ✓ await safeDblClick(page, text)         — for any double-click
+  ✓ await safeHover(page, text)            — for any hover (menus, tooltips)
+  ✓ await safeDrag(page, sourceText, targetText) — for drag-and-drop
+  ✓ await safeUpload(page, label, filePaths)     — for file upload (accepts string or string[])
+  ✓ await safeFocus(page, label)           — for focusing an element
+  ✓ await safeTap(page, text)              — for touch tap (mobile viewports)
+  ✓ await safePress(page, label, key)      — for pressing a key on a focused element
+  ✓ await safeRightClick(page, text)       — for context-menu / right-click`.trim();
+
+// Full combined rules — backward-compatible export used by consumers that
+// have not yet migrated to the tier-aware getter.
 export const SELF_HEALING_PROMPT_RULES = `
 STRICT RULE: Use ONLY self-healing helpers for ALL interactions AND visibility assertions.
 
@@ -1302,3 +1348,16 @@ FORBIDDEN — never use these (they bypass self-healing and will break on select
   ✗ const results = page.locator(...);       ← inline: expect(page.locator(...)).toHaveCount(N)
   ✗ const searchButton = page.locator(...);  ← use safeClick(page, text) instead
 `.trim();
+
+/**
+ * Return the appropriate prompt rules for the given tier.
+ *
+ * - `"cloud"` — full exhaustive rules (`SELF_HEALING_PROMPT_RULES`)
+ * - `"local"` — compact core rules only (`CORE_RULES`)
+ *
+ * @param {"cloud"|"local"} tier - The prompt tier.
+ * @returns {string} Prompt rules string.
+ */
+export function getPromptRules(tier) {
+  return tier === "local" ? CORE_RULES : SELF_HEALING_PROMPT_RULES;
+}

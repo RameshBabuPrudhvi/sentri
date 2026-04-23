@@ -21,7 +21,8 @@ import { generateText, parseJSON } from "../aiProvider.js";
 import { throwIfAborted } from "../utils/abortHelper.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
-import { SELF_HEALING_PROMPT_RULES } from "../selfHealing.js";
+import { getPromptRules } from "../selfHealing.js";
+import { getTier, TIER_CONFIG } from "./prompts/promptTiers.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -219,7 +220,7 @@ export function buildQualityAnalytics(improvements, testMap) {
 
 // ── Improvement prompt builder ────────────────────────────────────────────────
 
-function buildImprovementPrompt(test, failureCategory, errorMessage, snapshot) {
+function buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier) {
   const categoryInstructions = {
     SELECTOR_ISSUE: `The test failed because a selector couldn't find an element. 
 Rewrite using more resilient selectors:
@@ -281,13 +282,13 @@ ${test.playwrightCode}
 PAGE CONTEXT:
 - Title: ${snapshot?.title || "unknown"}
 - Forms: ${snapshot?.forms || 0}
-- Elements: ${JSON.stringify((snapshot?.elements || []).slice(0, 15), null, 2)}
+- Elements: ${JSON.stringify((snapshot?.elements || []).slice(0, TIER_CONFIG[tier || "cloud"].maxElements), null, 2)}
 
 INSTRUCTIONS:
 ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
 
 SELF-HEALING RULES:
-${SELF_HEALING_PROMPT_RULES}
+${getPromptRules(tier || "cloud")}
 
 Return ONLY valid JSON (no markdown):
 {
@@ -360,7 +361,8 @@ export async function regenerateFailingTest(improvement, signal) {
 
   try {
     throwIfAborted(signal);
-    const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot);
+    const tier = getTier();
+    const prompt = buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier);
     const text = await generateText(prompt, { signal });
     const improved = parseJSON(text);
 

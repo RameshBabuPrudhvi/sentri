@@ -15,9 +15,10 @@
  * (page data, scenario hints, dials) in the "user" role.
  */
 
-import { SELF_HEALING_PROMPT_RULES } from "../../selfHealing.js";
+import { getPromptRules } from "../../selfHealing.js";
 import { isLocalProvider } from "../../aiProvider.js";
 import { buildFewShotBlock } from "./fewShotExamples.js";
+import { getTier } from "./promptTiers.js";
 
 // ─── Valid test types ────────────────────────────────────────────────────────
 
@@ -115,6 +116,8 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 export const PROMPT_VERSION = "2.2.0";
 
 export function buildSystemPrompt() {
+  const tier = getTier();
+  const rules = getPromptRules(tier);
   return `You are a senior QA automation engineer generating production-grade Playwright test suites.
 
 PERSONA RULES:
@@ -125,7 +128,7 @@ PERSONA RULES:
 - Only test elements/behaviors that ACTUALLY exist for the page type.
 
 SELF-HEALING:
-${SELF_HEALING_PROMPT_RULES}
+${rules}
 
 ASSERTION QUALITY:
 ${ASSERTION_RULES}

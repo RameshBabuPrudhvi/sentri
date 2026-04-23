@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, STRATEGY_VERSION } from "../src/selfHealing.js";
+import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, CORE_RULES, EXTENDED_RULES, getPromptRules, STRATEGY_VERSION } from "../src/selfHealing.js";
 
 function test(name, fn) {
   try {
@@ -163,6 +163,65 @@ test("STRATEGY_VERSION is used server-side for hint scoping", () => {
   // helper code — the runtime only uses __healingHints (pre-filtered).
   assert.equal(typeof STRATEGY_VERSION, "number");
   assert.ok(STRATEGY_VERSION > 0, "STRATEGY_VERSION must be a positive integer");
+});
+
+// ── Tiered prompt rules (MNT-009) ────────────────────────────────────────────
+
+console.log("\n🏷️  tiered prompt rules (MNT-009)");
+
+test("CORE_RULES is significantly shorter than full SELF_HEALING_PROMPT_RULES", () => {
+  // CORE_RULES should be ~10-15% of the full rules
+  assert.ok(CORE_RULES.length < SELF_HEALING_PROMPT_RULES.length * 0.3,
+    `CORE_RULES (${CORE_RULES.length} chars) should be <30% of full rules (${SELF_HEALING_PROMPT_RULES.length} chars)`);
+});
+
+test("CORE_RULES mentions essential helpers (safeClick, safeFill, safeExpect)", () => {
+  assert.match(CORE_RULES, /safeClick/);
+  assert.match(CORE_RULES, /safeFill/);
+  assert.match(CORE_RULES, /safeExpect/);
+  assert.match(CORE_RULES, /safeSelect/);
+  assert.match(CORE_RULES, /safeCheck/);
+  assert.match(CORE_RULES, /safeUncheck/);
+});
+
+test("CORE_RULES includes forbidden patterns section", () => {
+  assert.match(CORE_RULES, /FORBIDDEN/);
+  assert.match(CORE_RULES, /page\.click/);
+});
+
+test("EXTENDED_RULES mentions additional helpers not in CORE_RULES", () => {
+  assert.match(EXTENDED_RULES, /safeDblClick/);
+  assert.match(EXTENDED_RULES, /safeHover/);
+  assert.match(EXTENDED_RULES, /safeDrag/);
+  assert.match(EXTENDED_RULES, /safeUpload/);
+  assert.match(EXTENDED_RULES, /safeFocus/);
+  assert.match(EXTENDED_RULES, /safeTap/);
+  assert.match(EXTENDED_RULES, /safePress/);
+  assert.match(EXTENDED_RULES, /safeRightClick/);
+});
+
+test("getPromptRules('cloud') returns full rules", () => {
+  const rules = getPromptRules("cloud");
+  assert.equal(rules, SELF_HEALING_PROMPT_RULES);
+});
+
+test("getPromptRules('local') returns compact CORE_RULES", () => {
+  const rules = getPromptRules("local");
+  assert.equal(rules, CORE_RULES);
+});
+
+test("CORE_RULES is under 2000 characters (fits in local model context)", () => {
+  assert.ok(CORE_RULES.length < 2000,
+    `CORE_RULES is ${CORE_RULES.length} chars — should be <2000 for local model context`);
+});
+
+test("SELF_HEALING_PROMPT_RULES (full) still includes all content", () => {
+  // Ensure the full rules weren't accidentally truncated during the split
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeClick/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeDblClick/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /safeDrag/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /FORBIDDEN/);
+  assert.match(SELF_HEALING_PROMPT_RULES, /page\.getByRole\(\.\.\.\)\.click\(\)/);
 });
 
 if (process.exitCode) process.exit(1);
