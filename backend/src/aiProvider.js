@@ -249,19 +249,13 @@ function hasOllamaConfig() {
 }
 
 function detectProvider() {
-  // ── Quick-switch override from the header dropdown ────────────────────────
-  // Checked BEFORE the AI_PROVIDER env var so the dropdown can switch away
-  // from a locally-forced provider (e.g. AI_PROVIDER=local in .env).
-  if (runtimeActiveProvider) {
-    if (isProviderUsable(runtimeActiveProvider)) return runtimeActiveProvider;
-    // Key gone — clear the override and fall through
-    runtimeActiveProvider = null;
-  }
-
   // ── Sticky fallback from a previous rate-limit event ─────────────────────
-  // When generateText() falls back to another provider, it pins the fallback
-  // here so subsequent calls skip the rate-limited primary.  Auto-expires
-  // after STICKY_FALLBACK_TTL_MS.
+  // Checked FIRST — when a rate-limit fallback succeeded, all subsequent
+  // calls must use the fallback provider, even if the user explicitly
+  // selected the (now rate-limited) primary via the dropdown.  Without this
+  // priority, every call would re-try the broken provider for ~3 min before
+  // falling back again.  Auto-expires after STICKY_FALLBACK_TTL_MS so normal
+  // provider selection resumes once the rate limit window resets.
   if (_stickyFallbackProvider && Date.now() < _stickyFallbackExpiry) {
     if (isProviderUsable(_stickyFallbackProvider)) return _stickyFallbackProvider;
     // Fallback no longer usable — clear and fall through
@@ -271,6 +265,15 @@ function detectProvider() {
     // Expired — clear
     _stickyFallbackProvider = null;
     _stickyFallbackExpiry   = 0;
+  }
+
+  // ── Quick-switch override from the header dropdown ────────────────────────
+  // Checked AFTER the sticky fallback so a rate-limited provider is not
+  // retried just because the user had it selected in the dropdown.
+  if (runtimeActiveProvider) {
+    if (isProviderUsable(runtimeActiveProvider)) return runtimeActiveProvider;
+    // Key gone — clear the override and fall through
+    runtimeActiveProvider = null;
   }
 
   // ── AI_PROVIDER env var (explicit static config) ─────────────────────────
