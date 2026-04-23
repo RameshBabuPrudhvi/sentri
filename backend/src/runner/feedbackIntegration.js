@@ -17,8 +17,11 @@ import { structuredLog } from "../utils/logFormatter.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import { computeAndPersistFlakyScores } from "../utils/flakyDetector.js";
 
-/** Maximum time the AI feedback loop is allowed to run before being abandoned. */
-const FEEDBACK_TIMEOUT_MS = parseInt(process.env.FEEDBACK_TIMEOUT_MS, 10) || 60_000;
+/** Maximum time the AI feedback loop is allowed to run before being abandoned.
+ *  Default 180s — generous enough for Ollama (local models are slow on large
+ *  prompts) while still preventing indefinite hangs on cloud providers.
+ *  Override via FEEDBACK_TIMEOUT_MS env var. */
+const FEEDBACK_TIMEOUT_MS = parseInt(process.env.FEEDBACK_TIMEOUT_MS, 10) || 180_000;
 
 /**
  * runFeedbackLoop(run, tests, signal)
@@ -54,12 +57,15 @@ export async function runFeedbackLoop(run, tests, signal) {
     const { hasProvider, isProviderDegraded } = await import("../aiProvider.js");
     if (!hasProvider()) return;
 
-    // Skip AI feedback when the provider is degraded (rate-limited primary with
-    // a sticky fallback active, or circuit breaker open).  The feedback loop
-    // makes multiple sequential AI calls that would each burn minutes retrying
-    // the rate-limited provider, blocking run completion.
-    if (isProviderDegraded() || run.rateLimitError) {
-      log(run, `⏭️  Skipping AI feedback loop — provider is degraded (rate limit active). Failure analysis logged above.`);
+    // Skip AI feedback when the run itself hit rate limits during generation.
+    // The run.rateLimitError flag is set by crawler.js when the generation
+    // phase exhausted all retries — attempting more AI calls would just fail.
+    // Note: we do NOT skip based on isProviderDegraded() alone because the
+    // user may have switched to a different (healthy) provider since the
+    // generation phase.  The degraded state is already handled by the sticky
+    // fallback in generateText() which routes calls to the working provider.
+    if (run.rateLimitError) {
+      log(run, `⏭️  Skipping AI feedback loop — run hit rate limits during generation. Failure analysis logged above.`);
       return;
     }
 
