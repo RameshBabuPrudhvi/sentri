@@ -944,7 +944,10 @@ export async function generateText(prompt, options) {
     const fallbacks = getFallbackProviders(provider);
 
     if (fallbacks.length === 0) {
-      // No fallbacks available — rethrow the original error
+      // No fallbacks available — log why and rethrow so the caller (and user)
+      // can tell this was a real "nothing more we can do" situation, not a
+      // silent skip.
+      console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} after ${MAX_RETRIES + 1} attempts — no other provider configured for fallback. Giving up. Configure a second provider in Settings to enable automatic fallback.`));
       throw err;
     }
 
@@ -1003,15 +1006,17 @@ export function parseJSON(text) {
  * Calls `onToken(string)` for each token as it arrives.
  * Returns the full accumulated text when the stream completes.
  *
- * Falls back to a single blocking call (Google / Ollama) that delivers
- * the entire response as one synthetic "token".
+ * ### Error handling
+ * If the streaming call fails with a retryable error (rate limit or
+ * transient 5xx) BEFORE any tokens are emitted, we transparently retry
+ * via `generateText()` — which applies the full FEA-003 retry + fallback
+ * chain and emits the full response as a single synthetic "token". Once
+ * tokens have started flowing we can't safely fall back (the user would
+ * see two partial responses), so mid-stream failures propagate as-is.
  *
- * NOTE: Unlike {@link generateText}, this function does NOT implement the
- * FEA-003 provider fallback chain. If the primary provider is rate-limited,
- * the error propagates directly. Google and Ollama paths delegate to
- * `generateText()` which does have fallback, but Anthropic/OpenAI streaming
- * paths do not. This is intentional — streaming callers (chat) need a
- * consistent provider for multi-turn context.
+ * Google and Ollama providers never start a real stream — they always
+ * delegate to `generateText()` (their SDKs don't support incremental
+ * streaming from this codebase), so they get fallback for free.
  *
  * @param {string|{system: string, user: string}} promptOrMessages - Plain string or structured messages.
  * @param {function(string): void} onToken - Callback invoked for each token.
@@ -1026,50 +1031,79 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
   if (!provider) throw new Error("No AI provider configured.");
 
   const { signal, responseFormat } = options;
-  const { system, user, combined } = normaliseMessages(promptOrMessages);
+  const { system, user } = normaliseMessages(promptOrMessages);
   const useJson = responseFormat !== "text";
 
+  // Helper — when a streaming call fails BEFORE any tokens have been emitted,
+  // fall back to non-streaming generateText() which has full FEA-003 retry
+  // + multi-provider fallback support. The result is delivered as one
+  // synthetic "token" (same pattern as Google/Ollama below).
+  async function fallbackToNonStreaming(err) {
+    console.warn(formatLogLine("warn", null, `[aiProvider] streamText ${provider} failed before any tokens (${err.message?.slice(0, 120)}) — retrying via non-streaming path with provider fallback.`));
+    const text = await generateText(promptOrMessages, { ...options, responseFormat });
+    onToken(text);
+    return text;
+  }
+
   if (provider === "anthropic") {
-    const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
-    const params = {
-      model: buildProviderMeta().anthropic.model,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      messages: [{ role: "user", content: user }],
-    };
-    if (system) params.system = system;
-    const stream = client.messages.stream(params, { signal });
-    for await (const chunk of stream) {
-      throwIfAborted(signal);
-      if (chunk.type === "content_block_delta" && chunk.delta?.text) {
-        onToken(chunk.delta.text);
+    let tokensEmitted = 0;
+    try {
+      const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
+      const params = {
+        model: buildProviderMeta().anthropic.model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        messages: [{ role: "user", content: user }],
+      };
+      if (system) params.system = system;
+      const stream = client.messages.stream(params, { signal });
+      for await (const chunk of stream) {
+        throwIfAborted(signal);
+        if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+          onToken(chunk.delta.text);
+          tokensEmitted++;
+        }
       }
+      return (await stream.finalMessage()).content[0].text;
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      // Only fall back if no tokens were emitted — otherwise the user would see two partial responses.
+      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
+      throw err;
     }
-    return (await stream.finalMessage()).content[0].text;
   }
 
   if (provider === "openai") {
-    const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
-    const messages = [];
-    if (system) messages.push({ role: "system", content: system });
-    messages.push({ role: "user", content: user });
-    const params = {
-      model: buildProviderMeta().openai.model,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      stream: true,
-      messages,
-    };
-    if (useJson) params.response_format = { type: "json_object" };
-    const stream = await client.chat.completions.create(params, { signal });
-    let full = "";
-    for await (const chunk of stream) {
-      throwIfAborted(signal);
-      const token = chunk.choices[0]?.delta?.content ?? "";
-      if (token) { full += token; onToken(token); }
+    let tokensEmitted = 0;
+    try {
+      const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+      const messages = [];
+      if (system) messages.push({ role: "system", content: system });
+      messages.push({ role: "user", content: user });
+      const params = {
+        model: buildProviderMeta().openai.model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        stream: true,
+        messages,
+      };
+      if (useJson) params.response_format = { type: "json_object" };
+      const stream = await client.chat.completions.create(params, { signal });
+      let full = "";
+      for await (const chunk of stream) {
+        throwIfAborted(signal);
+        const token = chunk.choices[0]?.delta?.content ?? "";
+        if (token) { full += token; onToken(token); tokensEmitted++; }
+      }
+      return full;
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
+      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
+      throw err;
     }
-    return full;
   }
 
-  // Google / Ollama — no streaming SDK; deliver whole response as one token
+  // Google / Ollama — no streaming SDK; deliver whole response as one token.
+  // generateText() handles retry + fallback internally so these providers
+  // get FEA-003 coverage for free.
   const text = await generateText(promptOrMessages, { ...options, responseFormat });
   onToken(text);
   return text;
