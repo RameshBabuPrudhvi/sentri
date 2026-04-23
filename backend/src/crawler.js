@@ -302,7 +302,16 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     log(run, `🌐 No API endpoints captured — site made no fetch/XHR calls during ${mode === "state" ? "exploration" : "crawl"}. API test generation skipped.`);
     log(run, `💡 Tip: Use "State exploration" mode to trigger API calls via button clicks and form submissions.`);
   }
-  if (apiEndpoints.length > 0 && !genResult.rateLimitHit) {
+  // Skip API test generation for trivial traffic — sites like google.com
+  // emit a few GET requests for assets/telemetry that don't produce useful
+  // API contract tests. Only invest an LLM call when there are enough
+  // meaningful endpoints (≥4) or at least one mutation (POST/PUT/PATCH/DELETE).
+  const hasMutationEndpoints = apiEndpoints.some(ep => ep.method !== "GET");
+  const skipApiTests = apiEndpoints.length > 0 && apiEndpoints.length < 4 && !hasMutationEndpoints;
+  if (skipApiTests) {
+    log(run, `🌐 Only ${apiEndpoints.length} trivial GET endpoint(s) captured — skipping API test generation (need ≥4 endpoints or a mutation)`);
+  }
+  if (apiEndpoints.length > 0 && !skipApiTests && !genResult.rateLimitHit) {
     throwIfAborted(signal);
     log(run, `🌐 Generating API tests from ${apiEndpoints.length} discovered endpoints...`);
     try {

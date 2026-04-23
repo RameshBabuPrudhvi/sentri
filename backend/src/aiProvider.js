@@ -887,6 +887,12 @@ export async function generateText(prompt, options) {
   } catch (err) {
     if (!isRateLimitError(err)) throw err;
 
+    // Ollama (local) doesn't have rate limits — its errors (HTTP 500, context
+    // overflow, timeout) can match isRateLimitError() false positives (e.g.
+    // "overloaded" in error messages). Don't circuit-break local models;
+    // just rethrow so the caller's retry/error handling takes over.
+    if (provider === "local") throw err;
+
     // Primary provider hit rate limit — record failure and try fallbacks
     recordProviderFailure(provider);
     const fallbacks = getFallbackProviders(provider);

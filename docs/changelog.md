@@ -11,10 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AI**: Tiered prompt system for local models (Ollama) — splits `SELF_HEALING_PROMPT_RULES` into compact `CORE_RULES` (~200 tokens) for local 7B models and full `EXTENDED_RULES` for cloud providers; all 4 prompt consumers (`outputSchema.js`, `testFix.js`, `feedbackLoop.js`) use tier-aware `getPromptRules(getTier())`; local system prompt total under 2000 characters (MNT-009) (#100)
 - **Frontend**: Re-run button on Run Detail page for crawl and generate runs — when a crawl or generate run is in a terminal state (completed, completed_empty, failed, interrupted, aborted), a "Re-run" button appears in the header that re-triggers the same operation and navigates to the new run (MNT-010) (#100)
 
+### Changed
+- **Pipeline**: Journey count capped for small crawls — ≤5 pages generates max 2 journeys (was unlimited), ≤15 pages max 4; reduces LLM calls from ~8 to ~3-4 for typical Ollama crawls (#100)
+- **Pipeline**: Low-priority pages (NAVIGATION, CONTENT) with fewer than 3 interactive elements are now skipped in test generation — these produced low-quality tests that were almost always rejected by validation (#100)
+- **Pipeline**: API test generation skipped for trivial traffic — sites with fewer than 4 GET-only endpoints (e.g. google.com telemetry) no longer waste an LLM call on low-value API contract tests (#100)
+- **AI**: Ollama exempted from circuit breaker — local models don't have rate limits; Ollama HTTP 500 / context overflow errors were falsely triggering the rate-limit circuit breaker (threshold=1), disabling all remaining LLM calls for 5 minutes (#100)
+
 ### Fixed
 - **Runner**: Test execution no longer crashes when ffmpeg is missing — `executeTest.js` now catches the Playwright "Executable doesn't exist" error on `browser.newContext()` and retries without `recordVideo`, so tests run (without video) instead of failing immediately with a confusing ffmpeg error (#100)
 - **Docker**: Both `Dockerfile` and `backend/Dockerfile` now install `ffmpeg` via apt — required by Playwright for video recording (#100)
 - **Docs**: All setup guides (README, getting-started, github-pages-render) updated to `npx playwright install chromium ffmpeg` — previously only chromium was installed, causing test runs to crash on Render deployments (#100)
+- **Validator**: `page.goto` check relaxed — tests that navigate via `safeClick` (which triggers `page.waitForLoadState` internally) are no longer rejected as "missing page.goto navigation"; this was the #1 false-positive rejection reason across all AI providers (#100)
 
 ## [1.6.2] — 2026-04-23
 

@@ -4,6 +4,7 @@ import { Search, X, RefreshCw, Clock } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
 import ExploreModePicker from "../generate/ExploreModePicker.jsx";
+import CrawlDialsPanel from "./CrawlDialsPanel.jsx";
 import { loadSavedConfig } from "../../utils/testDialsStorage.js";
 
 /**
@@ -110,6 +111,8 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
             </div>
 
             <ExploreModePicker value={dialsConfig} onChange={setDialsConfig} />
+
+            <CrawlDialsPanel value={dialsConfig} onChange={setDialsConfig} />
 
             {error && (
               <div className="alert-error" style={{ marginBottom: 16 }}>

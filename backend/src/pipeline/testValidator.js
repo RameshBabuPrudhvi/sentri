@@ -394,10 +394,15 @@ export function validateTest(test, projectUrl) {
         test.playwrightCode.includes("http://example.com")) {
       issues.push("playwrightCode uses placeholder example.com URL");
     }
-    // Must reference navigation — page.goto for UI tests, or request.newContext / api.get/post for API tests
+    // Must reference navigation — page.goto or self-healing helpers that navigate
+    // (safeClick on a link triggers page.waitForLoadState internally).
+    // API tests use request.newContext / api.get/post instead.
     const isApiTest = test._generatedFrom === "api_har_capture" || test._generatedFrom === "api_user_described"
       || test.playwrightCode.includes("request.newContext") || test.playwrightCode.includes("api.get") || test.playwrightCode.includes("api.post");
-    if (!isApiTest && !test.playwrightCode.includes("page.goto")) {
+    const hasNavigation = test.playwrightCode.includes("page.goto")
+      || test.playwrightCode.includes("safeClick")
+      || test.playwrightCode.includes("page.waitForURL");
+    if (!isApiTest && !hasNavigation) {
       issues.push("playwrightCode missing page.goto navigation");
     }
     // Syntax validation — catch malformed code at generation time rather than
