@@ -1195,6 +1195,21 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
+### MNT-010 — Re-run button on Run Detail page for crawl/generate runs 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #99 UX review
+
+**Problem:** The Run Detail page has no "Re-run" or "Retry" button for crawl and generate runs. When a crawl fails, is interrupted, or produces 0 tests (e.g. rate limit, Ollama quality), the user must navigate back to the Tests page and re-trigger manually. The re-run button only exists for `test_run` type runs in `TestRunView.jsx:638-661`.
+
+**Fix:** Add a "Re-run" button to `RunDetail.jsx` for crawl and generate runs (alongside the existing "Refresh" and "Stop Task" buttons). For crawl runs, call `api.crawl(projectId)`. For generate runs, call `api.generateTest(projectId, { name, description })` using `run.generateInput`. Show the button when the run is in a terminal state (`completed`, `completed_empty`, `failed`, `interrupted`, `aborted`).
+
+**Files to change:**
+- `frontend/src/pages/RunDetail.jsx` — add re-run button with type-aware API call
+
+**Dependencies:** None
+
+---
+
 ### MNT-008 — ESLint + Prettier enforcement in CI 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (PRD-04)
@@ -1260,9 +1275,9 @@ The following items have been verified complete against the codebase and are **n
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–009 | MNT-009 | MNT-006 | Remainder |
+| Maintenance | MNT-001–010 | MNT-009 | MNT-006 | Remainder |
 
-**Total active items:** 62 tracked items across 7 categories
+**Total active items:** 63 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
