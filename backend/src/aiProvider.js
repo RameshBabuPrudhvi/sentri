@@ -484,6 +484,44 @@ export function isRateLimitError(err) {
     || /\boverloaded/i.test(msg);
 }
 
+/**
+ * Detect transient server-side failures that warrant retry + provider
+ * fallback but aren't rate limits. Common examples:
+ *   - Google Gemini 503 "This model is currently experiencing high demand"
+ *   - Anthropic 503 "overloaded_error" (already matches isRateLimitError via /overloaded/)
+ *   - OpenAI 500/502/504 transient backend errors
+ *   - Provider-specific HTTP 5xx with "high demand", "service unavailable", "try again later"
+ *
+ * Distinct from isRateLimitError — these are not quota issues, they're
+ * temporary server outages. We retry with backoff and fall back to other
+ * providers, but don't trip the per-provider rate-limit circuit breaker
+ * (the provider's key is fine; the backend is struggling).
+ *
+ * @param {Error} err
+ * @returns {boolean}
+ */
+export function isTransientServerError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  const status = err?.status || err?.statusCode || 0;
+  // HTTP 5xx except 501 (Not Implemented) — 500/502/503/504 are retriable
+  if (status >= 500 && status !== 501) return true;
+  return /\b50[0234]\b/.test(msg)
+    || /\bservice unavailable\b/i.test(msg)
+    || /\bhigh demand\b/i.test(msg)
+    || /\btry again later\b/i.test(msg)
+    || /\binternal server error\b/i.test(msg)
+    || /\bbad gateway\b/i.test(msg)
+    || /\bgateway timeout\b/i.test(msg);
+}
+
+/**
+ * True if the error should be retried — either a rate limit (quota issue)
+ * or a transient server error (provider outage).
+ */
+function isRetryableError(err) {
+  return isRateLimitError(err) || isTransientServerError(err);
+}
+
 function extractRetryAfter(err) {
   const match = (err?.message || "").match(/retry in (\d+(?:\.\d+)?)(s|ms)/i);
   if (match) {
@@ -499,14 +537,17 @@ async function withRetry(fn, label = "") {
       return await fn();
     } catch (err) {
       if (attempt === MAX_RETRIES) throw err;
-      if (!isRateLimitError(err)) throw err;
+      if (!isRetryableError(err)) throw err;
       const retryAfter = extractRetryAfter(err);
       // Honor server-requested Retry-After delays (cap at 2× MAX_BACKOFF_MS to
       // prevent absurd waits). Only cap computed exponential backoff at MAX_BACKOFF_MS.
       const delay = retryAfter
         ? Math.min(retryAfter, MAX_BACKOFF_MS * 2)
         : Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_BACKOFF_MS);
-      console.warn(formatLogLine("warn", null, `Rate limit hit${label ? " for " + label : ""}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
+      // Distinguish quota issues (rate limit) from backend overload (5xx) in logs
+      // so operators can tell whether to add quota or wait out an outage.
+      const reason = isRateLimitError(err) ? "Rate limit" : "Transient server error (5xx)";
+      console.warn(formatLogLine("warn", null, `${reason} hit${label ? " for " + label : ""}: ${err.message?.slice(0, 120)}. Retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${MAX_RETRIES})`));
       await sleep(delay);
     }
   }
@@ -879,13 +920,15 @@ export async function generateText(prompt, options) {
     );
   }
 
-  // ── FEA-003: Try primary provider, then fall back on rate-limit errors ──
+  // ── FEA-003: Try primary provider, then fall back on rate-limit OR transient 5xx errors ──
   try {
     const result = await callProvider(provider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
     recordProviderSuccess(provider);
     return result;
   } catch (err) {
-    if (!isRateLimitError(err)) throw err;
+    // Only fall back on retriable errors (rate limits or transient server errors).
+    // Auth errors, invalid prompts, etc. are programmer errors and should propagate.
+    if (!isRetryableError(err)) throw err;
 
     // Ollama (local) doesn't have rate limits — its errors (HTTP 500, context
     // overflow, timeout) can match isRateLimitError() false positives (e.g.
@@ -893,8 +936,11 @@ export async function generateText(prompt, options) {
     // just rethrow so the caller's retry/error handling takes over.
     if (provider === "local") throw err;
 
-    // Primary provider hit rate limit — record failure and try fallbacks
-    recordProviderFailure(provider);
+    // Primary provider failed with a retriable error — record failure (rate limit only)
+    // and try fallbacks. Transient 5xx errors don't trip the circuit breaker because
+    // the quota is fine; the provider's backend is just temporarily overloaded.
+    const errType = isRateLimitError(err) ? "rate-limited" : "transient server error (5xx)";
+    if (isRateLimitError(err)) recordProviderFailure(provider);
     const fallbacks = getFallbackProviders(provider);
 
     if (fallbacks.length === 0) {
@@ -903,29 +949,31 @@ export async function generateText(prompt, options) {
     }
 
     for (const fallbackProvider of fallbacks) {
-      console.warn(formatLogLine("warn", null, `[aiProvider] Rate limit on ${provider} — falling back to ${fallbackProvider}`));
+      console.warn(formatLogLine("warn", null, `[aiProvider] ${provider} ${errType} — falling back to ${fallbackProvider}`));
       try {
         const result = await callProvider(fallbackProvider, prompt, options?.maxTokens, options?.signal, options?.responseFormat);
         recordProviderSuccess(fallbackProvider);
         // ── Sticky fallback: pin this provider so subsequent calls in the same
-        // pipeline skip the rate-limited primary entirely.  Expires after
-        // STICKY_FALLBACK_TTL_MS so normal selection resumes once the quota resets.
+        // pipeline skip the failing primary entirely.  Expires after
+        // STICKY_FALLBACK_TTL_MS so normal selection resumes once the
+        // quota/outage window closes.
         _stickyFallbackProvider = fallbackProvider;
         _stickyFallbackExpiry   = Date.now() + STICKY_FALLBACK_TTL_MS;
         console.log(formatLogLine("info", null, `[aiProvider] Pinned ${fallbackProvider} as sticky fallback for ${STICKY_FALLBACK_TTL_MS / 1000}s`));
         return result;
       } catch (fallbackErr) {
-        if (isRateLimitError(fallbackErr)) {
-          // Don't circuit-break Ollama as a fallback either — local models
-          // don't have rate limits; their errors are transient infrastructure
-          // issues that shouldn't disable the provider for 5 minutes.
-          if (fallbackProvider !== "local") {
+        if (isRetryableError(fallbackErr)) {
+          // Only trip the circuit breaker for rate-limit failures on non-local
+          // providers. Transient 5xx errors don't disable the provider — the
+          // backend is temporarily overloaded, not permanently broken.
+          if (isRateLimitError(fallbackErr) && fallbackProvider !== "local") {
             recordProviderFailure(fallbackProvider);
           }
-          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} also rate-limited — trying next`));
+          const fallbackErrType = isRateLimitError(fallbackErr) ? "rate-limited" : "transient server error (5xx)";
+          console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} ${fallbackErrType} — trying next`));
           continue;
         }
-        // Non-rate-limit error from fallback — throw it
+        // Non-retriable error from fallback — throw it
         throw fallbackErr;
       }
     }

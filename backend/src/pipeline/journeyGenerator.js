@@ -262,12 +262,12 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
 
   // Helper: call a generator and handle rate limit short-circuit.
   //
-  // When aiProvider.js exhausts all its internal retries and still gets a
-  // rate limit error, it surfaces that error here. Rather than immediately
-  // aborting every remaining call, we attempt one grace-period wait and
-  // retry — only setting rateLimitHit (permanent skip) if that also fails.
-  // This prevents a brief quota burst early in the run from silently
-  // discarding tests for all subsequent pages.
+  // When aiProvider.js exhausts all its internal retries (and fallback
+  // providers for rate-limit/5xx errors) it surfaces the error here.
+  // Rather than immediately aborting every remaining call, we attempt one
+  // grace-period wait and retry — only setting rateLimitHit (permanent
+  // skip) if that also fails. This prevents a brief quota burst early in
+  // the run from silently discarding tests for all subsequent pages.
   async function safeGenerate(label, fn) {
     if (rateLimitHit) return []; // permanently short-circuit after confirmed unrecoverable limit
     try {

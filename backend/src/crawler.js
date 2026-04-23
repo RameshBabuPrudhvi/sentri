@@ -365,10 +365,11 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       run.status = "completed_empty";
       logWarn(run, `Crawl completed but no tests were generated.`);
       logWarn(run, `Possible causes:`);
-      logWarn(run, `  1. Site requires authentication — add credentials in Project Settings`);
-      logWarn(run, `  2. Pages have no interactive elements — try a different start URL`);
-      logWarn(run, `  3. AI provider returned empty — check your API key in Settings`);
-      logWarn(run, `  4. Try "State exploration" mode to discover dynamic content`);
+      logWarn(run, `  1. AI provider is temporarily overloaded (503) — wait 5-10 min and Re-run, or configure multi-provider fallback in Settings`);
+      logWarn(run, `  2. Site requires authentication — add credentials in Project Settings`);
+      logWarn(run, `  3. Pages have no interactive elements — try a different start URL`);
+      logWarn(run, `  4. AI provider returned empty — check your API key in Settings`);
+      logWarn(run, `  5. Try "State exploration" mode to discover dynamic content`);
     } else if (run.rateLimitError) {
       logWarn(run, `Completed with rate limit — only ${run.tests.length} test(s) generated. Switch AI provider or retry later.`);
     } else {
