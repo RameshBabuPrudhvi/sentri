@@ -163,6 +163,8 @@ router.post("/tests/:testId/fix", requireRole("qa_lead"), async (req, res) => {
 
   const failureResult = runRepo.findLatestResultForTest(test.id);
 
+  console.log(formatLogLine("info", null, `[testFix] starting AI fix for ${test.id} ("${test.name}") — provider: ${isLocalProvider() ? "local/Ollama" : "cloud"}, hasFailureContext: ${!!failureResult}`));
+
   const userPrompt = buildUserPrompt(test, failureResult, project);
 
   // Set up SSE
