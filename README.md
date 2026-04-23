@@ -112,7 +112,7 @@ Open [http://localhost:80](http://localhost:80)
 ```bash
 cd backend
 npm install                 # Installs deps including better-sqlite3 (native module — prebuilt binaries for most platforms)
-npx playwright install chromium
+npx playwright install chromium ffmpeg
 cp .env.example .env        # Add at least one AI provider key
 npm run dev                 # Starts on :3001, creates data/sentri.db automatically
 ```

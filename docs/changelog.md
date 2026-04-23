@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AI**: Tiered prompt system for local models (Ollama) — splits `SELF_HEALING_PROMPT_RULES` into compact `CORE_RULES` (~200 tokens) for local 7B models and full `EXTENDED_RULES` for cloud providers; all 4 prompt consumers (`outputSchema.js`, `testFix.js`, `feedbackLoop.js`) use tier-aware `getPromptRules(getTier())`; local system prompt total under 2000 characters (MNT-009) (#100)
 - **Frontend**: Re-run button on Run Detail page for crawl and generate runs — when a crawl or generate run is in a terminal state (completed, completed_empty, failed, interrupted, aborted), a "Re-run" button appears in the header that re-triggers the same operation and navigates to the new run (MNT-010) (#100)
 
+### Fixed
+- **Runner**: Test execution no longer crashes when ffmpeg is missing — `executeTest.js` now catches the Playwright "Executable doesn't exist" error on `browser.newContext()` and retries without `recordVideo`, so tests run (without video) instead of failing immediately with a confusing ffmpeg error (#100)
+- **Docker**: Both `Dockerfile` and `backend/Dockerfile` now install `ffmpeg` via apt — required by Playwright for video recording (#100)
+- **Docs**: All setup guides (README, getting-started, github-pages-render) updated to `npx playwright install chromium ffmpeg` — previously only chromium was installed, causing test runs to crash on Render deployments (#100)
+
 ## [1.6.2] — 2026-04-23
 
 ### Added

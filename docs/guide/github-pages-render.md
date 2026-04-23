@@ -31,7 +31,7 @@ The repo includes `frontend/public/404.html` and a restore script in `frontend/i
 2. Connect your GitHub repo
 3. Set:
    - **Root directory:** `backend`
-   - **Build command:** `npm install && npx playwright install chromium`
+   - **Build command:** `npm install && npx playwright install chromium ffmpeg`
    - **Start command:** `npm start`
 
 ### Environment Variables

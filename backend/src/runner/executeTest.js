@@ -209,12 +209,12 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   const contextTimezone = opts.timezoneId || undefined;
   const contextGeolocation = opts.geolocation || undefined;
 
-  const context = await browser.newContext({
+  // Build shared context options (everything except recordVideo)
+  const contextOpts = {
     // Spread device descriptor first so explicit overrides below take precedence
     ...(deviceDescriptor || {}),
     // Always override these regardless of device profile
     userAgent: deviceDescriptor?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    recordVideo: { dir: testVideoDir, size: { width: effectiveViewport.width, height: effectiveViewport.height } },
     viewport: effectiveViewport,
     permissions: ["geolocation", "notifications"],
     ignoreHTTPSErrors: true,
@@ -224,7 +224,29 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     ...(contextLocale ? { locale: contextLocale } : {}),
     ...(contextTimezone ? { timezoneId: contextTimezone } : {}),
     ...(contextGeolocation ? { geolocation: contextGeolocation } : {}),
-  });
+  };
+
+  // Try creating context with video recording first. If ffmpeg is missing,
+  // Playwright throws "Executable doesn't exist at …/ffmpeg-linux" on
+  // newContext(). Fall back to no video so the test can still run — a missing
+  // ffmpeg should degrade gracefully, not crash the entire test.
+  let context;
+  let videoEnabled = true;
+  try {
+    context = await browser.newContext({
+      ...contextOpts,
+      recordVideo: { dir: testVideoDir, size: { width: effectiveViewport.width, height: effectiveViewport.height } },
+    });
+  } catch (ctxErr) {
+    if (ctxErr.message && ctxErr.message.includes("ffmpeg")) {
+      console.warn(formatLogLine("warn", null,
+        `[executeTest] ffmpeg not found — video recording disabled. Run "npx playwright install ffmpeg" to enable.`));
+      videoEnabled = false;
+      context = await browser.newContext(contextOpts);
+    } else {
+      throw ctxErr;
+    }
+  }
 
   const page = await context.newPage();
 
