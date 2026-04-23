@@ -76,27 +76,35 @@ Open [http://localhost:3000](http://localhost:3000)
 
 Redis unlocks **durable job queues** (crashes mid-run don't lose work), **shared rate limiting**, and **cross-instance SSE pub/sub**. Recommended once you start running long crawls or multiple concurrent runs.
 
-Run Redis in Docker (simplest):
+Install Redis natively:
 
-```bash
-docker run -d --name sentri-redis -p 6379:6379 redis:7-alpine
+::: code-group
+```bash [macOS]
+brew install redis
+brew services start redis   # Or: redis-server (foreground)
 ```
 
-Or via Homebrew on macOS:
-
-```bash
-brew install redis && redis-server
+```bash [Ubuntu / Debian]
+sudo apt-get install redis-server
+sudo systemctl enable --now redis-server
 ```
 
-Install the optional npm packages and enable Redis in `backend/.env`:
+```bash [Windows]
+# Use WSL2 and follow the Ubuntu instructions, or
+# use Memurai (Redis-compatible native Windows build): https://www.memurai.com
+```
+:::
+
+Install the optional npm packages:
 
 ```bash
 cd backend
 npm install ioredis rate-limit-redis bullmq
 ```
 
+Enable in `backend/.env`:
+
 ```bash
-# backend/.env
 REDIS_URL=redis://localhost:6379
 MAX_WORKERS=2               # Concurrency limit for BullMQ run execution
 ```
@@ -116,13 +124,33 @@ BullMQ activates automatically when `REDIS_URL` is set **and** `bullmq` is insta
 
 PostgreSQL replaces SQLite for horizontal scaling and better write-concurrency. Required for multi-instance deployments.
 
-```bash
-docker run -d --name sentri-postgres \
-  -e POSTGRES_USER=sentri -e POSTGRES_PASSWORD=sentri -e POSTGRES_DB=sentri \
-  -p 5432:5432 postgres:16-alpine
+Install PostgreSQL 16 natively:
+
+::: code-group
+```bash [macOS]
+brew install postgresql@16
+brew services start postgresql@16
+createdb sentri
 ```
 
-In `backend/.env`:
+```bash [Ubuntu / Debian]
+sudo apt-get install postgresql-16
+sudo systemctl enable --now postgresql
+sudo -u postgres createdb sentri
+sudo -u postgres psql -c "CREATE USER sentri WITH PASSWORD 'sentri';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sentri TO sentri;"
+```
+
+```bash [Windows]
+# Download the official installer from https://www.postgresql.org/download/windows/
+# After install, open SQL Shell (psql) and run:
+#   CREATE DATABASE sentri;
+#   CREATE USER sentri WITH PASSWORD 'sentri';
+#   GRANT ALL PRIVILEGES ON DATABASE sentri TO sentri;
+```
+:::
+
+Enable in `backend/.env`:
 
 ```bash
 DATABASE_URL=postgres://sentri:sentri@localhost:5432/sentri
@@ -135,13 +163,15 @@ Sentri's migration runner auto-detects the dialect at startup and translates SQL
 
 No API key needed — inference runs on your machine.
 
+1. Install Ollama from [ollama.com/download](https://ollama.com/download) (native installers for macOS, Linux, Windows).
+2. Pull a model and start the server:
+
 ```bash
-# Install Ollama — https://ollama.com/download
 ollama pull mistral:7b
 ollama serve                # Runs on :11434 by default
 ```
 
-In `backend/.env`:
+3. Enable in `backend/.env`:
 
 ```bash
 AI_PROVIDER=local
