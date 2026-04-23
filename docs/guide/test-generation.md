@@ -11,7 +11,24 @@ Each page snapshot goes through a structured pipeline — not a single prompt:
 5. **Generate** — writes focused Playwright tests per page intent
 6. **Deduplicate** — removes redundant tests across the batch
 7. **Enhance** — strengthens assertions for better coverage
-8. **Validate** — rejects malformed or placeholder output
+8. **Validate** — rejects malformed or placeholder output, including raw-CSS visibility/text assertions (see below)
+
+### Validator — quality gate for assertions
+
+The validator rejects tests that chain `toBeVisible()`, `toContainText(...)`, or `toHaveText(...)` off a raw CSS `page.locator()`:
+
+```js
+// ❌ Rejected — bypasses self-healing, breaks on class renames or empty states
+await expect(page.locator('.todo-count')).toContainText('0 items left');
+
+// ✅ Accepted — semantic locator, resilient
+await expect(page.getByText('0 items left')).toBeVisible();
+
+// ✅ Accepted — self-healing waterfall
+await safeExpect(page, expect, '0 items left');
+```
+
+Count, state, attribute, class, and CSS matchers on `page.locator()` are intentionally **allowed** — `toHaveCount`, `toBeHidden`, `toHaveAttribute`, `toHaveClass`, `toHaveCSS`. Those don't have a safe-helper equivalent and the generation prompt explicitly recommends `page.locator()` for them.
 
 ## Generate from Description
 

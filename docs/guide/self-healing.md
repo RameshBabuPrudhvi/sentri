@@ -14,6 +14,10 @@ getByRole('button', { name }) → getByRole('link', { name })
 
 When a fallback wins, Sentri **records which strategy index succeeded** for that element. On the next run, it tries the winner first — skipping strategies that previously failed.
 
+### `safeCheck` / `safeUncheck` list-item fallbacks
+
+Checkboxes in task lists (TodoMVC), bug trackers, and settings grids are typically inside a container (`<li>`, `<tr>`, `[role="listitem"]`, `[role="row"]`, or class names like `.item / .row / .todo / .task`) where the visible label is a sibling text node rather than an ARIA label on the checkbox itself. When the direct `getByRole('checkbox', { name })` and `getByLabel(name)` strategies miss, `safeCheck` and `safeUncheck` scope to the container by `hasText` and then pick the checkbox within — both `getByRole('checkbox')` and raw `input[type="checkbox"]` variants are tried.
+
 ## Healing History
 
 The healing history is stored per element, keyed by `<testId>::<action>::<label>`. Over time, tests become more resilient automatically as the system learns the best strategy for each element.
