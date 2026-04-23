@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, CORE_RULES, EXTENDED_RULES, getPromptRules, STRATEGY_VERSION } from "../src/selfHealing.js";
+import { getSelfHealingHelperCode, SELF_HEALING_PROMPT_RULES, CORE_RULES, getPromptRules, STRATEGY_VERSION } from "../src/selfHealing.js";
 
 function test(name, fn) {
   try {
@@ -194,17 +194,6 @@ test("CORE_RULES does NOT mention custom safe helpers (native Playwright for loc
 test("CORE_RULES includes rules section", () => {
   assert.match(CORE_RULES, /RULES/);
   assert.match(CORE_RULES, /NEVER/);
-});
-
-test("EXTENDED_RULES mentions additional helpers not in CORE_RULES", () => {
-  assert.match(EXTENDED_RULES, /safeDblClick/);
-  assert.match(EXTENDED_RULES, /safeHover/);
-  assert.match(EXTENDED_RULES, /safeDrag/);
-  assert.match(EXTENDED_RULES, /safeUpload/);
-  assert.match(EXTENDED_RULES, /safeFocus/);
-  assert.match(EXTENDED_RULES, /safeTap/);
-  assert.match(EXTENDED_RULES, /safePress/);
-  assert.match(EXTENDED_RULES, /safeRightClick/);
 });
 
 test("getPromptRules('cloud') returns full rules", () => {

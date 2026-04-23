@@ -16,9 +16,8 @@
  * - {@link getHealingHistoryForTest} — Serialise healing history for runtime injection.
  * - {@link getSelfHealingHelperCode} — Generate the runtime helper code string.
  * - {@link applyHealingTransforms} — Rewrite Playwright code to use self-healing helpers.
- * - {@link CORE_RULES} — Compact prompt rules for local models (~200 tokens).
- * - {@link EXTENDED_RULES} — Additional helper rules for cloud models.
- * - {@link SELF_HEALING_PROMPT_RULES} — Full combined prompt rules (backward compat).
+ * - {@link CORE_RULES} — Native Playwright rules for local models (~200 tokens).
+ * - {@link SELF_HEALING_PROMPT_RULES} — Full self-healing helper rules for cloud models.
  * - {@link getPromptRules} — Tier-aware getter: returns CORE_RULES or full rules.
  */
 
@@ -1144,11 +1143,9 @@ export function applyHealingTransforms(code) {
       (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
     )
     // ── Additional transforms for patterns Ollama frequently produces ────────
-    // expect(page.getByRole('role')).toBeVisible() — no { name } option (bare role)
-    .replace(
-      /(?:await\s+)?expect\(page\.getByRole\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
-      (match, role) => match // leave bare-role assertions as-is — they're valid Playwright
-    )
+    // NOTE: expect(page.getByRole('role')).toBeVisible() without { name } is
+    // valid Playwright — left as-is (no transform needed).
+
     // page.getByLabel(...).fill(val) with options object — e.g. { exact: true }
     .replace(
       /page\.getByLabel\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.fill\(([^)]+)\)/g,
@@ -1184,11 +1181,10 @@ export function applyHealingTransforms(code) {
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.first\(\)\.click\(\)/g,
       (match, arg) => `safeClick(page, '${esc(arg)}')`
     )
-    // expect(page.getByText(...)).toBeVisible() with options like { exact: true }
-    .replace(
-      /(?:await\s+)?expect\(page\.getByText\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\)\.toBeVisible\(\)/g,
-      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
-    )
+    // NOTE: expect(page.getByText('...', { exact: true })).toBeVisible() is already
+    // handled by the getByText assertion transform above (line 1123) which uses
+    // (?:,\s*\{[^}]*\})? to optionally match the options object.
+
     // expect(page.locator(...).first()).toBeVisible() — locator with .first()
     .replace(
       /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\.first\(\)\)\.toBeVisible\(\)/g,
@@ -1204,11 +1200,10 @@ export function applyHealingTransforms(code) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Prompt Rules — tiered for cloud vs local models (MNT-009)
 // ─────────────────────────────────────────────────────────────────────────────
-// CORE_RULES   (~200 tokens) — essential helper signatures + key constraints.
-//              Safe for 7B local models with limited context windows.
-// EXTENDED_RULES (~3800 tokens) — exhaustive forbidden-pattern list, advanced
-//              usage patterns (iframes, dialogs, tabs, downloads, mouse/keyboard).
-//              Included only for cloud models with large context windows.
+// CORE_RULES   (~200 tokens) — native Playwright instructions for local models.
+//              Local models write standard Playwright code; the transform engine
+//              (applyHealingTransforms) rewrites it to self-healing helpers at runtime.
+// SELF_HEALING_PROMPT_RULES — full exhaustive self-healing helper rules for cloud models.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CORE_RULES = `
@@ -1236,19 +1231,7 @@ RULES:
   ✗ NEVER use page.click('selector') or page.fill('selector', val) — use locator chains
   ✗ NEVER hard-code dynamic values (dates, IDs, counts) — use regex patterns`.trim();
 
-export const EXTENDED_RULES = `
-ADDITIONAL HELPERS:
-  ✓ await safeDblClick(page, text)         — for any double-click
-  ✓ await safeHover(page, text)            — for any hover (menus, tooltips)
-  ✓ await safeDrag(page, sourceText, targetText) — for drag-and-drop
-  ✓ await safeUpload(page, label, filePaths)     — for file upload (accepts string or string[])
-  ✓ await safeFocus(page, label)           — for focusing an element
-  ✓ await safeTap(page, text)              — for touch tap (mobile viewports)
-  ✓ await safePress(page, label, key)      — for pressing a key on a focused element
-  ✓ await safeRightClick(page, text)       — for context-menu / right-click`.trim();
-
-// Full combined rules — backward-compatible export used by consumers that
-// have not yet migrated to the tier-aware getter.
+// Full self-healing helper rules for cloud models.
 export const SELF_HEALING_PROMPT_RULES = `
 STRICT RULE: Use ONLY self-healing helpers for ALL interactions AND visibility assertions.
 
