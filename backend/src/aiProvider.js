@@ -916,7 +916,12 @@ export async function generateText(prompt, options) {
         return result;
       } catch (fallbackErr) {
         if (isRateLimitError(fallbackErr)) {
-          recordProviderFailure(fallbackProvider);
+          // Don't circuit-break Ollama as a fallback either — local models
+          // don't have rate limits; their errors are transient infrastructure
+          // issues that shouldn't disable the provider for 5 minutes.
+          if (fallbackProvider !== "local") {
+            recordProviderFailure(fallbackProvider);
+          }
           console.warn(formatLogLine("warn", null, `[aiProvider] Fallback ${fallbackProvider} also rate-limited — trying next`));
           continue;
         }

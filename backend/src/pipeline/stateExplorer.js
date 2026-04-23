@@ -33,6 +33,7 @@ import { extractFlows, flowToJourney } from "./flowGraph.js";
 import { extractPathPatternWithParams, stripNoiseParams } from "./smartCrawl.js";
 import { log, logWarn, logSuccess, emitRunEvent } from "../utils/runLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import { signRunArtifacts } from "../middleware/appSetup.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
@@ -227,7 +228,8 @@ function syncRunPages(run, snapshots) {
   run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
   // Persist to DB so the site map renders after page reload (not just in-memory)
   runRepo.update(run.id, { pages: run.pages, pagesFound: run.pagesFound });
-  emitRunEvent(run.id, "snapshot", { run: { ...run } });
+  // Sign artifact URLs before emitting SSE snapshot (matches testRunner.js pattern)
+  emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(run) });
 }
 
 async function restorePage(page, beforeUrl, fallbackUrl, actionTimeout) {
