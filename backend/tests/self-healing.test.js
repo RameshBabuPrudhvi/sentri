@@ -82,6 +82,48 @@ test("safeCheck uses checkbox role strategy", () => {
   assert.match(helpers, /getByRole\('checkbox', \{ name: labelOrText \}\)/);
 });
 
+test("safeCheck includes list-item scoped fallback (TC-5 / TodoMVC pattern)", () => {
+  // Matches `p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first()`
+  // inside the safeCheck strategies array. TC-5 failed because the checkbox
+  // is inside `<li>` and the readable label is the sibling text, so the
+  // role+name and getByLabel strategies never match.
+  assert.match(
+    helpers,
+    /locator\('li', \{ hasText: labelOrText \}\)\.getByRole\('checkbox'\)\.first\(\)/,
+    "safeCheck should include li→getByRole('checkbox') fallback",
+  );
+});
+
+test("safeCheck includes table-row scoped fallback", () => {
+  assert.match(
+    helpers,
+    /locator\('tr', \{ hasText: labelOrText \}\)\.getByRole\('checkbox'\)\.first\(\)/,
+    "safeCheck should include tr→getByRole('checkbox') fallback",
+  );
+});
+
+test("safeCheck includes raw input[type=checkbox] fallback inside li", () => {
+  assert.match(
+    helpers,
+    /locator\('li', \{ hasText: labelOrText \}\)\.locator\('input\[type="checkbox"\]'\)\.first\(\)/,
+    "safeCheck should include li→input[type=checkbox] fallback for cases without role",
+  );
+});
+
+test("safeUncheck mirrors safeCheck list-item fallback", () => {
+  // safeUncheck should have the same scoped strategies since the element
+  // hierarchy is identical — only the final action differs.
+  const uncheckBlock = helpers.match(
+    /async function safeUncheck[\s\S]+?await retry\(async \(\) => \{[\s\S]+?await el\.uncheck\(\)/,
+  );
+  assert.ok(uncheckBlock, "safeUncheck function block should be present");
+  assert.match(
+    uncheckBlock[0],
+    /locator\('li', \{ hasText: labelOrText \}\)\.getByRole\('checkbox'\)/,
+    "safeUncheck should include li→getByRole('checkbox') fallback",
+  );
+});
+
 test("safeSelect preserves object/array values (no coercion)", () => {
   // The runtime code should have the typeof value === 'object' passthrough
   assert.match(helpers, /typeof value === 'object'/);
