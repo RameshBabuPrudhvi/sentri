@@ -13,19 +13,11 @@ import StatCard from "../components/shared/StatCard.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
-import AppLogo from "../components/layout/AppLogo.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
-
 const RUN_TYPE_META = {
   crawl:    { label: "Crawl & Generate", avatar: "QA" },
   generate: { label: "AI Generate",      avatar: "QA" },
@@ -144,29 +136,16 @@ export default function Dashboard() {
   return (
     <div className="fade-in page-container">
 
-      {/* ── Hero Banner ─────────────────────────────────────────────── */}
-      <div className="dash-hero" data-tour="tour-welcome">
-        <div className="dash-hero-glow" />
-        <svg className="dash-hero-shield" width="180" height="180" viewBox="0 0 40 40" fill="none">
-          <path d="M20 1L3 8v11c0 9.5 7.2 18.2 17 20 9.8-1.8 17-10.5 17-20V8L20 1z" fill="#6366f1" />
-        </svg>
-
-        <div className="dash-hero-content">
-          <div>
-            <AppLogo size={48} variant="full" />
-            <p className="dash-hero-desc">
-              {greeting()}! Here's your real-time overview — system health, key metrics, and what your agents are up to right now.
-            </p>
-          </div>
-
-          <div className="dash-hero-meta">
-            <span className="dash-hero-pill">Autonomous QA</span>
-            <span className="dash-hero-date">
-              {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-            </span>
-            <ExportPDFButton />
-          </div>
+      {/* ── Page header ─────────────────────────────────────────────── */}
+      <div className="page-header" data-tour="tour-welcome">
+        <div>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            {" · "}System health, test metrics, and recent activity
+          </p>
         </div>
+        <ExportPDFButton />
       </div>
 
       {/* Error banner */}
