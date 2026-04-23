@@ -23,6 +23,7 @@
 
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import { getDatabase } from "../database/sqlite.js";
 import { formatLogLine } from "./logFormatter.js";
 
 /** @type {number} Minimum number of run results before computing a flaky score. */
@@ -65,18 +66,23 @@ export function computeAndPersistFlakyScores(projectId, maxRuns = 20) {
     }
   }
 
-  // Compute and persist scores
+  // Compute and persist scores in a single transaction for atomicity
+  // (consistent with bulkSetStale in testRepo.js).
   let updated = 0;
   let flaky = 0;
-  for (const [testId, { passes, fails }] of testResults) {
-    const total = passes + fails;
-    if (total < MIN_RESULTS) continue;
+  const db = getDatabase();
+  const txn = db.transaction(() => {
+    for (const [testId, { passes, fails }] of testResults) {
+      const total = passes + fails;
+      if (total < MIN_RESULTS) continue;
 
-    const score = Math.round((Math.min(passes, fails) / total) * 100);
-    testRepo.update(testId, { flakyScore: score });
-    updated++;
-    if (score > 0) flaky++;
-  }
+      const score = Math.round((Math.min(passes, fails) / total) * 100);
+      testRepo.update(testId, { flakyScore: score });
+      updated++;
+      if (score > 0) flaky++;
+    }
+  });
+  txn();
 
   if (flaky > 0) {
     console.log(formatLogLine("info", null,

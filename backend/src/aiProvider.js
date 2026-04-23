@@ -856,7 +856,7 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
  * FEA-003: On rate-limit errors, automatically falls back to the next
  * configured provider in CLOUD_DETECT_ORDER before giving up. Each
  * provider has a circuit breaker that disables it for 5 minutes after
- * 3 consecutive rate-limit failures.
+ * a rate-limit failure that survived all internal retries.
  *
  * @param {string|{system: string, user: string}} prompt - Plain string or structured `{ system, user }` messages.
  * @param {Object}      [options]

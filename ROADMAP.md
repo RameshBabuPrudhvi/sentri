@@ -418,7 +418,7 @@ The following items have been verified complete against the codebase and are **n
 
 **Problem:** There is no mechanism to identify tests that alternate between passing and failing across runs. Flaky tests erode trust in the test suite and consume engineering time investigating non-reproducible failures. The run result data to detect them already exists in the database but is never surfaced.
 
-**Fix:** After each run, compute a `flakyScore` (alternation rate over the last N runs) for each test and persist it to `tests.flakyScore`. Add a "Flaky Tests" panel to the dashboard showing the top 10 flakiest tests. Tests above a threshold receive a flaky badge in the test list.
+**Fix:** After each run, compute a `flakyScore` (pass/fail balance ratio over the last N runs) for each test and persist it to `tests.flakyScore`. Add a "Flaky Tests" panel to the dashboard showing the top 10 flakiest tests. Tests above a threshold receive a flaky badge in the test list.
 
 **Files to change:**
 - New `backend/src/utils/flakyDetector.js` — compute flaky score from run history

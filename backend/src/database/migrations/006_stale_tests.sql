@@ -3,7 +3,7 @@
 -- isStale: boolean flag for tests not run in STALE_TEST_DAYS (default 90).
 --   A weekly cron job in scheduler.js detects and flags stale tests.
 --
--- flakyScore: 0–100 alternation rate between pass/fail across recent runs.
+-- flakyScore: 0–100 pass/fail balance ratio across recent runs.
 --   Computed after each test run by the flaky detector utility.
 
 ALTER TABLE tests ADD COLUMN isStale INTEGER NOT NULL DEFAULT 0;

@@ -30,7 +30,6 @@ export default function OutcomeBanner({ variant = "success", title, subtitle, st
   return (
     <div
       role={isUrgent ? "alert" : "status"}
-      aria-live={isUrgent ? "assertive" : "polite"}
       style={{
         padding: "16px 18px", background: v.bg,
         border: `1px solid ${v.border}`, borderRadius: "var(--radius)",

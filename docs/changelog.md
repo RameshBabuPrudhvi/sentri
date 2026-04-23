@@ -9,19 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Tests**: Stale test detection and cleanup — approved tests not run in 90 days (configurable via `STALE_TEST_DAYS`) are automatically flagged as stale by a weekly background job; `isStale` badge shown in test lists; filter by stale tests in the Tests page; manual trigger via stale detector utility (AUTO-013) (#99)
-- **Tests**: Flaky test detection and reporting — after each test run, a flaky score (0–100) is computed from the alternation rate between pass/fail across the last 20 runs and persisted to `tests.flakyScore`; dashboard includes a top-10 flaky tests panel; tests with `flakyScore > 0` receive a flaky badge (DIF-004) (#99)
+- **Tests**: Flaky test detection and reporting — after each test run, a flaky score (0–100) is computed from the pass/fail balance ratio across the last 20 runs and persisted to `tests.flakyScore`; dashboard includes a top-10 flaky tests panel; tests with `flakyScore > 0` receive a flaky badge (DIF-004) (#99)
 - **API**: `isStale` filter support on `GET /api/v1/projects/:id/tests?stale=true` — returns only stale tests for cleanup review (AUTO-013) (#99)
 - **API**: `topFlakyTests` array in `GET /api/v1/dashboard` response — top 10 flakiest approved tests with `testId`, `name`, `flakyScore`, `projectId` (DIF-004) (#99)
 - **DB**: Migration 006 — adds `isStale` boolean column and `flakyScore` REAL column to `tests` table with indexes (AUTO-013, DIF-004) (#99)
 
 ### Fixed
 - **Auth**: CSRF token now works in cross-origin deployments (GitHub Pages + Render) — the `_csrf` cookie set by the backend domain was invisible to `document.cookie` on the frontend origin; backend now echoes the token in `X-CSRF-Token` response header with `Access-Control-Expose-Headers`, and the frontend caches it in memory via `setCsrfToken()` (#99)
-- **Auth**: CSRF `Set-Cookie` changed from `res.setHeader` to `res.append` (Express 4.x) — prevents the `_csrf` cookie from being overwritten by later cookie-setting code in the same response (#99)
+- **Auth**: CSRF `Set-Cookie` changed from `res.setHeader` to `res.append()` (Express 4.x) — prevents the `_csrf` cookie from being overwritten by later cookie-setting code in the same response (#99)
 - **Runner**: CDP screencast was skipped on virtually every run because the SSE listener check fired before any client connected; removed the premature guard so live browser view works reliably (#99)
 - **AI**: Feedback loop now skips AI calls when the provider is degraded (rate-limited or circuit-broken) — previously the feedback loop would burn minutes retrying the rate-limited provider, blocking run completion (#99)
 
 ### Changed
-- **Accessibility**: `role="alert"` and `aria-live="polite"` added to `OutcomeBanner`, test error display in `TestRunView`, and test result list for screen reader announcements (MNT-007) (#99)
+- **Accessibility**: `role="alert"` / `role="status"` added to `OutcomeBanner`, `role="alert"` to test error display in `TestRunView`, and `aria-live` region for test result announcements (MNT-007) (#99)
 - **AI**: Circuit breaker threshold reduced from 3 to 1 consecutive rate-limit failures — `withRetry()` already retries internally, so the error that reaches `generateText()` represents a confirmed durable rate limit (FEA-003) (#99)
 - **AI**: When a rate-limit fallback succeeds, the fallback provider is pinned as a sticky override for 10 minutes so subsequent calls in the same pipeline skip the rate-limited primary (FEA-003) (#99)
 - **Runner**: AI feedback loop wrapped in a 60-second timeout (`FEEDBACK_TIMEOUT_MS`) so it can never block run completion indefinitely (#99)

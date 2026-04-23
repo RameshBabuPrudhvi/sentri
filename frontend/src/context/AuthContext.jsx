@@ -87,12 +87,11 @@ export function AuthProvider({ children }) {
   // ── Proactive refresh scheduler ──────────────────────────────────────────
   const scheduleRefresh = useCallback(function schedule() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    const ms = msUntilRefresh();
+    let ms = msUntilRefresh();
     if (ms === null) {
       // Cross-origin: token_exp cookie may be unreadable (third-party cookie
       // restrictions). Fall back to a fixed interval so the session stays alive.
-      refreshTimerRef.current = setTimeout(schedule, 55 * 60 * 1000);
-      return;
+      ms = 55 * 60 * 1000;
     }
     refreshTimerRef.current = setTimeout(async () => {
       try {
