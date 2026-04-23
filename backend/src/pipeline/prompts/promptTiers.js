@@ -115,7 +115,13 @@ const CLOUD_CODE_REQUIREMENTS = `CODE REQUIREMENTS:
 const LOCAL_CODE_REQUIREMENTS = `CODE REQUIREMENTS:
 - playwrightCode must be fully self-contained and executable.
 - Use the real URL from the user message — never 'https://example.com'.
-- Inline all test data as string literals — never declare variables for values.
+- INLINE ALL VALUES as string literals. NEVER reference testData in code.
+  BAD:  searchBar.fill(testData.searchTerm)   ← ReferenceError, testData is undefined
+  BAD:  const query = 'ipad'; searchBar.fill(query)  ← unnecessary variable
+  GOOD: page.getByPlaceholder('Search').fill('ipad')  ← literal value, inline locator
+- NEVER assign locators to variables. Always chain directly on page.
+  BAD:  const btn = page.getByRole('button', { name: 'Go' }); await btn.click();
+  GOOD: await page.getByRole('button', { name: 'Go' }).click();
 - Add "// Step N:" comments before code for each step.`;
 
 /**
