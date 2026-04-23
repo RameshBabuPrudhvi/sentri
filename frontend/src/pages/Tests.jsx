@@ -134,7 +134,7 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
           No tests generated yet
         </div>
         <div style={{ fontSize: "0.875rem", color: "var(--text2)", lineHeight: 1.7, maxWidth: 400, margin: "0 auto 20px" }}>
-          Use <strong>Crawl</strong> above to auto-discover pages and generate tests, or <strong>Generate</strong> from a user story.
+          Use <strong>Crawl</strong> above to auto-discover pages and generate tests, or <strong>Generate</strong> from a requirement.
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
           <button className="btn btn-ghost btn-sm" onClick={onCreateTest}>
@@ -589,7 +589,7 @@ export default function Tests() {
     {
       icon: <Sparkles size={16} />,
       title: "Generate",
-      desc: "Create tests from a user story",
+      desc: "Create tests from a requirement",
       color: "var(--accent-bg)",
       iconColor: "var(--accent)",
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),

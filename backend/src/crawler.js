@@ -115,11 +115,11 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
 export async function generateFromUserDescription(project, run, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
   structuredLog("generate.start", { runId: run.id, projectId: project.id, mode: "description", name });
-  log(run, `✦ Starting test generation from description for "${name}"`);
+  log(run, `✦ Starting test generation from requirement for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️ Run config:`);
-  log(run, `Generation mode: 📝 From description (no crawl)`);
-  log(run, `Explorer mode: ⏭️ None (crawl skipped — generating from description)`);
+  log(run, `Generation mode: 📝 From requirement (no crawl)`);
+  log(run, `Explorer mode: ⏭️ None (crawl skipped — generating from requirement)`);
   log(run, `Test count: ${testCount}`);
   log(run, `HAR capture: ❌ disabled (no crawl)`);
   log(run, `API tests: ✅ auto-detected from description (mention endpoints, HTTP methods, /api/ paths)`);
