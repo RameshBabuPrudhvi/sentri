@@ -333,6 +333,13 @@ router.post("/chat", async (req, res) => {
   // When a crawl/generate/test run is actively making LLM calls via the
   // in-process runner, reject chat requests with a helpful message instead
   // of sending a concurrent request that will hang indefinitely.
+  //
+  // Known limitation: runAbortControllers and workerAbortControllers track
+  // ALL active runs regardless of which AI provider they use. If a run was
+  // started with a cloud provider and the user then switches to Ollama in
+  // Settings, the cloud run's entry still blocks chat. In practice this is
+  // rare (provider switching mid-run) and the conservative false-positive
+  // is preferable to letting a concurrent Ollama request hang the model.
   if (isLocalProvider() && (runAbortControllers.size > 0 || workerAbortControllers.size > 0)) {
     return res.status(503).json({
       error: "AI is busy with an active run — Ollama can only process one request at a time. Wait for the run to finish, or abort it first, then try again.",
