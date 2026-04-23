@@ -32,7 +32,7 @@ export function ReviewBadge({ status }) {
 
 export function StaleBadge({ isStale }) {
   if (!isStale) return null;
-  return <span className="badge badge-gray" style={{ fontSize: "0.65rem" }} title="Not run in 90+ days"><Clock size={10} /> Stale</span>;
+  return <span className="badge badge-gray" style={{ fontSize: "0.65rem" }} title="Stale — not run recently"><Clock size={10} /> Stale</span>;
 }
 
 // ── Flaky badge (DIF-004) ────────────────────────────────────────────────────

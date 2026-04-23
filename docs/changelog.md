@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Accessibility**: `role="alert"` / `role="status"` added to `OutcomeBanner`, `role="alert"` to test error display in `TestRunView`, and `aria-live` region for test result announcements (MNT-007) (#99)
 - **AI**: Circuit breaker threshold reduced from 3 to 1 consecutive rate-limit failures — `withRetry()` already retries internally, so the error that reaches `generateText()` represents a confirmed durable rate limit (FEA-003) (#99)
 - **AI**: When a rate-limit fallback succeeds, the fallback provider is pinned as a sticky override for 10 minutes so subsequent calls in the same pipeline skip the rate-limited primary (FEA-003) (#99)
-- **Runner**: AI feedback loop wrapped in a 60-second timeout (`FEEDBACK_TIMEOUT_MS`) so it can never block run completion indefinitely (#99)
+- **Runner**: AI feedback loop wrapped in a 180-second timeout (`FEEDBACK_TIMEOUT_MS`, default 180s) so it can never block run completion indefinitely (#99)
 
 ## [1.6.1] — 2026-04-22
 

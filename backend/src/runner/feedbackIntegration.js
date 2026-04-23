@@ -33,7 +33,7 @@ const FEEDBACK_TIMEOUT_MS = parseInt(process.env.FEEDBACK_TIMEOUT_MS, 10) || 180
  *   - No AI provider is configured
  *   - The AI provider is degraded (rate-limited / circuit-broken)
  *
- * The AI portion is wrapped in a timeout (FEEDBACK_TIMEOUT_MS, default 60s)
+ * The AI portion is wrapped in a timeout (FEEDBACK_TIMEOUT_MS, default 180s)
  * so it can never block run completion indefinitely.
  *
  * @param {object}       run    — mutable run record
