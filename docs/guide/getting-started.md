@@ -8,7 +8,10 @@
 
 ## Option A: Docker (Recommended)
 
-```bash
+Works identically on macOS, Linux, and Windows (Docker Desktop).
+
+::: code-group
+```bash [macOS / Linux]
 git clone https://github.com/RameshBabuPrudhvi/sentri.git
 cd sentri
 
@@ -17,6 +20,17 @@ cp backend/.env.example backend/.env
 
 docker compose up --build
 ```
+
+```powershell [Windows (PowerShell)]
+git clone https://github.com/RameshBabuPrudhvi/sentri.git
+cd sentri
+
+Copy-Item backend\.env.example backend\.env
+# Edit backend\.env — add at least one AI provider key
+
+docker compose up --build
+```
+:::
 
 Open [http://localhost:3000](http://localhost:3000) (frontend) — backend runs on `:3001`.
 
@@ -50,7 +64,8 @@ Runs everything in-process with SQLite — fastest path to trying Sentri.
 
 **Backend**
 
-```bash
+::: code-group
+```bash [macOS / Linux]
 cd backend
 npm install                 # Installs deps including better-sqlite3 (native module — prebuilt binaries for most platforms)
 npx playwright install chromium ffmpeg
@@ -58,17 +73,32 @@ cp .env.example .env        # Add at least one AI provider key
 npm run dev                 # Starts on :3001, creates data/sentri.db automatically
 ```
 
+```powershell [Windows (PowerShell)]
+cd backend
+npm install                 # Installs deps including better-sqlite3 (native module — prebuilt binaries for most platforms)
+npx playwright install chromium ffmpeg
+Copy-Item .env.example .env # Add at least one AI provider key
+npm run dev                 # Starts on :3001, creates data\sentri.db automatically
+```
+:::
+
+::: tip Windows build tools
+`better-sqlite3` ships prebuilt binaries for Windows x64 and arm64 — no compiler needed in most cases. If `npm install` tries to build from source, install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload, then re-run.
+:::
+
 ::: tip Database
 SQLite (`data/sentri.db`) is created automatically on first startup — no manual setup needed. If upgrading from a previous version that used `sentri-db.json`, data is auto-migrated on first run.
 :::
 
 **Frontend**
 
-```bash
+::: code-group
+```bash [macOS / Linux / Windows]
 cd frontend
 npm install
 npm run dev                 # Starts on :3000, proxies /api to :3001
 ```
+:::
 
 Open [http://localhost:3000](http://localhost:3000)
 
@@ -89,9 +119,21 @@ sudo apt-get install redis-server
 sudo systemctl enable --now redis-server
 ```
 
-```bash [Windows]
-# Use WSL2 and follow the Ubuntu instructions, or
-# use Memurai (Redis-compatible native Windows build): https://www.memurai.com
+```powershell [Windows (WSL2)]
+# Recommended — run Linux Redis inside Windows Subsystem for Linux.
+wsl --install -d Ubuntu     # First-time WSL2 setup (reboot may be required)
+wsl
+# Then inside the WSL shell:
+sudo apt-get update && sudo apt-get install -y redis-server
+sudo service redis-server start
+# Redis is now reachable from Windows at localhost:6379
+```
+
+```powershell [Windows (Memurai)]
+# Native Windows alternative — Memurai is Redis-compatible.
+# Download the free Developer Edition: https://www.memurai.com/get-memurai
+# After install, Memurai runs as a Windows service on :6379 automatically.
+Get-Service -Name Memurai   # Verify it's running
 ```
 :::
 
@@ -195,13 +237,23 @@ Only one LLM request can be in flight at a time. When a crawl/generate is runnin
 
 Quick health check from the terminal:
 
-```bash
+::: code-group
+```bash [macOS / Linux]
 # Backend is up
 curl http://localhost:3001/health
 
 # Active AI provider + infra status
 curl http://localhost:3001/api/v1/system
 ```
+
+```powershell [Windows (PowerShell)]
+# Backend is up
+Invoke-RestMethod http://localhost:3001/health
+
+# Active AI provider + infra status
+Invoke-RestMethod http://localhost:3001/api/v1/system
+```
+:::
 
 The `/api/v1/system` response includes `activeProvider`, `redis`, `postgres`, and `activeSchedules` so you can confirm optional services are wired up correctly.
 
