@@ -16,10 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Auth**: CSRF token now works in cross-origin deployments (GitHub Pages + Render) — the `_csrf` cookie set by the backend domain was invisible to `document.cookie` on the frontend origin; backend now echoes the token in `X-CSRF-Token` response header with `Access-Control-Expose-Headers`, and the frontend caches it in memory via `setCsrfToken()` (#99)
-- **Auth**: CSRF `Set-Cookie` changed from `setHeader` to `appendHeader` — prevents the `_csrf` cookie from being overwritten by later cookie-setting code in the same response (#99)
+- **Auth**: CSRF `Set-Cookie` changed from `res.setHeader` to `res.append` (Express 4.x) — prevents the `_csrf` cookie from being overwritten by later cookie-setting code in the same response (#99)
+- **Runner**: CDP screencast was skipped on virtually every run because the SSE listener check fired before any client connected; removed the premature guard so live browser view works reliably (#99)
+- **AI**: Feedback loop now skips AI calls when the provider is degraded (rate-limited or circuit-broken) — previously the feedback loop would burn minutes retrying the rate-limited provider, blocking run completion (#99)
 
 ### Changed
 - **Accessibility**: `role="alert"` and `aria-live="polite"` added to `OutcomeBanner`, test error display in `TestRunView`, and test result list for screen reader announcements (MNT-007) (#99)
+- **AI**: Circuit breaker threshold reduced from 3 to 1 consecutive rate-limit failures — `withRetry()` already retries internally, so the error that reaches `generateText()` represents a confirmed durable rate limit (FEA-003) (#99)
+- **AI**: When a rate-limit fallback succeeds, the fallback provider is pinned as a sticky override for 10 minutes so subsequent calls in the same pipeline skip the rate-limited primary (FEA-003) (#99)
+- **Runner**: AI feedback loop wrapped in a 60-second timeout (`FEEDBACK_TIMEOUT_MS`) so it can never block run completion indefinitely (#99)
 
 ## [1.6.1] — 2026-04-22
 
