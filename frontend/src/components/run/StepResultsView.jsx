@@ -573,6 +573,16 @@ export default function StepResultsView({ result, run, onBack }) {
   const activeVisualDiff = activeStepCaptureForTabs?.visualDiff || result?.visualDiff;
   const hasVisualDiff = !!activeVisualDiff;
 
+  // If the user is currently viewing the "Visual" tab and then selects a step
+  // whose capture has no visualDiff, the tab button disappears but `activeTab`
+  // still reads "visual", leaving the content panel blank. Fall back to the
+  // default tab in that case.
+  useEffect(() => {
+    if (activeTab === "visual" && !hasVisualDiff) {
+      setActiveTab(hasVideo ? "video" : "screenshot");
+    }
+  }, [activeTab, hasVisualDiff, hasVideo]);
+
   const tabs = isApi
     ? [
         { id: "screenshot", label: "🔌 Result" },

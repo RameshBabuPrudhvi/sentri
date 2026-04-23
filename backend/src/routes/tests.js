@@ -898,6 +898,18 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   try {
     stopResult = await stopRecording(req.params.sessionId, { testName: name });
   } catch (err) {
+    // Discard is a best-effort cleanup path. If the session was already torn
+    // down between `getRecording()` above and here — e.g. the
+    // `MAX_RECORDING_MS` safety-net timeout in `recorder.js` fired first —
+    // surface a success response instead of a 500, because the caller's
+    // intent (close the browser, don't persist a test) is already satisfied.
+    if (discard && /not found/i.test(err.message || "")) {
+      logActivity({ ...actor(req),
+        type: "test.record_discard", projectId: project.id, projectName: project.name,
+        detail: `Recording discarded after session auto-teardown (${req.params.sessionId})`, status: "success",
+      });
+      return res.json({ ok: true, discarded: true, alreadyStopped: true });
+    }
     console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/stop] stopRecording failed: ${err.message}`));
     return res.status(500).json({ error: "Internal server error" });
   }

@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Visual diff**: Baseline / diff artifact paths no longer round-trip through `encodeURIComponent(testId)`. Express URL-decodes the path before the static-file lookup + HMAC verification in `appSetup.js`, so any `%XX` bytes in the filename would 404 or fail signature validation. Test IDs are already path-safe (#103).
 - **Recorder UI**: The unmount cleanup effect in `RecorderModal` now tears down the server-side recording session via `recordDiscard` (using `sessionIdRef` / `projectIdRef` to dodge the empty-deps stale-closure bug). Navigating away from the Tests page mid-recording no longer leaves a Chromium process running on the backend (#103).
 - **Recorder**: `startRecording` now registers a `MAX_RECORDING_MS` (default 30 min, configurable) safety-net timeout that force-tears-down abandoned sessions even when the client never reconnects, bounding server memory usage (#103).
+- **Recorder**: Discard path is resilient to the TOCTOU window between `getRecording()` and `stopRecording()`. If the safety-net timeout tears the session down first, the stop endpoint now returns `{ ok: true, discarded: true, alreadyStopped: true }` instead of a 500 (#103).
+- **Run detail visual tab**: When switching to a step whose capture has no visual diff, the active tab no longer gets stuck on the now-hidden "Visual" button and blank out the content panel. `StepResultsView` resets `activeTab` to `video`/`screenshot` whenever the visual tab becomes unavailable (#103).
 
 ## [1.6.3] — 2026-04-23
 
