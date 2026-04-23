@@ -612,7 +612,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-013 — Anonymous usage telemetry with opt-out 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Assrt
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Audit
 
 **Problem:** Sentri has zero telemetry. The team has no visibility into feature usage, crawl success rates, model performance comparisons, or error frequency. Data-driven prioritisation is impossible.
 
@@ -631,11 +631,11 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-014 — Cursor overlay on live browser view 🔵 Medium
 
-**Status:** ✅ Complete | **Effort:** S | **Source:** Assrt (M-04)
+**Status:** ✅ Complete | **Effort:** S | **Source:** Audit (M-04)
 
 **Problem:** Sentri's live CDP screencast shows the browser but gives no visual indication of what the test is currently doing. Viewers cannot tell which element is about to be clicked, filled, or asserted — making live runs difficult to follow.
 
-**Fix:** Inject an animated cursor dot, click ripple, and keystroke toast via `page.evaluate()` after each navigation. Port from Assrt's `CURSOR_INJECT_SCRIPT` pattern.
+**Fix:** Inject an animated cursor dot, click ripple, and keystroke toast via `page.evaluate()` after each navigation. Port from the `CURSOR_INJECT_SCRIPT` pattern.
 
 **Files to change:**
 - `backend/src/runner/executeTest.js` — inject cursor overlay script
