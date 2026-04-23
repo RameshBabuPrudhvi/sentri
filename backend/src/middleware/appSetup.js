@@ -430,6 +430,25 @@ export function signRunArtifacts(run) {
       const sr = { ...r };
       if (sr.screenshotPath) sr.screenshotPath = signArtifactUrl(sr.screenshotPath);
       if (sr.videoPath) sr.videoPath = signArtifactUrl(sr.videoPath);
+      // DIF-001: sign baseline + diff paths on the final-screenshot visual diff
+      if (sr.visualDiff) {
+        sr.visualDiff = { ...sr.visualDiff };
+        if (sr.visualDiff.baselinePath) sr.visualDiff.baselinePath = signArtifactUrl(sr.visualDiff.baselinePath);
+        if (sr.visualDiff.diffPath) sr.visualDiff.diffPath = signArtifactUrl(sr.visualDiff.diffPath);
+      }
+      // DIF-001: per-step visual diffs live on stepCaptures[].visualDiff
+      if (Array.isArray(sr.stepCaptures)) {
+        sr.stepCaptures = sr.stepCaptures.map(sc => {
+          const s = { ...sc };
+          if (s.screenshotPath) s.screenshotPath = signArtifactUrl(s.screenshotPath);
+          if (s.visualDiff) {
+            s.visualDiff = { ...s.visualDiff };
+            if (s.visualDiff.baselinePath) s.visualDiff.baselinePath = signArtifactUrl(s.visualDiff.baselinePath);
+            if (s.visualDiff.diffPath) s.visualDiff.diffPath = signArtifactUrl(s.visualDiff.diffPath);
+          }
+          return s;
+        });
+      }
       return sr;
     });
   }

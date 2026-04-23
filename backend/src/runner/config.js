@@ -77,10 +77,19 @@ export const ARTIFACTS_DIR = path.join(__dirname, "..", "..", "artifacts");
 export const VIDEOS_DIR    = path.join(ARTIFACTS_DIR, "videos");
 export const TRACES_DIR    = path.join(ARTIFACTS_DIR, "traces");
 export const SHOTS_DIR     = path.join(ARTIFACTS_DIR, "screenshots");
+export const BASELINES_DIR = path.join(ARTIFACTS_DIR, "baselines");
+export const DIFFS_DIR     = path.join(ARTIFACTS_DIR, "diffs");
 
-[ARTIFACTS_DIR, VIDEOS_DIR, TRACES_DIR, SHOTS_DIR].forEach((d) => {
+[ARTIFACTS_DIR, VIDEOS_DIR, TRACES_DIR, SHOTS_DIR, BASELINES_DIR, DIFFS_DIR].forEach((d) => {
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
+
+// ── DIF-001: Visual regression ────────────────────────────────────────────────
+// Pixel difference threshold above which a step is flagged as a visual regression.
+// Expressed as a fraction of total pixels (0.02 = 2%). Per-pixel match tolerance
+// is governed by VISUAL_DIFF_PIXEL_TOLERANCE (pixelmatch `threshold` arg, 0..1).
+export const VISUAL_DIFF_THRESHOLD        = parseFloat(process.env.VISUAL_DIFF_THRESHOLD) || 0.02;
+export const VISUAL_DIFF_PIXEL_TOLERANCE  = parseFloat(process.env.VISUAL_DIFF_PIXEL_TOLERANCE) || 0.1;
 
 // ── DIF-003: Device emulation ─────────────────────────────────────────────────
 // Playwright ships 50+ device profiles. We expose a curated subset for the

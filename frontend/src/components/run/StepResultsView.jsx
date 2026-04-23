@@ -19,6 +19,7 @@ import OverlayCanvas from "./OverlayCanvas.jsx";
 import HealingTimeline from "./HealingTimeline.jsx";
 import { cleanTestName } from "../../utils/formatTestName.js";
 import { fmtMs, fmtBytes } from "../../utils/formatters.js";
+import { api } from "../../api.js";
 
 // ─── Infer per-step status from the overall test result ──────────────────────
 //
@@ -382,6 +383,155 @@ function BrowserChrome({ url, children, isLoading = false }) {
   );
 }
 
+// ─── DIF-001: Visual regression panel ─────────────────────────────────────────
+//
+// Renders a toggleable before/after view for a captured screenshot versus its
+// stored baseline, plus an "Accept visual changes" button that promotes the
+// current capture to the new baseline via the tests API.
+
+function VisualDiffPanel({ visualDiff, currentScreenshot, testId, runId, stepNumber }) {
+  const [mode, setMode] = useState("diff");   // "before" | "after" | "diff"
+  const [accepting, setAccepting] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (!visualDiff) return null;
+
+  const { status, diffPixels, totalPixels, diffRatio, threshold, baselinePath, diffPath, message } = visualDiff;
+  const percent = diffRatio != null ? (diffRatio * 100).toFixed(2) : null;
+
+  const statusLabel = {
+    baseline_created: { text: "Baseline captured", color: "var(--blue)", bg: "var(--blue-bg)" },
+    match:            { text: "No visual regression", color: "var(--green)", bg: "var(--green-bg)" },
+    regression:       { text: "Visual regression detected", color: "var(--red)", bg: "var(--red-bg)" },
+    error:            { text: "Visual diff unavailable", color: "var(--amber)", bg: "var(--amber-bg)" },
+  }[status] || { text: status, color: "var(--text2)", bg: "var(--bg2)" };
+
+  const canToggle = status === "regression" || status === "match";
+
+  async function handleAccept() {
+    if (!testId || !runId) return;
+    setAccepting(true);
+    setError(null);
+    try {
+      await api.acceptBaseline(testId, stepNumber || 0, runId);
+      setAccepted(true);
+    } catch (e) {
+      setError(e.message || "failed to accept baseline");
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  // Figure out which image URL to render for the selected mode.
+  let shownSrc = null;
+  if (mode === "before" && baselinePath) shownSrc = baselinePath;
+  else if (mode === "diff" && diffPath) shownSrc = diffPath;
+  else if (mode === "after" && currentScreenshot) {
+    shownSrc = currentScreenshot.startsWith("data:") ? currentScreenshot : `data:image/png;base64,${currentScreenshot}`;
+  }
+
+  return (
+    <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", background: "var(--surface)" }}>
+      {/* Status banner */}
+      <div style={{
+        padding: "10px 14px",
+        background: statusLabel.bg,
+        borderBottom: "1px solid var(--border)",
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+      }}>
+        <span style={{ fontWeight: 700, fontSize: "0.78rem", color: statusLabel.color }}>
+          {statusLabel.text}
+        </span>
+        {percent != null && (
+          <span style={{ fontSize: "0.74rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
+            {percent}% of pixels differ ({diffPixels}/{totalPixels}) · threshold {(threshold * 100).toFixed(1)}%
+          </span>
+        )}
+        {message && (
+          <span style={{ fontSize: "0.72rem", color: "var(--text3)", fontStyle: "italic" }}>{message}</span>
+        )}
+      </div>
+
+      {/* Mode toggle */}
+      {canToggle && (baselinePath || diffPath || currentScreenshot) && (
+        <div style={{ display: "flex", gap: 6, padding: "8px 12px", background: "var(--bg2)", borderBottom: "1px solid var(--border)" }}>
+          {[
+            { id: "before", label: "Baseline", enabled: !!baselinePath },
+            { id: "after",  label: "Current",  enabled: !!currentScreenshot },
+            { id: "diff",   label: "Diff",     enabled: !!diffPath },
+          ].map((t) => (
+            <button
+              key={t.id}
+              disabled={!t.enabled}
+              onClick={() => setMode(t.id)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                fontSize: "0.72rem",
+                fontWeight: 600,
+                cursor: t.enabled ? "pointer" : "not-allowed",
+                opacity: t.enabled ? 1 : 0.4,
+                background: mode === t.id ? "var(--accent)" : "var(--surface)",
+                color: mode === t.id ? "#fff" : "var(--text2)",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          {status === "regression" && (
+            <button
+              onClick={handleAccept}
+              disabled={accepting || accepted}
+              style={{
+                padding: "4px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                cursor: accepting || accepted ? "default" : "pointer",
+                background: accepted ? "var(--green-bg)" : "var(--surface)",
+                color: accepted ? "var(--green)" : "var(--text2)",
+              }}
+              title="Promote the current capture to the new baseline"
+            >
+              {accepted ? "Baseline updated" : accepting ? "Accepting…" : "Accept visual changes"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Image */}
+      <div style={{ padding: 0, display: "flex", justifyContent: "center", background: "#fafafa" }}>
+        {shownSrc ? (
+          <img
+            src={shownSrc}
+            alt={`Visual ${mode}`}
+            style={{ maxWidth: "100%", maxHeight: 620, display: "block" }}
+          />
+        ) : (
+          <div style={{ padding: "60px 20px", color: "#94a3b8", fontSize: "0.78rem" }}>
+            No image to display for "{mode}".
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div style={{
+          padding: "8px 14px",
+          background: "var(--red-bg)",
+          color: "var(--red)",
+          fontSize: "0.74rem",
+        }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function StepResultsView({ result, run, onBack }) {
@@ -414,6 +564,15 @@ export default function StepResultsView({ result, run, onBack }) {
   const hasVideo = !!(result?.videoPath);
   const isApi = !!result?.isApiTest;
 
+  // DIF-001: Show a "Visual" tab whenever the active step (or the final step)
+  // has a visualDiff attached. Per-step captures take precedence over the
+  // final-screenshot visualDiff when a per-step entry exists.
+  const activeStepCaptureForTabs = result?.stepCaptures?.find(
+    (c) => c.step === activeStepIdx + 1
+  );
+  const activeVisualDiff = activeStepCaptureForTabs?.visualDiff || result?.visualDiff;
+  const hasVisualDiff = !!activeVisualDiff;
+
   const tabs = isApi
     ? [
         { id: "screenshot", label: "🔌 Result" },
@@ -422,6 +581,7 @@ export default function StepResultsView({ result, run, onBack }) {
     : [
         ...(hasVideo ? [{ id: "video", label: "🎬 Recording" }] : []),
         { id: "screenshot", label: "📸 Screenshot" },
+        ...(hasVisualDiff ? [{ id: "visual", label: "🖼️ Visual" }] : []),
         { id: "network",    label: "🌐 Network" },
         { id: "console",    label: "📜 Console" },
         { id: "dom",        label: "🧩 DOM" },
@@ -1092,6 +1252,25 @@ export default function StepResultsView({ result, run, onBack }) {
                     </div>
                   )}
                 </BrowserChrome>
+              );
+            })()}
+
+            {/* 🖼️ VISUAL DIFF (DIF-001) */}
+            {activeTab === "visual" && (() => {
+              const stepCapture = result?.stepCaptures?.find(
+                (c) => c.step === activeStepIdx + 1
+              );
+              const vd = stepCapture?.visualDiff || result?.visualDiff;
+              const screenshotForAccept = stepCapture?.screenshot || result?.screenshot;
+              const stepNumber = stepCapture ? stepCapture.step : 0;
+              return (
+                <VisualDiffPanel
+                  visualDiff={vd}
+                  currentScreenshot={screenshotForAccept}
+                  testId={testId}
+                  runId={run?.id}
+                  stepNumber={stepNumber}
+                />
               );
             })()}
 

@@ -209,6 +209,57 @@ export const api = {
   bulkDeleteTests: (projectId, testIds) =>
     req("POST", `/projects/${projectId}/tests/bulk`, { testIds, action: "delete" }),
 
+  // ── Visual regression baselines (DIF-001) ──────────────────────────────────
+  /**
+   * List saved visual baselines for a test.
+   * @param {string} testId
+   * @returns {Promise<Array<{testId: string, stepNumber: number, imagePath: string, width: number|null, height: number|null, createdAt: string, updatedAt: string}>>}
+   */
+  getBaselines: (testId) => req("GET", `/tests/${testId}/baselines`),
+  /**
+   * Accept a captured screenshot from an earlier run as the new baseline for
+   * the given test + step. Called from the "Accept visual changes" action.
+   * @param {string} testId
+   * @param {number} stepNumber - 0 for the final screenshot; >= 1 for per-step captures.
+   * @param {string} runId
+   */
+  acceptBaseline: (testId, stepNumber, runId) =>
+    req("POST", `/tests/${testId}/baselines/${stepNumber}/accept`, { runId }),
+  /**
+   * Delete a baseline so the next run generates a fresh one.
+   * @param {string} testId
+   * @param {number} stepNumber
+   */
+  deleteBaseline: (testId, stepNumber) =>
+    req("DELETE", `/tests/${testId}/baselines/${stepNumber}`),
+
+  // ── Interactive browser recorder (DIF-015) ─────────────────────────────────
+  /**
+   * Start an interactive recording session. The browser opens server-side
+   * and streams a live CDP screencast to the returned `sessionId` over SSE.
+   * @param {string} projectId
+   * @param {Object} [body] - `{ startUrl?: string }`
+   * @returns {Promise<{sessionId: string, startUrl: string}>}
+   */
+  recordStart: (projectId, body) => req("POST", `/projects/${projectId}/record`, body || {}),
+  /**
+   * Stop an in-flight recording and persist the captured actions as a
+   * Draft Playwright test.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {Object} body - `{ name: string }`
+   * @returns {Promise<{test: Object, actionCount: number}>}
+   */
+  recordStop: (projectId, sessionId, body) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/stop`, body || {}),
+  /**
+   * Poll a live recording session for status and captured-action preview.
+   * @param {string} projectId
+   * @param {string} sessionId
+   */
+  recordStatus: (projectId, sessionId) =>
+    req("GET", `/projects/${projectId}/record/${sessionId}`),
+
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
   getRuns:   (id)    => req("GET", `/projects/${id}/runs`),

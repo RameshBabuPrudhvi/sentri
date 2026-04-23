@@ -4,12 +4,13 @@ import {
   Search, Download, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
   AlertCircle, ArrowUpDown, Trash2,
-  ThumbsUp, ThumbsDown, AlertTriangle,
+  ThumbsUp, ThumbsDown, AlertTriangle, Video,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import GenerateTestModal from "../components/generate/GenerateTestModal.jsx";
 import CrawlProjectModal from "../components/crawl/CrawlProjectModal.jsx";
+import RecorderModal from "../components/run/RecorderModal.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
@@ -226,6 +227,8 @@ export default function Tests() {
   const [showCrawlModal, setShowCrawlModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showRecorderModal, setShowRecorderModal] = useState(false);
+  const [recorderProjectId, setRecorderProjectId] = useState(null);
   const [page, setPage] = useState(1);
   const [sortCol, setSortCol] = useState(null);   // "status" | "lastRun" | "project"
   const [sortDir, setSortDir] = useState("asc");   // "asc" | "desc"
@@ -593,6 +596,19 @@ export default function Tests() {
       color: "var(--accent-bg)",
       iconColor: "var(--accent)",
       action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),
+    },
+    {
+      // DIF-015 — Interactive browser recorder
+      icon: <Video size={16} />,
+      title: "Record a test",
+      desc: "Click through the app; Sentri captures each step",
+      color: "var(--red-bg)",
+      iconColor: "var(--red)",
+      action: () => {
+        if (projects.length === 0) { navigate("/projects/new"); return; }
+        setRecorderProjectId(projects[0].id);
+        setShowRecorderModal(true);
+      },
     },
     {
       icon: <Play size={16} />,
@@ -1088,6 +1104,18 @@ export default function Tests() {
       )}
       {showReviewModal && (
         <ReviewModal projects={projects} onClose={() => setShowReviewModal(false)} />
+      )}
+      {showRecorderModal && recorderProjectId && (
+        <RecorderModal
+          open={showRecorderModal}
+          onClose={() => setShowRecorderModal(false)}
+          projectId={recorderProjectId}
+          defaultUrl={projects.find(p => p.id === recorderProjectId)?.url || ""}
+          onSaved={(t) => {
+            invalidateProjectDataCache(recorderProjectId);
+            navigate(`/tests/${t.id}`);
+          }}
+        />
       )}
 
       {/* Bulk action confirmation modal */}

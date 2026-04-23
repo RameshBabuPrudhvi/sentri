@@ -43,6 +43,13 @@ import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.
 import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
+import * as baselineRepo from "../database/repositories/baselineRepo.js";
+import { acceptBaseline } from "../runner/visualDiff.js";
+import { SHOTS_DIR, BASELINES_DIR } from "../runner/config.js";
+import path from "path";
+import fs from "fs";
+import { startRecording, stopRecording, getRecording } from "../runner/recorder.js";
+import { randomUUID } from "crypto";
 
 const router = Router();
 
@@ -708,6 +715,244 @@ router.get("/projects/:id/tests/traceability", (req, res) => {
     unlinkedTests: unlinked.length,
     matrix: byIssue,
     unlinked,
+  });
+});
+
+// ─── DIF-001: Visual regression baselines ────────────────────────────────────
+//
+// Baselines are the "golden" screenshots subsequent runs diff against. They
+// are created lazily on the first run that produces a screenshot for a given
+// (testId, stepNumber). Users can accept a fresh capture as the new baseline
+// (to acknowledge intentional UI changes) or delete a baseline to regenerate
+// it from the next run's output.
+
+/**
+ * GET /api/v1/tests/:testId/baselines
+ * List all baselines for a test.
+ */
+router.get("/tests/:testId/baselines", (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "test not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "test not found" });
+  res.json(baselineRepo.getAllByTestId(test.id));
+});
+
+/**
+ * POST /api/v1/tests/:testId/baselines/:stepNumber/accept
+ * Promote a captured screenshot from an earlier run to the new baseline.
+ *
+ * Body: { runId: string } — the run whose screenshot should become the baseline.
+ *   - For stepNumber = 0, the run result's `screenshotPath` is used.
+ *   - For stepNumber >= 1, the matching entry in `stepCaptures[]` is used.
+ */
+router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"), (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "test not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "test not found" });
+
+  const stepNumber = parseInt(req.params.stepNumber, 10);
+  if (!Number.isFinite(stepNumber) || stepNumber < 0) {
+    return res.status(400).json({ error: "invalid stepNumber" });
+  }
+
+  const runId = String(req.body?.runId || "");
+  if (!runId) return res.status(400).json({ error: "runId is required" });
+
+  const run = runRepo.getById(runId);
+  if (!run || run.projectId !== project.id) {
+    return res.status(404).json({ error: "run not found" });
+  }
+
+  const result = (run.results || []).find(r => r.testId === test.id);
+  if (!result) return res.status(404).json({ error: "test result not found on run" });
+
+  // Locate the source screenshot on disk. For step 0 we use the final
+  // screenshot; for step N we use the matching stepCaptures entry.
+  let relArtifactPath;
+  if (stepNumber === 0) {
+    relArtifactPath = result.screenshotPath;
+  } else {
+    const cap = (result.stepCaptures || []).find(c => c.step === stepNumber);
+    relArtifactPath = cap?.screenshotPath;
+  }
+  if (!relArtifactPath) {
+    return res.status(404).json({ error: "screenshot not captured for that step" });
+  }
+
+  // Strip any signing query params and map /artifacts/screenshots/foo.png →
+  // <SHOTS_DIR>/foo.png. Reject anything that escapes the screenshots dir.
+  const cleanPath = String(relArtifactPath).split("?")[0];
+  const prefix = "/artifacts/screenshots/";
+  if (!cleanPath.startsWith(prefix)) {
+    return res.status(400).json({ error: "screenshot path is not under /artifacts/screenshots/" });
+  }
+  const fileName = cleanPath.slice(prefix.length);
+  const sourceAbsPath = path.resolve(SHOTS_DIR, fileName);
+  if (!sourceAbsPath.startsWith(path.resolve(SHOTS_DIR) + path.sep)) {
+    return res.status(400).json({ error: "invalid screenshot path" });
+  }
+  if (!fs.existsSync(sourceAbsPath)) {
+    return res.status(404).json({ error: "screenshot file missing on disk" });
+  }
+
+  try {
+    const { baselinePath } = acceptBaseline({ testId: test.id, stepNumber, sourceAbsPath });
+    logActivity({ ...actor(req),
+      type: "test.baseline_accept", projectId: project.id, projectName: project.name,
+      detail: `Accepted visual baseline for ${test.id} step ${stepNumber}`, status: "success",
+    });
+    res.json({ ok: true, baselinePath, testId: test.id, stepNumber });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "failed to accept baseline" });
+  }
+});
+
+/**
+ * DELETE /api/v1/tests/:testId/baselines/:stepNumber
+ * Delete a baseline. The next run will create a new baseline from its capture.
+ */
+router.delete("/tests/:testId/baselines/:stepNumber", requireRole("qa_lead"), (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "test not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "test not found" });
+
+  const stepNumber = parseInt(req.params.stepNumber, 10);
+  if (!Number.isFinite(stepNumber) || stepNumber < 0) {
+    return res.status(400).json({ error: "invalid stepNumber" });
+  }
+
+  // Remove the on-disk PNG too so the next run definitely rebuilds it.
+  const absPath = path.join(BASELINES_DIR, test.id, `step-${stepNumber}.png`);
+  try { if (fs.existsSync(absPath)) fs.unlinkSync(absPath); } catch { /* ignore */ }
+
+  const deleted = baselineRepo.deleteOne(test.id, stepNumber);
+  res.json({ ok: true, deleted });
+});
+
+// ─── DIF-015: Interactive browser recorder ───────────────────────────────────
+//
+// Opens a Playwright browser at the project URL, streams the live CDP
+// screencast to the RecorderModal (via SSE on the session ID), and captures
+// raw user interactions. On stop, the captured actions are transformed into
+// a Playwright test body and saved as a Draft test.
+
+/**
+ * POST /api/v1/projects/:id/record
+ * Body: { startUrl?: string } — defaults to the project URL.
+ *
+ * Returns { sessionId } — the SSE run ID the frontend should subscribe to
+ * for live screencast frames while recording.
+ */
+router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const startUrl = String(req.body?.startUrl || project.url || "").trim();
+  if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
+    return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
+  }
+
+  const sessionId = `REC-${randomUUID().slice(0, 8)}`;
+  try {
+    await startRecording({ sessionId, projectId: project.id, startUrl });
+    logActivity({ ...actor(req),
+      type: "test.record_start", projectId: project.id, projectName: project.name,
+      detail: `Recorder started on ${startUrl}`, status: "running",
+    });
+    res.status(202).json({ sessionId, startUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "failed to start recorder" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/stop
+ * Body: { name: string } — the name to give the recorded Draft test.
+ *
+ * Persists the recorded actions as a new Draft test containing the
+ * generated Playwright code. Returns the created test.
+ */
+router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+
+  const name = String(req.body?.name || "").trim() || `Recorded flow @ ${new Date().toISOString()}`;
+
+  let stopResult;
+  try {
+    stopResult = await stopRecording(req.params.sessionId, { testName: name });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "failed to stop recorder" });
+  }
+
+  if (!stopResult.actions || stopResult.actions.length === 0) {
+    return res.status(400).json({ error: "no actions were captured — nothing to save" });
+  }
+
+  const testId = generateTestId();
+  const test = {
+    id: testId,
+    projectId: project.id,
+    name,
+    description: `Recorded from ${stopResult.url}`,
+    steps: stopResult.actions.map((a, i) => `Step ${i + 1}: ${a.kind}${a.selector ? ` → ${a.selector}` : ""}${a.url ? ` → ${a.url}` : ""}`),
+    playwrightCode: stopResult.playwrightCode,
+    priority: "medium",
+    type: "recorded",
+    sourceUrl: stopResult.url,
+    pageTitle: project.name,
+    createdAt: new Date().toISOString(),
+    lastResult: null,
+    lastRunAt: null,
+    qualityScore: null,
+    isJourneyTest: false,
+    reviewStatus: "draft",
+    reviewedAt: null,
+    promptVersion: null,
+    modelUsed: null,
+    linkedIssueKey: null,
+    tags: ["recorded"],
+    generatedFrom: "recorder",
+    workspaceId: project.workspaceId || null,
+  };
+  testRepo.create(test);
+
+  logActivity({ ...actor(req),
+    type: "test.record_stop", projectId: project.id, projectName: project.name,
+    testId, testName: name,
+    detail: `Recorder captured ${stopResult.actions.length} actions → Draft test`, status: "success",
+  });
+
+  res.status(201).json({ test, actionCount: stopResult.actions.length });
+});
+
+/**
+ * GET /api/v1/projects/:id/record/:sessionId
+ * Inspect an in-flight recording (action count, status). Used by the modal
+ * to poll for captured actions while the browser is still open.
+ */
+router.get("/projects/:id/record/:sessionId", (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  res.json({
+    sessionId: sess.id,
+    status: sess.status,
+    url: sess.url,
+    startedAt: sess.startedAt,
+    actionCount: sess.actions.length,
+    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, value: a.value, key: a.key, url: a.url, ts: a.ts })),
   });
 });
 
