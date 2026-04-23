@@ -27,16 +27,29 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [error, setError] = useState(null);
   const esRef = useRef(null);
   const pollRef = useRef(null);
+  // Refs mirror sessionId + projectId so the unmount cleanup sees the latest
+  // values. An empty-deps cleanup closure would otherwise capture the initial
+  // `sessionId = null` and never call `recordDiscard`, leaking the server-side
+  // Chromium process when the user navigates away mid-recording.
+  const sessionIdRef = useRef(null);
+  const projectIdRef = useRef(projectId);
 
   useEffect(() => {
     setStartUrl(defaultUrl);
   }, [defaultUrl]);
 
-  // Clean up SSE + polling on unmount or close
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
+
+  // Clean up SSE + polling AND server-side recording session on unmount.
   useEffect(() => {
     return () => {
       if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (sessionIdRef.current && projectIdRef.current) {
+        api.recordDiscard(projectIdRef.current, sessionIdRef.current).catch(() => {});
+        sessionIdRef.current = null;
+      }
     };
   }, []);
 
@@ -93,6 +106,10 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
         name: name.trim() || `Recorded flow @ ${new Date().toISOString()}`,
       });
       teardownStreams();
+      // Clear the ref so the unmount cleanup doesn't fire a redundant
+      // recordDiscard for a session we've already stopped.
+      sessionIdRef.current = null;
+      setSessionId(null);
       onSaved?.(result.test);
       onClose?.();
     } catch (e) {
@@ -115,6 +132,9 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       api.recordDiscard(projectId, sessionId).catch(() => {});
     }
     teardownStreams();
+    // Clear the ref immediately so the unmount cleanup doesn't fire a second
+    // discard for the same session we just tore down.
+    sessionIdRef.current = null;
     setPhase("idle");
     setSessionId(null);
     onClose?.();

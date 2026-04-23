@@ -28,6 +28,13 @@
 
 import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } from "./config.js";
 import { startScreencast } from "./screencast.js";
+import { formatLogLine } from "../utils/logFormatter.js";
+
+// Hard cap for how long a single recording session may stay open. Defence-in-
+// depth for the case where a client disconnects without hitting stop/discard
+// (e.g. browser tab closed, network cut). After this timeout the server tears
+// down the Chromium process and deletes the session from the map.
+const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS || "1800000", 10) || 1_800_000);
 
 /**
  * @typedef {Object} RecordedAction
@@ -264,6 +271,18 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Start CDP screencast so the RecorderModal can show the live browser.
     session.stopScreencast = await startScreencast(page, sessionId);
 
+    // Defence-in-depth: if the client never calls stop/discard (e.g. tab
+    // closed, network died) the browser would remain open forever. Force-kill
+    // the session after `MAX_RECORDING_MS` so we never leak Chromium.
+    session.idleTimeout = setTimeout(() => {
+      console.error(formatLogLine("warn", null, `[recorder] session ${sessionId} exceeded MAX_RECORDING_MS (${MAX_RECORDING_MS}ms) — auto-tearing down`));
+      stopRecording(sessionId).catch(() => { /* swallow — session may already be gone */ });
+    }, MAX_RECORDING_MS);
+    // Node's timer would keep the process alive; recorder sessions are
+    // per-request resources, so let the event loop exit if everything else
+    // is quiescent.
+    session.idleTimeout.unref?.();
+
     // Only publish the session after all async setup has succeeded —
     // otherwise the caller never learns the sessionId to stop and the
     // browser would leak permanently.
@@ -304,6 +323,7 @@ export async function stopRecording(sessionId, opts = {}) {
   session.status = "stopping";
 
   try {
+    if (session.idleTimeout) { clearTimeout(session.idleTimeout); session.idleTimeout = null; }
     if (session.stopScreencast) await session.stopScreencast().catch(() => {});
     await session.page?.close().catch(() => {});
     await session.context?.close().catch(() => {});

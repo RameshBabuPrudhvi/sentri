@@ -225,6 +225,27 @@ await test("diffScreenshot() creates a baseline on first run", () => {
   assert.ok(baselineRepo.get("TC-VR-2", 0), "baseline DB row should exist");
 });
 
+await test("baselinePath and diffPath contain raw testId (no %-encoding) for filesystem-URL parity", () => {
+  // Reviewer's concern: encodeURIComponent(testId) in the filename writes
+  // `%XX` bytes to disk, but Express URL-decodes the path before
+  // filesystem / HMAC lookup — producing a 404 / invalid signature.
+  const buf = splitPng(20, 20, { r: 255, g: 0, b: 0 }, { r: 0, g: 0, b: 255 }, 0.5);
+  const res = diffScreenshot({
+    runId: "RUN-ENC",
+    testId: "TC-VR-2",
+    stepNumber: 0,
+    pngBuffer: buf,
+  });
+  assert.ok(res.baselinePath, "baselinePath should be present");
+  assert.ok(res.diffPath, "diffPath should be present");
+  assert.ok(!res.baselinePath.includes("%"), `baselinePath must not contain %-encoded bytes: ${res.baselinePath}`);
+  assert.ok(!res.diffPath.includes("%"), `diffPath must not contain %-encoded bytes: ${res.diffPath}`);
+  // The on-disk file must match the URL path segment 1:1 after stripping the
+  // `/artifacts/diffs/` prefix.
+  const diskName = path.basename(res.diffPath);
+  assert.ok(fs.existsSync(path.join(DIFFS_DIR, diskName)), `diff PNG should exist on disk at ${diskName}`);
+});
+
 await test("diffScreenshot() returns status=match when the capture is identical", () => {
   const buf = solidPng(20, 20, { r: 255, g: 0, b: 0 });
   const res = diffScreenshot({

@@ -65,7 +65,11 @@ function baselineAbsPath(testId, stepNumber) {
  * @returns {string}
  */
 function baselinePublicPath(testId, stepNumber) {
-  return `/artifacts/baselines/${encodeURIComponent(testId)}/step-${stepNumber}.png`;
+  // Raw testId (not encoded): the URL path is URL-decoded by Express before
+  // the static-file lookup + HMAC verification in appSetup.js, so %-encoded
+  // bytes would break both. Test IDs from `generateTestId()` are already
+  // path-safe (uppercase + digits + hyphens).
+  return `/artifacts/baselines/${testId}/step-${stepNumber}.png`;
 }
 
 /**
@@ -186,7 +190,13 @@ export function diffScreenshot({ runId, testId, stepNumber = 0, pngBuffer }) {
     { threshold: VISUAL_DIFF_PIXEL_TOLERANCE, includeAA: false },
   );
 
-  const diffName = `${runId}-${encodeURIComponent(testId)}-step${stepNumber}.png`;
+  // Do NOT encodeURIComponent(testId) here: the filename is consumed both as
+  // a filesystem path (via fs.writeFileSync) and as a URL path segment (via
+  // `/artifacts/diffs/…`). Express URL-decodes the path before the filesystem
+  // lookup + HMAC verify in appSetup.js, so any %-encoded bytes would cause
+  // a 404 / invalid-signature. Test IDs from `generateTestId()` are already
+  // path-safe (uppercase + digits + hyphens).
+  const diffName = `${runId}-${testId}-step${stepNumber}.png`;
   const diffAbs = path.join(DIFFS_DIR, diffName);
   try {
     fs.writeFileSync(diffAbs, PNG.sync.write(diff));

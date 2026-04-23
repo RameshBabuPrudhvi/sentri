@@ -88,14 +88,17 @@ export const DIFFS_DIR     = path.join(ARTIFACTS_DIR, "diffs");
 // Pixel difference threshold above which a step is flagged as a visual regression.
 // Expressed as a fraction of total pixels (0.02 = 2%). Per-pixel match tolerance
 // is governed by VISUAL_DIFF_PIXEL_TOLERANCE (pixelmatch `threshold` arg, 0..1).
-// `|| default` is intentionally avoided — it would treat `0` as falsy and
-// prevent users from configuring zero-tolerance visual regression detection.
-export const VISUAL_DIFF_THRESHOLD        = process.env.VISUAL_DIFF_THRESHOLD != null && process.env.VISUAL_DIFF_THRESHOLD !== ""
-  ? parseFloat(process.env.VISUAL_DIFF_THRESHOLD)
-  : 0.02;
-export const VISUAL_DIFF_PIXEL_TOLERANCE  = process.env.VISUAL_DIFF_PIXEL_TOLERANCE != null && process.env.VISUAL_DIFF_PIXEL_TOLERANCE !== ""
-  ? parseFloat(process.env.VISUAL_DIFF_PIXEL_TOLERANCE)
-  : 0.1;
+// Parse a float env var with a default, accepting `0` (which `|| default`
+// would reject) but rejecting `NaN` from non-numeric strings (which would
+// silently disable regression detection because `diffRatio > NaN` is always
+// false).
+function parseFloatEnv(raw, def) {
+  if (raw == null || raw === "") return def;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : def;
+}
+export const VISUAL_DIFF_THRESHOLD       = parseFloatEnv(process.env.VISUAL_DIFF_THRESHOLD, 0.02);
+export const VISUAL_DIFF_PIXEL_TOLERANCE = parseFloatEnv(process.env.VISUAL_DIFF_PIXEL_TOLERANCE, 0.1);
 
 // ── DIF-003: Device emulation ─────────────────────────────────────────────────
 // Playwright ships 50+ device profiles. We expose a curated subset for the
