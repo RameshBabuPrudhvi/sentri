@@ -781,19 +781,30 @@ function isCircuitBreakerOpen(provider) {
 
 /**
  * FEA-003: Get the ordered list of fallback providers to try when the primary
- * provider hits a rate limit. Returns all configured providers except the
- * primary, in CLOUD_DETECT_ORDER, filtering out circuit-broken ones.
+ * provider hits a rate limit or transient error.
+ *
+ * **Same-tier only** — cloud primary falls back to other cloud providers;
+ * local primary has no fallback. This prevents cross-tier mismatches where
+ * a prompt built for cloud (~1600 chars, 128K context assumed) gets
+ * delivered to Ollama (4K context, needs >120s to process) and hits the
+ * chat timeout. Ollama is never a cross-tier rescue — the prompt shape,
+ * context window, and response latency are too different.
+ *
+ * To use Ollama as a primary, set `AI_PROVIDER=local` or pick it from
+ * the provider dropdown — detectProvider() will route all calls to Ollama
+ * with the correct tier-specific prompt.
  *
  * @param {string} primaryProvider - The provider that failed.
- * @returns {string[]} Ordered list of fallback provider IDs.
+ * @returns {string[]} Ordered list of same-tier fallback provider IDs.
  */
 function getFallbackProviders(primaryProvider) {
-  const allProviders = [...CLOUD_DETECT_ORDER, "local"];
-  return allProviders.filter(p =>
+  // Local tier has only one provider (Ollama) — no fallback possible.
+  if (primaryProvider === "local") return [];
+  // Cloud tier: try other cloud providers in detection order.
+  return CLOUD_DETECT_ORDER.filter(p =>
     p !== primaryProvider &&
     isProviderUsable(p) &&
-    !isCircuitBreakerOpen(p) &&
-    (p !== "local" || hasOllamaConfig()),
+    !isCircuitBreakerOpen(p),
   );
 }
 
