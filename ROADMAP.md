@@ -452,7 +452,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015 — Interactive browser recorder for test creation 🟡 High
 
-**Status:** 🔄 In Progress | **Effort:** L | **Source:** Competitive (BearQ)
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ)
 
 **Problem:** Sentri requires users to either write a plain-English description or wait for a full-site crawl to create tests. BearQ's primary UX is a visual recorder: click through the app, and the AI records and enhances the test. Users who cannot articulate a test scenario in text have no path to test creation. This is the single biggest UX barrier vs BearQ.
 
