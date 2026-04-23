@@ -151,6 +151,8 @@ Before writing new code, check whether a shared utility, component, or CSS class
 | `../middleware/demoQuota.js` | `demoQuota(op)`, `isDemoEnabled`, `getDemoQuotaStatus(userId)` | Per-user daily quota enforcement for demo mode (`DEMO_GOOGLE_API_KEY`). Applied to crawl, run, and generate routes. BYOK users bypass all quotas |
 | `pagination.js` | `parsePagination(page, pageSize)`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | Parsing and clamping pagination query params; shared by testRepo and runRepo |
 | `authWorkspace.js` | `buildJwtPayload(user, hint?)`, `buildUserResponse(user, hint?)` | Workspace-aware JWT payload and user response builders (ACL-001); used by auth routes and workspace switch |
+| `staleDetector.js` | `detectStaleTests(projectIds?)` | Flag approved tests not run in `STALE_TEST_DAYS` (default 90) as stale (AUTO-013). Called by the weekly cron job in `scheduler.js`. |
+| `flakyDetector.js` | `computeAndPersistFlakyScores(projectId)`, `getTopFlakyTests(projectIds, limit?)` | Compute flaky scores (0–100) from run history and persist to `tests.flakyScore` (DIF-004). Called after every test run via `feedbackIntegration.js`. |
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
 
@@ -203,7 +205,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 |---|---|---|
 | `src/api.js` | All `api.*` methods, `handleUnauthorized()` | Every backend call |
 | `src/utils/apiBase.js` | `API_BASE`, `API_VERSION`, `API_PATH`, `parseJsonResponse()` | Base URL resolution, versioned API path, safe JSON parsing |
-| `src/utils/csrf.js` | `getCsrfToken()` | CSRF token for mutating API requests |
+| `src/utils/csrf.js` | `getCsrfToken()`, `setCsrfToken()` | CSRF token for mutating API requests. `setCsrfToken()` caches the token from the `X-CSRF-Token` response header for cross-origin deployments where `document.cookie` cannot read the backend's `_csrf` cookie. |
 | `src/utils/markdown.js` | `escapeHtml()`, `renderMarkdown()` | Rendering AI/chat markdown safely (used by `AIChat.jsx` and `ChatHistory.jsx`) |
 | `src/utils/formatters.js` | `fmtMs()`, `fmtDate()`, `fmtDateTime()`, `fmtRelativeDate()`, `fmtDateTimeMedium()`, `fmtFutureRelative()`, `fmtDuration()`, `passRateColor()` | All date, time, duration, and colour formatting across pages and components |
 | `src/components/shared/CopyButton.jsx` | `<CopyButton text={…} />` | Copy-to-clipboard button with "Copied" feedback (used by TokenManager, IntegrationSnippets) |
@@ -514,7 +516,7 @@ const project = await api.getProject(id);
 const res = await fetch(`/api/projects/${id}`);
 ```
 
-The `api.js` `req()` wrapper sends `credentials: "include"` on every request so the HttpOnly auth cookie is attached automatically. It also injects the `X-CSRF-Token` header (from `utils/csrf.js`) on mutating methods (POST/PATCH/PUT/DELETE). On 401 responses it clears the stored user profile and redirects to `/login`. Any new `api.*` method that bypasses `req()` (e.g. for streaming) **must** replicate the 401 handling by calling `handleUnauthorized()` and include `credentials: "include"` + the CSRF header.
+The `api.js` `req()` wrapper sends `credentials: "include"` on every request so the HttpOnly auth cookie is attached automatically. It also injects the `X-CSRF-Token` header (from `utils/csrf.js`) on mutating methods (POST/PATCH/PUT/DELETE). After every response, `req()` captures the `X-CSRF-Token` **response** header (if present) via `setCsrfToken()` — this is how cross-origin deployments (GitHub Pages + Render) deliver the CSRF token since `document.cookie` cannot read cookies set by a different origin. On 401 responses it clears the stored user profile and redirects to `/login`. Any new `api.*` method that bypasses `req()` (e.g. for streaming) **must** replicate the 401 handling by calling `handleUnauthorized()`, include `credentials: "include"` + the CSRF header, **and** capture the `X-CSRF-Token` response header via `setCsrfToken()`.
 
 ### Error Handling (Frontend)
 
@@ -897,7 +899,7 @@ Before submitting any PR that touches auth, routes, or data handling, verify:
 The following have been implemented and are no longer open:
 
 - **Cookie-based auth** ✅: JWTs are stored in `access_token` HttpOnly; Secure; SameSite=Strict cookies. A `token_exp` cookie (Non-HttpOnly) exposes only the expiry timestamp for frontend UX. Tokens are never returned in response bodies or stored in localStorage.
-- **CSRF protection** ✅: Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. All mutating endpoints are validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints are exempt via `CSRF_EXEMPT_PATHS`.
+- **CSRF protection** ✅: Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. All mutating endpoints are validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints are exempt via `CSRF_EXEMPT_PATHS`. Cross-origin deployments echo the token in an `X-CSRF-Token` response header (exposed via CORS `exposedHeaders`) since `document.cookie` cannot read cookies set by a different origin.
 - **Session refresh** ✅: `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 minutes before expiry.
 - **Auth rate limiting** ✅: Per-endpoint rate limiters in `routes/auth.js` — separate buckets for login (10/IP/15 min), forgot-password (5), and reset-password (5). Uses `trust proxy` for correct IP detection behind nginx.
 - **Global API rate limiting** ✅: Three-tier `express-rate-limit` in `middleware/appSetup.js` — general (300 req/15 min for all `/api/*`), expensive operations (20/hr for crawl/run), AI generation (30/hr for test generation). In-memory store; swap to Redis for horizontal scaling.
@@ -965,6 +967,8 @@ The following are **not yet implemented** but should be addressed before product
 | `DEMO_DAILY_CRAWLS` | No | `2` | Max crawls per user per day in demo mode |
 | `DEMO_DAILY_RUNS` | No | `3` | Max test runs per user per day in demo mode |
 | `DEMO_DAILY_GENERATIONS` | No | `5` | Max AI test generations per user per day in demo mode |
+| `STALE_TEST_DAYS` | No | `90` | Days since last run before an approved test is flagged stale (AUTO-013) |
+| `FEEDBACK_TIMEOUT_MS` | No | `180000` | Maximum time (ms) the AI feedback loop is allowed to run before being abandoned |
 
 ---
 

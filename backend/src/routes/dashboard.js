@@ -15,6 +15,7 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
+import { getTopFlakyTests } from "../utils/flakyDetector.js";
 
 const router = Router();
 
@@ -187,6 +188,9 @@ router.get("/dashboard", (req, res) => {
     testsByUrl[t.sourceUrl] = (testsByUrl[t.sourceUrl] || 0) + 1;
   }
 
+  // DIF-004: Top flaky tests — persisted flakyScore from the flaky detector
+  const topFlakyTests = getTopFlakyTests(projectIds, 10);
+
   res.json({
     totalProjects: projects.length,
     totalTests: tests.length,
@@ -206,6 +210,7 @@ router.get("/dashboard", (req, res) => {
     avgRunDurationMs,
     defectBreakdown,
     flakyTestCount,
+    topFlakyTests,
     testGrowth,
     mttrMs,
     testsByUrl,

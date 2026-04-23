@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  CheckCircle2, XCircle, Clock, AlertCircle, Ban,
+  CheckCircle2, XCircle, Clock, AlertCircle, Ban, AlertTriangle,
 } from "lucide-react";
 
 // ── Status badge (test run result) ───────────────────────────────────────────
@@ -27,6 +27,30 @@ export function ReviewBadge({ status }) {
   return <span className="badge badge-amber"><AlertCircle size={10} /> Draft</span>;
 }
 
+// ── Stale badge (AUTO-013) ───────────────────────────────────────────────────
+// Shown on tests that haven't been run in STALE_TEST_DAYS (default 90).
+
+export function StaleBadge({ isStale }) {
+  if (!isStale) return null;
+  return <span className="badge badge-gray" style={{ fontSize: "0.65rem" }} title="Stale — not run recently"><Clock size={10} /> Stale</span>;
+}
+
+// ── Flaky badge (DIF-004) ────────────────────────────────────────────────────
+// Shown on tests with a non-zero flakyScore.
+
+export function FlakyBadge({ flakyScore }) {
+  if (!flakyScore || flakyScore <= 0) return null;
+  return (
+    <span
+      className={`badge ${flakyScore >= 40 ? "badge-red" : "badge-amber"}`}
+      style={{ fontSize: "0.65rem" }}
+      title={`Flaky score: ${flakyScore}%`}
+    >
+      <AlertTriangle size={10} /> Flaky {flakyScore}%
+    </span>
+  );
+}
+
 // ── Scenario & tag badges (journey, BDD, positive/negative/edge) ─────────────
 // Renders the inline badge cluster used in test list rows across pages.
 
@@ -39,6 +63,8 @@ export function ScenarioBadges({ test, isBddTest }) {
       {test.scenario === "positive" && <span className="badge badge-green" style={{ fontSize: "0.65rem" }}>✓ Positive</span>}
       {test.scenario === "negative" && <span className="badge badge-red" style={{ fontSize: "0.65rem" }}>✗ Negative</span>}
       {test.scenario === "edge_case" && <span className="badge badge-amber" style={{ fontSize: "0.65rem" }}>⚡ Edge case</span>}
+      <StaleBadge isStale={test.isStale} />
+      <FlakyBadge flakyScore={test.flakyScore} />
     </>
   );
 }

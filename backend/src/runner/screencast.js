@@ -21,12 +21,16 @@ import { formatLogLine } from "../utils/logFormatter.js";
  *
  * @param {Object} page - Playwright Page instance.
  * @param {string} runId
- * @returns {Promise<?function(): Promise<void>>} Resolves to a cleanup function, or `null` if no SSE clients.
+ * @returns {Promise<?function(): Promise<void>>} Resolves to a cleanup function, or `null` if CDP is unavailable.
  */
 export async function startScreencast(page, runId) {
-  // Only start if there are active SSE listeners
-  const { runListeners } = await import("../routes/sse.js").catch(() => ({}));
-  if (!runListeners?.get(runId)?.size) return null;
+  // Always start the screencast — SSE clients typically connect *after* the
+  // run begins (the user is redirected to /runs/:id after clicking "Run").
+  // The previous guard `if (!runListeners.get(runId)?.size) return null`
+  // caused the screencast to be skipped for virtually every run because no
+  // SSE client was connected yet at this point.  The frame handler below
+  // calls emitRunEvent() which already no-ops when there are no listeners,
+  // so the only overhead is CDP JPEG encoding (~2-3% CPU).
 
   let cdpSession;
   try {

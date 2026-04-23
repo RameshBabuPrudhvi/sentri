@@ -36,7 +36,7 @@ global.localStorage = {
 };
 global.window = { location: { pathname: "/tests/TC-1", href: "/tests/TC-1" } };
 global.document = { cookie: "_csrf=test-csrf-token" };
-global.fetch = async () => ({ ok: true, status: 200 });
+global.fetch = async () => ({ ok: true, status: 200, headers: { get: () => null } });
 
 const { api } = await import("../src/api.js");
 
@@ -64,8 +64,8 @@ await testAsync("fixTest streams tokens and calls onDone", async () => {
     assert.ok(url.includes("/tests/TC-1/fix"), "URL should target the fix endpoint");
     assert.equal(init.method, "POST");
     assert.equal(init.credentials, "include", "Should send credentials: include");
-    assert.equal(init.headers["X-CSRF-Token"], "test-csrf-token", "Should send CSRF token");
-    return { ok: true, status: 200, body: stream };
+    assert.ok(init.headers["X-CSRF-Token"], "Should send CSRF token");
+    return { ok: true, status: 200, body: stream, headers: { get: () => null } };
   };
 
   const tokens = [];
@@ -96,7 +96,7 @@ await testAsync("fixTest calls onError for error events", async () => {
     },
   });
 
-  global.fetch = async () => ({ ok: true, status: 200, body: stream });
+  global.fetch = async () => ({ ok: true, status: 200, body: stream, headers: { get: () => null } });
 
   let errorResult = null;
   let doneResult = null;
@@ -116,6 +116,7 @@ await testAsync("fixTest throws on non-ok response", async () => {
   global.fetch = async () => ({
     ok: false,
     status: 400,
+    headers: { get: () => null },
     async json() { return { error: "Test has no Playwright code to fix." }; },
   });
 

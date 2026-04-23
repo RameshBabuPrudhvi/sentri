@@ -68,6 +68,9 @@ The following items have been verified complete against the codebase and are **n
 | DIF-011 | Coverage heatmap on site graph | PR #94 |
 | DIF-014 | Cursor overlay on live browser view | PR #94 |
 | DIF-016 | Step-level timing and per-step screenshots | PR #94 |
+| AUTO-013 | Stale test detection and cleanup | PR #99 |
+| MNT-007 | ARIA live regions for real-time updates | PR #99 |
+| DIF-004 | Flaky test detection and reporting | PR #99 |
 
 ---
 
@@ -411,11 +414,11 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-004 — Flaky test detection and reporting 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
 **Problem:** There is no mechanism to identify tests that alternate between passing and failing across runs. Flaky tests erode trust in the test suite and consume engineering time investigating non-reproducible failures. The run result data to detect them already exists in the database but is never surfaced.
 
-**Fix:** After each run, compute a `flakyScore` (alternation rate over the last N runs) for each test and persist it to `tests.flakyScore`. Add a "Flaky Tests" panel to the dashboard showing the top 10 flakiest tests. Tests above a threshold receive a flaky badge in the test list.
+**Fix:** After each run, compute a `flakyScore` (pass/fail balance ratio over the last N runs) for each test and persist it to `tests.flakyScore`. Add a "Flaky Tests" panel to the dashboard showing the top 10 flakiest tests. Tests above a threshold receive a flaky badge in the test list.
 
 **Files to change:**
 - New `backend/src/utils/flakyDetector.js` — compute flaky score from run history
@@ -855,7 +858,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### AUTO-013 — Stale test detection and cleanup 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete | **Effort:** S | **Source:** Competitive Gap Analysis
 
 **Problem:** Tests that haven't been run in 90 days, or that target pages which no longer appear in the site map, accumulate silently. `lastRunAt` exists on tests but is never used for lifecycle management. Stale tests inflate test counts and degrade suite signal quality.
 
@@ -1151,7 +1154,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-007 — ARIA live regions for real-time updates 🔵 Medium
 
-**Status:** 🔲 Planned (partially implemented in `ProviderBanner`) | **Effort:** S | **Source:** Quality Review (UX-06, UX-07)
+**Status:** ✅ Complete | **Effort:** S | **Source:** Quality Review (UX-06, UX-07)
 
 **Problem:** SSE-driven log streams, run status changes, and toast notifications update the DOM without announcing changes to screen readers. `ProviderBanner` already implements `role="alert"` and `aria-live="polite"` correctly — this pattern must be extended to the run log panel, run status badge, and modal components which currently lack it.
 
@@ -1161,6 +1164,49 @@ The following items have been verified complete against the codebase and are **n
 - `frontend/src/components/run/TestRunView.jsx` — `aria-live` on log panel
 - All modal components — restore focus on close
 - Toast banner components — `role="alert"` where missing
+
+---
+
+### MNT-009 — Tiered prompt system for local models (Ollama) 🔴 Blocker
+
+**Status:** 🔲 Planned | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
+
+**Problem:** Since deep validation was added (MAINT-012 / PR #57), Ollama-generated tests are rejected at near-100% rate. The `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` is ~170 lines / ~4K tokens. When embedded in the system prompt, the total exceeds 7B model context windows (~4K-8K effective tokens). The model produces hallucinated selectors, wrong function signatures, missing `await`, and syntax errors — all caught by the validator. Cloud models (Gemini, Claude, GPT-4o) handle the full prompt fine; only local models are affected.
+
+**Evidence:** RUN-7 on google.com with Ollama: 11 raw tests → 3 deduped → 8 rejected by validation → 0 saved.
+
+**Fix:** Split `SELF_HEALING_PROMPT_RULES` into `CORE_RULES` (~200 tokens, 6 essential helpers with correct signatures) and `EXTENDED_RULES` (~3800 tokens, exhaustive forbidden list). Create a `promptTiers.js` module with `cloud` and `local` tier configs. `getPromptRules(tier)` returns compact rules for local, full rules for cloud. All 4 prompt consumers (`outputSchema.js`, `testFix.js`, `feedbackLoop.js`, `tests.js`) use the tier-aware getter.
+
+**Files to change:**
+- New `backend/src/pipeline/prompts/promptTiers.js` — tier definitions + `getTier()`
+- `backend/src/selfHealing.js` — split rules into `CORE_RULES` + `EXTENDED_RULES`, export `getPromptRules(tier)`
+- `backend/src/pipeline/prompts/outputSchema.js` — use `getPromptRules(getTier())`
+- `backend/src/routes/testFix.js` — use `getPromptRules(getTier())`
+- `backend/src/pipeline/feedbackLoop.js` — use `getPromptRules(getTier())`, limit elements to `tier.maxElements`
+- `backend/tests/self-healing.test.js` — test both rule tiers
+
+**Acceptance criteria:**
+- Ollama (mistral:7b) generates ≥1 valid test from a crawl of google.com
+- Cloud providers still get the full exhaustive rules
+- Local system prompt total < 2000 tokens
+- Existing tests pass
+
+**Dependencies:** None
+
+---
+
+### MNT-010 — Re-run button on Run Detail page for crawl/generate runs 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #99 UX review
+
+**Problem:** The Run Detail page has no "Re-run" or "Retry" button for crawl and generate runs. When a crawl fails, is interrupted, or produces 0 tests (e.g. rate limit, Ollama quality), the user must navigate back to the Tests page and re-trigger manually. The re-run button only exists for `test_run` type runs in `TestRunView.jsx:638-661`.
+
+**Fix:** Add a "Re-run" button to `RunDetail.jsx` for crawl and generate runs (alongside the existing "Refresh" and "Stop Task" buttons). For crawl runs, call `api.crawl(projectId)`. For generate runs, call `api.generateTest(projectId, { name, description })` using `run.generateInput`. Show the button when the run is in a terminal state (`completed`, `completed_empty`, `failed`, `interrupted`, `aborted`).
+
+**Files to change:**
+- `frontend/src/pages/RunDetail.jsx` — add re-run button with type-aware API call
+
+**Dependencies:** None
 
 ---
 
@@ -1207,7 +1253,7 @@ The following items have been verified complete against the codebase and are **n
 <!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
-| Flaky test detection | ❌ → DIF-004 | ✅ | ✅ | ✅ | ❌ |
+| Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
 | Accessibility testing | ❌ → AUTO-016 | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
@@ -1229,9 +1275,9 @@ The following items have been verified complete against the codebase and are **n
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–008 | — | MNT-006 | Remainder |
+| Maintenance | MNT-001–010 | MNT-009 | MNT-006 | Remainder |
 
-**Total active items:** 61 tracked items across 7 categories
+**Total active items:** 63 tracked items across 7 categories
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1239,10 +1285,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `AUTO-007` (locale/geo) + `DIF-006` (Playwright export)
+`MNT-009` (tiered prompts for Ollama — 🔴 Blocker, Ollama currently generates 0 valid tests) → `DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
 
 **Lowest effort / highest immediate value:**
-AUTO-007 (S) · AUTO-013 (S) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
+MNT-009 (M) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 

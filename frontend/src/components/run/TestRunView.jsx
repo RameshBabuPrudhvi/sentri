@@ -284,14 +284,17 @@ function SelectedCasePreview({ result, caseIndex, run, onDrillDown }) {
           </div>
         )}
 
-        {/* Error */}
+        {/* Error — MNT-007: role="alert" announces failures to screen readers */}
         {result.status === "failed" && result.error && (
-          <div style={{
-            padding: "10px 14px", background: "var(--red-bg)", borderRadius: 8,
-            border: "1px solid #fca5a5", fontSize: "0.76rem", color: "var(--red)",
-            fontFamily: "var(--font-mono)", lineHeight: 1.6,
-            whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 12,
-          }}>
+          <div
+            role="alert"
+            style={{
+              padding: "10px 14px", background: "var(--red-bg)", borderRadius: 8,
+              border: "1px solid #fca5a5", fontSize: "0.76rem", color: "var(--red)",
+              fontFamily: "var(--font-mono)", lineHeight: 1.6,
+              whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 12,
+            }}
+          >
             <div style={{ fontWeight: 700, marginBottom: 6, fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               Error
             </div>
@@ -491,6 +494,20 @@ export default function TestRunView({ run, frames = [] }) {
           </div>
         </div>
 
+        {/* MNT-007: Visually-hidden live region announces only the latest
+            result to screen readers, avoiding the excessive noise that
+            aria-live on the full scrolling list would cause. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}
+        >
+          {results.length > 0 && (() => {
+            const latest = results[results.length - 1];
+            const name = cleanTestName(latest.testName || latest.name) || `Test ${results.length}`;
+            return `${name}: ${latest.status}. ${results.length} of ${total} completed.`;
+          })()}
+        </div>
         <div ref={listRef} style={{ overflowY: "auto", flex: 1 }}>
           {results.map((result, ci) => (
             <TestCaseRow

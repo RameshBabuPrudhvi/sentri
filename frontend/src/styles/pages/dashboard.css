@@ -1,7 +1,7 @@
 /**
  * Dashboard — page-specific styles
  *
- * Hero banner and dashboard-only visual elements.
+ * Dashboard-only visual elements.
  * Scoped by `.dash-*` prefix.
  *
  * NOTE: stat-grid responsive breakpoints live in utilities.css (last import),
@@ -9,35 +9,7 @@
  * .dash-defect-row, .list-row, .legend-row).
  */
 
-.dash-hero {
-  margin-bottom: 32px; padding: 28px 32px; border-radius: 16px;
-  background: linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(168,85,247,0.06) 100%);
-  border: 1px solid rgba(99,102,241,0.18);
-  position: relative; overflow: hidden;
-}
-.dash-hero-glow {
-  position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(ellipse 60% 80% at 95% 50%, rgba(99,102,241,0.08) 0%, transparent 70%);
-}
-.dash-hero-shield {
-  position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
-  opacity: 0.04; pointer-events: none;
-}
-.dash-hero-content {
-  display: flex; align-items: center; justify-content: space-between; position: relative;
-}
-.dash-hero-desc {
-  margin-top: 12px; color: var(--text2); font-size: 0.875rem; max-width: 480px; line-height: 1.6;
-}
-.dash-hero-meta {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0;
-}
-.dash-hero-pill {
-  font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: #818cf8;
-  background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25);
-  border-radius: 999px; padding: 3px 10px;
-}
+/* Timestamp label used in Recent Activity rows */
 .dash-hero-date {
   font-size: 0.72rem; color: var(--text3);
 }
@@ -66,37 +38,6 @@
 
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
-  .dash-hero {
-    padding: 20px 22px;
-    margin-bottom: 20px;
-  }
-
-  /* Decorative shield clips at this width */
-  .dash-hero-shield {
-    display: none;
-  }
-
-  /* Stack logo+desc above the pill/date/export strip */
-  .dash-hero-content {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 14px;
-  }
-
-  /* Pill + date + export button become a horizontal strip */
-  .dash-hero-meta {
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .dash-hero-desc {
-    font-size: 0.82rem;
-    margin-top: 8px;
-    max-width: 100%;
-  }
-
   /* Defect row: 1:2 split → single column */
   .dash-defect-row {
     grid-template-columns: 1fr;
@@ -109,36 +50,8 @@
   }
 }
 
-/* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
-@media (max-width: 600px) {
-  .dash-hero {
-    padding: 16px;
-    border-radius: 12px;
-    margin-bottom: 14px;
-  }
-
-  .dash-hero-desc {
-    font-size: 0.8rem;
-    margin-top: 6px;
-  }
-
-  .dash-hero-meta {
-    gap: 8px;
-  }
-}
-
 /* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
 @media (max-width: 480px) {
-  .dash-hero {
-    padding: 14px;
-    border-radius: 10px;
-  }
-
-  /* Pill is decorative — not worth the line-height on a phone */
-  .dash-hero-pill {
-    display: none;
-  }
-
   .card-padded {
     padding: 14px;
   }

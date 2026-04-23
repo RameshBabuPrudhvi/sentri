@@ -22,7 +22,7 @@ export { parsePagination };
 // ─── Row ↔ Object helpers ─────────────────────────────────────────────────────
 
 const JSON_FIELDS = ["steps", "tags"];
-const BOOL_FIELDS = ["isJourneyTest", "assertionEnhanced", "isApiTest"];
+const BOOL_FIELDS = ["isJourneyTest", "assertionEnhanced", "isApiTest", "isStale"];
 
 function rowToTest(row) {
   if (!row) return undefined;
@@ -58,7 +58,7 @@ const INSERT_COLS = [
   "isJourneyTest", "journeyType", "assertionEnhanced", "reviewStatus",
   "reviewedAt", "promptVersion", "modelUsed", "linkedIssueKey", "tags",
   "generatedFrom", "isApiTest", "scenario", "codeRegeneratedAt",
-  "aiFixAppliedAt", "codeVersion", "workspaceId",
+  "aiFixAppliedAt", "codeVersion", "workspaceId", "isStale", "flakyScore",
 ];
 
 const INSERT_SQL = `INSERT INTO tests (${INSERT_COLS.join(", ")})
@@ -215,6 +215,9 @@ export function getByProjectIdPaged(projectId, page, pageSize, filters = {}) {
   } else if (filters.category === "ui") {
     conditions.push("(generatedFrom IS NULL OR generatedFrom NOT IN ('api_har_capture', 'api_user_described'))");
   }
+  if (filters.stale) {
+    conditions.push("isStale = 1");
+  }
   if (filters.search) {
     conditions.push("(name LIKE ? OR sourceUrl LIKE ?)");
     const like = `%${filters.search}%`;
@@ -271,6 +274,8 @@ export function create(test) {
   if (params.reviewStatus == null) params.reviewStatus = "draft";
   if (params.priority == null) params.priority = "medium";
   if (params.codeVersion == null) params.codeVersion = 0;
+  if (params.isStale == null) params.isStale = 0;
+  if (params.flakyScore == null) params.flakyScore = 0;
   db.prepare(INSERT_SQL).run(params);
 }
 
@@ -428,6 +433,61 @@ export function restoreByProjectIdAfter(projectId, deletedAfter) {
   return info.changes;
 }
 
+// ─── Stale test detection (AUTO-013) ──────────────────────────────────────────
+
+/**
+ * Find non-deleted tests that have not been run in the last N days.
+ * @param {string[]} projectIds — Scope to these projects.
+ * @param {number}   staleDays  — Days since last run to consider stale.
+ * @returns {string[]} Test IDs.
+ */
+export function findStaleByAge(projectIds, staleDays) {
+  if (!projectIds || projectIds.length === 0) return [];
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const cutoff = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000).toISOString();
+  return db.prepare(
+    `SELECT id FROM tests
+     WHERE projectId IN (${placeholders})
+       AND deletedAt IS NULL
+       AND (lastRunAt IS NULL OR lastRunAt < ?)
+       AND reviewStatus = 'approved'`
+  ).all(...projectIds, cutoff).map(r => r.id);
+}
+
+/**
+ * Bulk-set the isStale flag for a list of test IDs.
+ * @param {string[]} testIds
+ * @param {boolean}  isStale
+ */
+export function bulkSetStale(testIds, isStale) {
+  if (!testIds || testIds.length === 0) return;
+  const db = getDatabase();
+  const val = isStale ? 1 : 0;
+  const stmt = db.prepare("UPDATE tests SET isStale = ? WHERE id = ?");
+  const txn = db.transaction(() => {
+    for (const id of testIds) stmt.run(val, id);
+  });
+  txn();
+}
+
+/**
+ * Clear the isStale flag on all tests for the given project IDs.
+ * Called before re-evaluating staleness so previously-stale tests that
+ * have since been run are unflagged.
+ * @param {string[]} projectIds
+ * @returns {number} Number of tests that had their stale flag cleared.
+ */
+export function clearStaleByProjectIds(projectIds) {
+  if (!projectIds || projectIds.length === 0) return 0;
+  const db = getDatabase();
+  const placeholders = projectIds.map(() => "?").join(", ");
+  const info = db.prepare(
+    `UPDATE tests SET isStale = 0 WHERE projectId IN (${placeholders}) AND isStale = 1 AND deletedAt IS NULL`
+  ).run(...projectIds);
+  return info.changes;
+}
+
 // ─── Counts ───────────────────────────────────────────────────────────────────
 
 /**
@@ -451,6 +511,16 @@ export function countByReviewStatus(projectId) {
     FROM tests
     WHERE projectId = ? AND deletedAt IS NULL
   `).get(projectId);
+  // Stale count (AUTO-013) — separate query to avoid breaking the main aggregate
+  // on databases that haven't run migration 006 yet.
+  let stale = 0;
+  try {
+    const staleRow = db.prepare(
+      "SELECT COUNT(*) AS cnt FROM tests WHERE projectId = ? AND deletedAt IS NULL AND isStale = 1"
+    ).get(projectId);
+    stale = staleRow?.cnt || 0;
+  } catch { /* isStale column may not exist yet */ }
+
   return {
     draft:    row.draft    || 0,
     approved: row.approved || 0,
@@ -459,5 +529,6 @@ export function countByReviewStatus(projectId) {
     failed:   row.failed   || 0,
     api:      row.api      || 0,
     ui:       (row.draft || 0) + (row.approved || 0) + (row.rejected || 0) - (row.api || 0),
+    stale,
   };
 }

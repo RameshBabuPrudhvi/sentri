@@ -414,7 +414,7 @@ export default function ProjectDetail() {
             <div className="card pd-empty">
               <Search size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
               <div style={{ fontWeight: 600, marginBottom: 6 }}>No tests yet</div>
-              <div style={{ fontSize: "0.875rem", marginBottom: 14 }}>Go to the Tests page to crawl this project or generate tests from a user story.</div>
+              <div style={{ fontSize: "0.875rem", marginBottom: 14 }}>Go to the Tests page to crawl this project or generate tests from a requirement.</div>
               <button className="btn btn-primary btn-sm" onClick={() => navigate("/tests")}>
                 Go to Tests
               </button>

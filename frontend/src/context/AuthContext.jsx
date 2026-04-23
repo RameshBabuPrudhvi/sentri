@@ -21,7 +21,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { API_PATH } from "../utils/apiBase.js";
-import { getCsrfToken } from "../utils/csrf.js";
+import { getCsrfToken, setCsrfToken } from "../utils/csrf.js";
 
 const AuthContext = createContext(null);
 
@@ -87,12 +87,11 @@ export function AuthProvider({ children }) {
   // ── Proactive refresh scheduler ──────────────────────────────────────────
   const scheduleRefresh = useCallback(function schedule() {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    const ms = msUntilRefresh();
+    let ms = msUntilRefresh();
     if (ms === null) {
       // Cross-origin: token_exp cookie may be unreadable (third-party cookie
       // restrictions). Fall back to a fixed interval so the session stays alive.
-      refreshTimerRef.current = setTimeout(schedule, 55 * 60 * 1000);
-      return;
+      ms = 55 * 60 * 1000;
     }
     refreshTimerRef.current = setTimeout(async () => {
       try {
@@ -101,6 +100,9 @@ export function AuthProvider({ children }) {
           credentials: "include",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": getCsrfToken() },
         });
+        // Capture CSRF token from response header (cross-origin support)
+        const csrf = res.headers.get("X-CSRF-Token");
+        if (csrf) setCsrfToken(csrf);
         if (res.ok) {
           const data = await res.json();
           if (data.user) {
@@ -147,7 +149,12 @@ export function AuthProvider({ children }) {
       return;
     }
     fetch(`${API_PATH}/auth/me`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        // Capture CSRF token from response header (cross-origin support)
+        const csrf = r.headers.get("X-CSRF-Token");
+        if (csrf) setCsrfToken(csrf);
+        return r.ok ? r.json() : null;
+      })
       .then(data => {
         if (data?.id) {
           const safe = sanitiseUser(data);
@@ -206,6 +213,9 @@ export function AuthProvider({ children }) {
     // authFetch callers pass paths like "/api/v1/…" — prepend the backend origin.
     const fullUrl = url.startsWith("/api/") ? `${API_PATH}${url.replace(/^\/api(\/v\d+)?/, "")}` : url;
     const res = await fetch(fullUrl, { ...options, headers, credentials: "include" });
+    // Capture CSRF token from response header (cross-origin support)
+    const csrf = res.headers.get("X-CSRF-Token");
+    if (csrf) setCsrfToken(csrf);
     if (res.status === 401) {
       doLogout(true);
       throw new Error("Session expired. Please sign in again.");

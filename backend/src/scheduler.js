@@ -36,11 +36,15 @@ import { logActivity } from "./utils/activityLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { formatLogLine } from "./utils/logFormatter.js";
 import { fireNotifications } from "./utils/notifications.js";
+import { detectStaleTests } from "./utils/staleDetector.js";
 
 // ─── Task registry ─────────────────────────────────────────────────────────────
 // Maps projectId → node-cron ScheduledTask
 /** @type {Map<string, Object>} projectId → node-cron ScheduledTask */
 const tasks = new Map();
+
+/** @type {Object|null} Weekly stale test detection task (AUTO-013). */
+let _staleDetectionTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -344,6 +348,7 @@ function armTask(schedule) {
 
 /**
  * Load all enabled schedules from the database and arm cron tasks.
+ * Also starts the weekly stale test detection job (AUTO-013).
  * Called once from `index.js` after DB init.
  */
 export function initScheduler() {
@@ -356,7 +361,19 @@ export function initScheduler() {
         `[scheduler] Failed to arm task for project ${s.projectId}: ${err.message} — skipping`));
     }
   }
-  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded)`));
+
+  // AUTO-013: Weekly stale test detection — runs every Sunday at 03:00 UTC.
+  // Flags approved tests that haven't been run in STALE_TEST_DAYS (default 90).
+  _staleDetectionTask = cron.schedule("0 3 * * 0", () => {
+    try {
+      detectStaleTests();
+    } catch (err) {
+      console.error(formatLogLine("error", null,
+        `[scheduler] Stale test detection failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection armed`));
 }
 
 /**
@@ -395,6 +412,10 @@ export function stopAllTasks() {
     task.stop();
   }
   tasks.clear();
+  if (_staleDetectionTask) {
+    _staleDetectionTask.stop();
+    _staleDetectionTask = null;
+  }
 }
 
 /**

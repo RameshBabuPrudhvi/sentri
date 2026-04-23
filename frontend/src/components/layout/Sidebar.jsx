@@ -1,20 +1,24 @@
 import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Zap, Settings, BookOpen, ExternalLink, MessageSquare, ChevronDown, Check } from "lucide-react";
+import { LayoutDashboard, FlaskConical, FolderOpen, BarChart2, Briefcase, Layers, Zap, Settings, ChevronDown, Check } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { userHasRole } from "../../utils/roles.js";
 import { api } from "../../api.js";
 
 const NAV = [
+  // ── Core ──
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", tour: "tour-dashboard" },
   { to: "/projects",  icon: FolderOpen,      label: "Projects",  tour: "tour-projects"  },
   { to: "/tests",     icon: FlaskConical,    label: "Tests",     tour: "tour-tests"     },
-  { to: "/reports",   icon: BarChart2,       label: "Reports"   },
+  // ── Activity ──
+  { separator: true },
   { to: "/runs",      icon: Briefcase,       label: "Runs"      },
+  { to: "/reports",   icon: BarChart2,       label: "Reports"   },
+  // ── Automation ──
+  { separator: true },
   { to: "/automation", icon: Zap,             label: "Automation" },
   { to: "/system",    icon: Layers,          label: "System"    },
-  { to: "/chat",      icon: MessageSquare,   label: "AI Chat"   },
 ];
 
 export default function Sidebar({ open }) {
@@ -121,8 +125,10 @@ export default function Sidebar({ open }) {
 
       {/* Nav */}
       <nav style={{ padding: "10px 8px", flex: 1 }}>
-        {NAV.map(({ to, icon: Icon, label, tour }) => (
-          <NavLink key={to} to={to} className="nav-link" data-tour={tour || undefined} style={({ isActive }) => ({
+        {NAV.map((item, i) => item.separator ? (
+          <div key={`sep-${i}`} style={{ height: 1, background: "var(--border)", margin: "6px 10px" }} />
+        ) : (
+          <NavLink key={item.to} to={item.to} className="nav-link" data-tour={item.tour || undefined} style={({ isActive }) => ({
             display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
             borderRadius: "var(--radius)", marginBottom: 1,
             fontWeight: isActive ? 600 : 400, fontSize: "0.875rem",
@@ -130,15 +136,15 @@ export default function Sidebar({ open }) {
             background: isActive ? "var(--accent-bg)" : "transparent",
             textDecoration: "none", transition: "all 0.12s",
           })}>
-            <Icon size={16} />
-            {label}
+            <item.icon size={16} />
+            {item.label}
           </NavLink>
         ))}
       </nav>
 
-      {/* Settings (admin only) + Docs at bottom */}
+      {/* Settings (admin only) */}
+      {isAdmin && (
       <div style={{ padding: "10px 8px", borderTop: "1px solid var(--border)" }}>
-        {isAdmin && (
         <NavLink to="/settings" className="nav-link" data-tour="tour-settings" style={({ isActive }) => ({
           display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
           borderRadius: "var(--radius)", fontWeight: isActive ? 600 : 400,
@@ -148,19 +154,8 @@ export default function Sidebar({ open }) {
         })}>
           <Settings size={16} />Settings
         </NavLink>
-        )}
-        <a href={`${import.meta.env.BASE_URL}docs/`} target="_blank" rel="noopener noreferrer" style={{
-          display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
-          borderRadius: "var(--radius)", fontSize: "0.875rem", color: "var(--text2)",
-          textDecoration: "none", transition: "all 0.12s", marginTop: 1,
-        }}
-          onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-        >
-          <BookOpen size={16} />Docs
-          <ExternalLink size={11} style={{ marginLeft: "auto", opacity: 0.4 }} />
-        </a>
       </div>
+      )}
     </aside>
   );
 }

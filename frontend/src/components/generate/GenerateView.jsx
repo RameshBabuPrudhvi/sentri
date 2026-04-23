@@ -8,7 +8,7 @@ import RunSidebar from "../run/RunSidebar.jsx";
 import { cleanTestName } from "../../utils/formatTestName.js";
 
 // Pipeline stages for AI Generate flow.
-// Steps 1 & 2 (Crawl & Filter) are skipped — user provides test name + description directly.
+// Steps 1 & 2 (Crawl & Filter) are skipped — user provides requirement directly.
 const PIPELINE_STAGES = [
   { label: "Crawl",               icon: "🔍", step: 1, skipped: true },
   { label: "Filter",              icon: "🧹", step: 2, skipped: true },
@@ -55,7 +55,7 @@ export default function GenerateView({ run, isRunning, llmTokens = "" }) {
         }}>
           <span style={{ fontSize: "1rem", flexShrink: 0 }}>✦</span>
           <span>
-            <strong>Crawl &amp; Filter skipped</strong> — you provided the test scenario directly,
+            <strong>Crawl &amp; Filter skipped</strong> — you provided the requirement directly,
             so the AI jumps straight to classifying intent and writing detailed test steps.
           </span>
         </div>

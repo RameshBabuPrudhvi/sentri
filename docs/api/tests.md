@@ -23,6 +23,7 @@ When `page` or `pageSize` is provided, the response shape changes to `{ data: []
 | `reviewStatus` | `draft`, `approved`, `rejected` | Filter by review status |
 | `category` | `api`, `ui` | Filter by test category |
 | `search` | free text | Search against test name and source URL |
+| `stale` | `true` | Return only stale tests (AUTO-013) |
 
 Example with filters:
 ```
@@ -142,9 +143,12 @@ Lightweight endpoint returning per-status test counts without fetching row data.
   "failed": 2,
   "api": 3,
   "ui": 16,
+  "stale": 3,
   "total": 19
 }
 ```
+
+The `stale` field counts approved tests that haven't been run in `STALE_TEST_DAYS` (default 90 days). A weekly background job flags stale tests automatically (AUTO-013).
 
 ## Export
 

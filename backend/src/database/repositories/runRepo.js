@@ -240,6 +240,35 @@ export function getByIdIncludeDeleted(id) {
   return run;
 }
 
+/**
+ * Get recent completed test runs with only the columns needed for flaky score
+ * computation.  Returns at most `limit` rows, sorted newest-first, with only
+ * `id`, `type`, `status`, `startedAt`, and `results` — avoiding the heavy
+ * JSON blobs (`testQueue`, `generateInput`, `promptAudit`, `qualityAnalytics`).
+ *
+ * @param {string} projectId
+ * @param {number} [limit=20]
+ * @returns {Object[]}
+ */
+export function getRecentCompletedWithResults(projectId, limit = 20) {
+  const db = getDatabase();
+  const rows = db.prepare(
+    `SELECT id, type, status, startedAt, results FROM runs
+     WHERE projectId = ? AND deletedAt IS NULL
+       AND type IN ('test_run', 'run') AND status = 'completed'
+       AND results IS NOT NULL AND results != '[]'
+     ORDER BY startedAt DESC LIMIT ?`
+  ).all(projectId, limit);
+  return rows.map(row => {
+    if (row.results) {
+      try { row.results = JSON.parse(row.results); } catch { row.results = []; }
+    } else {
+      row.results = [];
+    }
+    return row;
+  });
+}
+
 // ─── Write operations ─────────────────────────────────────────────────────────
 
 /**

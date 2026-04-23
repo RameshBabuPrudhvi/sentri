@@ -13,19 +13,11 @@ import StatCard from "../components/shared/StatCard.jsx";
 import PassFailChart from "../components/charts/PassFailChart.jsx";
 import SparklineChart from "../components/charts/SparklineChart.jsx";
 import StackedBar from "../components/charts/StackedBar.jsx";
-import AppLogo from "../components/layout/AppLogo.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
-
 const RUN_TYPE_META = {
   crawl:    { label: "Crawl & Generate", avatar: "QA" },
   generate: { label: "AI Generate",      avatar: "QA" },
@@ -144,29 +136,16 @@ export default function Dashboard() {
   return (
     <div className="fade-in page-container">
 
-      {/* ── Hero Banner ─────────────────────────────────────────────── */}
-      <div className="dash-hero" data-tour="tour-welcome">
-        <div className="dash-hero-glow" />
-        <svg className="dash-hero-shield" width="180" height="180" viewBox="0 0 40 40" fill="none">
-          <path d="M20 1L3 8v11c0 9.5 7.2 18.2 17 20 9.8-1.8 17-10.5 17-20V8L20 1z" fill="#6366f1" />
-        </svg>
-
-        <div className="dash-hero-content">
-          <div>
-            <AppLogo size={48} variant="full" />
-            <p className="dash-hero-desc">
-              {greeting()}! Here's your real-time overview — system health, key metrics, and what your agents are up to right now.
-            </p>
-          </div>
-
-          <div className="dash-hero-meta">
-            <span className="dash-hero-pill">Autonomous QA</span>
-            <span className="dash-hero-date">
-              {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-            </span>
-            <ExportPDFButton />
-          </div>
+      {/* ── Page header ─────────────────────────────────────────────── */}
+      <div className="page-header" data-tour="tour-welcome">
+        <div>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            {" · "}System health, test metrics, and recent activity
+          </p>
         </div>
+        <ExportPDFButton />
       </div>
 
       {/* Error banner */}
@@ -256,6 +235,54 @@ export default function Dashboard() {
               </div>
             );
           })()}
+
+          {/* ── Row 3b: Top Flaky Tests panel (DIF-004) ── */}
+          {(data?.topFlakyTests?.length ?? 0) > 0 && (
+            <div className="card card-padded mb-md">
+              <div className="flex-between" style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <AlertTriangle size={14} color="var(--amber)" />
+                  <span className="section-title" style={{ marginBottom: 0 }}>Top Flaky Tests</span>
+                </div>
+                <span className="text-xs text-muted">{data.topFlakyTests.length} test{data.topFlakyTests.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="flex-col gap-sm">
+                {data.topFlakyTests.map(ft => (
+                  <div
+                    key={ft.testId}
+                    className="list-row"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/tests/${ft.testId}`)}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, fontSize: "0.875rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ft.name}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <div style={{
+                        width: 60, height: 6, background: "var(--bg3)", borderRadius: 99, overflow: "hidden",
+                      }}>
+                        <div style={{
+                          height: "100%", width: `${ft.flakyScore}%`,
+                          background: ft.flakyScore >= 40 ? "var(--red)" : "var(--amber)",
+                          borderRadius: 99, transition: "width 0.4s ease",
+                        }} />
+                      </div>
+                      <span style={{
+                        fontSize: "0.75rem", fontWeight: 700, fontFamily: "var(--font-mono)",
+                        color: ft.flakyScore >= 40 ? "var(--red)" : "var(--amber)",
+                        minWidth: 32, textAlign: "right",
+                      }}>
+                        {ft.flakyScore}%
+                      </span>
+                      <ArrowRight size={14} color="var(--text3)" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ── Row 4: Run Status Distribution ── */}
           {data?.totalRuns > 0 && (() => {
