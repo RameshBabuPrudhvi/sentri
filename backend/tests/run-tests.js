@@ -46,6 +46,8 @@ const files = [
   "tests/locale-timezone.test.js",
   "tests/stale-detector.test.js",
   "tests/flaky-detector.test.js",
+  "tests/recorder.test.js",
+  "tests/visual-regression.test.js",
 ];
 
 let passed = 0;

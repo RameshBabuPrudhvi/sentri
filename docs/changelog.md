@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Runner**: Visual regression testing with baseline diffing (DIF-001) — captured screenshots are diffed against a persisted baseline via `pixelmatch` / `pngjs`. First run for a `(testId, stepNumber)` pair lazily creates a baseline under `artifacts/baselines/`; subsequent runs produce a diff PNG under `artifacts/diffs/` and flag the step as a regression when the pixel difference exceeds `VISUAL_DIFF_THRESHOLD` (default 2 %). New `GET /tests/:testId/baselines`, `POST /tests/:testId/baselines/:stepNumber/accept`, and `DELETE /tests/:testId/baselines/:stepNumber` endpoints back a new `🖼️ Visual` tab on the run-detail page with Baseline / Current / Diff toggles and an "Accept visual changes" action (#103).
+- **Frontend**: Interactive browser recorder for test creation (DIF-015) — "Record a test" quick action on the Tests page launches a Playwright browser, streams it live via the existing CDP screencast, captures click / fill / press / select / navigation events in the page, and on stop persists a Draft test whose Playwright code uses `safeClick` / `safeFill` so the existing self-healing transform takes over at execution time (#103).
+
+### Fixed
+- **Config**: `VISUAL_DIFF_THRESHOLD` and `VISUAL_DIFF_PIXEL_TOLERANCE` can now be set to `0` — previous `parseFloat(env) || default` treated `0` as falsy and silently fell back to the default, making zero-tolerance visual regression detection impossible (#103).
+- **Recorder**: URLs interpolated into generated Playwright code are now single-quote escaped, matching the existing selector/value escaping. Captured URLs containing `'` no longer produce syntactically broken test scripts (#103).
+- **Recorder**: `startRecording` no longer leaks a Chromium process when mid-setup calls (`exposeBinding`, `addInitScript`, `page.goto`, `startScreencast`) throw. The session is only published to the active-sessions map after all async setup succeeds, and any partially-initialised browser / context / page is closed on failure (#103).
+
 ## [1.6.3] — 2026-04-23
 
 ### Added

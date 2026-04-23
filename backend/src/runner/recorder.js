@@ -143,14 +143,16 @@ const RECORDER_SCRIPT = `
  */
 export function actionsToPlaywrightCode(testName, startUrl, actions) {
   const safeName = String(testName || "Recorded test").replace(/'/g, "\\'");
+  const safeStartUrl = String(startUrl || "").replace(/'/g, "\\'");
   const lines = [];
-  lines.push(`await page.goto('${startUrl}');`);
+  lines.push(`await page.goto('${safeStartUrl}');`);
   let stepNo = 1;
   for (const a of actions) {
     const sel = (a.selector || "").replace(/'/g, "\\'");
     if (a.kind === "goto" && a.url) {
+      const safeUrl = String(a.url).replace(/'/g, "\\'");
       lines.push(`// Step ${stepNo}: Navigate`);
-      lines.push(`await page.goto('${a.url}');`);
+      lines.push(`await page.goto('${safeUrl}');`);
     } else if (a.kind === "click" && sel) {
       lines.push(`// Step ${stepNo}: Click element`);
       lines.push(`await safeClick(page, '${sel}');`);
@@ -202,58 +204,72 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
   }
 
   const browser = await launchBrowser();
-  const context = await browser.newContext({
-    viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-    ignoreHTTPSErrors: true,
-    acceptDownloads: true,
-  });
-
-  const session = /** @type {RecordingSession} */ ({
-    id: sessionId,
-    projectId,
-    url: startUrl,
-    status: "recording",
-    actions: [],
-    startedAt: Date.now(),
-    browser,
-    context,
-  });
-  sessions.set(sessionId, session);
-
-  const page = await context.newPage();
-  session.page = page;
-
-  // Expose a binding for the injected script to relay captured events.
-  await context.exposeBinding("__sentriRecord", (_source, action) => {
-    if (session.status !== "recording") return;
-    if (!action || typeof action !== "object") return;
-    session.actions.push({
-      kind: String(action.kind || ""),
-      selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
-      value: action.value != null ? String(action.value).slice(0, 500) : undefined,
-      url: action.url ? String(action.url) : undefined,
-      key: action.key ? String(action.key) : undefined,
-      ts: Number(action.ts) || Date.now(),
+  let context;
+  let page;
+  try {
+    context = await browser.newContext({
+      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      ignoreHTTPSErrors: true,
+      acceptDownloads: true,
     });
-  });
-  await context.addInitScript(RECORDER_SCRIPT);
 
-  // Navigate to the starting URL and record it as the first action.
-  await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
-  session.actions.push({ kind: "goto", url: startUrl, ts: Date.now() });
+    const session = /** @type {RecordingSession} */ ({
+      id: sessionId,
+      projectId,
+      url: startUrl,
+      status: "recording",
+      actions: [],
+      startedAt: Date.now(),
+      browser,
+      context,
+    });
 
-  // Capture subsequent in-page navigations (form submit, link click that
-  // triggers a full load) so the generated script replays them via goto.
-  page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame() && frame.url() && frame.url() !== "about:blank") {
-      session.actions.push({ kind: "goto", url: frame.url(), ts: Date.now() });
-    }
-  });
+    page = await context.newPage();
+    session.page = page;
 
-  // Start CDP screencast so the RecorderModal can show the live browser.
-  session.stopScreencast = await startScreencast(page, sessionId);
+    // Expose a binding for the injected script to relay captured events.
+    await context.exposeBinding("__sentriRecord", (_source, action) => {
+      if (session.status !== "recording") return;
+      if (!action || typeof action !== "object") return;
+      session.actions.push({
+        kind: String(action.kind || ""),
+        selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+        value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+        url: action.url ? String(action.url) : undefined,
+        key: action.key ? String(action.key) : undefined,
+        ts: Number(action.ts) || Date.now(),
+      });
+    });
+    await context.addInitScript(RECORDER_SCRIPT);
 
-  return session;
+    // Navigate to the starting URL and record it as the first action.
+    await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
+    session.actions.push({ kind: "goto", url: startUrl, ts: Date.now() });
+
+    // Capture subsequent in-page navigations (form submit, link click that
+    // triggers a full load) so the generated script replays them via goto.
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+        session.actions.push({ kind: "goto", url: frame.url(), ts: Date.now() });
+      }
+    });
+
+    // Start CDP screencast so the RecorderModal can show the live browser.
+    session.stopScreencast = await startScreencast(page, sessionId);
+
+    // Only publish the session after all async setup has succeeded —
+    // otherwise the caller never learns the sessionId to stop and the
+    // browser would leak permanently.
+    sessions.set(sessionId, session);
+    return session;
+  } catch (err) {
+    // Tear down any partial Playwright resources so we don't leak a
+    // Chromium process when setup fails mid-way.
+    try { await page?.close(); } catch { /* ignore */ }
+    try { await context?.close(); } catch { /* ignore */ }
+    try { await browser?.close(); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 /**
