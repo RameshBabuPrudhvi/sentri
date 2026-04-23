@@ -113,8 +113,8 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
         </div>
       )}
 
-      {/* Scrollable body */}
-      <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "20px 22px 4px" }}>
+      {/* Scrollable body — max-height ensures scroll works even without definite parent height */}
+      <div style={{ overflowY: "auto", flex: "1 1 0", minHeight: 0, maxHeight: "calc(100vh - 220px)", padding: "20px 22px 4px" }}>
         {projects.length === 0 ? (
           <div style={{ textAlign: "center", padding: "16px 0" }}>
             <div style={{ fontSize: "0.82rem", color: "var(--text3)", marginBottom: 16 }}>
