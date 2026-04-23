@@ -1169,7 +1169,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-009 — Tiered prompt system for local models (Ollama) 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
+**Status:** 🔄 In Progress | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
 
 **Problem:** Since deep validation was added (MAINT-012 / PR #57), Ollama-generated tests are rejected at near-100% rate. The `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` is ~170 lines / ~4K tokens. When embedded in the system prompt, the total exceeds 7B model context windows (~4K-8K effective tokens). The model produces hallucinated selectors, wrong function signatures, missing `await`, and syntax errors — all caught by the validator. Cloud models (Gemini, Claude, GPT-4o) handle the full prompt fine; only local models are affected.
 
@@ -1197,7 +1197,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-010 — Re-run button on Run Detail page for crawl/generate runs 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #99 UX review
+**Status:** 🔄 In Progress | **Effort:** S | **Source:** PR #99 UX review
 
 **Problem:** The Run Detail page has no "Re-run" or "Retry" button for crawl and generate runs. When a crawl fails, is interrupted, or produces 0 tests (e.g. rate limit, Ollama quality), the user must navigate back to the Tests page and re-trigger manually. The re-run button only exists for `test_run` type runs in `TestRunView.jsx:638-661`.
 
