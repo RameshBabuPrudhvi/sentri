@@ -71,6 +71,8 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-013 | Stale test detection and cleanup | PR #99 |
 | MNT-007 | ARIA live regions for real-time updates | PR #99 |
 | DIF-004 | Flaky test detection and reporting | PR #99 |
+| MNT-009 | Tiered prompt system for local models (Ollama) | PR #100 |
+| MNT-010 | Re-run button on Run Detail page for crawl/generate runs | PR #100 |
 
 ---
 
@@ -1169,7 +1171,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-009 — Tiered prompt system for local models (Ollama) 🔴 Blocker
 
-**Status:** 🔄 In Progress | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
+**Status:** ✅ Complete | **Effort:** M | **Source:** PR #99 testing — Ollama generates 0 valid tests
 
 **Problem:** Since deep validation was added (MAINT-012 / PR #57), Ollama-generated tests are rejected at near-100% rate. The `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` is ~170 lines / ~4K tokens. When embedded in the system prompt, the total exceeds 7B model context windows (~4K-8K effective tokens). The model produces hallucinated selectors, wrong function signatures, missing `await`, and syntax errors — all caught by the validator. Cloud models (Gemini, Claude, GPT-4o) handle the full prompt fine; only local models are affected.
 
@@ -1197,7 +1199,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### MNT-010 — Re-run button on Run Detail page for crawl/generate runs 🔵 Medium
 
-**Status:** 🔄 In Progress | **Effort:** S | **Source:** PR #99 UX review
+**Status:** ✅ Complete | **Effort:** S | **Source:** PR #99 UX review
 
 **Problem:** The Run Detail page has no "Re-run" or "Retry" button for crawl and generate runs. When a crawl fails, is interrupted, or produces 0 tests (e.g. rate limit, Ollama quality), the user must navigate back to the Tests page and re-trigger manually. The re-run button only exists for `test_run` type runs in `TestRunView.jsx:638-661`.
 
@@ -1292,10 +1294,10 @@ The following items have been verified complete against the codebase and are **n
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
 | Differentiators | 13 | 5 | 0 | 8 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
-| Maintenance | 11 | 1 | 2 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **61** | **20** | **2** | **39** | |
+| Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
+| **Totals** | **61** | **22** | **0** | **39** | |
 
-**Total tracked items:** 61 across 7 categories — **20 complete** (33%), **2 in progress**, **39 remaining**
+**Total tracked items:** 61 across 7 categories — **22 complete** (36%), **0 in progress**, **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1303,10 +1305,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`MNT-009` (tiered prompts for Ollama — 🔴 Blocker, Ollama currently generates 0 valid tests) → `DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
+`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
 
 **Lowest effort / highest immediate value:**
-MNT-009 (M) · DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
+DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
 
 ---
 
