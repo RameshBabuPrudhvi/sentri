@@ -69,7 +69,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 FIELD RULES:
 - "type" must be one of: ${VALID_TEST_TYPES.map(t => `"${t}"`).join(", ")}. Pick the best match. If unsure, use "functional".
 - "preconditions" — state any required setup (user role, data state, browser context). Omit or set to "" if the test starts from a clean state.
-- "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const searchTerm = ...) and NEVER reference a testData key by name inside the code. BAD: page.getByLabel('Search').fill(searchTerm) — searchTerm is not defined at runtime. GOOD: page.getByLabel('Search').fill('iphone') — literal value inline. Omit testData or set to {} if no test data is needed.
+- "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const query = ...) and NEVER reference a testData key by name inside the code. BAD: safeFill(page, 'Username', emailVar) — emailVar is not defined at runtime. GOOD: safeFill(page, 'Username', 'testuser@example.com') — literal value inline. Use the ACTUAL field labels from PAGE DATA. Omit testData or set to {} if no test data is needed.
 - "steps" — SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
   Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result.
   BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed"]
@@ -90,7 +90,7 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.4.0";
+export const PROMPT_VERSION = "2.5.0";
 
 export function buildSystemPrompt() {
   const tier = getTier();

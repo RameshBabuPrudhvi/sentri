@@ -33,8 +33,8 @@ STRICT RULES:
 4. CRITICAL: playwrightCode MUST start with: await page.goto('${appUrl}', { waitUntil: 'domcontentloaded', timeout: 30000 });
 5. Base your assertions on the APPLICATION URL and USER DESCRIPTION provided above — use real content the user would expect to see
 6. testData values are DOCUMENTATION ONLY — inline ALL values as string literals in playwrightCode.
-   BAD: safeFill(page, 'Search', testData.searchTerm)  ← ReferenceError, testData doesn't exist at runtime
-   GOOD: safeFill(page, 'Search', 'laptop')             ← literal string, always works
+   BAD: safeFill(page, 'Username', testData.email)       ← ReferenceError, testData doesn't exist at runtime
+   GOOD: safeFill(page, 'Username', 'testuser@example.com')  ← literal string, always works
 7. Count assertions: NEVER use greaterThan() — it is not Playwright API.
    BAD: expect(results).toHaveCount(greaterThan(0))
    GOOD: await expect(page.locator('.result')).not.toHaveCount(0)
