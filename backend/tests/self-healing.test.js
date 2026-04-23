@@ -175,18 +175,25 @@ test("CORE_RULES is significantly shorter than full SELF_HEALING_PROMPT_RULES", 
     `CORE_RULES (${CORE_RULES.length} chars) should be <30% of full rules (${SELF_HEALING_PROMPT_RULES.length} chars)`);
 });
 
-test("CORE_RULES mentions essential helpers (safeClick, safeFill, safeExpect)", () => {
-  assert.match(CORE_RULES, /safeClick/);
-  assert.match(CORE_RULES, /safeFill/);
-  assert.match(CORE_RULES, /safeExpect/);
-  assert.match(CORE_RULES, /safeSelect/);
-  assert.match(CORE_RULES, /safeCheck/);
-  assert.match(CORE_RULES, /safeUncheck/);
+test("CORE_RULES mentions native Playwright methods (getByRole, getByLabel, fill, click)", () => {
+  assert.match(CORE_RULES, /getByRole/);
+  assert.match(CORE_RULES, /getByLabel/);
+  assert.match(CORE_RULES, /\.click\(\)/);
+  assert.match(CORE_RULES, /\.fill\(/);
+  assert.match(CORE_RULES, /toBeVisible/);
+  assert.match(CORE_RULES, /selectOption/);
+  assert.match(CORE_RULES, /\.check\(\)/);
 });
 
-test("CORE_RULES includes forbidden patterns section", () => {
-  assert.match(CORE_RULES, /FORBIDDEN/);
-  assert.match(CORE_RULES, /page\.click/);
+test("CORE_RULES does NOT mention custom safe helpers (native Playwright for local models)", () => {
+  assert.doesNotMatch(CORE_RULES, /safeClick/);
+  assert.doesNotMatch(CORE_RULES, /safeFill/);
+  assert.doesNotMatch(CORE_RULES, /safeExpect/);
+});
+
+test("CORE_RULES includes rules section", () => {
+  assert.match(CORE_RULES, /RULES/);
+  assert.match(CORE_RULES, /NEVER/);
 });
 
 test("EXTENDED_RULES mentions additional helpers not in CORE_RULES", () => {
@@ -210,9 +217,9 @@ test("getPromptRules('local') returns compact CORE_RULES", () => {
   assert.equal(rules, CORE_RULES);
 });
 
-test("CORE_RULES is under 2000 characters (fits in local model context)", () => {
-  assert.ok(CORE_RULES.length < 2000,
-    `CORE_RULES is ${CORE_RULES.length} chars — should be <2000 for local model context`);
+test("CORE_RULES is under 1500 characters (fits in local model context)", () => {
+  assert.ok(CORE_RULES.length < 1500,
+    `CORE_RULES is ${CORE_RULES.length} chars — should be <1500 for local model context`);
 });
 
 test("SELF_HEALING_PROMPT_RULES (full) still includes all content", () => {

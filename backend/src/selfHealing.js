@@ -719,6 +719,17 @@ export function getSelfHealingHelperCode(healingHints) {
     // Covers ALL common ARIA roles so the AI's role guess doesn't break the test.
     async function safeExpect(page, expect, text, role) {
       // Guard: same rationale as safeClick — undefined text matches random elements.
+      // If the AI passed a Playwright Locator object instead of a string (common
+      // Ollama mistake), fall back to asserting visibility on it directly rather
+      // than crashing with a confusing error.
+      if (text != null && typeof text === 'object') {
+        // Looks like a Locator — has waitFor and isVisible methods
+        if (typeof text.waitFor === 'function') {
+          await text.waitFor({ state: 'visible', timeout: DEFAULT_TIMEOUT }).catch(() => {});
+          await expect(text).toBeVisible();
+          return;
+        }
+      }
       if (text == null || typeof text !== 'string' || !text.trim()) {
         throw new Error('safeExpect: text argument is required (got ' + typeof text + ')');
       }
@@ -1131,6 +1142,62 @@ export function applyHealingTransforms(code) {
     .replace(
       /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
       (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
+    )
+    // ── Additional transforms for patterns Ollama frequently produces ────────
+    // expect(page.getByRole('role')).toBeVisible() — no { name } option (bare role)
+    .replace(
+      /(?:await\s+)?expect\(page\.getByRole\(['"`]([^'"`]+)['"`]\)\)\.toBeVisible\(\)/g,
+      (match, role) => match // leave bare-role assertions as-is — they're valid Playwright
+    )
+    // page.getByLabel(...).fill(val) with options object — e.g. { exact: true }
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.fill\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.getByLabel(...).click() with options — e.g. { exact: true }
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByText(...).click() with options — e.g. { exact: true }
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // page.getByText(...).fill(val) — Ollama sometimes chains fill on getByText
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\.fill\(([^)]+)\)/g,
+      (match, arg, val) => `safeFill(page, '${esc(arg)}', ${val})`
+    )
+    // page.locator(...).first().click() — Ollama often adds .first()
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.first\(\)\.click\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
+    )
+    // page.locator(...).nth(N).click() — Ollama sometimes adds .nth()
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.nth\(\d+\)\.click\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `safeClick(page, '${esc(sel)}')`
+    )
+    // page.getByRole(...).first().click() — chain with .first()
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.first\(\)\.click\(\)/g,
+      (match, arg) => `safeClick(page, '${esc(arg)}')`
+    )
+    // expect(page.getByText(...)).toBeVisible() with options like { exact: true }
+    .replace(
+      /(?:await\s+)?expect\(page\.getByText\(['"`]([^'"`]+)['"`],\s*\{[^}]*\}\)\)\.toBeVisible\(\)/g,
+      (match, name) => `await safeExpect(page, expect, '${esc(name)}')`
+    )
+    // expect(page.locator(...).first()).toBeVisible() — locator with .first()
+    .replace(
+      /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\.first\(\)\)\.toBeVisible\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
+    )
+    // expect(page.locator(...).nth(N)).toBeVisible() — locator with .nth()
+    .replace(
+      /(?:await\s+)?expect\(page\.locator\(['"`]([^'"`]+)['"`]\)\.nth\(\d+\)\)\.toBeVisible\(\)/g,
+      (match, sel) => looksLikeCssSelector(sel) ? match : `await safeExpect(page, expect, '${esc(sel)}')`
     );
 }
 
@@ -1145,27 +1212,29 @@ export function applyHealingTransforms(code) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CORE_RULES = `
-Use ONLY self-healing helpers for ALL interactions and visibility assertions.
+Write standard Playwright code. The runtime automatically adds self-healing.
 
-INTERACTIONS — use these exclusively (all are async, always await):
-  await safeClick(page, text)            — click buttons, links, tabs
-  await safeFill(page, label, value)     — fill inputs (also replaces page.type)
-  await safeSelect(page, label, value)   — select/dropdown
-  await safeCheck(page, label)           — check checkbox/radio
-  await safeUncheck(page, label)         — uncheck checkbox/radio
-  await safeExpect(page, expect, text)   — assert element is visible
+INTERACTIONS — use standard Playwright methods:
+  await page.getByRole('button', { name: 'Submit' }).click()
+  await page.getByLabel('Email').fill('user@test.com')
+  await page.getByRole('combobox', { name: 'Country' }).selectOption('US')
+  await page.getByRole('checkbox', { name: 'Agree' }).check()
+  await page.getByText('Sign in').click()
+  await page.keyboard.press('Enter')
 
-ASSERTIONS — use page.locator() inline inside expect():
-  await expect(page.locator(...)).toHaveCount(N)
-  await expect(page.locator(...)).toContainText('...')
+ASSERTIONS — inline locators inside expect():
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  await expect(page.getByText('Welcome')).toBeVisible()
+  await expect(page.locator('.results')).toHaveCount(3)
+  await expect(page.locator('.results')).toContainText('search term')
   await expect(page).toHaveURL(/hostname/i)  — hostname-only regex, never exact URL
 
-FORBIDDEN — never use raw Playwright calls:
-  ✗ page.click / page.fill / page.type / page.check / page.uncheck / page.selectOption
-  ✗ page.locator(...).click() / .fill() / .check() / .type()
-  ✗ page.getByRole(...).click() / .fill()
-  ✗ expect(page.getByRole(...)).toBeVisible()  — use safeExpect instead
-  ✗ const el = page.locator(...)  — always inline inside expect() or use safe helpers`.trim();
+RULES:
+  ✓ Prefer getByRole, getByLabel, getByText, getByPlaceholder over CSS selectors
+  ✓ Always inline locators inside expect() — never assign to a variable
+  ✓ Use { waitUntil: 'domcontentloaded' } after page.goto — never networkidle
+  ✗ NEVER use page.click('selector') or page.fill('selector', val) — use locator chains
+  ✗ NEVER hard-code dynamic values (dates, IDs, counts) — use regex patterns`.trim();
 
 export const EXTENDED_RULES = `
 ADDITIONAL HELPERS:

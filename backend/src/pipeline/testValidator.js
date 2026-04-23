@@ -397,13 +397,16 @@ export function validateTest(test, projectUrl) {
         test.playwrightCode.includes("http://example.com")) {
       issues.push("playwrightCode uses placeholder example.com URL");
     }
-    // Must reference navigation — page.goto or self-healing helpers that navigate
-    // (safeClick on a link triggers page.waitForLoadState internally).
+    // Must reference navigation — page.goto, click actions (which may navigate),
+    // or self-healing helpers. The runtime auto-navigates to sourceUrl when
+    // page.goto is absent (executeTest.js:322-324), so .click() on a link
+    // is also valid navigation evidence.
     // API tests use request.newContext / api.get/post instead.
     const isApiTest = test._generatedFrom === "api_har_capture" || test._generatedFrom === "api_user_described"
       || test.playwrightCode.includes("request.newContext") || test.playwrightCode.includes("api.get") || test.playwrightCode.includes("api.post");
     const hasNavigation = test.playwrightCode.includes("page.goto")
       || test.playwrightCode.includes("safeClick")
+      || test.playwrightCode.includes(".click(")
       || test.playwrightCode.includes("page.waitForURL");
     if (!isApiTest && !hasNavigation) {
       issues.push("playwrightCode missing page.goto navigation");

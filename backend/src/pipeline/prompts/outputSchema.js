@@ -92,7 +92,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 FIELD RULES:
 - "type" must be one of: ${VALID_TEST_TYPES.map(t => `"${t}"`).join(", ")}. Pick the best match. If unsure, use "functional".
 - "preconditions" — state any required setup (user role, data state, browser context). Omit or set to "" if the test starts from a clean state.
-- "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const searchTerm = ...) and NEVER reference a testData key by name inside the code. BAD: safeFill(page, 'Search', searchTerm) — searchTerm is not defined at runtime. GOOD: safeFill(page, 'Search', 'iphone') — literal value inline. Omit testData or set to {} if no test data is needed.
+- "testData" — provide concrete sample values (emails, IDs, search terms, amounts) for documentation only. CRITICAL: ALL values in testData MUST be inlined as string or number literals directly inside playwrightCode — NEVER declare a variable (const searchTerm = ...) and NEVER reference a testData key by name inside the code. BAD: page.getByLabel('Search').fill(searchTerm) — searchTerm is not defined at runtime. GOOD: page.getByLabel('Search').fill('iphone') — literal value inline. Omit testData or set to {} if no test data is needed.
 - "steps" — SHORT HUMAN-READABLE descriptions of what the user does and sees (plain English), NOT Playwright code or technical assertions. Playwright code goes ONLY in "playwrightCode".
   Write each step so a manual tester can follow it without looking at code. Name the SPECIFIC element or text the user interacts with and what they should SEE as a result.
   BAD steps (too vague):  ["The page loads successfully", "The URL reflects the section", "Verify the expected content is displayed"]
@@ -113,11 +113,40 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.2.0";
+export const PROMPT_VERSION = "2.3.0";
+
+// ─── Compact assertion & stability rules for local models ────────────────────
+// ~200 tokens total — essential constraints only, no examples or edge cases.
+
+const LOCAL_ASSERTION_RULES = `
+- Every test MUST have at least 2 assertions that verify SPECIFIC VISIBLE CONTENT (text, count, value).
+- STRONG: toBeVisible(), toContainText('exact'), toHaveValue('val'), toHaveCount(N).
+- Use toHaveURL() ONLY with hostname-only regex — never exact URL.
+- NEVER hard-code dynamic values (dates, IDs, counts, prices) — use regex patterns.`.trim();
+
+const LOCAL_STABILITY_RULES = `
+- Use { waitUntil: 'domcontentloaded' } after page.goto — NEVER networkidle.
+- Wait for content before asserting: await expect(locator).toContainText('text', { timeout: 10000 }).`.trim();
 
 export function buildSystemPrompt() {
   const tier = getTier();
+  const local = tier === "local";
   const rules = getPromptRules(tier);
+  const assertionBlock = local ? LOCAL_ASSERTION_RULES : ASSERTION_RULES;
+  const stabilityBlock = local ? LOCAL_STABILITY_RULES : STABILITY_RULES;
+  const codeBlock = local
+    ? `CODE REQUIREMENTS:
+- playwrightCode must be fully self-contained and executable.
+- Use the real URL from the user message — never 'https://example.com'.
+- Inline all test data as string literals — never declare variables for values.
+- Add "// Step N:" comments before code for each step.`
+    : `CODE REQUIREMENTS:
+- playwrightCode must be fully self-contained and executable on its own.
+- Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.
+- INLINE ALL TEST DATA: Every value used in the test (search terms, email addresses, passwords, usernames, quantities, IDs) MUST be written as a string literal directly in the code. NEVER declare variables like "const searchTerm = 'iphone'" or reference testData keys by name. BAD: await safeFill(page, 'Search', searchTerm) — ReferenceError at runtime. GOOD: await safeFill(page, 'Search', 'iphone') — literal value always works.
+- NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.
+- STEP COMMENTS: Add a "// Step N:" comment before the code for each step in the "steps" array. This aligns the code with the step descriptions in the UI. Example: if steps has 3 items, the code should have "// Step 1:", "// Step 2:", "// Step 3:" comments marking where each step's code begins. Every step in the "steps" array MUST have corresponding code — do NOT leave steps without implementation.`;
+
   return `You are a senior QA automation engineer generating production-grade Playwright test suites.
 
 PERSONA RULES:
@@ -131,15 +160,10 @@ SELF-HEALING:
 ${rules}
 
 ASSERTION QUALITY:
-${ASSERTION_RULES}
+${assertionBlock}
 
 STABILITY:
-${STABILITY_RULES}
+${stabilityBlock}
 
-CODE REQUIREMENTS:
-- playwrightCode must be fully self-contained and executable on its own.
-- Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.
-- INLINE ALL TEST DATA: Every value used in the test (search terms, email addresses, passwords, usernames, quantities, IDs) MUST be written as a string literal directly in the code. NEVER declare variables like "const searchTerm = 'iphone'" or reference testData keys by name. BAD: await safeFill(page, 'Search', searchTerm) — ReferenceError at runtime. GOOD: await safeFill(page, 'Search', 'iphone') — literal value always works.
-- NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.
-- STEP COMMENTS: Add a "// Step N:" comment before the code for each step in the "steps" array. This aligns the code with the step descriptions in the UI. Example: if steps has 3 items, the code should have "// Step 1:", "// Step 2:", "// Step 3:" comments marking where each step's code begins. Every step in the "steps" array MUST have corresponding code — do NOT leave steps without implementation.`;
+${codeBlock}`;
 }
