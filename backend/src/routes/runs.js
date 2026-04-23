@@ -75,6 +75,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     logs: [],
     tests: [],
     pagesFound: 0,
+    generateInput: validatedDials ? { dialsConfig: validatedDials } : undefined,
     workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);

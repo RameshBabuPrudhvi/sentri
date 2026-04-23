@@ -160,10 +160,15 @@ export default function RunDetail() {
     setRerunning(true);
     try {
       let result;
+      const input = run.generateInput || {};
       if (run.type === "crawl") {
-        result = await api.crawl(run.projectId);
+        result = await api.crawl(run.projectId, input.dialsConfig ? { dialsConfig: input.dialsConfig } : undefined);
       } else if (run.type === "generate") {
-        result = await api.generateTest(run.projectId, run.generateInput || {});
+        result = await api.generateTest(run.projectId, {
+          name: input.name,
+          description: input.description,
+          dialsConfig: input.dialsConfig,
+        });
       }
       if (result?.runId) {
         addNotification({ type: "success", title: "Re-run started", body: `New run ${result.runId} created` });

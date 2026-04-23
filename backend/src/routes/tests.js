@@ -431,7 +431,7 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
     logs: [],
     tests: [],
     pagesFound: 0,
-    generateInput: { name: cleanName, description: cleanDescription },
+    generateInput: { name: cleanName, description: cleanDescription, dialsConfig: validatedGenDials || undefined },
     promptAudit: {
       descriptionLength: cleanDescription.length,
       dialsConfigSummary: validatedGenDials ? {

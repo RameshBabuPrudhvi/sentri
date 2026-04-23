@@ -432,19 +432,24 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     await page.close().catch(() => {});
     await context.close().catch(() => {});
 
-    // Move the video to a stable named path
-    try {
-      const files = fs.readdirSync(testVideoDir).filter(f => f.endsWith(".webm"));
-      if (files.length > 0) {
-        const src = path.join(testVideoDir, files[0]);
-        const videoName = `${runId}-step${stepIndex}.webm`;
-        const dst = path.join(VIDEOS_DIR, videoName);
-        fs.renameSync(src, dst);
-        result.videoPath = `/artifacts/videos/${videoName}`;
+    // Move the video to a stable named path (skip when ffmpeg was missing)
+    if (videoEnabled) {
+      try {
+        const files = fs.readdirSync(testVideoDir).filter(f => f.endsWith(".webm"));
+        if (files.length > 0) {
+          const src = path.join(testVideoDir, files[0]);
+          const videoName = `${runId}-step${stepIndex}.webm`;
+          const dst = path.join(VIDEOS_DIR, videoName);
+          fs.renameSync(src, dst);
+          result.videoPath = `/artifacts/videos/${videoName}`;
+        }
+        fs.rmSync(testVideoDir, { recursive: true, force: true });
+      } catch (videoErr) {
+        console.warn(formatLogLine("warn", null, `[executeTest] Video move failed for step ${stepIndex}: ${videoErr.message}`));
       }
-      fs.rmSync(testVideoDir, { recursive: true, force: true });
-    } catch (videoErr) {
-      console.warn(formatLogLine("warn", null, `[executeTest] Video move failed for step ${stepIndex}: ${videoErr.message}`));
+    } else {
+      // No video was recorded — clean up the empty directory
+      try { fs.rmSync(testVideoDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }
 
