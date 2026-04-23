@@ -971,4 +971,20 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
-**End of Roadmap. Last updated April 23, 2026.**
+## Contributing & Process
+
+- **Issue tracker:** [GitHub Issues](https://github.com/RameshBabuPrudhvi/sentri/issues)
+- **Contribution guide:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **PR template:** Use the provided [PR template](.github/PULL_REQUEST_TEMPLATE.md)
+- **Acceptance criteria checklist:** Each roadmap item includes acceptance criteria; PRs must check all boxes
+
+---
+
+## Feedback & Changes
+
+This roadmap is living. To propose changes:
+1. Open a [GitHub Discussion](https://github.com/RameshBabuPrudhvi/sentri/discussions)
+2. Tag with `[ROADMAP]` prefix
+3. Include: impact (why), effort (how long), risk (what could go wrong), priority (when)
+
+Major changes require consensus from maintainers (@RameshBabuPrudhvi, @contributors).
