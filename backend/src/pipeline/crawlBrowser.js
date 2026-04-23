@@ -44,13 +44,15 @@ function isSameEffectiveOrigin(urlA, urlB) {
  * @param {object} run            — mutable run record (logs, pagesFound, pages)
  * @param {object} opts
  * @param {AbortSignal} [opts.signal]
- * @returns {Promise<{ snapshots: object[], snapshotsByUrl: Record<string, object> }>}
+ * @returns {Promise<{ snapshots: object[], snapshotsByUrl: Record<string, object>, apiEndpoints: object[], navigationFailures: Array<{url:string, message:string, category:string}> }>}
  */
 export async function crawlPages(project, run, { signal } = {}) {
   const browser = await launchBrowser();
 
   const snapshots = [];
   const snapshotsByUrl = {};
+  /** @type {Array<{url:string, message:string, category:string}>} */
+  const navigationFailures = [];
   let harCapture = null;
 
   try {
@@ -92,7 +94,19 @@ export async function crawlPages(project, run, { signal } = {}) {
       if (resolvedOrigin !== project.url) {
         log(run, `🔀 Redirected: ${project.url} → ${resolvedOrigin}`);
       }
-    } catch { /* fall back to user-entered URL */ }
+    } catch (err) {
+      // Surface probe-navigation failures so the caller can classify fully
+      // unreachable targets (e.g. DNS failures) as failed runs instead of
+      // "completed empty". The existing BFS loop still records per-URL
+      // failures, but the probe failure matters when the target's root page
+      // is the first thing that breaks.
+      const failMsg = err?.message || String(err);
+      navigationFailures.push({
+        url: project.url,
+        message: failMsg,
+        category: categoriseNavigationError(failMsg),
+      });
+    }
     finally { await probePage.close().catch(() => {}); }
 
     // ── HAR capture: attach AFTER redirect so it uses the resolved origin ──
@@ -258,7 +272,13 @@ export async function crawlPages(project, run, { signal } = {}) {
           }
         }
       } catch (err) {
-        logWarn(run, `Failed: ${url} — ${err.message}`);
+        const failMsg = err?.message || String(err);
+        logWarn(run, `Failed: ${url} — ${failMsg}`);
+        navigationFailures.push({
+          url,
+          message: failMsg,
+          category: categoriseNavigationError(failMsg),
+        });
       } finally {
         await page.close();
       }
@@ -282,5 +302,39 @@ export async function crawlPages(project, run, { signal } = {}) {
 
   logSuccess(run, `Smart crawl done. ${snapshots.length} unique pages found.`);
 
-  return { snapshots, snapshotsByUrl, apiEndpoints };
+  return { snapshots, snapshotsByUrl, apiEndpoints, navigationFailures };
+}
+
+/**
+ * Classify a navigation failure message into a coarse category so the caller
+ * can decide whether a totally-unreachable target warrants a `failed` run.
+ *
+ * @param {string} message - Error message from `page.goto` (Playwright).
+ * @returns {string} One of `"dns"`, `"network"`, `"timeout"`, or `"other"`.
+ */
+function categoriseNavigationError(message) {
+  const m = (message || "").toLowerCase();
+  if (m.includes("err_name_not_resolved")
+    || m.includes("enotfound")
+    || m.includes("dns")) {
+    return "dns";
+  }
+  if (m.includes("err_connection_refused")
+    || m.includes("err_connection_reset")
+    || m.includes("err_connection_closed")
+    || m.includes("err_connection_timed_out")
+    || m.includes("err_network")
+    || m.includes("err_address_unreachable")
+    || m.includes("err_internet_disconnected")
+    || m.includes("err_ssl_")
+    || m.includes("err_cert_")
+    || m.includes("econnrefused")
+    || m.includes("econnreset")
+    || m.includes("enetunreach")) {
+    return "network";
+  }
+  if (m.includes("timeout") || m.includes("timed out")) {
+    return "timeout";
+  }
+  return "other";
 }

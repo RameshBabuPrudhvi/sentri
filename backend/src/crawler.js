@@ -261,6 +261,38 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
     snapshotsByUrl = crawlResult.snapshotsByUrl;
     apiEndpoints = crawlResult.apiEndpoints || [];
 
+    // ── Early failure: unreachable target ────────────────────────────────
+    // If the crawl produced zero pages AND every navigation attempt failed
+    // with a network-class error (DNS, connection refused, TLS, timeout),
+    // throw a navigation error so the run is classified `failed` with a
+    // clear DNS/network reason — instead of silently completing as
+    // "completed_empty" after the Filter/Classify/Generate stages run on
+    // an empty snapshot list.
+    const failures = crawlResult.navigationFailures || [];
+    if (snapshots.length === 0 && failures.length > 0) {
+      const networkFailures = failures.filter(f =>
+        f.category === "dns" || f.category === "network" || f.category === "timeout"
+      );
+      if (networkFailures.length === failures.length) {
+        const primary = networkFailures[0];
+        const isDns = networkFailures.some(f => f.category === "dns");
+        logWarn(run, isDns
+          ? `Crawl aborted: DNS resolution failed for ${project.url} (${primary.message})`
+          : `Crawl aborted: target URL unreachable — ${primary.message}`);
+        structuredLog("crawl.unreachable", {
+          runId: run.id, projectId: project.id, url: project.url,
+          category: primary.category, message: primary.message,
+        });
+        // Throw with a message that contains "net::err_" / DNS markers so
+        // classifyError() routes it to the NAVIGATION category (and the DNS
+        // branch added in this change produces the DNS-specific hint).
+        throw new Error(isDns
+          ? `Target host could not be resolved (DNS). "${project.url}" is not reachable — ${primary.message}`
+          : `Target URL is unreachable — ${primary.message}`
+        );
+      }
+    }
+
     throwIfAborted(signal);
 
     // ── Steps 2 & 3: shared filter + classify ─────────────────────────────

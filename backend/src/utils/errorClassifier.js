@@ -135,8 +135,25 @@ export function classifyError(err, context = "run") {
     };
   }
 
+  // ── DNS resolution failure ────────────────────────────────────────────
+  // Matches both our own "DNS" marker messages and Chromium's underlying
+  // `net::ERR_NAME_NOT_RESOLVED`. Checked before the generic NAVIGATION
+  // branch so the user gets a specific hint (typo/hostname/VPN) instead of
+  // the catch-all "check the project URL" message.
+  if (msg.includes("err_name_not_resolved")
+    || msg.includes("enotfound")
+    || (msg.includes("dns") && (msg.includes("resolv") || msg.includes("not reachable")))) {
+    return {
+      message: "The target host could not be resolved (DNS failure). Check the project URL for typos, verify the hostname exists, and — if the site is internal-only — ensure your VPN is connected.",
+      category: ERROR_CATEGORY.NAVIGATION,
+    };
+  }
+
   // ── Navigation failure ────────────────────────────────────────────────
-  if (msg.includes("navigation") || msg.includes("net::err_") || msg.includes("page.goto")) {
+  if (msg.includes("navigation")
+    || msg.includes("net::err_")
+    || msg.includes("page.goto")
+    || msg.includes("unreachable")) {
     return {
       message: "Page navigation failed. Check that the project URL is accessible and responds correctly.",
       category: ERROR_CATEGORY.NAVIGATION,
