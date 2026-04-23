@@ -32,7 +32,7 @@ export { parsePagination };
 const JSON_FIELDS = [
   "tests", "results", "testQueue", "generateInput",
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
-  "qualityAnalytics",
+  "qualityAnalytics", "pages",
 ];
 
 function rowToRun(row) {
@@ -41,9 +41,9 @@ function rowToRun(row) {
   for (const f of JSON_FIELDS) {
     if (obj[f]) {
       try { obj[f] = JSON.parse(obj[f]); }
-      catch { obj[f] = f === "tests" || f === "results" || f === "videoSegments" ? [] : null; }
+      catch { obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null; }
     } else {
-      obj[f] = f === "tests" || f === "results" || f === "videoSegments" ? [] : null;
+      obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null;
     }
   }
   // Always initialise logs as an empty array; callers that need the full
@@ -71,7 +71,7 @@ const INSERT_COLS = [
   "pagesFound", "parallelWorkers", "tracePath", "videoPath", "videoSegments",
   "tests", "results", "testQueue", "generateInput", "promptAudit",
   "pipelineStats", "feedbackLoop", "currentStep",
-  "rateLimitError", "qualityAnalytics", "workspaceId",
+  "rateLimitError", "qualityAnalytics", "workspaceId", "pages",
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

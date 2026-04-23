@@ -32,7 +32,10 @@ export default function useLogBuffer(run) {
 
   useEffect(() => {
     const incoming = run?.logs || [];
-    if (incoming.length > bufferRef.current.length) {
+    // Use !== instead of > so the buffer resets when navigating to a run
+    // with fewer logs (e.g. a new re-run). The > check caused stale logs
+    // from the previous run to persist when the new run had fewer entries.
+    if (incoming.length !== bufferRef.current.length) {
       bufferRef.current = incoming;
       setLogs([...incoming]);
     }

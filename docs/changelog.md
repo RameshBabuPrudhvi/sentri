@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docker**: Both `Dockerfile` and `backend/Dockerfile` now install `ffmpeg` via apt — required by Playwright for video recording (#100)
 - **Docs**: All setup guides (README, getting-started, github-pages-render) updated to `npx playwright install chromium ffmpeg` — previously only chromium was installed, causing test runs to crash on Render deployments (#100)
 - **Validator**: `page.goto` check relaxed — tests that navigate via `safeClick` (which triggers `page.waitForLoadState` internally) are no longer rejected as "missing page.goto navigation"; this was the #1 false-positive rejection reason across all AI providers (#100)
+- **Crawl**: Site map was always empty — `run.pages` was set in-memory during crawl but never persisted to DB; added `pages` TEXT column (migration 007), added to `runRepo.js` JSON_FIELDS/INSERT_COLS, and both `crawlBrowser.js` and `stateExplorer.js` now persist pages and emit SSE snapshots as pages are discovered (#100)
+- **SSE**: `useRunSSE` retryTimer race — if the backoff timer fired between cleanup and re-setup on navigation, a stale `connect()` for the old runId would fire; added `mountedRef` guard (#100)
+- **Frontend**: `useLogBuffer` showed stale logs from previous run when navigating to a re-run with fewer log entries — changed `>` to `!==` comparison so the buffer resets on any length change (#100)
+- **Frontend**: SiteGraph D3 simulation leaked on early return when `pages.length === 0` — now always returns a cleanup function that calls `sim.stop()`, preventing ghost animations (#100)
+- **AI Chat**: Ollama chat requests during an active crawl/generate run caused Ollama to hang (single-threaded model) — chat endpoint now returns 503 "AI is busy" when Ollama is the provider and an in-process run is active (#100)
 
 ## [1.6.2] — 2026-04-23
 
