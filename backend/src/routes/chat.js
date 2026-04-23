@@ -27,6 +27,7 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
+import { runAbortControllers } from "../utils/runWithAbort.js";
 
 const router = Router();
 
@@ -324,6 +325,16 @@ router.post("/chat", async (req, res) => {
   if (!hasProvider()) {
     return res.status(503).json({
       error: "No AI provider configured. Go to Settings to add an API key.",
+    });
+  }
+
+  // Ollama is single-threaded — concurrent requests cause hangs or crashes.
+  // When a crawl/generate/test run is actively making LLM calls via the
+  // in-process runner, reject chat requests with a helpful message instead
+  // of sending a concurrent request that will hang indefinitely.
+  if (isLocalProvider() && runAbortControllers.size > 0) {
+    return res.status(503).json({
+      error: "AI is busy with an active run — Ollama can only process one request at a time. Wait for the run to finish, or abort it first, then try again.",
     });
   }
 
