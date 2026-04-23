@@ -28,6 +28,7 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
 import { runAbortControllers } from "../utils/runWithAbort.js";
+import { workerAbortControllers } from "../workers/runWorker.js";
 
 const router = Router();
 
@@ -332,7 +333,7 @@ router.post("/chat", async (req, res) => {
   // When a crawl/generate/test run is actively making LLM calls via the
   // in-process runner, reject chat requests with a helpful message instead
   // of sending a concurrent request that will hang indefinitely.
-  if (isLocalProvider() && runAbortControllers.size > 0) {
+  if (isLocalProvider() && (runAbortControllers.size > 0 || workerAbortControllers.size > 0)) {
     return res.status(503).json({
       error: "AI is busy with an active run — Ollama can only process one request at a time. Wait for the run to finish, or abort it first, then try again.",
     });

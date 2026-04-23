@@ -328,7 +328,7 @@ export async function generateAllTests(classifiedPages, journeys, snapshotsByUrl
     : classifiedPages.length <= 15 ? 4
     : journeys.length;
   const maxJourneys = testCountCap != null
-    ? Math.min(testCountCap, pageCountCap)
+    ? (testCount === "large" ? testCountCap : Math.min(testCountCap, pageCountCap))
     : pageCountCap;
   const cappedJourneys = journeys.slice(0, maxJourneys);
   if (cappedJourneys.length < journeys.length) {
