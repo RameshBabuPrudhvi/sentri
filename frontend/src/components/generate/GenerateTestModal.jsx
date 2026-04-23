@@ -351,8 +351,8 @@ export default function GenerateTestModal({ projects = [], onClose }) {
           </div>
         )}
 
-        {/* Body — maxHeight caps scroll area so content doesn't extend behind nav */}
-        <div style={{ overflowY: "auto", flex: "1 1 0", minHeight: 0, maxHeight: "calc(100vh - 220px)", padding: "20px 22px" }}>
+        {/* Scrollable body */}
+        <div style={{ overflowY: "auto", flex: "1 1 0", minHeight: 0, padding: "20px 22px" }}>
 
           {/* ── Story tab ── */}
           {tab === "story" && (
