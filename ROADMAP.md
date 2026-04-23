@@ -1284,8 +1284,8 @@ The following items have been verified complete against the codebase and are **n
 
 ## Summary
 
-| Category | Total | ✅ Done | 🔄 Active | 🔲 Left | Remaining items |
-|----------|------:|--------:|----------:|--------:|-----------------|
+| Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
+|----------|------:|--------:|---------------:|----------:|-----------|
 | Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
