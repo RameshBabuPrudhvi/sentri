@@ -160,6 +160,33 @@ const RECORDER_SCRIPT = `
 `;
 
 /**
+ * Escape a user-controlled string so it can be safely interpolated into a
+ * JavaScript single-quoted string literal in generated source code. Handles
+ * backslash (`\`), single quote (`'`), newline (`\n`), carriage return (`\r`),
+ * line/paragraph separators (U+2028 / U+2029 — these break literals in most
+ * engines), and other C0 control characters via `\xHH` escapes.
+ *
+ * Order matters: backslash must be escaped first, otherwise subsequent
+ * replacements would double-escape their own inserted backslashes.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeJsSingleQuote(str) {
+  return String(str ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+    // Any remaining C0 / DEL control byte → \xHH. These would either break
+    // the literal (e.g. U+0008) or render untrustworthy generated code.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+/**
  * Convert a list of captured actions into a Playwright test body. The output
  * is wrapped in the repo-standard `test(...)` shape so the existing runner
  * (codeExecutor, codeParsing) treats it like any AI-generated test.
@@ -170,8 +197,8 @@ const RECORDER_SCRIPT = `
  * @returns {string} Playwright source code.
  */
 export function actionsToPlaywrightCode(testName, startUrl, actions) {
-  const safeName = String(testName || "Recorded test").replace(/'/g, "\\'");
-  const safeStartUrl = String(startUrl || "").replace(/'/g, "\\'");
+  const safeName = escapeJsSingleQuote(testName || "Recorded test");
+  const safeStartUrl = escapeJsSingleQuote(startUrl || "");
   const lines = [];
   lines.push(`await page.goto('${safeStartUrl}');`);
   // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
@@ -181,11 +208,11 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   let lastGotoUrl = String(startUrl || "");
   let stepNo = 1;
   for (const a of actions) {
-    const sel = (a.selector || "").replace(/'/g, "\\'");
+    const sel = escapeJsSingleQuote(a.selector || "");
     if (a.kind === "goto" && a.url) {
       if (a.url === lastGotoUrl) continue;
       lastGotoUrl = a.url;
-      const safeUrl = String(a.url).replace(/'/g, "\\'");
+      const safeUrl = escapeJsSingleQuote(a.url);
       lines.push(`// Step ${stepNo}: Navigate`);
       lines.push(`await page.goto('${safeUrl}');`);
     } else if (a.kind === "click" && sel) {
@@ -193,13 +220,13 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`await safeClick(page, '${sel}');`);
     } else if (a.kind === "fill" && sel) {
       lines.push(`// Step ${stepNo}: Fill field`);
-      lines.push(`await safeFill(page, '${sel}', '${(a.value || "").replace(/'/g, "\\'")}');`);
+      lines.push(`await safeFill(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if (a.kind === "press" && a.key) {
-      lines.push(`// Step ${stepNo}: Press ${a.key}`);
-      lines.push(`await page.keyboard.press('${a.key}');`);
+      lines.push(`// Step ${stepNo}: Press ${escapeJsSingleQuote(a.key)}`);
+      lines.push(`await page.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
     } else if (a.kind === "select" && sel) {
       lines.push(`// Step ${stepNo}: Select option`);
-      lines.push(`await page.selectOption('${sel}', '${(a.value || "").replace(/'/g, "\\'")}');`);
+      lines.push(`await page.selectOption('${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if ((a.kind === "check" || a.kind === "uncheck") && sel) {
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
       lines.push(`await page.${a.kind === "check" ? "check" : "uncheck"}('${sel}');`);

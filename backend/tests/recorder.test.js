@@ -120,6 +120,78 @@ test("escapes single quotes in test name, selectors, and fill values", () => {
   assert.match(code, /await safeFill\(page, '#q', 'I\\'m here'\);/);
 });
 
+test("escapes newlines in fill values so multiline <textarea> input produces valid JS", () => {
+  // A user typing into a <textarea> produces a `fill` action whose value
+  // contains a literal U+000A. Interpolating that raw into a single-quoted
+  // literal would split the string across source lines → SyntaxError at
+  // runtime. The generated code must use `\\n` escapes.
+  const code = actionsToPlaywrightCode("Multiline", "https://example.com", [
+    { kind: "fill", selector: "#bio", value: "line1\nline2\nline3", ts: 1 },
+  ]);
+  // No raw newline inside the generated fill call.
+  assert.doesNotMatch(code, /safeFill\(page, '#bio', 'line1\nline2/);
+  // Properly escaped sequence.
+  assert.match(code, /await safeFill\(page, '#bio', 'line1\\nline2\\nline3'\);/);
+});
+
+test("escapes backslashes so Windows paths and raw escape sequences replay verbatim", () => {
+  // Raw `C:\new\file` would get re-interpreted: `\n` → newline, `\f` → form
+  // feed. Backslashes must be doubled up first so the replayed value is
+  // identical to what the user typed.
+  const code = actionsToPlaywrightCode("Paths", "https://example.com", [
+    { kind: "fill", selector: "#path", value: "C:\\new\\file", ts: 1 },
+  ]);
+  assert.match(code, /await safeFill\(page, '#path', 'C:\\\\new\\\\file'\);/);
+});
+
+test("escapes carriage returns and U+2028 / U+2029 line separators", () => {
+  const code = actionsToPlaywrightCode("Sep", "https://example.com", [
+    { kind: "fill", selector: "#x", value: "a\rb\u2028c\u2029d", ts: 1 },
+  ]);
+  assert.match(code, /await safeFill\(page, '#x', 'a\\rb\\u2028c\\u2029d'\);/);
+});
+
+test("escapes control characters (e.g. backspace U+0008) via \\xHH", () => {
+  const code = actionsToPlaywrightCode("Ctrl", "https://example.com", [
+    { kind: "fill", selector: "#x", value: "a\bb", ts: 1 },
+  ]);
+  assert.match(code, /await safeFill\(page, '#x', 'a\\x08b'\);/);
+});
+
+test("generated code is always syntactically parseable regardless of captured value content", () => {
+  // Property-check style: throw every ugly string we can think of at the
+  // generator and confirm the result parses as a module. If this ever
+  // regresses the project's runner will refuse to execute the recorded
+  // test at runtime.
+  const nasties = [
+    "simple",
+    "it's complex",
+    "line1\nline2",
+    "C:\\Users\\root",
+    "mix: '\\n' and \"quotes\" and \t\ttabs",
+    "\u2028\u2029",
+    "null\u0000byte",
+  ];
+  for (const s of nasties) {
+    const code = actionsToPlaywrightCode(s, "https://example.com/" + s, [
+      { kind: "fill", selector: "#f", value: s, ts: 1 },
+      { kind: "select", selector: "#s", value: s, ts: 2 },
+      { kind: "press", key: "Enter", ts: 3 },
+    ]);
+    // The generator wraps the body inside `test('…', async ({ page }) => { … })`
+    // and prepends an `import` line. Strip both so we can parse just the body
+    // as a Function and validate that every interpolated string literal is
+    // syntactically valid.
+    const bodyMatch = code.match(/async \(\{ page \}\) => \{\n([\s\S]*)\n\}\);\n$/);
+    assert.ok(bodyMatch, `generated code should have the expected wrapper shape for input ${JSON.stringify(s)}`);
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    assert.doesNotThrow(
+      () => new AsyncFunction("page", "expect", "safeClick", "safeFill", bodyMatch[1]),
+      `generated body should parse for input ${JSON.stringify(s)}`,
+    );
+  }
+});
+
 console.log("\n──────────────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);
 

@@ -61,6 +61,20 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       setError("Enter a valid http(s) URL to record from.");
       return;
     }
+    // If a previous handleStopAndSave failed, `sessionId` still points at a
+    // live server-side Chromium process. Fire a best-effort discard before
+    // launching a new session so clicking "Launch recorder" a second time
+    // doesn't orphan the previous browser until MAX_RECORDING_MS fires.
+    const stale = sessionIdRef.current;
+    if (stale) {
+      const staleProject = projectIdRef.current || projectId;
+      api.recordDiscard(staleProject, stale).catch(() => {});
+      sessionIdRef.current = null;
+      setSessionId(null);
+    }
+    // Also tear down any still-running SSE / poller from the previous
+    // attempt before they race with the new session's streams.
+    teardownStreams();
     setPhase("starting");
     try {
       const { sessionId: sid } = await api.recordStart(projectId, { startUrl });

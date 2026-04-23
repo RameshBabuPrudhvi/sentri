@@ -48,6 +48,7 @@ const files = [
   "tests/flaky-detector.test.js",
   "tests/recorder.test.js",
   "tests/visual-regression.test.js",
+  "tests/recorder-baselines-routes.test.js",
 ];
 
 let passed = 0;
