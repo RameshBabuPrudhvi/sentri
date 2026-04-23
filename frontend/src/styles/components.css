@@ -105,6 +105,13 @@
   overflow: hidden;
   display: flex; flex-direction: column;
 }
+/* When a modal opts into scrollable content via a tall tab (e.g. Test Dials),
+   the panel needs a definite height so flex children can shrink and scroll.
+   Modals that set an explicit height via the style prop get this automatically;
+   for all others, the content grows naturally up to max-height and clips. */
+.modal-panel-scrollable {
+  height: calc(100vh - 48px);
+}
 .modal-close {
   background: none; border: none; cursor: pointer;
   color: var(--text3); padding: 2px; display: flex;

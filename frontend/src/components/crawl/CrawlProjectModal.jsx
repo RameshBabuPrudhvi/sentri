@@ -81,7 +81,7 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
   }
 
   return (
-    <ModalShell onClose={onClose} width="min(520px, 96vw)">
+    <ModalShell onClose={onClose} width="min(520px, 96vw)" scrollable>
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,

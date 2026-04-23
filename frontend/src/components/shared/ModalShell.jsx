@@ -9,17 +9,19 @@ import React, { useEffect } from "react";
  *   style    — extra inline styles merged onto the panel div
  *   children — modal content
  */
-export default function ModalShell({ onClose, width = "min(440px, 95vw)", style, children }) {
+export default function ModalShell({ onClose, width = "min(440px, 95vw)", scrollable = false, style, children }) {
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  const cls = scrollable ? "modal-panel modal-panel-scrollable" : "modal-panel";
+
   return (
     <>
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel" style={{ width, ...style }}>
+      <div className={cls} style={{ width, ...style }}>
         {children}
       </div>
     </>
