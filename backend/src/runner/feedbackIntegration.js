@@ -95,12 +95,13 @@ export async function runFeedbackLoop(run, tests, signal) {
 
     // Wrap the AI-heavy feedback loop in a timeout so it can never block run
     // completion indefinitely (e.g. when Ollama hangs on an oversized prompt).
+    let feedbackTimer;
     const feedback = await Promise.race([
       applyFeedbackLoop(run, { signal }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Feedback loop timed out after ${FEEDBACK_TIMEOUT_MS / 1000}s`)), FEEDBACK_TIMEOUT_MS)
-      ),
-    ]);
+      new Promise((_, reject) => {
+        feedbackTimer = setTimeout(() => reject(new Error(`Feedback loop timed out after ${FEEDBACK_TIMEOUT_MS / 1000}s`)), FEEDBACK_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(feedbackTimer));
     structuredLog("feedback.complete", { runId: run.id, improved: feedback.improved, skipped: feedback.skipped, failures: run.failed });
     if (feedback.improved > 0) {
       logSuccess(run, `Auto-regenerated ${feedback.improved} failing test(s) (${feedback.skipped} skipped)`);
