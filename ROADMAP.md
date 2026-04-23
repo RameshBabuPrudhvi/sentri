@@ -1284,17 +1284,18 @@ The following items have been verified complete against the codebase and are **n
 
 ## Summary
 
-| Category | Items | Blockers | 🟡 High | 🔵/🟢 |
-|----------|-------|---------|---------|-------|
-| Security & Compliance | SEC-001–005 | ~~SEC-001~~ ✅ | ~~SEC-002~~ ✅, ~~SEC-003~~ ✅ | SEC-004, SEC-005 |
-| Infrastructure | INF-001–005 | ~~INF-001~~ ✅, ~~INF-002~~ ✅ | ~~INF-003~~ ✅ | ~~INF-004~~ ✅, ~~INF-005~~ ✅ |
-| Access Control | ACL-001–002 | ~~ACL-001~~ ✅, ~~ACL-002~~ ✅ | — | — |
-| Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
-| Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
-| Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–011 | MNT-009 | MNT-006 | Remainder |
+| Category | Total | ✅ Done | 🔄 Active | 🔲 Left | Remaining items |
+|----------|------:|--------:|----------:|--------:|-----------------|
+| Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
+| Infrastructure | 5 | 5 | 0 | 0 | — |
+| Access Control | 2 | 2 | 0 | 0 | — |
+| Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
+| Differentiators | 13 | 5 | 0 | 8 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
+| Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
+| Maintenance | 11 | 1 | 2 | 8 | MNT-001–006, 008, 011 |
+| **Totals** | **61** | **20** | **2** | **39** | |
 
-**Total active items:** 63 tracked items across 7 categories
+**Total tracked items:** 61 across 7 categories — **20 complete** (33%), **2 in progress**, **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
