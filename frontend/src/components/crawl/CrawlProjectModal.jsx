@@ -4,13 +4,38 @@ import { Search, X, RefreshCw, Clock } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
 import ExploreModePicker from "../generate/ExploreModePicker.jsx";
-import CrawlDialsPanel from "./CrawlDialsPanel.jsx";
-import { loadSavedConfig } from "../../utils/testDialsStorage.js";
+import TestDials from "../shared/TestDials.jsx";
+import { countActiveDials, loadSavedConfig } from "../../utils/testDialsStorage.js";
+
+// ── Tab component (matches GenerateTestModal pattern) ─────────────────────────
+
+function Tab({ label, badge, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1, padding: "10px 4px", background: "none", border: "none",
+        borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+        color: active ? "var(--accent)" : "var(--text2)",
+        fontWeight: active ? 600 : 400, fontSize: "0.875rem",
+        cursor: "pointer", display: "flex", alignItems: "center",
+        justifyContent: "center", gap: 6, marginBottom: -1,
+        transition: "color 0.15s",
+      }}
+    >
+      {label}
+      {badge != null && (
+        <span className="active-count-pill">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
 
 /**
  * Modal for crawling a project from the Tests page.
- * Lets the user pick a project, choose explore mode (link crawl vs state
- * exploration), tune explorer settings, and start a crawl + AI generation run.
+ * Two tabs: "Crawl" (project + explore mode) and "Test Dials" (AI generation config).
  *
  * Props:
  *   projects        — array of project objects { id, name, url }
@@ -18,11 +43,14 @@ import { loadSavedConfig } from "../../utils/testDialsStorage.js";
  *   defaultProjectId — optional: pre-select this project
  */
 export default function CrawlProjectModal({ projects, onClose, defaultProjectId }) {
+  const [tab, setTab] = useState("crawl"); // "crawl" | "dials"
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [dialsConfig, setDialsConfig] = useState(() => loadSavedConfig());
   const navigate = useNavigate();
+
+  const activeDialCount = countActiveDials(dialsConfig);
 
   // Sync if defaultProjectId changes after mount
   useEffect(() => {
@@ -32,7 +60,7 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
   const selectedProject = projects.find(p => p.id === projectId);
 
   async function handleCrawl() {
-    if (!projectId) { setError("Please select a project."); return; }
+    if (!projectId) { setError("Please select a project."); setTab("crawl"); return; }
     setError(null);
     setRunning(true);
     try {
@@ -53,12 +81,11 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
   }
 
   return (
-    <ModalShell onClose={onClose} width="min(480px, 96vw)">
-      {/* Header — pinned */}
+    <ModalShell onClose={onClose} width="min(520px, 96vw)">
+      {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
-        padding: "18px 22px 16px", borderBottom: "1px solid var(--border)",
-        flexShrink: 0,
+        padding: "18px 22px 0", flexShrink: 0,
       }}>
         <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
           Crawl & Generate Tests
@@ -68,15 +95,26 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
         </button>
       </div>
 
+      {/* Tab bar */}
+      <div style={{
+        display: "flex", borderBottom: "1px solid var(--border)",
+        padding: "0 22px", marginTop: 12, flexShrink: 0,
+      }}>
+        <Tab label="Crawl" active={tab === "crawl"} onClick={() => setTab("crawl")} />
+        <Tab label="Test Dials" badge={activeDialCount} active={tab === "dials"} onClick={() => setTab("dials")} />
+      </div>
+
+      {/* Persistent error banner — visible on all tabs */}
+      {error && (
+        <div style={{ padding: "0 22px", flexShrink: 0 }}>
+          <div className="alert-error" style={{ marginTop: 12 }}>
+            {error}
+          </div>
+        </div>
+      )}
+
       {/* Scrollable body */}
       <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "20px 22px 4px" }}>
-        <p style={{
-          fontSize: "0.82rem", color: "var(--text2)",
-          marginTop: 0, marginBottom: 20, lineHeight: 1.6,
-        }}>
-          Select a project and discovery mode, then start crawling. New tests will appear as Draft for your review.
-        </p>
-
         {projects.length === 0 ? (
           <div style={{ textAlign: "center", padding: "16px 0" }}>
             <div style={{ fontSize: "0.82rem", color: "var(--text3)", marginBottom: 16 }}>
@@ -88,35 +126,46 @@ export default function CrawlProjectModal({ projects, onClose, defaultProjectId 
           </div>
         ) : (
           <>
-            {/* Project selector */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", marginBottom: 5, fontSize: "0.82rem", fontWeight: 500, color: "var(--text2)" }}>
-                Project
-              </label>
-              <select
-                className="input"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                style={{ height: 38 }}
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              {selectedProject?.url && (
-                <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
-                  {selectedProject.url}
+            {/* ── Crawl tab ── */}
+            {tab === "crawl" && (
+              <div>
+                <p style={{
+                  fontSize: "0.82rem", color: "var(--text2)",
+                  marginTop: 0, marginBottom: 20, lineHeight: 1.6,
+                }}>
+                  Select a project and discovery mode, then start crawling. New tests will appear as Draft for your review.
+                </p>
+
+                {/* Project selector */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", marginBottom: 5, fontSize: "0.82rem", fontWeight: 500, color: "var(--text2)" }}>
+                    Project
+                  </label>
+                  <select
+                    className="input"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    style={{ height: 38 }}
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  {selectedProject?.url && (
+                    <div style={{ fontSize: "0.72rem", color: "var(--text3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
+                      {selectedProject.url}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
-            <ExploreModePicker value={dialsConfig} onChange={setDialsConfig} />
+                <ExploreModePicker value={dialsConfig} onChange={setDialsConfig} />
+              </div>
+            )}
 
-            <CrawlDialsPanel value={dialsConfig} onChange={setDialsConfig} />
-
-            {error && (
-              <div className="alert-error" style={{ marginBottom: 16 }}>
-                {error}
+            {/* ── Test Dials tab ── */}
+            {tab === "dials" && (
+              <div>
+                <TestDials value={dialsConfig} onChange={setDialsConfig} />
               </div>
             )}
           </>
