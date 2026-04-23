@@ -525,10 +525,8 @@ const SETTINGS_TABS = [
   { key: "providers",   label: "AI Providers",  icon: <Zap size={14} /> },
   { key: "members",     label: "Members",       icon: <Users size={14} /> },
   { key: "execution",   label: "Execution",     icon: <Cpu size={14} /> },
-  { key: "account",     label: "Account",       icon: <Shield size={14} /> },
   { key: "data",        label: "Data",          icon: <Database size={14} /> },
-  { key: "recycle-bin", label: "Recycle Bin",   icon: <Trash2 size={14} /> },
-  { key: "system",      label: "System",        icon: <Server size={14} /> },
+  { key: "account",     label: "Account",       icon: <Shield size={14} /> },
 ];
 
 
@@ -1160,7 +1158,7 @@ export default function Settings() {
       {/* ── Tab: Members ── */}
       {tab === "members" && <MembersTab />}
 
-      {/* ── Tab: Execution ── */}
+      {/* ── Tab: Execution (runtime defaults + system info) ── */}
       {tab === "execution" && <>
       <SectionTitle icon={<Cpu size={16} color="var(--accent)" />} title="Test Execution" sub="Self-healing runtime defaults — applied to every test run" />
       <div className="card" style={{ overflow: "hidden" }}>
@@ -1187,26 +1185,9 @@ export default function Settings() {
         <Info size={11} style={{ verticalAlign: "middle", marginRight: 4 }} />
         These values are compiled into the self-healing runtime. To customise, edit <span className="text-mono" style={{ background: "var(--bg3)", padding: "1px 5px", borderRadius: 3 }}>backend/src/selfHealing.js</span>
       </div>
-      </>}
 
-      {/* ── Tab: Account ── */}
-      {tab === "account" && <AccountTab />}
+      <div style={{ height: 32 }} />
 
-      {/* ── Tab: Data ── */}
-      {tab === "data" && <>
-      <SectionTitle icon={<Database size={16} color="var(--amber)" />} title="Data Management" sub="Clear in-memory data — all data is ephemeral and resets on server restart" />
-      <div className="flex-col gap-md">
-        <DataAction icon={<Activity size={16} />} label="Run History" sub="All crawl and test run records, including logs and results" count={sysInfo?.runs} btnLabel="Clear Runs" onAction={async () => { const r = await api.clearRuns(); await reload(); return r; }} />
-        <DataAction icon={<Clock size={16} />} label="Activity Log" sub="Timeline of all user and system actions" count={sysInfo?.activities} btnLabel="Clear Log" onAction={async () => { const r = await api.clearActivities(); await reload(); return r; }} />
-        <DataAction icon={<Shield size={16} />} label="Self-Healing History" sub="Learned selector strategies — clearing forces the waterfall to start fresh" count={sysInfo?.healingEntries} btnLabel="Clear History" onAction={async () => { const r = await api.clearHealing(); await reload(); return r; }} />
-      </div>
-      </>}
-
-      {/* ── Tab: Recycle Bin ── */}
-      {tab === "recycle-bin" && <RecycleBinTab />}
-
-      {/* ── Tab: System ── */}
-      {tab === "system" && <>
       <SectionTitle icon={<Server size={16} color="var(--green)" />} title="System" sub="Server runtime and resource information" />
       {sysInfo ? (
         <div className="card" style={{ overflow: "hidden" }}>
@@ -1231,6 +1212,23 @@ export default function Settings() {
         <div className="text-sm text-muted" style={{ padding: "20px 0" }}>Could not load system info.</div>
       )}
       </>}
+
+      {/* ── Tab: Data (data management + recycle bin) ── */}
+      {tab === "data" && <>
+      <SectionTitle icon={<Database size={16} color="var(--amber)" />} title="Data Management" sub="Clear in-memory data — all data is ephemeral and resets on server restart" />
+      <div className="flex-col gap-md">
+        <DataAction icon={<Activity size={16} />} label="Run History" sub="All crawl and test run records, including logs and results" count={sysInfo?.runs} btnLabel="Clear Runs" onAction={async () => { const r = await api.clearRuns(); await reload(); return r; }} />
+        <DataAction icon={<Clock size={16} />} label="Activity Log" sub="Timeline of all user and system actions" count={sysInfo?.activities} btnLabel="Clear Log" onAction={async () => { const r = await api.clearActivities(); await reload(); return r; }} />
+        <DataAction icon={<Shield size={16} />} label="Self-Healing History" sub="Learned selector strategies — clearing forces the waterfall to start fresh" count={sysInfo?.healingEntries} btnLabel="Clear History" onAction={async () => { const r = await api.clearHealing(); await reload(); return r; }} />
+      </div>
+
+      <div style={{ height: 32 }} />
+
+      <RecycleBinTab />
+      </>}
+
+      {/* ── Tab: Account ── */}
+      {tab === "account" && <AccountTab />}
 
       {/* ── Restart onboarding tour ── */}
       <div className="st-tour-card">
