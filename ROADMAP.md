@@ -361,7 +361,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-001 — Visual regression testing with baseline diffing 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive
+**Status:** 🔄 In Progress | **Effort:** L | **Source:** Competitive
 
 **Problem:** Sentri detects functional failures (wrong text, broken navigation, missing elements) but not visual regressions — layout shifts, colour changes, component repositioning. Mabl and Testim both offer visual diffing natively. Screenshot capture already runs on every test step; the diff layer is the missing piece.
 
@@ -452,7 +452,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015 — Interactive browser recorder for test creation 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ)
+**Status:** 🔄 In Progress | **Effort:** L | **Source:** Competitive (BearQ)
 
 **Problem:** Sentri requires users to either write a plain-English description or wait for a full-site crawl to create tests. BearQ's primary UX is a visual recorder: click through the app, and the AI records and enhances the test. Users who cannot articulate a test scenario in text have no path to test creation. This is the single biggest UX barrier vs BearQ.
 
@@ -1292,12 +1292,12 @@ The following items have been verified complete against the codebase and are **n
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
-| Differentiators | 16 | 5 | 0 | 11 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
+| Differentiators | 16 | 5 | 2 | 9 | DIF-002, 005, 006, 007, 008, 009, 010, 012, 013 |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **64** | **22** | **0** | **42** | |
+| **Totals** | **64** | **22** | **2** | **40** | |
 
-**Total tracked items:** 64 across 7 categories — **22 complete** (34%), **0 in progress**, **42 remaining**
+**Total tracked items:** 64 across 7 categories — **22 complete** (34%), **2 in progress** (DIF-001, DIF-015), **40 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
