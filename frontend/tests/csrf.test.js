@@ -11,28 +11,46 @@ const originalDocument = global.document;
   try {
     // Set up initial document mock before import
     global.document = { cookie: "_csrf=abc123" };
-    const { getCsrfToken, setCsrfToken } = await import("../src/utils/csrf.js");
+    const { getCsrfToken, setCsrfToken, _resetCsrfTokenForTesting } = await import("../src/utils/csrf.js");
+
+    // ── Returns token from _csrf cookie ────────────────────────────────
+    assert.equal(getCsrfToken(), "abc123", "Should read _csrf cookie value");
+
+    // ── Returns empty string when no _csrf cookie ──────────────────────
+    global.document = { cookie: "other=value; session=xyz" };
+    assert.equal(getCsrfToken(), "", "Should return empty when _csrf is absent");
+
+    // ── Returns empty string when document.cookie is empty ─────────────
+    global.document = { cookie: "" };
+    assert.equal(getCsrfToken(), "", "Should return empty for empty cookie string");
+
+    // ── Handles multiple cookies correctly ─────────────────────────────
+    global.document = { cookie: "foo=bar; _csrf=mytoken; baz=qux" };
+    assert.equal(getCsrfToken(), "mytoken", "Should find _csrf among multiple cookies");
+
+    // ── Returns empty string when document is undefined ────────────────
+    global.document = undefined;
+    assert.equal(getCsrfToken(), "", "Should return empty when document is undefined");
 
     // ── setCsrfToken stores a token that getCsrfToken returns ──────────
     // (cross-origin: token comes from response header, not cookie)
     setCsrfToken("from-header");
     assert.equal(getCsrfToken(), "from-header", "Should return token set via setCsrfToken");
 
-    // ── Reset in-memory token so cookie-based tests work ───────────────
-    // Use an internal trick: setCsrfToken only stores truthy values, so
-    // we need to re-import or clear. Instead, just verify cookie fallback
-    // by importing a fresh module — but since ESM caches, we test the
-    // priority: setCsrfToken value takes precedence over cookie.
-    // Already tested above. Now verify setCsrfToken ignores falsy values.
+    // ── In-memory token takes precedence over cookie ───────────────────
+    global.document = { cookie: "_csrf=cookie-value" };
+    assert.equal(getCsrfToken(), "from-header", "In-memory token should take precedence over cookie");
+
+    // ── setCsrfToken ignores falsy values ──────────────────────────────
     setCsrfToken("");
     assert.equal(getCsrfToken(), "from-header", "setCsrfToken should ignore empty string");
     setCsrfToken(null);
     assert.equal(getCsrfToken(), "from-header", "setCsrfToken should ignore null");
 
-    // ── Returns token from _csrf cookie when no in-memory token ────────
-    // We cannot clear the module-level variable without re-importing, so
-    // we trust the cookie fallback path is exercised when _csrfToken is "".
-    // The initial import already tested cookie reading (abc123).
+    // ── _resetCsrfTokenForTesting clears in-memory token ───────────────
+    _resetCsrfTokenForTesting();
+    global.document = { cookie: "_csrf=after-reset" };
+    assert.equal(getCsrfToken(), "after-reset", "After reset, should fall back to cookie");
 
     console.log("✅ csrf: all checks passed");
   } catch (err) {

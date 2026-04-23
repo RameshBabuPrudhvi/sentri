@@ -6,7 +6,7 @@
  * a configurable number of days (default 90, env `STALE_TEST_DAYS`).
  *
  * Called by the weekly background job in `scheduler.js` and can also be
- * invoked manually via `POST /api/v1/system/detect-stale`.
+ * invoked programmatically via `detectStaleTests(projectIds)`.
  *
  * When called without arguments from the cron job, scans each workspace
  * independently so logging and counts are per-workspace (multi-tenant safe).

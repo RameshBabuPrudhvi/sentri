@@ -2,12 +2,14 @@
  * @module utils/flakyDetector
  * @description Compute and persist flaky scores for tests (DIF-004).
  *
- * A test is "flaky" when it alternates between passing and failing across
- * runs.  The flaky score (0–100) represents the alternation rate:
+ * A test is "flaky" when it sometimes passes and sometimes fails across
+ * runs.  The flaky score (0–100) represents the pass/fail balance ratio:
  *   `flakyScore = (min(passes, fails) / total) * 100`
  *
- * A score of 0 means the test always produces the same result.
+ * A score of 0 means the test always produces the same result (all pass or all fail).
  * A score of 50 means it passes and fails equally often (maximally flaky).
+ * Note: the score measures the *proportion* of minority outcomes, not the
+ * sequential alternation pattern — PPPPPFFFFF and PFPFPFPFPF both score 50.
  *
  * Called after each test run by `testRunner.js` via `runFeedbackLoop`.
  * The score is persisted to `tests.flakyScore` for dashboard display,

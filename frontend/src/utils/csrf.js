@@ -41,3 +41,13 @@ export function getCsrfToken() {
     return match.split("=")[1]?.trim() || "";
   } catch { return ""; }
 }
+
+/**
+ * Reset the in-memory CSRF token.  **Test-only** — allows unit tests to
+ * exercise the cookie-fallback path in {@link getCsrfToken} without
+ * re-importing the module (ESM caches singletons).
+ * @private
+ */
+export function _resetCsrfTokenForTesting() {
+  _csrfToken = "";
+}
