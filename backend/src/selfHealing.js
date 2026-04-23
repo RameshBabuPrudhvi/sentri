@@ -531,6 +531,18 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.getByRole('checkbox', { name: labelOrText }),
           p => p.getByLabel(labelOrText),
           p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+          // List/row scoped fallbacks — common in TodoMVC, task trackers,
+          // bug queues, settings lists. The checkbox sits inside the li/tr/
+          // .item/.row and the readable label is a sibling of (not on) the
+          // checkbox, so getByRole+name / getByLabel never match. Scope to
+          // the container by hasText first, then pick the checkbox within.
+          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
         ];
 
       await retry(async () => {
@@ -550,6 +562,14 @@ export function getSelfHealingHelperCode(healingHints) {
           p => p.getByRole('checkbox', { name: labelOrText }),
           p => p.getByLabel(labelOrText),
           p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+          // Mirror safeCheck's list/row scoped fallbacks — identical structure.
+          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
+          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
         ];
 
       await retry(async () => {
@@ -1217,18 +1237,20 @@ INTERACTIONS — use standard Playwright methods:
   await page.getByText('Sign in').click()
   await page.keyboard.press('Enter')
 
-ASSERTIONS — inline locators inside expect():
+ASSERTIONS — inline semantic locators inside expect():
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
   await expect(page.getByText('Welcome')).toBeVisible()
   await expect(page.locator('.results')).toHaveCount(3)
-  await expect(page.locator('.results')).toContainText('search term')
+  await expect(page.getByText('search term')).toBeVisible()
   await expect(page).toHaveURL(/hostname/i)  — hostname-only regex, never exact URL
 
 RULES:
-  ✓ Prefer getByRole, getByLabel, getByText, getByPlaceholder over CSS selectors
-  ✓ Always inline locators inside expect() — never assign to a variable
-  ✓ Use { waitUntil: 'domcontentloaded' } after page.goto — never networkidle
-  ✗ NEVER use page.click('selector') or page.fill('selector', val) — use locator chains
+  ✓ Prefer getByRole, getByLabel, getByText, getByPlaceholder over CSS
+  ✓ Inline locators inside expect() — never assign to a variable
+  ✓ Use { waitUntil: 'domcontentloaded' } after page.goto
+  ✗ NEVER use page.click('sel') or page.fill('sel', val) — use locator chains
+  ✗ NEVER use expect(page.locator('css')).toBeVisible()/.toContainText() —
+       use getByText/getByRole for visibility/text
   ✗ NEVER hard-code dynamic values (dates, IDs, counts) — use regex patterns`.trim();
 
 // Full self-healing helper rules for cloud models.
@@ -1283,15 +1305,18 @@ MOUSE (coordinate-based — use only when no element label exists):
   ✓ await page.mouse.move(x, y)
   ✓ await page.mouse.wheel(0, 500)         — for scrolling
 
-VISIBILITY ASSERTIONS — use safeExpect instead of raw locators:
+VISIBILITY ASSERTIONS — use safeExpect (NOT raw page.locator):
   ✓ await safeExpect(page, expect, text)           — assert any element is visible
   ✓ await safeExpect(page, expect, text, 'button') — scoped to a role
+  ✗ await expect(page.locator('.class')).toBeVisible()  — rejected by the validator
+  ✗ await expect(page.locator('#id')).toContainText('X') — rejected; use safeExpect(page, expect, 'X')
+  ✗ await expect(page.locator('.x')).toHaveText('X')     — rejected; use safeExpect(page, expect, 'X')
 
-COUNT / VALUE / STATE ASSERTIONS — use page.locator() scoped to a semantic selector:
+COUNT / VALUE / STATE / ATTRIBUTE ASSERTIONS — page.locator() IS allowed:
   ✓ await expect(page.locator(...)).toHaveCount(5);
   ✓ await expect(page.locator(...)).toHaveValue('expected');
   ✓ await expect(page.locator(...)).not.toHaveCount(0);
-  ✓ await expect(page.locator(...)).toBeHidden();
+  ✓ await expect(page.locator(...)).toBeHidden();             — scoped with a semantic selector
   ✓ await expect(page.locator(...)).toHaveAttribute('href', /expected/);
   ✓ await expect(page.locator(...)).toHaveClass(/active/);
   ✓ await expect(page.locator(...)).toHaveCSS('color', 'rgb(0, 0, 0)');
@@ -1303,7 +1328,6 @@ COUNT / VALUE / STATE ASSERTIONS — use page.locator() scoped to a semantic sel
 OTHER ASSERTIONS — these are fine as-is (do not wrap them):
   ✓ await expect(page).toHaveURL(...)
   ✓ await expect(page).toHaveTitle(...)
-  ✓ await expect(locator).toContainText(...)
   ✓ await expect(locator).toHaveValue(...)
   ✓ await expect(locator).toBeEnabled()
   ✓ await expect(locator).toBeDisabled()

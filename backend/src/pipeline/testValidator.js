@@ -4,10 +4,11 @@
  * Pure function — no external dependencies beyond the shared type enum.
  *
  * Exports:
- *   validateTest(test, projectUrl)     → string[]  (empty = valid)
- *   validateLocators(code)             → string[]
- *   validateActions(code)              → string[]
- *   validateAssertions(code)           → string[]
+ *   validateTest(test, projectUrl)          → string[]  (empty = valid)
+ *   validateLocators(code)                  → string[]
+ *   validateActions(code)                   → string[]
+ *   validateAssertions(code)                → string[]
+ *   validateSafeHelperUsage(code)           → string[]
  */
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
@@ -197,6 +198,107 @@ export function validateAssertions(code) {
     }
   }
 
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Safe-helper enforcement (TC-7 regression) — raw-CSS `expect(page.locator(...))`
+// chains bypass the self-healing waterfall, so a brittle class rename or
+// empty-state edge case silently fails the whole test. Force the AI to use
+// either a semantic locator (getByRole / getByText / getByLabel / getByTestId)
+// or the `safeExpect(page, expect, text, role?)` helper, which falls back
+// through ~20 role/text/label strategies.
+// ---------------------------------------------------------------------------
+
+/**
+ * Matchers that have a safe-helper equivalent and therefore should not be
+ * chained off a raw `page.locator(<cssSelector>)` expression. Tests that
+ * combine these with raw-CSS locators are rejected so the generator retries.
+ *
+ * NOTE: `toHaveCount`, `toBeHidden`, `toHaveValue`, `toHaveAttribute`,
+ * `toHaveClass`, and `toHaveCSS` are intentionally **not** listed here —
+ * the `SELF_HEALING_PROMPT_RULES` in `selfHealing.js` explicitly tells the
+ * AI to use `page.locator(...)` for count/state/attribute assertions, so
+ * rejecting those would contradict the generation prompt. Only visibility
+ * and textual-content assertions are enforced to go through `safeExpect`.
+ */
+const SAFE_HELPER_MATCHERS = new Set([
+  "toBeVisible",
+  "toContainText",
+  "toHaveText",
+]);
+
+/**
+ * Captures `expect(page.locator(<literal>)).[not.]<matcher>(...)` chains.
+ * Only literal-string locator arguments are matched — dynamic locator
+ * expressions (variables, chained `.first()`, etc.) are outside scope and
+ * get a pass. Three quote alternations mirror the other RE helpers so
+ * inner quotes (`"[data-id='x']"`) don't truncate the capture.
+ */
+const EXPECT_LOCATOR_RE =
+  /expect\s*\(\s*page\s*\.\s*locator\s*\(\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`)\s*\)\s*\)\s*(?:\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+
+/**
+ * Lightweight CSS/XPath heuristic — mirrors `looksLikeCssSelector` in
+ * `selfHealing.js`, kept here to avoid a circular import between the pipeline
+ * and runtime-helper modules. Human text like "Email:" / "Add new task"
+ * returns false so those chains (which semantically match text) aren't
+ * wrongly rejected.
+ *
+ * @param {string} arg
+ * @returns {boolean}
+ */
+function looksLikeSelector(arg) {
+  if (!arg || typeof arg !== "string") return false;
+  const s = arg.trim();
+  return /^[#.[/]|^\/\//.test(s)
+    || /(?:[\w\])])\s[>~+]\s(?:[\w#.[:])/.test(s)
+    || /\w\[[^\]]+\]/.test(s)
+    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
+}
+
+/**
+ * validateSafeHelperUsage(code) → string[]
+ *
+ * Rejects `expect(page.locator('<cssSelector>')).<visibilityMatcher>(...)`
+ * chains. These bypass the self-healing locator waterfall and so fail
+ * silently when the class/id is renamed or the element only renders in a
+ * subset of UI states (the TC-7 regression where `.todo-count` was missing
+ * in TodoMVC's empty state).
+ *
+ * The AI is expected to use one of:
+ *   - `await safeExpect(page, expect, '<visible text>', '<role>')`
+ *   - `expect(page.getByRole('<role>', { name: '<text>' })).<matcher>(...)`
+ *   - `expect(page.getByText('<text>')).<matcher>(...)`
+ *
+ * Human-readable arguments (e.g. `locator('Submit')`) are a no-op for
+ * `page.locator()` anyway — Playwright will simply fail to find them —
+ * so they're left for the existing locator validator to flag.
+ *
+ * @param {string} code
+ * @returns {string[]}
+ */
+export function validateSafeHelperUsage(code) {
+  if (!code) return [];
+  const issues = [];
+  const seen = new Set();
+  let m;
+  EXPECT_LOCATOR_RE.lastIndex = 0;
+  while ((m = EXPECT_LOCATOR_RE.exec(code)) !== null) {
+    const selector = m[1] || m[2] || m[3];
+    const matcher = m[4];
+    if (!SAFE_HELPER_MATCHERS.has(matcher)) continue;
+    if (!looksLikeSelector(selector)) continue;
+    const key = `${matcher}::${selector}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    issues.push(
+      `raw-CSS locator assertion expect(page.locator("${selector}")).${matcher}(...) — `
+      + `use safeExpect(page, expect, "<visible text>") or a semantic locator `
+      + `(getByRole/getByText/getByLabel/getByTestId) so the assertion survives `
+      + `class renames and empty-state edge cases`
+    );
+  }
   return issues;
 }
 
@@ -440,6 +542,7 @@ export function validateTest(test, projectUrl) {
       issues.push(...validateLocators(codeToCheck));
       issues.push(...validateActions(codeToCheck));
       issues.push(...validateAssertions(codeToCheck));
+      issues.push(...validateSafeHelperUsage(codeToCheck));
     } catch (syntaxErr) {
       const loc = syntaxErr.loc ? ` (line ${syntaxErr.loc.line}, col ${syntaxErr.loc.column})` : "";
       issues.push(`playwrightCode has syntax error${loc}: ${syntaxErr.message}`);
