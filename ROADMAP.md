@@ -1210,6 +1210,24 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
+### MNT-011 — Persist crawl/generate dialsConfig on run record 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** PR #100 Devin review
+
+**Problem:** The "Re-run" button on `RunDetail.jsx` (MNT-010) calls `api.crawl(projectId)` without passing any configuration body. The original crawl was started from `CrawlProjectModal.jsx` with `api.crawl(projectId, { dialsConfig })`, where `dialsConfig` includes the explore mode, explorer tuning parameters, test count, approach, format, and other dials. Without this config, the re-run uses server defaults — silently switching from state exploration back to link crawl mode, using different test counts, and producing completely different results than the original run.
+
+**Fix:** Store the `dialsConfig` on the run record in the backend when the crawl is initiated. Add a `dialsConfig` TEXT (JSON) column to the `runs` table. Populate it in `routes/runs.js` when creating the run. On re-run, `RunDetail.jsx` reads `run.dialsConfig` and passes it to `api.crawl(projectId, { dialsConfig: run.dialsConfig })`. Same pattern for generate runs with `run.generateInput`.
+
+**Files to change:**
+- `backend/src/database/migrations/` — add `dialsConfig` TEXT column to `runs`
+- `backend/src/database/repositories/runRepo.js` — add `dialsConfig` to `JSON_FIELDS` and `INSERT_COLS`
+- `backend/src/routes/runs.js` — store `dialsConfig` on the run record at creation time
+- `frontend/src/pages/RunDetail.jsx` — pass `run.dialsConfig` in `handleRerun`
+
+**Dependencies:** MNT-010 (re-run button must exist first)
+
+---
+
 ### MNT-008 — ESLint + Prettier enforcement in CI 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Quality Review (PRD-04)
@@ -1275,7 +1293,7 @@ The following items have been verified complete against the codebase and are **n
 | Platform Features | FEA-001–003 | — | ~~FEA-001~~ ✅ | FEA-002, ~~FEA-003~~ ✅ |
 | Differentiators | DIF-001–016 | — | DIF-015 | Remainder |
 | Autonomous Intelligence | AUTO-001–022 | — | AUTO-005, AUTO-012, AUTO-016 | Remainder |
-| Maintenance | MNT-001–010 | MNT-009 | MNT-006 | Remainder |
+| Maintenance | MNT-001–011 | MNT-009 | MNT-006 | Remainder |
 
 **Total active items:** 63 tracked items across 7 categories
 
