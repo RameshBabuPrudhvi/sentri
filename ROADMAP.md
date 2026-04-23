@@ -1292,12 +1292,12 @@ The following items have been verified complete against the codebase and are **n
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
-| Differentiators | 13 | 5 | 0 | 8 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
+| Differentiators | 16 | 5 | 0 | 11 | DIF-001, 002, 005, 006, 007, 008, 009, 010, 012, 013, 015 |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **61** | **22** | **0** | **39** | |
+| **Totals** | **64** | **22** | **0** | **42** | |
 
-**Total tracked items:** 61 across 7 categories — **22 complete** (36%), **0 in progress**, **39 remaining**
+**Total tracked items:** 64 across 7 categories — **22 complete** (34%), **0 in progress**, **42 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
