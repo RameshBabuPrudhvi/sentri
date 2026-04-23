@@ -90,7 +90,7 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.3.0";
+export const PROMPT_VERSION = "2.4.0";
 
 export function buildSystemPrompt() {
   const tier = getTier();
