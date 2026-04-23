@@ -1268,7 +1268,6 @@ The following items have been verified complete against the codebase and are **n
 | Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ✅ DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
-<!-- Sentri targets Teams/email/webhook — see FEA-001 -->
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
