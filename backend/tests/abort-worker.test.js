@@ -44,14 +44,14 @@ function test(name, fn) {
  */
 function simulateAbortLookup(runId, runAbortControllers, workerAbortControllers) {
   const entry = runAbortControllers.get(runId);
-  const workerController = workerAbortControllers.get(runId);
+  const workerEntry = workerAbortControllers.get(runId);
 
   if (entry) {
     entry.controller.abort();
     runAbortControllers.delete(runId);
     return { source: "in-process", aborted: true };
-  } else if (workerController) {
-    workerController.abort();
+  } else if (workerEntry) {
+    workerEntry.controller.abort();
     workerAbortControllers.delete(runId);
     return { source: "worker", aborted: true };
   }
@@ -75,7 +75,7 @@ test("in-process controller is preferred when both registries have entries", () 
   });
 
   const workerAbortControllers = new Map();
-  workerAbortControllers.set(runId, workerController);
+  workerAbortControllers.set(runId, { controller: workerController, provider: "local" });
 
   const result = simulateAbortLookup(runId, runAbortControllers, workerAbortControllers);
 
@@ -93,7 +93,7 @@ test("worker controller is used when in-process registry has no entry", () => {
 
   const runAbortControllers = new Map();
   const workerAbortControllers = new Map();
-  workerAbortControllers.set(runId, workerController);
+  workerAbortControllers.set(runId, { controller: workerController, provider: "anthropic" });
 
   const result = simulateAbortLookup(runId, runAbortControllers, workerAbortControllers);
 
@@ -125,7 +125,7 @@ test("abort signal is actually received by the controller", () => {
 
   const runAbortControllers = new Map();
   const workerAbortControllers = new Map();
-  workerAbortControllers.set(runId, workerController);
+  workerAbortControllers.set(runId, { controller: workerController, provider: "local" });
 
   simulateAbortLookup(runId, runAbortControllers, workerAbortControllers);
 
@@ -138,8 +138,8 @@ test("aborting one run does not affect another run's controller", () => {
 
   const controller1 = new AbortController();
   const controller2 = new AbortController();
-  workerAbortControllers.set("RUN-A", controller1);
-  workerAbortControllers.set("RUN-B", controller2);
+  workerAbortControllers.set("RUN-A", { controller: controller1, provider: "local" });
+  workerAbortControllers.set("RUN-B", { controller: controller2, provider: "openai" });
 
   simulateAbortLookup("RUN-A", runAbortControllers, workerAbortControllers);
 

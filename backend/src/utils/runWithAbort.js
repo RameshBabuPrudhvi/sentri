@@ -7,7 +7,7 @@
  *
  * ### Exports
  * - {@link runWithAbort} — Execute an async function with abort support.
- * - {@link runAbortControllers} — `Map<runId, { controller: AbortController, run: Object }>` registry.
+ * - {@link runAbortControllers} — `Map<runId, { controller: AbortController, run: Object, provider: string|null }>` registry.
  */
 
 import { emitRunEvent } from "../routes/sse.js";
@@ -16,12 +16,15 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import { classifyError } from "./errorClassifier.js";
 import { formatLogLine } from "./logFormatter.js";
+import { captureProvider } from "./activeRuns.js";
 
 // ─── Abort registry: runId → AbortController ──────────────────────────────────
 // Allows in-progress crawl / generate / test_run operations to be cancelled.
-// Maps runId → { controller: AbortController, run: Object }
+// Maps runId → { controller: AbortController, run: Object, provider: string|null }
 // Storing the run reference lets the abort endpoint mutate the same
 // in-memory object the pipeline holds, preventing status overwrites.
+// Storing the provider lets the chat endpoint skip runs that aren't using
+// Ollama when checking for concurrent LLM activity.
 export const runAbortControllers = new Map();
 
 /**
@@ -36,7 +39,11 @@ export const runAbortControllers = new Map();
  */
 export function runWithAbort(runId, run, asyncFn, { onSuccess, onFailActivity, actorInfo, onComplete }) {
   const abortController = new AbortController();
-  runAbortControllers.set(runId, { controller: abortController, run });
+  // Capture the provider at start time so the chat busy guard can accurately
+  // filter to runs actually using Ollama. If the user switches providers
+  // mid-run, the captured value stays the same — matching the provider the
+  // pipeline's LLM calls are pinned to via the sticky fallback mechanism.
+  runAbortControllers.set(runId, { controller: abortController, run, provider: captureProvider() });
 
   asyncFn(abortController.signal)
     .then((result) => {

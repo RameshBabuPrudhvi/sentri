@@ -16,7 +16,7 @@
  *
  * ### Exports
  * - {@link getTier}           — Returns `"cloud"` or `"local"` based on the active provider.
- * - {@link TIER_CONFIG}       — Per-tier configuration (maxElements, fewShot, etc.).
+ * - {@link TIER_CONFIG}       — Per-tier configuration (maxElements).
  * - {@link getAssertionRules} — Tier-aware assertion rules.
  * - {@link getStabilityRules} — Tier-aware stability rules.
  * - {@link getCodeRequirements} — Tier-aware code requirement block.
@@ -26,23 +26,13 @@ import { isLocalProvider } from "../../aiProvider.js";
 
 /**
  * @typedef {Object} TierConfig
- * @property {string}  name          - Tier name (`"cloud"` or `"local"`).
- * @property {number}  maxElements   - Max DOM elements to include in prompts.
- * @property {boolean} includeFewShot - Whether to include few-shot examples.
+ * @property {number} maxElements - Max DOM elements to include in prompts.
  */
 
 /** @type {Object<string, TierConfig>} */
 export const TIER_CONFIG = {
-  cloud: {
-    name: "cloud",
-    maxElements: 50,
-    includeFewShot: true,
-  },
-  local: {
-    name: "local",
-    maxElements: 15,
-    includeFewShot: false,
-  },
+  cloud: { maxElements: 50 },
+  local: { maxElements: 15 },
 };
 
 /**

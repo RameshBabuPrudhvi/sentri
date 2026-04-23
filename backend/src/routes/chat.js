@@ -27,8 +27,7 @@ import * as runRepo from "../database/repositories/runRepo.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
-import { runAbortControllers } from "../utils/runWithAbort.js";
-import { workerAbortControllers } from "../workers/runWorker.js";
+import { hasActiveRunForProvider } from "../utils/activeRuns.js";
 
 const router = Router();
 
@@ -330,17 +329,10 @@ router.post("/chat", async (req, res) => {
   }
 
   // Ollama is single-threaded — concurrent requests cause hangs or crashes.
-  // When a crawl/generate/test run is actively making LLM calls via the
-  // in-process runner, reject chat requests with a helpful message instead
-  // of sending a concurrent request that will hang indefinitely.
-  //
-  // Known limitation: runAbortControllers and workerAbortControllers track
-  // ALL active runs regardless of which AI provider they use. If a run was
-  // started with a cloud provider and the user then switches to Ollama in
-  // Settings, the cloud run's entry still blocks chat. In practice this is
-  // rare (provider switching mid-run) and the conservative false-positive
-  // is preferable to letting a concurrent Ollama request hang the model.
-  if (isLocalProvider() && (runAbortControllers.size > 0 || workerAbortControllers.size > 0)) {
+  // Reject chat when an Ollama-backed run is already in progress (either the
+  // in-process runner or a BullMQ worker). Cloud runs don't block chat, even
+  // when the user has since switched to Ollama in Settings.
+  if (isLocalProvider() && hasActiveRunForProvider("local")) {
     return res.status(503).json({
       error: "AI is busy with an active run — Ollama can only process one request at a time. Wait for the run to finish, or abort it first, then try again.",
     });

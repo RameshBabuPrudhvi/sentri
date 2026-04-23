@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Frontend**: `useLogBuffer` showed stale logs from previous run when navigating to a re-run with fewer log entries — changed `>` to `!==` comparison so the buffer resets on any length change (#100)
 - **Frontend**: SiteGraph D3 simulation leaked on early return when `pages.length === 0` — now always returns a cleanup function that calls `sim.stop()`, preventing ghost animations (#100)
 - **AI Chat**: Ollama chat requests during an active crawl/generate run caused Ollama to hang (single-threaded model) — chat endpoint now returns 503 "AI is busy" when Ollama is the provider and an in-process run is active (#100)
+- **AI Chat**: Ollama busy guard now filters by the provider each active run is using — previously a cloud-provider (Anthropic/OpenAI/Google) run would incorrectly block chat when the user switched to Ollama mid-run. Each run's provider is captured at start time on both `runAbortControllers` (in-process) and `workerAbortControllers` (BullMQ) registries so the chat endpoint can accurately distinguish Ollama-using runs from cloud runs (#100)
 
 ## [1.6.2] — 2026-04-23
 
