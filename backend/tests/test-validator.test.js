@@ -29,7 +29,7 @@
  */
 
 import assert from "node:assert/strict";
-import { validateTest } from "../src/pipeline/testValidator.js";
+import { validateTest, validateSafeHelperUsage } from "../src/pipeline/testValidator.js";
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 
@@ -655,6 +655,102 @@ test("nested parentheses in expect() are handled", () => {
 test("empty code produces no issues", () => {
   assert.equal(validateAssertions("").length, 0);
   assert.equal(validateAssertions(null).length, 0);
+});
+
+// ── Safe-helper enforcement (TC-7 regression) ────────────────────────────────
+// Rejects raw-CSS `expect(page.locator(...))` chains on visibility / text
+// matchers so the generator retries with a semantic locator or safeExpect.
+console.log("\n🔒 validateSafeHelperUsage — raw-CSS expect chains");
+
+test("rejects expect(page.locator('.class')).toBeVisible()", () => {
+  const code = `await expect(page.locator('.todo-count')).toBeVisible();`;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1, `Expected 1 issue, got ${JSON.stringify(issues)}`);
+  assert.match(issues[0], /\.toBeVisible/);
+  assert.match(issues[0], /safeExpect/);
+});
+
+test("rejects expect(page.locator('#id')).toContainText('text')", () => {
+  const code = `await expect(page.locator('#msg')).toContainText('Hello');`;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /toContainText/);
+});
+
+test("rejects expect(page.locator('.x')).toHaveText('text')", () => {
+  const code = `await expect(page.locator('.foo')).toHaveText('bar');`;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /toHaveText/);
+});
+
+test("allows expect(page.locator(...)).toHaveCount(n) — count is not enforced", () => {
+  const code = `await expect(page.locator('.todo-list li')).toHaveCount(3);`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("allows expect(page.locator(...)).toBeHidden() — state is not enforced", () => {
+  const code = `await expect(page.locator('.spinner')).toBeHidden();`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("allows expect(page.locator(...)).toHaveAttribute(...) — attribute is not enforced", () => {
+  const code = `await expect(page.locator('a.external')).toHaveAttribute('href', /example/);`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("allows expect(page.getByText('x')).toBeVisible() — semantic locator OK", () => {
+  const code = `await expect(page.getByText('Welcome')).toBeVisible();`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("allows expect(page.getByRole('heading', { name: 'x' })).toBeVisible() — semantic OK", () => {
+  const code = `await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("allows expect(page.locator('plain-text-label')).toBeVisible() — not a CSS selector", () => {
+  // The existing locator validator will flag this; safe-helper gate intentionally passes.
+  const code = `await expect(page.locator('Welcome message')).toBeVisible();`;
+  assert.deepEqual(validateSafeHelperUsage(code), []);
+});
+
+test("handles .not chain — expect(page.locator('.x')).not.toBeVisible()", () => {
+  const code = `await expect(page.locator('.loader')).not.toBeVisible();`;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1, "Raw-CSS .not.toBeVisible should still be flagged");
+});
+
+test("de-duplicates repeated violations", () => {
+  const code = `
+    await expect(page.locator('.foo')).toBeVisible();
+    await expect(page.locator('.foo')).toBeVisible();
+  `;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1, "Identical violations are de-duplicated");
+});
+
+test("reports distinct violations separately", () => {
+  const code = `
+    await expect(page.locator('.foo')).toBeVisible();
+    await expect(page.locator('.bar')).toContainText('x');
+  `;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 2);
+});
+
+test("TC-7 regression — flags the exact AI-generated pattern from RUN-6", () => {
+  const code = `await expect(page.locator('.todo-count')).toContainText('0 items left');`;
+  const issues = validateSafeHelperUsage(code);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /todo-count/);
+  assert.match(issues[0], /safeExpect/);
+});
+
+test("empty code produces no safe-helper issues", () => {
+  assert.equal(validateSafeHelperUsage("").length, 0);
+  assert.equal(validateSafeHelperUsage(null).length, 0);
+  assert.equal(validateSafeHelperUsage(undefined).length, 0);
 });
 
 // ── Results ───────────────────────────────────────────────────────────────────
