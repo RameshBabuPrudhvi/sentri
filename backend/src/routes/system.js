@@ -57,7 +57,21 @@ router.post("/test-connection", requireRole("qa_lead"), async (req, res) => {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     return res.status(400).json({ error: "URL must use http or https protocol" });
   }
-  // SSRF protection: block loopback, link-local, and private IP ranges
+  // SSRF protection: block loopback, link-local, and private IP ranges.
+  //
+  // Dev escape hatch — when `ALLOW_PRIVATE_URLS=true`, skip the SSRF check so
+  // developers can Test against `http://localhost:3000`, Dockerised stacks, or
+  // internal staging hostnames (mirrors the `SKIP_EMAIL_VERIFICATION` pattern).
+  // Never set this in production — it permits SSRF to cloud metadata endpoints
+  // (169.254.169.254), databases on the local network, etc.
+  if (process.env.ALLOW_PRIVATE_URLS === "true") {
+    try {
+      const response = await fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(10000) });
+      return res.json({ ok: true, status: response.status });
+    } catch (err) {
+      return res.status(502).json({ ok: false, error: err.message });
+    }
+  }
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
 
   function extractMappedIPv4(host) {

@@ -1000,6 +1000,7 @@ The following are **not yet implemented** but should be addressed before product
 | `SMTP_PASS` | No | — | SMTP password |
 | `EMAIL_FROM` | No | `Sentri <noreply@sentri.dev>` | Sender address for transactional emails |
 | `SKIP_EMAIL_VERIFICATION` | No | `false` | When `"true"`, registration auto-verifies users (dev/CI only — never set in production) |
+| `ALLOW_PRIVATE_URLS` | No | `false` | When `"true"`, `POST /api/v1/test-connection` skips its SSRF guard so developers can test against `http://localhost:3000`, Docker services, or internal staging hostnames. **Never set in production** — permits requests to cloud metadata (169.254.169.254) and local-network databases. |
 | `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution (INF-003). Ignored when Redis/BullMQ is not available. |
 | `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads (e.g. `https://sentri.example.com`). Falls back to `CORS_ORIGIN`, then `http://localhost:3000`. |
 | `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection (SEC-002). Only needed when the frontend dist is not at the default location. In Docker, set to `/usr/share/frontend/index.html` (shared volume). |
