@@ -61,7 +61,12 @@ test("emits a runnable test skeleton even for zero actions", () => {
   assert.match(code, /await expect\(page\)\.toHaveURL\(\/\.\*\/\);/);
 });
 
-test("translates a mixed action list into safeClick / safeFill / keyboard.press", () => {
+test("translates a mixed action list into self-healing helpers and keyboard.press", () => {
+  // All element interactions (click, fill, select, check, uncheck) must route
+  // through their self-healing helper so recorded tests benefit from the
+  // waterfall on first replay — `bestSelector()` produces CSS-looking output
+  // that the `applyHealingTransforms` regex guard refuses to rewrite, so
+  // `actionsToPlaywrightCode` is the last chance to pick the safe helper.
   const code = actionsToPlaywrightCode("Login flow", "https://example.com/login", [
     { kind: "click", selector: "#submit", ts: 1 },
     { kind: "fill", selector: "#email", value: "user@example.com", ts: 2 },
@@ -74,10 +79,19 @@ test("translates a mixed action list into safeClick / safeFill / keyboard.press"
   assert.match(code, /await safeClick\(page, '#submit'\);/);
   assert.match(code, /await safeFill\(page, '#email', 'user@example\.com'\);/);
   assert.match(code, /await page\.keyboard\.press\('Enter'\);/);
-  assert.match(code, /await page\.selectOption\('#country', 'US'\);/);
-  assert.match(code, /await page\.check\('#agree'\);/);
-  assert.match(code, /await page\.uncheck\('#agree'\);/);
+  assert.match(code, /await safeSelect\(page, '#country', 'US'\);/);
+  assert.match(code, /await safeCheck\(page, '#agree'\);/);
+  assert.match(code, /await safeUncheck\(page, '#agree'\);/);
   assert.match(code, /await page\.goto\('https:\/\/example\.com\/dashboard'\);/);
+  // Defence-in-depth: the raw Playwright calls must NOT appear anywhere in
+  // the generated code — this catches accidental revert of the self-healing
+  // dispatch in `actionsToPlaywrightCode`.
+  assert.doesNotMatch(code, /\bawait\s+page\.selectOption\(/,
+    "recorder must not emit raw page.selectOption() — use safeSelect");
+  assert.doesNotMatch(code, /\bawait\s+page\.check\(/,
+    "recorder must not emit raw page.check() — use safeCheck");
+  assert.doesNotMatch(code, /\bawait\s+page\.uncheck\(/,
+    "recorder must not emit raw page.uncheck() — use safeUncheck");
 });
 
 test("skips actions with missing selectors / keys / urls", () => {
@@ -186,7 +200,10 @@ test("generated code is always syntactically parseable regardless of captured va
     assert.ok(bodyMatch, `generated code should have the expected wrapper shape for input ${JSON.stringify(s)}`);
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     assert.doesNotThrow(
-      () => new AsyncFunction("page", "expect", "safeClick", "safeFill", bodyMatch[1]),
+      // All self-healing helper names must be in scope for the parsed body —
+      // the generated code now references safeSelect / safeCheck / safeUncheck
+      // in addition to safeClick / safeFill.
+      () => new AsyncFunction("page", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", bodyMatch[1]),
       `generated body should parse for input ${JSON.stringify(s)}`,
     );
   }

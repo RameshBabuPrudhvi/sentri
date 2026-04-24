@@ -225,11 +225,23 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: Press ${escapeJsSingleQuote(a.key)}`);
       lines.push(`await page.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
     } else if (a.kind === "select" && sel) {
+      // Route through the self-healing helper so recorded selects benefit
+      // from the safeSelect waterfall (getByLabel → getByRole('combobox') →
+      // aria-label fallback). `applyHealingTransforms` won't rewrite a raw
+      // `page.selectOption('#css', ...)` because `bestSelector()` always
+      // produces CSS-looking output, so emit `safeSelect` directly here to
+      // stay consistent with how `safeClick` and `safeFill` are handled
+      // above.
       lines.push(`// Step ${stepNo}: Select option`);
-      lines.push(`await page.selectOption('${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      lines.push(`await safeSelect(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if ((a.kind === "check" || a.kind === "uncheck") && sel) {
+      // Same rationale as safeSelect above — the recorder's CSS-looking
+      // selectors bypass the applyHealingTransforms regex guard, so emit
+      // safeCheck/safeUncheck directly. These helpers gained list/row
+      // scoped fallbacks in PR #103 for TodoMVC-style patterns, which
+      // recorded checkboxes benefit from for free.
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
-      lines.push(`await page.${a.kind === "check" ? "check" : "uncheck"}('${sel}');`);
+      lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(page, '${sel}');`);
     } else {
       continue;
     }
