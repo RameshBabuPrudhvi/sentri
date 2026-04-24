@@ -48,6 +48,54 @@ async function main() {
     });
     const authCookie = `access_token=${token}`;
 
+    // ── Shared helpers ───────────────────────────────────────────────────────
+    // Every test below posts `{ url }` to `/api/test-connection` with the same
+    // auth cookie and parses the JSON response. `probe(body)` captures that
+    // shape in one place so future test additions are a single-line call.
+    const probe = (body) => req(base, "/api/test-connection", {
+      method: "POST", cookie: authCookie, body,
+    });
+
+    // Every escape-hatch test sets `ALLOW_PRIVATE_URLS=true`, optionally installs
+    // a fetch stub, runs the assertion, then restores both. `withEscapeHatch()`
+    // encapsulates the setup/teardown so a new test only specifies the probe
+    // behaviour (a stub function) and the assertion body.
+    const realFetch = global.fetch;
+    const PROBE_TARGET = "http://localhost:9999/probe";
+    /**
+     * Install a selective fetch stub that only intercepts the outbound HEAD
+     * probe the route fires at `PROBE_TARGET`. All other traffic (the test
+     * client's inbound calls to the Express server) still uses the real fetch
+     * so auth cookies, CSRF, and JSON parsing keep working.
+     *
+     * @param {(init: object) => Response|Promise<Response>|never} stub
+     *   Returns the response to serve for the probe. Throw to simulate a
+     *   network failure (ECONNREFUSED, DNS, TLS).
+     */
+    function installProbeStub(stub) {
+      global.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url === PROBE_TARGET && init?.method === "HEAD") return stub(init);
+        return realFetch(input, init);
+      };
+    }
+    /**
+     * Run `fn` with `ALLOW_PRIVATE_URLS=true` and optionally a probe fetch
+     * stub. Always restores `global.fetch` and deletes the env var in finally,
+     * so tests can't leak state even if assertions throw.
+     *
+     * @param {{ stub?: Function }} opts
+     * @param {Function} fn
+     */
+    async function withEscapeHatch({ stub } = {}, fn) {
+      process.env.ALLOW_PRIVATE_URLS = "true";
+      if (stub) installProbeStub(stub);
+      try { await fn(); } finally {
+        global.fetch = realFetch;
+        delete process.env.ALLOW_PRIVATE_URLS;
+      }
+    }
+
     console.log("\n── Input validation ──────────────────────────────────────────");
 
     await test("401 without auth", async () => {
@@ -59,29 +107,22 @@ async function main() {
       assert.equal(r.status, 401);
     });
 
-    await test("400 when url is missing", async () => {
-      const out = await req(base, "/api/test-connection", {
-        method: "POST", cookie: authCookie, body: {},
+    // Table-driven input validation — one row per rejection vector so adding
+    // a new case is a single-line addition without copy-pasting boilerplate.
+    const INPUT_VALIDATION_CASES = [
+      { label: "400 when url is missing",          body: {},                              errorMatch: /url is required/i     },
+      { label: "400 for malformed URL",            body: { url: "not a url" },            errorMatch: /Invalid URL format/i  },
+      { label: "400 for non-http protocol (ftp)",  body: { url: "ftp://example.com" },    errorMatch: /http or https/i       },
+      { label: "400 for non-http protocol (file)", body: { url: "file:///etc/passwd" },   errorMatch: /http or https/i       },
+      { label: "400 for javascript: URI",          body: { url: "javascript:alert(1)" },  errorMatch: /http or https/i       },
+    ];
+    for (const { label, body, errorMatch } of INPUT_VALIDATION_CASES) {
+      await test(label, async () => {
+        const out = await probe(body);
+        assert.equal(out.res.status, 400, `expected 400, got ${out.res.status}: ${JSON.stringify(out.json)}`);
+        assert.match(out.json.error, errorMatch);
       });
-      assert.equal(out.res.status, 400);
-      assert.match(out.json.error, /url is required/i);
-    });
-
-    await test("400 for malformed URL", async () => {
-      const out = await req(base, "/api/test-connection", {
-        method: "POST", cookie: authCookie, body: { url: "not a url" },
-      });
-      assert.equal(out.res.status, 400);
-      assert.match(out.json.error, /Invalid URL format/i);
-    });
-
-    await test("400 for non-http protocol (ftp://)", async () => {
-      const out = await req(base, "/api/test-connection", {
-        method: "POST", cookie: authCookie, body: { url: "ftp://example.com" },
-      });
-      assert.equal(out.res.status, 400);
-      assert.match(out.json.error, /http or https/i);
-    });
+    }
 
     console.log("\n── SSRF defaults (ALLOW_PRIVATE_URLS unset) ──────────────────");
     // Sanity: the dev escape hatch must default to off so prod stays safe.
@@ -99,9 +140,7 @@ async function main() {
     ];
     for (const { url, label } of SSRF_CASES) {
       await test(`rejects ${label} (${url})`, async () => {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url },
-        });
+        const out = await probe({ url });
         assert.equal(out.res.status, 400, `expected 400, got ${out.res.status}: ${JSON.stringify(out.json)}`);
         assert.match(out.json.error, /localhost|private|internal/i);
       });
@@ -109,130 +148,85 @@ async function main() {
 
     console.log("\n── ALLOW_PRIVATE_URLS dev escape hatch ───────────────────────");
 
-    // Selective fetch stub — only intercepts outbound HEAD probes to the
-    // target URL the test-connection route issues. Inbound HTTP from `req()`
-    // to the test server still uses the real fetch so auth cookies, CSRF,
-    // and JSON parsing keep working. Avoids the flakiness of hitting
-    // `${base}/health` for real, which is at the mercy of the server's
-    // `AbortSignal.timeout(10000)` and the CI event loop.
-    const realFetch = global.fetch;
-    const PROBE_TARGET = "http://localhost:9999/probe";
-    function installProbeStub(status) {
-      global.fetch = async (input, init) => {
-        const url = typeof input === "string" ? input : input.url;
-        if (url === PROBE_TARGET && init?.method === "HEAD") {
-          return new Response(null, { status });
-        }
-        return realFetch(input, init);
-      };
+    // Table-driven escape-hatch probe outcomes. Each row specifies how the
+    // stubbed HEAD probe should behave and what the route's response must
+    // look like. Adding a new stubbed scenario (new status code, new error
+    // class) is a single-line row — no setup/teardown boilerplate.
+    const ESCAPE_HATCH_PROBE_CASES = [
+      {
+        label: "permits loopback — HEAD 204 → { ok:true, status:204 }",
+        stub: () => new Response(null, { status: 204 }),
+        assert: (out) => {
+          assert.equal(out.res.status, 200, `expected 200, got ${out.res.status}: ${JSON.stringify(out.json)}`);
+          assert.equal(out.json.ok, true);
+          assert.equal(out.json.status, 204);
+        },
+      },
+      {
+        // The route doesn't treat upstream 4xx/5xx as a failure — it surfaces
+        // whatever the target responded with so users can distinguish
+        // "unreachable" from "reachable but erroring".
+        label: "surfaces non-2xx status from the target (HEAD 500 → { ok:true, status:500 })",
+        stub: () => new Response(null, { status: 500 }),
+        assert: (out) => {
+          assert.equal(out.res.status, 200);
+          assert.equal(out.json.ok, true);
+          assert.equal(out.json.status, 500);
+        },
+      },
+      {
+        // Simulates DNS failure / connection refused / TLS handshake error.
+        label: "returns 502 when the target is unreachable (fetch throws)",
+        stub: () => { throw new Error("ECONNREFUSED"); },
+        assert: (out) => {
+          assert.equal(out.res.status, 502);
+          assert.equal(out.json.ok, false);
+          assert.match(out.json.error, /ECONNREFUSED/);
+        },
+      },
+    ];
+    for (const { label, stub, assert: check } of ESCAPE_HATCH_PROBE_CASES) {
+      await test(`ALLOW_PRIVATE_URLS=true — ${label}`, async () => {
+        await withEscapeHatch({ stub }, async () => {
+          const out = await probe({ url: PROBE_TARGET });
+          check(out);
+        });
+      });
     }
-    function restoreFetch() { global.fetch = realFetch; }
 
-    await test("ALLOW_PRIVATE_URLS=true permits loopback — HEAD succeeds via stubbed fetch", async () => {
-      // With the escape hatch enabled, the SSRF guard is skipped and the
-      // route performs a real HEAD request. We stub fetch so the probe
-      // resolves deterministically with HTTP 204, avoiding the
-      // AbortSignal.timeout(10000) race under CI load.
-      process.env.ALLOW_PRIVATE_URLS = "true";
-      installProbeStub(204);
-      try {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
+    // Table-driven pre-SSRF-guard checks — protocol/format validation must
+    // run BEFORE the escape hatch, so malformed URLs are still rejected even
+    // when `ALLOW_PRIVATE_URLS=true`. If a future route change moves one of
+    // these checks AFTER the hatch, these tests catch it.
+    const PRE_GUARD_REJECTION_CASES = [
+      { label: "non-http protocol (ftp://localhost)", body: { url: "ftp://localhost" }, errorMatch: /http or https/i      },
+      { label: "malformed URL",                       body: { url: "not a url" },       errorMatch: /Invalid URL format/i },
+    ];
+    for (const { label, body, errorMatch } of PRE_GUARD_REJECTION_CASES) {
+      await test(`ALLOW_PRIVATE_URLS=true still rejects ${label}`, async () => {
+        await withEscapeHatch({}, async () => {
+          const out = await probe(body);
+          assert.equal(out.res.status, 400);
+          assert.match(out.json.error, errorMatch);
         });
-        assert.equal(out.res.status, 200, `expected 200, got ${out.res.status}: ${JSON.stringify(out.json)}`);
-        assert.equal(out.json.ok, true);
-        assert.equal(out.json.status, 204);
-      } finally {
-        restoreFetch();
-        delete process.env.ALLOW_PRIVATE_URLS;
-      }
-    });
+      });
+    }
 
-    await test("ALLOW_PRIVATE_URLS=true surfaces non-2xx status from the target", async () => {
-      // The route does not treat 4xx/5xx as a failure — it returns whatever
-      // the upstream responded with so users can distinguish "unreachable"
-      // from "reachable but erroring". Confirm a 500 still produces ok:true.
-      process.env.ALLOW_PRIVATE_URLS = "true";
-      installProbeStub(500);
-      try {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
-        });
-        assert.equal(out.res.status, 200);
-        assert.equal(out.json.ok, true);
-        assert.equal(out.json.status, 500);
-      } finally {
-        restoreFetch();
-        delete process.env.ALLOW_PRIVATE_URLS;
-      }
-    });
-
-    await test("ALLOW_PRIVATE_URLS=true returns 502 when the target is unreachable", async () => {
-      // Stub fetch to throw — simulates DNS failure or connection refused.
-      // The route catches and returns a structured 502.
-      process.env.ALLOW_PRIVATE_URLS = "true";
-      global.fetch = async (input, init) => {
-        const url = typeof input === "string" ? input : input.url;
-        if (url === PROBE_TARGET && init?.method === "HEAD") {
-          throw new Error("ECONNREFUSED");
-        }
-        return realFetch(input, init);
-      };
-      try {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
-        });
-        assert.equal(out.res.status, 502);
-        assert.equal(out.json.ok, false);
-        assert.match(out.json.error, /ECONNREFUSED/);
-      } finally {
-        restoreFetch();
-        delete process.env.ALLOW_PRIVATE_URLS;
-      }
-    });
-
-    await test("ALLOW_PRIVATE_URLS=true still rejects non-http protocols (pre-SSRF guard)", async () => {
-      // Protocol check runs BEFORE the escape hatch; `ftp://` must still 400.
-      process.env.ALLOW_PRIVATE_URLS = "true";
-      try {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: "ftp://localhost" },
-        });
-        assert.equal(out.res.status, 400);
-        assert.match(out.json.error, /http or https/i);
-      } finally {
-        delete process.env.ALLOW_PRIVATE_URLS;
-      }
-    });
-
-    await test("ALLOW_PRIVATE_URLS=true still rejects malformed URLs (pre-SSRF guard)", async () => {
-      process.env.ALLOW_PRIVATE_URLS = "true";
-      try {
-        const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: "not a url" },
-        });
-        assert.equal(out.res.status, 400);
-        assert.match(out.json.error, /Invalid URL format/i);
-      } finally {
-        delete process.env.ALLOW_PRIVATE_URLS;
-      }
-    });
-
-    await test("ALLOW_PRIVATE_URLS only activates on literal string \"true\" (not truthy)", async () => {
-      // Defence-in-depth: accidental `ALLOW_PRIVATE_URLS=1` or `=yes` must
-      // NOT bypass the SSRF guard — only the explicit literal "true" works.
-      for (const val of ["1", "yes", "on", "TRUE", " true", "true "]) {
+    // Defence-in-depth: accidental `ALLOW_PRIVATE_URLS=1` or `=yes` must NOT
+    // bypass the SSRF guard — only the explicit literal "true" works.
+    // Parameterised so new misspellings of "true" are a single-line add.
+    const NON_ACTIVATING_VALUES = ["1", "yes", "on", "TRUE", " true", "true "];
+    for (const val of NON_ACTIVATING_VALUES) {
+      await test(`ALLOW_PRIVATE_URLS=${JSON.stringify(val)} must NOT bypass SSRF`, async () => {
         process.env.ALLOW_PRIVATE_URLS = val;
         try {
-          const out = await req(base, "/api/test-connection", {
-            method: "POST", cookie: authCookie, body: { url: "http://localhost:3000" },
-          });
+          const out = await probe({ url: "http://localhost:3000" });
           assert.equal(out.res.status, 400, `value ${JSON.stringify(val)} must NOT bypass SSRF (got ${out.res.status})`);
         } finally {
           delete process.env.ALLOW_PRIVATE_URLS;
         }
-      }
-    });
+      });
+    }
   } finally {
     summary("test-connection");
     env.restore();
