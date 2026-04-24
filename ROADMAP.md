@@ -383,6 +383,12 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
+> **Intentional scope boundaries (documented during #XXX, captured as follow-on IDs DIF-002b and DIF-002c below):**
+> - Visual baselines (DIF-001) are keyed by `(testId, stepNumber)` only, not by browser. Running the same test under Firefox and Chromium against a Chromium-recorded baseline will produce spurious pixel diffs from font-rendering differences. → **DIF-002b**
+> - Cross-browser CI smoke coverage is not yet wired. Only `resolveBrowser()` is unit-tested; live-launch verification of firefox/webkit still relies on manual testing. → **DIF-002b**
+> - Run Detail, Runs list, and Run History UIs do not yet render a per-run browser badge. The data (`run.browser`) is persisted and returned by the API; the frontend just doesn't surface it. → **DIF-002b**
+> - Crawler (`crawlBrowser.js`, `stateExplorer.js`), interactive recorder (`recorder.js`), and the live CDP screencast (`screencast.js`) are pinned to Chromium because they rely on CDP / shadow-DOM APIs not available in Firefox or WebKit. Firefox/WebKit crawling is out of scope. → **DIF-002c**
+
 **Problem:** Only Chromium is supported. Playwright natively supports Firefox and WebKit — this is a configuration gap, not a technical limitation. Many enterprise customers require Safari compatibility testing and will ask about it during evaluation.
 
 **Fix:** Parameterise `launchBrowser(browserName)` to accept `'chromium'` | `'firefox'` | `'webkit'`. Add a browser selector to `RunRegressionModal.jsx`. Include `browser` on test results. Show browser icon and name per result in `RunDetail.jsx`.
@@ -394,6 +400,56 @@ The following items have been verified complete against the codebase and are **n
 - `frontend/src/pages/RunDetail.jsx` — browser icon per result
 
 **Dependencies:** None
+
+---
+
+### DIF-002b — Cross-browser polish: browser-aware baselines, UI badges, CI coverage 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Follow-on from DIF-002
+
+**Problem:** DIF-002 landed the core cross-browser dispatch (`resolveBrowser()`, per-run `browser` field, migration 009, Run Regression modal dropdown) but left three visible gaps that prevent firefox/webkit from feeling like first-class citizens:
+
+1. **Visual baselines are browser-agnostic.** `visualDiff.js` keys baselines by `(testId, stepNumber)`. Running the same test under Firefox against a Chromium baseline produces spurious pixel diffs from font-rendering differences — users will hit this the first time they click the new Browser dropdown on a test that has a baseline.
+2. **No CI smoke coverage for firefox/webkit.** `backend/tests/cross-browser.test.js` unit-tests `resolveBrowser()` without actually launching firefox or webkit. A Playwright API regression (e.g. an option name change in an engine-specific path) would only surface in production.
+3. **Run Detail / Runs list / Run History show no browser badge.** `run.browser` is persisted and returned via the API but no UI component reads it. Users can pick firefox in the modal but can't tell which browser a completed run used without opening its logs.
+
+**Fix:**
+- Extend the `baseline_screenshots` PK from `(testId, stepNumber)` to `(testId, stepNumber, browser)`. Change `visualDiff.js` paths to `artifacts/baselines/<testId>/<browser>/step-<N>.png`. Update `backend/src/routes/tests.js` baseline accept/delete endpoints to accept `browser` as a route param or query string. Backfill existing baselines as `browser = "chromium"` in the migration.
+- Add a CI job to `.github/workflows/ci.yml` that installs all three Playwright engines and runs a minimal 1-test smoke against each (asserts that `launchBrowser({ browser })` succeeds and the test executes). Gate on test duration — firefox/webkit double the CI time, so run them only on PRs touching `runner/config.js` or on nightly cron.
+- Add a browser badge component (`<BrowserBadge browser={run.browser} />`) rendering a lucide icon + text. Consume it in `frontend/src/pages/RunDetail.jsx` header, `Runs.jsx` list rows, and the Run Regression history view. Fall back to "chromium" for pre-migration-009 rows where `run.browser` is null.
+
+**Files to change:**
+- `backend/src/database/migrations/010_baseline_browser.sql` — new PK
+- `backend/src/database/repositories/baselineRepo.js` — accept `browser` param
+- `backend/src/runner/visualDiff.js` — rekey baseline paths
+- `backend/src/routes/tests.js` — baseline CRUD accepts `browser`
+- `.github/workflows/ci.yml` — cross-browser smoke job
+- New `frontend/src/components/shared/BrowserBadge.jsx`
+- `frontend/src/pages/RunDetail.jsx`, `frontend/src/pages/Runs.jsx` — render the badge
+
+**Dependencies:** None (DIF-002 already complete)
+
+---
+
+### DIF-002c — Cross-browser crawl and recorder support 🔲 Backlog
+
+**Status:** 🔲 Planned | **Effort:** XL | **Source:** Follow-on from DIF-002
+
+**Problem:** Crawler (`pipeline/crawlBrowser.js`, `pipeline/stateExplorer.js`), interactive recorder (`runner/recorder.js`), and the live CDP screencast (`runner/screencast.js`) are pinned to Chromium in DIF-002. They use Playwright's CDP APIs directly — `page.context().newCDPSession()`, `Page.startScreencast`, shadow-DOM tree walkers via CDP `DOM.getFlattenedDocument` — which Firefox has no equivalent for and WebKit implements only partially via WebDriver BiDi. Users who want to crawl/record a Safari-only issue or test a WebKit rendering quirk during authoring have no path.
+
+**Fix (high-level; deliberately deferred until there is customer demand):**
+- Replace CDP screencast with Playwright's cross-browser `page.screenshot()` polling at ~8-12 fps. Lower quality but engine-agnostic. Keep CDP path for chromium as a fast fallback.
+- Replace the CDP-based shadow-DOM tree walker in `crawlBrowser.js` with Playwright's `page.locator()` + `{ strict: false }` serialisation. Slower but engine-agnostic.
+- Add a browser param to `POST /projects/:id/record` and `POST /projects/:id/crawl` routes; pass through to the relevant pipeline modules.
+- Accept that crawl quality will degrade for firefox/webkit relative to chromium until Playwright's BiDi API stabilises.
+
+**Files to change:**
+- `backend/src/pipeline/crawlBrowser.js`, `stateExplorer.js` — accept `browser` param, swap CDP calls for cross-engine equivalents
+- `backend/src/runner/recorder.js` — accept `browser`, swap screencast impl
+- `backend/src/runner/screencast.js` — dual-path (CDP for chromium, screenshot poll fallback)
+- `frontend/src/components/run/RecorderModal.jsx`, `frontend/src/components/run/CrawlProjectModal.jsx` — browser selector
+
+**Dependencies:** DIF-002 ✅, DIF-002b (baselines must be browser-aware before crawler variability amplifies diff noise)
 
 ---
 
@@ -1292,12 +1348,12 @@ The following items have been verified complete against the codebase and are **n
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
-| Differentiators | 16 | 6 | 2 | 8 | DIF-005, 006, 007, 008, 009, 010, 012, 013 |
+| Differentiators | 18 | 6 | 2 | 10 | DIF-002b, 002c, 005, 006, 007, 008, 009, 010, 012, 013 |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **64** | **23** | **2** | **39** | |
+| **Totals** | **66** | **23** | **2** | **41** | |
 
-**Total tracked items:** 64 across 7 categories — **23 complete** (36%), **2 in progress** (DIF-001, DIF-015), **39 remaining**
+**Total tracked items:** 66 across 7 categories — **23 complete** (35%), **2 in progress** (DIF-001, DIF-015), **41 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
