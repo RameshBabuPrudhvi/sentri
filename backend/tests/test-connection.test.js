@@ -109,20 +109,84 @@ async function main() {
 
     console.log("\n── ALLOW_PRIVATE_URLS dev escape hatch ───────────────────────");
 
-    await test("ALLOW_PRIVATE_URLS=true permits loopback — probes the test server itself", async () => {
+    // Selective fetch stub — only intercepts outbound HEAD probes to the
+    // target URL the test-connection route issues. Inbound HTTP from `req()`
+    // to the test server still uses the real fetch so auth cookies, CSRF,
+    // and JSON parsing keep working. Avoids the flakiness of hitting
+    // `${base}/health` for real, which is at the mercy of the server's
+    // `AbortSignal.timeout(10000)` and the CI event loop.
+    const realFetch = global.fetch;
+    const PROBE_TARGET = "http://localhost:9999/probe";
+    function installProbeStub(status) {
+      global.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url === PROBE_TARGET && init?.method === "HEAD") {
+          return new Response(null, { status });
+        }
+        return realFetch(input, init);
+      };
+    }
+    function restoreFetch() { global.fetch = realFetch; }
+
+    await test("ALLOW_PRIVATE_URLS=true permits loopback — HEAD succeeds via stubbed fetch", async () => {
       // With the escape hatch enabled, the SSRF guard is skipped and the
-      // route performs a real HEAD request. Point it at `/health` on the
-      // same test server (which is on 127.0.0.1) to get a deterministic 2xx
-      // without relying on external DNS.
+      // route performs a real HEAD request. We stub fetch so the probe
+      // resolves deterministically with HTTP 204, avoiding the
+      // AbortSignal.timeout(10000) race under CI load.
       process.env.ALLOW_PRIVATE_URLS = "true";
+      installProbeStub(204);
       try {
         const out = await req(base, "/api/test-connection", {
-          method: "POST", cookie: authCookie, body: { url: `${base}/health` },
+          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
         });
         assert.equal(out.res.status, 200, `expected 200, got ${out.res.status}: ${JSON.stringify(out.json)}`);
         assert.equal(out.json.ok, true);
-        assert.ok(out.json.status >= 200 && out.json.status < 500, `expected HEAD status in [200..500), got ${out.json.status}`);
+        assert.equal(out.json.status, 204);
       } finally {
+        restoreFetch();
+        delete process.env.ALLOW_PRIVATE_URLS;
+      }
+    });
+
+    await test("ALLOW_PRIVATE_URLS=true surfaces non-2xx status from the target", async () => {
+      // The route does not treat 4xx/5xx as a failure — it returns whatever
+      // the upstream responded with so users can distinguish "unreachable"
+      // from "reachable but erroring". Confirm a 500 still produces ok:true.
+      process.env.ALLOW_PRIVATE_URLS = "true";
+      installProbeStub(500);
+      try {
+        const out = await req(base, "/api/test-connection", {
+          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
+        });
+        assert.equal(out.res.status, 200);
+        assert.equal(out.json.ok, true);
+        assert.equal(out.json.status, 500);
+      } finally {
+        restoreFetch();
+        delete process.env.ALLOW_PRIVATE_URLS;
+      }
+    });
+
+    await test("ALLOW_PRIVATE_URLS=true returns 502 when the target is unreachable", async () => {
+      // Stub fetch to throw — simulates DNS failure or connection refused.
+      // The route catches and returns a structured 502.
+      process.env.ALLOW_PRIVATE_URLS = "true";
+      global.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url === PROBE_TARGET && init?.method === "HEAD") {
+          throw new Error("ECONNREFUSED");
+        }
+        return realFetch(input, init);
+      };
+      try {
+        const out = await req(base, "/api/test-connection", {
+          method: "POST", cookie: authCookie, body: { url: PROBE_TARGET },
+        });
+        assert.equal(out.res.status, 502);
+        assert.equal(out.json.ok, false);
+        assert.match(out.json.error, /ECONNREFUSED/);
+      } finally {
+        restoreFetch();
         delete process.env.ALLOW_PRIVATE_URLS;
       }
     });
