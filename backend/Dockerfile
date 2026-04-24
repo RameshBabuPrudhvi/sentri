@@ -33,9 +33,16 @@ RUN npm install --omit=dev
 # `playwright install` runs after npm install because PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # skipped the postinstall hook. Adds ~400MB to the image; skip both engines
 # with BUILD_SKIP_FIREFOX_WEBKIT=1 for slimmer chromium-only builds.
+#
+# Use the `playwright` runtime package's bundled CLI directly rather than
+# `npx playwright`. The `@playwright/test` package (which ships the `playwright`
+# bin on $PATH) is a devDependency and was omitted by `npm install --omit=dev`
+# above — so `npx playwright` fails with "playwright: not found" in the image.
+# The runtime `playwright` package does ship `node_modules/playwright/cli.js`
+# which exposes the same `install` subcommand.
 ARG BUILD_SKIP_FIREFOX_WEBKIT=0
 RUN if [ "$BUILD_SKIP_FIREFOX_WEBKIT" != "1" ]; then \
-      npx playwright install firefox webkit; \
+      node node_modules/playwright/cli.js install firefox webkit; \
     fi
 
 COPY backend/src/ ./src/
