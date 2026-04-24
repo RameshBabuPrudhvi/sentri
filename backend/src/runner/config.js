@@ -53,12 +53,15 @@ export const DEFAULT_BROWSER = (() => {
 /**
  * Resolve a browser name string to a Playwright BrowserType.
  * Unknown values fall back to chromium so a typo doesn't crash a run.
+ * Non-string truthy inputs (numbers, objects, booleans) are treated as
+ * unknown rather than throwing — the route layer can pass `req.body.browser`
+ * straight through without a `typeof` guard.
  *
- * @param {string} [name] - One of `"chromium"`, `"firefox"`, `"webkit"`. Case-insensitive.
+ * @param {*} [name] - One of `"chromium"`, `"firefox"`, `"webkit"`. Case-insensitive. Non-string values fall back to chromium.
  * @returns {{ engine: Object, name: string }} The Playwright BrowserType and its canonical name.
  */
 export function resolveBrowser(name) {
-  const key = (name || "").toLowerCase();
+  const key = typeof name === "string" ? name.toLowerCase() : "";
   if (BROWSER_ENGINES[key]) return { engine: BROWSER_ENGINES[key], name: key };
   return { engine: BROWSER_ENGINES[DEFAULT_BROWSER], name: DEFAULT_BROWSER };
 }
