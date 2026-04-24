@@ -50,6 +50,7 @@ const files = [
   "tests/visual-regression.test.js",
   "tests/recorder-baselines-routes.test.js",
   "tests/dns-classification.test.js",
+  "tests/test-connection.test.js",
 ];
 
 let passed = 0;
