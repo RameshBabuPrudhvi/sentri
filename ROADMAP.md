@@ -510,6 +510,9 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** ✅ Complete | **Effort:** L | **Source:** Competitive (BearQ)
 
+> **Intentional scope boundary (captured as follow-on DIF-015b below):**
+> - The injected `bestSelector()` in `backend/src/runner/recorder.js:102-112` is a 5-strategy fallback chain (data-testid → role+name → id → name attr → tag.class). Playwright's own `codegen` uses a significantly more sophisticated selector-generation algorithm with scoring, disambiguation for duplicate matches, and iframe/shadow-DOM handling. We can't reuse `codegen` directly because it opens a desktop Inspector window with no cross-origin SaaS deployment story, but we **can** import Playwright's internal `selectorGenerator` module to get the same quality while keeping our server-side-browser + SSE-screencast architecture. → **DIF-015b**
+
 **Problem:** Sentri requires users to either write a plain-English description or wait for a full-site crawl to create tests. BearQ's primary UX is a visual recorder: click through the app, and the AI records and enhances the test. Users who cannot articulate a test scenario in text have no path to test creation. This is the single biggest UX barrier vs BearQ.
 
 **Fix:** Add a "Record a test" mode that opens the target URL in a Playwright browser served via CDP screencast (the live view infrastructure already exists). Capture user interactions (clicks, fills, navigations) as raw Playwright actions. On stop, run the captured actions through the existing assertion enhancement pipeline (Stage 6) and self-healing transform (`applyHealingTransforms`). Save as a draft test with the recorded code.
@@ -521,6 +524,45 @@ The following items have been verified complete against the codebase and are **n
 - `frontend/src/pages/Tests.jsx` — "Record a test" button alongside existing Crawl and Generate
 
 **Dependencies:** None (reuses existing CDP screencast and self-healing transform infrastructure)
+
+---
+
+### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Follow-on from DIF-015
+
+**Problem:** The DIF-015 recorder captures user interactions correctly but the selectors it emits are noticeably lower-quality than what Playwright's own `codegen` tool produces. Three concrete gaps:
+
+1. **No disambiguation for duplicate matches.** Our `bestSelector()` at `backend/src/runner/recorder.js:102-112` produces `button.btn-primary` — fine when there's one on the page, but if the page has three, the recorded `safeClick(page, 'button.btn-primary')` picks the first visible one instead of the exact one the user clicked. Codegen emits `button.btn-primary >> nth=2` or disambiguates via nearest text/role.
+2. **Weak scoring when multiple strategies fit.** For a button with both `data-testid="submit"` and accessible name "Save changes", we pick data-testid; codegen's scorer weights semantic roles higher in some cases (e.g. if the testid is auto-generated `data-testid="el_abc123"` it falls back to role+name). Our heuristic has no notion of "good" vs "noise" data-testids.
+3. **No iframe / shadow DOM handling.** Clicking inside an iframe or shadow root produces a selector scoped to the main document, which then fails at replay. Codegen emits the full `frameLocator(…) >> locator(…)` chain automatically.
+
+Using Playwright's own `codegen` tool isn't an option — it's a CLI that opens a desktop Inspector window (`chromium.launch({ devtools: true })`) with no way to stream the browser to a web UI. The recorder architecture has to stay server-side with CDP screencast. But the selector-generation algorithm itself lives at `node_modules/playwright-core/lib/server/injected/selectorGenerator.js` and is pure DOM code with no CLI dependencies.
+
+**Fix:** Replace the hand-rolled `bestSelector()` in `RECORDER_SCRIPT` (`backend/src/runner/recorder.js:97-160`) with a call into Playwright's internal `generateSelector()`. The algorithm:
+- Prefers role+name with proper ARIA semantics.
+- Handles CSS ambiguity by appending `>> nth=N` when the primary selector matches multiple elements.
+- Emits the correct `internal:label=` / `internal:role=` tokens that the replay engine understands.
+- Knows about `iframe` and shadow-root boundaries and prefixes the selector accordingly.
+
+Because it's marked internal, import risk is real — the path or signature could change in any Playwright minor release. Mitigate with:
+- A thin wrapper in `backend/src/runner/selectorGenerator.js` that tries the internal import first and falls back to the existing `bestSelector()` on failure, logged as a warning.
+- A unit test (`backend/tests/recorder-selector.test.js`) that asserts the import resolves and produces output for a fixture HTML snippet — catches breakage the moment Renovate bumps Playwright.
+
+**Files to change:**
+- New `backend/src/runner/selectorGenerator.js` — import Playwright's `selectorGenerator` with fallback
+- `backend/src/runner/recorder.js` — swap `RECORDER_SCRIPT`'s `bestSelector()` for a call into the wrapper (the wrapper runs in Node; the recorder passes target-element metadata to it via the `__sentriRecord` binding instead of generating the selector in page context)
+- New `backend/tests/recorder-selector.test.js` — fixture-based assertion that the wrapper produces expected Playwright selectors
+- `backend/tests/run-tests.js` — register the new test file
+- `docs/changelog.md` — `### Changed` entry documenting the improved selector quality
+
+**Acceptance criteria:**
+- Recorded click on a page with three identical `button.btn-primary` elements produces a disambiguated selector that replays correctly.
+- Recorded interaction inside an `<iframe>` produces a `frameLocator(…).locator(…)` chain.
+- If the internal import fails (Playwright patch release changed the path), the recorder falls back to `bestSelector()` and logs a single warning — does not crash.
+- `backend/tests/recorder.test.js` tests still pass unchanged (the action-to-code transformation in `actionsToPlaywrightCode` is independent of selector generation).
+
+**Dependencies:** DIF-015 ✅
 
 ---
 
@@ -1348,12 +1390,12 @@ The following items have been verified complete against the codebase and are **n
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
-| Differentiators | 18 | 6 | 2 | 10 | DIF-002b, 002c, 005, 006, 007, 008, 009, 010, 012, 013 |
+| Differentiators | 19 | 6 | 2 | 11 | DIF-002b, 002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **66** | **23** | **2** | **41** | |
+| **Totals** | **67** | **23** | **2** | **42** | |
 
-**Total tracked items:** 66 across 7 categories — **23 complete** (35%), **2 in progress** (DIF-001, DIF-015), **41 remaining**
+**Total tracked items:** 67 across 7 categories — **23 complete** (34%), **2 in progress** (DIF-001, DIF-015), **42 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
