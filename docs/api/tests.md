@@ -175,3 +175,140 @@ GET /api/v1/projects/:id/tests/traceability
 ```
 
 Returns a JSON traceability matrix grouping tests by `linkedIssueKey`, with an `unlinked` array for tests without issue links.
+
+## Visual Regression Baselines (DIF-001)
+
+Baselines are the "golden" screenshots that subsequent runs diff against. A
+baseline is created lazily on the first run that produces a screenshot for a
+given `(testId, stepNumber)` pair; subsequent runs produce a diff PNG under
+`artifacts/diffs/` and flag the step as a regression when the pixel difference
+exceeds `VISUAL_DIFF_THRESHOLD` (default 2 %).
+
+### List Baselines
+
+```
+GET /api/v1/tests/:testId/baselines
+```
+
+Returns all stored baselines for the test, ordered by `stepNumber`.
+
+**Response:**
+```json
+[
+  {
+    "testId": "TC-1",
+    "stepNumber": 0,
+    "imagePath": "/artifacts/baselines/TC-1/step-0.png",
+    "width": 1280,
+    "height": 720,
+    "createdAt": "2026-04-23T10:00:00.000Z",
+    "updatedAt": "2026-04-23T10:00:00.000Z"
+  }
+]
+```
+
+`stepNumber = 0` is the final end-of-test screenshot; `stepNumber >= 1`
+correspond to per-step captures (DIF-016).
+
+### Accept a Baseline
+
+```
+POST /api/v1/tests/:testId/baselines/:stepNumber/accept
+```
+
+Requires `qa_lead` role. Promotes a captured screenshot from an earlier run
+to the new baseline for the given step.
+
+**Body:**
+```json
+{ "runId": "RUN-42" }
+```
+
+The source PNG must live under `/artifacts/screenshots/` — the route rejects
+paths outside `SHOTS_DIR` with HTTP 400.
+
+### Delete a Baseline
+
+```
+DELETE /api/v1/tests/:testId/baselines/:stepNumber
+```
+
+Requires `qa_lead` role. Removes the DB row and the on-disk PNG. The next run
+will create a fresh baseline from its capture. Idempotent — returns
+`{ ok: true, deleted: 0 }` when no baseline exists for that step.
+
+## Interactive Recorder (DIF-015)
+
+Opens a server-side Playwright browser at the project URL, streams the live
+CDP screencast to the frontend via SSE, and captures click / fill / press /
+select / navigation events. On stop, captured actions are transformed into a
+Playwright test body and persisted as a Draft test using `safeClick` /
+`safeFill` so the self-healing transform takes over at execution time.
+
+> The recorder requires a headed Chromium (`BROWSER_HEADLESS=false`). See
+> AGENT.md § "Testing DIF-001 and DIF-015" for the full gotcha list.
+
+### Start a Recording
+
+```
+POST /api/v1/projects/:id/record
+```
+
+Requires `qa_lead` role. Rate-limited via the expensive-operations limiter.
+
+**Body (optional):**
+```json
+{ "startUrl": "https://example.com" }
+```
+
+Defaults to the project's configured URL. Returns `{ sessionId, startUrl }`.
+The frontend subscribes to `/api/v1/runs/:sessionId/events` for live
+screencast frames.
+
+### Stop / Save / Discard
+
+```
+POST /api/v1/projects/:id/record/:sessionId/stop
+```
+
+Requires `qa_lead` role.
+
+**Body — save as Draft test:**
+```json
+{ "name": "Login happy path" }
+```
+
+Returns `201 { test, actionCount }`. When the `MAX_RECORDING_MS` safety-net
+timeout already tore down the session, the response additionally includes
+`recoveredFromAutoTimeout: true`.
+
+**Body — discard without persisting:**
+```json
+{ "discard": true }
+```
+
+Tears down the server-side browser without creating a Draft test.
+
+### Poll Recording Status
+
+```
+GET /api/v1/projects/:id/record/:sessionId
+```
+
+Returns the live session status and the captured-action list for the
+RecorderModal sidebar:
+
+```json
+{
+  "sessionId": "REC-abc12345",
+  "status": "recording",
+  "url": "https://example.com",
+  "startedAt": 1713873600000,
+  "actionCount": 3,
+  "actions": [
+    { "kind": "goto",  "url": "https://example.com", "ts": 1713873600000 },
+    { "kind": "click", "selector": "#login", "ts": 1713873601500 },
+    { "kind": "fill",  "selector": "#email", "value": "u@x.com", "ts": 1713873602100 }
+  ]
+}
+```

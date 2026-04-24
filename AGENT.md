@@ -20,7 +20,7 @@ backend/           Node.js 20+ ESM server (Express 4, Playwright, LLM SDKs)
       sqlite.js            SQLite singleton (WAL mode, auto-schema)
       schema.sql           Table definitions, indexes, counter seeds
       migrate.js           One-time JSON → SQLite migration
-      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, verificationTokenRepo, webhookTokenRepo, scheduleRepo, workspaceRepo, notificationSettingsRepo, accountRepo, apiKeyRepo)
+      repositories/        Data access layer (counterRepo, userRepo, projectRepo, testRepo, runRepo, runLogRepo, activityRepo, healingRepo, passwordResetTokenRepo, verificationTokenRepo, webhookTokenRepo, scheduleRepo, workspaceRepo, notificationSettingsRepo, accountRepo, apiKeyRepo, baselineRepo)
     aiProvider.js          Multi-provider LLM abstraction (Anthropic/OpenAI/Google/Ollama)
     selfHealing.js         Adaptive selector waterfall + healing history
     crawler.js             Link-crawl orchestrator
@@ -426,7 +426,7 @@ Sentri supports **SQLite** (default, via `better-sqlite3`) and **PostgreSQL** (v
 Both adapters expose the same interface (`prepare`, `exec`, `transaction`, `pragma`, `close`, `dialect`) so all repository modules work unchanged. The adapter is selected at startup by `database/sqlite.js` (the module name is kept for backward compatibility).
 
 - **Repository pattern**: All DB access goes through repository modules in `backend/src/database/repositories/`. Never write raw SQL in route handlers.
-- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo`, `notificationSettingsRepo`, `accountRepo`, `apiKeyRepo` — each in `backend/src/database/repositories/`.
+- **Repositories**: `projectRepo`, `testRepo`, `runRepo`, `runLogRepo`, `activityRepo`, `healingRepo`, `userRepo`, `counterRepo`, `passwordResetTokenRepo`, `verificationTokenRepo`, `webhookTokenRepo`, `scheduleRepo`, `workspaceRepo`, `notificationSettingsRepo`, `accountRepo`, `apiKeyRepo`, `baselineRepo` — each in `backend/src/database/repositories/`.
 - **JSON columns**: `steps`, `tags`, `results`, `testQueue`, `credentials`, etc. are stored as JSON strings and auto-serialized/deserialized by the repository layer. Note: `logs` was moved from a JSON column on `runs` to a dedicated `run_logs` table (ENH-008) — `runRepo.getById()` hydrates `run.logs` from `run_logs` automatically.
 - **Boolean columns**: `isJourneyTest`, `assertionEnhanced`, `isApiTest` are stored as `0`/`1` integers and converted to `true`/`false` by `testRepo`.
 - **ID generation**: Atomic counters in the `counters` table via `counterRepo.next("test")` → `TC-1`, `TC-2`, etc.
@@ -1009,6 +1009,10 @@ The following are **not yet implemented** but should be addressed before product
 | `DEMO_DAILY_GENERATIONS` | No | `5` | Max AI test generations per user per day in demo mode |
 | `STALE_TEST_DAYS` | No | `90` | Days since last run before an approved test is flagged stale (AUTO-013) |
 | `FEEDBACK_TIMEOUT_MS` | No | `180000` | Maximum time (ms) the AI feedback loop is allowed to run before being abandoned |
+| `VISUAL_DIFF_THRESHOLD` | No | `0.02` | Fraction of differing pixels above which a step is flagged as a visual regression (DIF-001). Set to `0` for zero-tolerance. |
+| `VISUAL_DIFF_PIXEL_TOLERANCE` | No | `0.1` | Per-pixel colour-match tolerance passed to `pixelmatch` (0..1). Higher values ignore anti-aliasing jitter. |
+| `MAX_RECORDING_MS` | No | `1800000` (30 min) | Safety-net timeout for an interactive recorder session (DIF-015). Abandoned sessions are force-torn-down after this elapses. Min `60000`. |
+| `RECORDER_COMPLETED_TTL_MS` | No | `120000` (2 min) | Lifetime of the in-memory cache that preserves a recorder's generated test after the `MAX_RECORDING_MS` auto-teardown. Allows "Stop & Save" to recover from the TOCTOU race. Min `10000`. |
 
 ---
 
