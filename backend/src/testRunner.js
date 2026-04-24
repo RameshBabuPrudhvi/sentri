@@ -31,7 +31,7 @@
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
-import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
@@ -77,10 +77,15 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {Object}      run                       - The run record (mutated in place).
  * @param {Object}      [options]
  * @param {number}      [options.parallelWorkers]  - Concurrent browser contexts (1–10). Overrides env default.
+ * @param {string}      [options.browser]          - `"chromium" | "firefox" | "webkit"` (DIF-002). Defaults to chromium.
+ * @param {string}      [options.device]           - Playwright device preset name (DIF-003).
+ * @param {string}      [options.locale]           - BCP 47 locale (AUTO-007).
+ * @param {string}      [options.timezoneId]       - IANA timezone (AUTO-007).
+ * @param {Object}      [options.geolocation]      - `{ latitude, longitude }` (AUTO-007).
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, { parallelWorkers, device, locale, timezoneId, geolocation, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
 
@@ -105,11 +110,16 @@ export async function runTests(project, tests, run, { parallelWorkers, device, l
   let browser = null;
   let traceContext = null;
 
-  structuredLog("run.start", { runId, projectId: project.id, tests: tests.length, workers, allApiOnly });
+  // DIF-002: resolve the requested browser once so we can log + persist a
+  // canonical name (invalid / unknown values fall back to chromium).
+  const { name: resolvedBrowser } = resolveBrowser(browserName);
+  run.browser = resolvedBrowser;
+
+  structuredLog("run.start", { runId, projectId: project.id, tests: tests.length, workers, allApiOnly, browser: resolvedBrowser });
 
   if (!allApiOnly) {
     try {
-      browser = await launchBrowser();
+      browser = await launchBrowser({ browser: resolvedBrowser });
     } catch (launchErr) {
       const classified = classifyError(launchErr, "run");
       run.status = "failed";
@@ -148,7 +158,9 @@ export async function runTests(project, tests, run, { parallelWorkers, device, l
   log(run, `Execution mode: ${workers > 1 ? `⚡ Parallel (${workers} workers)` : "▶ Sequential (1 worker)"}`);
   log(run, `Tests queued: ${tests.length}${apiCount > 0 ? ` (${apiCount} API, ${tests.length - apiCount} browser)` : ""}`);
   log(run, `Project URL: ${project.url}`);
-  log(run, allApiOnly ? `Browser: ⏭️ Skipped (all tests are API-only)` : `Browser: Chromium (headless)`);
+  log(run, allApiOnly
+    ? `Browser: ⏭️ Skipped (all tests are API-only)`
+    : `Browser: ${resolvedBrowser} (${BROWSER_HEADLESS ? "headless" : "headed"})`);
 
   const runStart = Date.now();
   const allVideoSegments = [];
@@ -212,7 +224,7 @@ export async function runTests(project, tests, run, { parallelWorkers, device, l
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const result = await executeTest(test, browser, runId, i, runStart, { device, locale, timezoneId, geolocation });
+        const result = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation });
         structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
         processResult(test, result);
       } catch (err) {

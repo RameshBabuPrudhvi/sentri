@@ -72,6 +72,7 @@ const INSERT_COLS = [
   "tests", "results", "testQueue", "generateInput", "promptAudit",
   "pipelineStats", "feedbackLoop", "currentStep",
   "rateLimitError", "qualityAnalytics", "workspaceId", "pages",
+  "browser", // DIF-002: chromium | firefox | webkit
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -83,6 +84,7 @@ const LEAN_COLS = [
   "id", "projectId", "type", "status", "startedAt", "finishedAt",
   "duration", "error", "errorCategory", "passed", "failed", "total",
   "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
+  "browser", // DIF-002 — surfaces browser badge on runs list without a second query
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;

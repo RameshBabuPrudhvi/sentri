@@ -1014,6 +1014,7 @@ The following are **not yet implemented** but should be addressed before product
 | `VISUAL_DIFF_PIXEL_TOLERANCE` | No | `0.1` | Per-pixel colour-match tolerance passed to `pixelmatch` (0..1). Higher values ignore anti-aliasing jitter. |
 | `MAX_RECORDING_MS` | No | `1800000` (30 min) | Safety-net timeout for an interactive recorder session (DIF-015). Abandoned sessions are force-torn-down after this elapses. Min `60000`. |
 | `RECORDER_COMPLETED_TTL_MS` | No | `120000` (2 min) | Lifetime of the in-memory cache that preserves a recorder's generated test after the `MAX_RECORDING_MS` auto-teardown. Allows "Stop & Save" to recover from the TOCTOU race. Min `10000`. |
+| `BROWSER_DEFAULT` | No | `chromium` | Default browser engine for test execution (DIF-002). One of `chromium`, `firefox`, `webkit`. Per-run overrides via the Run Regression modal or `POST /api/v1/projects/:id/run { browser }`. Invalid values fall back to chromium. |
 
 ---
 

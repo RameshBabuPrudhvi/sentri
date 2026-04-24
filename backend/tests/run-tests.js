@@ -51,6 +51,7 @@ const files = [
   "tests/recorder-baselines-routes.test.js",
   "tests/dns-classification.test.js",
   "tests/test-connection.test.js",
+  "tests/cross-browser.test.js",
 ];
 
 let passed = 0;

@@ -30,6 +30,7 @@ import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
+import { resolveBrowser } from "../runner/config.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
 import { demoQuota } from "../middleware/demoQuota.js";
@@ -145,10 +146,15 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
   if (!tests.length) return res.status(400).json({ error: "no approved tests — review generated tests and approve them before running regression" });
 
-  // Extract parallel workers, device emulation, and locale/geo from request body / dials config
-  const { dialsConfig, device, locale, timezoneId, geolocation } = req.body || {};
+  // Extract parallel workers, device emulation, browser engine, and locale/geo
+  // from the request body / dials config. `browser` (DIF-002) is validated
+  // against the known engines by `resolveBrowser()` inside `runTests`; we only
+  // pass it through here and stamp the sanitised canonical name onto the run
+  // record for display on the Run Detail page.
+  const { dialsConfig, browser, device, locale, timezoneId, geolocation } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
+  const canonicalBrowser = resolveBrowser(browser).name;
 
   const runId = generateRunId();
   const run = {
@@ -163,6 +169,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     failed: 0,
     total: tests.length,
     parallelWorkers,
+    browser: canonicalBrowser,
     device: device || null,
     testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
     workspaceId: project.workspaceId || null,
@@ -184,7 +191,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, testIds: tests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -195,7 +202,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, device, locale, timezoneId, geolocation, signal }),
+      (signal) => runTests(project, tests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

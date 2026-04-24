@@ -23,10 +23,30 @@ POST /api/v1/projects/:id/run
 
 **Body (optional):**
 ```json
-{ "dialsConfig": { "parallelWorkers": 4 }, "device": "iPhone 14" }
+{
+  "dialsConfig": { "parallelWorkers": 4 },
+  "browser": "firefox",
+  "device": "iPhone 14",
+  "locale": "fr-FR",
+  "timezoneId": "Europe/Paris"
+}
 ```
 
-Runs all approved tests for the project. When `parallelWorkers > 1`, tests execute concurrently in isolated browser contexts within a single Chromium instance (1–10, default 1).
+Runs all approved tests for the project. When `parallelWorkers > 1`, tests execute concurrently in isolated browser contexts within a single browser instance (1–10, default 1).
+
+### Browser engine (DIF-002)
+
+Pass a `browser` field to run the tests under a specific Playwright engine:
+
+| Value | Notes |
+|---|---|
+| `"chromium"` | Default. Required for crawl, recorder, and live browser view (they depend on CDP). |
+| `"firefox"` | Playwright's bundled Gecko build. |
+| `"webkit"` | Playwright's bundled Safari engine. macOS / iOS Safari parity. |
+
+Invalid or unknown values silently fall back to chromium (no error). The canonical browser name is persisted on the run record (`runs.browser` column, migration 009) and returned on `GET /runs/:runId` so the Run Detail page can show a per-run badge.
+
+Baselines (visual regression — DIF-001) are currently keyed by `(testId, stepNumber)` only, not by browser. Running the same test under Firefox and Chromium against the same baseline will produce spurious pixel regressions due to font-rendering differences. Browser-aware baselines are tracked as a separate follow-on.
 
 ### Device emulation (DIF-003)
 

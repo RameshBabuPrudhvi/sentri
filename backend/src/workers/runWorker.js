@@ -142,6 +142,7 @@ async function processJob(job) {
 
       await runTests(project, tests, run, {
         parallelWorkers: options.parallelWorkers || 1,
+        browser: options.browser || null,         // DIF-002: resolved to chromium inside runTests when null
         device: options.device || null,
         locale: options.locale || null,
         timezoneId: options.timezoneId || null,

@@ -176,6 +176,7 @@ function formatTestError(err) {
  * @param {number}  stepIndex
  * @param {number}  runStart     - `Date.now()` when the run started.
  * @param {Object}  [opts]
+ * @param {string}  [opts.browser]    - DIF-002: `"chromium" | "firefox" | "webkit"` (used only to stamp `result.browser`; the Playwright Browser is already launched by the caller).
  * @param {string}  [opts.device]     - DIF-003: Playwright device name (e.g. `"iPhone 14"`).
  * @param {string}  [opts.locale]     - AUTO-007: BCP 47 locale (e.g. `"fr-FR"`).
  * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
@@ -289,6 +290,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     stepCaptures: [],   // DIF-016: per-step screenshots
     stepTimings: [],    // DIF-016: per-step timing data
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
+    browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
   };
 
   const start = Date.now();

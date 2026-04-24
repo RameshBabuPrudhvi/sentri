@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, X, RefreshCw, Smartphone, Globe } from "lucide-react";
+import { Play, X, RefreshCw, Smartphone, Globe, Monitor } from "lucide-react";
 import { api } from "../../api.js";
 import ModalShell from "../shared/ModalShell.jsx";
+
+// DIF-002: Browser engine presets — mirrors BROWSER_PRESETS in backend/src/runner/config.js.
+// Kept as a static list to avoid an extra API call. Must stay in sync with the backend.
+const BROWSER_PRESETS = [
+  { label: "Chromium (default)", value: "chromium" },
+  { label: "Firefox",            value: "firefox"  },
+  { label: "WebKit (Safari)",    value: "webkit"   },
+];
 
 // DIF-003: Curated device presets — mirrors DEVICE_PRESETS in backend/src/runner/config.js.
 // Kept as a static list to avoid an extra API call. Must stay in sync with the backend.
@@ -64,6 +72,7 @@ const TIMEZONE_PRESETS = [
  */
 export default function RunRegressionModal({ projects, onClose, defaultProjectId }) {
   const [projectId, setProjectId] = useState(defaultProjectId || projects[0]?.id || "");
+  const [browser, setBrowser] = useState("chromium"); // DIF-002
   const [device, setDevice] = useState("");
   const [locale, setLocale] = useState("");
   const [timezoneId, setTimezoneId] = useState("");
@@ -82,6 +91,11 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
     setRunning(true);
     try {
       const body = {};
+      // DIF-002: Only include `browser` when the user picked something other
+      // than the default. The backend falls back to chromium when the field
+      // is absent, so we avoid writing a redundant `browser: "chromium"` onto
+      // every run record.
+      if (browser && browser !== "chromium") body.browser = browser;
       if (device) body.device = device;
       if (locale) body.locale = locale;
       if (timezoneId) body.timezoneId = timezoneId;
@@ -131,6 +145,24 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
             </select>
           </div>
         )}
+
+        {/* DIF-002: Browser engine selector */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Monitor size={13} />
+            Browser
+          </label>
+          <select
+            className="input"
+            value={browser}
+            onChange={(e) => setBrowser(e.target.value)}
+            style={{ height: 38 }}
+          >
+            {BROWSER_PRESETS.map((b) => (
+              <option key={b.value} value={b.value}>{b.label}</option>
+            ))}
+          </select>
+        </div>
 
         {/* DIF-003: Device emulation selector */}
         <div style={{ marginBottom: 16 }}>

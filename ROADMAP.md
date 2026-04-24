@@ -381,7 +381,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-002 — Cross-browser testing (Firefox, WebKit / Safari) 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
 **Problem:** Only Chromium is supported. Playwright natively supports Firefox and WebKit — this is a configuration gap, not a technical limitation. Many enterprise customers require Safari compatibility testing and will ask about it during evaluation.
 
@@ -1267,7 +1267,7 @@ The following items have been verified complete against the codebase and are **n
 | Multi-provider LLM | ✅ Anthropic/OpenAI/Google/Ollama | ❌ | ❌ | ❌ | ❌ |
 | Parallel execution | ✅ 1–10 workers | ✅ Cloud | ✅ Cloud | ✅ Cloud | ✅ CLI sharding |
 | Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
-| Cross-browser | ❌ → DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
+| Cross-browser | ✅ DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ✅ DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
@@ -1292,12 +1292,12 @@ The following items have been verified complete against the codebase and are **n
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 2 | 0 | 1 | FEA-002 |
-| Differentiators | 16 | 5 | 2 | 9 | DIF-002, 005, 006, 007, 008, 009, 010, 012, 013 |
+| Differentiators | 16 | 6 | 2 | 8 | DIF-005, 006, 007, 008, 009, 010, 012, 013 |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 3 | 0 | 8 | MNT-001–006, 008, 011 |
-| **Totals** | **64** | **22** | **2** | **40** | |
+| **Totals** | **64** | **23** | **2** | **39** | |
 
-**Total tracked items:** 64 across 7 categories — **22 complete** (34%), **2 in progress** (DIF-001, DIF-015), **40 remaining**
+**Total tracked items:** 64 across 7 categories — **23 complete** (36%), **2 in progress** (DIF-001, DIF-015), **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1305,10 +1305,10 @@ The following items have been verified complete against the codebase and are **n
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-015` (browser recorder — #1 UX gap vs BearQ, 🟡 High) → `DIF-001` (visual regression) + `DIF-002` (cross-browser) → `DIF-006` (Playwright export)
+`DIF-006` (Playwright export — biggest lock-in objection handler) → `AUTO-005` (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` (accessibility via axe-core) → `MNT-006` (S3 object storage — production prerequisite)
 
 **Lowest effort / highest immediate value:**
-DIF-006 (M) · DIF-002 (M) · DIF-015 (L) · DIF-001 (L)
+MNT-011 (S) · AUTO-007 (S) ✅ · DIF-006 (M) · AUTO-005 (M)
 
 ---
 
