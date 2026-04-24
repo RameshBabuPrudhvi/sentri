@@ -309,10 +309,12 @@ export async function crawlPages(project, run, { signal } = {}) {
  * Classify a navigation failure message into a coarse category so the caller
  * can decide whether a totally-unreachable target warrants a `failed` run.
  *
+ * Exported for regression tests — see `tests/dns-classification.test.js`.
+ *
  * @param {string} message - Error message from `page.goto` (Playwright).
  * @returns {string} One of `"dns"`, `"network"`, `"timeout"`, or `"other"`.
  */
-function categoriseNavigationError(message) {
+export function categoriseNavigationError(message) {
   const m = (message || "").toLowerCase();
   if (m.includes("err_name_not_resolved")
     || m.includes("enotfound")
