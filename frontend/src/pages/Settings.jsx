@@ -551,14 +551,13 @@ function MembersTab() {
 
   const members = membersQuery.data || [];
   const loading = membersQuery.isLoading;
-  const queryError = membersQuery.error?.message;
 
   const load = useCallback(() => membersQuery.refetch(), [membersQuery]);
 
-  // Surface query-level errors via the same banner as mutation errors.
-  useEffect(() => {
-    if (queryError) setError(queryError);
-  }, [queryError]);
+  // Display query and mutation errors in the same banner. Query errors come
+  // straight from the query (auto-clear when the query recovers); mutation
+  // errors live in `error` state set by the action handlers below.
+  const displayError = error || membersQuery.error?.message || null;
 
   async function handleInvite(e) {
     e.preventDefault();
@@ -611,9 +610,9 @@ function MembersTab() {
         sub={`${members.length} member${members.length !== 1 ? "s" : ""}`}
       />
 
-      {error && (
+      {displayError && (
         <div className="card card-padded" style={{ borderColor: "var(--danger)", color: "var(--danger)", display: "flex", gap: 8, alignItems: "center" }}>
-          <AlertCircle size={15} /> {error}
+          <AlertCircle size={15} /> {displayError}
         </div>
       )}
 
@@ -814,14 +813,13 @@ function RecycleBinTab() {
 
   const data = recycleQuery.data ?? null;
   const loading = recycleQuery.isLoading;
-  const queryError = recycleQuery.error?.message;
 
   const load = useCallback(() => recycleQuery.refetch(), [recycleQuery]);
 
-  // Surface query-level errors via the same banner as mutation errors.
-  useEffect(() => {
-    if (queryError) setError(queryError);
-  }, [queryError]);
+  // Display query and mutation errors in the same banner. Query errors come
+  // straight from the query (auto-clear when the query recovers); mutation
+  // errors live in `error` state set by the action handlers below.
+  const displayError = error || recycleQuery.error?.message || null;
 
   async function handleRestore(type, id) {
     setError(null);
@@ -858,9 +856,9 @@ function RecycleBinTab() {
     </div>
   );
 
-  if (error) return (
+  if (displayError) return (
     <div className="card card-padded" style={{ borderColor: "var(--danger)", color: "var(--danger)", display: "flex", gap: 8, alignItems: "center" }}>
-      <AlertCircle size={15} /> {error}
+      <AlertCircle size={15} /> {displayError}
     </div>
   );
 
