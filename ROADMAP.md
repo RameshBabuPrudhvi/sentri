@@ -1329,6 +1329,34 @@ Because it's marked internal, import risk is real — the path or signature coul
 **Dependencies:** MNT-010 ✅
 
 ---
+### MNT-012 — Full Playwright capability coverage in prompts, validator & feedback loop 🔵 Medium
+**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit (capability coverage review against modern Playwright cheat sheets)
+**Problem:** The 8-stage AI pipeline emits production-grade Playwright code for the *common* surface (semantic locators, basic interactions, navigation, single-level frames, basic API CRUD via `request.newContext`), but a capability audit against modern Playwright cheat sheets shows ~14 gaps where prompts, validator, and feedback loop are silent. The LLM never produces tests using these capabilities even when the page or user request would benefit, because:
+- `CORE_RULES` / `SELF_HEALING_PROMPT_RULES` in `backend/src/selfHealing.js:1229-1300` cover interactions, frames, downloads, dialogs, new tabs — but **not** network mocking, `storageState`, tracing, soft assertions, `expect.poll`, `test.step`, multi-context, or device emulation in prompt form (DIF-003 / AUTO-007 wired the runtime context but the LLM is not taught to *write* device-aware tests).
+- `VALID_PAGE_ACTIONS` in `backend/src/pipeline/testValidator.js:31-62` rejects valid Playwright code that uses `route`, `unroute`, `routeFromHAR`, `storageState`, `setExtraHTTPHeaders`, `setGeolocation`, `setViewportSize`, `emulateMedia`, `grantPermissions`, `addCookies`, `setOffline` — these will be flagged as "unknown action".
+- `feedbackLoop.js` `categoryInstructions` (`backend/src/pipeline/feedbackLoop.js:223-269`) has no remediation path for `NETWORK_FAIL` (suggest `page.route` mock) or `FLAKY_DYNAMIC` (suggest `expect.poll`) failures.
+- `apiTestPrompt.js` covers GET/POST/PUT/PATCH/DELETE bodies but lacks auth-header reuse via `extraHTTPHeaders`, response schema-shape assertions, and multipart upload patterns.
+- Cross-browser dispatch (DIF-002 ✅) targets Firefox/WebKit at runtime, but the generation prompt never branches per browser — the LLM produces Chromium-flavoured tests for all engines.
+This is *not* a runtime gap (the runtime supports all of these via Playwright directly); it is a prompt-and-validator gap that prevents the LLM from using the full Playwright surface.
+**Fix:**
+1. Extend `EXTENDED_RULES` in `backend/src/selfHealing.js` with new sections (kept *out* of `CORE_RULES` so the local-Ollama tier from MNT-009 stays compact):
+   - `NETWORK MOCKING:` — `await page.route('**/api/users', r => r.fulfill({ json: [...] }))`, `route.abort('blockedbyclient')`, `routeFromHAR(path)`.
+   - `AUTH REUSE:` — capture `await context.storageState({ path: 'auth.json' })` in a setup test; consume via `browser.newContext({ storageState: 'auth.json' })`.
+   - `TRACING / DEBUG:` — `context.tracing.start({ screenshots: true, snapshots: true })` / `stop({ path })`.
+   - `SOFT ASSERTIONS:` — `expect.soft(locator).toBeVisible()` and `expect.poll(() => …, { timeout, intervals }).toBe(…)`.
+   - `STEPS:` — `await test.step('Login', async () => { … })` for grouped reporting.
+   - `MULTI-CONTEXT:` — second `browser.newContext()` for parallel-user flows (chat, collab, two-tab).
+   - `DEVICE / LOCALE:` — example using `playwright.devices['iPhone 13']` + `geolocation` + `locale` + `timezoneId` in `newContext` options (LLM-facing — runtime already wired via DIF-003 / AUTO-007).
+2. Widen `VALID_PAGE_ACTIONS` in `backend/src/pipeline/testValidator.js:31-62` with: `route`, `unroute`, `routeFromHAR`, `storageState`, `setExtraHTTPHeaders`, `setGeolocation`, `setViewportSize`, `emulateMedia`, `grantPermissions`, `addCookies`, `setOffline`, `bringToFront`, `pdf`. Add `expect.soft`, `expect.poll`, `test.step`, `test.beforeEach`, `test.afterEach`, `test.describe`, `test.describe.parallel`, `test.slow`, `test.setTimeout`, `expect.configure` to the assertion/structure validators (`validateAssertions`, `validateActions`).
+3. Add new failure categories to `categoryInstructions` in `backend/src/pipeline/feedbackLoop.js:224-269`:
+   - `NETWORK_FAIL` — instruct the model to mock the failing endpoint with `page.route` + `route.fulfill`.
+   - `FLAKY_DYNAMIC` — instruct the model to replace fixed waits / brittle assertions with `expect.poll`.
+   Wire the categoriser to map error patterns (`net::ERR_`, `Timeout … waiting for response`, flaky heuristic from DIF-004) to the new keys.
+4. Extend `backend/src/pipeline/prompts/apiTestPrompt.js` with auth-header reuse via `request.newContext({ extraHTTPHeaders, storageState })`, response schema-shape assertions (`expect(body).toMatchObject({ id: expect.any(Number) })`), and a multipart-upload example.
+5. In `backend/src/pipeline/journeyGenerator.js`, when the run config targets Firefox or WebKit, append a 2–3-line browser-specific note to the system prompt.
+6. Add 5–6 new entries to `backend/src/pipeline/prompts/f
+
+---
 
 ### MNT-008 — ESLint + Prettier enforcement in CI 🔵 Medium
 
