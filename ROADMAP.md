@@ -267,7 +267,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### FEA-002 — TanStack React Query data layer 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Audit
+**Status:** 🔄 In Progress | **Effort:** L | **Source:** Audit
 
 **Problem:** All data fetching uses manual `useEffect` + `useState` patterns with no cache, no background refresh, no optimistic updates, and no retry. `useProjectData` exports `invalidateProjectDataCache` which callers must manually invoke — multiple components fail to do so, producing stale UI after mutations.
 
