@@ -441,7 +441,25 @@ export default function Tests() {
         setBulkError(`Some tests failed to delete. The rest were removed successfully.`);
         setTimeout(() => setBulkError(null), 6000);
       }
-      // Invalidate the shared cache — useProjectData refetches automatically.
+
+      // ── Optimistic cache removal ─────────────────────────────────────
+      // Drop the successfully-deleted tests from the cache immediately so the
+      // UI updates the moment `actionLoading` clears in the finally block —
+      // matches the pattern used by deleteSingleTest and executeBulkAction.
+      // Without this, the fire-and-forget invalidate below would leave the
+      // deleted tests visible until the background refetch resolves.
+      const successfullyDeleted = new Set(
+        Object.entries(byProject).flatMap(([, ids], i) =>
+          results[i].status === "fulfilled" ? ids : [],
+        ),
+      );
+      if (successfullyDeleted.size > 0) {
+        updateTestsCache(prev => prev.filter(t => !successfullyDeleted.has(t.id)));
+      }
+
+      // Invalidate the shared cache so other pages (Dashboard, ProjectDetail,
+      // Reports) see the deletion on next render. Fire-and-forget — the
+      // optimistic patch above already updated the local view.
       invalidateProjectDataCache();
       setSelected(new Set());
     } catch (err) {
