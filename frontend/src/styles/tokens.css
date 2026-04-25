@@ -42,6 +42,11 @@
   --blue-bg: #dbeafe;
   --purple: #7c3aed;
   --purple-bg: #ede9fe;
+  /* Browser-engine brand colours (DIF-002b) — used by BrowserBadge.jsx. */
+  --firefox: #dd4814;
+  --firefox-bg: rgba(221,72,20,0.10);
+  --webkit: #1d6fff;
+  --webkit-bg: rgba(29,111,255,0.10);
 
   /* ── Typography ── */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -84,6 +89,11 @@
   --blue-bg:    rgba(91,156,245,0.12);
   --purple:     #a78bfa;
   --purple-bg:  rgba(167,139,250,0.12);
+  /* Browser-engine brand colours — slightly lifted for dark-mode contrast. */
+  --firefox:    #ff7b3d;
+  --firefox-bg: rgba(255,123,61,0.14);
+  --webkit:     #5b9cf5;
+  --webkit-bg:  rgba(91,156,245,0.14);
   --shadow-sm:  0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
   --shadow:     0 4px 12px rgba(0,0,0,0.5);
 }
@@ -113,6 +123,10 @@
   --blue-bg: #dbeafe;
   --purple: #7c3aed;
   --purple-bg: #ede9fe;
+  --firefox: #dd4814;
+  --firefox-bg: rgba(221,72,20,0.10);
+  --webkit: #1d6fff;
+  --webkit-bg: rgba(29,111,255,0.10);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
   --shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
@@ -143,6 +157,10 @@
     --blue-bg:    rgba(91,156,245,0.12);
     --purple:     #a78bfa;
     --purple-bg:  rgba(167,139,250,0.12);
+    --firefox:    #ff7b3d;
+    --firefox-bg: rgba(255,123,61,0.14);
+    --webkit:     #5b9cf5;
+    --webkit-bg:  rgba(91,156,245,0.14);
     --shadow-sm:  0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
     --shadow:     0 4px 12px rgba(0,0,0,0.5);
   }

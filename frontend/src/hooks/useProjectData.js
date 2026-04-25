@@ -12,10 +12,12 @@ import { projectDataQueryKeys, queryClient } from "../queryClient";
  * Bust cached project data queries. Call after mutations (create/delete project,
  * approve/reject tests, etc.) so the next render fetches fresh data.
  *
- * @returns {void}
+ * @returns {Promise<void>} Resolves once the matching queries finish refetching,
+ *   so callers can `await` to defer follow-up UI changes (toasts, navigation)
+ *   until the cache is fresh.
  */
 export function invalidateProjectDataCache() {
-  queryClient.invalidateQueries({ queryKey: projectDataQueryKeys.root });
+  return queryClient.invalidateQueries({ queryKey: projectDataQueryKeys.root });
 }
 
 /**
@@ -130,6 +132,6 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
     testRuns,
     projMap,
     loading,
-    refresh: () => invalidateProjectDataCache(),
+    refresh: invalidateProjectDataCache,
   };
 }

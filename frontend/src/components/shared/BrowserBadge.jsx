@@ -11,9 +11,9 @@
 import React from "react";
 
 const BROWSER_META = {
-  chromium: { label: "Chromium", color: "var(--blue)",   bg: "var(--blue-bg)",        icon: "🌐" },
-  firefox:  { label: "Firefox",  color: "#dd4814",        bg: "rgba(221,72,20,0.10)",  icon: "🦊" },
-  webkit:   { label: "WebKit",   color: "#1d6fff",        bg: "rgba(29,111,255,0.10)", icon: "🧭" },
+  chromium: { label: "Chromium", color: "var(--blue)",    bg: "var(--blue-bg)",    icon: "🌐" },
+  firefox:  { label: "Firefox",  color: "var(--firefox)", bg: "var(--firefox-bg)", icon: "🦊" },
+  webkit:   { label: "WebKit",   color: "var(--webkit)",  bg: "var(--webkit-bg)",  icon: "🧭" },
 };
 
 /**
@@ -32,7 +32,10 @@ export default function BrowserBadge({ browser, compact = false }) {
       style={{
         background: meta.bg,
         color: meta.color,
-        border: `1px solid ${meta.color}33`,
+        // The `bg` token is already a low-alpha tint of the brand colour; reuse
+        // it as the border so we don't try to splice an alpha suffix onto a
+        // `var(--…)` reference (which CSS doesn't support).
+        border: `1px solid ${meta.bg}`,
         gap: 4,
         fontWeight: 600,
       }}

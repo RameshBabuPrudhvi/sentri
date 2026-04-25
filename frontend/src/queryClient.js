@@ -73,10 +73,12 @@ export const queryClient = new QueryClient({
  * metrics (run completion, test approval, project deletion) so the next render
  * fetches fresh data.
  *
- * @returns {void}
+ * @returns {Promise<void>} Resolves once the matching queries finish refetching,
+ *   so callers can `await` to defer follow-up UI changes (toasts, navigation,
+ *   tour events) until the cache is fresh.
  */
 export function invalidateDashboardCache() {
-  queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.root });
+  return queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.root });
 }
 
 /**
@@ -84,18 +86,20 @@ export function invalidateDashboardCache() {
  * that change run state (abort, re-run, manual refresh).
  *
  * @param {string} runId
- * @returns {void}
+ * @returns {Promise<void>} See {@link invalidateDashboardCache}.
  */
 export function invalidateRunCache(runId) {
-  queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
+  return queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
 }
 
 /**
  * Bust every settings-related cached query (bundle, members, recycleBin,
  * ollamaStatus). Call after mutations that affect settings or workspace state.
  *
- * @returns {void}
+ * @returns {Promise<void>} See {@link invalidateDashboardCache}. `Settings.jsx`
+ *   relies on this so `await reload()` actually waits for the bundle refetch
+ *   before the post-save UI advances (sysInfo counts, tour event dispatch).
  */
 export function invalidateSettingsCache() {
-  queryClient.invalidateQueries({ queryKey: settingsQueryKeys.root });
+  return queryClient.invalidateQueries({ queryKey: settingsQueryKeys.root });
 }
