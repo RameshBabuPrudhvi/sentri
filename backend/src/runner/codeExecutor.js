@@ -377,7 +377,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   try {
     const result = await runInSandbox(
       code,
-      { page, context, expect, __captureStep, __newRequestContext, __requestShim },
+      { page, context, expect, __captureStep, __requestShim },
       "browser-test.js",
     );
     return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings };

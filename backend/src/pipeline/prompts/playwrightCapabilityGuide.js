@@ -36,7 +36,7 @@ const DEBUG_CAPABILITIES = [
  * Regexes that indicate the test uses advanced Playwright patterns where
  * assertion enhancement should be conservative to avoid breaking orchestration.
  */
-export const ADVANCED_PLAYWRIGHT_PATTERNS = [
+const ADVANCED_PLAYWRIGHT_PATTERNS = [
   /\bpage\.route\s*\(/,
   /\broute\.(fulfill|continue|abort|fallback)\s*\(/,
   /\brequest\.newContext\s*\(/,

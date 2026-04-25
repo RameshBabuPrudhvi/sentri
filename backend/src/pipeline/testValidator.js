@@ -58,7 +58,7 @@ const VALID_PAGE_ACTIONS = new Set([
   "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
   // Emulation / page configuration
-  "setViewportSize", "emulateMedia", "setExtraHTTPHeaders", "addInitScript",
+  "setViewportSize", "emulateMedia", "addInitScript",
   // Evaluate-on-selector variants (Ollama frequently uses these)
   "$eval", "$$eval", "$", "$$", "$x",
   // Expect (assertion builder)
@@ -252,16 +252,6 @@ const SAFE_HELPER_MATCHERS = new Set([
 const EXPECT_LOCATOR_RE =
   /expect\s*\(\s*page\s*\.\s*locator\s*\(\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`)\s*\)\s*\)\s*(?:\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
-/**
- * Lightweight CSS/XPath heuristic — mirrors `looksLikeCssSelector` in
- * `selfHealing.js`, kept here to avoid a circular import between the pipeline
- * and runtime-helper modules. Human text like "Email:" / "Add new task"
- * returns false so those chains (which semantically match text) aren't
- * wrongly rejected.
- *
- * @param {string} arg
- * @returns {boolean}
- */
 /**
  * validateSafeHelperUsage(code) → string[]
  *

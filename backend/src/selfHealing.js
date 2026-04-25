@@ -1093,10 +1093,10 @@ export function applyHealingTransforms(code) {
       /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
       (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
     )
-    .replace(
-      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
-      (match) => match
-    )
+    // page.getByTestId(...).setInputFiles(...) — intentionally NOT transformed.
+    // The test-id locator is already precise; rewriting to safeUpload would
+    // route through generic input[type="file"] fallbacks and could pick the
+    // wrong file input on pages with multiple uploaders.
     .replace(
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.setInputFiles\(([^)]+)\)/g,
       (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
