@@ -92,8 +92,13 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
 
   const projects = projectsQuery.data || [];
 
+  const projectIds = useMemo(
+    () => projects.map((project) => project.id).sort(),
+    [projects]
+  );
+
   const runsQuery = useQuery({
-    queryKey: projectDataQueryKeys.runs,
+    queryKey: [...projectDataQueryKeys.runs, projectIds],
     queryFn: () => fetchProjectRuns(projects),
     enabled: fetchRuns && projects.length > 0,
     staleTime: STALE_TIME_MS,
@@ -102,7 +107,7 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
   });
 
   const testsQuery = useQuery({
-    queryKey: projectDataQueryKeys.tests,
+    queryKey: [...projectDataQueryKeys.tests, projectIds],
     queryFn: () => fetchProjectTests(projects),
     enabled: fetchTests && projects.length > 0,
     staleTime: STALE_TIME_MS,
