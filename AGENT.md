@@ -210,7 +210,9 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | `src/utils/formatters.js` | `fmtMs()`, `fmtDate()`, `fmtDateTime()`, `fmtRelativeDate()`, `fmtDateTimeMedium()`, `fmtFutureRelative()`, `fmtDuration()`, `passRateColor()` | All date, time, duration, and colour formatting across pages and components |
 | `src/components/shared/CopyButton.jsx` | `<CopyButton text={…} />` | Copy-to-clipboard button with "Copied" feedback (used by TokenManager, IntegrationSnippets) |
 | `src/context/AuthContext.jsx` | `useAuth()` hook, login/logout, `authFetch()` | Auth state in any component |
-| `src/hooks/useProjectData.js` | `useProjectData(projectId)` | Fetching project + tests + runs |
+| `src/queryClient.js` | Shared TanStack Query `queryClient`, `*QueryKeys` constants, `invalidateProjectDataCache()` / `invalidateDashboardCache()` / `invalidateRunCache(runId)` / `invalidateSettingsCache()` helpers | Bust cached queries after mutations; import the matching `*QueryKeys` when defining a new cached query |
+| `src/hooks/queries/` | Per-resource `useQuery` hooks: `useDashboardQuery`, `useRunDetailQuery(runId)`, `useSettingsBundleQuery`, `useMembersQuery`, `useRecycleBinQuery`, `useOllamaStatusQuery` | Cached GET endpoints — pages should consume these instead of calling `useQuery` directly |
+| `src/hooks/useProjectData.js` | `useProjectData({ fetchTests, fetchRuns })` — TanStack Query hook for projects + tests + runs (FEA-002) | Canonical access to the project/tests/runs cache. Mutations call `invalidateProjectDataCache()` to refresh consumers |
 | `src/hooks/useRunSSE.js` | `useRunSSE(runId)` | Real-time run streaming |
 
 #### Test shared utilities (`backend/tests/helpers/`)
@@ -492,7 +494,10 @@ res.flushHeaders();
 
 ### State & Data Fetching
 
-- The `useProjectData(projectId)` hook is the canonical way to fetch and cache project, tests, and runs data. Use it instead of ad-hoc `useEffect` + `fetch`.
+- All cached GETs go through **TanStack Query** via the shared `queryClient` in `src/queryClient.js`. Global defaults (`staleTime`/`gcTime` 30s, `retry: 1`, `refetchOnWindowFocus: false`) are set there — do not repeat them at the call site.
+- **Use the per-resource hooks in `src/hooks/queries/`** (`useDashboardQuery`, `useRunDetailQuery`, `useSettingsBundleQuery`, `useMembersQuery`, `useRecycleBinQuery`, `useOllamaStatusQuery`) instead of calling `useQuery` directly in pages. For project/tests/runs data, `useProjectData({ fetchTests, fetchRuns })` is the canonical hook.
+- **Adding a new cached endpoint:** (1) add a key namespace to `src/queryClient.js`, (2) add a `useXxxQuery()` hook in `src/hooks/queries/`, (3) consume it from the page. Do not call `useQuery` directly from pages or duplicate `staleTime`/`gcTime`/`retry` config.
+- **Mutations:** after a successful POST/PATCH/DELETE that affects cached data, call the matching `invalidate*Cache()` helper exported from `src/queryClient.js`. For SSE-driven optimistic updates (e.g. `RunDetail.jsx`), use `queryClient.setQueryData(key, updater)` so the cache stays the source of truth.
 - Use the `useRunSSE(runId)` hook for real-time run streaming; do not write raw `EventSource` logic in components.
 - Global auth state lives in `context/AuthContext.jsx`. Access it with `useAuth()`.
 

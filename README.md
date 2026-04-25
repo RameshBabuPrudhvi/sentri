@@ -70,7 +70,7 @@ There are plenty of "AI test generator" repos. Most generate code and leave you 
 | 🆔 **Human-Readable IDs** | `TC-1`, `RUN-2`, `PRJ-3` — not UUIDs. Counters persist in DB and rehydrate on startup |
 | ⛔ **Abort Everything** | `AbortSignal` threaded through the entire pipeline — AI calls, browser ops, and feedback loops halt immediately |
 | 🔀 **Code Diff View** | Built-in Myers line diff shows what changed when Playwright code is regenerated |
-| 📦 **Smart Data Fetching** | `useProjectData` hook with 30s TTL cache + batch `/api/v1/tests` endpoint eliminates N+1 fetches |
+| 📦 **Smart Data Fetching** | TanStack Query data layer (`useProjectData` + per-resource hooks under `frontend/src/hooks/queries/`) with a 30s shared cache and batch `/api/v1/tests` endpoint eliminates N+1 fetches |
 | 🦙 **Ollama Support** | Completely free, private, local inference. NDJSON response fallback, `OLLAMA_MAX_PREDICT` token cap, HTTP 500 retry |
 | 🔐 **Built-in Auth** | Email/password + GitHub/Google OAuth. Scrypt hashing, JWT in HttpOnly cookies (never in localStorage), CSRF double-submit protection, rate limiting, proactive session refresh |
 | 📖 **Full Documentation** | VitePress guide, REST API reference, and auto-generated JSDoc — all deployed to GitHub Pages |
