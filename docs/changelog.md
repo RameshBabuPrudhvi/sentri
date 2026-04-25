@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Frontend**: `useProjectData` migrated to TanStack Query — projects, runs, and tests are now fetched via `useQuery` with a shared `QueryClient` (30s `staleTime`/`gcTime`), replacing the hand-rolled module-level cache. `invalidateProjectDataCache()` and `refresh()` retain their public API and now delegate to `queryClient.invalidateQueries()`. The runs and tests query keys include the current project ID set so dependent queries automatically refetch when the project list changes (FEA-002) (#107)
+
 ## [1.6.4] — 2026-04-24
 
 ### Added
