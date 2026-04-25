@@ -1,6 +1,6 @@
 {
   "name": "autonomous-qa-frontend",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
