@@ -521,29 +521,34 @@ export function getSelfHealingHelperCode(healingHints) {
       });
     }
 
+    function buildCheckboxStrategies(labelOrText) {
+      if (looksLikeSelector(labelOrText)) {
+        return [p => p.locator(labelOrText)];
+      }
+      return [
+        p => p.getByRole('checkbox', { name: labelOrText }),
+        p => p.getByLabel(labelOrText),
+        p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+        // List/row scoped fallbacks — common in TodoMVC, task trackers,
+        // bug queues, settings lists. The checkbox sits inside the li/tr/
+        // .item/.row and the readable label is a sibling of (not on) the
+        // checkbox, so getByRole+name / getByLabel never match. Scope to
+        // the container by hasText first, then pick the checkbox within.
+        p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+        p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+      ];
+    }
+
     async function safeCheck(page, labelOrText) {
       if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
         throw new Error('safeCheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
       }
-      const strategies = looksLikeSelector(labelOrText)
-        ? [p => p.locator(labelOrText)]
-        : [
-          p => p.getByRole('checkbox', { name: labelOrText }),
-          p => p.getByLabel(labelOrText),
-          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
-          // List/row scoped fallbacks — common in TodoMVC, task trackers,
-          // bug queues, settings lists. The checkbox sits inside the li/tr/
-          // .item/.row and the readable label is a sibling of (not on) the
-          // checkbox, so getByRole+name / getByLabel never match. Scope to
-          // the container by hasText first, then pick the checkbox within.
-          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-        ];
+      const strategies = buildCheckboxStrategies(labelOrText);
 
       await retry(async () => {
         const el = await findElement(page, strategies, { healingKey: 'check::' + labelOrText });
@@ -556,21 +561,7 @@ export function getSelfHealingHelperCode(healingHints) {
       if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
         throw new Error('safeUncheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
       }
-      const strategies = looksLikeSelector(labelOrText)
-        ? [p => p.locator(labelOrText)]
-        : [
-          p => p.getByRole('checkbox', { name: labelOrText }),
-          p => p.getByLabel(labelOrText),
-          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
-          // Mirror safeCheck's list/row scoped fallbacks — identical structure.
-          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-        ];
+      const strategies = buildCheckboxStrategies(labelOrText);
 
       await retry(async () => {
         const el = await findElement(page, strategies, { healingKey: 'uncheck::' + labelOrText });
@@ -1096,6 +1087,23 @@ export function applyHealingTransforms(code) {
     .replace(
       /\bpage\.dragAndDrop\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
       (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    // ── File upload transforms → safeUpload ─────────────────────────────────
+    .replace(
+      /\bpage\.setInputFiles\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
     )
     // ── Press transforms → safePress ────────────────────────────────────────
     .replace(

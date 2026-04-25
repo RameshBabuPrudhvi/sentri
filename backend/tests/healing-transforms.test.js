@@ -789,6 +789,25 @@ test("transforms check/uncheck/selectOption in a full test body", () => {
   assert.match(out, /page\.goto/);
 });
 
+// ── 20. File upload transforms (setInputFiles) ───────────────────────────────
+
+console.log("\n📁  File upload transforms");
+
+test("transforms page.getByLabel(...).setInputFiles(...) to safeUpload", () => {
+  const out = applyHealingTransforms("await page.getByLabel('Profile photo').setInputFiles('avatar.png')");
+  assert.equal(out, "await safeUpload(page, 'Profile photo', 'avatar.png')");
+});
+
+test("transforms page.getByTestId(...).setInputFiles(...) to safeUpload", () => {
+  const out = applyHealingTransforms("await page.getByTestId('resume-upload').setInputFiles(['cv.pdf'])");
+  assert.equal(out, "await safeUpload(page, 'resume-upload', ['cv.pdf'])");
+});
+
+test("keeps selector-based page.setInputFiles(...) unchanged", () => {
+  const code = "await page.setInputFiles('#file-input', 'invoice.pdf')";
+  assert.equal(applyHealingTransforms(code), code);
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

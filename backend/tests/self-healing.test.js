@@ -111,17 +111,10 @@ test("safeCheck includes raw input[type=checkbox] fallback inside li", () => {
 });
 
 test("safeUncheck mirrors safeCheck list-item fallback", () => {
-  // safeUncheck should have the same scoped strategies since the element
-  // hierarchy is identical — only the final action differs.
-  const uncheckBlock = helpers.match(
-    /async function safeUncheck[\s\S]+?await retry\(async \(\) => \{[\s\S]+?await el\.uncheck\(\)/,
-  );
-  assert.ok(uncheckBlock, "safeUncheck function block should be present");
-  assert.match(
-    uncheckBlock[0],
-    /locator\('li', \{ hasText: labelOrText \}\)\.getByRole\('checkbox'\)/,
-    "safeUncheck should include li→getByRole('checkbox') fallback",
-  );
+  // safeCheck and safeUncheck should both use the shared strategy builder.
+  assert.match(helpers, /function buildCheckboxStrategies\(labelOrText\)/);
+  assert.match(helpers, /const strategies = buildCheckboxStrategies\(labelOrText\);[\s\S]+?await el\.check\(\)/);
+  assert.match(helpers, /const strategies = buildCheckboxStrategies\(labelOrText\);[\s\S]+?await el\.uncheck\(\)/);
 });
 
 test("safeSelect preserves object/array values (no coercion)", () => {
