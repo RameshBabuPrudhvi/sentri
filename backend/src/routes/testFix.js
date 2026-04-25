@@ -55,7 +55,7 @@ Rules:
 SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
 ${rules}
 
-${buildCapabilityCoverageBlock()}`;
+${buildCapabilityCoverageBlock({ mode: "debug", tier: getTier() })}`;
 }
 
 /**

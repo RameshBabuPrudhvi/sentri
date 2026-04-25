@@ -291,7 +291,7 @@ ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
 SELF-HEALING RULES:
 ${getPromptRules(tier || "cloud")}
 
-${buildCapabilityCoverageBlock()}
+${buildCapabilityCoverageBlock({ mode: "debug", tier: tier || "cloud" })}
 
 Return ONLY valid JSON (no markdown):
 {

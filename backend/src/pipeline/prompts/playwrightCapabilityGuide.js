@@ -1,35 +1,51 @@
 /**
  * @module pipeline/prompts/playwrightCapabilityGuide
- * @description Shared Playwright capability coverage guidance used by
- * generation, regeneration, and debugging prompts.
+ * @description Tier/scenario-aware Playwright capability guidance to keep
+ * prompts focused instead of dumping an undifferentiated capability list.
  */
 
-/**
- * Full-surface Playwright capability checklist used to prevent prompts from
- * overfitting to only click/fill style tests.
- */
-export const PLAYWRIGHT_CAPABILITY_GUIDE = [
-  "Browser & context lifecycle: browser.newContext(), context.newPage(), storageState reuse",
-  "Cross-browser intent: chromium/firefox/webkit compatibility when scenario requires it",
-  "Navigation: page.goto(), reload(), goBack(), goForward()",
-  "Locators: locator(), getByRole(), getByText(), getByTestId(), frameLocator()",
-  "Actions: click, dblclick, fill, type, press, hover, check/uncheck, drag/drop, file upload",
-  "Assertions: toBeVisible(), toHaveText(), toHaveValue(), toContainText(), soft assertions when appropriate",
-  "Waiting strategy: auto-waiting first, waitForSelector/waitForLoadState as targeted fallbacks",
-  "Frames & complex DOM: nested frame handling and Shadow DOM-safe locator strategy",
-  "Network controls: page.route() interception, mock/fulfill/abort/continue patterns",
-  "API testing: request.newContext(), GET/POST/PUT/PATCH/DELETE with schema assertions",
-  "Debugging/observability: screenshots, traces, videos/test attachments",
-  "Execution structure: fixtures/hooks, retries/timeouts, describe.parallel, device emulation (viewport/geolocation)",
+const CLOUD_UI_CAPABILITIES = [
+  "Use browser/context lifecycle only when needed (newContext/newPage/storageState).",
+  "Prefer resilient locators: getByRole/getByText/getByTestId, locator(), frameLocator() for iframes.",
+  "Cover rich interactions where the UI requires them: dblclick/hover/check/uncheck/drag-drop/file upload/press.",
+  "Use targeted waiting: auto-wait first, then waitForSelector/waitForLoadState('domcontentloaded') when justified.",
+  "Use network/API primitives only for relevant flows: page.route mocks, request.newContext contract checks.",
+  "Add debugging observability for fragile flows: screenshots/tracing/video attachments.",
+  "For scale scenarios, structure tests with hooks/fixtures/retries/timeouts and parallel-safe describe blocks.",
+  "Use device emulation/geolocation only when mobile or regional behaviour is explicitly under test.",
+];
+
+const LOCAL_UI_CAPABILITIES = [
+  "Match Playwright APIs to scenario complexity (frames/uploads/drag-drop/mocks/API/device).",
+  "Prefer semantic locators (getByRole/getByText/getByTestId) and frameLocator for iframe flows.",
+  "Use stable waits (auto-wait + domcontentloaded + targeted waitForSelector).",
+];
+
+const API_CAPABILITIES = [
+  "API tests must use request.newContext + HTTP methods (get/post/put/patch/delete).",
+  "Validate status + response schema/content; use route mocking only when API dependency requires isolation.",
+  "Do not include browser-only UI interactions unless explicitly generating hybrid API+UI coverage.",
+];
+
+const DEBUG_CAPABILITIES = [
+  "Preserve advanced primitives already in the test (route mocks, storageState, tracing, frame locators).",
+  "Apply the smallest fix possible without downgrading robust Playwright patterns to basic click/fill only.",
 ];
 
 /**
- * Build a compact capability block for prompt inclusion.
+ * Build a capability block tuned for prompt purpose and model tier.
  *
+ * @param {object} [opts]
+ * @param {"ui"|"api"|"debug"} [opts.mode="ui"]
+ * @param {"cloud"|"local"} [opts.tier="cloud"]
  * @returns {string}
  */
-export function buildCapabilityCoverageBlock() {
-  return `PLAYWRIGHT CAPABILITY COVERAGE (use what the scenario needs, not a limited subset):
-${PLAYWRIGHT_CAPABILITY_GUIDE.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}`;
+export function buildCapabilityCoverageBlock({ mode = "ui", tier = "cloud" } = {}) {
+  let items = CLOUD_UI_CAPABILITIES;
+  if (mode === "api") items = API_CAPABILITIES;
+  if (mode === "debug") items = DEBUG_CAPABILITIES;
+  if (mode === "ui" && tier === "local") items = LOCAL_UI_CAPABILITIES;
+  return `PLAYWRIGHT CAPABILITY RULES (${mode.toUpperCase()}):
+${items.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}`;
 }
 

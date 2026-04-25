@@ -115,7 +115,7 @@ ${getAssertionRules(tier)}
 STABILITY:
 ${getStabilityRules(tier)}
 
-${buildCapabilityCoverageBlock()}
+${buildCapabilityCoverageBlock({ mode: "ui", tier })}
 
 ${getCodeRequirements(tier)}`;
 }

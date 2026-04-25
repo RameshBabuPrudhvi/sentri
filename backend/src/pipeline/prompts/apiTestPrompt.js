@@ -115,7 +115,7 @@ FORBIDDEN — NEVER generate any of these in API tests:
 - \`page.waitForLoadState()\` or \`page.waitForSelector()\` — these are browser-only.
 - Any reference to \`page\`, \`context\`, or \`browser\` variables — API tests only use \`request\`.
 
-${buildCapabilityCoverageBlock()}
+${buildCapabilityCoverageBlock({ mode: "api", tier: local ? "local" : "cloud" })}
 
 PROMPT VERSION: ${PROMPT_VERSION}`;
 
