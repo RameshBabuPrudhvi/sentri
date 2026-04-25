@@ -8,6 +8,7 @@ import {
 import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/shared/StatusBadge";
+import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
@@ -357,7 +358,17 @@ export default function Work() {
                       </div>
                     )}
                   </td>
-                  <td><TypeBadge type={run.type} /></td>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <TypeBadge type={run.type} />
+                      {/* Show browser badge only for non-chromium test runs —
+                          crawl/generate are pinned to chromium so a badge
+                          there would be visual noise (DIF-002b). */}
+                      {run.type === "test_run" && run.browser && run.browser !== "chromium" && (
+                        <BrowserBadge browser={run.browser} compact />
+                      )}
+                    </div>
+                  </td>
                   <td><StatusBadge status={run.status} /></td>
                   <td>
                     {run.type === "test_run"

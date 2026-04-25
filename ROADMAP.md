@@ -407,7 +407,9 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-002b — Cross-browser polish: browser-aware baselines, UI badges, CI coverage 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Follow-on from DIF-002
+**Status:** 🔄 In Progress | **Effort:** M | **Source:** Follow-on from DIF-002
+
+**Progress (PR #107):** Gap 3 (browser badge) shipped — new `BrowserBadge` component renders the Playwright engine on Run Detail header (test runs only) and Runs list rows (compact, non-chromium only). Gap 1 (browser-aware visual baselines) and gap 2 (firefox/webkit CI smoke job) still outstanding.
 
 **Problem:** DIF-002 landed the core cross-browser dispatch (`resolveBrowser()`, per-run `browser` field, migration 009, Run Regression modal dropdown) but left three visible gaps that prevent firefox/webkit from feeling like first-class citizens:
 
@@ -1390,12 +1392,12 @@ Because it's marked internal, import risk is real — the path or signature coul
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 3 | 0 | 0 | — |
-| Differentiators | 19 | 6 | 0 | 13 | DIF-002b, 002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
+| Differentiators | 19 | 6 | 1 | 12 | DIF-002b (in progress), 002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **67** | **25** | **0** | **42** | |
+| **Totals** | **67** | **25** | **1** | **41** | |
 
-**Total tracked items:** 67 across 7 categories — **25 complete** (37%), **0 in progress**, **42 remaining**
+**Total tracked items:** 67 across 7 categories — **25 complete** (37%), **1 in progress** (DIF-002b), **41 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅

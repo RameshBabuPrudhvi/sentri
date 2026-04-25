@@ -27,6 +27,7 @@ import CrawlView from "../components/crawl/CrawlView";
 import GenerateView from "../components/generate/GenerateView";
 import TestRunView from "../components/run/TestRunView";
 import AgentTag from "../components/shared/AgentTag.jsx";
+import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -414,6 +415,12 @@ export default function RunDetail() {
             <span className="badge badge-gray">
               <Ban size={10} /> Aborted
             </span>
+          )}
+
+          {/* Browser engine (DIF-002b) — only meaningful for test runs.
+              Crawl and generate runs are pinned to chromium. */}
+          {!isCrawl && !isGenerate && run.browser && (
+            <BrowserBadge browser={run.browser} />
           )}
 
           <div className="rd-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
