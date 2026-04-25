@@ -18,7 +18,7 @@ import { streamText, hasProvider, isLocalProvider } from "../aiProvider.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { getPromptRules, applyHealingTransforms } from "../selfHealing.js";
+import { getPromptRules } from "../selfHealing.js";
 import { getTier } from "../pipeline/prompts/promptTiers.js";
 import { buildCapabilityCoverageBlock } from "../pipeline/prompts/playwrightCapabilityGuide.js";
 import { actor } from "../utils/actor.js";
@@ -238,12 +238,6 @@ router.post("/tests/:testId/fix", requireRole("qa_lead"), async (req, res) => {
       .replace(/^```(?:javascript|js|typescript|ts)?\s*\n?/i, "")
       .replace(/\n?\s*```\s*$/i, "")
       .trim();
-
-    // Safety net: rewrite any raw Playwright calls the AI may have used back
-    // to self-healing helpers (safeClick, safeFill, safeExpect). This ensures
-    // the fixed code stays consistent with the original code style even when
-    // the model ignores the self-healing prompt rules.
-    fixedCode = applyHealingTransforms(fixedCode);
 
     // Build diff summary
     const { diff, added, removed } = computeDiffSummary(test.playwrightCode, fixedCode);

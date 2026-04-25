@@ -13,6 +13,7 @@
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
 import { extractTestBody, stripPlaywrightImports, patchNetworkIdle, repairBrokenStringLiterals } from "../runner/codeParsing.js";
+import { looksLikeCssSelector } from "../utils/selectorHeuristics.js";
 import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
@@ -63,7 +64,7 @@ const VALID_PAGE_ACTIONS = new Set([
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
-  "get", "post", "put", "patch", "delete", "fetch",
+  "get", "post", "put", "patch", "delete", "fetch", "dispose",
   // Test runner structure / diagnostics
   "describe", "beforeEach", "afterEach", "beforeAll", "afterAll", "step",
   "setTimeout", "slow", "fixme", "skip", "fail", "info", "attach",
@@ -261,15 +262,6 @@ const EXPECT_LOCATOR_RE =
  * @param {string} arg
  * @returns {boolean}
  */
-function looksLikeSelector(arg) {
-  if (!arg || typeof arg !== "string") return false;
-  const s = arg.trim();
-  return /^[#.[/]|^\/\//.test(s)
-    || /(?:[\w\])])\s[>~+]\s(?:[\w#.[:])/.test(s)
-    || /\w\[[^\]]+\]/.test(s)
-    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
-}
-
 /**
  * validateSafeHelperUsage(code) → string[]
  *
@@ -301,7 +293,7 @@ export function validateSafeHelperUsage(code) {
     const selector = m[1] || m[2] || m[3];
     const matcher = m[4];
     if (!SAFE_HELPER_MATCHERS.has(matcher)) continue;
-    if (!looksLikeSelector(selector)) continue;
+    if (!looksLikeCssSelector(selector)) continue;
     const key = `${matcher}::${selector}`;
     if (seen.has(key)) continue;
     seen.add(key);

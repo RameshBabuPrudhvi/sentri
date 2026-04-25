@@ -31,6 +31,7 @@
 // Value: { strategyIndex: number, succeededAt: string, failCount: number }
 
 import * as healingRepo from "./database/repositories/healingRepo.js";
+import { looksLikeCssSelector } from "./utils/selectorHeuristics.js";
 
 /**
  * Record a successful healing result.
@@ -376,7 +377,9 @@ export function getSelfHealingHelperCode(healingHints) {
       // Use domcontentloaded (not networkidle) because SPAs and e-commerce
       // sites fire continuous background requests and never reach networkidle,
       // causing a guaranteed timeout.
-      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+      if (typeof page?.waitForLoadState === 'function') {
+        await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+      }
     }
 
     async function safeHover(page, text) {
@@ -808,26 +811,6 @@ export function getSelfHealingHelperCode(healingHints) {
 // Safer Transform Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Detect CSS/XPath selectors that should NOT be rewritten to text-based helpers.
-// This is the server-side counterpart of the runtime `looksLikeSelector` injected
-// by getSelfHealingHelperCode(). Both must agree on what constitutes a selector.
-//
-// Matches:
-//   - Starts with #, ., [, //           (ID, class, attribute, XPath)
-//   - CSS combinators (>, ~, +)          with selector-like context on both sides
-//   - Attribute selectors (tag[attr])    e.g. input[name=q]
-//   - Pseudo-selectors (:nth-child, …)  e.g. div:hover, a:nth-child(2)
-//
-// Does NOT match human-readable text like "Email:", "Price: $10", "Add + Continue".
-function looksLikeCssSelector(arg) {
-  if (!arg || typeof arg !== 'string') return false;
-  const s = arg.trim();
-  return /^[#.\[/]|^\/\//.test(s)
-    || /(?:[\w\])])\s[>~+]\s(?:[\w#.\[:])/.test(s)
-    || /\w\[[^\]]+\]/.test(s)
-    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
-}
-
 // Escape special characters in captured text so injecting into generated code
 // strings is safe. Handles:
 //   - backslashes  (must be first to avoid double-escaping)
@@ -1088,6 +1071,14 @@ export function applyHealingTransforms(code) {
       /\bpage\.dragAndDrop\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
       (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
     )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.dragTo\(page\.locator\(['"`]([^'"`]+)['"`]\)\)/g,
+      (match, src, tgt) => looksLikeCssSelector(src) || looksLikeCssSelector(tgt) ? match : `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\.dragTo\(page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\)/g,
+      (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
     // ── File upload transforms → safeUpload ─────────────────────────────────
     .replace(
       /\bpage\.setInputFiles\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
@@ -1104,6 +1095,14 @@ export function applyHealingTransforms(code) {
     .replace(
       /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
       (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /frame\.locator\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(frame, '${esc(target)}', ${files})`
     )
     // ── Press transforms → safePress ────────────────────────────────────────
     .replace(

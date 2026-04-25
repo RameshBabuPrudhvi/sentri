@@ -282,6 +282,13 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   const instrumented = injectStepCaptures(cleaned);
 
   const helpers = getSelfHealingHelperCode(healingHints);
+  const browserRequestContexts = [];
+
+  const __newRequestContext = async (options) => {
+    const ctx = await playwright.request.newContext({ ignoreHTTPSErrors: true, ...options });
+    browserRequestContexts.push(ctx);
+    return ctx;
+  };
 
   // Step capture state — collected by __captureStep inside the sandbox,
   // populated by the onStepCapture callback provided by executeTest.
@@ -318,7 +325,9 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       // 'request'). Defining them as undefined prevents ReferenceError crashes.
       const run = undefined;
       const browser = context?.browser?.() ?? undefined;
-      const request = undefined;
+      // Hybrid UI+API flows legitimately use request.newContext().
+      // Expose a scoped request fixture instead of undefined.
+      const request = { newContext: (...args) => __newRequestContext(...args) };
       let __testError = null;
       try {
         ${instrumented}
@@ -336,13 +345,17 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   `;
 
   try {
-    const result = await runInSandbox(code, { page, context, expect, __captureStep }, "browser-test.js");
+    const result = await runInSandbox(code, { page, context, expect, __captureStep, __newRequestContext }, "browser-test.js");
     return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
     err.__stepCaptures = stepCaptures;
     err.__stepTimings = stepTimings;
     throw err;
+  } finally {
+    for (const ctx of browserRequestContexts) {
+      await ctx.dispose().catch(() => {});
+    }
   }
 }
 

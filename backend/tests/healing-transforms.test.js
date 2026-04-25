@@ -808,6 +808,16 @@ test("keeps selector-based page.setInputFiles(...) unchanged", () => {
   assert.equal(applyHealingTransforms(code), code);
 });
 
+test("transforms page.getByRole(...).setInputFiles(...) to safeUpload", () => {
+  const out = applyHealingTransforms("await page.getByRole('button', { name: 'Upload avatar' }).setInputFiles('avatar.png')");
+  assert.equal(out, "await safeUpload(page, 'Upload avatar', 'avatar.png')");
+});
+
+test("transforms text-based locator.dragTo(locator) into safeDrag", () => {
+  const out = applyHealingTransforms("await page.locator('Card A').dragTo(page.locator('Column B'))");
+  assert.equal(out, "await safeDrag(page, 'Card A', 'Column B')");
+});
+
 // ── Results ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${"─".repeat(50)}`);

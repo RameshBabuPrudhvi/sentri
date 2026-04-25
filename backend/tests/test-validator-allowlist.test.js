@@ -32,6 +32,7 @@ const ALLOWLIST_CASES = [
   { label: "context.setGeolocation", code: "await context.setGeolocation({ latitude: 1, longitude: 2 });" },
   { label: "page.frameLocator", code: "await page.frameLocator('#checkout').getByRole('button', { name: 'Pay' }).click();" },
   { label: "request context", code: "const api = await request.newContext({ baseURL: 'https://x' }); await api.get('/health');" },
+  { label: "request.dispose", code: "const api = await request.newContext({ baseURL: 'https://x' }); await api.dispose();" },
   { label: "page.dragAndDrop", code: "await page.dragAndDrop('#source', '#target');" },
   { label: "locator.dragTo", code: "await page.locator('#source').dragTo(page.locator('#target'));" },
   { label: "setInputFiles", code: "await page.getByLabel('Upload').setInputFiles('file.txt');" },
@@ -55,4 +56,3 @@ console.log("\n─────────────────────�
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
 console.log("\n🎉 test-validator allowlist tests passed");
-
