@@ -23,6 +23,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { getPromptRules } from "../selfHealing.js";
 import { getTier, TIER_CONFIG } from "./prompts/promptTiers.js";
+import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuide.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -289,6 +290,8 @@ ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
 
 SELF-HEALING RULES:
 ${getPromptRules(tier || "cloud")}
+
+${buildCapabilityCoverageBlock()}
 
 Return ONLY valid JSON (no markdown):
 {

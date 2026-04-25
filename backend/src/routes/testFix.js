@@ -20,6 +20,7 @@ import { logActivity } from "../utils/activityLogger.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { getPromptRules, applyHealingTransforms } from "../selfHealing.js";
 import { getTier } from "../pipeline/prompts/promptTiers.js";
+import { buildCapabilityCoverageBlock } from "../pipeline/prompts/playwrightCapabilityGuide.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 
@@ -52,7 +53,9 @@ Rules:
 - Keep the test name the same as the original.
 
 SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
-${rules}`;
+${rules}
+
+${buildCapabilityCoverageBlock()}`;
 }
 
 /**

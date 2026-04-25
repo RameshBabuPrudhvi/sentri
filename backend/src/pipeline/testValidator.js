@@ -29,16 +29,23 @@ const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
  * Grouped for readability; the Set is what drives validation.
  */
 const VALID_PAGE_ACTIONS = new Set([
+  // Browser / context lifecycle
+  "launch", "newContext", "newPage", "close", "storageState",
+  "addCookies", "clearCookies", "cookies", "grantPermissions", "clearPermissions",
+  "setGeolocation", "setExtraHTTPHeaders", "setDefaultTimeout", "setDefaultNavigationTimeout",
+  "tracing", "start", "stop", "startChunk", "stopChunk",
   // Navigation
-  "goto", "goBack", "goForward", "reload", "close", "waitForURL",
+  "goto", "goBack", "goForward", "reload", "waitForURL",
   // Interaction
   "click", "dblclick", "fill", "type", "press", "pressSequentially",
   "hover", "focus", "blur", "tap", "check", "uncheck", "selectOption",
-  "dispatchEvent", "dragAndDrop", "setInputFiles",
+  "dispatchEvent", "dragAndDrop", "dragTo", "setInputFiles",
   // Waiting
   "waitForLoadState", "waitForNavigation", "waitForSelector",
   "waitForFunction", "waitForTimeout", "waitForRequest", "waitForResponse",
   "waitForEvent",
+  // Routing / network control
+  "route", "unroute", "routeFromHAR", "fulfill", "continue", "fallback", "abort",
   // Extraction
   "textContent", "getAttribute", "innerHTML", "innerText", "inputValue",
   "isChecked", "isDisabled", "isEditable", "isEnabled", "isHidden", "isVisible",
@@ -49,16 +56,22 @@ const VALID_PAGE_ACTIONS = new Set([
   // Locator terminal actions (called on locator, not page)
   "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
+  // Emulation / page configuration
+  "setViewportSize", "emulateMedia", "setExtraHTTPHeaders", "addInitScript",
   // Evaluate-on-selector variants (Ollama frequently uses these)
   "$eval", "$$eval", "$", "$$", "$x",
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
   "newContext", "get", "post", "put", "patch", "delete", "fetch",
+  // Test runner structure / diagnostics
+  "describe", "beforeEach", "afterEach", "beforeAll", "afterAll", "step",
+  "setTimeout", "slow", "fixme", "skip", "fail", "info", "attach",
+  "soft", "configure",
   // Misc
-  "evaluate", "evaluateHandle", "addInitScript",
+  "evaluate", "evaluateHandle",
   "keyboard", "mouse", "touchscreen",
-  "on", "once",
+  "on", "once", "off",
 ]);
 
 /**
@@ -67,7 +80,7 @@ const VALID_PAGE_ACTIONS = new Set([
  *   e.g.  page.clicks(...)  →  method = "clicks"
  *         locator.fillup()  →  method = "fillup"
  */
-const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * validateActions(code) → string[]

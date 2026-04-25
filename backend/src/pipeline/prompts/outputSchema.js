@@ -19,6 +19,7 @@ import { getPromptRules } from "../../selfHealing.js";
 import { isLocalProvider } from "../../aiProvider.js";
 import { buildFewShotBlock } from "./fewShotExamples.js";
 import { getTier, getAssertionRules, getStabilityRules, getCodeRequirements } from "./promptTiers.js";
+import { buildCapabilityCoverageBlock } from "./playwrightCapabilityGuide.js";
 
 // ─── Valid test types ────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ ${isLocalProvider() ? "" : buildFewShotBlock()}`.trim();
 // produced which tests, A/B test prompt changes, and roll back if quality
 // regresses.
 
-export const PROMPT_VERSION = "2.3.0";
+export const PROMPT_VERSION = "2.4.0";
 
 export function buildSystemPrompt() {
   const tier = getTier();
@@ -113,6 +114,8 @@ ${getAssertionRules(tier)}
 
 STABILITY:
 ${getStabilityRules(tier)}
+
+${buildCapabilityCoverageBlock()}
 
 ${getCodeRequirements(tier)}`;
 }
