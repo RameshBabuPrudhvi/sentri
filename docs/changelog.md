@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Pipeline**: Advanced Playwright flows are now handled more safely end-to-end. `validateActions()` accepts `request.dispose()` to prevent false-positive API test rejection, `runGeneratedCode()` now exposes a scoped `request.newContext()` fixture for hybrid UI+API tests (with guaranteed context disposal), and `testFix` no longer pre-applies healing transforms (transforms are applied once at execution time) (#unreleased).
+- **Self-healing**: Transform coverage now includes text-based `locator.dragTo(...)` patterns and additional upload variants (`getByRole(...).setInputFiles(...)`), and `safeClick` guards `waitForLoadState` calls for non-Page roots (#unreleased).
+- **Feedback loop**: Added advanced failure categories (`NETWORK_MOCK_FAIL`, `FRAME_FAIL`, `API_ASSERTION_FAIL`) with targeted regeneration instructions and high-priority handling instead of falling back to `UNKNOWN` (#unreleased).
+
+### Changed
+- **Maintenance**: Selector classification logic is now centralized in `backend/src/utils/selectorHeuristics.js` and reused by both validator and self-healing transform paths to prevent heuristic drift (#unreleased).
+
+### Added
+- **Tests**: Added/extended regressions for advanced capability handling:
+  - `backend/tests/test-validator-allowlist.test.js` now covers `request.dispose`.
+  - `backend/tests/healing-transforms.test.js` covers `getByRole(...).setInputFiles(...)` and `locator.dragTo(...)` transforms.
+  - `backend/tests/feedback-loop.test.js` covers new advanced failure categories (#unreleased).
+
 ## [1.6.5] — 2026-04-25
 
 ### Changed
