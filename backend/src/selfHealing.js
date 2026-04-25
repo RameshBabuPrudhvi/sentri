@@ -608,6 +608,7 @@ export function getSelfHealingHelperCode(healingHints) {
       const strategies = looksLikeSelector(labelOrSelector)
         ? [p => p.locator(labelOrSelector)]
         : [
+          p => p.getByTestId(labelOrSelector),
           p => p.getByLabel(labelOrSelector),
           p => p.getByRole('button', { name: labelOrSelector }),
           p => p.getByText(labelOrSelector, { exact: true }),

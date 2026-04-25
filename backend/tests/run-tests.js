@@ -34,6 +34,7 @@ const files = [
   "tests/trigger-api.test.js",
   "tests/ssrf-protection.test.js",
   "tests/run-worker.test.js",
+  "tests/code-executor-hybrid-request.test.js",
   "tests/abort-worker.test.js",
   "tests/notifications-api.test.js",
   "tests/email-verification.test.js",

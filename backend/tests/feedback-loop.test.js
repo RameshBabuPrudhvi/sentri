@@ -81,8 +81,17 @@ test("NETWORK_MOCK_FAIL: route.fulfill mismatch", () => {
   assert.equal(classifyFailure("route.fulfill returned malformed mocked response body"), "NETWORK_MOCK_FAIL");
 });
 
+test("generic 'intercept' wording is NOT auto-classified as NETWORK_MOCK_FAIL", () => {
+  const category = classifyFailure("Cannot intercept a closed page");
+  assert.notEqual(category, "NETWORK_MOCK_FAIL");
+});
+
 test("FRAME_FAIL: frameLocator target missing", () => {
   assert.equal(classifyFailure("frameLocator('#payment-frame') could not resolve element"), "FRAME_FAIL");
+});
+
+test("iframe selector miss is classified as SELECTOR_ISSUE (not FRAME_FAIL)", () => {
+  assert.equal(classifyFailure("locator('iframe#checkout') not found after 30000ms"), "SELECTOR_ISSUE");
 });
 
 test("API_ASSERTION_FAIL: request.newContext response status mismatch", () => {

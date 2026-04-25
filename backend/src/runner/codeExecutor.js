@@ -283,12 +283,34 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
 
   const helpers = getSelfHealingHelperCode(healingHints);
   const browserRequestContexts = [];
+  let requestContextsDisposed = false;
+
+  const defaultRequestContext = await playwright.request.newContext({ ignoreHTTPSErrors: true });
+  browserRequestContexts.push(defaultRequestContext);
 
   const __newRequestContext = async (options) => {
     const ctx = await playwright.request.newContext({ ignoreHTTPSErrors: true, ...options });
     browserRequestContexts.push(ctx);
     return ctx;
   };
+
+  const __disposeRequestContexts = async () => {
+    if (requestContextsDisposed) return;
+    requestContextsDisposed = true;
+    for (const ctx of browserRequestContexts) {
+      await ctx.dispose().catch(() => {});
+    }
+  };
+
+  // Hybrid browser tests may call both request.newContext() and request.get/post.
+  // Provide a fixture-like shim that supports both patterns.
+  const __requestShim = {
+    newContext: (...args) => __newRequestContext(...args),
+    dispose: () => __disposeRequestContexts(),
+  };
+  for (const method of ["get", "post", "put", "patch", "delete", "fetch", "head"]) {
+    __requestShim[method] = (...args) => defaultRequestContext[method](...args);
+  }
 
   // Step capture state — collected by __captureStep inside the sandbox,
   // populated by the onStepCapture callback provided by executeTest.
@@ -327,7 +349,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
       const browser = context?.browser?.() ?? undefined;
       // Hybrid UI+API flows legitimately use request.newContext().
       // Expose a scoped request fixture instead of undefined.
-      const request = { newContext: (...args) => __newRequestContext(...args) };
+      const request = __requestShim;
       let __testError = null;
       try {
         ${instrumented}
@@ -345,7 +367,11 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   `;
 
   try {
-    const result = await runInSandbox(code, { page, context, expect, __captureStep, __newRequestContext }, "browser-test.js");
+    const result = await runInSandbox(
+      code,
+      { page, context, expect, __captureStep, __newRequestContext, __requestShim },
+      "browser-test.js",
+    );
     return { passed: true, healingEvents: result?.__healingEvents || [], stepCaptures, stepTimings };
   } catch (err) {
     err.__healingEvents = err.__healingEvents || [];
@@ -353,9 +379,7 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     err.__stepTimings = stepTimings;
     throw err;
   } finally {
-    for (const ctx of browserRequestContexts) {
-      await ctx.dispose().catch(() => {});
-    }
+    await __disposeRequestContexts();
   }
 }
 

@@ -47,22 +47,6 @@ import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuid
 //      not already classified as a selector or navigation issue.
 
 const FAILURE_PATTERNS = [
-  ["NETWORK_MOCK_FAIL", [
-    /route\.fulfill/i,
-    /route handler/i,
-    /mock(ed)? response/i,
-    /intercept/i,
-  ]],
-  ["FRAME_FAIL", [
-    /frameLocator/i,
-    /frame .* not found/i,
-    /iframe/i,
-  ]],
-  ["API_ASSERTION_FAIL", [
-    /res\.status\(\)/i,
-    /response body/i,
-    /api\.get|api\.post|request\.newContext/i,
-  ]],
   ["SELECTOR_ISSUE", [
     /locator.*not found/i,
     /element not visible/i,
@@ -84,6 +68,24 @@ const FAILURE_PATTERNS = [
     /navigation failed/i,
     /timeout.*navigation/i,
     /ERR_NAME_NOT_RESOLVED/i,
+  ]],
+  ["NETWORK_MOCK_FAIL", [
+    /page\.route/i,
+    /route\.fulfill/i,
+    /route handler/i,
+    /mock(ed)? response/i,
+  ]],
+  ["FRAME_FAIL", [
+    /frameLocator/i,
+    /frame .* not found/i,
+    /iframe.*not found/i,
+    /cannot access iframe/i,
+  ]],
+  ["API_ASSERTION_FAIL", [
+    /request\.newContext.*(?:status|schema|contract|body)/i,
+    /api\.(?:get|post|put|patch|delete|fetch).*(?:status|schema|contract|body)/i,
+    /api response (?:status|schema|contract)/i,
+    /\bres\.status\(\)/i,
   ]],
   ["ASSERTION_FAIL", [
     /expect.*received/i,
