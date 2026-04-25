@@ -9,11 +9,12 @@
     "test": "node tests/run-tests.js"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.66.9",
+    "lucide-react": "^0.577.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5",
-    "recharts": "^2.15.0",
-    "lucide-react": "^0.577.0"
+    "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
