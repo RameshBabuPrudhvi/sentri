@@ -63,7 +63,7 @@ const VALID_PAGE_ACTIONS = new Set([
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
-  "newContext", "get", "post", "put", "patch", "delete", "fetch",
+  "get", "post", "put", "patch", "delete", "fetch",
   // Test runner structure / diagnostics
   "describe", "beforeEach", "afterEach", "beforeAll", "afterAll", "step",
   "setTimeout", "slow", "fixme", "skip", "fail", "info", "attach",

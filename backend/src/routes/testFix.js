@@ -33,8 +33,11 @@ const router = Router();
  * @returns {string} The system prompt.
  */
 function buildFixSystemPrompt() {
-  const rules = getPromptRules(getTier());
+  const tier = getTier();
+  const rules = getPromptRules(tier);
   return `You are a Playwright test expert. Your job is to apply a MINIMAL, TARGETED fix to a failing Playwright test.
+
+${buildCapabilityCoverageBlock({ mode: "debug", tier })}
 
 CRITICAL — MINIMAL CHANGES ONLY:
 - Identify the SPECIFIC line(s) that caused the failure based on the error message.
@@ -53,9 +56,7 @@ Rules:
 - Keep the test name the same as the original.
 
 SELF-HEALING HELPERS — the test runtime provides these helpers. You MUST use them instead of raw Playwright selectors:
-${rules}
-
-${buildCapabilityCoverageBlock({ mode: "debug", tier: getTier() })}`;
+${rules}`;
 }
 
 /**

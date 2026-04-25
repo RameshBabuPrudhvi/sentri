@@ -33,6 +33,23 @@ const DEBUG_CAPABILITIES = [
 ];
 
 /**
+ * Regexes that indicate the test uses advanced Playwright patterns where
+ * assertion enhancement should be conservative to avoid breaking orchestration.
+ */
+export const ADVANCED_PLAYWRIGHT_PATTERNS = [
+  /\bpage\.route\s*\(/,
+  /\broute\.(fulfill|continue|abort|fallback)\s*\(/,
+  /\brequest\.newContext\s*\(/,
+  /\bapi\.(get|post|put|patch|delete|fetch)\s*\(/,
+  /\bframeLocator\s*\(/,
+  /\bsetInputFiles\s*\(/,
+  /\bdragAndDrop\s*\(/,
+  /\bdragTo\s*\(/,
+  /\bstorageState\s*\(/,
+  /\btracing\.(start|stop|startChunk|stopChunk)\s*\(/,
+];
+
+/**
  * Build a capability block tuned for prompt purpose and model tier.
  *
  * @param {object} [opts]
@@ -49,3 +66,14 @@ export function buildCapabilityCoverageBlock({ mode = "ui", tier = "cloud" } = {
 ${items.map((item, idx) => `${idx + 1}. ${item}`).join("\n")}`;
 }
 
+/**
+ * Returns true when code includes advanced Playwright primitives that are
+ * sensitive to assertion enhancer rewrites.
+ *
+ * @param {string} playwrightCode
+ * @returns {boolean}
+ */
+export function isAdvancedPlaywrightScenario(playwrightCode) {
+  if (!playwrightCode || typeof playwrightCode !== "string") return false;
+  return ADVANCED_PLAYWRIGHT_PATTERNS.some((pattern) => pattern.test(playwrightCode));
+}

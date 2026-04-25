@@ -261,6 +261,34 @@ test("no_assertions: reason when code has zero expect() calls", () => {
   assert.equal(r._enhancementReason, "no_assertions");
 });
 
+test("advanced route-mocking flow is not force-enhanced", () => {
+  const advanced = noAssertTest({
+    playwrightCode: [
+      "test('x', async ({ page }) => {",
+      "  await page.route('**/api/todos', route => route.fulfill({ status: 200, body: '[]' }));",
+      "  await page.goto('http://ex.com/page');",
+      "});",
+    ].join("\n"),
+  });
+  const r = enhanceTest(advanced, SNAPSHOT, { dominantIntent: "NAVIGATION" });
+  assert.equal(r._assertionEnhanced, false);
+  assert.equal(r._enhancementSkipped, "advanced_capability_flow");
+});
+
+test("advanced API request context flow is not force-enhanced", () => {
+  const advanced = noAssertTest({
+    playwrightCode: [
+      "test('x', async ({ request }) => {",
+      "  const api = await request.newContext({ baseURL: 'http://ex.com' });",
+      "  await api.get('/health');",
+      "});",
+    ].join("\n"),
+  });
+  const r = enhanceTest(advanced, SNAPSHOT, null);
+  assert.equal(r._assertionEnhanced, false);
+  assert.equal(r._enhancementSkipped, "advanced_capability_flow");
+});
+
 test("weak_assertions_replaced: reason when only toBeTruthy/toBeDefined present", () => {
   const r = enhanceTest(weakAssertTest(), SNAPSHOT, null);
   assert.equal(r._assertionEnhanced, true);
