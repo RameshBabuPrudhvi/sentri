@@ -30,6 +30,21 @@ await safeExpect(page, expect, '0 items left');
 
 Count, state, attribute, class, and CSS matchers on `page.locator()` are intentionally **allowed** — `toHaveCount`, `toBeHidden`, `toHaveAttribute`, `toHaveClass`, `toHaveCSS`. Those don't have a safe-helper equivalent and the generation prompt explicitly recommends `page.locator()` for them.
 
+### Advanced Playwright capability coverage
+
+The pipeline preserves advanced Playwright primitives end-to-end so complex flows are not downgraded to basic `click`/`fill` between generation, enhancement, validation, and self-healing stages:
+
+- **Browser/context lifecycle** — `browser.newContext`, `context.newPage`, `storageState`, `addCookies`, `grantPermissions`, `setExtraHTTPHeaders`.
+- **Frames & Shadow DOM** — `frameLocator()` for iframe-scoped interactions and assertions.
+- **Network interception/mocking** — `page.route`, `route.fulfill`/`continue`/`fallback`/`abort`, `routeFromHAR`, `unroute`.
+- **API request contexts** — `request.newContext` plus `get`/`post`/`put`/`patch`/`delete`/`fetch`/`dispose` for hybrid UI+API tests.
+- **Rich interactions** — `dblclick`, `hover`, `check`/`uncheck`, `dragAndDrop`, `locator.dragTo`, `setInputFiles`, `press`.
+- **Diagnostics** — `tracing.start`/`stop`/`startChunk`/`stopChunk`, screenshots, `testInfo.attach`, `expect.soft`.
+- **Test runner structure** — `test.describe`/`describe.parallel`/`describe.configure`, `beforeEach`/`afterEach`/`beforeAll`/`afterAll`, `test.step`, retries/timeouts.
+- **Emulation** — `setViewportSize`, `emulateMedia`, geolocation/locale/timezone via context options.
+
+Tests that use these primitives are detected as "advanced scenarios" and are **skipped by the assertion enhancer** so its generic templates can't break bespoke orchestration. The feedback loop also classifies advanced failures into dedicated categories (`NETWORK_MOCK_FAIL`, `FRAME_FAIL`, `API_ASSERTION_FAIL`) with targeted regeneration instructions instead of falling through to `UNKNOWN`.
+
 ## Generate from Description
 
 Skip crawling entirely — open **Create Tests**, write a plain-English scenario, and Sentri generates the steps and Playwright code. Watch AI output arrive token by token via LLM streaming.
