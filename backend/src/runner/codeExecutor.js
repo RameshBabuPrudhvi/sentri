@@ -214,8 +214,6 @@ async function runInSandbox(code, exposed, filename = "generated-test.js") {
  * @returns {string} instrumented code
  */
 function injectStepCaptures(code) {
-  // Match "// Step N:" with optional trailing text, case-insensitive
-  const stepPattern = /^(\s*\/\/\s*Step\s+(\d+)\s*:.*)$/gmi;
   let hasSteps = false;
 
   // Strategy: after each block of code belonging to a step (i.e. just before
