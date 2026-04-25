@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Frontend**: Per-run browser engine badge — Run Detail header and Runs list now show whether a test run executed under Chromium, Firefox, or WebKit (DIF-002b gap 3). New `<BrowserBadge>` component (`frontend/src/components/shared/BrowserBadge.jsx`) renders an emoji + label with engine-tinted styling; the Runs table uses a compact icon-only variant and hides the badge for the chromium default to avoid visual noise. Crawl and generate runs (which are pinned to chromium) do not render the badge. Gap 1 (browser-aware visual baselines) and gap 2 (firefox/webkit CI smoke job) of DIF-002b remain outstanding (#107)
 
+### Fixed
+- **Frontend**: Query failures are now logged once per durable error via a centralized `QueryCache.onError` handler in `queryClient.js` instead of per-page render-body `console.error` calls. The previous Dashboard implementation re-fired the log on every re-render and doubled under React 18 Strict Mode; the new handler runs exactly once per failed query (after retries exhaust) and emits a stable `[query] <key>:failed` signature so similar failures collapse in log aggregators (#107)
+
 ## [1.6.4] — 2026-04-24
 
 ### Added

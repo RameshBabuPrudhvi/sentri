@@ -69,6 +69,31 @@ import assert from "node:assert/strict";
       );
     }
 
+    // ── Centralised QueryCache.onError handler logs once per failure ──
+    // The cache MUST be wired with an onError handler (we replaced
+    // per-component useEffect logging with this in PR #107).
+    const queryCache = queryClient.getQueryCache();
+    assert.equal(typeof queryCache.config.onError, "function",
+      "queryClient must wire QueryCache.onError for centralized logging");
+
+    // Capture console.error calls and verify the handler emits a useful
+    // message containing the query-key signature.
+    const originalError = console.error;
+    const calls = [];
+    console.error = (...args) => calls.push(args);
+    try {
+      queryCache.config.onError(
+        new Error("network down"),
+        { queryKey: ["dashboard", "summary"] },
+      );
+      assert.equal(calls.length, 1, "onError should log exactly once per call");
+      const [label, message] = calls[0];
+      assert.match(label, /\[query\] dashboard:summary failed:/);
+      assert.equal(message, "network down");
+    } finally {
+      console.error = originalError;
+    }
+
     queryClient.clear();
     console.log("✅ query-client: all checks passed");
   } catch (err) {

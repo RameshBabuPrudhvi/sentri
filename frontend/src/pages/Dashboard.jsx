@@ -85,10 +85,8 @@ export default function Dashboard() {
   const runs = (data?.recentRuns || []).slice(0, 8);
   const loading = dashboardQuery.isLoading;
   const loadError = dashboardQuery.isError;
-
-  if (dashboardQuery.error) {
-    console.error("Dashboard load error:", dashboardQuery.error);
-  }
+  // Query failures are logged centrally by the QueryCache.onError handler
+  // in queryClient.js — see [query] dashboard:summary entries in the console.
 
   const chartData = (data?.history || []).map((r, i) => ({ name: `#${i + 1}`, passed: r.passed, failed: r.failed }));
   const rbs = data?.runsByStatus || {};

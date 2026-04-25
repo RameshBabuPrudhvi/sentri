@@ -3,7 +3,7 @@
  * @description Shared TanStack Query client and query keys.
  */
 
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryCache } from "@tanstack/react-query";
 
 export const projectDataQueryKeys = {
   root: ["projectData"],
@@ -57,7 +57,34 @@ export const settingsQueryKeys = {
 /** Default cache window for almost every query in the app (30 seconds). */
 export const DEFAULT_STALE_TIME_MS = 30_000;
 
+/**
+ * Format a query key array into a stable log label.
+ * Skips the dynamic params object on `projectDetail` so similar failures
+ * collapse into a single signature.
+ *
+ * @param {Array} queryKey
+ * @returns {string}
+ */
+function formatQueryLabel(queryKey) {
+  return queryKey
+    .filter((part) => typeof part === "string" || typeof part === "number")
+    .join(":");
+}
+
 export const queryClient = new QueryClient({
+  // Centralised error handler — fires once per query AFTER retries are
+  // exhausted, so we don't log the same failure on every retry attempt.
+  // This replaces per-component `useEffect`-based logging that was prone
+  // to render-body misuse and Strict Mode double-firing.
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      const label = formatQueryLabel(query.queryKey);
+      // Use console.warn for "expected" recoverable errors (4xx, network blips)
+      // and console.error for programming failures. We can't reliably tell
+      // them apart from a fetch promise rejection, so default to error.
+      console.error(`[query] ${label} failed:`, error?.message || error);
+    },
+  }),
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
