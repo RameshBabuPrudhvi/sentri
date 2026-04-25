@@ -7,7 +7,8 @@ import {
   ThumbsUp, ThumbsDown, AlertTriangle, Video,
 } from "lucide-react";
 import { api } from "../api.js";
-import { invalidateProjectDataCache } from "../hooks/useProjectData.js";
+import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
+import { queryClient, projectDataQueryKeys } from "../queryClient.js";
 import GenerateTestModal from "../components/generate/GenerateTestModal.jsx";
 import CrawlProjectModal from "../components/crawl/CrawlProjectModal.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
@@ -207,9 +208,16 @@ function EmptyState({ projects, tests, search, reviewFilter, onCreateTest, onCle
 
 export default function Tests() {
   usePageTitle("Tests");
-  const [projects, setProjects] = useState([]);
-  const [tests, setTests] = useState([]);
+  const { projects, allTests: tests, loading } = useProjectData({ fetchRuns: false });
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Mutate every cached tests query (regardless of projectIds suffix) so
+  // optimistic updates surface immediately on every consumer.
+  const updateTestsCache = useCallback((updater) => {
+    queryClient.setQueriesData({ queryKey: projectDataQueryKeys.tests }, (prev) =>
+      Array.isArray(prev) ? updater(prev) : prev,
+    );
+  }, []);
   const search        = searchParams.get("q")        || "";
   const filter        = searchParams.get("status")   || "All";
   const reviewFilter  = searchParams.get("review")   || "All Tests";
@@ -222,7 +230,6 @@ export default function Tests() {
   const setCategoryFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("category", v) : n.delete("category"); return n; }, { replace: true }), [setSearchParams]);
   const setStaleFilter   = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("stale", "true") : n.delete("stale"); return n; }, { replace: true }), [setSearchParams]);
 
-  const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCrawlModal, setShowCrawlModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
@@ -239,32 +246,6 @@ export default function Tests() {
   const [actionLoading, setActionLoading] = useState(null);
   const navigate = useNavigate();
   const searchRef = useRef(null);
-
-  useEffect(() => {
-    // Use batch getAllTests endpoint — falls back to per-project if not available.
-    // Wrap in try/catch so a transient API error doesn't wipe existing state.
-    async function load() {
-      try {
-        const [projs, allFromBatch] = await Promise.all([
-          api.getProjects(),
-          api.getAllTests().catch(() => null),
-        ]);
-        setProjects(projs);
-        if (allFromBatch) {
-          setTests(allFromBatch);
-        } else {
-          const all = await Promise.all(projs.map(p => api.getTests(p.id).catch(() => [])));
-          setTests(all.flat());
-        }
-      } catch (err) {
-        console.error("Tests page load error:", err);
-        // Don't setProjects([]) / setTests([]) — keep whatever state we had
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
 
   // ── Filter counts ────────────────────────────────────────────────────────────
   const statusCounts = useMemo(() => ({
@@ -382,15 +363,16 @@ export default function Tests() {
     const idSet = new Set(ids);
     const newStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : null;
 
-    // Capture original statuses BEFORE the state update — React state updater
-    // functions must be pure (no side effects). Reading from the current `tests`
-    // snapshot is safe because it's a stable reference at this point in the handler.
+    // Capture original statuses BEFORE the cache update so we can roll back
+    // on partial failure. Reading from `tests` (the current useProjectData
+    // snapshot) is safe because it's a stable reference at this point in the
+    // handler.
     const originalStatuses = {};
     if (newStatus) {
       for (const t of tests) {
         if (idSet.has(t.id)) originalStatuses[t.id] = t.reviewStatus;
       }
-      setTests(prev => prev.map(t =>
+      updateTestsCache(prev => prev.map(t =>
         idSet.has(t.id) ? { ...t, reviewStatus: newStatus } : t
       ));
     }
@@ -409,7 +391,7 @@ export default function Tests() {
       const failedIds = ids.filter((_, i) => results[i].status === "rejected");
       if (failedIds.length > 0) {
         const failedSet = new Set(failedIds);
-        setTests(prev => prev.map(t =>
+        updateTestsCache(prev => prev.map(t =>
           failedSet.has(t.id) ? { ...t, reviewStatus: originalStatuses[t.id] } : t
         ));
         const failedCount = failedIds.length;
@@ -424,7 +406,7 @@ export default function Tests() {
     } catch (err) {
       // Full failure — roll back all optimistic updates
       if (newStatus) {
-        setTests(prev => prev.map(t =>
+        updateTestsCache(prev => prev.map(t =>
           idSet.has(t.id) ? { ...t, reviewStatus: originalStatuses[t.id] } : t
         ));
       }
@@ -459,17 +441,8 @@ export default function Tests() {
         setBulkError(`Some tests failed to delete. The rest were removed successfully.`);
         setTimeout(() => setBulkError(null), 6000);
       }
+      // Invalidate the shared cache — useProjectData refetches automatically.
       invalidateProjectDataCache();
-      try {
-        const allFromBatch = await api.getAllTests().catch(() => null);
-        if (allFromBatch) { setTests(allFromBatch); }
-        else {
-          const all = await Promise.all(projects.map(p => api.getTests(p.id).catch(() => [])));
-          if (all.flat().length > 0) setTests(all.flat());
-        }
-      } catch (refreshErr) {
-        console.error("Refresh after bulk delete failed:", refreshErr);
-      }
       setSelected(new Set());
     } catch (err) {
       console.error("Bulk delete failed:", err);
@@ -506,8 +479,8 @@ export default function Tests() {
     setActionLoading(t.id);
     try {
       await api.deleteTest(t.projectId, t.id);
+      updateTestsCache(prev => prev.filter(x => x.id !== t.id));
       invalidateProjectDataCache();
-      setTests(prev => prev.filter(x => x.id !== t.id));
       setSelected(s => { const n = new Set(s); n.delete(t.id); return n; });
     } catch (err) { console.error("Delete failed:", err); }
     finally { setActionLoading(null); }

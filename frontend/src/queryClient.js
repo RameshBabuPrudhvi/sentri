@@ -26,6 +26,26 @@ export const runQueryKeys = {
   detail: (runId) => ["run", "detail", runId],
 };
 
+export const testQueryKeys = {
+  root: ["test"],
+  /**
+   * @param {string} testId
+   * @returns {Array}
+   */
+  detail: (testId) => ["test", "detail", testId],
+};
+
+export const projectDetailQueryKeys = {
+  root: ["projectDetail"],
+  /**
+   * @param {string} projectId
+   * @param {Object} params - paging + filter inputs
+   * @returns {Array}
+   */
+  detail: (projectId, params) => ["projectDetail", projectId, params],
+  traceability: (projectId) => ["projectDetail", projectId, "traceability"],
+};
+
 export const settingsQueryKeys = {
   root: ["settings"],
   bundle: ["settings", "bundle"], // settings + config + system info

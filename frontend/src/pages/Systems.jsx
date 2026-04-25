@@ -12,9 +12,9 @@ import {
   XCircle, Settings as SettingsIcon,
   RefreshCw, Shield,
 } from "lucide-react";
-import { api } from "../api";
 import { fmtRelativeDate } from "../utils/formatters";
 import useProjectData from "../hooks/useProjectData";
+import { useSettingsBundleQuery } from "../hooks/queries/useSettingsQueries.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 function SectionHeader({ icon, title, sub }) {
@@ -47,12 +47,9 @@ export default function Systems() {
   usePageTitle("System");
   //  useProjectData batches all project/run/test fetches in one pass (no N+1)
   const { projects, allTests, allRuns, loading } = useProjectData();
-  const [config, setConfig] = React.useState(null);
+  const bundleQuery = useSettingsBundleQuery();
+  const config = bundleQuery.data?.config ?? null;
   const navigate = useNavigate();
-
-  React.useEffect(() => {
-    api.getConfig().then(setConfig).catch(() => null);
-  }, []);
 
   // Build crawl summary per project from already-fetched allRuns and allTests
   const crawlData = useMemo(() => {

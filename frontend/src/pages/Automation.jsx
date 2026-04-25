@@ -8,10 +8,10 @@
  * section at the bottom provides copy-to-clipboard CI examples.
  */
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Zap, FolderOpen } from "lucide-react";
-import { api } from "../api.js";
+import useProjectData from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import ProjectAutomationCard from "../components/automation/ProjectAutomationCard.jsx";
 import IntegrationCards from "../components/automation/IntegrationCards.jsx";
@@ -21,8 +21,7 @@ export default function Automation() {
   usePageTitle("Automation");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const { projects, loading } = useProjectData({ fetchTests: false, fetchRuns: false });
 
   const snippetsRef = useRef(null);
 
@@ -32,13 +31,6 @@ export default function Automation() {
 
   // Optional ?project=PRJ-1 param to auto-expand a specific project
   const focusProjectId = searchParams.get("project");
-
-  useEffect(() => {
-    api.getProjects()
-      .then(setProjects)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
 
   if (loading) return (
     <div className="page-container" style={{ maxWidth: 880 }}>

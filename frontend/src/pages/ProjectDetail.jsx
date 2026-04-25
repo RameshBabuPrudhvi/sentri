@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Search, Trash2, ArrowRight,
@@ -6,6 +6,11 @@ import {
   RotateCcw, Info,
 } from "lucide-react";
 import { api } from "../api.js";
+import { queryClient, projectDetailQueryKeys } from "../queryClient.js";
+import {
+  useProjectDetailQuery,
+  useTraceabilityQuery,
+} from "../hooks/queries/useProjectDetailQueries.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
@@ -44,15 +49,8 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const [project, setProject]             = useState(null);
-  const [tests, setTests]                 = useState([]);
-  const [testsMeta, setTestsMeta]         = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
-  const [testCounts, setTestCounts]       = useState({ draft: 0, approved: 0, rejected: 0, total: 0, passed: 0, failed: 0, api: 0, ui: 0 });
-  const [runs, setRuns]                   = useState([]);
-  const [runsMeta, setRunsMeta]           = useState({ total: 0, page: 1, pageSize: 10, hasMore: false });
   const [activeRun, setActiveRun]         = useState(null);
   const [activeRunId, setActiveRunId]     = useState(null); // for toast link
-  const [loading, setLoading]             = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [parallelWorkers, setParallelWorkers] = useState(1);
   const [tab, setTab]                     = useState("review");
@@ -67,9 +65,30 @@ export default function ProjectDetail() {
   const [toast, setToast]                 = useState({ msg: "", type: "info", visible: false, showLink: false, runId: null });
   const [showNewBadges, setShowNewBadges] = useState(true);
   const [now, setNow] = useState(Date.now);
+
+  // ── TanStack Query: composite project detail + traceability ─────────────
+  const detailQuery = useProjectDetailQuery({
+    projectId: id,
+    reviewPage,
+    runsPage,
+    reviewFilter,
+    categoryFilter,
+    search,
+  });
+  const data = detailQuery.data;
+  const project = data?.project ?? null;
+  const tests = data?.tests ?? [];
+  const testsMeta = data?.testsMeta ?? { total: 0, page: 1, pageSize: PAGE_SIZE, hasMore: false };
+  const runs = data?.runs ?? [];
+  const runsMeta = data?.runsMeta ?? { total: 0, page: 1, pageSize: PAGE_SIZE, hasMore: false };
+  const testCounts = data?.testCounts ?? { draft: 0, approved: 0, rejected: 0, total: 0, passed: 0, failed: 0, api: 0, ui: 0 };
+  const loading = detailQuery.isLoading;
+
+  const traceabilityQuery = useTraceabilityQuery(id, tab === "traceability");
+  const traceability = traceabilityQuery.data ?? null;
+  const traceLoading = traceabilityQuery.isLoading && tab === "traceability";
+
   usePageTitle(project?.name ? `${project.name} — Project` : "Project");
-  const [traceability, setTraceability]     = useState(null);
-  const [traceLoading, setTraceLoading]     = useState(false);
   const { addNotification } = useNotifications();
   const { user: authUser } = useAuth();
   const canEdit = userHasRole(authUser, "qa_lead");
@@ -106,76 +125,32 @@ export default function ProjectDetail() {
     return () => clearInterval(timer);
   }, [showNewBadges]);
 
-  // Fetch traceability data when the tab is first switched to "traceability".
-  // Previously this was an IIFE inside the render body which violated React's
-  // rule against calling setState during render and caused duplicate API calls
-  // in concurrent mode.
-  useEffect(() => {
-    if (tab !== "traceability" || traceability || traceLoading) return;
-    setTraceLoading(true);
-    api.getTraceability(id).then(setTraceability).catch(() => {}).finally(() => setTraceLoading(false));
-  }, [tab, traceability, traceLoading, id]);
-
   const showToast = (msg, type = "info", runId = null) => {
     setToast({ msg, type, visible: true, showLink: !!runId, runId });
     setTimeout(() => setToast(t => ({ ...t, visible: false })), type === "error" ? 5000 : 3500);
   };
 
-  // Use refs so the fetch callback always reads the latest page / filter values
-  // without needing them in the dependency array (which would cause an
-  // infinite loop when the clamp logic adjusts the page after fetch).
-  const reviewPageRef    = useRef(reviewPage);
-  const runsPageRef      = useRef(runsPage);
-  const reviewFilterRef  = useRef(reviewFilter);
-  const categoryFilterRef = useRef(categoryFilter);
-  const searchRef        = useRef(search);
-  useEffect(() => { reviewPageRef.current = reviewPage; }, [reviewPage]);
-  useEffect(() => { runsPageRef.current = runsPage; }, [runsPage]);
-  useEffect(() => { reviewFilterRef.current = reviewFilter; }, [reviewFilter]);
-  useEffect(() => { categoryFilterRef.current = categoryFilter; }, [categoryFilter]);
-  useEffect(() => { searchRef.current = search; }, [search]);
+  // Cache invalidation: bust every cached projectDetail query for this project
+  // (across any combination of paging/filter inputs). The composite useQuery
+  // re-runs automatically because its key includes the same project id.
+  const refresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: projectDetailQueryKeys.root }),
+    [],
+  );
 
-  const refresh = useCallback(async () => {
-    try {
-      const filters = {};
-      if (reviewFilterRef.current && reviewFilterRef.current !== "all") filters.reviewStatus = reviewFilterRef.current;
-      if (categoryFilterRef.current && categoryFilterRef.current !== "all") filters.category = categoryFilterRef.current;
-      if (searchRef.current) filters.search = searchRef.current;
-
-      const [p, tRes, rRes, counts] = await Promise.all([
-        api.getProject(id),
-        api.getTestsPaged(id, reviewPageRef.current, PAGE_SIZE, filters),
-        api.getRunsPaged(id, runsPageRef.current, PAGE_SIZE),
-        api.getTestCounts(id),
-      ]);
-      setProject(p);
-      setTests(tRes.data); setTestsMeta(tRes.meta);
-      setRuns(rRes.data);  setRunsMeta(rRes.meta);
-      setTestCounts(counts);
-      // Clamp pages so they don't point past the last page after
-      // a review action removes tests from the current filter view.
-      setReviewPage(prev => {
-        const total = Math.max(1, Math.ceil(tRes.meta.total / PAGE_SIZE));
-        return prev > total ? total : prev;
-      });
-      setRunsPage(prev => {
-        const total = Math.max(1, Math.ceil(rRes.meta.total / PAGE_SIZE));
-        return prev > total ? total : prev;
-      });
-    } catch (err) {
-      console.error("ProjectDetail refresh error:", err);
-    }
-  }, [id]);
-
-  // Re-fetch when page or filters change. Skip the initial mount — the
-  // next effect handles that with the loading flag.
-  const mountedRef = useRef(false);
+  // Clamp pages when totals shrink below the current page (e.g. after a bulk
+  // delete leaves fewer pages than the cursor). Done as an effect on totals
+  // change rather than inside the fetch — the previous implementation read
+  // refs to avoid an infinite loop, but query-key-driven refetch makes that
+  // dance unnecessary.
   useEffect(() => {
-    if (!mountedRef.current) { mountedRef.current = true; return; }
-    refresh();
-  }, [reviewPage, runsPage, reviewFilter, categoryFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { refresh().finally(() => setLoading(false)); }, [refresh]);
+    const total = Math.max(1, Math.ceil(testsMeta.total / PAGE_SIZE));
+    if (reviewPage > total) setReviewPage(total);
+  }, [testsMeta.total, reviewPage]);
+  useEffect(() => {
+    const total = Math.max(1, Math.ceil(runsMeta.total / PAGE_SIZE));
+    if (runsPage > total) setRunsPage(total);
+  }, [runsMeta.total, runsPage]);
 
   const handleRunSettled = useCallback((evt) => {
     setActiveRun(null);

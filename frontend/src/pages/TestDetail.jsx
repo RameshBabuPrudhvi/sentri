@@ -8,6 +8,8 @@ import {
   Link2, Tag, Clipboard, Wand2,
 } from "lucide-react";
 import { api } from "../api.js";
+import { queryClient, testQueryKeys } from "../queryClient.js";
+import { useTestDetailQuery } from "../hooks/queries/useTestDetailQuery.js";
 // Heavy components lazy-loaded — only fetched when the user actually needs them.
 // DiffView and AiFixPanel are only rendered on explicit user interaction (click to
 // show diff / click to open AI fix panel), so they are ideal lazy-load candidates.
@@ -77,11 +79,30 @@ export default function TestDetail() {
   const { testId } = useParams();
   const navigate = useNavigate();
 
-  const [test, setTest]       = useState(null);
-  const [project, setProject] = useState(null);
-  const [runs, setRuns]       = useState([]);  // all runs for this project
-  const [loading, setLoading] = useState(true);
+  const detailQuery = useTestDetailQuery(testId);
+  const test = detailQuery.data?.test ?? null;
+  const project = detailQuery.data?.project ?? null;
+  const runs = detailQuery.data?.runs ?? [];
+  const loading = detailQuery.isLoading;
   const [running, setRunning] = useState(false);
+
+  // Optimistic patch helper: mutate the test field of the composite cache
+  // entry so inline edits and approve/restore actions reflect immediately
+  // without re-fetching project + runs.
+  const setTest = useCallback((updater) => {
+    queryClient.setQueryData(testQueryKeys.detail(testId), (prev) => {
+      if (!prev) return prev;
+      const nextTest = typeof updater === "function" ? updater(prev.test) : updater;
+      return { ...prev, test: nextTest };
+    });
+  }, [testId]);
+
+  // load() preserved as a public API for `.then(load)` callers below — it
+  // simply busts the cache so the query refetches.
+  const load = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: testQueryKeys.detail(testId) }),
+    [testId],
+  );
 
   // ── Edit mode state ──────────────────────────────────────────────────────
   const [editing, setEditing]         = useState(false);
@@ -114,26 +135,6 @@ export default function TestDetail() {
   const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
   const [applyingPreview, setApplyingPreview] = useState(false);
   const [regenWarning, setRegenWarning] = useState(null); // dismissible warning for regen failures
-
-  const load = useCallback(async () => {
-    const t = await api.getTest(testId);
-    setTest(t);
-    const [p, r] = await Promise.all([
-      api.getProject(t.projectId).catch(() => null),
-      api.getRuns(t.projectId).catch(() => []),
-    ]);
-    setProject(p);
-    // Filter runs that include this test in their results
-    const relevant = r.filter(run =>
-      run.type === "test_run" &&
-      (run.tests?.includes(testId) || run.results?.some(res => res.testId === testId))
-    );
-    setRuns(relevant);
-  }, [testId]);
-
-  useEffect(() => {
-    load().finally(() => setLoading(false));
-  }, [load]);
 
   // ── Inline code editing state ─────────────────────────────────────────
   const [editCode, setEditCode] = useState("");
