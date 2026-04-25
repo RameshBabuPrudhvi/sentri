@@ -284,9 +284,14 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
   const helpers = getSelfHealingHelperCode(healingHints);
   const browserRequestContexts = [];
   let requestContextsDisposed = false;
+  let defaultRequestContext = null;
 
-  const defaultRequestContext = await playwright.request.newContext({ ignoreHTTPSErrors: true });
-  browserRequestContexts.push(defaultRequestContext);
+  const __getDefaultRequestContext = async () => {
+    if (defaultRequestContext) return defaultRequestContext;
+    defaultRequestContext = await playwright.request.newContext({ ignoreHTTPSErrors: true });
+    browserRequestContexts.push(defaultRequestContext);
+    return defaultRequestContext;
+  };
 
   const __newRequestContext = async (options) => {
     const ctx = await playwright.request.newContext({ ignoreHTTPSErrors: true, ...options });
@@ -309,7 +314,10 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     dispose: () => __disposeRequestContexts(),
   };
   for (const method of ["get", "post", "put", "patch", "delete", "fetch", "head"]) {
-    __requestShim[method] = (...args) => defaultRequestContext[method](...args);
+    __requestShim[method] = async (...args) => {
+      const ctx = await __getDefaultRequestContext();
+      return ctx[method](...args);
+    };
   }
 
   // Step capture state — collected by __captureStep inside the sandbox,

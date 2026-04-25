@@ -1095,7 +1095,7 @@ export function applyHealingTransforms(code) {
     )
     .replace(
       /page\.getByTestId\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
-      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+      (match) => match
     )
     .replace(
       /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.setInputFiles\(([^)]+)\)/g,

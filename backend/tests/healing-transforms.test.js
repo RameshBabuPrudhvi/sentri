@@ -798,9 +798,9 @@ test("transforms page.getByLabel(...).setInputFiles(...) to safeUpload", () => {
   assert.equal(out, "await safeUpload(page, 'Profile photo', 'avatar.png')");
 });
 
-test("transforms page.getByTestId(...).setInputFiles(...) to safeUpload", () => {
+test("keeps page.getByTestId(...).setInputFiles(...) unchanged", () => {
   const out = applyHealingTransforms("await page.getByTestId('resume-upload').setInputFiles(['cv.pdf'])");
-  assert.equal(out, "await safeUpload(page, 'resume-upload', ['cv.pdf'])");
+  assert.equal(out, "await page.getByTestId('resume-upload').setInputFiles(['cv.pdf'])");
 });
 
 test("keeps selector-based page.setInputFiles(...) unchanged", () => {
