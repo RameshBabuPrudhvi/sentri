@@ -1354,7 +1354,16 @@ This is *not* a runtime gap (the runtime supports all of these via Playwright di
    Wire the categoriser to map error patterns (`net::ERR_`, `Timeout … waiting for response`, flaky heuristic from DIF-004) to the new keys.
 4. Extend `backend/src/pipeline/prompts/apiTestPrompt.js` with auth-header reuse via `request.newContext({ extraHTTPHeaders, storageState })`, response schema-shape assertions (`expect(body).toMatchObject({ id: expect.any(Number) })`), and a multipart-upload example.
 5. In `backend/src/pipeline/journeyGenerator.js`, when the run config targets Firefox or WebKit, append a 2–3-line browser-specific note to the system prompt.
-6. Add 5–6 new entries to `backend/src/pipeline/prompts/f
+6. Add 5–6 new entries to `backend/src/pipeline/prompts/fewShotExamples.js` covering: a `page.route` mock test, a `storageState` auth-reuse test, a `test.step`-grouped journey, an `expect.poll` flaky-fix, and a multi-context collab flow — so the LLM has concrete patterns to imitate.
+
+**Acceptance criteria:**
+- Cloud-tier prompt includes the 7 new `EXTENDED_RULES` sections; local-tier prompt unchanged (still < 2000 tokens).
+- `testValidator.js` accepts code using all newly listed actions/assertions without flagging "unknown action".
+- `feedbackLoop.js` emits `NETWORK_FAIL` and `FLAKY_DYNAMIC` remediation prompts for matching error patterns.
+- New unit tests in `backend/tests/test-validator.test.js` and `backend/tests/feedback-loop.test.js` cover the new actions and categories.
+- `docs/changelog.md` entry under `### Added` documenting the expanded Playwright surface.
+
+**Dependencies:** MNT-009 ✅ (tier system must exist before extending `EXTENDED_RULES`)
 
 ---
 
