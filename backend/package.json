@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
     "@google/generative-ai": "^0.24.0",
+    "@playwright/test": "^1.58.2",
     "acorn": "^8.14.0",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
@@ -34,7 +35,6 @@
     "rate-limit-redis": "^4.2.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "jsdoc": "^4.0.4"
   }
 }

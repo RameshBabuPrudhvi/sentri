@@ -68,7 +68,7 @@ const VALID_PAGE_ACTIONS = new Set([
   // Test runner structure / diagnostics
   "describe", "beforeEach", "afterEach", "beforeAll", "afterAll", "step",
   "setTimeout", "slow", "fixme", "skip", "fail", "info", "attach",
-  "soft", "configure",
+  "soft", "configure", "use", "extend", "only",
   // Misc
   "evaluate", "evaluateHandle",
   "keyboard", "mouse", "touchscreen",
