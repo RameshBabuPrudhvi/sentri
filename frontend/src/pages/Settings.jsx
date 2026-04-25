@@ -8,6 +8,13 @@ import {
   Users, UserPlus, Crown,
 } from "lucide-react";
 import { api } from "../api.js";
+import { invalidateSettingsCache } from "../queryClient.js";
+import {
+  useSettingsBundleQuery,
+  useMembersQuery,
+  useRecycleBinQuery,
+  useOllamaStatusQuery,
+} from "../hooks/queries/useSettingsQueries.js";
 import { invalidateConfigCache } from "../components/layout/ProviderBadge.jsx";
 import { resetOnboarding, emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
@@ -76,37 +83,31 @@ const PROVIDERS = [
 
 // ── Ollama status panel (shown inside the local provider card) ────────────────
 function OllamaStatusPanel({ baseUrl, model, onModelChange, onBaseUrlChange }) {
-  const [status, setStatus] = useState(null);   // null | { ok, error?, availableModels? }
-  const [checking, setChecking] = useState(false);
-
-  // Refs to avoid re-triggering the status check when model/callback change
+  // Refs avoid re-triggering the model-sync effect when model/callback change.
   const modelRef = useRef(model);
   const onModelChangeRef = useRef(onModelChange);
   useEffect(() => { modelRef.current = model; }, [model]);
   useEffect(() => { onModelChangeRef.current = onModelChange; }, [onModelChange]);
 
-  const check = useCallback(async () => {
-    setChecking(true);
-    try {
-      const s = await api.getOllamaStatus();
-      setStatus(s);
-      // Sync model state to the exact option value returned by Ollama so the
-      // controlled <select> stays in sync. Ollama tags include a suffix like
-      // ":latest" that the saved config may omit (e.g. "mistral:7b" vs
-      // "mistral:7b:latest"), causing a value mismatch → flicker loop.
-      const cur = modelRef.current;
-      if (s.availableModels?.length && !s.availableModels.includes(cur)) {
-        const match = s.availableModels.find(m => m.split(":")[0] === cur.split(":")[0]);
-        if (match) onModelChangeRef.current(match);
-      }
-    } catch (err) {
-      setStatus({ ok: false, error: err.message });
-    } finally {
-      setChecking(false);
-    }
-  }, []);
+  const statusQuery = useOllamaStatusQuery();
 
-  useEffect(() => { check(); }, [check]);
+  const status = statusQuery.data ?? null;
+  const checking = statusQuery.isFetching;
+
+  const check = useCallback(() => statusQuery.refetch(), [statusQuery]);
+
+  // Sync model state to the exact option value returned by Ollama so the
+  // controlled <select> stays in sync. Ollama tags include a suffix like
+  // ":latest" that the saved config may omit (e.g. "mistral:7b" vs
+  // "mistral:7b:latest"), causing a value mismatch → flicker loop.
+  useEffect(() => {
+    if (!status?.availableModels?.length) return;
+    const cur = modelRef.current;
+    if (!status.availableModels.includes(cur)) {
+      const match = status.availableModels.find(m => m.split(":")[0] === cur.split(":")[0]);
+      if (match) onModelChangeRef.current(match);
+    }
+  }, [status]);
 
   return (
     <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
@@ -540,28 +541,24 @@ const ROLE_OPTIONS = [
 
 function MembersTab() {
   const { user } = useAuth();
-  const [members, setMembers]     = useState([]);
-  const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole]   = useState("viewer");
   const [inviting, setInviting]   = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.getMembers();
-      setMembers(data);
-    } catch (e) {
-      setError(e.message || "Failed to load members");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const membersQuery = useMembersQuery();
 
-  useEffect(() => { load(); }, []);
+  const members = membersQuery.data || [];
+  const loading = membersQuery.isLoading;
+  const queryError = membersQuery.error?.message;
+
+  const load = useCallback(() => membersQuery.refetch(), [membersQuery]);
+
+  // Surface query-level errors via the same banner as mutation errors.
+  useEffect(() => {
+    if (queryError) setError(queryError);
+  }, [queryError]);
 
   async function handleInvite(e) {
     e.preventDefault();
@@ -810,25 +807,21 @@ function RecycleBinSection({ title, icon, items, type, nameKey = "name", subKey 
 
 // ── Recycle Bin tab ───────────────────────────────────────────────────────────
 function RecycleBinTab() {
-  const [data, setData]         = useState(null);
-  const [loading, setLoading]   = useState(true);
   const [busy, setBusy]         = useState({});
   const [error, setError]       = useState(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.getRecycleBin();
-      setData(result);
-    } catch (e) {
-      setError(e.message || "Failed to load recycle bin");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const recycleQuery = useRecycleBinQuery();
 
-  useEffect(() => { load(); }, []);
+  const data = recycleQuery.data ?? null;
+  const loading = recycleQuery.isLoading;
+  const queryError = recycleQuery.error?.message;
+
+  const load = useCallback(() => recycleQuery.refetch(), [recycleQuery]);
+
+  // Surface query-level errors via the same banner as mutation errors.
+  useEffect(() => {
+    if (queryError) setError(queryError);
+  }, [queryError]);
 
   async function handleRestore(type, id) {
     setError(null);
@@ -1033,24 +1026,19 @@ function AccountTab() {
 export default function Settings() {
   usePageTitle("Settings");
   const navigate = useNavigate();
-  const [settings, setSettings] = useState(null);
-  const [config, setConfig]     = useState(null);
-  const [sysInfo, setSysInfo]   = useState(null);
-  const [loading, setLoading]   = useState(true);
   const [tab, setTab]           = useState("providers");
 
-  async function reload() {
-    const [s, c, sys] = await Promise.all([
-      api.getSettings(),
-      api.getConfig(),
-      api.getSystemInfo().catch(() => null),
-    ]);
-    setSettings(s);
-    setConfig(c);
-    setSysInfo(sys);
-  }
+  const bundleQuery = useSettingsBundleQuery();
 
-  useEffect(() => { reload().finally(() => setLoading(false)); }, []);
+  const settings = bundleQuery.data?.settings ?? null;
+  const config   = bundleQuery.data?.config ?? null;
+  const sysInfo  = bundleQuery.data?.sysInfo ?? null;
+  const loading  = bundleQuery.isLoading;
+
+  // After a save/delete we want sibling tabs (members, recycleBin, ollamaStatus)
+  // to also refresh, since adding/removing an API key affects config and
+  // system info displayed elsewhere on the page.
+  const reload = useCallback(() => invalidateSettingsCache(), []);
 
   async function handleSave(provider, apiKey, ollamaOpts) {
     await api.saveApiKey(provider, apiKey, ollamaOpts);

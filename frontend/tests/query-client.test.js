@@ -42,6 +42,8 @@ import assert from "node:assert/strict";
       "Window-focus refetch should be disabled by default",
     );
     assert.equal(defaults.queries.retry, 1, "Default retry count should be 1");
+    assert.equal(defaults.queries.staleTime, 30_000, "Default staleTime should be 30s");
+    assert.equal(defaults.queries.gcTime, 30_000, "Default gcTime should be 30s");
 
     // ── Hierarchical invalidation cascades from root to child keys ────
     // Seed each child key with fresh data, invalidate the root, and verify

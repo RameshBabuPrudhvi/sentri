@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
   FlaskConical, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
   Download, RefreshCw,
 } from "lucide-react";
-import { api } from "../api.js";
+import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
 import { fmtDurationMs } from "../utils/formatters.js";
 import { generateExecutivePDF } from "../utils/pdfReportGenerator.js";
 import AgentTag from "../components/shared/AgentTag.jsx";
@@ -76,26 +76,19 @@ function ExportPDFButton() {
 // Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [data, setData] = useState(null);
-  const [runs, setRuns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const navigate = useNavigate();
   usePageTitle("Dashboard");
 
-  useEffect(() => {
-    api.getDashboard()
-      .then((d) => {
-        setData(d);
-        setRuns((d.recentRuns || []).slice(0, 8));
-        setLoadError(false);
-      })
-      .catch((err) => {
-        console.error("Dashboard load error:", err);
-        setLoadError(true);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const dashboardQuery = useDashboardQuery();
+
+  const data = dashboardQuery.data || null;
+  const runs = (data?.recentRuns || []).slice(0, 8);
+  const loading = dashboardQuery.isLoading;
+  const loadError = dashboardQuery.isError;
+
+  if (dashboardQuery.error) {
+    console.error("Dashboard load error:", dashboardQuery.error);
+  }
 
   const chartData = (data?.history || []).map((r, i) => ({ name: `#${i + 1}`, passed: r.passed, failed: r.failed }));
   const rbs = data?.runsByStatus || {};
@@ -154,7 +147,7 @@ export default function Dashboard() {
           <div className="empty-state-icon">⚠️</div>
           <div className="empty-state-title">Could not load dashboard data</div>
           <div className="empty-state-desc">The API may be temporarily unavailable. Your data is safe.</div>
-          <button className="btn btn-ghost btn-sm" onClick={() => window.location.reload()}>Retry</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => dashboardQuery.refetch()}>Retry</button>
         </div>
       )}
 

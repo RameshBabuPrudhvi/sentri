@@ -6,9 +6,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import { queryClient, projectDataQueryKeys } from "../queryClient";
-
-const STALE_TIME_MS = 30_000;
+import { projectDataQueryKeys, queryClient } from "../queryClient";
 
 /**
  * Bust cached project data queries. Call after mutations (create/delete project,
@@ -85,9 +83,6 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
   const projectsQuery = useQuery({
     queryKey: projectDataQueryKeys.projects,
     queryFn: api.getProjects,
-    staleTime: STALE_TIME_MS,
-    gcTime: STALE_TIME_MS,
-    retry: 1,
   });
 
   const projects = projectsQuery.data || [];
@@ -101,18 +96,12 @@ export default function useProjectData({ fetchTests = true, fetchRuns = true } =
     queryKey: [...projectDataQueryKeys.runs, projectIds],
     queryFn: () => fetchProjectRuns(projects),
     enabled: fetchRuns && projects.length > 0,
-    staleTime: STALE_TIME_MS,
-    gcTime: STALE_TIME_MS,
-    retry: 1,
   });
 
   const testsQuery = useQuery({
     queryKey: [...projectDataQueryKeys.tests, projectIds],
     queryFn: () => fetchProjectTests(projects),
     enabled: fetchTests && projects.length > 0,
-    staleTime: STALE_TIME_MS,
-    gcTime: STALE_TIME_MS,
-    retry: 1,
   });
 
   const allRuns = fetchRuns ? (runsQuery.data || []) : [];

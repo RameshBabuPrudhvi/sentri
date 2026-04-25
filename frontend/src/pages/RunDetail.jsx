@@ -18,6 +18,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { api } from "../api.js";
+import { queryClient, runQueryKeys, invalidateRunCache } from "../queryClient.js";
+import { useRunDetailQuery } from "../hooks/queries/useRunDetailQuery.js";
 import { useRunSSE } from "../hooks/useRunSSE.js";
 import { useNotifications } from "../context/NotificationContext.jsx";
 
@@ -119,12 +121,9 @@ export default function RunDetail() {
   const { runId } = useParams();
   const navigate = useNavigate();
 
-  const [run, setRun] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [initialStatus, setInitialStatus] = useState(undefined);
   const [frames, setFrames] = useState([]);
   const [llmTokens, setLlmTokens] = useState("");
-  usePageTitle(run ? `Run ${runId.slice(0, 6).toUpperCase()}` : "Run Detail");
   const [aborting, setAborting] = useState(false);
   const [rerunning, setRerunning] = useState(false);
   const { addNotification } = useNotifications();
@@ -133,25 +132,44 @@ export default function RunDetail() {
   // accumulate hundreds of thousands of characters and cause layout/memory issues.
   const LLM_TOKEN_LIMIT = 50_000;
 
-  const fetchRun = useCallback(async () => {
-    const r = await api.getRun(runId).catch(() => null);
-    if (r) setRun(r);
-    return r;
-  }, [runId]);
+  // ── TanStack Query: run detail ────────────────────────────────────────
+  // SSE updates apply optimistic patches directly into the query cache via
+  // queryClient.setQueryData(), so `run` from useRunDetailQuery is always
+  // the latest merged state of (server fetch ∪ live SSE events).
+  const runQuery = useRunDetailQuery(runId);
+
+  const run = runQuery.data || null;
+  const loading = runQuery.isLoading;
+  usePageTitle(run ? `Run ${runId.slice(0, 6).toUpperCase()}` : "Run Detail");
+
+  // Capture the run's status at first successful load so useRunSSE can skip
+  // SSE entirely for already-finished runs (prevents spurious notifications).
+  useEffect(() => {
+    if (initialStatus === undefined && run?.status) {
+      setInitialStatus(run.status);
+    }
+  }, [run?.status, initialStatus]);
+
+  const updateRun = useCallback(
+    (updater) => queryClient.setQueryData(runQueryKeys.detail(runId), updater),
+    [runId],
+  );
+
+  const fetchRun = useCallback(() => invalidateRunCache(runId), [runId]);
 
   const handleAbort = useCallback(async () => {
     if (aborting) return;
     setAborting(true);
     try {
       await api.abortRun(runId);
-      setRun((prev) => prev ? { ...prev, status: "aborted" } : prev);
+      updateRun((prev) => prev ? { ...prev, status: "aborted" } : prev);
       setFrames([]);
     } catch (err) {
       console.error("Abort failed:", err);
     } finally {
       setAborting(false);
     }
-  }, [runId, aborting]);
+  }, [runId, aborting, updateRun]);
 
   // ── Re-run handler (MNT-010) ─────────────────────────────────────────────
   // For crawl and generate runs in terminal states, re-trigger the same operation.
@@ -191,14 +209,6 @@ export default function RunDetail() {
     }
   }, [run, rerunning, navigate, addNotification]);
 
-  // Initial fetch — capture the run's status at load time so useRunSSE can
-  // skip SSE entirely for already-finished runs (prevents spurious notifications).
-  useEffect(() => {
-    fetchRun().then((r) => {
-      if (r) setInitialStatus(r.status);
-    }).finally(() => setLoading(false));
-  }, [fetchRun]);
-
   // Reset live-stream state when navigating to a different run
   useEffect(() => {
     setFrames([]);
@@ -211,9 +221,9 @@ export default function RunDetail() {
   // for already-completed/failed runs (avoids spurious "Run complete" notifications).
   const { sseDown, retryIn } = useRunSSE(runId, useCallback((event) => {
     if (event.type === "snapshot") {
-      setRun(event.run);
+      updateRun(() => event.run);
     } else if (event.type === "result") {
-      setRun((prev) => {
+      updateRun((prev) => {
         if (!prev) return prev;
         const results = [...(prev.results || [])];
         const idx = results.findIndex((r) => r.testId === event.result.testId);
@@ -222,7 +232,7 @@ export default function RunDetail() {
         return { ...prev, results };
       });
     } else if (event.type === "log") {
-      setRun((prev) => {
+      updateRun((prev) => {
         if (!prev) return prev;
         return { ...prev, logs: [...(prev.logs || []), event.message] };
       });
@@ -241,7 +251,7 @@ export default function RunDetail() {
       // Immediately mark as completed so the UI stops showing "running"
       // (isRunning = run.status === "running" flips to false right away,
       //  so CrawlView/GenerateView render their completed state instantly)
-      setRun((prev) => prev ? { ...prev, status: event.status ?? "completed" } : prev);
+      updateRun((prev) => prev ? { ...prev, status: event.status ?? "completed" } : prev);
       setFrames([]); // clear live stream on completion
       // Then re-fetch to get the full completed run object (stats, results, etc.)
       fetchRun();
