@@ -15,6 +15,7 @@
 import { isLocalProvider } from "../../aiProvider.js";
 import { resolveTestCountInstruction } from "../promptHelpers.js";
 import { PROMPT_VERSION } from "./outputSchema.js";
+import { buildCapabilityCoverageBlock } from "./playwrightCapabilityGuide.js";
 
 /**
  * Truncate a JSON request/response body example to fit within a token budget.
@@ -113,6 +114,8 @@ FORBIDDEN — NEVER generate any of these in API tests:
 - \`expect(page)\` or \`expect(page).toHaveURL()\` — the \`page\` object does not exist.
 - \`page.waitForLoadState()\` or \`page.waitForSelector()\` — these are browser-only.
 - Any reference to \`page\`, \`context\`, or \`browser\` variables — API tests only use \`request\`.
+
+${buildCapabilityCoverageBlock({ mode: "api", tier: local ? "local" : "cloud" })}
 
 PROMPT VERSION: ${PROMPT_VERSION}`;
 

@@ -13,6 +13,7 @@
 
 import { VALID_TEST_TYPES } from "./prompts/outputSchema.js";
 import { extractTestBody, stripPlaywrightImports, patchNetworkIdle, repairBrokenStringLiterals } from "../runner/codeParsing.js";
+import { looksLikeCssSelector } from "../utils/selectorHeuristics.js";
 import { parse } from "acorn";
 
 const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
@@ -29,16 +30,23 @@ const VALID_TYPES_SET = new Set(VALID_TEST_TYPES);
  * Grouped for readability; the Set is what drives validation.
  */
 const VALID_PAGE_ACTIONS = new Set([
+  // Browser / context lifecycle
+  "launch", "newContext", "newPage", "close", "storageState",
+  "addCookies", "clearCookies", "cookies", "grantPermissions", "clearPermissions",
+  "setGeolocation", "setExtraHTTPHeaders", "setDefaultTimeout", "setDefaultNavigationTimeout",
+  "tracing", "start", "stop", "startChunk", "stopChunk",
   // Navigation
-  "goto", "goBack", "goForward", "reload", "close", "waitForURL",
+  "goto", "goBack", "goForward", "reload", "waitForURL",
   // Interaction
   "click", "dblclick", "fill", "type", "press", "pressSequentially",
   "hover", "focus", "blur", "tap", "check", "uncheck", "selectOption",
-  "dispatchEvent", "dragAndDrop", "setInputFiles",
+  "dispatchEvent", "dragAndDrop", "dragTo", "setInputFiles",
   // Waiting
   "waitForLoadState", "waitForNavigation", "waitForSelector",
   "waitForFunction", "waitForTimeout", "waitForRequest", "waitForResponse",
   "waitForEvent",
+  // Routing / network control
+  "route", "unroute", "routeFromHAR", "fulfill", "continue", "fallback", "abort",
   // Extraction
   "textContent", "getAttribute", "innerHTML", "innerText", "inputValue",
   "isChecked", "isDisabled", "isEditable", "isEnabled", "isHidden", "isVisible",
@@ -49,16 +57,22 @@ const VALID_PAGE_ACTIONS = new Set([
   // Locator terminal actions (called on locator, not page)
   "waitFor", "count", "nth", "first", "last", "filter", "all",
   "screenshot", "scrollIntoViewIfNeeded", "selectText",
+  // Emulation / page configuration
+  "setViewportSize", "emulateMedia", "addInitScript",
   // Evaluate-on-selector variants (Ollama frequently uses these)
   "$eval", "$$eval", "$", "$$", "$x",
   // Expect (assertion builder)
   "expect",
   // API / request context (for api tests)
-  "newContext", "get", "post", "put", "patch", "delete", "fetch",
+  "get", "post", "put", "patch", "delete", "head", "fetch", "dispose",
+  // Test runner structure / diagnostics
+  "describe", "beforeEach", "afterEach", "beforeAll", "afterAll", "step",
+  "setTimeout", "slow", "fixme", "skip", "fail", "info", "attach",
+  "soft", "poll", "configure", "use", "extend", "only",
   // Misc
-  "evaluate", "evaluateHandle", "addInitScript",
+  "evaluate", "evaluateHandle",
   "keyboard", "mouse", "touchscreen",
-  "on", "once",
+  "on", "once", "off",
 ]);
 
 /**
@@ -67,7 +81,7 @@ const VALID_PAGE_ACTIONS = new Set([
  *   e.g.  page.clicks(...)  →  method = "clicks"
  *         locator.fillup()  →  method = "fillup"
  */
-const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+const ACTION_CALL_RE = /(?<![a-zA-Z0-9_$])(?:page|locator|frame|context|request|browser|api|test|expect|testInfo|route)\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
  * validateActions(code) → string[]
@@ -239,25 +253,6 @@ const EXPECT_LOCATOR_RE =
   /expect\s*\(\s*page\s*\.\s*locator\s*\(\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`)\s*\)\s*\)\s*(?:\.not)?\s*\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
 
 /**
- * Lightweight CSS/XPath heuristic — mirrors `looksLikeCssSelector` in
- * `selfHealing.js`, kept here to avoid a circular import between the pipeline
- * and runtime-helper modules. Human text like "Email:" / "Add new task"
- * returns false so those chains (which semantically match text) aren't
- * wrongly rejected.
- *
- * @param {string} arg
- * @returns {boolean}
- */
-function looksLikeSelector(arg) {
-  if (!arg || typeof arg !== "string") return false;
-  const s = arg.trim();
-  return /^[#.[/]|^\/\//.test(s)
-    || /(?:[\w\])])\s[>~+]\s(?:[\w#.[:])/.test(s)
-    || /\w\[[^\]]+\]/.test(s)
-    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
-}
-
-/**
  * validateSafeHelperUsage(code) → string[]
  *
  * Rejects `expect(page.locator('<cssSelector>')).<visibilityMatcher>(...)`
@@ -288,7 +283,7 @@ export function validateSafeHelperUsage(code) {
     const selector = m[1] || m[2] || m[3];
     const matcher = m[4];
     if (!SAFE_HELPER_MATCHERS.has(matcher)) continue;
-    if (!looksLikeSelector(selector)) continue;
+    if (!looksLikeCssSelector(selector)) continue;
     const key = `${matcher}::${selector}`;
     if (seen.has(key)) continue;
     seen.add(key);

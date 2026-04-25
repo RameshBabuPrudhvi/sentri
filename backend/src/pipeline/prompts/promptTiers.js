@@ -98,6 +98,8 @@ export function getStabilityRules(tier) {
 const CLOUD_CODE_REQUIREMENTS = `CODE REQUIREMENTS:
 - playwrightCode must be fully self-contained and executable on its own.
 - Do NOT use placeholder URLs like 'https://example.com' — use the real URL provided in the user message.
+- Support full Playwright capability surface when the scenario needs it: browser.newContext/context.newPage, cross-browser projects (chromium/firefox/webkit), frameLocator for nested iframes, Shadow DOM-aware locators, locator/page actions (click/dblclick/fill/type/press/hover/check/uncheck/selectOption/dragAndDrop or locator.dragTo/setInputFiles), waits (waitForSelector/waitForLoadState auto-wait), network interception/mocking (page.route/route.fulfill/route.continue/route.abort), APIRequestContext (request.newContext + get/post/put/patch/delete), auth/session reuse (storageState), debug artifacts (testInfo.attach, page/context screenshots, tracing), retries/timeouts/soft assertions, fixtures/hooks, parallel-safe structure (test.describe.parallel), and device emulation (viewport/geolocation/user-agent) when relevant.
+- Use the SMALLEST viable toolset for the scenario: simple flows stay simple; complex flows (iframes, uploads, API-dependent UI, auth state reuse) must include the advanced primitives explicitly.
 - INLINE ALL TEST DATA: Every value used in the test (search terms, email addresses, passwords, usernames, quantities, IDs) MUST be written as a string literal directly in the code. NEVER declare variables like "const query = 'term'" or reference testData keys by name. BAD: await safeFill(page, fieldLabel, searchTerm) — ReferenceError at runtime. GOOD: await safeFill(page, actual_label_from_page_data, 'test term') — literal test values, label from CLASSIFIED INTERACTIVE ELEMENTS. Read the placeholder/label from PAGE DATA — never guess it.
 - NEVER declare unused variables. Do NOT assign a locator to a variable (const searchInput = page.locator(...)) unless you immediately use it on the very next line.
 - Count assertions: use .not.toHaveCount(0) not greaterThan(). greaterThan() does not exist in Playwright. Locators inline inside expect(), never as variables.
@@ -106,6 +108,7 @@ const CLOUD_CODE_REQUIREMENTS = `CODE REQUIREMENTS:
 const LOCAL_CODE_REQUIREMENTS = `CODE REQUIREMENTS:
 - playwrightCode must be fully self-contained and executable.
 - Use the real URL from the user message — never 'https://example.com'.
+- Use Playwright capabilities that match scenario complexity. Include advanced APIs when needed: frameLocator, drag/drop, file upload, wait strategies, route mocks, API request.newContext, storageState reuse, tracing/screenshot hooks, retries/timeouts, describe.parallel, and device emulation.
 - INLINE ALL VALUES as string literals. NEVER reference testData in code.
   BAD:  input.fill(testData.searchTerm)   ← ReferenceError, testData is undefined
   BAD:  const query = 'term'; input.fill(query)  ← unnecessary variable

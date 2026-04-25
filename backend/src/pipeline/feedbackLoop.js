@@ -23,6 +23,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { getPromptRules } from "../selfHealing.js";
 import { getTier, TIER_CONFIG } from "./prompts/promptTiers.js";
+import { buildCapabilityCoverageBlock } from "./prompts/playwrightCapabilityGuide.js";
 
 // ── Failure classification ────────────────────────────────────────────────────
 //
@@ -67,6 +68,24 @@ const FAILURE_PATTERNS = [
     /navigation failed/i,
     /timeout.*navigation/i,
     /ERR_NAME_NOT_RESOLVED/i,
+  ]],
+  ["NETWORK_MOCK_FAIL", [
+    /page\.route/i,
+    /route\.fulfill/i,
+    /route handler/i,
+    /mock(ed)? response/i,
+  ]],
+  ["FRAME_FAIL", [
+    /frameLocator/i,
+    /frame .* not found/i,
+    /iframe.*not found/i,
+    /cannot access iframe/i,
+  ]],
+  ["API_ASSERTION_FAIL", [
+    /request\.newContext.*(?:status|schema|contract|body)/i,
+    /api\.(?:get|post|put|patch|delete|fetch).*(?:status|schema|contract|body)/i,
+    /api response (?:status|schema|contract)/i,
+    /\bres\.status\(\)/i,
   ]],
   ["ASSERTION_FAIL", [
     /expect.*received/i,
@@ -222,6 +241,24 @@ export function buildQualityAnalytics(improvements, testMap) {
 
 function buildImprovementPrompt(test, failureCategory, errorMessage, snapshot, tier) {
   const categoryInstructions = {
+    NETWORK_MOCK_FAIL: `The test failed around network interception/mocking.
+Fix by:
+- Preserving page.route()/route.fulfill() flow — do not remove mock setup
+- Ensuring mocked response shape matches app expectations (keys/types)
+- Keeping assertions aligned to the mocked payload and rendered UI`,
+
+    FRAME_FAIL: `The test failed inside an iframe/frame context.
+Fix by:
+- Using frameLocator() targeting the correct iframe selector/title/name
+- Performing interactions/assertions on frame-scoped locators
+- Avoiding page-level selectors for frame-contained elements`,
+
+    API_ASSERTION_FAIL: `The test failed in API request/response validation.
+Fix by:
+- Keeping request.newContext() calls and endpoint method usage intact
+- Asserting status/body against actual API contract (types + required keys)
+- Avoiding UI-only page assertions for API-only tests`,
+
     SELECTOR_ISSUE: `The test failed because a selector couldn't find an element. 
 Rewrite using more resilient selectors:
 - Use getByRole(), getByLabel(), getByText() instead of CSS selectors
@@ -290,6 +327,8 @@ ${categoryInstructions[failureCategory] || categoryInstructions.UNKNOWN}
 SELF-HEALING RULES:
 ${getPromptRules(tier || "cloud")}
 
+${buildCapabilityCoverageBlock({ mode: "debug", tier: tier || "cloud" })}
+
 Return ONLY valid JSON (no markdown):
 {
   "name": "improved test name",
@@ -316,7 +355,15 @@ export function analyzeRunResults(runResults, testMap, snapshotsByUrl) {
   // prompt-quality issues rather than real application bugs.
   // ASSERTION_FAIL is included because hard-coded crawl-time values (dates, IDs,
   // counts) are a prompt-quality issue, not a real application regression.
-  const HIGH_PRIORITY_CATEGORIES = new Set(["SELECTOR_ISSUE", "URL_MISMATCH", "TIMEOUT", "ASSERTION_FAIL"]);
+  const HIGH_PRIORITY_CATEGORIES = new Set([
+    "SELECTOR_ISSUE",
+    "URL_MISMATCH",
+    "TIMEOUT",
+    "ASSERTION_FAIL",
+    "NETWORK_MOCK_FAIL",
+    "FRAME_FAIL",
+    "API_ASSERTION_FAIL",
+  ]);
 
   for (const result of runResults) {
     stats.total++;

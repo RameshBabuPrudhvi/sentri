@@ -31,6 +31,7 @@
 // Value: { strategyIndex: number, succeededAt: string, failCount: number }
 
 import * as healingRepo from "./database/repositories/healingRepo.js";
+import { looksLikeCssSelector } from "./utils/selectorHeuristics.js";
 
 /**
  * Record a successful healing result.
@@ -376,7 +377,9 @@ export function getSelfHealingHelperCode(healingHints) {
       // Use domcontentloaded (not networkidle) because SPAs and e-commerce
       // sites fire continuous background requests and never reach networkidle,
       // causing a guaranteed timeout.
-      await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+      if (typeof page?.waitForLoadState === 'function') {
+        await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+      }
     }
 
     async function safeHover(page, text) {
@@ -521,29 +524,34 @@ export function getSelfHealingHelperCode(healingHints) {
       });
     }
 
+    function buildCheckboxStrategies(labelOrText) {
+      if (looksLikeSelector(labelOrText)) {
+        return [p => p.locator(labelOrText)];
+      }
+      return [
+        p => p.getByRole('checkbox', { name: labelOrText }),
+        p => p.getByLabel(labelOrText),
+        p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
+        // List/row scoped fallbacks — common in TodoMVC, task trackers,
+        // bug queues, settings lists. The checkbox sits inside the li/tr/
+        // .item/.row and the readable label is a sibling of (not on) the
+        // checkbox, so getByRole+name / getByLabel never match. Scope to
+        // the container by hasText first, then pick the checkbox within.
+        p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
+        p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+        p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
+      ];
+    }
+
     async function safeCheck(page, labelOrText) {
       if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
         throw new Error('safeCheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
       }
-      const strategies = looksLikeSelector(labelOrText)
-        ? [p => p.locator(labelOrText)]
-        : [
-          p => p.getByRole('checkbox', { name: labelOrText }),
-          p => p.getByLabel(labelOrText),
-          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
-          // List/row scoped fallbacks — common in TodoMVC, task trackers,
-          // bug queues, settings lists. The checkbox sits inside the li/tr/
-          // .item/.row and the readable label is a sibling of (not on) the
-          // checkbox, so getByRole+name / getByLabel never match. Scope to
-          // the container by hasText first, then pick the checkbox within.
-          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-        ];
+      const strategies = buildCheckboxStrategies(labelOrText);
 
       await retry(async () => {
         const el = await findElement(page, strategies, { healingKey: 'check::' + labelOrText });
@@ -556,21 +564,7 @@ export function getSelfHealingHelperCode(healingHints) {
       if (labelOrText == null || typeof labelOrText !== 'string' || !labelOrText.trim()) {
         throw new Error('safeUncheck: labelOrText argument is required (got ' + typeof labelOrText + ')');
       }
-      const strategies = looksLikeSelector(labelOrText)
-        ? [p => p.locator(labelOrText)]
-        : [
-          p => p.getByRole('checkbox', { name: labelOrText }),
-          p => p.getByLabel(labelOrText),
-          p => p.locator(\`[aria-label*="\${labelOrText}"]\`),
-          // Mirror safeCheck's list/row scoped fallbacks — identical structure.
-          p => p.locator('li', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('tr', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="listitem"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('[role="row"]', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('.item, .row, .todo, .task', { hasText: labelOrText }).getByRole('checkbox').first(),
-          p => p.locator('li', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-          p => p.locator('tr', { hasText: labelOrText }).locator('input[type="checkbox"]').first(),
-        ];
+      const strategies = buildCheckboxStrategies(labelOrText);
 
       await retry(async () => {
         const el = await findElement(page, strategies, { healingKey: 'uncheck::' + labelOrText });
@@ -614,6 +608,7 @@ export function getSelfHealingHelperCode(healingHints) {
       const strategies = looksLikeSelector(labelOrSelector)
         ? [p => p.locator(labelOrSelector)]
         : [
+          p => p.getByTestId(labelOrSelector),
           p => p.getByLabel(labelOrSelector),
           p => p.getByRole('button', { name: labelOrSelector }),
           p => p.getByText(labelOrSelector, { exact: true }),
@@ -816,26 +811,6 @@ export function getSelfHealingHelperCode(healingHints) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Safer Transform Engine
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Detect CSS/XPath selectors that should NOT be rewritten to text-based helpers.
-// This is the server-side counterpart of the runtime `looksLikeSelector` injected
-// by getSelfHealingHelperCode(). Both must agree on what constitutes a selector.
-//
-// Matches:
-//   - Starts with #, ., [, //           (ID, class, attribute, XPath)
-//   - CSS combinators (>, ~, +)          with selector-like context on both sides
-//   - Attribute selectors (tag[attr])    e.g. input[name=q]
-//   - Pseudo-selectors (:nth-child, …)  e.g. div:hover, a:nth-child(2)
-//
-// Does NOT match human-readable text like "Email:", "Price: $10", "Add + Continue".
-function looksLikeCssSelector(arg) {
-  if (!arg || typeof arg !== 'string') return false;
-  const s = arg.trim();
-  return /^[#.\[/]|^\/\//.test(s)
-    || /(?:[\w\])])\s[>~+]\s(?:[\w#.\[:])/.test(s)
-    || /\w\[[^\]]+\]/.test(s)
-    || /:(?:nth-child|nth-of-type|first-child|last-child|has|is|not)\(/.test(s);
-}
 
 // Escape special characters in captured text so injecting into generated code
 // strings is safe. Handles:
@@ -1096,6 +1071,39 @@ export function applyHealingTransforms(code) {
     .replace(
       /\bpage\.dragAndDrop\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
       (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.dragTo\(page\.locator\(['"`]([^'"`]+)['"`]\)\)/g,
+      (match, src, tgt) => looksLikeCssSelector(src) || looksLikeCssSelector(tgt) ? match : `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    .replace(
+      /page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\.dragTo\(page\.getByText\(['"`]([^'"`]+)['"`](?:,\s*\{[^}]*\})?\)\)/g,
+      (match, src, tgt) => `safeDrag(page, '${esc(src)}', '${esc(tgt)}')`
+    )
+    // ── File upload transforms → safeUpload ─────────────────────────────────
+    .replace(
+      /\bpage\.setInputFiles\(['"`]([^'"`]+)['"`],\s*([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.locator\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /page\.getByLabel\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    // page.getByTestId(...).setInputFiles(...) — intentionally NOT transformed.
+    // The test-id locator is already precise; rewriting to safeUpload would
+    // route through generic input[type="file"] fallbacks and could pick the
+    // wrong file input on pages with multiple uploaders.
+    .replace(
+      /page\.getByRole\(['"`][^'"`]+['"`],\s*\{\s*name:\s*['"`]([^'"`]+)['"`]\s*\}\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => `safeUpload(page, '${esc(target)}', ${files})`
+    )
+    .replace(
+      /frame\.locator\(['"`]([^'"`]+)['"`]\)\.setInputFiles\(([^)]+)\)/g,
+      (match, target, files) => looksLikeCssSelector(target) ? match : `safeUpload(frame, '${esc(target)}', ${files})`
     )
     // ── Press transforms → safePress ────────────────────────────────────────
     .replace(

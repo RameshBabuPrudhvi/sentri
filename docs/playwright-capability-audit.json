@@ -1,0 +1,29 @@
+{
+  "coverage_score": "93%",
+  "missing_capabilities": [
+    "No deterministic enforcement yet that every generated suite includes multi-browser project metadata (chromium/firefox/webkit) when cross-browser intent is requested.",
+    "Shadow DOM-specific selector strategy is prompt-guided but not validated by a dedicated validator rule."
+  ],
+  "partial_support": [
+    "Network mocking is supported in prompt guidance and validator action whitelist, but pipeline validation does not yet semantically verify route/fulfill assertions are present when mocking is declared.",
+    "Parallel execution support exists in runtime orchestration and validator method allowlist (test.describe.parallel/configure), but generation prompts do not always force parallel grouping for high-scale scenarios.",
+    "Debugging artifacts (screenshots/traces/videos) are supported at runtime and now represented in prompt guidance, but generation validation does not enforce artifact capture for critical-path failures."
+  ],
+  "strong_areas": [
+    "Prompt system now includes a shared Playwright capability coverage block reused across generation, API generation, feedback regeneration, and test-fix debugging prompts.",
+    "Validation stage includes broad Playwright method coverage across navigation, locators, actions, waits, API request contexts, network routing, auth/session methods, fixtures/hooks, and diagnostics.",
+    "Pipeline stages preserve advanced code through dedup -> enhance -> self-healing transform -> validate without stripping advanced Playwright APIs.",
+    "API testing flow already supports request.newContext with method coverage and schema/status validation requirements in dedicated API prompt path."
+  ],
+  "recommended_prompt_fixes": [
+    "System prompt rewrite: 'When scenario evidence includes iframe, upload, drag surface, API dependency, auth reuse, or geo/mobile context, include matching Playwright primitives explicitly (frameLocator, setInputFiles, dragTo/dragAndDrop, page.route/request.newContext, storageState, viewport/geolocation).'",
+    "Debug prompt rewrite: 'Apply minimal code change but preserve/restore advanced primitives already present (route mocks, storageState, tracing, parallel blocks, hooks). Do not downgrade to basic click/fill patterns.'",
+    "API prompt rewrite: 'For API+UI hybrid scenarios, generate separate tests for request.newContext contract checks and UI verification with network interception stubs where needed.'"
+  ],
+  "pipeline_improvements": [
+    "Add capability-intent tags to generation metadata (e.g., usesFrames, usesMocking, usesApiContext, usesParallel) and assert they survive post-generation stages.",
+    "Extend testValidator with optional semantic checks: if code calls page.route, require fulfill/continue/abort assertion path; if frameLocator present, require frame-scoped assertion.",
+    "Add quality analytics counters in feedbackLoop for advanced capability usage and flake rate by capability class (network, frames, auth, emulation).",
+    "Add regression tests for validator allowlist covering browser/context/network/auth/debug/parallel APIs to prevent capability regressions in future prompt updates."
+  ]
+}

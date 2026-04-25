@@ -3,6 +3,7 @@
  *
  * Detects weak/missing assertions and rewrites them using page context.
  */
+import { isAdvancedPlaywrightScenario } from "./prompts/playwrightCapabilityGuide.js";
 
 // ── Assertion quality detection ───────────────────────────────────────────────
 
@@ -189,6 +190,7 @@ function buildPageLoadAssertion(url, title) {
  */
 export function enhanceTest(test, snapshot, classifiedPage) {
   let code = test.playwrightCode || "";
+  const advancedScenario = isAdvancedPlaywrightScenario(code);
 
   // ── Fast-path: already fully enhanced ────────────────────────────────────
   // A test qualifies only when it has at least one strong assertion AND a
@@ -212,6 +214,13 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // If no assertions at all — inject based on intent or type
   if (hasNoAssertions(code)) {
+    // Advanced tests (route mocks, API request contexts, frame-heavy flows,
+    // uploads, tracing, etc.) often require bespoke assertions that can be
+    // broken by generic enhancer templates. Leave them untouched and let the
+    // original generation prompt own assertion strategy.
+    if (advancedScenario) {
+      return { ...test, _assertionEnhanced: false, _enhancementSkipped: "advanced_capability_flow" };
+    }
     // Two-tier lookup: classifiedPage intent → test.type → fallback
     const intent = classifiedPage?.dominantIntent;
     const template = (intent && INTENT_TEMPLATES[intent])
@@ -241,6 +250,9 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // If only weak assertions — replace them
   if (hasWeakAssertions(code) && !hasStrongAssertions(code)) {
+    if (advancedScenario) {
+      return { ...test, _assertionEnhanced: false, _enhancementSkipped: "advanced_capability_flow" };
+    }
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
     // Replace weak assertion lines
     code = code.replace(/.*expect\(.*\)\.(toBeTruthy|toBeDefined|not\.toBeNull).*\n?/g, "");
@@ -256,6 +268,9 @@ export function enhanceTest(test, snapshot, classifiedPage) {
 
   // Already has strong assertions — ensure page load assertion exists
   if (!HAS_PAGE_LOAD_ASSERTION_RE.test(code)) {
+    if (advancedScenario) {
+      return { ...test, _assertionEnhanced: false, _enhancementSkipped: "advanced_capability_flow" };
+    }
     const pageLoad = buildPageLoadAssertion(snapshot.url, snapshot.title);
     code = code.replace(/(\}\s*\);\s*$)/, `${pageLoad}\n$1`);
     return { ...test, playwrightCode: code, _assertionEnhanced: true, _enhancementReason: "added_page_load_assertion" };
