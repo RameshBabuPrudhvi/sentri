@@ -283,7 +283,6 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
 
   const helpers = getSelfHealingHelperCode(healingHints);
   const browserRequestContexts = [];
-  let requestContextsDisposed = false;
   let defaultRequestContext = null;
 
   const __getDefaultRequestContext = async () => {
@@ -299,10 +298,23 @@ export async function runGeneratedCode(page, context, playwrightCode, expect, he
     return ctx;
   };
 
+  // Drain-and-dispose: splice out the tracked contexts on every call so a
+  // mid-test `request.dispose()` followed by a fresh `request.newContext()`
+  // still has its new context disposed by the `finally` block. The previous
+  // `requestContextsDisposed` early-return flag would skip the second call
+  // entirely, leaking any context created after the first dispose.
   const __disposeRequestContexts = async () => {
-    if (requestContextsDisposed) return;
-    requestContextsDisposed = true;
-    for (const ctx of browserRequestContexts) {
+    if (browserRequestContexts.length === 0) return;
+    // Reset the default-context cache so the next request.<method>() call
+    // lazily creates a fresh context instead of reusing a disposed one.
+    if (defaultRequestContext && !browserRequestContexts.includes(defaultRequestContext)) {
+      defaultRequestContext = null;
+    }
+    const toDispose = browserRequestContexts.splice(0);
+    if (toDispose.includes(defaultRequestContext)) {
+      defaultRequestContext = null;
+    }
+    for (const ctx of toDispose) {
       await ctx.dispose().catch(() => {});
     }
   };
