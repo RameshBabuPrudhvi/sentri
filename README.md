@@ -144,7 +144,7 @@ Full setup guide including Ollama: **[AI Providers →](https://rameshbabuprudhv
 
 ## Contributing
 
-Contributions are welcome. Please read the guidelines below before opening a pull request.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 **Before you start:**
 - Check [open issues](https://github.com/RameshBabuPrudhvi/sentri/issues) and [ROADMAP.md](ROADMAP.md) to avoid duplicating in-progress work
