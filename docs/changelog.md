@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Runner**: Visual baselines are now browser-aware (DIF-002b gap 1). Baseline storage keys and artifact paths include the Playwright engine (`chromium` / `firefox` / `webkit`) so cross-browser runs no longer diff against Chromium goldens. Added migration `010_baseline_browser.sql` to re-key existing rows and backfill legacy baselines as `chromium`.
+
+### Fixed
+- **API**: Visual baseline endpoints now accept browser scoping (`?browser=` or run/browser fallback) for accept/delete/list flows, and baseline accept activity logs include the targeted browser engine to improve audit clarity.
+
 ## [1.6.6] — 2026-04-25
 
 ### Fixed

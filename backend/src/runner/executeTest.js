@@ -316,6 +316,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
   try {
     const expect = await getExpect();
+    const browserName = browser?.browserType?.()?.name?.() || "chromium";
 
     const testExecution = (async () => {
       if (test.playwrightCode && extractTestBody(test.playwrightCode)) {
@@ -342,6 +343,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
                 visualDiff = diffScreenshot({
                   runId,
                   testId: test.id,
+                  browser: browserName,
                   stepNumber,
                   pngBuffer: Buffer.from(shot.base64, "base64"),
                 });
@@ -396,6 +398,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
           result.visualDiff = diffScreenshot({
             runId,
             testId: test.id,
+            browser: browserName,
             stepNumber: 0,
             pngBuffer: Buffer.from(shot.base64, "base64"),
           });
