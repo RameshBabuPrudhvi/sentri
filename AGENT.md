@@ -668,7 +668,8 @@ curl -sc /tmp/c.txt -X POST http://127.0.0.1:3001/api/v1/auth/login \
   -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'
 CSRF=$(grep _csrf /tmp/c.txt | awk '{print $7}')
 
-# B1 — first run auto-creates baselines at backend/artifacts/baselines/$TID/step-*.png
+# B1 — first run auto-creates baselines at backend/artifacts/baselines/$TID/<browser>/step-*.png
+#      (default browser is chromium; DIF-002b keys baselines per Playwright engine)
 curl -sb /tmp/c.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
   -X POST http://127.0.0.1:3001/api/v1/tests/$TID/run -d '{}'
 
@@ -682,7 +683,7 @@ curl -sb /tmp/c.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json'
 
 `visualDiff` shape in `runs.results[*].stepCaptures[*].visualDiff`: `{ status, diffPixels, totalPixels, diffRatio, threshold, baselinePath, diffPath }`. `status` is one of `baseline_created | match | regression | error`, matching the four badge variants in `StepResultsView.jsx`.
 
-**Accept must rewrite the PNG, not just the DB row.** A silent no-op failure mode is updating only `baseline_screenshots` without touching disk. The only assertion that catches this is B5 — re-running with the page still mutated. Always check `stat`/`md5sum` on `backend/artifacts/baselines/$TID/step-*.png` before and after Accept.
+**Accept must rewrite the PNG, not just the DB row.** A silent no-op failure mode is updating only `baseline_screenshots` without touching disk. The only assertion that catches this is B5 — re-running with the page still mutated. Always check `stat`/`md5sum` on `backend/artifacts/baselines/$TID/<browser>/step-*.png` before and after Accept (DIF-002b — baselines are now keyed by `(testId, stepNumber, browser)`).
 
 **Visual tab visibility.** The `🖼️ Visual` tab only renders when the **currently selected step** has a `visualDiff` attached. On a run-detail page, click into an individual step in the Activity Log first; the tab is hidden on the top-level `Test Case` row when every step matched the baseline. Check all three toggles (`Baseline`, `Current`, `Diff`) render distinct images — this proves all three artifact URLs are correctly signed by `ARTIFACT_SIGNING_SECRET`.
 

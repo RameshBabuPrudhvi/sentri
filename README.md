@@ -284,8 +284,8 @@ See the [full deployment guide](https://rameshbabuprudhvi.github.io/sentri/docs/
 | **File Storage** | ⬜ Store videos/screenshots to S3/R2 instead of local disk (MNT-006) |
 | **Multi-tenancy** | ✅ Workspace isolation — every entity scoped to a workspace; auto-created on first login (ACL-001) |
 | **RBAC** | ✅ Role-based access control — Admin / QA Lead / Viewer with `requireRole()` middleware on all mutating routes (ACL-002) |
-| **Cross-Browser** | ⬜ Firefox + WebKit/Safari support (DIF-002) |
-| **Visual Regression** | ⬜ Baseline screenshot diffing with `pixelmatch` (DIF-001) |
+| **Cross-Browser** | ✅ Firefox + WebKit/Safari support — per-run engine selector, browser-scoped visual baselines, live-launch CI smoke for all three engines (DIF-002, DIF-002b) |
+| **Visual Regression** | ✅ Baseline screenshot diffing with `pixelmatch` — keyed by `(testId, stepNumber, browser)` so cross-browser runs no longer diff against Chromium goldens (DIF-001, DIF-002b) |
 
 ---
 
