@@ -16,6 +16,33 @@
 
 ---
 
+## Before writing any code — 30-second pre-flight
+
+Every task. No exceptions. Do this before touching a file:
+
+1. **Does a utility already exist?**
+   `grep_search` or Ctrl+F in REFERENCE.md for the concept (e.g. "escape", "format", "classify", "validate") before writing a new helper. Check:
+   - `backend/src/utils/` for backend helpers
+   - `frontend/src/utils/` for frontend helpers
+   - `frontend/src/styles/components.css` + `utilities.css` for CSS
+   - `frontend/src/hooks/queries/` for cached GET hooks
+
+2. **Does a similar pattern already exist in a sibling file?**
+   Read one existing file in the same directory (e.g. another repo, route, page, hook). Match its structure, naming, imports, and error-handling style. Consistency > cleverness.
+
+3. **Is this change minimal?**
+   Only modify files listed in NEXT.md § "Files to change" unless you have a hard reason. If you find yourself editing a 4th or 5th file, stop and reconsider — you may be solving the wrong problem.
+
+4. **Will this be re-used?**
+   If a helper is used by ≥2 call sites (or will be), put it in `utils/`. If it's one-off, inline it. Never define a helper mid-component file.
+
+5. **Am I introducing a new concept?**
+   New env var, new DB column, new CSS token, new auth strategy, new pipeline stage — each has a documented "Adding a new X" section in STANDARDS.md. Follow that section; do not improvise.
+
+If any of these pre-flight checks fails or is unclear, stop and ask the human before writing code. Writing code first and asking later is worse than asking first.
+
+---
+
 ## Project Overview
 
 Sentri is a full-lifecycle AI QA platform that crawls a web application, generates Playwright test suites with an LLM, routes every generated test through a human-approval queue, executes approved tests against a live browser, and self-heals broken selectors across runs.
@@ -74,6 +101,9 @@ docs/                      VitePress site + REST API reference
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See REVIEW.md for the full requirements table.
 - **Do not duplicate test helpers.** Integration test utilities live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.
 - **Do not use TypeScript syntax in JSDoc comments.** This project uses plain JSDoc, not TypeScript. The CI pipeline runs `jsdoc` and will **fail** on TS-only syntax. Never use `prop?: type` — use `@typedef` with `@property {type} [prop]` instead. Never use `type?` for nullable — use `{type|null}` or `{?type}`. See STANDARDS.md §JSDoc for the full reference.
+- **Do not create a new utility/component/CSS class without a lookup pass first.** Run `grep_search` against `backend/src/utils/`, `frontend/src/utils/`, `components.css`, and `utilities.css`. If 80% of what you need exists, extend the existing module — do not fork it.
+- **Do not edit files outside NEXT.md § "Files to change" without explicit reason.** If scope creeps beyond the listed files, stop and justify in the PR description. Unbounded scope is the #1 cause of PR-review friction.
+- **Do not match stylistic conventions from memory — match the sibling file.** Before writing a new repo, route, page, or hook, open one existing sibling file and mirror its structure. "What the codebase does" beats "what I think is idiomatic."
 
 ---
 

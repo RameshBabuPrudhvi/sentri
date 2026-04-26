@@ -17,6 +17,7 @@
 - [ ] CI passes locally (`cd backend && npm test` and `cd frontend && npm run build && npm test`)
 - [ ] Security checklist reviewed if the PR touches auth, routes, or data handling (see below)
 - [ ] Sprint tracker updated (see [Sprint Tracker Hand-off](#sprint-tracker) below)
+- [ ] Code review self-pass: no duplicated helpers, no duplicated CSS classes, no files edited outside NEXT.md scope, new utilities placed in shared `utils/` not inline, sibling-file conventions followed.
 
 ---
 
