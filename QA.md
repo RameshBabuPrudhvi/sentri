@@ -19,20 +19,20 @@ This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section 
 
 | If you need… | Go to |
 |---|---|
-| Role required for any endpoint | `qa/permissions.json` (machine-readable, derived from `requireRole(...)` calls) |
+| Role required for any endpoint | [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) (machine-readable, lives next to `requireRole.js`) |
 | End-to-end happy-path validation | [Golden E2E Happy Path](#golden-e2e-happy-path-must-pass-before-release) (50 steps) |
 | Per-feature checks | jump to `### <feature>` (Authentication, Workspaces, Projects, Tests Page, Recorder, Runs, AI Fix, Test Code Editing, Automation, Visual Testing, Dashboard, AI Chat, Settings, Account / GDPR, Email Verification, Recycle Bin, Audit Log, Notifications, Security, Reports, System Diagnostics, New Project, Runs List, Project Detail, Bulk Actions, Modals, Imports, Onboarding, Demo Mode, Workspace Switcher) |
 | Bug template | [Bug Reporting Template](#-bug-reporting-template) |
-| What's in / out of scope | [Coverage Checklist](#-coverage-checklist) and `qa/permissions.json#outOfScope` |
+| What's in / out of scope | [Coverage Checklist](#-coverage-checklist) and `backend/src/middleware/permissions.json#outOfScope` |
 
 **When adding a new user-facing flow** (per [REVIEW.md](./REVIEW.md)):
 1. Add a section here under "Functional Test Areas".
 2. Add a step (or sub-section) in the Golden E2E Happy Path if it belongs in the must-pass journey.
 3. Add a row to the Coverage Checklist.
-4. If the flow has a new endpoint, add it to `qa/permissions.json`.
+4. If the flow has a new endpoint, add it to [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json).
 5. Cite the source file/line for any role-gated or behavior claim.
 
-**When verifying a permissions claim:** read `qa/permissions.json`, not the markdown matrix below — the JSON is the canonical machine-readable form. The markdown table mirrors it for humans.
+**When verifying a permissions claim:** read [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json), not the markdown matrix below — the JSON is the canonical machine-readable form. The markdown table mirrors it for humans.
 
 ---
 
