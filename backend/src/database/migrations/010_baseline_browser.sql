@@ -24,7 +24,14 @@ INSERT INTO baseline_screenshots (
   testId, stepNumber, browser, imagePath, width, height, createdAt, updatedAt
 )
 SELECT
-  testId, stepNumber, 'chromium', imagePath, width, height, createdAt, updatedAt
+  testId,
+  stepNumber,
+  'chromium',
+  replace(imagePath, '/baselines/' || testId || '/', '/baselines/' || testId || '/chromium/'),
+  width,
+  height,
+  createdAt,
+  updatedAt
 FROM baseline_screenshots_old;
 
 DROP TABLE baseline_screenshots_old;

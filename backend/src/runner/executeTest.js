@@ -316,7 +316,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
 
   try {
     const expect = await getExpect();
-    const browserName = browser?.browserType?.()?.name?.() || "chromium";
+    const browserName = opts.browser || "chromium";
 
     const testExecution = (async () => {
       if (test.playwrightCode && extractTestBody(test.playwrightCode)) {

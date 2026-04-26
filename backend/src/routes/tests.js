@@ -829,7 +829,9 @@ router.delete("/tests/:testId/baselines/:stepNumber", requireRole("qa_lead"), (r
   if (!Number.isFinite(stepNumber) || stepNumber < 0) {
     return res.status(400).json({ error: "invalid stepNumber" });
   }
-  const browser = resolveBrowser(req.query?.browser || "chromium").name;
+  const browser = resolveBrowser(
+    req.query?.browser || req.body?.browser || "chromium"
+  ).name;
 
   // Remove the on-disk PNG too so the next run definitely rebuilds it.
   const absPath = path.join(BASELINES_DIR, test.id, browser, `step-${stepNumber}.png`);

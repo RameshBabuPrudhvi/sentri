@@ -125,7 +125,14 @@ function persistBaseline(testId, stepNumber, browser, pngBuffer) {
 export function ensureBaseline(testId, stepNumber = 0, browser = "chromium") {
   const row = baselineRepo.get(testId, stepNumber, browser);
   if (!row) return null;
-  const abs = baselineAbsPath(testId, browser, stepNumber);
+  let abs = baselineAbsPath(testId, browser, stepNumber);
+  if (!fs.existsSync(abs)) {
+    // Legacy fallback: pre-migration baselines stored at <testId>/step-N.png
+    // (no browser subdir). Migration 010 rewrites DB imagePath but cannot
+    // move files on disk. See PR #110.
+    const legacyAbs = path.join(BASELINES_DIR, testId, `step-${stepNumber}.png`);
+    if (browser === "chromium" && fs.existsSync(legacyAbs)) abs = legacyAbs;
+  }
   if (!fs.existsSync(abs)) return null;
   return { row, abs };
 }
