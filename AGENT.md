@@ -14,6 +14,7 @@
 | Looking up a utility, CSS class, hook, repo, env var, or auth strategy | [REFERENCE.md](./REFERENCE.md) — Ctrl+F only, never top-to-bottom |
 | Before opening a PR | [REVIEW.md](./REVIEW.md) |
 | Validating a user-visible change manually | [QA.md](./QA.md) — Golden E2E happy path + per-feature checks |
+| Looking up the role required for an endpoint | [`qa/permissions.json`](./qa/permissions.json) — machine-readable, derived from `requireRole(...)` |
 
 ---
 

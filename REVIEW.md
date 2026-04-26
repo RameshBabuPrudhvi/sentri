@@ -21,6 +21,7 @@
 - [ ] Code review self-pass: no duplicated helpers, no duplicated CSS classes, no files edited outside NEXT.md scope, new utilities placed in shared `utils/` not inline, sibling-file conventions followed.
 - [ ] For user-visible changes: walked the affected section(s) of [QA.md](./QA.md). For changes that touch any flow in the Golden E2E Happy Path (auth → project → crawl → generate → approve → run → AI fix → visual → reports → automation → notifications → GDPR → permissions), rerun the full Golden E2E on Chrome plus one other browser.
 - [ ] `QA.md` updated when the PR adds, removes, or materially changes a user-facing flow (new page/modal/endpoint, new role gate, changed happy-path steps, shipped/unshipped feature moving in or out of the "Out of scope" list).
+- [ ] [`qa/permissions.json`](./qa/permissions.json) updated when the PR adds / removes / changes a `requireRole(...)` gate or adds a new role-gated endpoint. The JSON is the canonical machine-readable RBAC source for agents and reviewers.
 
 ---
 
