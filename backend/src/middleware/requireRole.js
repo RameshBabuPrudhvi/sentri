@@ -22,6 +22,13 @@
  * router.post("/",      requireRole("qa_lead"), (req, res) => { … });
  * ```
  *
+ * ### Keeping `permissions.json` in sync
+ * Every `requireRole(...)` call site is mirrored in `./permissions.json`,
+ * which is the canonical machine-readable RBAC matrix consumed by agents
+ * and reviewers (see QA.md, AGENT.md, REVIEW.md). Whenever you add, remove,
+ * or change a role gate, update the corresponding entry in `permissions.json`.
+ * Audit drift with: `grep -rn 'requireRole(' backend/src/routes/`.
+ *
  * @param {string} minimumRole — The minimum role required ('admin' | 'qa_lead' | 'viewer').
  * @returns {Function} Express middleware `(req, res, next)`.
  */

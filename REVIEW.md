@@ -4,6 +4,7 @@
 > this file** — it contains the project's always-on rules (DO NOTs, architecture,
 > auth model). For coding conventions see [STANDARDS.md](./STANDARDS.md). For
 > table lookups (utils, env vars, auth strategies) see [REFERENCE.md](./REFERENCE.md).
+> For manual end-to-end validation (Golden E2E + per-feature checks) see [QA.md](./QA.md).
 >
 > Read this file before submitting any pull request.
 
@@ -18,6 +19,9 @@
 - [ ] Security checklist reviewed if the PR touches auth, routes, or data handling (see below)
 - [ ] Sprint tracker updated (see [Sprint Tracker Hand-off](#sprint-tracker) below)
 - [ ] Code review self-pass: no duplicated helpers, no duplicated CSS classes, no files edited outside NEXT.md scope, new utilities placed in shared `utils/` not inline, sibling-file conventions followed.
+- [ ] For user-visible changes: walked the affected section(s) of [QA.md](./QA.md). For changes that touch any flow in the Golden E2E Happy Path (auth → project → crawl → generate → approve → run → AI fix → visual → reports → automation → notifications → GDPR → permissions), rerun the full Golden E2E on Chrome plus one other browser.
+- [ ] `QA.md` updated when the PR adds, removes, or materially changes a user-facing flow (new page/modal/endpoint, new role gate, changed happy-path steps, shipped/unshipped feature moving in or out of the "Out of scope" list).
+- [ ] [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) updated when the PR adds / removes / changes a `requireRole(...)` gate or adds a new role-gated endpoint. The JSON is the canonical machine-readable RBAC source for agents and reviewers.
 
 ---
 
@@ -90,7 +94,7 @@ cd frontend && npm test
 | New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly | Dedicated file or `tests/auth-cookies.test.js` |
 | Security fix | Unit test for the fix mechanism AND integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
 | Pipeline stage change | Unit tests | `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` |
-| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | E2E spec exercising the full HTTP/UI flow | `tests/e2e/specs/<area>.spec.mjs` (see STANDARDS.md § E2E Tests) |
+| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | E2E spec exercising the full HTTP/UI flow **and** a corresponding section / Golden E2E step in [QA.md](./QA.md) | `tests/e2e/specs/<area>.spec.mjs` (see STANDARDS.md § E2E Tests); update `QA.md` at repo root |
 
 **Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
 

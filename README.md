@@ -138,6 +138,7 @@ Full setup guide including Ollama: **[AI Providers →](https://rameshbabuprudhv
 | **API Reference** | [Full REST API with request/response examples](https://rameshbabuprudhvi.github.io/sentri/docs/api/) |
 | **Production Checklist** | [Security, infrastructure, and deployment hardening](https://rameshbabuprudhvi.github.io/sentri/docs/guide/production.html) |
 | **Environment Variables** | [Complete backend and frontend variable reference](https://rameshbabuprudhvi.github.io/sentri/docs/guide/env-vars.html) |
+| **Manual QA Guide** | [End-to-end manual test plan, Golden E2E happy path, per-feature checks](QA.md) |
 
 ---
 
@@ -154,6 +155,7 @@ Contributions are welcome. Please read the guidelines below before opening a pul
 2. Read [AGENT.md](AGENT.md) — it covers architecture, conventions, and what not to do
 3. Read [STANDARDS.md](STANDARDS.md) when writing new code
 4. Run the test suite before submitting: `cd backend && npm test` and `cd frontend && npm run build`
+   - For user-visible changes, also walk the affected sections of [QA.md](QA.md) — at minimum the Golden E2E Happy Path
 5. Follow [Conventional Commits](https://www.conventionalcommits.org/) for commit and PR title format — the release pipeline uses this to determine version bumps automatically
 6. Update `docs/changelog.md` under `## [Unreleased]` for any user-visible change
 7. Read [REVIEW.md](REVIEW.md) before opening the PR
