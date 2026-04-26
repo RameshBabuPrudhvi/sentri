@@ -2,7 +2,9 @@
 
 ## Scope
 This suite validates:
-- API auth happy/negative paths
+- API auth + verification lifecycle
+- API full functional flow (project + test CRUD + approval)
+- API negative validations for project/test payloads
 - UI login-route smoke checks (when frontend is reachable)
 
 ## Run

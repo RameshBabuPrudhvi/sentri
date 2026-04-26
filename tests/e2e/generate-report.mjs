@@ -2,7 +2,6 @@ import fs from 'node:fs';
 
 const candidates = [
   'tests/e2e/artifacts/results.json',
-  'tests/e2e/tests/e2e/artifacts/results.json',
 ];
 const outPath = 'tests/e2e/EXECUTION_REPORT.md';
 

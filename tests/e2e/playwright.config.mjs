@@ -9,8 +9,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: [
     ['list'],
-    ['json', { outputFile: 'tests/e2e/artifacts/results.json' }],
-    ['html', { outputFolder: 'tests/e2e/artifacts/html-report', open: 'never' }],
+    ['json', { outputFile: 'artifacts/results.json' }],
+    ['html', { outputFolder: 'artifacts/html-report', open: 'never' }],
   ],
   fullyParallel: false,
   workers: 1,
@@ -25,7 +25,7 @@ export default defineConfig({
       use: {
         baseURL: backendBaseURL,
       },
-      testMatch: /.*api-auth\.spec\.mjs/,
+      testMatch: /.*(api-auth|full-functional-api)\.spec\.mjs/,
     },
     {
       name: 'ui-chromium',
