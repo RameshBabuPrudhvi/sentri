@@ -16,6 +16,36 @@
 - [ ] All new backend logic has tests; new test files are registered in `backend/tests/run-tests.js`
 - [ ] CI passes locally (`cd backend && npm test` and `cd frontend && npm run build && npm test`)
 - [ ] Security checklist reviewed if the PR touches auth, routes, or data handling (see below)
+- [ ] Sprint tracker updated (see [Sprint Tracker Hand-off](#sprint-tracker) below)
+
+---
+
+<a id="sprint-tracker"></a>
+## Sprint Tracker Hand-off (NEXT.md + ROADMAP.md)
+
+Every PR that closes a roadmap item **must** update the sprint trackers. This keeps the next agent unblocked — if `NEXT.md` still points at the item you just shipped, the next agent will waste a cycle re-implementing it.
+
+### When your PR implements a roadmap item (e.g. DIF-006, AUTO-005, MNT-006)
+
+- [ ] **`ROADMAP.md`** — Move the item from its phase table to the ✅ **Completed Work Summary** table. Include the PR number (e.g. `| DIF-006 | Standalone Playwright export | PR #112 |`).
+- [ ] **`ROADMAP.md`** — Update the "Remaining" count in the fast-path section at the top (currently says `Remaining: 39 items`).
+- [ ] **`NEXT.md` → `## ▶ Current PR`** — Replace this block entirely with the **next** item. Promote item 2 from the queue to be the new Current PR. Copy over its title, branch, effort, dependencies, files to change, acceptance criteria, and watch-outs.
+- [ ] **`NEXT.md` → `## ⏭ Queue`** — Remove the promoted item. Shift items 3 and 4 up. Pick a new item 4 from `ROADMAP.md` (highest priority with `Dependencies: none`).
+- [ ] **`NEXT.md` → `## ✅ Recently completed`** — Add your shipped item as the new top row with its PR number. Keep the table to the 3 most recent entries; drop the oldest.
+- [ ] **`NEXT.md` → `## 🔀 Parallel opportunities`** — If your PR modified any file listed in the "Shared files?" column, remove or flag the affected parallel items.
+
+### When your PR is infrastructure/docs/refactor (no roadmap ID)
+
+- [ ] No `NEXT.md` update needed.
+- [ ] No `ROADMAP.md` update needed.
+- [ ] Still update `docs/changelog.md` if user-visible.
+
+### Sanity checks before merging
+
+- [ ] The `Current PR` block in `NEXT.md` **does not** still reference the item this PR shipped.
+- [ ] The `Remaining: N items` count in `ROADMAP.md` decreased by exactly the number of items this PR closed.
+- [ ] The item appears in `ROADMAP.md` ✅ Completed table **and** `NEXT.md` Recently completed — not only one.
+- [ ] The next agent can run `cat NEXT.md` and immediately know what to build, without opening `ROADMAP.md`.
 
 ---
 
