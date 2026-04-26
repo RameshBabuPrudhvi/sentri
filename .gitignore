@@ -19,6 +19,8 @@ backend/data/
 
 # Playwright artifacts
 backend/artifacts/
+tests/e2e/artifacts/
+tests/e2e/EXECUTION_REPORT.md
 
 # OS files
 .DS_Store

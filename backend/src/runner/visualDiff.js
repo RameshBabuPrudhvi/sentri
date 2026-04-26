@@ -7,14 +7,14 @@
  * a structured result the test runner can attach to a step.
  *
  * A baseline is created lazily on the first run that produces a screenshot
- * for a given `(testId, stepNumber)` pair. Subsequent runs compare against
+ * for a given `(testId, stepNumber, browser)` tuple. Subsequent runs compare against
  * that baseline; if the pixel difference ratio exceeds
  * `VISUAL_DIFF_THRESHOLD` the step is flagged `visualRegression: true`.
  *
  * ### Directory layout
  * ```
  * artifacts/
- *   baselines/<testId>/step-<N>.png
+ *   baselines/<testId>/<browser>/step-<N>.png
  *   diffs/<runId>-<testId>-step<N>.png
  * ```
  *
@@ -49,27 +49,29 @@ import {
  */
 
 /**
- * Absolute path to the baseline PNG for a given test + step.
+ * Absolute path to the baseline PNG for a given test + browser + step.
  * @param {string} testId
+ * @param {string} browser
  * @param {number} stepNumber
  * @returns {string}
  */
-function baselineAbsPath(testId, stepNumber) {
-  return path.join(BASELINES_DIR, testId, `step-${stepNumber}.png`);
+function baselineAbsPath(testId, browser, stepNumber) {
+  return path.join(BASELINES_DIR, testId, browser, `step-${stepNumber}.png`);
 }
 
 /**
  * Public (URL-safe) artifact path for a baseline.
  * @param {string} testId
+ * @param {string} browser
  * @param {number} stepNumber
  * @returns {string}
  */
-function baselinePublicPath(testId, stepNumber) {
+function baselinePublicPath(testId, browser, stepNumber) {
   // Raw testId (not encoded): the URL path is URL-decoded by Express before
   // the static-file lookup + HMAC verification in appSetup.js, so %-encoded
   // bytes would break both. Test IDs from `generateTestId()` are already
   // path-safe (uppercase + digits + hyphens).
-  return `/artifacts/baselines/${testId}/step-${stepNumber}.png`;
+  return `/artifacts/baselines/${testId}/${browser}/step-${stepNumber}.png`;
 }
 
 /**
@@ -91,13 +93,14 @@ function readPng(absPath) {
  *
  * @param {string} testId
  * @param {number} stepNumber
+ * @param {string} browser
  * @param {Buffer} pngBuffer
  * @returns {{ absPath: string, publicPath: string, width: number, height: number }}
  */
-function persistBaseline(testId, stepNumber, pngBuffer) {
-  const dir = path.join(BASELINES_DIR, testId);
+function persistBaseline(testId, stepNumber, browser, pngBuffer) {
+  const dir = path.join(BASELINES_DIR, testId, browser);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const absPath = baselineAbsPath(testId, stepNumber);
+  const absPath = baselineAbsPath(testId, browser, stepNumber);
   fs.writeFileSync(absPath, pngBuffer);
 
   // Decode header only to capture dimensions — safe on failure.
@@ -109,8 +112,8 @@ function persistBaseline(testId, stepNumber, pngBuffer) {
     height = decoded.height;
   } catch { /* keep null dimensions */ }
 
-  const publicPath = baselinePublicPath(testId, stepNumber);
-  baselineRepo.upsert({ testId, stepNumber, imagePath: publicPath, width, height });
+  const publicPath = baselinePublicPath(testId, browser, stepNumber);
+  baselineRepo.upsert({ testId, stepNumber, browser, imagePath: publicPath, width, height });
   return { absPath, publicPath, width, height };
 }
 
@@ -119,12 +122,20 @@ function persistBaseline(testId, stepNumber, pngBuffer) {
  *
  * @param {string} testId
  * @param {number} stepNumber
+ * @param {string} [browser="chromium"]
  * @returns {{ row: Object, abs: string } | null}
  */
-export function ensureBaseline(testId, stepNumber = 0) {
-  const row = baselineRepo.get(testId, stepNumber);
+export function ensureBaseline(testId, stepNumber = 0, browser = "chromium") {
+  const row = baselineRepo.get(testId, stepNumber, browser);
   if (!row) return null;
-  const abs = baselineAbsPath(testId, stepNumber);
+  let abs = baselineAbsPath(testId, browser, stepNumber);
+  if (!fs.existsSync(abs)) {
+    // Legacy fallback: pre-migration baselines stored at <testId>/step-N.png
+    // (no browser subdir). Migration 010 rewrites DB imagePath but cannot
+    // move files on disk. See PR #110.
+    const legacyAbs = path.join(BASELINES_DIR, testId, `step-${stepNumber}.png`);
+    if (browser === "chromium" && fs.existsSync(legacyAbs)) abs = legacyAbs;
+  }
   if (!fs.existsSync(abs)) return null;
   return { row, abs };
 }
@@ -141,19 +152,20 @@ export function ensureBaseline(testId, stepNumber = 0) {
  * @param {Object} args
  * @param {string} args.runId
  * @param {string} args.testId
+ * @param {string} [args.browser="chromium"]
  * @param {number} [args.stepNumber=0]
  * @param {Buffer} args.pngBuffer - Raw PNG bytes of the captured screenshot.
  * @returns {VisualDiffResult}
  */
-export function diffScreenshot({ runId, testId, stepNumber = 0, pngBuffer }) {
+export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber = 0, pngBuffer }) {
   if (!pngBuffer || !Buffer.isBuffer(pngBuffer) || pngBuffer.length === 0) {
     return { status: "error", message: "empty screenshot buffer" };
   }
 
   // ── First run for this step — create baseline and bail out early ──
-  const existing = ensureBaseline(testId, stepNumber);
+  const existing = ensureBaseline(testId, stepNumber, browser);
   if (!existing) {
-    const { publicPath, width, height } = persistBaseline(testId, stepNumber, pngBuffer);
+    const { publicPath, width, height } = persistBaseline(testId, stepNumber, browser, pngBuffer);
     return {
       status: "baseline_created",
       baselinePath: publicPath,
@@ -226,13 +238,14 @@ export function diffScreenshot({ runId, testId, stepNumber = 0, pngBuffer }) {
  *
  * @param {Object} args
  * @param {string} args.testId
+ * @param {string} [args.browser="chromium"]
  * @param {number} [args.stepNumber=0]
  * @param {string} args.sourceAbsPath - Absolute filesystem path to the PNG to promote.
  * @returns {{ baselinePath: string }}
  * @throws {Error} When the source file cannot be read.
  */
-export function acceptBaseline({ testId, stepNumber = 0, sourceAbsPath }) {
+export function acceptBaseline({ testId, browser = "chromium", stepNumber = 0, sourceAbsPath }) {
   const buf = fs.readFileSync(sourceAbsPath);
-  const { publicPath } = persistBaseline(testId, stepNumber, buf);
+  const { publicPath } = persistBaseline(testId, stepNumber, browser, buf);
   return { baselinePath: publicPath };
 }

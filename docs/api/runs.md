@@ -46,7 +46,7 @@ Pass a `browser` field to run the tests under a specific Playwright engine:
 
 Invalid or unknown values silently fall back to chromium (no error). The canonical browser name is persisted on the run record (`runs.browser` column, migration 009) and returned on `GET /runs/:runId` so the Run Detail page can show a per-run badge.
 
-Baselines (visual regression — DIF-001) are currently keyed by `(testId, stepNumber)` only, not by browser. Running the same test under Firefox and Chromium against the same baseline will produce spurious pixel regressions due to font-rendering differences. Browser-aware baselines are tracked as a separate follow-on.
+Visual baselines (DIF-001) are scoped per browser engine (DIF-002b, migration 010) — keyed by `(testId, stepNumber, browser)` and stored under `artifacts/baselines/<testId>/<browser>/step-<N>.png`. Running the same test under Firefox and Chromium maintains independent goldens, so font-rendering differences across engines no longer produce false regressions. The baseline endpoints (`GET/POST/DELETE /api/v1/tests/:testId/baselines/...`) accept an optional `?browser=` query string (or fall back to the run's `browser` field) — see the [Tests API](./tests.md#visual-regression-baselines-dif-001) for details.
 
 ### Device emulation (DIF-003)
 

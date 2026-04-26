@@ -45,7 +45,7 @@ import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
-import { SHOTS_DIR, BASELINES_DIR } from "../runner/config.js";
+import { SHOTS_DIR, BASELINES_DIR, resolveBrowser } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode } from "../runner/recorder.js";
@@ -735,7 +735,9 @@ router.get("/tests/:testId/baselines", (req, res) => {
   if (!test) return res.status(404).json({ error: "test not found" });
   const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "test not found" });
-  res.json(baselineRepo.getAllByTestId(test.id));
+  const requestedBrowser = typeof req.query?.browser === "string" ? req.query.browser : "";
+  const browser = requestedBrowser ? resolveBrowser(requestedBrowser).name : "";
+  res.json(baselineRepo.getAllByTestId(test.id, browser));
 });
 
 /**
@@ -767,6 +769,7 @@ router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"
 
   const result = (run.results || []).find(r => r.testId === test.id);
   if (!result) return res.status(404).json({ error: "test result not found on run" });
+  const browser = resolveBrowser(req.query?.browser || req.body?.browser || run.browser || "chromium").name;
 
   // Locate the source screenshot on disk. For step 0 we use the final
   // screenshot; for step N we use the matching stepCaptures entry.
@@ -798,12 +801,12 @@ router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"
   }
 
   try {
-    const { baselinePath } = acceptBaseline({ testId: test.id, stepNumber, sourceAbsPath });
+    const { baselinePath } = acceptBaseline({ testId: test.id, browser, stepNumber, sourceAbsPath });
     logActivity({ ...actor(req),
       type: "test.baseline_accept", projectId: project.id, projectName: project.name,
-      detail: `Accepted visual baseline for ${test.id} step ${stepNumber}`, status: "success",
+      detail: `Accepted visual baseline for ${test.id} [${browser}] step ${stepNumber}`, status: "success",
     });
-    res.json({ ok: true, baselinePath, testId: test.id, stepNumber });
+    res.json({ ok: true, baselinePath, testId: test.id, browser, stepNumber });
   } catch (err) {
     // Log the real error server-side; return a generic message to the client
     // per AGENT.md ("5xx errors never leak internal details").
@@ -826,13 +829,16 @@ router.delete("/tests/:testId/baselines/:stepNumber", requireRole("qa_lead"), (r
   if (!Number.isFinite(stepNumber) || stepNumber < 0) {
     return res.status(400).json({ error: "invalid stepNumber" });
   }
+  const browser = resolveBrowser(
+    req.query?.browser || req.body?.browser || "chromium"
+  ).name;
 
   // Remove the on-disk PNG too so the next run definitely rebuilds it.
-  const absPath = path.join(BASELINES_DIR, test.id, `step-${stepNumber}.png`);
+  const absPath = path.join(BASELINES_DIR, test.id, browser, `step-${stepNumber}.png`);
   try { if (fs.existsSync(absPath)) fs.unlinkSync(absPath); } catch { /* ignore */ }
 
-  const deleted = baselineRepo.deleteOne(test.id, stepNumber);
-  res.json({ ok: true, deleted });
+  const deleted = baselineRepo.deleteOne(test.id, stepNumber, browser);
+  res.json({ ok: true, deleted, browser });
 });
 
 // ─── DIF-015: Interactive browser recorder ───────────────────────────────────

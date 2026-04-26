@@ -1,0 +1,17 @@
+{
+  "name": "sentri-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "docs"
+  ],
+  "scripts": {
+    "e2e:test": "playwright test -c tests/e2e/playwright.config.mjs",
+    "e2e:report": "node tests/e2e/generate-report.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}

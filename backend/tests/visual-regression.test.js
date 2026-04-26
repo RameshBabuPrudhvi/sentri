@@ -135,7 +135,8 @@ await test("upsert() inserts a new row and get() returns it", () => {
   baselineRepo.upsert({
     testId: "TC-VR-1",
     stepNumber: 0,
-    imagePath: "/artifacts/baselines/TC-VR-1/step-0.png",
+    browser: "chromium",
+    imagePath: "/artifacts/baselines/TC-VR-1/chromium/step-0.png",
     width: 10,
     height: 10,
   });
@@ -154,7 +155,8 @@ await test("upsert() updates an existing row and refreshes updatedAt", async () 
   baselineRepo.upsert({
     testId: "TC-VR-1",
     stepNumber: 0,
-    imagePath: "/artifacts/baselines/TC-VR-1/step-0.png",
+    browser: "chromium",
+    imagePath: "/artifacts/baselines/TC-VR-1/chromium/step-0.png",
     width: 20,
     height: 20,
   });
@@ -168,13 +170,15 @@ await test("getAllByTestId() orders by stepNumber", () => {
   baselineRepo.upsert({
     testId: "TC-VR-1",
     stepNumber: 2,
-    imagePath: "/artifacts/baselines/TC-VR-1/step-2.png",
+    browser: "chromium",
+    imagePath: "/artifacts/baselines/TC-VR-1/chromium/step-2.png",
     width: 10, height: 10,
   });
   baselineRepo.upsert({
     testId: "TC-VR-1",
     stepNumber: 1,
-    imagePath: "/artifacts/baselines/TC-VR-1/step-1.png",
+    browser: "chromium",
+    imagePath: "/artifacts/baselines/TC-VR-1/chromium/step-1.png",
     width: 10, height: 10,
   });
   const rows = baselineRepo.getAllByTestId("TC-VR-1");
@@ -218,11 +222,70 @@ await test("diffScreenshot() creates a baseline on first run", () => {
     pngBuffer: buf,
   });
   assert.equal(res.status, "baseline_created");
-  assert.ok(res.baselinePath?.includes("TC-VR-2"));
+  assert.ok(res.baselinePath?.includes("TC-VR-2/chromium"));
   // Baseline PNG + DB row should now exist.
-  const absPath = path.join(BASELINES_DIR, "TC-VR-2", "step-0.png");
+  const absPath = path.join(BASELINES_DIR, "TC-VR-2", "chromium", "step-0.png");
   assert.ok(fs.existsSync(absPath), `baseline PNG should exist at ${absPath}`);
   assert.ok(baselineRepo.get("TC-VR-2", 0), "baseline DB row should exist");
+});
+
+await test("diffScreenshot() creates browser-scoped baseline directories", () => {
+  const firefoxBuf = solidPng(20, 20, { r: 0, g: 0, b: 0 });
+  const res = diffScreenshot({
+    runId: "RUN-TEST-FF",
+    testId: "TC-VR-2",
+    browser: "firefox",
+    stepNumber: 0,
+    pngBuffer: firefoxBuf,
+  });
+  assert.equal(res.status, "baseline_created");
+  assert.ok(res.baselinePath?.includes("/firefox/step-0.png"));
+  const absPath = path.join(BASELINES_DIR, "TC-VR-2", "firefox", "step-0.png");
+  assert.ok(fs.existsSync(absPath), `firefox baseline should exist at ${absPath}`);
+});
+
+await test("diffScreenshot() honours legacy chromium baseline path post-migration 010", () => {
+  // Migration 010 rewrites baseline DB rows to be browser-scoped but cannot
+  // move PNG files on disk. `ensureBaseline()` must therefore fall back to
+  // the legacy `<testId>/step-N.png` layout (no browser subdir) for chromium
+  // when the new `<testId>/chromium/step-N.png` file is missing on disk.
+  // Without this fallback, the first post-upgrade run would silently return
+  // `baseline_created` for every step, masking real regressions — exactly
+  // the failure mode AGENT.md:685 warns about for visual baselines.
+  const testId = "TC-VR-LEGACY";
+  ensureTestRow(db, testId);
+  const buf = solidPng(20, 20, { r: 10, g: 20, b: 30 });
+
+  // Simulate a pre-migration on-disk baseline: PNG at the legacy path,
+  // DB row already rewritten by migration 010 to point at the new path.
+  const legacyDir = path.join(BASELINES_DIR, testId);
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, "step-0.png"), buf);
+  baselineRepo.upsert({
+    testId,
+    stepNumber: 0,
+    browser: "chromium",
+    imagePath: `/artifacts/baselines/${testId}/chromium/step-0.png`,
+    width: 20,
+    height: 20,
+  });
+
+  // Diffing the same image against the legacy baseline must report `match`,
+  // not `baseline_created`. This is the only assertion that catches a
+  // regression in the legacy-path fallback.
+  const res = diffScreenshot({
+    runId: "RUN-TEST-LEGACY",
+    testId,
+    browser: "chromium",
+    stepNumber: 0,
+    pngBuffer: buf,
+  });
+  assert.equal(res.status, "match", `expected match against legacy baseline, got ${res.status}`);
+  assert.equal(res.diffPixels, 0);
+
+  // Cleanup
+  fs.rmSync(legacyDir, { recursive: true, force: true });
+  baselineRepo.deleteByTestId(testId);
 });
 
 await test("baselinePath and diffPath contain raw testId (no %-encoding) for filesystem-URL parity", () => {
@@ -298,6 +361,7 @@ await test("acceptBaseline() promotes a source PNG to the new baseline and refre
 
   const res = acceptBaseline({
     testId: "TC-VR-2",
+    browser: "chromium",
     stepNumber: 0,
     sourceAbsPath: newCapturePath,
   });
