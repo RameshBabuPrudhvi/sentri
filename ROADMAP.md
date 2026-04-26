@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** none ✅ · **Remaining:** 41 items
+> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** none ✅ · **Remaining:** 39 items
 
 ---
 
@@ -1413,12 +1413,12 @@ Because it's marked internal, import risk is real — the path or signature coul
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 3 | 0 | 0 | — |
-| Differentiators | 19 | 7 | 0 | 12 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
+| Differentiators | 19 | 9 | 0 | 10 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **67** | **26** | **0** | **41** | |
+| **Totals** | **67** | **28** | **0** | **39** | |
 
-**Total tracked items:** 67 across 7 categories — **26 complete** (39%), **0 in progress**, **41 remaining**
+**Total tracked items:** 67 across 7 categories — **28 complete** (42%), **0 in progress**, **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
