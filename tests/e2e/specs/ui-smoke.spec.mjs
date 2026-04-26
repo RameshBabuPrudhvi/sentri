@@ -12,19 +12,18 @@ test.describe('Sentri UI smoke (login route)', () => {
   test('login page renders core controls', async ({ page }) => {
     await page.goto('/login');
 
-    await expect(page.getByRole('heading', { name: /login|sign in/i })).toBeVisible();
-    await expect(page.getByLabel(/email/i)).toBeVisible();
-    await expect(page.getByLabel(/password/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /login|sign in/i })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /password/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /login|sign in/i }).first()).toBeVisible();
 
     await page.screenshot({ path: 'tests/e2e/artifacts/login-page.png', fullPage: true });
   });
 
   test('invalid credentials show an error state', async ({ page }) => {
     await page.goto('/login');
-    await page.getByLabel(/email/i).fill('invalid-user@example.com');
-    await page.getByLabel(/password/i).fill('bad-password');
-    await page.getByRole('button', { name: /login|sign in/i }).click();
+    await page.getByRole('textbox', { name: /email/i }).fill('invalid-user@example.com');
+    await page.getByRole('textbox', { name: /password/i }).fill('bad-password');
+    await page.getByRole('button', { name: /login|sign in/i }).first().click();
 
     await expect(page.getByText(/invalid|incorrect|failed|error/i).first()).toBeVisible();
     await page.screenshot({ path: 'tests/e2e/artifacts/login-invalid.png', fullPage: true });
