@@ -1,4 +1,4 @@
-import { defineConfig } from '../../backend/node_modules/@playwright/test/index.mjs';
+import { defineConfig } from './utils/playwright.mjs';
 
 const frontendBaseURL = process.env.E2E_FRONTEND_URL || 'http://127.0.0.1:4173';
 const backendBaseURL = process.env.E2E_BACKEND_URL || 'http://127.0.0.1:3001';

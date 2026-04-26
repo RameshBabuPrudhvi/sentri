@@ -261,6 +261,70 @@ jobs:
           path: frontend/dist/
           retention-days: 3
 
+  # ── UI E2E (Playwright) ───────────────────────────────────────────────────
+  ui-e2e:
+    name: UI E2E — Playwright smoke (Chromium)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install root Playwright tooling
+        run: npm install
+
+      - name: Install backend dependencies
+        run: npm --prefix backend install
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend install
+
+      - name: Provision Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Start backend + frontend and run UI E2E
+        run: |
+          npm --prefix backend run start > /tmp/backend.log 2>&1 &
+          BACKEND_PID=$!
+          echo "Backend PID: $BACKEND_PID"
+
+          npm --prefix frontend run dev -- --host 127.0.0.1 --port 4173 > /tmp/frontend.log 2>&1 &
+          FRONTEND_PID=$!
+          echo "Frontend PID: $FRONTEND_PID"
+
+          # Wait for backend
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3001/health > /dev/null 2>&1; then
+              echo "✅ Backend is up"
+              break
+            fi
+            echo "Waiting for backend ($i/20)..."
+            sleep 2
+          done
+
+          # Wait for frontend
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:4173/login > /dev/null 2>&1; then
+              echo "✅ Frontend is up"
+              break
+            fi
+            echo "Waiting for frontend ($i/20)..."
+            sleep 2
+          done
+
+          RUN_UI_E2E=true npx playwright test -c tests/e2e/playwright.config.mjs --project=ui-chromium
+
+          kill $FRONTEND_PID || true
+          kill $BACKEND_PID || true
+        env:
+          SKIP_EMAIL_VERIFICATION: "true"
+          PORT: 3001
+
   # ── Docs (VitePress + JSDoc assembly) ────────────────────────────────────
   docs:
     name: Docs — VitePress Build

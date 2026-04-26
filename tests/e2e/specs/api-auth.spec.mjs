@@ -1,4 +1,4 @@
-import { test, expect } from '../../../backend/node_modules/@playwright/test/index.mjs';
+import { test, expect } from '../utils/playwright.mjs';
 import { registerUser, safeJson } from '../utils/auth.mjs';
 
 test.describe('Sentri API auth + core health', () => {

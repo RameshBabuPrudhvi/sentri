@@ -1,4 +1,4 @@
-import { test, expect } from '../../../backend/node_modules/@playwright/test/index.mjs';
+import { test, expect } from '../utils/playwright.mjs';
 import { isReachable } from '../utils/environment.mjs';
 
 test.describe('Sentri UI smoke (login route)', () => {

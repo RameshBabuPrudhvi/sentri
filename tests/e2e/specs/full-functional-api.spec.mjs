@@ -1,4 +1,4 @@
-import { test, expect } from '../../../backend/node_modules/@playwright/test/index.mjs';
+import { test, expect } from '../utils/playwright.mjs';
 import * as userRepo from '../../../backend/src/database/repositories/userRepo.js';
 import * as verificationTokenRepo from '../../../backend/src/database/repositories/verificationTokenRepo.js';
 import { registerUser, safeJson } from '../utils/auth.mjs';

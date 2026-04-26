@@ -1,4 +1,4 @@
-import { request } from '../../../backend/node_modules/@playwright/test/index.mjs';
+import { request } from './playwright.mjs';
 
 /**
  * Check whether an HTTP endpoint is reachable.
