@@ -1,11 +1,15 @@
 # Manual QA Guide — Sentri
 
 ## 🎯 Purpose
+
 This document is for **manual testers** to validate all functional flows in Sentri before release.
 
-This is **NOT** a smoke test. Each section below defines preconditions, steps, and explicit expected results. A test only passes when **every** expected result is observed.
+It has two layers:
 
-> ℹ️ Values below are grounded in `README.md`, `AGENT.md`, `ROADMAP.md` (ACL-002), and `backend/src/utils/notifications.js`. Any remaining `TBD` requires engineering confirmation (e.g. a stable demo crawl target).
+1. **Golden E2E Happy Path** (must-pass) — one stitched-together user journey that exercises every core feature end-to-end. If any step fails, **stop the release**.
+2. **Per-feature happy paths + negatives** — targeted checks per area for full coverage.
+
+> ℹ️ Values are grounded in `README.md`, `AGENT.md`, `ROADMAP.md`, `docs/changelog.md`, `backend/src/routes/testFix.js`, `backend/src/pipeline/feedbackLoop.js`, `backend/src/utils/notifications.js`. `TBD` items require engineering confirmation.
 
 ---
 
@@ -88,6 +92,104 @@ Then:
 - Stable crawl target URL: `TBD` (engineering to confirm a stable demo site)
 - Sample regression suite: ≥ 5 tests, mix of passing/failing
 - Sample baseline images: at least one stable, one with intentional diff
+
+---
+
+## 🌟 Golden E2E Happy Path (must-pass before release)
+
+Run this single end-to-end journey **as User A (admin)** in a fresh browser. Every numbered step must pass. If any fails, log a Blocker bug and stop.
+
+**Preconditions:** Backend + frontend running; one AI provider key configured; mail transport (Resend / SMTP / console) reachable; clean DB or fresh workspace.
+
+### 1. Auth — register & verify
+1. Register `usera@example.test` with a strong password.
+2. Verification email arrives (or appears in console fallback). Click the link.
+3. Login → land on dashboard for the auto-created workspace.
+
+### 2. Workspace — invite collaborator
+4. Invite `userb@example.test` as `qa_lead`. Open invite link in incognito → User B accepts and lands in WS-1.
+
+### 3. Project — create
+5. As User A, create project **"PRJ-Demo"** with a stable URL (`TBD: demo site`). Project appears in the list and as `?project=PRJ-Demo` deep-link target.
+
+### 4. Discover — crawl the app
+6. Trigger **Link Crawl** → progress visible; pages discovered; same-origin fetch/XHR captured.
+7. Trigger **State Exploration** crawl on the same project → multi-step flows discovered (forms submitted, auth flows entered).
+
+### 5. Generate — AI tests
+8. Click **Generate** → 8-stage pipeline runs (discover → filter → classify → plan → generate → deduplicate → enhance → validate). New tests land in **Draft** queue, not auto-approved.
+9. Verify at least one **API test** was generated from captured fetch/XHR (Playwright `request` test asserting status + JSON shape).
+
+### 6. Record — manual recorder
+10. Click **Record a test** → Playwright browser opens via CDP screencast.
+11. Perform: click, fill, press, select, navigate. Stop.
+12. New Draft test appears with `safeClick` / `safeFill` calls and per-step entries.
+
+### 7. Review — approve / reject
+13. Open a Draft → review steps **and** Playwright code via the **Steps / Source toggle** on TestDetail.
+14. Reject one obviously bad test → archived, excluded from regression.
+15. Approve at least 3 tests → moved to active suite.
+
+### 8. Edit — verify auto-generated Playwright code
+16. Open an approved test → switch to **Source** tab → confirm code uses role-based selectors (`getByRole`, `getByLabel`, `getByText`), starts with `await page.goto(...)`, has ≥ 3 `expect(...)` assertions, no `import` lines (`backend/src/routes/tests.js:218-224`).
+17. Edit a step (rename a button, add a step) → save → **diff/preview panel** appears showing only the changed lines, **not** a full rewrite (`backend/src/routes/tests.js:160-198`).
+18. Accept the diff → `playwrightCode` updated, `playwrightCodePrev` retained, `codeRegeneratedAt` set.
+19. Discard a different diff → original code preserved.
+
+### 9. Run — execute regression
+20. Trigger regression with **parallelism = 3**, browser = **Chromium**, device = desktop. RunDetail opens with live SSE log stream.
+21. Watch per-step screenshots and step-timing waterfall update (`docs/changelog.md` DIF-016).
+22. Run completes → mix of pass/fail expected with at least one intentional failure (use a known-bad test or temporarily break a selector).
+
+### 10. AI Fix — fix the failure
+23. On a failed test in TestDetail, click **"Fix with AI"** (visible only when `lastResult === "failed"` and `playwrightCode` exists, `frontend/src/pages/TestDetail.jsx:411-426`).
+24. SSE stream from `POST /api/v1/tests/:testId/fix` shows incremental tokens; final fixed code appears in the fix panel.
+25. Accept the fix → test goes back to **Draft** for re-review (auto-fix never silently re-approves; `backend/src/pipeline/feedbackLoop.js:481-490`).
+26. Re-approve the fixed test → re-run **only failed tests** → all pass.
+
+### 11. Visual baseline
+27. Run a test with a screenshot step twice → first run creates baseline under `artifacts/baselines/`, second run produces diff = 0.
+28. Change something visible on the target → re-run → diff PNG appears at `artifacts/diffs/`, run flagged as visual regression when diff > `VISUAL_DIFF_THRESHOLD` (0.02).
+29. Click **Accept visual changes** → baseline updated; subsequent run passes.
+
+### 12. Run results & artifacts (the "report")
+30. On RunDetail verify: per-test status, per-step screenshots, per-step timing, video, network logs, browser badge, parallelism used.
+31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open.
+32. **Note:** there is **no** standalone HTML/PDF run report or shareable public link today (DIF-005 trace viewer + DIF-006 standalone Playwright export are 🔲 planned per `ROADMAP.md`). Do **not** test for them.
+
+### 13. Notifications
+33. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
+
+### 14. Automation (CI/CD)
+34. Create a trigger token → plaintext shown **once**.
+35. `POST /api/projects/PRJ-Demo/trigger` with `Authorization: Bearer <token>` → returns **202** with `{ runId, statusUrl }`. Poll `statusUrl`; final state matches RunDetail.
+36. Set a cron schedule for "every minute" → wait → run fires automatically; disable schedule.
+
+### 15. Export & traceability
+37. Export tests as **Zephyr CSV** and **TestRail CSV** → non-empty files, correct headers.
+38. Open **Traceability matrix** → maps tests ↔ source URLs / requirements.
+
+### 16. AI Chat
+39. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
+40. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
+41. Export the session as Markdown and JSON.
+
+### 17. Dashboard
+42. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
+
+### 18. Recycle bin & audit
+43. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
+44. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
+
+### 19. Account / GDPR
+45. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
+46. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
+
+### 20. Permissions sanity (negative)
+47. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
+48. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
+
+> ✅ **Pass criterion:** all 48 steps green. Any failure = release blocker.
 
 ---
 
@@ -243,6 +345,64 @@ Each area uses this format:
 - Viewer attempts to trigger run → blocked.
 - `qa_lead` stops another user's run → blocked; `admin` → allowed.
 - Browser close mid-run → run continues on backend; status visible on return.
+
+---
+
+### 🪄 AI Fix (failed test recovery)
+
+**Preconditions:** A test exists with `playwrightCode` and `lastResult === "failed"` (or its latest run result is failed). AI provider configured. Role: `qa_lead` or `admin` (`backend/src/routes/testFix.js:152` — `requireRole("qa_lead")`).
+
+**Manual fix flow:**
+1. Open the failed test in TestDetail → **"Fix with AI"** button visible only when failed and code present (`frontend/src/pages/TestDetail.jsx:411-426`).
+2. Click → `POST /api/v1/tests/:testId/fix` opens an **SSE stream** with incremental tokens.
+3. Fix panel shows the proposed new code with a diff against the current code.
+4. Accept → test goes back to **Draft** state for re-review (never silently re-approved — `backend/src/pipeline/feedbackLoop.js:481-490`).
+5. Re-run the test after re-approval → previously-failing assertion passes.
+
+**Automatic feedback loop** (`backend/src/pipeline/feedbackLoop.js:443-496`):
+6. On a regression run with failures, only **high-priority categories** are auto-regenerated: `SELECTOR_ISSUE`, `URL_MISMATCH`, `TIMEOUT`, `ASSERTION_FAIL`, `NETWORK_MOCK_FAIL`, `FRAME_FAIL`, `API_ASSERTION_FAIL` (`backend/src/pipeline/feedbackLoop.js:358-366`).
+7. Regenerated tests appear in **Draft** with `_regenerated` / `_regenerationReason` metadata; `qualityAnalytics` attached to the run.
+8. Flaky-test detection runs and is exposed in `analytics.flakyTests` on the run record.
+
+**Negative / edge:**
+- No AI provider configured → button still clickable, server returns **503** with a clear "Go to Settings" message (`testFix.js:162-166`).
+- Test with no `playwrightCode` → server returns **400** "Test has no Playwright code to fix" (`testFix.js:158-160`).
+- Viewer attempts to call `/fix` → 403 (role gate).
+- Cancel SSE mid-stream → no partial update persisted.
+- AI returns malformed code → surfaced as "invalid output" error, original code untouched.
+- Fix run mid-execution → abort signal honored, no half-applied changes (`feedbackLoop.js:478`).
+
+---
+
+### ✏️ Test Code Editing (Steps ↔ Source)
+
+**Preconditions:** Approved test with `playwrightCode`. Open TestDetail.
+
+**Toggle & view:**
+1. Steps / Source toggle present (`frontend/src/pages/TestDetail.jsx:125-126`). Default = Steps.
+2. **Steps tab** — list of plain-English steps; can add, remove, reorder, edit text inline.
+3. **Source tab** — full Playwright code, monospace, editable.
+
+**Code regeneration on step edit** (`backend/src/routes/tests.js:154-273`):
+4. Edit a step → save → **preview** mode kicks in: diff panel shows old vs new code with **minimal changes only** (existing helpers, comments `// Step N:`, structure preserved).
+5. The new code starts with `await page.goto(...)`, uses role-based selectors, has ≥ 3 `expect(...)` assertions, includes no `import` statements (cloud prompt at `backend/src/routes/tests.js:218-224`).
+6. Accept diff → `playwrightCode` updated; `playwrightCodePrev` set to old code; `codeRegeneratedAt` timestamped.
+7. Discard diff → no DB change; the test keeps prior code.
+8. The hint banner reads "Code will be regenerated on save — you'll review changes before applying" when editing in Steps view (`frontend/src/pages/TestDetail.jsx:862-875`).
+
+**Direct source editing:**
+9. Edit Playwright code directly in **Source** tab → save → persists without going through AI regeneration (steps and code can drift; document this as expected).
+10. `isApiTest` flag updates automatically based on code content (`backend/src/routes/tests.js:265`).
+
+**Local provider (Ollama) path:**
+11. Switch to a local provider → editing a step still works; backend uses a **shorter prompt**, plain-text response (no JSON wrapper) per `backend/src/routes/tests.js:199-209` and `230-238`. Verify regenerated code still parses.
+
+**Negative / edge:**
+- AI provider down → save returns the regeneration error string; original test untouched.
+- Concurrent edit by two users → last-write-wins; document if an edit warning is shown.
+- Edit and refresh before save → unsaved-changes warning.
+- Edit Source to invalid JS → server validation rejects (test would fail to compile at run time); confirm clear error.
+- Viewer attempts edit → 403.
 
 ---
 
@@ -561,6 +721,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 
 | Area | Chrome | Firefox | Safari | Edge | Notes / Bug links |
 |---|---|---|---|---|---|
+| **Golden E2E Happy Path (all 48 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Authentication | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Email Verification | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
@@ -569,6 +730,8 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | API Test Generation | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Recorder | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Runs (cross-browser, mobile, parallel, abort, self-heal) | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **AI Fix (manual + auto feedback loop)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Test Code Editing (Steps ↔ Source)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Automation (trigger tokens + schedules) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Visual Testing | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Dashboard | ⬜ | ⬜ | ⬜ | ⬜ | |
@@ -583,11 +746,14 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | Permissions matrix | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
+> **Out of scope (not yet shipped):** standalone HTML/PDF run reports, embedded trace viewer (`DIF-005`), standalone Playwright export (`DIF-006`), MFA/2FA (`SEC-004`), shareable public test reports, Jira integration, billing, CLI. Do not test these — file enhancement requests instead.
+
 ---
 
 ## ✅ Sign-off Criteria
 
 A release is QA-approved only when **all** of the following are true:
+- The **Golden E2E Happy Path** (48 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
 - Every row in the coverage checklist is ✅ across the required browser matrix.
 - The permissions matrix has been verified end-to-end, including Outsider access attempts.
 - All Security authorization checks return 403/404 (never the resource).
