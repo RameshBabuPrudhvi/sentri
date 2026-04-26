@@ -5,7 +5,7 @@ This document is for **manual testers** to validate all functional flows in Sent
 
 This is **NOT** a smoke test. Each section below defines preconditions, steps, and explicit expected results. A test only passes when **every** expected result is observed.
 
-> ℹ️ Items marked **TBD** must be filled in by engineering with project-specific values (URLs, role names, notification channels). Do not skip them.
+> ℹ️ Values below are grounded in `README.md`, `AGENT.md`, `ROADMAP.md` (ACL-002), and `backend/src/utils/notifications.js`. Any remaining `TBD` requires engineering confirmation (e.g. a stable demo crawl target).
 
 ---
 
@@ -25,22 +25,27 @@ This is **NOT** a smoke test. Each section below defines preconditions, steps, a
 
 ## 👤 Test Accounts & Roles
 
+Sentri defines three workspace roles (see `ROADMAP.md` ACL-002, stored in `workspace_members.role`): `admin`, `qa_lead`, `viewer`.
+
 | Account | Role | Workspace | Purpose |
 |---------|------|-----------|---------|
-| User A | Admin / Owner | WS-1 | Full-permission flows |
-| User B | Member | WS-1 | Reduced-permission flows |
-| User C | Viewer (read-only) | WS-1 | Read-only enforcement |
-| User D | Outsider (no membership) | — | Cross-workspace isolation |
+| User A | `admin` | WS-1 | Full-permission flows, settings, destructive ops |
+| User B | `qa_lead` | WS-1 | Day-to-day QA flows (tests, runs) |
+| User C | `viewer` | WS-1 | Read-only enforcement |
+| User D | — (no membership) | — | Cross-workspace isolation |
 
 - Use separate browsers / incognito windows per user.
 - Never share auth cookies between users.
 
 ### Permissions Matrix (expected)
 
-| Action | Admin | Member | Viewer | Outsider |
+Derived from ACL-002: `admin` gates settings + destructive ops; `qa_lead` runs QA workflows; `viewer` is read-only. Verify these in-product — any deviation is a **severe security bug**.
+
+| Action | admin | qa_lead | viewer | Outsider |
 |---|---|---|---|---|
 | Create/Delete workspace | ✅ | ❌ | ❌ | ❌ |
 | Invite users / change roles | ✅ | ❌ | ❌ | ❌ |
+| Edit workspace settings (AI keys, notifications) | ✅ | ❌ | ❌ | ❌ |
 | Create/Edit/Delete project | ✅ | ✅ | ❌ | ❌ |
 | Restore from recycle bin | ✅ | ✅ | ❌ | ❌ |
 | Create/Edit tests | ✅ | ✅ | ❌ | ❌ |
@@ -48,24 +53,39 @@ This is **NOT** a smoke test. Each section below defines preconditions, steps, a
 | Trigger run / regression | ✅ | ✅ | ❌ | ❌ |
 | Stop running execution | ✅ | ✅ (own runs) | ❌ | ❌ |
 | Accept visual baseline | ✅ | ✅ | ❌ | ❌ |
-| Edit workspace settings | ✅ | ❌ | ❌ | ❌ |
 | View dashboard / runs | ✅ | ✅ | ✅ | ❌ |
 | Access another workspace's data via URL | ❌ | ❌ | ❌ | ❌ |
-
-> Any deviation from this matrix is a **severe security bug** — file immediately.
 
 ---
 
 ## ⚙️ Setup
 
-1. Start backend (`TBD: command`). Confirm `GET /health` returns `200`.
-2. Start frontend (`npm run dev`).
+From `README.md`:
+
+```bash
+# Backend (port 3001)
+cd backend
+npm install
+npx playwright install chromium ffmpeg
+cp .env.example .env            # Add at least one AI provider key
+npm run dev
+
+# Frontend (port 3000, proxies /api → :3001)
+cd frontend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Then:
+1. Confirm backend `GET http://localhost:3001/health` returns `200`.
+2. Open `http://localhost:3000`.
 3. Record exact build / commit SHA under test (include in every bug report).
 4. Note environment: local / staging / preview URL.
-5. Seed test data: `TBD: seed command or fixture URL`.
+5. Dev-only seed endpoint is available when `NODE_ENV !== production` (see `AGENT.md`). Use it to pre-populate users/workspaces; otherwise register via UI.
 
 **Test data to prepare:**
-- Stable crawl target URL: `TBD`
+- Stable crawl target URL: `TBD` (engineering to confirm a stable demo site)
 - Sample regression suite: ≥ 5 tests, mix of passing/failing
 - Sample baseline images: at least one stable, one with intentional diff
 
@@ -96,7 +116,7 @@ Each area uses this format:
    - **Expected:** Old password rejected; new password works; reset link is single-use.
 
 **Negative / edge:**
-- Wrong password → generic error (no user enumeration); rate-limited after `TBD: N` attempts.
+- Wrong password → generic error (no user enumeration); auth endpoints rate-limited to **5–10 requests / 15 min per IP** (`README.md` security table). Hammer the endpoint and confirm 429.
 - Expired verification link → clear error, option to resend.
 - Expired / reused password reset link → rejected.
 - Weak password → blocked at form level with reason.
@@ -150,12 +170,12 @@ Each area uses this format:
 **Preconditions:** Project exists.
 
 **Steps & expected:**
-1. Crawl URL (`TBD: demo site`) → crawl completes; discovered pages listed; progress visible.
+1. Crawl URL (engineering to confirm a stable demo site; otherwise use a site you control) → crawl completes; discovered pages listed; progress visible.
 2. Generate tests from crawled pages → tests appear in "pending" state with steps.
 3. Approve test → moves to active suite; appears in run targets.
 4. Reject test → removed/archived; excluded from regression.
 5. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
-6. Export tests → downloads in supported format(s) (`TBD: list formats`); re-import (if supported) round-trips cleanly.
+6. Export tests → downloads in the product's supported format(s). Specific formats are not documented — record what the UI offers and confirm re-import (if supported) round-trips cleanly.
 
 **Negative / edge:**
 - Crawl an unreachable URL → clear error, no infinite spinner.
@@ -171,7 +191,7 @@ Each area uses this format:
 **Preconditions:** Project exists; recorder extension/feature available.
 
 **Steps & expected:**
-1. Start recorder on `TBD: demo site` → recording indicator visible.
+1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast and persists a Draft test with `safeClick` / `safeFill` (see `docs/changelog.md` DIF-015).
 2. Perform: click, type, select dropdown, file upload, hover, scroll, navigate across pages.
    - **Expected:** Each action captured as a discrete step with selector + action type; no empty/null steps.
 3. Stop and save → test appears in Tests page with all steps intact after refresh.
@@ -192,17 +212,18 @@ Each area uses this format:
 **Preconditions:** At least one approved test.
 
 **Steps & expected:**
-1. Run single test → status: queued → running → passed/failed; logs, screenshots, video (if supported) available.
+1. Run single test → status: queued → running → passed/failed; logs, screenshots, CDP video available (recorder uses Playwright CDP screencast).
 2. Run regression suite → all tests execute; summary shows pass/fail counts matching detail view.
-3. Stop running execution → stops within `TBD: N` seconds; run marked as "stopped"; partial results retained.
+3. Stop running execution → stops within a few seconds; run marked as "stopped"; partial results retained. Note: per-test hard timeout is `BROWSER_TEST_TIMEOUT` (default **120 000 ms**, see `AGENT.md`).
 4. Re-run failed tests only → only previously-failed tests execute.
 
 **Negative / edge:**
-- Trigger run while another is in progress → queued or parallel per `TBD: concurrency policy`; no crash.
+- Trigger run while another is in progress → concurrency = `PARALLEL_WORKERS` (default **1**, `AGENT.md`). Extra runs queue; no crash.
 - Run test against unreachable target → fails with clear network error, not timeout silence.
-- Flaky test (intermittent failure) → retry policy behaves per `TBD: retry config`.
+- Long-running / hung test → aborted at `BROWSER_TEST_TIMEOUT` with a clear timeout error.
+- Flaky test (intermittent failure) → no product-level auto-retry is documented. Rely on `safeClick` / `safeFill` self-healing (see `docs/changelog.md` DIF-015); confirm behavior, file if retry is expected.
 - Viewer attempts to trigger run → blocked.
-- Stop another user's run as Member → blocked; as Admin → allowed.
+- `qa_lead` stops another user's run → blocked; `admin` → allowed.
 - Browser close mid-run → run continues on backend; status visible on return.
 
 ---
@@ -219,9 +240,9 @@ Each area uses this format:
 5. Reject change → baseline unchanged; run remains failed.
 
 **Negative / edge:**
-- Anti-aliasing / font rendering differences across OS → threshold tolerance works (`TBD: threshold`).
-- Dynamic content (timestamps, ads) → mask/ignore regions supported and honored.
-- Viewport size change between runs → diff behavior documented (pass/fail/warn).
+- Anti-aliasing / font rendering differences across OS → `VISUAL_DIFF_THRESHOLD` (default **0.02** = 2% of pixels) and `VISUAL_DIFF_PIXEL_TOLERANCE` (default **0.1**) filter noise (`AGENT.md`). Change `VISUAL_DIFF_THRESHOLD=0` to verify zero-tolerance mode also works.
+- Dynamic content (timestamps, ads) → **mask/ignore regions are not documented** in the codebase. File as a gap or confirm with engineering before marking this row pass.
+- Viewport size change between runs → diff behavior documented (pass/fail/warn) — confirm actual product behavior and note it in checklist.
 - Concurrent baseline accept by two users → last-write-wins with audit trail.
 - Very large images → no timeout, no memory crash.
 
@@ -232,7 +253,7 @@ Each area uses this format:
 **Preconditions:** Workspace has runs, tests, and projects with data.
 
 **Steps & expected:**
-1. Open dashboard → all charts render within `TBD: N` seconds; no console errors.
+1. Open dashboard → all charts render within a reasonable time (no formal SLO documented — use ≤ 3s as a guideline and file any regression); no console errors.
 2. Verify each widget against source of truth:
    - Pass rate % matches count(passed) / count(total) over selected range.
    - Run count matches Runs page filter for same range.
@@ -242,7 +263,7 @@ Each area uses this format:
 
 **Negative / edge:**
 - Empty workspace (no runs) → empty states shown, not zero-division errors / NaN.
-- Very large dataset (`TBD: N runs`) → dashboard loads in ≤ `TBD: N` seconds.
+- Very large dataset (≥ 1000 runs) → dashboard loads without hanging or crashing; no unbounded network calls.
 - Viewer sees dashboard but cannot trigger actions.
 
 ---
@@ -272,7 +293,11 @@ Each area uses this format:
 **Preconditions:** Admin logged in.
 
 **Steps & expected:**
-1. Update each setting category (`TBD: list — profile, workspace, billing, integrations, API keys`) → change persists after refresh and across sessions.
+1. Update each setting category → change persists after refresh and across sessions. Sentri surfaces (no billing module):
+   - **AI provider keys** (Anthropic / OpenAI / Google / Ollama). Switching providers via the header dropdown should succeed in one click (`README.md`).
+   - **Workspace members & roles** (ACL-002: `admin` / `qa_lead` / `viewer`).
+   - **Per-project notification settings** (Teams webhook / email recipients / generic webhook — at least one channel required, see `backend/tests/account-compliance.test.js`).
+   - **System info / Ollama status**.
 2. Invalid input (bad email, bad URL) → inline validation; save blocked.
 3. Revoke/regenerate API key → old key returns 401 immediately; new key works.
 4. Disconnect integration → subsequent features depending on it fail gracefully.
@@ -286,20 +311,28 @@ Each area uses this format:
 
 ### 🔔 Notifications
 
-**Preconditions:** Notification channels configured: `TBD: email / Slack / webhook / in-app`.
+**Preconditions:** Notifications configured per project. Sentri supports exactly **three channels** (see `backend/src/utils/notifications.js` — `fireNotifications`):
+- **Microsoft Teams** — Adaptive Card via incoming webhook.
+- **Email** — HTML summary via `emailSender.js`.
+- **Generic webhook** — POST JSON to user-configured URL.
+
+Note: **Slack and in-app are NOT supported** — do not test them.
+
+The settings API requires **at least one channel** to be enabled (confirmed by `backend/tests/account-compliance.test.js`: saving with all three blank returns 400).
 
 **Steps & expected (per channel):**
-1. Trigger a failed run → notification delivered via each enabled channel within `TBD: N` seconds.
+1. Trigger a failed run → notification delivered via each enabled channel. Expect delivery within ~1 min (engineering to confirm SLO).
 2. Notification payload includes: project, test name, run ID, failure reason, link to run detail.
 3. Link in notification opens the correct run and requires auth.
 4. Disable a channel → no notifications sent via that channel for subsequent runs.
-5. Trigger recovery (previously failing test now passes) → "recovered" notification sent (if supported).
+5. Save settings with all three channels blank → API returns **400** ("At least one channel is required").
+6. Trigger recovery (previously failing test now passes) → "recovered" notification sent (confirm if supported; otherwise file as enhancement).
 
 **Negative / edge:**
-- Invalid webhook URL → clear error in settings; no silent drop.
-- Flood of failures (10+ in a minute) → batched or rate-limited per `TBD: policy`; no spam.
+- Invalid / non-HTTPS webhook URL → clear error in settings; no silent drop.
+- Flood of failures (10+ in a minute) → batching/rate-limit policy is **undocumented**; observe and file if spam occurs.
 - User removed from workspace → stops receiving notifications for that workspace.
-- Notification contains no PII / secrets / tokens.
+- Notification payloads contain no PII / secrets / tokens.
 
 ---
 
@@ -316,9 +349,11 @@ Each area uses this format:
 6. Change numeric/opaque IDs in URLs (IDOR) on project, test, run, baseline, invite, API key → 403.
 
 **Session / auth:**
+- JWT stored in **HttpOnly cookie**; verify `HttpOnly`, `Secure`, `SameSite` flags in DevTools (`README.md` security table).
+- Proactive refresh fires **5 min before expiry** (`docs/changelog.md`); leave a tab idle and confirm refresh happens without redirect.
 - Logout invalidates cookie server-side (replay fails).
-- Password change invalidates other sessions per `TBD: policy`.
-- Cookies have `HttpOnly`, `Secure`, `SameSite` set (verify in DevTools).
+- Password reset uses DB-backed **atomic one-time claim** tokens (`README.md`, `docs/changelog.md`): reusing a claimed token → rejected; requesting a new token invalidates all prior unused tokens (`#78`).
+- Global session invalidation on password change is **not documented**; observe behavior and file if other sessions remain valid.
 
 **Input / injection:**
 - XSS probes in test names, project names, workspace names, chat messages, bug titles (`<script>alert(1)</script>`) → rendered as text, never executed.
@@ -348,18 +383,17 @@ Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
 - Deep-link to a run/test/project while logged out — redirected to login, then back to the target.
 
 **Performance:**
-- Initial page load ≤ `TBD: N` seconds on `TBD: baseline connection`.
+- Initial page load ≤ 3s on a local dev build over loopback (no formal SLO documented — file regressions against prior release).
 - No memory leaks after 10 minutes of navigation (check DevTools heap snapshot).
 - No unbounded network polling (check Network tab).
 
 **Accessibility (spot check):**
 - Keyboard-only navigation works on primary flows (tab order, focus rings visible, Enter/Space activates).
-- Screen reader announces form errors and modals (`TBD: required compliance level`).
-- Color contrast meets `TBD: WCAG AA/AAA`.
+- Screen reader announces form errors and modals.
+- No formal WCAG compliance target is documented — treat **WCAG 2.1 AA** as the working goal and file contrast / ARIA gaps as Minor.
 
-**Internationalization (if applicable):**
-- Long strings don't break layouts.
-- RTL languages render correctly (`TBD: supported locales`).
+**Internationalization:**
+- Sentri does not document i18n / locale support — the app is effectively English-only. Long English strings must not break layouts; RTL testing is out of scope until locales are added.
 
 ---
 
@@ -367,12 +401,14 @@ Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
 
 > Do **not** re-file these. Link the ticket in your report if you encounter them.
 
+Per the codebase, recorder (DIF-015) and visual diff (DIF-001) were implemented/fixed in `docs/changelog.md`; there is no live "known issues" register in the repo. Treat the rows below as **claims to verify** — if you reproduce any, open a ticket and replace this table with the real IDs.
+
 | Issue | Ticket | Repro | Workaround |
 |---|---|---|---|
-| Deploy pages failing | `TBD` | `TBD` | `TBD` |
-| Image push failures | `TBD` | `TBD` | `TBD` |
-| Recorder empty-steps bug | `TBD` | `TBD` | `TBD` |
-| Visual diff false positives | `TBD` | `TBD` | `TBD` |
+| Deploy pages failing | _open_ | Attempt deploy flow; capture logs | None known |
+| Image push failures | _open_ | Trigger image push; capture logs | None known |
+| Recorder empty-steps (regression) | _open_ | Record a simple flow; check each step has selector + action | Re-record; file bug |
+| Visual diff false positives | _open_ | Re-run unchanged suite; check flagged steps | Tune `VISUAL_DIFF_THRESHOLD` / `VISUAL_DIFF_PIXEL_TOLERANCE` |
 
 ---
 
