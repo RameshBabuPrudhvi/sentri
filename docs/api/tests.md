@@ -266,7 +266,8 @@ Playwright test body and persisted as a Draft test using `safeClick` /
 `safeFill` so the self-healing transform takes over at execution time.
 
 > The recorder requires a headed Chromium (`BROWSER_HEADLESS=false`). See
-> AGENT.md § "Testing DIF-001 and DIF-015" for the full gotcha list.
+> REVIEW.md § "Testing DIF-001 (Visual Regression) and DIF-015 (Recorder)"
+> for the full gotcha list.
 
 ### Start a Recording
 

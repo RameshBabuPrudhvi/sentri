@@ -73,3 +73,19 @@ docs/                      VitePress site + REST API reference
 - **Do not submit PRs without tests.** Every new repository, utility, endpoint, bug fix, and security fix requires corresponding unit and/or integration tests. Register new test files in `backend/tests/run-tests.js`. See REVIEW.md for the full requirements table.
 - **Do not duplicate test helpers.** Integration test utilities live in `backend/tests/helpers/test-base.js`. Import from there — do not copy these functions into new test files.
 - **Do not use TypeScript syntax in JSDoc comments.** This project uses plain JSDoc, not TypeScript. The CI pipeline runs `jsdoc` and will **fail** on TS-only syntax. Never use `prop?: type` — use `@typedef` with `@property {type} [prop]` instead. Never use `type?` for nullable — use `{type|null}` or `{?type}`. See STANDARDS.md §JSDoc for the full reference.
+
+---
+
+## PR Checklist
+
+Copy this block into your PR description and tick each item before requesting review. Full details in [REVIEW.md](./REVIEW.md).
+
+```markdown
+- [ ] PR title is a Conventional Commit (`feat:`, `fix:`, `perf:`, `feat!:`, `docs:`, etc.)
+- [ ] `docs/changelog.md` updated under `## [Unreleased]` (if user-visible)
+- [ ] New backend logic has tests; new test files registered in `backend/tests/run-tests.js`
+- [ ] `cd backend && npm test` passes locally
+- [ ] `cd frontend && npm run build && npm test` passes locally
+- [ ] Security checklist reviewed (if PR touches auth, routes, or data handling)
+- [ ] No `require()`, no direct LLM SDK imports, no raw `fetch()` in components, no JWTs in response bodies, no raw SQL in routes
+```

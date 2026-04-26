@@ -3,8 +3,21 @@
 > **Ctrl+F lookup only. Never read top-to-bottom.**
 > Find what you need and stop. For how-to guidance → STANDARDS.md.
 
+## Contents
+
+- [Backend Shared Utilities](#backend-utils)
+- [Frontend Shared CSS](#frontend-css)
+- [Frontend Shared JS Modules & Hooks](#frontend-js)
+- [Test Shared Utilities](#test-utils)
+- [Authentication Strategy Table](#auth-strategies)
+- [Database Adapters & Repositories](#database)
+- [Self-Healing Runtime Helpers](#self-healing-helpers)
+- [Docker & Deployment](#docker)
+- [Environment Variables](#env-vars)
+
 ---
 
+<a id="backend-utils"></a>
 ## Backend Shared Utilities (`backend/src/utils/`)
 
 Do not reimplement any of these. If you need a variant, extend the existing module.
@@ -31,6 +44,7 @@ Do not reimplement any of these. If you need a variant, extend the existing modu
 
 ---
 
+<a id="frontend-css"></a>
 ## Frontend Shared CSS (`frontend/src/styles/`)
 
 The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
@@ -70,6 +84,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 
 ---
 
+<a id="frontend-js"></a>
 ## Frontend Shared JS Modules & Hooks
 
 | Module | What it provides | When to use |
@@ -88,6 +103,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 
 ---
 
+<a id="test-utils"></a>
 ## Test Shared Utilities (`backend/tests/helpers/`)
 
 | Module | What it provides | When to use |
@@ -96,6 +112,7 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 
 ---
 
+<a id="auth-strategies"></a>
 ## Authentication Strategy Table
 
 All authentication is centralised in `backend/src/middleware/authenticate.js`.
@@ -130,6 +147,7 @@ All authentication is centralised in `backend/src/middleware/authenticate.js`.
 
 ---
 
+<a id="database"></a>
 ## Database Adapters
 
 | `DATABASE_URL` | Backend | Adapter |
@@ -147,6 +165,7 @@ All in `backend/src/database/repositories/`:
 
 ---
 
+<a id="self-healing-helpers"></a>
 ## Self-Healing Runtime Helpers
 
 | Helper | Purpose |
@@ -162,6 +181,7 @@ All in `backend/src/database/repositories/`:
 
 ---
 
+<a id="docker"></a>
 ## Docker & Deployment
 
 - `docker-compose.yml` — local development and production.
@@ -198,6 +218,7 @@ cd frontend && npm install && npm run dev
 
 ---
 
+<a id="env-vars"></a>
 ## Environment Variables
 
 | Variable | Required | Default | Purpose |

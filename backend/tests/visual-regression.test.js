@@ -251,7 +251,8 @@ await test("diffScreenshot() honours legacy chromium baseline path post-migratio
   // when the new `<testId>/chromium/step-N.png` file is missing on disk.
   // Without this fallback, the first post-upgrade run would silently return
   // `baseline_created` for every step, masking real regressions — exactly
-  // the failure mode AGENT.md:685 warns about for visual baselines.
+  // the failure mode REVIEW.md § "Testing DIF-001" warns about for visual
+  // baselines.
   const testId = "TC-VR-LEGACY";
   ensureTestRow(db, testId);
   const buf = solidPng(20, 20, { r: 10, g: 20, b: 30 });
