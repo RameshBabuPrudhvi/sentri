@@ -49,8 +49,9 @@ import {
  */
 
 /**
- * Absolute path to the baseline PNG for a given test + step.
+ * Absolute path to the baseline PNG for a given test + browser + step.
  * @param {string} testId
+ * @param {string} browser
  * @param {number} stepNumber
  * @returns {string}
  */
@@ -61,6 +62,7 @@ function baselineAbsPath(testId, browser, stepNumber) {
 /**
  * Public (URL-safe) artifact path for a baseline.
  * @param {string} testId
+ * @param {string} browser
  * @param {number} stepNumber
  * @returns {string}
  */
@@ -91,6 +93,7 @@ function readPng(absPath) {
  *
  * @param {string} testId
  * @param {number} stepNumber
+ * @param {string} browser
  * @param {Buffer} pngBuffer
  * @returns {{ absPath: string, publicPath: string, width: number, height: number }}
  */
