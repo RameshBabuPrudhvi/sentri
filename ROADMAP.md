@@ -99,7 +99,7 @@ The following items are the highest-leverage work to pick up next. Ordering bala
 3. **AUTO-016** — Accessibility testing via axe-core (M) — Increasingly a legal requirement (ADA, EAA); high signal-to-effort ratio with first-class Playwright support.
 4. **MNT-006** — Object storage for artifacts, S3 / R2 (M) — Production prerequisite for any multi-instance or container-based deployment; currently called out in the README production checklist.
 
-See [Planned Items](#phase-2--team--enterprise-foundation) sections below for full specs. Lowest-effort follow-ups with high immediate value: `DIF-013` (telemetry, S).
+See the phase sections below for full specs: [Phase 3 — AI-Native Differentiation](#phase-3--ai-native-differentiation) (`DIF-006`), [Phase 4 — Autonomous Intelligence](#phase-4--autonomous-intelligence) (`AUTO-005`, `AUTO-016`), and [Ongoing Maintenance & Platform Health](#ongoing-maintenance--platform-health) (`MNT-006`). Lowest-effort follow-up with high immediate value: `DIF-013` (telemetry, S).
 
 ---
 
