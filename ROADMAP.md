@@ -407,12 +407,12 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-002b — Cross-browser polish: browser-aware baselines, UI badges, CI coverage 🔵 Medium
 
-**Status:** 🔄 In Progress | **Effort:** M | **Source:** Follow-on from DIF-002
+**Status:** ✅ Complete | **Effort:** M | **Source:** Follow-on from DIF-002
 
 **Progress:**
 - **PR #107** — Gap 3 (browser badge) shipped: new `BrowserBadge` component renders the Playwright engine on Run Detail header (test runs only) and Runs list rows (compact, non-chromium only).
 - **PR #110** — Gap 1 (browser-aware visual baselines) shipped: `baseline_screenshots` re-keyed to `(testId, stepNumber, browser)` via migration `010_baseline_browser.sql`; `visualDiff.js`, `baselineRepo`, and baseline accept/delete/list routes thread `browser` end-to-end. Pre-upgrade chromium baselines stay effective via a legacy-path fallback in `ensureBaseline()` (the migration cannot move PNG files on disk).
-- **Outstanding** — Gap 2 (firefox/webkit CI smoke job that actually launches the engines). Only `resolveBrowser()` is unit-tested today; live launch verification still relies on manual testing.
+- **PR #110** — Gap 2 (cross-browser CI smoke) shipped: new `cross-browser-smoke` matrix job in `.github/workflows/ci.yml` provisions firefox + webkit via Playwright and asserts `launchBrowser({ browser })` actually opens the requested engine and renders a page. `fail-fast: false` keeps both engines independently visible.
 
 **Problem:** DIF-002 landed the core cross-browser dispatch (`resolveBrowser()`, per-run `browser` field, migration 009, Run Regression modal dropdown) but left three visible gaps that prevent firefox/webkit from feeling like first-class citizens:
 
@@ -1395,12 +1395,12 @@ Because it's marked internal, import risk is real — the path or signature coul
 | Infrastructure | 5 | 5 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 3 | 3 | 0 | 0 | — |
-| Differentiators | 19 | 6 | 1 | 12 | DIF-002b (in progress), 002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
+| Differentiators | 19 | 7 | 0 | 12 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **67** | **25** | **1** | **41** | |
+| **Totals** | **67** | **26** | **0** | **41** | |
 
-**Total tracked items:** 67 across 7 categories — **25 complete** (37%), **1 in progress** (DIF-002b), **41 remaining**
+**Total tracked items:** 67 across 7 categories — **26 complete** (39%), **0 in progress**, **41 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
