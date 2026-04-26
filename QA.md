@@ -43,9 +43,7 @@ Sentri defines three workspace roles (see `ROADMAP.md` ACL-002, stored in `works
 
 ### Permissions Matrix (expected)
 
-Derived from ACL-002: `admin` gates settings + destructive ops; `qa_lead` runs QA workflows; `viewer` is read-only. Verify these in-product — any deviation is a **severe security bug**.
-
-Verified against `requireRole(...)` declarations in `backend/src/routes/*.js` and `backend/src/middleware/requireRole.js` (hierarchy: `admin > qa_lead > viewer`). Source cited per row — if behavior diverges from this table, file a **severe security bug**.
+Verified against `requireRole(...)` declarations in `backend/src/routes/*.js` and `backend/src/middleware/requireRole.js` (hierarchy: `admin > qa_lead > viewer`). `admin` gates settings + destructive ops; `qa_lead` runs QA workflows; `viewer` is read-only. Source cited per row — if behavior diverges from this table, file a **severe security bug**.
 
 **admin-only actions:**
 
@@ -197,38 +195,38 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), public/shareable report links. Do not test these.
 
 ### 13. Notifications
-33. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
+35. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
 
 ### 14. Automation (CI/CD)
-34. Create a trigger token → plaintext shown **once**.
-35. `POST /api/projects/PRJ-Demo/trigger` with `Authorization: Bearer <token>` → returns **202** with `{ runId, statusUrl }`. Poll `statusUrl`; final state matches RunDetail.
-36. Set a cron schedule for "every minute" → wait → run fires automatically; disable schedule.
+36. Create a trigger token → plaintext shown **once**.
+37. `POST /api/projects/PRJ-Demo/trigger` with `Authorization: Bearer <token>` → returns **202** with `{ runId, statusUrl }`. Poll `statusUrl`; final state matches RunDetail.
+38. Set a cron schedule for "every minute" → wait → run fires automatically; disable schedule.
 
 ### 15. Export & traceability
-37. Export tests as **Zephyr CSV** and **TestRail CSV** → non-empty files, correct headers.
-38. Open **Traceability matrix** → maps tests ↔ source URLs / requirements.
+39. Export tests as **Zephyr CSV** and **TestRail CSV** → non-empty files, correct headers.
+40. Open **Traceability matrix** → maps tests ↔ source URLs / requirements.
 
 ### 16. AI Chat
-39. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
-40. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
-41. Export the session as Markdown and JSON.
+41. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
+42. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
+43. Export the session as Markdown and JSON.
 
 ### 17. Dashboard
-42. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
+44. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
 
 ### 18. Recycle bin & audit
-43. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
-44. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
+45. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
+46. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
 
 ### 19. Account / GDPR
-45. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
-46. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
+47. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
+48. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
 
 ### 20. Permissions sanity (negative)
-47. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
-48. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
+49. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
+50. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
 
-> ✅ **Pass criterion:** all 48 steps green. Any failure = release blocker.
+> ✅ **Pass criterion:** all 50 steps green. Any failure = release blocker.
 
 ---
 
@@ -277,7 +275,7 @@ Each area uses this format:
 2. Switch workspaces → URL updates, data scoped correctly, no leakage from previous workspace.
 3. Invite User B by email → invite email arrives; pending state visible to Admin.
 4. User B accepts → appears in member list with assigned role.
-5. Change User B's role Member → Viewer → permissions update **without requiring relogin** (or document if relogin needed).
+5. Change User B's role `qa_lead` → `viewer` → permissions update **without requiring relogin** (role is re-resolved from DB on every request, ACL-001/002).
 6. Remove User B → active session loses access on next request (≤ 60s).
 
 **Negative / edge:**
@@ -652,7 +650,7 @@ The settings API requires **at least one channel** to be enabled (confirmed by `
 
 ### 🔒 Security
 
-**Preconditions:** Users A (Admin WS-1), B (Member WS-1), D (Outsider). A has project P1, test T1, run R1 in WS-1.
+**Preconditions:** Users A (`admin` WS-1), B (`qa_lead` WS-1), C (`viewer` WS-1), D (outsider, no membership). A owns project P1, test T1, run R1 in WS-1.
 
 **Authorization checks — each must return 403/404, never the resource:**
 1. User D opens `/workspaces/WS-1` directly → denied.
@@ -939,7 +937,7 @@ Per the codebase, recorder (DIF-015) and visual diff (DIF-001) were implemented/
 **Environment:** local / staging / preview — URL: ...
 **Build / commit SHA:** ...
 **Browser + version + OS:** e.g. Chrome 131 / macOS 14.6
-**User role:** Admin / Member / Viewer / Outsider
+**User role:** admin / qa_lead / viewer / outsider
 **Workspace / Project / Test / Run IDs:** ...
 
 **Preconditions:**
@@ -973,7 +971,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 
 | Area | Chrome | Firefox | Safari | Edge | Notes / Bug links |
 |---|---|---|---|---|---|
-| **Golden E2E Happy Path (all 48 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Golden E2E Happy Path (all 50 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Authentication | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Email Verification | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
@@ -1017,7 +1015,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 ## ✅ Sign-off Criteria
 
 A release is QA-approved only when **all** of the following are true:
-- The **Golden E2E Happy Path** (48 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
+- The **Golden E2E Happy Path** (50 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
 - Every row in the coverage checklist is ✅ across the required browser matrix.
 - The permissions matrix has been verified end-to-end, including Outsider access attempts.
 - All Security authorization checks return 403/404 (never the resource).
