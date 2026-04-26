@@ -5,6 +5,7 @@ This suite validates:
 - API auth + verification lifecycle
 - API full functional flow (project + test CRUD + approval)
 - API negative validations for project/test payloads
+- API session security (CSRF enforcement + logout revocation)
 - UI login-route smoke checks (when frontend is reachable)
 
 ## Run

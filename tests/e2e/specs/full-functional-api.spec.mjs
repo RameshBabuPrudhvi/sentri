@@ -86,4 +86,33 @@ test.describe('Sentri full functional API flows', () => {
     });
     expect(badTestRes.status()).toBe(400);
   });
+
+  test('session security: logout revokes access and missing CSRF blocks mutation', async ({ request }) => {
+    const api = new SessionClient(request);
+    const { email, password } = await registerUser(request);
+    const user = userRepo.getByEmail(email);
+    const tokenRow = verificationTokenRepo.getUnusedByUserId(user.id);
+
+    await api.call('get', `/api/v1/auth/verify?token=${encodeURIComponent(tokenRow.token)}`);
+    const loginRes = await api.call('post', '/api/v1/auth/login', { data: { email, password } });
+    expect(loginRes.status()).toBe(200);
+
+    // Control: mutation works with SessionClient-managed CSRF.
+    const okProject = await api.call('post', '/api/v1/projects', {
+      data: { name: 'CSRF Control Project', url: 'https://example.com' },
+    });
+    expect(okProject.status()).toBe(201);
+
+    // Separate raw request context without CSRF header should be blocked.
+    const missingCsrfRes = await request.post('/api/v1/projects', {
+      data: { name: 'Should Fail CSRF', url: 'https://example.com' },
+    });
+    expect([401, 403]).toContain(missingCsrfRes.status());
+
+    const logoutRes = await api.call('post', '/api/v1/auth/logout', { data: {} });
+    expect(logoutRes.status()).toBe(200);
+
+    const dashboardAfterLogout = await api.call('get', '/api/v1/dashboard');
+    expect(dashboardAfterLogout.status()).toBe(401);
+  });
 });
