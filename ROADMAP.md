@@ -328,6 +328,8 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** ✅ Complete | **Effort:** S | **Source:** Audit
 
+> **Historical note:** Originally scoped as Medium priority but pulled forward in PR #94 to unblock INF-004 (OpenAPI spec needs stable versioned routes). In hindsight this should have been 🟡 High — keep priority labels in mind for similar foundational dependencies.
+
 **Problem:** All routes are mounted at `/api/*` with no version prefix. Any breaking API change will immediately break all consumers — CI/CD integrations, GitHub Actions, external webhooks — with no safe migration path.
 
 **Fix:** Mount all routers under `/api/v1/`. Update `API_BASE` in the frontend. Add 308 redirects from `/api/*` to `/api/v1/*` for backward compatibility during the transition window (308 preserves HTTP method on redirect).
@@ -792,6 +794,8 @@ Because it's marked internal, import risk is real — the path or signature coul
 ## Phase 4 — Autonomous Intelligence
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
+
+> **Note:** Some Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above (e.g. `AUTO-007`, `AUTO-013`). The remaining ~20 items are scoped here and ready to start.
 
 ---
 
