@@ -39,6 +39,8 @@
 
 The following items have been verified complete against the codebase and are **not** repeated below.
 
+> **Naming note:** Items numbered `MAINT-*` are legacy from prior roadmap versions. The current convention is `MNT-*`. Old IDs are preserved in PR descriptions and git history — do not rename them. Use `MNT-*` for all new maintenance items.
+
 | ID | Title | PR / Commit |
 |----|-------|-------------|
 | S3-02 | Shadow DOM support in crawler | PR #55 |
@@ -101,7 +103,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase | Scope | Status | Est. Duration |
 |-------|-------|--------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
-| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In Progress | 8–10 weeks |
+| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete (SEC-004 deferred) | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔲 Planned | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔲 Planned | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
@@ -370,6 +372,25 @@ The following items have been verified complete against the codebase and are **n
 - `frontend/src/pages/Settings.jsx` — MFA setup and management
 
 **Dependencies:** ACL-001 (multi-tenancy first allows for per-workspace MFA policy)
+
+---
+
+### SEC-005 — SAML / OIDC SSO federation 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ, enterprise)
+
+**Problem:** Sentri supports email/password + GitHub/Google OAuth, and SEC-004 covers TOTP MFA, but there is no SAML 2.0 or OIDC federation support. Enterprise procurement teams require SSO integration with their identity provider (Okta, Azure AD, OneLogin, Ping). BearQ inherits SmartBear's enterprise SSO. This is a distinct requirement from MFA — SSO replaces the login flow entirely rather than adding a second factor.
+
+**Fix:** Integrate `openid-client` for OIDC and `@node-saml/passport-saml` for SAML 2.0. Add a per-workspace SSO configuration (metadata URL, client ID, certificate). When SSO is enabled, redirect login to the IdP. Map IdP attributes to Sentri user fields. Auto-provision users on first SSO login. Add SSO configuration UI in Settings → Authentication.
+
+**Files to change:**
+- `backend/src/middleware/authenticate.js` — add `saml` and `oidc` auth strategies
+- `backend/src/routes/auth.js` — SSO callback endpoints, IdP-initiated login
+- `backend/src/database/migrations/` — `sso_configurations` table per workspace
+- `frontend/src/pages/Settings.jsx` — SSO configuration panel
+- `backend/package.json` — add `openid-client`, `@node-saml/passport-saml`
+
+**Dependencies:** ACL-001 (workspaces must exist for per-workspace SSO configuration)
 
 ---
 
@@ -1153,25 +1174,6 @@ Because it's marked internal, import risk is real — the path or signature coul
 
 **Dependencies:** None
 **See also:** MNT-004 (fixtures) — fixtures handle environment setup/teardown; parameterisation handles input variation. They are complementary.
-
----
-
-### SEC-005 — SAML / OIDC SSO federation 🔵 Medium
-
-**Status:** 🔲 Planned | **Effort:** L | **Source:** Competitive (BearQ, enterprise)
-
-**Problem:** Sentri supports email/password + GitHub/Google OAuth, and SEC-004 covers TOTP MFA, but there is no SAML 2.0 or OIDC federation support. Enterprise procurement teams require SSO integration with their identity provider (Okta, Azure AD, OneLogin, Ping). BearQ inherits SmartBear's enterprise SSO. This is a distinct requirement from MFA — SSO replaces the login flow entirely rather than adding a second factor.
-
-**Fix:** Integrate `openid-client` for OIDC and `@node-saml/passport-saml` for SAML 2.0. Add a per-workspace SSO configuration (metadata URL, client ID, certificate). When SSO is enabled, redirect login to the IdP. Map IdP attributes to Sentri user fields. Auto-provision users on first SSO login. Add SSO configuration UI in Settings → Authentication.
-
-**Files to change:**
-- `backend/src/middleware/authenticate.js` — add `saml` and `oidc` auth strategies
-- `backend/src/routes/auth.js` — SSO callback endpoints, IdP-initiated login
-- `backend/src/database/migrations/` — `sso_configurations` table per workspace
-- `frontend/src/pages/Settings.jsx` — SSO configuration panel
-- `backend/package.json` — add `openid-client`, `@node-saml/passport-saml`
-
-**Dependencies:** ACL-001 (workspaces must exist for per-workspace SSO configuration)
 
 ---
 
