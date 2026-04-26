@@ -1,6 +1,6 @@
 # Sentri E2E Execution Report
 
-Generated: 2026-04-26T06:47:57.388Z
+Generated: 2026-04-26T06:58:36.504Z
 
 ## 1. Functional Coverage Report
 
@@ -12,10 +12,12 @@ Generated: 2026-04-26T06:47:57.388Z
 | verify account, login, project+test CRUD happy path | Tested | Validated in Playwright run |
 | negative validations for project/test inputs | Tested | Validated in Playwright run |
 | session security: logout revokes access and missing CSRF blocks mutation | Tested | Validated in Playwright run |
+| project tests workflow: create, approve/reject/restore, export, run | Tested | Validated in Playwright run |
+| crawl + generate + recorder + ai-fix/chat endpoint contracts | Tested | Validated in Playwright run |
 | login page renders core controls | Partially Tested | Skipped due environment/runtime gating |
 | invalid credentials show an error state | Partially Tested | Skipped due environment/runtime gating |
 
-**Summary:** 6 passed, 0 failed, 2 skipped.
+**Summary:** 8 passed, 0 failed, 2 skipped.
 
 ## 2. Issues Found
 

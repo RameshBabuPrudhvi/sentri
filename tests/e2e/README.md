@@ -6,6 +6,7 @@ This suite validates:
 - API full functional flow (project + test CRUD + approval)
 - API negative validations for project/test payloads
 - API session security (CSRF enforcement + logout revocation)
+- Functional area contracts: crawl, generate, recorder, run-all orchestration, AI fix apply, AI chat
 - UI login-route smoke checks (when frontend is reachable)
 
 ## Run

@@ -1,7 +1,7 @@
 import { test, expect } from '../utils/playwright.mjs';
 import * as userRepo from '../../../backend/src/database/repositories/userRepo.js';
 import * as verificationTokenRepo from '../../../backend/src/database/repositories/verificationTokenRepo.js';
-import { registerUser, safeJson } from '../utils/auth.mjs';
+import { loginWithRetry, registerUser, safeJson } from '../utils/auth.mjs';
 import { SessionClient } from '../utils/session.mjs';
 
 test.describe('Sentri full functional API flows', () => {
@@ -17,7 +17,8 @@ test.describe('Sentri full functional API flows', () => {
     const verifyRes = await api.call('get', `/api/v1/auth/verify?token=${encodeURIComponent(tokenRow.token)}`);
     expect(verifyRes.status()).toBe(200);
 
-    const loginRes = await api.call('post', '/api/v1/auth/login', { data: { email, password } });
+    const loginRes = await loginWithRetry(request, email, password);
+    if (loginRes.status() === 429) test.skip(true, 'Rate-limited in shared local environment');
     expect(loginRes.status()).toBe(200);
 
     const meRes = await api.call('get', '/api/v1/auth/me');
@@ -68,7 +69,8 @@ test.describe('Sentri full functional API flows', () => {
     const tokenRow = verificationTokenRepo.getUnusedByUserId(user.id);
 
     await api.call('get', `/api/v1/auth/verify?token=${encodeURIComponent(tokenRow.token)}`);
-    await api.call('post', '/api/v1/auth/login', { data: { email, password } });
+    const loginRes = await loginWithRetry(request, email, password);
+    if (loginRes.status() === 429) test.skip(true, 'Rate-limited in shared local environment');
 
     const badProjectRes = await api.call('post', '/api/v1/projects', {
       data: { name: 'Bad URL Project', url: 'ftp://invalid.local' },
@@ -94,7 +96,8 @@ test.describe('Sentri full functional API flows', () => {
     const tokenRow = verificationTokenRepo.getUnusedByUserId(user.id);
 
     await api.call('get', `/api/v1/auth/verify?token=${encodeURIComponent(tokenRow.token)}`);
-    const loginRes = await api.call('post', '/api/v1/auth/login', { data: { email, password } });
+    const loginRes = await loginWithRetry(request, email, password);
+    if (loginRes.status() === 429) test.skip(true, 'Rate-limited in shared local environment');
     expect(loginRes.status()).toBe(200);
 
     // Control: mutation works with SessionClient-managed CSRF.

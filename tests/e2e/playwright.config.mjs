@@ -25,7 +25,7 @@ export default defineConfig({
       use: {
         baseURL: backendBaseURL,
       },
-      testMatch: /.*(api-auth|full-functional-api)\.spec\.mjs/,
+      testMatch: /.*(api-auth|full-functional-api|functional-areas)\.spec\.mjs/,
     },
     {
       name: 'ui-chromium',
