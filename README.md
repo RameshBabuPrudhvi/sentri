@@ -303,4 +303,4 @@ Pull requests are welcome. For major changes, open an issue first.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details
