@@ -9,6 +9,16 @@
 
 ---
 
+## ⚡ Agent fast path
+
+> **Working on the next PR? Read [`NEXT.md`](./NEXT.md) instead — it has the current item spec, files to change, and acceptance criteria. You do not need to read further in this file.**
+>
+> Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
+>
+> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** none ✅ · **Remaining:** 41 items
+
+---
+
 ## How to Read This Document
 
 | Symbol | Meaning |
@@ -75,6 +85,14 @@ The following items have been verified complete against the codebase and are **n
 | MNT-010 | Re-run button on Run Detail page for crawl/generate runs | PR #100 |
 | FEA-002 | TanStack React Query data layer | PR #107 |
 | MNT-011 | Persist crawl/generate dialsConfig on run record | Verified in PR #107 (fix landed in an earlier untracked commit) |
+| ACL-001 | Multi-tenancy: workspace ownership on all entities | PR #87 |
+| ACL-002 | Role-based access control (Admin / QA Lead / Viewer) | PR #87 |
+| INF-004 | OpenAPI specification and Swagger UI | PR #94 |
+| DIF-001 | Visual regression testing with baseline diffing | PR #94 |
+| DIF-002 | Cross-browser testing (Firefox, WebKit / Safari) | PR #94 |
+| DIF-002b | Cross-browser polish: browser-aware baselines, UI badges, CI coverage | PR #107, PR #110 |
+| DIF-015 | Interactive browser recorder for test creation | PR #94 |
+| AUTO-007 | Geolocation / locale / timezone testing | PR #94 |
 
 ---
 
