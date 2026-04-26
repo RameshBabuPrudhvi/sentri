@@ -460,12 +460,24 @@ The self-healing system in `selfHealing.js` uses a strategy waterfall:
 
 All interactions in generated tests are routed through safe wrappers (`safeClick`, `safeFill`, `safeSelect`, etc.). `applyHealingTransforms()` rewrites raw Playwright calls into safe helpers.
 
+### Healing history & versioned scoping
+
+On every test run, the winning strategy index is recorded in `db.healingHistory`. Keys are **versioned** by test code revision: `"<testId>@v<codeVersion>::<action>::<label>"`. This ensures stale hints from old code versions don't pollute current runs. The repository layer (`healingRepo.getByTestId`) reads both versioned and legacy (unversioned) keys for backward compatibility.
+
+### Fail-count cap
+
+Hints that have failed `≥ HEALING_HINT_MAX_FAILS` (default 3, env-configurable) consecutive times are skipped by both `getHealingHint()` and `getHealingHistoryForTest()`. This prevents the runtime from retrying strategies that are known-broken.
+
+### Visibility wait cap
+
+The `firstVisible()` helper caps its `waitFor` timeout at `HEALING_VISIBLE_WAIT_CAP` (default 1200ms, env-configurable) to avoid slow waterfalls when a strategy doesn't match. The full retry loop still provides multiple attempts.
+
 ### Adding new selector strategies
 
 - Add them to the `strategies` array in `getSelfHealingHelperCode()`.
 - Keep strategies ordered from most-semantic (ARIA) to least-semantic (CSS).
-- Bump `STRATEGY_VERSION` in `selfHealing.js` when reordering or removing strategies.
-- Do not change the healing key schema (`<testId>@v<version>::<action>::<label>`) without a migration strategy.
+- Bump `STRATEGY_VERSION` in `selfHealing.js` when reordering or removing strategies — hints from older versions are automatically ignored.
+- Do not change the healing key schema (`<testId>@v<version>::<action>::<label>`) without a migration strategy — existing DB records will silently stop matching. The repository layer reads both versioned and legacy keys, but new writes always use the versioned format.
 
 ---
 

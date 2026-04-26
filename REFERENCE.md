@@ -13,6 +13,9 @@
 - [Database Adapters & Repositories](#database)
 - [Self-Healing Runtime Helpers](#self-healing-helpers)
 - [Docker & Deployment](#docker)
+- [Monitoring & Observability](#monitoring)
+- [Security — Resolved Items](#security-resolved)
+- [Security — Known Gaps](#security-gaps)
 - [Environment Variables](#env-vars)
 
 ---
@@ -215,6 +218,55 @@ cd frontend && npm install && npm run dev
 ### Health Check
 
 `GET /health` (unauthenticated) → `{ ok: true }`. Used by Docker Compose health checks (interval 10s, 5 retries, 20s start period).
+
+---
+
+<a id="monitoring"></a>
+## Monitoring & Observability
+
+> **Status:** No external monitoring or APM tools are configured. Structured logging is in place.
+
+| Capability | How |
+|---|---|
+| Health endpoint | `GET /health` (unauthenticated) — `{ ok: true }`. Used by Docker Compose health checks and external uptime monitors (UptimeRobot, Pingdom). |
+| System info | `GET /api/v1/system` (authenticated) — uptime, Node/Playwright versions, memory usage, DB record counts, `activeSchedules` (armed cron tasks). |
+| Structured logging | All backend logs go through `formatLogLine()` from `utils/logFormatter.js`. Set `LOG_JSON=true` for machine-parseable JSON lines (Datadog, Cloud Logging compatible). |
+| Lifecycle events | Semantic events (`run.start`, `browser.launched`, `run.complete`, etc.) emitted via `structuredLog()`. |
+| Real-time streaming | Run progress streamed to the frontend via Server-Sent Events. |
+
+When adding external observability: APM (Datadog, New Relic) for request tracing; error tracking (Sentry) for backend and frontend.
+
+---
+
+<a id="security-resolved"></a>
+## Security — Resolved Items
+
+Historical record of completed security work. **Do not "re-fix" these** — they are already implemented. Verify before designing a fix that overlaps with this list.
+
+| Item | Implementation |
+|---|---|
+| Cookie-based auth | JWTs in `access_token` HttpOnly; Secure; SameSite=Strict cookies. `token_exp` (Non-HttpOnly) exposes only the expiry timestamp. Tokens never returned in response bodies or stored in localStorage. |
+| CSRF protection | Double-submit cookie pattern via `_csrf` cookie + `X-CSRF-Token` header. Validated by `csrfMiddleware` in `appSetup.js`. Auth endpoints exempt via `CSRF_EXEMPT_PATHS`. Cross-origin deployments echo the token in an `X-CSRF-Token` response header (CORS `exposedHeaders`). |
+| Session refresh | `POST /api/auth/refresh` issues a new token and revokes the old one. Frontend proactively refreshes 5 min before expiry. |
+| Auth rate limiting | Per-endpoint limiters in `routes/auth.js` — login (10/IP/15 min), forgot-password (5), reset-password (5). Uses `trust proxy` for IP detection behind nginx. |
+| Global API rate limiting | Three-tier `express-rate-limit` in `appSetup.js` — general (300 req/15 min), expensive ops (20/hr crawl/run), AI generation (30/hr). In-memory store; swap to Redis for horizontal scaling. |
+| Content-Security-Policy | Helmet CSP fully enabled in `appSetup.js`: `default-src 'self'`, `script-src 'self' 'nonce-<per-request>'`, `connect-src 'self'`, `frame-ancestors 'none'`. `'unsafe-inline'` replaced with per-request nonces (SEC-002). |
+| Reset token exposure | Forgot-password endpoint returns the reset token only when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. |
+| DB-backed reset tokens | Persisted in `password_reset_tokens` (migration 003) via `passwordResetTokenRepo`. Atomic `claim()` prevents TOCTOU double-use. `usedAt` provides one-time-use audit trail. |
+| Per-user audit trail | Activity log records `userId` + `userName` (migration 001). `actor(req)` extracts identity from `req.authUser`. Bulk approve/reject/restore log per-test entries with the acting user. |
+| Artifact authentication | `/artifacts` route protected by HMAC-SHA256 signed `?token=&exp=` query params (1hr TTL via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` required in production. `signArtifactUrl()` in `appSetup.js` generates URLs. `Cache-Control: private, no-store`. |
+| Secrets scanning | Gitleaks runs on every PR/push to `main` via the `secrets` CI job. `lint` and `build` jobs depend on it. Config in `.github/.gitleaks.toml`. |
+| Nonce-based CSP | Per-request nonce via `crypto.randomBytes(16)` in `appSetup.js`, passed to Helmet CSP `scriptSrc` as `'nonce-<value>'`. Vite `transformIndexHtml` injects `nonce="__CSP_NONCE__"`; `serveIndexWithNonce()` replaces at serve-time (SEC-002). |
+| GDPR/CCPA export & delete | `GET /api/auth/export` returns JSON archive of all user-owned data (`passwordHash` stripped). `DELETE /api/auth/account` hard-deletes user + owned data in a transaction. Both require password confirmation. Frontend Account tab with two-click confirm flow (SEC-003). |
+
+---
+
+<a id="security-gaps"></a>
+## Security — Known Gaps
+
+Not yet implemented; address before production:
+
+- **External error tracking**: No Sentry/equivalent. Errors only visible in server logs and browser console.
 
 ---
 
