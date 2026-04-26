@@ -90,6 +90,7 @@ cd frontend && npm test
 | New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly | Dedicated file or `tests/auth-cookies.test.js` |
 | Security fix | Unit test for the fix mechanism AND integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
 | Pipeline stage change | Unit tests | `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` |
+| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | E2E spec exercising the full HTTP/UI flow | `tests/e2e/specs/<area>.spec.mjs` (see STANDARDS.md § E2E Tests) |
 
 **Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
 
@@ -141,6 +142,10 @@ test("creates a token", () => {
 ### Frontend Tests
 
 Tests live in `frontend/tests/` and also use plain Node `assert`. Run with `npm test` from `frontend/`.
+
+### E2E Tests
+
+Playwright suite at `tests/e2e/`. Run with `npm run e2e:test` from the repo root. UI specs are gated by `RUN_UI_E2E=true`; API specs run unconditionally. See **STANDARDS.md § E2E Tests** for full conventions and **REFERENCE.md § E2E Test Utilities** for the helper module table. Do not import directly from `@playwright/test` — go through `tests/e2e/utils/playwright.mjs`. Do not write custom auth or CSRF logic — use `loginWithRetry()` and `SessionClient` from `tests/e2e/utils/`.
 
 ### Testing DIF-001 (Visual Regression) and DIF-015 (Recorder)
 

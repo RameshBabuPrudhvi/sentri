@@ -330,6 +330,30 @@ res.flushHeaders();
 
 `AbortSignal` is threaded through the entire pipeline. Every stage that does I/O must accept and honour a `signal` parameter. Use `throwIfAborted(signal)` at the start of each stage and after each expensive operation.
 
+### E2E Tests (`tests/e2e/`)
+
+Playwright-based end-to-end tests live at the repo root in `tests/e2e/`, separate from backend unit/integration tests. Run with `npm run e2e:test` from the repo root.
+
+- **Specs** in `tests/e2e/specs/*.spec.mjs`. One spec file per functional area (e.g. `api-auth.spec.mjs`, `full-functional-api.spec.mjs`, `ui-smoke.spec.mjs`).
+- **Shared helpers** in `tests/e2e/utils/` — always import from there (see REFERENCE.md § E2E Test Utilities):
+  - `auth.mjs` — `registerUser()`, `loginWithRetry()`, `safeJson()`
+  - `session.mjs` — `SessionClient` (stateful cookie + CSRF API client)
+  - `environment.mjs` — `isReachable()` for environment-gating
+  - `playwright.mjs` — re-export of `@playwright/test` (single import surface)
+- **Config:** `tests/e2e/playwright.config.mjs`. Base URLs from `E2E_FRONTEND_URL` (default `http://127.0.0.1:4173`) and `E2E_BACKEND_URL` (default `http://127.0.0.1:3001`).
+- **UI tests are gated by `RUN_UI_E2E=true`** to keep CI fast. Pure-API specs run unconditionally.
+- **Reports:** `npm run e2e:report` generates an execution summary from `tests/e2e/artifacts/results.json`.
+
+```js
+// ✅ Correct — single import surface
+import { test, expect } from '../utils/playwright.mjs';
+import { loginWithRetry, registerUser } from '../utils/auth.mjs';
+import { SessionClient } from '../utils/session.mjs';
+
+// ❌ Wrong — direct Playwright import bypasses the shared surface
+import { test, expect } from '@playwright/test';
+```
+
 ---
 
 ## Frontend Standards

@@ -104,6 +104,8 @@ docs/                      VitePress site + REST API reference
 - **Do not create a new utility/component/CSS class without a lookup pass first.** Run `grep_search` against `backend/src/utils/`, `frontend/src/utils/`, `components.css`, and `utilities.css`. If 80% of what you need exists, extend the existing module — do not fork it.
 - **Do not edit files outside NEXT.md § "Files to change" without explicit reason.** If scope creeps beyond the listed files, stop and justify in the PR description. Unbounded scope is the #1 cause of PR-review friction.
 - **Do not match stylistic conventions from memory — match the sibling file.** Before writing a new repo, route, page, or hook, open one existing sibling file and mirror its structure. "What the codebase does" beats "what I think is idiomatic."
+- **Do not import directly from `@playwright/test` in E2E specs.** Use `tests/e2e/utils/playwright.mjs` so the import surface stays single-source. If you need a new export, add it there.
+- **Do not write custom auth or CSRF logic in E2E specs.** Use `loginWithRetry()` and `SessionClient` from `tests/e2e/utils/`. New auth-related helpers belong in `auth.mjs` or `session.mjs`, not inline in a spec.
 
 ---
 

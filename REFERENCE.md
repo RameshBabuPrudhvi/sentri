@@ -9,6 +9,7 @@
 - [Frontend Shared CSS](#frontend-css)
 - [Frontend Shared JS Modules & Hooks](#frontend-js)
 - [Test Shared Utilities](#test-utils)
+- [E2E Test Utilities](#e2e-utils)
 - [Authentication Strategy Table](#auth-strategies)
 - [Database Adapters & Repositories](#database)
 - [Self-Healing Runtime Helpers](#self-healing-helpers)
@@ -112,6 +113,30 @@ The CSS follows ITCSS cascade order, imported via `frontend/src/index.css`:
 | Module | What it provides | When to use |
 |---|---|---|
 | `test-base.js` | `createTestContext()` → `{ app, req, workspaceScope, resetDb, setupEnv, registerAndLogin, extractCookie, parseCookies, buildCookieHeader, decodeJwtPayload, createTestRunner, getDatabase }` | Every integration test that needs HTTP requests, auth, or DB access |
+
+---
+
+<a id="e2e-utils"></a>
+## E2E Test Utilities (`tests/e2e/utils/`)
+
+Shared modules for the Playwright E2E suite at `tests/e2e/`. Always import from these — never inline auth, CSRF, or environment-check logic in a spec.
+
+| Module | What it provides | When to use |
+|---|---|---|
+| `playwright.mjs` | Re-export of `defineConfig`, `test`, `expect`, `request` from `@playwright/test` | Single import surface for every spec — never import `@playwright/test` directly |
+| `auth.mjs` | `registerUser(request)`, `loginWithRetry(request, creds)`, `safeJson(response)` | Any spec that needs a logged-in user or to register a fresh account |
+| `session.mjs` | `SessionClient` — stateful API client handling cookies + CSRF tokens | Multi-request flows that mutate state (e.g. create project → run test → assert result) |
+| `environment.mjs` | `isReachable(url)` | Gating tests on backend/frontend availability before a UI spec runs |
+
+**Config:** `tests/e2e/playwright.config.mjs`. Specs live in `tests/e2e/specs/*.spec.mjs`. Run with `npm run e2e:test`. Reports via `npm run e2e:report`.
+
+**Environment vars:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `E2E_FRONTEND_URL` | `http://127.0.0.1:4173` | Vite preview server for UI specs |
+| `E2E_BACKEND_URL` | `http://127.0.0.1:3001` | Backend API for HTTP specs |
+| `RUN_UI_E2E` | unset | When `"true"`, runs browser UI specs. Default keeps CI fast by running API-only. |
 
 ---
 
