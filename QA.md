@@ -170,12 +170,25 @@ Each area uses this format:
 **Preconditions:** Project exists.
 
 **Steps & expected:**
-1. Crawl URL (engineering to confirm a stable demo site; otherwise use a site you control) → crawl completes; discovered pages listed; progress visible.
-2. Generate tests from crawled pages → tests appear in "pending" state with steps.
-3. Approve test → moves to active suite; appears in run targets.
-4. Reject test → removed/archived; excluded from regression.
-5. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
-6. Export tests → downloads in the product's supported format(s). Specific formats are not documented — record what the UI offers and confirm re-import (if supported) round-trips cleanly.
+1. Crawl URL — verify **both crawl modes** (`README.md`):
+   - **Link Crawl** — follows `<a>` tags, maps pages.
+   - **State Exploration** — clicks/fills/submits to discover multi-step flows (auth, checkout).
+   Each mode completes, discovered pages listed, progress visible. Same-origin fetch/XHR captured (powers API test generation).
+2. Generate tests — verify the **8-stage AI pipeline** runs (`README.md`): discover → filter → classify → plan → generate → deduplicate → enhance → validate. Tests appear in **Draft** queue (`README.md`: "Nothing executes until a human approves it").
+3. **API test generation** (`README.md`) — three paths:
+   - During crawl: same-origin fetch/XHR auto-generated as Playwright `request` tests.
+   - "Generate Test" modal: plain-English endpoint description.
+   - Paste `METHOD /path` patterns or attach an OpenAPI spec.
+   Each path produces tests that verify status codes, JSON shape, error payloads.
+4. Approve test → moves to active suite; appears in run targets.
+5. Reject test → removed/archived; excluded from regression.
+6. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
+7. **Search** tests via `?search=` (`/api/v1/projects/:id/tests?search=`) → filters list correctly; empty results show empty state.
+8. **Exports** (`backend/src/routes/tests.js`):
+   - `GET /api/v1/projects/:id/tests/export/zephyr` — Zephyr Scale CSV.
+   - `GET /api/v1/projects/:id/tests/export/testrail` — TestRail CSV.
+   - `GET /api/v1/projects/:id/tests/traceability` — traceability matrix.
+   Each downloads a non-empty file with correct headers; re-importing into the target tool round-trips cleanly.
 
 **Negative / edge:**
 - Crawl an unreachable URL → clear error, no infinite spinner.
@@ -192,8 +205,8 @@ Each area uses this format:
 
 **Steps & expected:**
 1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast and persists a Draft test with `safeClick` / `safeFill` (see `docs/changelog.md` DIF-015).
-2. Perform: click, type, select dropdown, file upload, hover, scroll, navigate across pages.
-   - **Expected:** Each action captured as a discrete step with selector + action type; no empty/null steps.
+2. Perform actions captured by the recorder (per `docs/changelog.md` DIF-015): **click, fill (type), press (keyboard), select (dropdown), navigate**. File upload, hover, and scroll are **not** captured — confirm they are silently ignored, not crashing the recorder.
+   - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Uses `safeClick` / `safeFill` so self-healing engages at run time.
 3. Stop and save → test appears in Tests page with all steps intact after refresh.
 4. Replay the recorded test → all steps execute; pass status reported.
 
@@ -212,10 +225,15 @@ Each area uses this format:
 **Preconditions:** At least one approved test.
 
 **Steps & expected:**
-1. Run single test → status: queued → running → passed/failed; logs, screenshots, CDP video available (recorder uses Playwright CDP screencast).
+1. Run single test → status: queued → running → passed/failed; logs, screenshots, video available.
 2. Run regression suite → all tests execute; summary shows pass/fail counts matching detail view.
-3. Stop running execution → stops within a few seconds; run marked as "stopped"; partial results retained. Note: per-test hard timeout is `BROWSER_TEST_TIMEOUT` (default **120 000 ms**, see `AGENT.md`).
-4. Re-run failed tests only → only previously-failed tests execute.
+3. **Cross-browser run selector** (`docs/changelog.md` DIF-002) — trigger run with each engine: **Chromium** (default), **Firefox**, **WebKit**. Each run record persists `browser` (migration 009); RunDetail page shows a per-run badge.
+4. **Mobile device emulation** (`docs/changelog.md` DIF-003) — pass `device` (e.g. `"iPhone 14"`, `"Pixel 7"`) → run uses Playwright device profile (viewport, user agent, touch). Verify dropdown lists curated devices.
+5. **Parallel execution** (`README.md`) — set parallelism 1–10 from UI (or `PARALLEL_WORKERS`). Verify each worker has isolated video/screenshots/network logs; default is 1.
+6. **Live run view** — RunDetail streams logs via SSE, shows per-step screenshots, and exposes **Abort** action mid-run.
+7. **Abort run** → run marked `stopped`; partial results retained; per-test hard timeout is `BROWSER_TEST_TIMEOUT` (default **120 000 ms**, `AGENT.md`).
+8. Re-run failed tests only → only previously-failed tests execute.
+9. **Self-healing** (`README.md`) — break a primary selector, re-run; runtime tries role → label → text → aria-label → title, remembers the winner per element. Confirm subsequent run picks the previously-successful strategy first.
 
 **Negative / edge:**
 - Trigger run while another is in progress → concurrency = `PARALLEL_WORKERS` (default **1**, `AGENT.md`). Extra runs queue; no crash.
@@ -225,6 +243,32 @@ Each area uses this format:
 - Viewer attempts to trigger run → blocked.
 - `qa_lead` stops another user's run → blocked; `admin` → allowed.
 - Browser close mid-run → run continues on backend; status visible on return.
+
+---
+
+### ⚡ Automation (CI/CD + Scheduled Runs)
+
+**Preconditions:** Project exists with at least one approved test. Open `/automation` (or use `?project=PRJ-X` deep-link).
+
+**CI/CD trigger tokens** (`docs/changelog.md` ENH-011):
+1. Create a token via `POST /api/projects/:id/trigger-tokens` (UI button) → plaintext token shown **exactly once**; refresh and confirm only the SHA-256 hash is stored (never plaintext again).
+2. List tokens → no hashes leaked to UI.
+3. Trigger a run via `POST /api/projects/:id/trigger` with `Authorization: Bearer <token>` → returns **202 Accepted** with `{ runId, statusUrl }`. Poll `statusUrl`; final state matches RunDetail page.
+4. Optional `callbackUrl` → callback hits the URL on completion with run status.
+5. Revoke token via `DELETE /api/projects/:id/trigger-tokens/:tid` → subsequent trigger calls return 401.
+
+**Scheduled runs** (`docs/changelog.md` ENH-006):
+1. Open `ScheduleManager` for a project → set a 5-field cron expression + IANA timezone via preset picker (hourly/daily/weekly).
+2. `PATCH /api/projects/:id/schedule` → server validates cron; invalid expression rejected (try `* * *` → 400).
+3. Enable schedule → next-run time displayed; persists across server restart (hot-reloaded on save without process restart — verify by saving while watching backend).
+4. Disable schedule → cron task cancelled; no runs fired.
+5. `DELETE /api/projects/:id/schedule` → schedule removed; `GET` returns null.
+
+**Negative / edge:**
+- Viewer attempts to create trigger token / schedule → blocked.
+- Trigger run with revoked or wrong token → 401, no run created.
+- Schedule across DST transition → next-run time correct in target timezone.
+- Two schedules firing simultaneously → respect `PARALLEL_WORKERS` queue; no crash.
 
 ---
 
@@ -270,7 +314,7 @@ Each area uses this format:
 
 ### 🤖 AI Chat
 
-**Preconditions:** Workspace with tests/runs/projects data.
+**Preconditions:** Workspace with tests/runs/projects data. Open `/chat` (Chat History page, `docs/changelog.md` #83).
 
 **Steps & expected:**
 1. Ask "How many tests failed this week?" → answer matches Runs page filtered count.
@@ -278,6 +322,19 @@ Each area uses this format:
 3. Ask about a specific test by name → returns accurate step count, last status, last run time.
 4. Multi-turn: follow up with "why did it fail?" → uses prior context; answer references actual logs.
 5. Ask for something outside scope ("what's the weather") → declines or redirects gracefully.
+
+**Chat History page** (`/chat`, persisted in localStorage per user):
+6. Create a new session → appears in sidebar.
+7. Rename a session → name persists across reload.
+8. Delete a session → removed from list, conversation gone.
+9. Search across sessions → matching messages highlighted.
+10. Export session as **Markdown** and as **JSON** from the topbar menu → both files download with full conversation.
+11. Create > 50 sessions → oldest are evicted (cap is 50/user per `#83`); confirm no errors.
+12. "Open full chat page" button in the AI Chat modal → navigates to `/chat`.
+13. Sidebar nav → "AI Chat" entry visible and active when on `/chat`.
+
+**AI provider switching** (`README.md`):
+14. Header dropdown lists configured providers (Anthropic / OpenAI / Google / Ollama). Switch with one click → next chat message uses the new provider; auto-detection order is Anthropic → OpenAI → Google → Ollama.
 
 **Negative / edge:**
 - Ask about data in a workspace the user doesn't belong to → **must refuse**; no data leakage (severe bug if leaked).
@@ -306,6 +363,55 @@ Each area uses this format:
 - Member / Viewer attempts to open workspace settings → blocked.
 - Concurrent settings edits → last-write-wins with no lost fields.
 - Save partial form (required field blank) → blocked, no partial persistence.
+
+---
+
+### 👤 Account / GDPR (Settings → Account)
+
+**Preconditions:** Logged in. Open Settings → Account tab (`docs/changelog.md` SEC-003 #93).
+
+**Steps & expected:**
+1. **Export account data** — click Export, enter password → server validates via `X-Account-Password` header → JSON downloads containing workspaces, projects, tests, runs, activities, schedules, notification settings (`GET /api/auth/export`).
+2. Wrong password on export → 401, no file.
+3. **Delete account** — two-click confirm with **5s auto-disarm** (UI re-arms after 5s if not confirmed). Final confirm + password → `DELETE /api/auth/account` runs in a single transaction; user logged out; subsequent login fails with "account not found"; all owned workspace data is gone.
+4. Wrong password on delete → 401, account intact.
+5. Cancel mid-flow → no state change.
+
+---
+
+### 📧 Email Verification (extra cases)
+
+Beyond the Authentication section (`docs/changelog.md` SEC-001 #87):
+1. Register → verification email sent via Resend / SMTP / console fallback (depending on env).
+2. Try to login **before** verifying → blocked with "verify your email" state on Login page; "Resend" button visible.
+3. Click Resend → `POST /api/auth/resend-verification` returns the same response whether or not the address is registered (enumeration-safe). Rate limit applies (5–10/15min).
+4. `GET /api/auth/verify?token=` with valid token → user marked verified; tampered/expired token → rejected.
+5. Pre-existing users (created before SEC-001 migration 003) are grandfathered as verified — login works without verification.
+
+---
+
+### ♻️ Recycle Bin (Settings)
+
+**Preconditions:** Soft-delete a project, a test, and a run (`docs/changelog.md` ENH-020). Settings → Recycle Bin.
+
+**Steps & expected:**
+1. `GET /api/recycle-bin` → returns soft-deleted entities grouped by type, capped at **200 items per type**.
+2. Restore a test → `POST /api/restore/test/:id`; reappears in active list with steps intact.
+3. Restore a project → cascades to tests/runs deleted **at the same time** as the project. Tests deleted **individually** earlier remain in the bin.
+4. Purge a test → `DELETE /api/purge/test/:id`; gone from `GET /api/recycle-bin`; cannot be restored.
+5. Viewer attempts restore/purge → blocked.
+
+---
+
+### 🧾 Audit Log
+
+**Preconditions:** Multiple users acting in WS-1 (`docs/changelog.md` #78).
+
+**Steps & expected:**
+1. Each mutating action records `userId` + `userName` on the activity entry.
+2. Bulk approve/reject/restore → emits **one activity per test**, each tagged with the acting user (not a single bulk row).
+3. Filter audit log by user → only that user's actions visible.
+4. Audit entries cannot be edited/deleted via UI.
 
 ---
 
@@ -403,11 +509,11 @@ Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
 
 Per the codebase, recorder (DIF-015) and visual diff (DIF-001) were implemented/fixed in `docs/changelog.md`; there is no live "known issues" register in the repo. Treat the rows below as **claims to verify** — if you reproduce any, open a ticket and replace this table with the real IDs.
 
+> **Note:** "Deploy pages failing" and "image push failures" referenced in earlier drafts of this doc apply to the **CD GitHub Actions workflow** (`.github/workflows/cd.yml` — GitHub Pages + GHCR). They are **not user-facing flows** and are out of scope for manual QA. If they fail, escalate to engineering, do not log against a tester's session.
+
 | Issue | Ticket | Repro | Workaround |
 |---|---|---|---|
-| Deploy pages failing | _open_ | Attempt deploy flow; capture logs | None known |
-| Image push failures | _open_ | Trigger image push; capture logs | None known |
-| Recorder empty-steps (regression) | _open_ | Record a simple flow; check each step has selector + action | Re-record; file bug |
+| Recorder empty-steps (regression) | _open_ | Record a simple flow; verify each step has selector + action | Re-record; file bug |
 | Visual diff false positives | _open_ | Re-run unchanged suite; check flagged steps | Tune `VISUAL_DIFF_THRESHOLD` / `VISUAL_DIFF_PIXEL_TOLERANCE` |
 
 ---
@@ -456,15 +562,22 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | Area | Chrome | Firefox | Safari | Edge | Notes / Bug links |
 |---|---|---|---|---|---|
 | Authentication | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Email Verification | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Projects | ⬜ | ⬜ | ⬜ | ⬜ | |
-| Tests | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Tests (crawl modes, generate, search, exports) | ⬜ | ⬜ | ⬜ | ⬜ | |
+| API Test Generation | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Recorder | ⬜ | ⬜ | ⬜ | ⬜ | |
-| Runs | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Runs (cross-browser, mobile, parallel, abort, self-heal) | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Automation (trigger tokens + schedules) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Visual Testing | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Dashboard | ⬜ | ⬜ | ⬜ | ⬜ | |
-| AI Chat | ⬜ | ⬜ | ⬜ | ⬜ | |
+| AI Chat + Chat History | ⬜ | ⬜ | ⬜ | ⬜ | |
+| AI Provider switching | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Settings | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Account / GDPR (export, delete) | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Recycle Bin | ⬜ | ⬜ | ⬜ | ⬜ | |
+| Audit Log | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Notifications | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Security | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Permissions matrix | ⬜ | ⬜ | ⬜ | ⬜ | |
