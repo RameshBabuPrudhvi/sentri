@@ -1,0 +1,93 @@
+name: Cross-browser smoke
+
+# DIF-002b gap 2 — live-launch verification that `launchBrowser({ browser })`
+# actually opens firefox and webkit (chromium is already exercised by the main
+# `ci.yml` workflow). Provisioning firefox/webkit doubles CI time per PR, so
+# this workflow is path-filtered: it only runs on PRs that touch the runner
+# config or this workflow file. A nightly cron also runs it against `main` so
+# Playwright API regressions surface even when the runner code is unchanged.
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/src/runner/config.js
+      - backend/src/runner/executeTest.js
+      - backend/src/runner/launchOptions.js
+      - backend/package.json
+      - .github/workflows/cross-browser.yml
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - backend/src/runner/config.js
+      - backend/src/runner/executeTest.js
+      - backend/src/runner/launchOptions.js
+      - backend/package.json
+      - .github/workflows/cross-browser.yml
+  schedule:
+    # Nightly at 03:17 UTC — catches Playwright minor-bump API regressions
+    # on `main` even when no PR touched the runner code that day.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# Cancel outdated runs for the same PR when new commits are pushed.
+concurrency:
+  group: cross-browser-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  cross-browser-smoke:
+    name: Cross-browser smoke — ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Provision ${{ matrix.browser }} for Playwright
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Smoke test — launchBrowser({ browser }) opens a page
+        run: |
+          node --input-type=module -e "
+            import { launchBrowser, resolveBrowser } from './src/runner/config.js';
+            const want = process.env.SMOKE_BROWSER;
+            const { name } = resolveBrowser(want);
+            if (name !== want) {
+              console.error('❌ resolveBrowser returned ' + name + ', expected ' + want);
+              process.exit(1);
+            }
+            const browser = await launchBrowser({ browser: want });
+            const engineName = browser.browserType().name();
+            if (engineName !== want) {
+              console.error('❌ launched engine is ' + engineName + ', expected ' + want);
+              await browser.close();
+              process.exit(1);
+            }
+            const ctx = await browser.newContext();
+            const page = await ctx.newPage();
+            await page.goto('data:text/html,<h1>ok</h1>');
+            const heading = await page.textContent('h1');
+            if (heading !== 'ok') {
+              console.error('❌ page did not render expected content; got: ' + heading);
+              await browser.close();
+              process.exit(1);
+            }
+            await browser.close();
+            console.log('✅ ' + want + ' launched and rendered a page');
+          "
+        env:
+          SMOKE_BROWSER: ${{ matrix.browser }}

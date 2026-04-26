@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **API**: Visual baseline endpoints now accept browser scoping (`?browser=` or run/browser fallback) for accept/delete/list flows, and baseline accept activity logs include the targeted browser engine to improve audit clarity (#110).
 
 ### Added
-- **CI**: New `cross-browser-smoke` matrix job (DIF-002b gap 2) live-launches Firefox and WebKit via Playwright and asserts `launchBrowser({ browser })` opens the requested engine and renders a page. Closes the gap where only `resolveBrowser()` was unit-tested while live engine launches relied on manual verification (#110).
+- **CI**: New `cross-browser-smoke` matrix workflow (`.github/workflows/cross-browser.yml`, DIF-002b gap 2) live-launches Firefox and WebKit via Playwright and asserts `launchBrowser({ browser })` opens the requested engine and renders a page. Path-filtered to PRs touching `backend/src/runner/**` and runs on a nightly cron against `main`, so the matrix doesn't double CI time on unrelated PRs while still catching Playwright API regressions (#110).
 
 ## [1.6.6] — 2026-04-25
 

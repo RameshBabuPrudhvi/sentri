@@ -262,69 +262,9 @@ jobs:
           retention-days: 3
 
   # ── Cross-browser smoke (DIF-002b gap 2) ──────────────────────────────────
-  # Live-launch verification that `launchBrowser({ browser })` works for
-  # firefox and webkit. Chromium is already exercised by the `backend`,
-  # `integration`, and `docker` jobs, so this matrix covers only the two
-  # engines that are otherwise unit-tested only via `resolveBrowser()`.
-  # Runs in parallel with the other jobs and does not block them on failure
-  # of a single engine — `fail-fast: false` keeps both engines visible.
-  cross-browser-smoke:
-    name: Cross-browser smoke — ${{ matrix.browser }}
-    runs-on: ubuntu-latest
-    needs: [secrets]
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [firefox, webkit]
-    defaults:
-      run:
-        working-directory: backend
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node 20
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Provision ${{ matrix.browser }} for Playwright
-        run: npx playwright install --with-deps ${{ matrix.browser }}
-
-      - name: Smoke test — launchBrowser({ browser }) opens a page
-        run: |
-          node --input-type=module -e "
-            import { launchBrowser, resolveBrowser } from './src/runner/config.js';
-            const want = process.env.SMOKE_BROWSER;
-            const { name } = resolveBrowser(want);
-            if (name !== want) {
-              console.error('❌ resolveBrowser returned ' + name + ', expected ' + want);
-              process.exit(1);
-            }
-            const browser = await launchBrowser({ browser: want });
-            const engineName = browser.browserType().name();
-            if (engineName !== want) {
-              console.error('❌ launched engine is ' + engineName + ', expected ' + want);
-              await browser.close();
-              process.exit(1);
-            }
-            const ctx = await browser.newContext();
-            const page = await ctx.newPage();
-            await page.goto('data:text/html,<h1>ok</h1>');
-            const heading = await page.textContent('h1');
-            if (heading !== 'ok') {
-              console.error('❌ page did not render expected content; got: ' + heading);
-              await browser.close();
-              process.exit(1);
-            }
-            await browser.close();
-            console.log('✅ ' + want + ' launched and rendered a page');
-          "
-        env:
-          SMOKE_BROWSER: ${{ matrix.browser }}
+  # Lives in its own workflow at `.github/workflows/cross-browser.yml` so it
+  # can be path-filtered (only runs on PRs touching the runner) and run on a
+  # nightly cron, instead of doubling CI time on every PR.
 
   # ── UI E2E (Playwright) ───────────────────────────────────────────────────
   ui-e2e:
