@@ -89,7 +89,11 @@ Then:
 5. Dev-only seed endpoint is available when `NODE_ENV !== production` (see `AGENT.md`). Use it to pre-populate users/workspaces; otherwise register via UI.
 
 **Test data to prepare:**
-- Stable crawl target URL: `TBD` (engineering to confirm a stable demo site)
+- Stable crawl target URLs (from `frontend/src/demo.js` and CI):
+  - `https://demo-shop.example.com` (E-Commerce demo)
+  - `https://admin.example.com` (Admin Dashboard demo)
+  - `https://www.example.com` (Marketing Site demo / CI default — `.github/workflows/ci.yml`)
+  - These use IANA-reserved `example.com` subdomains; they will not actually crawl real content but are deterministic for create-project / connection-test flows. For real crawl/run testing, point at a site you control.
 - Sample regression suite: ≥ 5 tests, mix of passing/failing
 - Sample baseline images: at least one stable, one with intentional diff
 
@@ -110,7 +114,7 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 4. Invite `userb@example.test` as `qa_lead`. Open invite link in incognito → User B accepts and lands in WS-1.
 
 ### 3. Project — create
-5. As User A, create project **"PRJ-Demo"** with a stable URL (`TBD: demo site`). Project appears in the list and as `?project=PRJ-Demo` deep-link target.
+5. As User A, create project **"PRJ-Demo"** with a real URL you control (or `https://www.example.com` for the create-project + connection-test flow only — `example.com` won't yield meaningful crawl results). Project appears in the list and as `?project=PRJ-Demo` deep-link target.
 
 ### 4. Discover — crawl the app
 6. Trigger **Link Crawl** → progress visible; pages discovered; same-origin fetch/XHR captured.
@@ -447,7 +451,7 @@ Each area uses this format:
 
 **Negative / edge:**
 - Anti-aliasing / font rendering differences across OS → `VISUAL_DIFF_THRESHOLD` (default **0.02** = 2% of pixels) and `VISUAL_DIFF_PIXEL_TOLERANCE` (default **0.1**) filter noise (`AGENT.md`). Change `VISUAL_DIFF_THRESHOLD=0` to verify zero-tolerance mode also works.
-- Dynamic content (timestamps, ads) → **mask/ignore regions are not documented** in the codebase. File as a gap or confirm with engineering before marking this row pass.
+- Dynamic content (timestamps, ads) → **mask / ignore regions are NOT supported.** `diffScreenshot()` in `backend/src/runner/executeTest.js:343-349` is called with only `{ runId, testId, browser, stepNumber, pngBuffer }` — no mask, region, clip, or exclude params exist. Workaround: tune `VISUAL_DIFF_THRESHOLD` / `VISUAL_DIFF_PIXEL_TOLERANCE`, or stub the dynamic content in the test. Do not test for masking; file as enhancement if needed.
 - Viewport size change between runs → diff behavior documented (pass/fail/warn) — confirm actual product behavior and note it in checklist.
 - Concurrent baseline accept by two users → last-write-wins with audit trail.
 - Very large images → no timeout, no memory crash.
@@ -588,18 +592,25 @@ Note: **Slack and in-app are NOT supported** — do not test them.
 
 The settings API requires **at least one channel** to be enabled (confirmed by `backend/tests/account-compliance.test.js`: saving with all three blank returns 400).
 
+**Delivery model** (`backend/src/utils/notifications.js:270-305`):
+- Channels fire **simultaneously** via `Promise.allSettled(dispatches)` — no queue, no retry, no rate-limit.
+- All errors are logged (`[notifications] X failed for runId: ...`) but **never propagated** — a failing notification cannot fail the run.
+- Notifications fire **only when `run.failed > 0`** (`notifications.js:256-257`). Successful runs send nothing.
+
 **Steps & expected (per channel):**
-1. Trigger a failed run → notification delivered via each enabled channel. Expect delivery within ~1 min (engineering to confirm SLO).
+1. Trigger a failed run → each enabled channel receives one dispatch. Verify backend log line `[notifications] <channel> notification sent for <runId>`.
 2. Notification payload includes: project, test name, run ID, failure reason, link to run detail.
 3. Link in notification opens the correct run and requires auth.
 4. Disable a channel → no notifications sent via that channel for subsequent runs.
 5. Save settings with all three channels blank → API returns **400** ("At least one channel is required").
-6. Trigger recovery (previously failing test now passes) → "recovered" notification sent (confirm if supported; otherwise file as enhancement).
+6. Successful run (no failures) → **no notification** sent on any channel (intentional, `notifications.js:256`).
+7. Recovery notifications ("previously failed, now passes") are **not implemented** — do not test for them; file as enhancement if needed.
 
 **Negative / edge:**
-- Invalid / non-HTTPS webhook URL → clear error in settings; no silent drop.
-- Flood of failures (10+ in a minute) → batching/rate-limit policy is **undocumented**; observe and file if spam occurs.
-- User removed from workspace → stops receiving notifications for that workspace.
+- Invalid / non-HTTPS webhook URL → channel call fails; backend log shows `[notifications] Webhook notification failed` warning; **other channels still deliver** (best-effort).
+- Slow / hung channel → no timeout in code; the dispatch will wait on the underlying HTTP client default. Verify this does not stall run completion (the run completes regardless because dispatches are best-effort).
+- Flood of failures (10+ failed runs in a minute) → **no batching, throttling, or dedup is implemented**. Each failed run sends one notification per enabled channel. File as enhancement if this floods Teams/email.
+- User removed from workspace → stops receiving notifications because settings are workspace-scoped.
 - Notification payloads contain no PII / secrets / tokens.
 
 ---
@@ -620,8 +631,8 @@ The settings API requires **at least one channel** to be enabled (confirmed by `
 - JWT stored in **HttpOnly cookie**; verify `HttpOnly`, `Secure`, `SameSite` flags in DevTools (`README.md` security table).
 - Proactive refresh fires **5 min before expiry** (`docs/changelog.md`); leave a tab idle and confirm refresh happens without redirect.
 - Logout invalidates cookie server-side (replay fails).
-- Password reset uses DB-backed **atomic one-time claim** tokens (`README.md`, `docs/changelog.md`): reusing a claimed token → rejected; requesting a new token invalidates all prior unused tokens (`#78`).
-- Global session invalidation on password change is **not documented**; observe behavior and file if other sessions remain valid.
+- Password reset uses DB-backed **atomic one-time claim** tokens (`README.md`, `docs/changelog.md`): reusing a claimed token → rejected; requesting a new token invalidates all prior unused **reset tokens** (`#78`).
+- ⚠️ **There is no in-app "change password" endpoint** — only `forgot-password` + `reset-password` (`backend/src/routes/auth.js:687`). Password reset **does NOT invalidate active sessions on other devices** (no token version bump / refresh-token clear). Verify this: log in on browsers A and B → run reset flow on A → confirm B's session continues to work. File as `SEC` enhancement; do not log as a bug against the current build.
 
 **Input / injection:**
 - XSS probes in test names, project names, workspace names, chat messages, bug titles (`<script>alert(1)</script>`) → rendered as text, never executed.
