@@ -34,6 +34,8 @@ This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section 
 
 **When verifying a permissions claim:** read [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json), not the markdown matrix below — the JSON is the canonical machine-readable form. The markdown table mirrors it for humans.
 
+> **Automated coverage:** This manual plan is the human baseline. Automated unit / component / E2E tests are tracked in [#98](https://github.com/RameshBabuPrudhvi/sentri/issues/98). Sections already covered by automation should be tagged `_(automated by tests/…)_` — manual testers may skip those during release sign-off. When you add an automated test, update the matching `QA.md` section and Coverage Checklist row.
+
 ---
 
 ## 🧪 How to Test
