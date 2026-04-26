@@ -152,10 +152,12 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 28. Change something visible on the target → re-run → diff PNG appears at `artifacts/diffs/`, run flagged as visual regression when diff > `VISUAL_DIFF_THRESHOLD` (0.02).
 29. Click **Accept visual changes** → baseline updated; subsequent run passes.
 
-### 12. Run results & artifacts (the "report")
+### 12. Run results, artifacts & reports
 30. On RunDetail verify: per-test status, per-step screenshots, per-step timing, video, network logs, browser badge, parallelism used.
 31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open.
-32. **Note:** there is **no** standalone HTML/PDF run report or shareable public link today (DIF-005 trace viewer + DIF-006 standalone Playwright export are 🔲 planned per `ROADMAP.md`). Do **not** test for them.
+32. Open **`/reports`** page → renders run/test reports for the workspace.
+33. From Dashboard, export the **executive PDF report** → file downloads, opens, contains pass-rate / defect breakdown / trends matching on-screen widgets.
+34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), public/shareable report links. Do not test these.
 
 ### 13. Notifications
 33. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
@@ -633,13 +635,217 @@ The settings API requires **at least one channel** to be enabled (confirmed by `
 
 ---
 
+### 📑 Reports (`/reports`) & PDF Export
+
+**Preconditions:** Workspace with completed runs and approved tests.
+
+**Steps & expected:**
+1. Sidebar → **Reports** → `/reports` loads without console errors.
+2. Verify the report views available (run summary, test status, defect breakdown, etc. — record the actual list shown).
+3. Filter / date-range controls update report content; counts match Runs and Tests pages.
+4. From **Dashboard**, click **Export PDF** (executive report) → PDF downloads.
+5. Open the PDF → contains pass-rate, defect breakdown, recent activity, and matches on-screen Dashboard widgets.
+6. CSV export from **Tests** page (full-detail with step rows, file `sentri-tests-YYYY-MM-DD.csv` per `frontend/src/pages/Tests.jsx:564`) → opens in spreadsheet, header row + per-step rows.
+
+**Negative / edge:**
+- Empty workspace → reports/PDF render empty states, no errors.
+- Viewer can view reports but cannot trigger destructive actions from them.
+- Very large dataset → PDF generation completes; no client crash.
+
+---
+
+### 🖥️ System Diagnostics (`/system`)
+
+**Preconditions:** Logged in.
+
+**Steps & expected:**
+1. Sidebar → **System** → `/system` loads.
+2. Verify the diagnostics surfaces (record what's shown — typically uptime, version, AI provider status, Ollama status, DB stats, queue stats, etc.).
+3. Settings → **System** tab shows the same/related info from `sysInfo` (`frontend/src/pages/Settings.jsx`); both should agree.
+4. `GET /health` returns `200 { ok: true, uptime, version }` (`backend/src/index.js:270-278`).
+5. `GET /config` returns app config including `demoMode` flag and per-user demo quota (see Demo Mode section).
+
+---
+
+### 🆕 New Project Page (`/projects/new`)
+
+**Preconditions:** `qa_lead` or `admin` logged in.
+
+**Steps & expected:**
+1. Projects → **New Project** → `/projects/new` loads (separate page, not a modal).
+2. Fill name + URL + any optional fields → **Test connection** button probes the URL.
+   - Locally, set `ALLOW_PRIVATE_URLS=true` to allow `http://localhost:<port>` (`docs/changelog.md`); off in prod.
+3. Save → redirects to ProjectDetail; project appears in `/projects` list.
+4. Submit invalid URL / SSRF payload (e.g. `file://`, `http://169.254.169.254/`) → blocked.
+5. Submit duplicate name → handled with clear error.
+6. Viewer attempts to open `/projects/new` → blocked / 403.
+
+---
+
+### 📋 Runs List (`/runs`)
+
+**Preconditions:** Workspace with multiple runs in different states.
+
+**Steps & expected:**
+1. Sidebar → **Runs** → `/runs` loads with table/list of runs.
+2. Filter by status (passed / failed / running / stopped) → list updates.
+3. Filter by project → only that project's runs.
+4. Click a row → navigates to `/runs/:runId` (RunDetail).
+5. Sort by date / duration → ordering correct.
+6. Pagination (if present) → next/prev pages load without losing filter state.
+
+---
+
+### 📁 Project Detail (`/projects/:id`)
+
+**Preconditions:** Project with approved tests + at least one run.
+
+**Steps & expected:**
+1. Open a project → `/projects/:id` loads with project-scoped command center.
+2. **Run regression** from this page → uses the project's defaults; opens RunRegressionModal.
+3. **Review / approve / reject** tests scoped to this project (does not show other projects' tests).
+4. **Export** Zephyr CSV / TestRail CSV / Traceability scoped to this project.
+5. **⚡ Automation** quick-link → opens `/automation?project=<id>` with project pre-expanded.
+6. Per-status counts widget reflects `GET /api/v1/projects/:id/tests/counts`.
+7. Project-scoped **Notification settings** entry point visible to admin.
+
+---
+
+### ☑️ Bulk Actions & Keyboard Shortcuts
+
+**Preconditions:** Tests page (`/tests`) with ≥ 5 tests in mixed statuses.
+
+**Bulk actions** (`POST /api/v1/projects/:id/tests/bulk`, see `backend/src/routes/tests.js:19`):
+1. Select multiple tests via checkboxes → bulk bar appears showing "N selected" with **Approve**, **Reject**, **Clear selection** (`frontend/src/pages/Tests.jsx:914-927`).
+2. **Bulk approve** → all selected tests move to active suite; **one audit-log entry per test**, each tagged with the acting user (`docs/changelog.md` #78).
+3. **Bulk reject** → all selected archived; one activity per test.
+4. **Bulk delete** → soft-deletes selected tests into Recycle Bin.
+5. **Bulk restore** (from Recycle Bin) → restores all selected.
+6. Mixing roles: Viewer cannot use bulk actions → buttons hidden or 403.
+
+**Keyboard shortcuts** (`frontend/src/pages/Tests.jsx:508-518`):
+7. `/` → focuses search input (when no input is focused).
+8. `a` (with selection) → triggers bulk approve.
+9. `r` (with selection) → triggers bulk reject.
+10. `Esc` → clears selection.
+11. Typing in inputs/textareas / contenteditable → shortcuts **must NOT** fire (verify `INPUT`/`TEXTAREA`/`isContentEditable` guard).
+
+**Command palette** (`⌘K` / `Ctrl+K`):
+12. Press `⌘K` (mac) or `Ctrl+K` (win/linux) → palette opens with navigation entries + AI chat entry.
+13. Type a page name → fuzzy match; `Enter` navigates.
+14. `Esc` closes the palette.
+
+**Negative / edge:**
+- Bulk action with 0 selected → action button disabled.
+- Bulk action mid-run on the same tests → handled gracefully (queued or rejected with clear error).
+- Refresh after partial bulk failure → state consistent (no half-applied bulk).
+
+---
+
+### 🪟 Modals (Tests page)
+
+**Preconditions:** Tests page open.
+
+For each modal: open → fill → submit → close behavior.
+
+| Modal | Trigger | Verify |
+|---|---|---|
+| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal |
+| **GenerateTestModal** | "Generate Test" | Plain-English input, OpenAPI upload, HAR upload, paste `METHOD /path` patterns; submit creates Draft tests |
+| **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, parallelism 1–10; submit opens RunDetail |
+| **ReviewModal** | "Review" / opening a Draft | Step-by-step approval queue; Approve/Reject/Skip; advances to next test |
+| **RecorderModal** | "Record a test" | Live CDP screencast; record/stop controls; on stop saves Draft |
+| **AiFixPanel** | "Fix with AI" on failed test | SSE token stream; diff vs current code; Accept/Discard |
+
+**Common checks for every modal:**
+- Click outside or `Esc` closes (only if no unsaved input — otherwise warns).
+- Required fields validated inline; submit blocked with clear errors.
+- Loading state shown during submission; double-click does not double-submit.
+
+---
+
+### 📤 Imports (OpenAPI, HAR, plain-English API)
+
+**Preconditions:** GenerateTestModal open.
+
+**Steps & expected:**
+1. **OpenAPI import** — upload a valid OpenAPI 3.x spec → tests generated cover documented endpoints with status + JSON-shape assertions.
+2. **HAR import** — upload a captured HAR file → tests generated for same-origin fetch/XHR calls in the HAR.
+3. **Plain-English** — describe an endpoint ("POST /api/login expects 200 + token") → API test generated.
+4. **`METHOD /path` patterns** — paste lines like `GET /api/users` → matching tests generated.
+
+**Negative / edge:**
+- Malformed OpenAPI / HAR → clear error, no crash.
+- HAR with cross-origin / sensitive data → only same-origin requests included; auth headers stripped or masked in generated tests.
+- Oversized HAR → rejected with size limit message.
+
+---
+
+### 🚀 Onboarding Tour ("Getting Started")
+
+**Preconditions:** Fresh user OR Settings → "Restart Tour" clicked (`frontend/src/pages/Settings.jsx:1219-1243`).
+
+**Steps & expected:**
+1. First login → onboarding tour appears on `/dashboard`.
+2. Tour walks through the primary surfaces (record what steps are shown).
+3. Skip → tour dismissed; doesn't reappear on next login.
+4. Settings → **Restart Tour** → page navigates to `/dashboard` and tour replays.
+5. After restart, the previous "completed" state is cleared (verify via localStorage `onboarding` keys).
+
+---
+
+### 🎟️ Demo Mode & Per-User Quotas
+
+**Preconditions:** Hosted deployment with `DEMO_GOOGLE_API_KEY` set (`docs/changelog.md` #94).
+
+**Steps & expected:**
+1. `GET /config` returns `{ demoMode: true, quota: { crawls, runs, generations } }`.
+2. As a demo user (no own AI key), per-day quotas enforced: **2 crawls**, **3 runs**, **5 generations** (`demoQuota` middleware).
+3. Hit each quota → next call returns 429 / "quota exceeded" with reset time.
+4. Add own AI key (BYOK) → quotas bypass, `/config` reflects new state.
+5. Counters use Redis when available, in-memory fallback otherwise — verify either by inspecting Redis or restarting backend (in-memory resets, Redis persists).
+
+**Skip in self-hosted / unset env:** confirm `demoMode: false` and no quota headers in responses.
+
+---
+
+### ⚙️ Settings → Data tab (destructive admin actions)
+
+**Preconditions:** Admin logged in. Settings → Data tab.
+
+**Steps & expected:** (per `frontend/src/pages/Settings.jsx:1202-1213`)
+1. **Clear Run History** — confirms intent → `api.clearRuns()` → all run records + logs/results gone; counts on Dashboard reset.
+2. **Clear Activity Log** — `api.clearActivities()` → audit log empty.
+3. **Clear Self-Healing History** — `api.clearHealing()` → next run starts the selector waterfall fresh (no remembered winners).
+4. Counts displayed reflect current state (`sysInfo.runs`, `sysInfo.activities`, `sysInfo.healingEntries`).
+5. Recycle Bin section also accessible from this tab — verify same behavior as `Recycle Bin` section above.
+
+**Negative / edge:**
+- Non-admin opens Settings → 403 (route is `requiredRole="admin"`, `frontend/src/App.jsx:66`).
+- Clear actions show a confirmation step (no one-click destruction).
+- Concurrent runs while clearing → in-flight runs handled gracefully (record observed behavior).
+
+---
+
+### 🔀 Workspace Switcher
+
+**Preconditions:** User belongs to ≥ 2 workspaces.
+
+**Steps & expected:**
+1. Workspace switcher visible in sidebar/topbar.
+2. Switch workspace → URL updates, all entity lists (projects/tests/runs/activity) scoped to the new workspace; no data leak from previous.
+3. JWT carries `workspaceId` hint; role re-resolved from DB on every request (`docs/changelog.md` ACL-001/002 #88) → role change in DB takes effect within one request.
+4. Direct API call with mismatched workspace ID → 403.
+
+---
+
 ## 📱 Cross-Cutting Checks
 
 Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
 
 **Responsive / visual:**
 - Mobile (375px), tablet (768px), desktop (1440px) — no broken layouts, no horizontal scroll, all buttons reachable.
-- Dark mode — no illegible text, no white flashes, all icons visible.
+- Dark mode — **automatic** via `prefers-color-scheme` (no manual toggle exists, `README.md:77`). Toggle the OS setting and reload; verify no illegible text, no white flashes, all icons visible.
 - High-DPI / Retina — images crisp, no pixelation.
 
 **State & navigation:**
@@ -744,9 +950,21 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | Notifications | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Security | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Permissions matrix | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Reports + Dashboard PDF + CSV** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **System diagnostics (`/system` + Settings → System)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **New Project page (`/projects/new`)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Runs list (`/runs`)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Project Detail (`/projects/:id`)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Bulk actions + keyboard shortcuts + ⌘K palette** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Modals (Crawl / Generate / Run / Review / Recorder / AiFix)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Imports (OpenAPI / HAR / API description)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Onboarding tour** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Demo mode + per-user quotas** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Settings → Data tab (destructive clears)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** standalone HTML/PDF run reports, embedded trace viewer (`DIF-005`), standalone Playwright export (`DIF-006`), MFA/2FA (`SEC-004`), shareable public test reports, Jira integration, billing, CLI. Do not test these — file enhancement requests instead.
+> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page and Dashboard PDF export **are** shipped and must be tested.
 
 ---
 
