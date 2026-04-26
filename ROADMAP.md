@@ -409,7 +409,10 @@ The following items have been verified complete against the codebase and are **n
 
 **Status:** 🔄 In Progress | **Effort:** M | **Source:** Follow-on from DIF-002
 
-**Progress (PR #107):** Gap 3 (browser badge) shipped — new `BrowserBadge` component renders the Playwright engine on Run Detail header (test runs only) and Runs list rows (compact, non-chromium only). Gap 1 (browser-aware visual baselines) and gap 2 (firefox/webkit CI smoke job) still outstanding.
+**Progress:**
+- **PR #107** — Gap 3 (browser badge) shipped: new `BrowserBadge` component renders the Playwright engine on Run Detail header (test runs only) and Runs list rows (compact, non-chromium only).
+- **PR #110** — Gap 1 (browser-aware visual baselines) shipped: `baseline_screenshots` re-keyed to `(testId, stepNumber, browser)` via migration `010_baseline_browser.sql`; `visualDiff.js`, `baselineRepo`, and baseline accept/delete/list routes thread `browser` end-to-end. Pre-upgrade chromium baselines stay effective via a legacy-path fallback in `ensureBaseline()` (the migration cannot move PNG files on disk).
+- **Outstanding** — Gap 2 (firefox/webkit CI smoke job that actually launches the engines). Only `resolveBrowser()` is unit-tested today; live launch verification still relies on manual testing.
 
 **Problem:** DIF-002 landed the core cross-browser dispatch (`resolveBrowser()`, per-run `browser` field, migration 009, Run Regression modal dropdown) but left three visible gaps that prevent firefox/webkit from feeling like first-class citizens:
 
