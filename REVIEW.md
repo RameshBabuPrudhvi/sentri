@@ -1,6 +1,11 @@
 # Sentri — PR Review Checklist
 
-> Read this before submitting any pull request.
+> **Reviewing agents (Devin, Copilot, Cursor): also read [AGENT.md](./AGENT.md) before
+> this file** — it contains the project's always-on rules (DO NOTs, architecture,
+> auth model). For coding conventions see [STANDARDS.md](./STANDARDS.md). For
+> table lookups (utils, env vars, auth strategies) see [REFERENCE.md](./REFERENCE.md).
+>
+> Read this file before submitting any pull request.
 
 ---
 
