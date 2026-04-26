@@ -90,62 +90,22 @@ The following items have been verified complete against the codebase and are **n
 
 ---
 
+## Next Up — Recommended PR Order
+
+The following items are the highest-leverage work to pick up next. Ordering balances customer impact, unblocking effect on later items, and effort.
+
+1. **DIF-006** — Standalone Playwright export (M) — Removes the single biggest vendor lock-in objection raised during evaluations; unblocks enterprise procurement conversations.
+2. **AUTO-005** — Automatic test retry with flake isolation (M) — Complements DIF-004 (flaky detection ✅) by acting on flakes automatically; reduces false-failure noise in CI.
+3. **AUTO-016** — Accessibility testing via axe-core (M) — Increasingly a legal requirement (ADA, EAA); high signal-to-effort ratio with first-class Playwright support.
+4. **MNT-006** — Object storage for artifacts, S3 / R2 (M) — Production prerequisite for any multi-instance or container-based deployment; currently called out in the README production checklist.
+
+See [Planned Items](#phase-2--team--enterprise-foundation) sections below for full specs. Lowest-effort follow-ups with high immediate value: `DIF-013` (telemetry, S).
+
+---
+
 ## Phase 2 — Team & Enterprise Foundation
 
 *Goal: Multi-user, secure, and durable enough for team deployment (5–50 users). Blockers must be resolved before inviting external users or handling real customer data.*
-
----
-
-### SEC-001 — Email verification on registration 🔴 Blocker
-
-**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-01)
-
-**Problem:** `POST /api/auth/register` creates accounts immediately with no email verification. Any actor can claim any email address, enabling account spoofing. The forgot-password flow explicitly acknowledges this gap (`auth.js:426`). This is a SOC 2 compliance failure.
-
-**Fix:** Add a `verification_tokens(token, userId, email, expiresAt)` table. On registration, create the user with `emailVerified = false` and send a signed token link via email. Block login for unverified users. Add `GET /api/auth/verify?token=` and a resend endpoint.
-
-**Files to change:**
-- `backend/src/database/migrations/` — add `verification_tokens` table; add `emailVerified` column to `users`
-- `backend/src/routes/auth.js` — verification endpoint; block login for unverified accounts
-- New `backend/src/utils/emailSender.js` — email transport (Resend / SendGrid / SMTP)
-- `frontend/src/pages/Login.jsx` — show "verify your email" state with resend link
-- `backend/.env.example` — document `SMTP_HOST`, `SMTP_PORT`, `RESEND_API_KEY`
-
-**Dependencies:** None
-
----
-
-### SEC-002 — Nonce-based Content Security Policy 🟡 High
-
-**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-03)
-
-**Problem:** `appSetup.js:55` uses `'unsafe-inline'` for both `scriptSrc` and `styleSrc`. An inline comment acknowledges "replace with nonces in prod." Without nonces, any XSS injection can execute inline scripts — CSP provides no real protection.
-
-**Fix:** Generate a per-request nonce via `crypto.randomBytes(16).toString('base64')`. Pass it to Helmet's CSP directives as `'nonce-<value>'`. Inject it into Vite's HTML template via a custom `transformIndexHtml` plugin. Remove `'unsafe-inline'` from `scriptSrc`.
-
-**Files to change:**
-- `backend/src/middleware/appSetup.js` — nonce generation middleware; update Helmet CSP directives
-- `frontend/vite.config.js` — custom plugin to inject `nonce` attribute on `<script>` tags
-- `frontend/index.html` — add nonce placeholder
-
-**Dependencies:** None
-
----
-
-### SEC-003 — GDPR / CCPA account data export and deletion 🟡 High
-
-**Status:** ✅ Complete | **Effort:** M | **Source:** Quality Review (GAP-04)
-
-**Problem:** There is no way for a user to export their data or delete their account. GDPR Article 17 (right to erasure) and Article 20 (data portability) are legal requirements for EU deployments. CCPA creates equivalent expectations for US users.
-
-**Fix:** Add `DELETE /api/auth/account` — hard-deletes the user and all owned data (projects, tests, runs, activities, tokens, schedules). Add `GET /api/auth/export` — returns a JSON archive of all user data. Both endpoints require password confirmation. Add UI in Settings → Account.
-
-**Files to change:**
-- `backend/src/routes/auth.js` — `DELETE /account`, `GET /export` endpoints
-- All repository files — cascade delete by `userId`
-- `frontend/src/pages/Settings.jsx` — Account tab with delete/export buttons
-
-**Dependencies:** None
 
 ---
 
