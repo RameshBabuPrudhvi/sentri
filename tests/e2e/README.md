@@ -9,6 +9,8 @@ This suite validates:
 - Functional area contracts: crawl, generate, recorder, run-all orchestration, AI fix apply, AI chat
 - UI login-route smoke checks (when frontend is reachable)
 
+> For **manual** end-to-end validation (Golden E2E happy path + per-feature happy paths and negatives), see [`QA.md`](../../QA.md) at the repo root. The Playwright suite below is the automated complement — both should pass before release.
+
 ## Run
 From repo root:
 

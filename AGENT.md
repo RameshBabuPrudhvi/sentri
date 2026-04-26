@@ -13,6 +13,7 @@
 | Writing or modifying code | [STANDARDS.md](./STANDARDS.md) |
 | Looking up a utility, CSS class, hook, repo, env var, or auth strategy | [REFERENCE.md](./REFERENCE.md) — Ctrl+F only, never top-to-bottom |
 | Before opening a PR | [REVIEW.md](./REVIEW.md) |
+| Validating a user-visible change manually | [QA.md](./QA.md) — Golden E2E happy path + per-feature checks |
 
 ---
 
@@ -121,4 +122,5 @@ Copy this block into your PR description and tick each item before requesting re
 - [ ] `cd frontend && npm run build && npm test` passes locally
 - [ ] Security checklist reviewed (if PR touches auth, routes, or data handling)
 - [ ] No `require()`, no direct LLM SDK imports, no raw `fetch()` in components, no JWTs in response bodies, no raw SQL in routes
+- [ ] User-visible changes walked through the relevant section(s) of [QA.md](./QA.md)
 ```
