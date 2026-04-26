@@ -244,6 +244,50 @@ await test("diffScreenshot() creates browser-scoped baseline directories", () =>
   assert.ok(fs.existsSync(absPath), `firefox baseline should exist at ${absPath}`);
 });
 
+await test("diffScreenshot() honours legacy chromium baseline path post-migration 010", () => {
+  // Migration 010 rewrites baseline DB rows to be browser-scoped but cannot
+  // move PNG files on disk. `ensureBaseline()` must therefore fall back to
+  // the legacy `<testId>/step-N.png` layout (no browser subdir) for chromium
+  // when the new `<testId>/chromium/step-N.png` file is missing on disk.
+  // Without this fallback, the first post-upgrade run would silently return
+  // `baseline_created` for every step, masking real regressions — exactly
+  // the failure mode AGENT.md:685 warns about for visual baselines.
+  const testId = "TC-VR-LEGACY";
+  ensureTestRow(db, testId);
+  const buf = solidPng(20, 20, { r: 10, g: 20, b: 30 });
+
+  // Simulate a pre-migration on-disk baseline: PNG at the legacy path,
+  // DB row already rewritten by migration 010 to point at the new path.
+  const legacyDir = path.join(BASELINES_DIR, testId);
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, "step-0.png"), buf);
+  baselineRepo.upsert({
+    testId,
+    stepNumber: 0,
+    browser: "chromium",
+    imagePath: `/artifacts/baselines/${testId}/chromium/step-0.png`,
+    width: 20,
+    height: 20,
+  });
+
+  // Diffing the same image against the legacy baseline must report `match`,
+  // not `baseline_created`. This is the only assertion that catches a
+  // regression in the legacy-path fallback.
+  const res = diffScreenshot({
+    runId: "RUN-TEST-LEGACY",
+    testId,
+    browser: "chromium",
+    stepNumber: 0,
+    pngBuffer: buf,
+  });
+  assert.equal(res.status, "match", `expected match against legacy baseline, got ${res.status}`);
+  assert.equal(res.diffPixels, 0);
+
+  // Cleanup
+  fs.rmSync(legacyDir, { recursive: true, force: true });
+  baselineRepo.deleteByTestId(testId);
+});
+
 await test("baselinePath and diffPath contain raw testId (no %-encoding) for filesystem-URL parity", () => {
   // Reviewer's concern: encodeURIComponent(testId) in the filename writes
   // `%XX` bytes to disk, but Express URL-decodes the path before
