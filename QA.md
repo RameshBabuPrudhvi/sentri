@@ -45,20 +45,53 @@ Sentri defines three workspace roles (see `ROADMAP.md` ACL-002, stored in `works
 
 Derived from ACL-002: `admin` gates settings + destructive ops; `qa_lead` runs QA workflows; `viewer` is read-only. Verify these in-product — any deviation is a **severe security bug**.
 
-| Action | admin | qa_lead | viewer | Outsider |
-|---|---|---|---|---|
-| Create/Delete workspace | ✅ | ❌ | ❌ | ❌ |
-| Invite users / change roles | ✅ | ❌ | ❌ | ❌ |
-| Edit workspace settings (AI keys, notifications) | ✅ | ❌ | ❌ | ❌ |
-| Create/Edit/Delete project | ✅ | ✅ | ❌ | ❌ |
-| Restore from recycle bin | ✅ | ✅ | ❌ | ❌ |
-| Create/Edit tests | ✅ | ✅ | ❌ | ❌ |
-| Approve/Reject generated tests | ✅ | ✅ | ❌ | ❌ |
-| Trigger run / regression | ✅ | ✅ | ❌ | ❌ |
-| Stop running execution | ✅ | ✅ (own runs) | ❌ | ❌ |
-| Accept visual baseline | ✅ | ✅ | ❌ | ❌ |
-| View dashboard / runs | ✅ | ✅ | ✅ | ❌ |
-| Access another workspace's data via URL | ❌ | ❌ | ❌ | ❌ |
+Verified against `requireRole(...)` declarations in `backend/src/routes/*.js` and `backend/src/middleware/requireRole.js` (hierarchy: `admin > qa_lead > viewer`). Source cited per row — if behavior diverges from this table, file a **severe security bug**.
+
+**admin-only actions:**
+
+| Action | Source |
+|---|---|
+| Edit workspace (rename, settings) | `routes/workspaces.js:44` |
+| Invite / change-role / remove members | `routes/workspaces.js:134, 168, 196` |
+| AI provider settings (`/settings`) | `routes/settings.js:48, 53, 130` |
+| Settings → Data destructive clears (runs / activities / healing) | `routes/system.js:193, 200, 205` |
+| **Delete project** | `routes/projects.js:84` |
+| **Purge from recycle bin** (permanent) | `routes/recycleBin.js:132` |
+| **Create / revoke CI/CD trigger token** | `routes/runs.js:379, 411` |
+
+**qa_lead or admin (qa_lead-gated):**
+
+| Action | Source |
+|---|---|
+| Create project | `routes/projects.js:46` |
+| Test connection (New Project) | `routes/system.js:48` |
+| Restore from recycle bin (soft-undelete) | `routes/recycleBin.js:54` |
+| Crawl project | `routes/runs.js:46` |
+| Create / Edit / Delete tests | `routes/tests.js:97, 318, 364` |
+| Generate tests / Record / AI Fix / Apply Fix | `routes/tests.js:382, 858`; `routes/testFix.js:152, 273` |
+| Approve / Reject (single + bulk) | `routes/tests.js:538, 555, 589` |
+| Trigger run (project regression + single test) | `routes/runs.js:134`; `routes/tests.js:487` |
+| **Abort / stop run** — note: code has **no "own-runs only" restriction**, any qa_lead can stop any run | `routes/runs.js:257` |
+| Accept visual baseline | `routes/tests.js:751` |
+| Set / edit / delete cron schedule | `routes/projects.js:162, 222` |
+| Edit per-project notification settings | `routes/projects.js:266` |
+
+**Any authenticated workspace member (no `requireRole`):**
+
+| Action | Notes |
+|---|---|
+| View dashboard / runs / tests / reports / projects pages | Workspace scope still enforced — outsiders blocked |
+| Account export / delete (own account, GDPR) | Password-confirmed; not workspace-scoped |
+| Switch workspace | Via switcher; role re-resolved from DB on every request (ACL-001/002) |
+
+**Always denied (cross-workspace isolation):**
+
+| Action |
+|---|
+| Access another workspace's data via URL or API |
+| Outsider (no `workspace_members` row) accessing any workspace resource |
+
+> ⚠️ **Note on workspace create/delete:** the `POST/DELETE /api/workspaces/...` endpoints for creating/destroying entire workspaces are out of the scope captured here. Verify behavior against the running build and update this table if found.
 
 ---
 
@@ -248,7 +281,7 @@ Each area uses this format:
 6. Remove User B → active session loses access on next request (≤ 60s).
 
 **Negative / edge:**
-- User B (Member) tries to invite users → blocked.
+- User B (`qa_lead`) tries to invite users → blocked (admin-only, `routes/workspaces.js:134`).
 - Outsider opens workspace URL directly → 403 / redirect, not 200 with empty data.
 - Duplicate invite → handled gracefully.
 - Invite to non-existent email → still sends (or clear UX); no crash.
@@ -260,16 +293,17 @@ Each area uses this format:
 **Preconditions:** Workspace exists.
 
 **Steps & expected:**
-1. Create project → appears in list; slug/URL unique.
+1. Create project (`qa_lead` or `admin`, `routes/projects.js:46`) → appears in list; slug/URL unique.
 2. Edit project name/settings → persists after refresh.
-3. Delete project → moved to recycle bin, no longer in active list.
-4. Restore from recycle bin → returns to active list with data intact (tests, runs, baselines).
-5. Permanently delete → unrecoverable; associated runs/tests gone.
+3. **Delete project (admin-only**, `routes/projects.js:84`) → moved to recycle bin, no longer in active list. As `qa_lead`, attempting delete returns **403**.
+4. Restore from recycle bin (`qa_lead` or `admin`, `routes/recycleBin.js:54`) → returns to active list with data intact (tests, runs, baselines).
+5. **Permanently purge (admin-only**, `routes/recycleBin.js:132`) → unrecoverable; associated runs/tests gone. `qa_lead` purge attempt → 403.
 
 **Negative / edge:**
 - Two users edit same project simultaneously → last-write-wins or conflict warning (document behavior).
 - Delete project with active running tests → runs stopped/completed cleanly, no orphans.
-- Viewer attempts edit/delete → blocked with clear message.
+- Viewer attempts any project mutation (create/edit/delete/restore/purge) → 403.
+- `qa_lead` attempts delete or purge → 403 (admin-only ops).
 
 ---
 
@@ -349,7 +383,7 @@ Each area uses this format:
 - Long-running / hung test → aborted at `BROWSER_TEST_TIMEOUT` with a clear timeout error.
 - Flaky test (intermittent failure) → no product-level auto-retry is documented. Rely on `safeClick` / `safeFill` self-healing (see `docs/changelog.md` DIF-015); confirm behavior, file if retry is expected.
 - Viewer attempts to trigger run → blocked.
-- `qa_lead` stops another user's run → blocked; `admin` → allowed.
+- `qa_lead` stops another user's run → **allowed** (no per-user "own runs" gate exists in code, `routes/runs.js:257` only requires `qa_lead`). If product intent is to restrict to the run's owner, file as security enhancement.
 - Browser close mid-run → run continues on backend; status visible on return.
 
 ---
@@ -431,7 +465,8 @@ Each area uses this format:
 5. `DELETE /api/projects/:id/schedule` → schedule removed; `GET` returns null.
 
 **Negative / edge:**
-- Viewer attempts to create trigger token / schedule → blocked.
+- Viewer attempts to create trigger token or schedule → 403.
+- **`qa_lead` attempts to create / revoke trigger token → 403** (admin-only, `routes/runs.js:379, 411`). `qa_lead` *can* create / edit schedules (`routes/projects.js:162, 222`).
 - Trigger run with revoked or wrong token → 401, no run created.
 - Schedule across DST transition → next-run time correct in target timezone.
 - Two schedules firing simultaneously → respect `PARALLEL_WORKERS` queue; no crash.
@@ -517,16 +552,16 @@ Each area uses this format:
 
 **Steps & expected:**
 1. Update each setting category → change persists after refresh and across sessions. Sentri surfaces (no billing module):
-   - **AI provider keys** (Anthropic / OpenAI / Google / Ollama). Switching providers via the header dropdown should succeed in one click (`README.md`).
-   - **Workspace members & roles** (ACL-002: `admin` / `qa_lead` / `viewer`).
-   - **Per-project notification settings** (Teams webhook / email recipients / generic webhook — at least one channel required, see `backend/tests/account-compliance.test.js`).
-   - **System info / Ollama status**.
+   - **AI provider keys** — admin-only (`routes/settings.js:48, 53, 130`). Switching providers via the header dropdown should succeed in one click (`README.md`).
+   - **Workspace members & roles** — admin-only (`routes/workspaces.js:134, 168, 196`). Roles: `admin` / `qa_lead` / `viewer`.
+   - **Per-project notification settings** (Teams webhook / email recipients / generic webhook) — **`qa_lead` or admin** (`routes/projects.js:266`); at least one channel required (`backend/tests/account-compliance.test.js`).
+   - **System info / Ollama status** — read-only diagnostics; available on Settings → System and `/system` page.
 2. Invalid input (bad email, bad URL) → inline validation; save blocked.
 3. Revoke/regenerate API key → old key returns 401 immediately; new key works.
 4. Disconnect integration → subsequent features depending on it fail gracefully.
 
 **Negative / edge:**
-- Member / Viewer attempts to open workspace settings → blocked.
+- `qa_lead` or `viewer` opens `/settings` page → 403 (route is `requiredRole="admin"`, `frontend/src/App.jsx:66`). Note: per-project notification edits are reachable from ProjectDetail, not `/settings`.
 - Concurrent settings edits → last-write-wins with no lost fields.
 - Save partial form (required field blank) → blocked, no partial persistence.
 
