@@ -24,6 +24,12 @@ This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section 
 | Per-feature checks | jump to `### <feature>` (Authentication, Workspaces, Projects, Tests Page, Recorder, Runs, AI Fix, Test Code Editing, Automation, Visual Testing, Dashboard, AI Chat, Settings, Account / GDPR, Email Verification, Recycle Bin, Audit Log, Notifications, Security, Reports, System Diagnostics, New Project, Runs List, Project Detail, Bulk Actions, Modals, Imports, Onboarding, Demo Mode, Workspace Switcher) |
 | Bug template | [Bug Reporting Template](#-bug-reporting-template) |
 | What's in / out of scope | [Coverage Checklist](#-coverage-checklist) and `backend/src/middleware/permissions.json#outOfScope` |
+| Generating tests for the deployed app | [Tests Page → UI / browser test generation](#-tests-page) — **UI tests are the default output**; API tests are additional |
+
+> ⚠️ **Agents generating Playwright tests for Sentri: read this.**
+> Sentri's primary output is **UI / browser tests** that drive a real browser via `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and `expect(page....)` assertions on rendered DOM.
+> API tests using `request.fetch` / `request.get` / `request.post` are an **additional, secondary** output — only valid when same-origin fetch/XHR was captured during a crawl, or the user explicitly asked for an API test (OpenAPI / HAR / `METHOD /path`).
+> **If you emit only `request.*` tests when asked for "Playwright tests for Sentri", you have misread this guide.** Default to UI tests unless the user explicitly says "API test".
 
 **When adding a new user-facing flow** (per [REVIEW.md](./REVIEW.md)):
 1. Add a section here under "Functional Test Areas".
