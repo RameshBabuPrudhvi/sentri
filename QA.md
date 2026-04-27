@@ -15,16 +15,76 @@ It has two layers:
 
 ## 🤖 For agents — read this first
 
-This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section you need.
+This file is ~1000 lines. **Do not read it top-to-bottom.** Use the index below to jump directly to the section you need, read only that section, then stop.
 
-| If you need… | Go to |
-|---|---|
-| Role required for any endpoint | [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) (machine-readable, lives next to `requireRole.js`) |
-| End-to-end happy-path validation | [Golden E2E Happy Path](#golden-e2e-happy-path-must-pass-before-release) (50 steps) |
-| Per-feature checks | jump to `### <feature>` (Authentication, Workspaces, Projects, Tests Page, Recorder, Runs, AI Fix, Test Code Editing, Automation, Visual Testing, Dashboard, AI Chat, Settings, Account / GDPR, Email Verification, Recycle Bin, Audit Log, Notifications, Security, Reports, System Diagnostics, New Project, Runs List, Project Detail, Bulk Actions, Modals, Imports, Onboarding, Demo Mode, Workspace Switcher) |
-| Bug template | [Bug Reporting Template](#-bug-reporting-template) |
-| What's in / out of scope | [Coverage Checklist](#-coverage-checklist) and `backend/src/middleware/permissions.json#outOfScope` |
-| Generating tests for the deployed app | [Tests Page → UI / browser test generation](#-tests-page) — **UI tests are the default output**; API tests are additional |
+### Intent → section map
+
+If the user asks for… read only this section:
+
+| User intent | Section (anchor) | Lines |
+|---|---|---|
+| "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 180–279 |
+| "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 34–48, 358–394 |
+| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 358–394, 866–882 |
+| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 444–467 |
+| "Record a test" | [Recorder](#-recorder) | 397–415 |
+| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 418–441 |
+| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 470–499 |
+| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 502–526 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 529–546 |
+| "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
+| "Verify security / authorization" | [Security](#-security) | 706–733 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 813–841 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 988–1021 |
+
+### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
+
+```yaml
+# Feature sections
+authentication:      { lines: 293-316 }
+workspaces:          { lines: 319-335 }
+projects:            { lines: 339-354 }
+tests-page:          { lines: 358-394 }
+recorder:            { lines: 397-415 }
+runs:                { lines: 418-441 }
+ai-fix:              { lines: 444-467 }
+test-code-editing:   { lines: 470-499 }
+automation:          { lines: 502-526 }
+visual-testing:      { lines: 529-546 }
+dashboard:           { lines: 549-566 }
+ai-chat:             { lines: 569-599 }
+settings:            { lines: 602-620 }
+account-gdpr:        { lines: 623-633 }
+email-verification:  { lines: 636-644 }
+recycle-bin:         { lines: 647-657 }
+audit-log:           { lines: 660-669 }
+notifications:       { lines: 672-703 }
+security:            { lines: 706-733 }
+reports-pdf:         { lines: 737-753 }
+system-diagnostics:  { lines: 756-766 }
+new-project:         { lines: 769-781 }
+runs-list:           { lines: 784-795 }
+project-detail:      { lines: 798-810 }
+bulk-actions:        { lines: 813-841 }
+modals:              { lines: 844-863 }
+api-test-imports:    { lines: 866-882 }
+onboarding:          { lines: 885-895 }
+demo-mode:           { lines: 898-910 }
+settings-data-tab:   { lines: 913-928 }
+workspace-switcher:  { lines: 931-940 }
+
+# Meta sections
+golden-happy-path:       { lines: 180-279 }
+canonical-ui-test-shape: { lines: 34-48 }
+permissions-matrix:      { lines: 91-139 }
+setup:                   { lines: 143-177 }
+cross-cutting-checks:    { lines: 943-970 }
+known-issues:            { lines: 973-985 }
+bug-template:            { lines: 988-1021 }
+coverage-checklist:      { lines: 1025-1069 }
+```
+
+> **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
 
 > ⚠️ **Agents generating Playwright tests for Sentri: read this.**
 > Sentri's primary output is **UI / browser tests** that drive a real browser via `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and `expect(page....)` assertions on rendered DOM.
