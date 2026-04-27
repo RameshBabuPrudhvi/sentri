@@ -31,6 +31,22 @@ This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section 
 > API tests using `request.fetch` / `request.get` / `request.post` are an **additional, secondary** output — only valid when same-origin fetch/XHR was captured during a crawl, or the user explicitly asked for an API test (OpenAPI / HAR / `METHOD /path`).
 > **If you emit only `request.*` tests when asked for "Playwright tests for Sentri", you have misread this guide.** Default to UI tests unless the user explicitly says "API test".
 
+**Canonical UI test shape — emit this by default:**
+
+```js
+test('user can log in', async ({ page }) => {
+  await page.goto('https://rameshbabuprudhvi.github.io/sentri/login');
+  await safeFill(page.getByLabel('Email'), 'user@example.test');
+  await safeFill(page.getByLabel('Password'), 'pw');
+  await safeClick(page.getByRole('button', { name: 'Sign in' }));
+  await expect(page).toHaveURL(/dashboard/);
+  await expect(page.getByRole('heading', { name: /workspace/i })).toBeVisible();
+  await expect(page.getByRole('navigation')).toBeVisible();
+});
+```
+
+No `import` lines. No `request.fetch` / `request.get` / `request.post`. Role-based selectors. ≥ 3 `expect(page....)` assertions on visible UI state.
+
 **When adding a new user-facing flow** (per [REVIEW.md](./REVIEW.md)):
 1. Add a section here under "Functional Test Areas".
 2. Add a step (or sub-section) in the Golden E2E Happy Path if it belongs in the must-pass journey.
@@ -347,7 +363,7 @@ Each area uses this format:
 1. Crawl URL — verify **both crawl modes** (`README.md`):
    - **Link Crawl** — follows `<a>` tags, maps pages.
    - **State Exploration** — clicks/fills/submits to discover multi-step flows (auth, checkout).
-   Each mode completes, discovered pages listed, progress visible. Same-origin fetch/XHR captured (powers API test generation).
+   Each mode completes, discovered pages listed, progress visible. **Primary output: UI / browser tests** (see §3 below). Same-origin fetch/XHR is also captured and powers API test generation as a secondary output (see §4).
 2. Generate tests — verify the **8-stage AI pipeline** runs (`README.md`): discover → filter → classify → plan → generate → deduplicate → enhance → validate. Tests appear in **Draft** queue (`README.md`: "Nothing executes until a human approves it").
 3. **UI / browser test generation (default output)** — three paths, all produce tests that drive a real browser:
    - During **Link Crawl**: discovered pages → Playwright tests with `page.goto(...)` + `getByRole` / `getByLabel` / `getByText` + ≥ 3 `expect(...)` assertions on visible UI state.
@@ -833,8 +849,8 @@ For each modal: open → fill → submit → close behavior.
 
 | Modal | Trigger | Verify |
 |---|---|---|
-| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal |
-| **GenerateTestModal** | "Generate Test" | Plain-English input, OpenAPI upload, HAR upload, paste `METHOD /path` patterns; submit creates Draft tests |
+| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal. **Output: UI / browser tests** (Draft) — `page.goto` + role selectors + `safeClick` / `safeFill`; same-origin fetch/XHR additionally yields API tests |
+| **GenerateTestModal** | "Generate Test" | **Default output: UI / browser tests** from the crawl context. API-shaped inputs (plain-English endpoint, OpenAPI upload, HAR upload, `METHOD /path` paste) produce API tests only when explicitly used; submit creates Draft tests |
 | **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, parallelism 1–10; submit opens RunDetail |
 | **ReviewModal** | "Review" / opening a Draft | Step-by-step approval queue; Approve/Reject/Skip; advances to next test |
 | **RecorderModal** | "Record a test" | Live CDP screencast; record/stop controls; on stop saves Draft |
@@ -847,7 +863,9 @@ For each modal: open → fill → submit → close behavior.
 
 ---
 
-### 📤 Imports (OpenAPI, HAR, plain-English API)
+### 📤 API Test Imports (OpenAPI, HAR, plain-English API)
+
+> Scope: this section covers **API test** generation paths only. UI / browser tests are generated from crawls and the Recorder — see [Tests Page §3](#-tests-page) and [Recorder](#-recorder).
 
 **Preconditions:** GenerateTestModal open.
 
@@ -1016,7 +1034,8 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Projects | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Tests (crawl modes, generate, search, exports) | ⬜ | ⬜ | ⬜ | ⬜ | |
-| API Test Generation | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **UI / Browser Test Generation (default output)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| API Test Generation (additional output) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Recorder | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Runs (cross-browser, mobile, parallel, abort, self-heal) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **AI Fix (manual + auto feedback loop)** | ⬜ | ⬜ | ⬜ | ⬜ | |
