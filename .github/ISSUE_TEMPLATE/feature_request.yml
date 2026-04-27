@@ -1,0 +1,80 @@
+name: ✨ Feature request
+description: Suggest a new capability or enhancement for Sentri.
+title: "feat: <short description>"
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Per `REVIEW.md`, new features generally need to exist in `ROADMAP.md` before a PR is accepted.
+        Use this template to propose the idea so it can be discussed and (if accepted) added to the roadmap.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have read `ROADMAP.md` and this is not already planned.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / user need
+      description: What problem does this solve? Who is affected?
+      placeholder: "As a <role>, I want <capability> so that <outcome>."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Include UX sketches, API shape, or example flows.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you evaluated and why this one is preferred.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Frontend (UI)
+        - Backend (API)
+        - Authentication / permissions
+        - Recorder
+        - Crawl / test generation
+        - Runs / scheduling
+        - AI Fix / AI Chat
+        - Visual testing
+        - Reports / dashboard
+        - Docs
+        - CI / build
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Bullet list of testable conditions for "done".
+      value: |
+        - [ ]
+        - [ ]
+        - [ ]
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links, prior art, screenshots, related issues.

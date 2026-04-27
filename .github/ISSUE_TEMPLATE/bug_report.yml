@@ -1,0 +1,127 @@
+name: 🐛 Bug report
+description: Report a reproducible defect in Sentri (frontend, backend, or deployed app).
+title: "bug: <short description>"
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Before submitting, please:
+        - Search [existing issues](../issues?q=is%3Aissue) to avoid duplicates.
+        - Confirm the bug reproduces on the latest `main`.
+        - For security issues, **do not** open a public issue — see `SECURITY.md` (or email the maintainer).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I can reproduce this on the latest `main` (or a deployed build I can identify below).
+          required: true
+        - label: This is not a security vulnerability (those go to `SECURITY.md`).
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence describing the bug.
+      placeholder: "Login form submits empty payload when password manager autofills."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, numbered steps. Include test data if relevant.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include error messages, console output, stack traces, or screenshots.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Frontend (UI)
+        - Backend (API)
+        - Authentication / permissions
+        - Recorder
+        - Crawl / test generation
+        - Runs / scheduling
+        - AI Fix / AI Chat
+        - Visual testing
+        - Reports / dashboard
+        - Docs
+        - CI / build
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical (data loss, auth bypass, total outage)
+        - High (core flow broken, no workaround)
+        - Medium (feature broken, workaround exists)
+        - Low (cosmetic / minor)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Sentri version / commit
+      description: Git SHA, release tag, or "deployed at <url>".
+      placeholder: "main @ a1b2c3d  /  https://rameshbabuprudhvi.github.io/sentri"
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Browser + version, OS, Node version (if running locally).
+      placeholder: |
+        - Browser: Chrome 130 / Firefox 131 / Safari 18
+        - OS: macOS 14.5 / Windows 11 / Ubuntu 24.04
+        - Node: 20.x (only if running locally)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots / network traces
+      description: Paste relevant logs, attach screenshots, or link a HAR file. Redact secrets.
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might help — recent changes, related issues, hypotheses.

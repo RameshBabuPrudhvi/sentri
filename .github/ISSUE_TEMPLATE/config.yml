@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation & QA guide
+    url: https://github.com/rameshbabuprudhvi/sentri/blob/main/QA.md
+    about: Check QA.md, README.md, and ROADMAP.md before opening an issue.
+  - name: 💬 Questions & discussions
+    url: https://github.com/rameshbabuprudhvi/sentri/discussions
+    about: Use Discussions for usage questions, ideas, and Q&A (not bug reports).
+  - name: 🔒 Security vulnerabilities
+    url: https://github.com/rameshbabuprudhvi/sentri/security/advisories/new
+    about: Report security issues privately — do NOT open a public issue.
