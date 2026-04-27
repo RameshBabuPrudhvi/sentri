@@ -32,6 +32,12 @@ The zip must contain:
 | `backend/src/routes/tests.js` | Add `GET /api/v1/projects/:id/export/playwright` — fetch approved tests, call builder, stream zip |
 | `frontend/src/pages/Tests.jsx` | Add "Export as Playwright project" button that triggers a file download |
 
+### Lanes (for AGENT.md § Branch co-ownership protocol)
+
+- **agent-scope:** `backend/src/utils/exportFormats.js`, `backend/src/routes/tests.js`, `backend/tests/**` (new tests for the endpoint + builder) — claimable by any single agent (devin / claude / codex / cursor / copilot)
+- **human-scope:** `frontend/src/pages/Tests.jsx` and any other `frontend/**` change
+- **shared (coordinate via PR comment before editing):** `docs/changelog.md`, `ROADMAP.md`, this file
+
 ### Acceptance criteria
 
 - [ ] `GET /api/v1/projects/:id/export/playwright` returns `Content-Type: application/zip`

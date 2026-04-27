@@ -45,6 +45,32 @@ If any of these pre-flight checks fails or is unclear, stop and ask the human be
 
 ---
 
+## Branch co-ownership protocol — applies to every agent and human on the PR
+
+This protocol is **agent-agnostic**. It applies equally to Devin, Claude Code, Codex, Cursor, Copilot Workspace, any future agent, and any human teammate sharing the branch. Wherever this document says "agent", substitute your own identity (`devin`, `claude`, `codex`, `cursor`, `copilot`, `human:<github-handle>`, etc.). This is what lets short prompts like *"Implement the current PR per NEXT.md"* be safe by default.
+
+**Your agent id** = the first token you put in every claim / heartbeat / hand-off comment. Pick one and stick with it for the whole session:
+- `devin` — Devin cloud agent
+- `claude` — Claude Code / Anthropic CLI
+- `codex` — OpenAI Codex CLI / ChatGPT code
+- `cursor` — Cursor background agent
+- `copilot` — GitHub Copilot Workspace
+- `human:<handle>` — a person editing directly
+
+### Rules
+
+1. **Lane = `agent-scope` field in `NEXT.md`.** You may only edit files listed under the current item's `agent-scope`. Files under `human-scope` are off-limits even if you "need" to touch them — comment on the PR instead. If the item lists multiple agent lanes (e.g. `agent-scope-backend`, `agent-scope-frontend`), pick one and name it in your claim.
+2. **Claim before first edit.** Push an empty commit `chore(claim): <agent-id> working on <files>` and post a PR comment `🟢 <agent-id>-active <UTC timestamp> — files: <list>`. If **any** `🟢 <other>-active` comment exists newer than yours and overlaps your files, stop and wait or pick a non-overlapping subset.
+3. **Re-sync before every commit.** `git fetch && git rebase origin/<branch>`. If the rebase touches a file outside your lane, abort, comment `⚠️ <agent-id> scope conflict on <file>`, and stop.
+4. **Commit-before-pause (mandatory).** Before any sleep, context switch, or long-running task: `git add -A && git commit -m "wip(<scope>): <what>, next: <what>" && git push`. Then post a PR comment with: agent-id, last-done, next-step, files-touched, files-not-yet-touched. **Never end a session with uncommitted local changes.**
+5. **Heartbeat.** Push a wip commit roughly every 15 min of active work. If you cannot make progress in 10 min, stop and comment instead of guessing.
+6. **Hand-off.** When your scope is done, post `✅ <agent-id>-done <files>` and stop. Do not start the next `NEXT.md` item without re-prompting.
+7. **Conflict de-escalation.** If a commit from another agent or a human lands on files in your lane while you were paused, treat the newer version as canonical, rebase onto it, re-run tests, continue. Do not revert. If unsure, stop and ask in a PR comment.
+
+If `NEXT.md` for the current item has no `agent-scope` field, treat the "Files to change" table as your scope and ask the human to confirm in a PR comment before your first edit.
+
+---
+
 ## Project Overview
 
 Sentri is a full-lifecycle AI QA platform that crawls a web application, generates Playwright test suites with an LLM, routes every generated test through a human-approval queue, executes approved tests against a live browser, and self-heals broken selectors across runs.
