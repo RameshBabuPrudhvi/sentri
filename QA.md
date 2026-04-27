@@ -35,7 +35,7 @@ If the user asks for… read only this section:
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
 | "Verify security / authorization" | [Security](#-security) | 766–794 |
 | "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 873–900 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1080 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1081 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
@@ -91,7 +91,7 @@ coverage-checklist:      { lines: 1085-1129 }
 > API tests using `request.fetch` / `request.get` / `request.post` are an **additional, secondary** output — only valid when same-origin fetch/XHR was captured during a crawl, or the user explicitly asked for an API test (OpenAPI / HAR / `METHOD /path`).
 > **If you emit only `request.*` tests when asked for "Playwright tests for Sentri", you have misread this guide.** Default to UI tests unless the user explicitly says "API test".
 
-**Canonical UI test shape — emit this by default:**
+#### Canonical UI test shape — emit this by default
 
 ```js
 test('user can log in', async ({ page }) => {
