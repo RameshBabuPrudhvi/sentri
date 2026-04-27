@@ -23,65 +23,65 @@ If the user asks for… read only this section:
 
 | User intent | Section (anchor) | Lines |
 |---|---|---|
-| "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 180–279 |
-| "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 34–48, 358–394 |
-| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 358–394, 866–882 |
-| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 444–467 |
-| "Record a test" | [Recorder](#-recorder) | 397–415 |
-| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 418–441 |
-| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 470–499 |
-| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 502–526 |
-| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 529–546 |
+| "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 240–339 |
+| "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 94–108, 418–453 |
+| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 926–941 |
+| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 504–527 |
+| "Record a test" | [Recorder](#-recorder) | 457–475 |
+| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 478–501 |
+| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 530–559 |
+| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 562–586 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 589–606 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
-| "Verify security / authorization" | [Security](#-security) | 706–733 |
-| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 813–841 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 988–1021 |
+| "Verify security / authorization" | [Security](#-security) | 766–794 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 873–900 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1080 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
 ```yaml
 # Feature sections
-authentication:      { lines: 293-316 }
-workspaces:          { lines: 319-335 }
-projects:            { lines: 339-354 }
-tests-page:          { lines: 358-394 }
-recorder:            { lines: 397-415 }
-runs:                { lines: 418-441 }
-ai-fix:              { lines: 444-467 }
-test-code-editing:   { lines: 470-499 }
-automation:          { lines: 502-526 }
-visual-testing:      { lines: 529-546 }
-dashboard:           { lines: 549-566 }
-ai-chat:             { lines: 569-599 }
-settings:            { lines: 602-620 }
-account-gdpr:        { lines: 623-633 }
-email-verification:  { lines: 636-644 }
-recycle-bin:         { lines: 647-657 }
-audit-log:           { lines: 660-669 }
-notifications:       { lines: 672-703 }
-security:            { lines: 706-733 }
-reports-pdf:         { lines: 737-753 }
-system-diagnostics:  { lines: 756-766 }
-new-project:         { lines: 769-781 }
-runs-list:           { lines: 784-795 }
-project-detail:      { lines: 798-810 }
-bulk-actions:        { lines: 813-841 }
-modals:              { lines: 844-863 }
-api-test-imports:    { lines: 866-882 }
-onboarding:          { lines: 885-895 }
-demo-mode:           { lines: 898-910 }
-settings-data-tab:   { lines: 913-928 }
-workspace-switcher:  { lines: 931-940 }
+authentication:      { lines: 353-376 }
+workspaces:          { lines: 379-395 }
+projects:            { lines: 399-414 }
+tests-page:          { lines: 418-453 }
+recorder:            { lines: 457-475 }
+runs:                { lines: 478-501 }
+ai-fix:              { lines: 504-527 }
+test-code-editing:   { lines: 530-559 }
+automation:          { lines: 562-586 }
+visual-testing:      { lines: 589-606 }
+dashboard:           { lines: 609-625 }
+ai-chat:             { lines: 629-658 }
+settings:            { lines: 662-679 }
+account-gdpr:        { lines: 683-692 }
+email-verification:  { lines: 696-703 }
+recycle-bin:         { lines: 707-716 }
+audit-log:           { lines: 720-728 }
+notifications:       { lines: 732-762 }
+security:            { lines: 766-794 }
+reports-pdf:         { lines: 797-812 }
+system-diagnostics:  { lines: 816-825 }
+new-project:         { lines: 829-840 }
+runs-list:           { lines: 844-854 }
+project-detail:      { lines: 858-869 }
+bulk-actions:        { lines: 873-900 }
+modals:              { lines: 904-922 }
+api-test-imports:    { lines: 926-941 }
+onboarding:          { lines: 945-954 }
+demo-mode:           { lines: 958-969 }
+settings-data-tab:   { lines: 973-987 }
+workspace-switcher:  { lines: 991-999 }
 
 # Meta sections
-golden-happy-path:       { lines: 180-279 }
-canonical-ui-test-shape: { lines: 34-48 }
-permissions-matrix:      { lines: 91-139 }
-setup:                   { lines: 143-177 }
-cross-cutting-checks:    { lines: 943-970 }
-known-issues:            { lines: 973-985 }
-bug-template:            { lines: 988-1021 }
-coverage-checklist:      { lines: 1025-1069 }
+golden-happy-path:       { lines: 240-339 }
+canonical-ui-test-shape: { lines: 94-108 }
+permissions-matrix:      { lines: 151-199 }
+setup:                   { lines: 203-237 }
+cross-cutting-checks:    { lines: 1003-1029 }
+known-issues:            { lines: 1033-1044 }
+bug-template:            { lines: 1048-1081 }
+coverage-checklist:      { lines: 1085-1129 }
 ```
 
 > **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
