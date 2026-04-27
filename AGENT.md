@@ -13,6 +13,7 @@
 | Writing or modifying code | [STANDARDS.md](./STANDARDS.md) |
 | Looking up a utility, CSS class, hook, repo, env var, or auth strategy | [REFERENCE.md](./REFERENCE.md) — Ctrl+F only, never top-to-bottom |
 | Before opening a PR | [REVIEW.md](./REVIEW.md) |
+| First-time or external contributor (workflow, branch naming, commit style) | [CONTRIBUTING.md](./CONTRIBUTING.md) |
 | Validating a user-visible change manually | [QA.md](./QA.md) — Golden E2E happy path + per-feature checks |
 | Looking up the role required for an endpoint | [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) — machine-readable, lives next to `requireRole.js` |
 
