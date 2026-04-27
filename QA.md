@@ -175,10 +175,13 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 ### 4. Discover — crawl the app
 6. Trigger **Link Crawl** → progress visible; pages discovered; same-origin fetch/XHR captured.
 7. Trigger **State Exploration** crawl on the same project → multi-step flows discovered (forms submitted, auth flows entered).
-
 ### 5. Generate — AI tests
 8. Click **Generate** → 8-stage pipeline runs (discover → filter → classify → plan → generate → deduplicate → enhance → validate). New tests land in **Draft** queue, not auto-approved.
-9. Verify at least one **API test** was generated from captured fetch/XHR (Playwright `request` test asserting status + JSON shape).
+9. Verify **both test types** were produced — Sentri generates **UI / browser tests by default**; API tests are an additional output:
+   - **UI / browser test (primary)** — uses `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and ≥ 3 `expect(...)` assertions on visible UI state. Drives a real browser. **No `request.` / `request.fetch` / `request.get` calls.**
+   - **API test (only if same-origin fetch/XHR was captured)** — Playwright `request` test asserting status + JSON shape.
+   If only API tests appear, the crawl did not discover UI flows — re-run **State Exploration** and regenerate.
+
 
 ### 6. Record — manual recorder
 10. Click **Record a test** → Playwright browser opens via CDP screencast.
@@ -340,16 +343,21 @@ Each area uses this format:
    - **State Exploration** — clicks/fills/submits to discover multi-step flows (auth, checkout).
    Each mode completes, discovered pages listed, progress visible. Same-origin fetch/XHR captured (powers API test generation).
 2. Generate tests — verify the **8-stage AI pipeline** runs (`README.md`): discover → filter → classify → plan → generate → deduplicate → enhance → validate. Tests appear in **Draft** queue (`README.md`: "Nothing executes until a human approves it").
-3. **API test generation** (`README.md`) — three paths:
+3. **UI / browser test generation (default output)** — three paths, all produce tests that drive a real browser:
+   - During **Link Crawl**: discovered pages → Playwright tests with `page.goto(...)` + `getByRole` / `getByLabel` / `getByText` + ≥ 3 `expect(...)` assertions on visible UI state.
+   - During **State Exploration** crawl: multi-step flows (login, form submit, checkout) → tests using `safeClick` / `safeFill` so self-healing engages at run time.
+   - **Recorder**: user-driven click/fill/press/select/navigate (see Recorder section).
+   Each path produces a Playwright test that opens a browser, navigates pages, and asserts on rendered DOM. **No `request.fetch` / `request.get` / `request.post` calls.**
+4. **API test generation (additional output)** — three paths, all produce Playwright `request` tests (no browser):
    - During crawl: same-origin fetch/XHR auto-generated as Playwright `request` tests.
    - "Generate Test" modal: plain-English endpoint description.
    - Paste `METHOD /path` patterns or attach an OpenAPI spec.
    Each path produces tests that verify status codes, JSON shape, error payloads.
-4. Approve test → moves to active suite; appears in run targets.
-5. Reject test → removed/archived; excluded from regression.
-6. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
-7. **Search** tests via `?search=` (`/api/v1/projects/:id/tests?search=`) → filters list correctly; empty results show empty state.
-8. **Exports** (`backend/src/routes/tests.js`):
+5. Approve test → moves to active suite; appears in run targets.
+6. Reject test → removed/archived; excluded from regression.
+7. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
+8. **Search** tests via `?search=` (`/api/v1/projects/:id/tests?search=`) → filters list correctly; empty results show empty state.
+9. **Exports** (`backend/src/routes/tests.js`):
    - `GET /api/v1/projects/:id/tests/export/zephyr` — Zephyr Scale CSV.
    - `GET /api/v1/projects/:id/tests/export/testrail` — TestRail CSV.
    - `GET /api/v1/projects/:id/tests/traceability` — traceability matrix.
