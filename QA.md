@@ -15,15 +15,97 @@ It has two layers:
 
 ## 🤖 For agents — read this first
 
-This file is ~1000 lines. **Do not read it top-to-bottom.** Jump to the section you need.
+This file is ~1000 lines. **Do not read it top-to-bottom.** Use the index below to jump directly to the section you need, read only that section, then stop.
 
-| If you need… | Go to |
-|---|---|
-| Role required for any endpoint | [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) (machine-readable, lives next to `requireRole.js`) |
-| End-to-end happy-path validation | [Golden E2E Happy Path](#golden-e2e-happy-path-must-pass-before-release) (50 steps) |
-| Per-feature checks | jump to `### <feature>` (Authentication, Workspaces, Projects, Tests Page, Recorder, Runs, AI Fix, Test Code Editing, Automation, Visual Testing, Dashboard, AI Chat, Settings, Account / GDPR, Email Verification, Recycle Bin, Audit Log, Notifications, Security, Reports, System Diagnostics, New Project, Runs List, Project Detail, Bulk Actions, Modals, Imports, Onboarding, Demo Mode, Workspace Switcher) |
-| Bug template | [Bug Reporting Template](#-bug-reporting-template) |
-| What's in / out of scope | [Coverage Checklist](#-coverage-checklist) and `backend/src/middleware/permissions.json#outOfScope` |
+### Intent → section map
+
+If the user asks for… read only this section:
+
+| User intent | Section (anchor) | Lines |
+|---|---|---|
+| "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 240–339 |
+| "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 94–108, 418–453 |
+| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 926–941 |
+| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 504–527 |
+| "Record a test" | [Recorder](#-recorder) | 457–475 |
+| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 478–501 |
+| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 530–559 |
+| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 562–586 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 589–606 |
+| "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
+| "Verify security / authorization" | [Security](#-security) | 766–794 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 873–900 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1081 |
+
+### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
+
+```yaml
+# Feature sections
+authentication:      { lines: 353-376 }
+workspaces:          { lines: 379-395 }
+projects:            { lines: 399-414 }
+tests-page:          { lines: 418-453 }
+recorder:            { lines: 457-475 }
+runs:                { lines: 478-501 }
+ai-fix:              { lines: 504-527 }
+test-code-editing:   { lines: 530-559 }
+automation:          { lines: 562-586 }
+visual-testing:      { lines: 589-606 }
+dashboard:           { lines: 609-625 }
+ai-chat:             { lines: 629-658 }
+settings:            { lines: 662-679 }
+account-gdpr:        { lines: 683-692 }
+email-verification:  { lines: 696-703 }
+recycle-bin:         { lines: 707-716 }
+audit-log:           { lines: 720-728 }
+notifications:       { lines: 732-762 }
+security:            { lines: 766-794 }
+reports-pdf:         { lines: 797-812 }
+system-diagnostics:  { lines: 816-825 }
+new-project:         { lines: 829-840 }
+runs-list:           { lines: 844-854 }
+project-detail:      { lines: 858-869 }
+bulk-actions:        { lines: 873-900 }
+modals:              { lines: 904-922 }
+api-test-imports:    { lines: 926-941 }
+onboarding:          { lines: 945-954 }
+demo-mode:           { lines: 958-969 }
+settings-data-tab:   { lines: 973-987 }
+workspace-switcher:  { lines: 991-999 }
+
+# Meta sections
+golden-happy-path:       { lines: 240-339 }
+canonical-ui-test-shape: { lines: 94-108 }
+permissions-matrix:      { lines: 151-199 }
+setup:                   { lines: 203-237 }
+cross-cutting-checks:    { lines: 1003-1029 }
+known-issues:            { lines: 1033-1044 }
+bug-template:            { lines: 1048-1081 }
+coverage-checklist:      { lines: 1085-1129 }
+```
+
+> **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
+
+> ⚠️ **Agents generating Playwright tests for Sentri: read this.**
+> Sentri's primary output is **UI / browser tests** that drive a real browser via `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and `expect(page....)` assertions on rendered DOM.
+> API tests using `request.fetch` / `request.get` / `request.post` are an **additional, secondary** output — only valid when same-origin fetch/XHR was captured during a crawl, or the user explicitly asked for an API test (OpenAPI / HAR / `METHOD /path`).
+> **If you emit only `request.*` tests when asked for "Playwright tests for Sentri", you have misread this guide.** Default to UI tests unless the user explicitly says "API test".
+
+#### Canonical UI test shape — emit this by default
+
+```js
+test('user can log in', async ({ page }) => {
+  await page.goto('https://rameshbabuprudhvi.github.io/sentri/login');
+  await safeFill(page.getByLabel('Email'), 'user@example.test');
+  await safeFill(page.getByLabel('Password'), 'pw');
+  await safeClick(page.getByRole('button', { name: 'Sign in' }));
+  await expect(page).toHaveURL(/dashboard/);
+  await expect(page.getByRole('heading', { name: /workspace/i })).toBeVisible();
+  await expect(page.getByRole('navigation')).toBeVisible();
+});
+```
+
+No `import` lines. No `request.fetch` / `request.get` / `request.post`. Role-based selectors. ≥ 3 `expect(page....)` assertions on visible UI state.
 
 **When adding a new user-facing flow** (per [REVIEW.md](./REVIEW.md)):
 1. Add a section here under "Functional Test Areas".
@@ -175,10 +257,13 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 ### 4. Discover — crawl the app
 6. Trigger **Link Crawl** → progress visible; pages discovered; same-origin fetch/XHR captured.
 7. Trigger **State Exploration** crawl on the same project → multi-step flows discovered (forms submitted, auth flows entered).
-
 ### 5. Generate — AI tests
 8. Click **Generate** → 8-stage pipeline runs (discover → filter → classify → plan → generate → deduplicate → enhance → validate). New tests land in **Draft** queue, not auto-approved.
-9. Verify at least one **API test** was generated from captured fetch/XHR (Playwright `request` test asserting status + JSON shape).
+9. Verify **both test types** were produced — Sentri generates **UI / browser tests by default**; API tests are an additional output:
+   - **UI / browser test (primary)** — uses `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and ≥ 3 `expect(...)` assertions on visible UI state. Drives a real browser. **No `request.` / `request.fetch` / `request.get` calls.**
+   - **API test (only if same-origin fetch/XHR was captured)** — Playwright `request` test asserting status + JSON shape.
+   If only API tests appear, the crawl did not discover UI flows — re-run **State Exploration** and regenerate.
+
 
 ### 6. Record — manual recorder
 10. Click **Record a test** → Playwright browser opens via CDP screencast.
@@ -338,18 +423,23 @@ Each area uses this format:
 1. Crawl URL — verify **both crawl modes** (`README.md`):
    - **Link Crawl** — follows `<a>` tags, maps pages.
    - **State Exploration** — clicks/fills/submits to discover multi-step flows (auth, checkout).
-   Each mode completes, discovered pages listed, progress visible. Same-origin fetch/XHR captured (powers API test generation).
+   Each mode completes, discovered pages listed, progress visible. **Primary output: UI / browser tests** (see §3 below). Same-origin fetch/XHR is also captured and powers API test generation as a secondary output (see §4).
 2. Generate tests — verify the **8-stage AI pipeline** runs (`README.md`): discover → filter → classify → plan → generate → deduplicate → enhance → validate. Tests appear in **Draft** queue (`README.md`: "Nothing executes until a human approves it").
-3. **API test generation** (`README.md`) — three paths:
+3. **UI / browser test generation (default output)** — three paths, all produce tests that drive a real browser:
+   - During **Link Crawl**: discovered pages → Playwright tests with `page.goto(...)` + `getByRole` / `getByLabel` / `getByText` + ≥ 3 `expect(...)` assertions on visible UI state.
+   - During **State Exploration** crawl: multi-step flows (login, form submit, checkout) → tests using `safeClick` / `safeFill` so self-healing engages at run time.
+   - **Recorder**: user-driven click/fill/press/select/navigate (see Recorder section).
+   Each path produces a Playwright test that opens a browser, navigates pages, and asserts on rendered DOM. **No `request.fetch` / `request.get` / `request.post` calls.**
+4. **API test generation (additional output)** — three paths, all produce Playwright `request` tests (no browser):
    - During crawl: same-origin fetch/XHR auto-generated as Playwright `request` tests.
    - "Generate Test" modal: plain-English endpoint description.
    - Paste `METHOD /path` patterns or attach an OpenAPI spec.
    Each path produces tests that verify status codes, JSON shape, error payloads.
-4. Approve test → moves to active suite; appears in run targets.
-5. Reject test → removed/archived; excluded from regression.
-6. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
-7. **Search** tests via `?search=` (`/api/v1/projects/:id/tests?search=`) → filters list correctly; empty results show empty state.
-8. **Exports** (`backend/src/routes/tests.js`):
+5. Approve test → moves to active suite; appears in run targets.
+6. Reject test → removed/archived; excluded from regression.
+7. Edit test steps (add/remove/reorder) → saved; preview reflects changes.
+8. **Search** tests via `?search=` (`/api/v1/projects/:id/tests?search=`) → filters list correctly; empty results show empty state.
+9. **Exports** (`backend/src/routes/tests.js`):
    - `GET /api/v1/projects/:id/tests/export/zephyr` — Zephyr Scale CSV.
    - `GET /api/v1/projects/:id/tests/export/testrail` — TestRail CSV.
    - `GET /api/v1/projects/:id/tests/traceability` — traceability matrix.
@@ -819,8 +909,8 @@ For each modal: open → fill → submit → close behavior.
 
 | Modal | Trigger | Verify |
 |---|---|---|
-| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal |
-| **GenerateTestModal** | "Generate Test" | Plain-English input, OpenAPI upload, HAR upload, paste `METHOD /path` patterns; submit creates Draft tests |
+| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal. **Output: UI / browser tests** (Draft) — `page.goto` + role selectors + `safeClick` / `safeFill`; same-origin fetch/XHR additionally yields API tests |
+| **GenerateTestModal** | "Generate Test" | **Default output: UI / browser tests** from the crawl context. API-shaped inputs (plain-English endpoint, OpenAPI upload, HAR upload, `METHOD /path` paste) produce API tests only when explicitly used; submit creates Draft tests |
 | **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, parallelism 1–10; submit opens RunDetail |
 | **ReviewModal** | "Review" / opening a Draft | Step-by-step approval queue; Approve/Reject/Skip; advances to next test |
 | **RecorderModal** | "Record a test" | Live CDP screencast; record/stop controls; on stop saves Draft |
@@ -833,7 +923,9 @@ For each modal: open → fill → submit → close behavior.
 
 ---
 
-### 📤 Imports (OpenAPI, HAR, plain-English API)
+### 📤 API Test Imports (OpenAPI, HAR, plain-English API)
+
+> Scope: this section covers **API test** generation paths only. UI / browser tests are generated from crawls and the Recorder — see [Tests Page §3](#-tests-page) and [Recorder](#-recorder).
 
 **Preconditions:** GenerateTestModal open.
 
@@ -1002,7 +1094,8 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Projects | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Tests (crawl modes, generate, search, exports) | ⬜ | ⬜ | ⬜ | ⬜ | |
-| API Test Generation | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **UI / Browser Test Generation (default output)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| API Test Generation (additional output) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Recorder | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Runs (cross-browser, mobile, parallel, abort, self-heal) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **AI Fix (manual + auto feedback loop)** | ⬜ | ⬜ | ⬜ | ⬜ | |
