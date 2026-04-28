@@ -1047,11 +1047,22 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   // `startRecording` always pushes as actions[0] is suppressed (the generated
   // code already emits an explicit `page.goto(startUrl)` at the top, and the
   // human-readable steps shouldn't include a redundant initial Step 1).
-  let lastGotoUrl = String(stopResult.url || "");
+  // Compare by origin + pathname so visually-identical consecutive gotos
+  // collapse — recorder pages frequently echo `framenavigated` events with
+  // re-ordered query strings (e.g. Amazon search pages add tracking params
+  // after the first hit), which would otherwise produce two adjacent
+  // "User navigates to https://amazon.in/s" steps in the persisted test.
+  const gotoKey = (u) => {
+    if (!u) return "";
+    try { const x = new URL(u); return `${x.origin}${x.pathname}`; }
+    catch { return String(u); }
+  };
+  let lastGotoKey = gotoKey(stopResult.url || "");
   for (const a of stopResult.actions) {
     if (a.kind === "goto" && a.url) {
-      if (a.url === lastGotoUrl) continue;
-      lastGotoUrl = a.url;
+      const k = gotoKey(a.url);
+      if (k === lastGotoKey) continue;
+      lastGotoKey = k;
     }
     dedupedActions.push(a);
   }

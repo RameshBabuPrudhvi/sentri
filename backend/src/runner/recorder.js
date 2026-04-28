@@ -41,6 +41,13 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
  * @typedef {Object} RecordedAction
  * @property {"goto"|"click"|"fill"|"press"|"select"|"check"|"uncheck"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
+ * @property {string} [label]      - Human-readable label for the target
+ *                                   element (aria-label / inner text /
+ *                                   placeholder / `name`). Used by the Test
+ *                                   Detail Steps panel so reviewers see "the
+ *                                   Search button" instead of `role=button…`.
+ *                                   The selector is still the source of truth
+ *                                   for the generated Playwright code.
  * @property {string} [value]      - For `fill`, the final value typed.
  * @property {string} [url]        - For `goto`.
  * @property {string} [key]        - For `press`.
@@ -112,6 +119,23 @@ const RECORDER_SCRIPT = `
     const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
     return el.tagName.toLowerCase() + (cls ? "." + cls : "");
   }
+  // Friendly label for the human-readable Steps panel. Mirrors how AI-
+  // generated steps reference elements ("the Search button", "the Email
+  // field") rather than CSS / role= selectors. Falls through a priority
+  // chain: aria-label → trimmed inner text → placeholder → name → "" so
+  // the caller can fall back to a kind-only sentence ("User clicks").
+  function bestLabel(el) {
+    if (!el || el.nodeType !== 1) return "";
+    const aria = (el.getAttribute("aria-label") || "").trim();
+    if (aria) return aria.slice(0, 60);
+    const text = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ");
+    if (text && text.length <= 60) return text;
+    if (text) return text.slice(0, 57) + "…";
+    const ph = (el.getAttribute && el.getAttribute("placeholder")) || "";
+    if (ph) return ph.trim().slice(0, 60);
+    if (el.name) return String(el.name).slice(0, 60);
+    return "";
+  }
   function roleFromTag(tag) {
     tag = (tag || "").toLowerCase();
     if (tag === "button") return "button";
@@ -124,7 +148,7 @@ const RECORDER_SCRIPT = `
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
     window.__sentriRecord && window.__sentriRecord({
-      kind: "click", selector: bestSelector(el), ts: Date.now(),
+      kind: "click", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
     });
   }, true);
 
@@ -135,15 +159,16 @@ const RECORDER_SCRIPT = `
       window.__sentriRecord && window.__sentriRecord({
         kind: el.checked ? "check" : "uncheck",
         selector: bestSelector(el),
+        label: bestLabel(el),
         ts: Date.now(),
       });
     } else if (el.tagName === "SELECT") {
       window.__sentriRecord && window.__sentriRecord({
-        kind: "select", selector: bestSelector(el), value: el.value, ts: Date.now(),
+        kind: "select", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: bestSelector(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     }
   }, true);
@@ -155,7 +180,7 @@ const RECORDER_SCRIPT = `
     const interestingKeys = ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
     if (!interestingKeys.includes(ev.key)) return;
     window.__sentriRecord && window.__sentriRecord({
-      kind: "press", key: ev.key, selector: bestSelector(ev.target), ts: Date.now(),
+      kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),
     });
   }, true);
 })();
@@ -204,30 +229,82 @@ function escapeJsSingleQuote(str) {
  * @param {RecordedAction} a
  * @returns {string} A single step sentence suitable for the persisted `steps[]` array.
  */
+/**
+ * Derive a human-readable target phrase from a recorded action — prefers the
+ * captured `label` (aria-label / inner text / placeholder), then falls back
+ * to extracting a friendly name from a Playwright role selector
+ * (`role=button[name="Sign in"]` → `the "Sign in" button`), and finally to
+ * an empty string so the caller can degrade to a target-less sentence.
+ *
+ * Important: callers must NOT splice raw selectors into the persisted steps
+ * — the AI generate / crawl pipeline ("User clicks the Sign Up button") and
+ * the manual-test path both produce English prose, and recorded steps need
+ * to render alongside them on the Test Detail page without leaking
+ * `role=…[name="…"]` or CSS into the reviewer's view.
+ *
+ * @param {RecordedAction} a
+ * @returns {string} Either ` the "<label>" <noun>`, ` "<label>"`, or `""`.
+ */
+function friendlyTarget(a, noun = "") {
+  const raw = (a.label || "").trim();
+  if (raw) {
+    return noun ? ` the "${raw}" ${noun}` : ` "${raw}"`;
+  }
+  // Legacy actions captured before the `label` field existed only carry the
+  // selector. Try to recover a name from `role=foo[name="bar"]` so older
+  // recordings still render readable steps after this upgrade ships.
+  const sel = a.selector || "";
+  const m = sel.match(/role=([a-z]+)\[name="([^"]+)"\]/i);
+  if (m) {
+    const role = m[1].toLowerCase();
+    const name = m[2];
+    return noun || role ? ` the "${name}" ${noun || role}` : ` "${name}"`;
+  }
+  // No label, no role selector — return empty so the sentence reads cleanly
+  // ("User clicks") instead of leaking a CSS selector to the reviewer.
+  return "";
+}
+
+/**
+ * Trim a captured URL for display in the Steps panel. Strips the query
+ * string + fragment (which dominate noisy recorder URLs like Amazon search
+ * pages with 6 tracking params) and caps the rendered length so a single
+ * step doesn't push the panel sideways.
+ */
+function shortUrl(u) {
+  if (!u) return "";
+  try {
+    const url = new URL(u);
+    const base = `${url.origin}${url.pathname}`;
+    return base.length > 80 ? base.slice(0, 77) + "…" : base;
+  } catch {
+    return String(u).slice(0, 80);
+  }
+}
+
 export function recordedActionToStepText(a) {
-  const target = a.selector ? ` ${a.selector}` : "";
   switch (a.kind) {
     case "goto":
-      return `User navigates to ${a.url || ""}`.trim();
+      return `User navigates to ${shortUrl(a.url)}`.trim();
     case "click":
-      return `User clicks${target}`;
+      return `User clicks${friendlyTarget(a, "button")}`;
     case "fill":
       // Recorded fill values can contain secrets (passwords, API keys). The
       // raw value already lives in `playwrightCode`; truncate aggressively in
       // the human-readable steps so the Test Detail page doesn't surface it.
-      return `User fills${target} with "${String(a.value || "").slice(0, 40)}"`;
+      return `User fills${friendlyTarget(a, "field")} with "${String(a.value || "").slice(0, 40)}"`;
     case "press":
       return `User presses ${a.key || ""}`.trim();
     case "select":
-      return `User selects "${String(a.value || "").slice(0, 40)}" in${target}`;
+      return `User selects "${String(a.value || "").slice(0, 40)}"${friendlyTarget(a, "dropdown") ? ` in${friendlyTarget(a, "dropdown")}` : ""}`;
     case "check":
-      return `User checks${target}`;
+      return `User checks${friendlyTarget(a, "checkbox")}`;
     case "uncheck":
-      return `User unchecks${target}`;
+      return `User unchecks${friendlyTarget(a, "checkbox")}`;
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
-      return `User performs ${a.kind || "action"}${target}`;
+      return `User performs ${a.kind || "action"}${friendlyTarget(a)}`;
   }
 }
 
@@ -353,6 +430,7 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       session.actions.push({
         kind: String(action.kind || ""),
         selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+        label: action.label ? String(action.label).slice(0, 80) : undefined,
         value: action.value != null ? String(action.value).slice(0, 500) : undefined,
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
