@@ -261,11 +261,13 @@ test("goto: renders the full URL when there is no query string", () => {
   assert.equal(s, "User navigates to https://www.amazon.in/");
 });
 
-test("goto: falls back to the raw string when URL parsing fails", () => {
-  // Defensive — `framenavigated` can technically emit non-URL strings (e.g.
-  // `about:blank`). Don't crash the step formatter.
-  const s = recordedActionToStepText({ kind: "goto", url: "about:blank", ts: 1 });
-  assert.match(s, /User navigates to about:blank/);
+test("goto: falls back to the raw string (truncated) when URL parsing fails", () => {
+  // Defensive — `framenavigated` can technically emit strings that are not
+  // valid absolute URLs (e.g. relative paths, malformed strings during a
+  // navigation race). The shortUrl() catch branch must not throw and must
+  // not crash the step formatter.
+  const s = recordedActionToStepText({ kind: "goto", url: "not-a-real-url", ts: 1 });
+  assert.equal(s, "User navigates to not-a-real-url");
 });
 
 test("click: prefers the captured friendly label over the raw selector", () => {
