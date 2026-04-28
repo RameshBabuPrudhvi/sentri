@@ -405,6 +405,35 @@ export function takeCompletedRecording(sessionId) {
 }
 
 /**
+ * Test-only seam: install a fake recording session keyed by `sessionId` so
+ * unit tests can exercise {@link forwardInput} (and its CDP dispatch logic)
+ * without launching a real Chromium. Returns a disposer that removes the
+ * session from the in-memory map.
+ *
+ * Intentionally not part of the public API — only the module's own test file
+ * imports this. The `_test` prefix and JSDoc tag should keep it out of normal
+ * usage; reviewers should reject any non-test caller.
+ *
+ * @param {string} sessionId
+ * @param {Object} fields - Partial RecordingSession fields to seed.
+ * @returns {() => void} Disposer that deletes the seeded session.
+ * @private
+ */
+export function _testSeedSession(sessionId, fields = {}) {
+  sessions.set(sessionId, {
+    id: sessionId,
+    projectId: fields.projectId ?? "TEST-PROJECT",
+    url: fields.url ?? "https://example.com",
+    status: fields.status ?? "recording",
+    actions: [],
+    startedAt: Date.now(),
+    cdpSession: fields.cdpSession,
+    ...fields,
+  });
+  return () => sessions.delete(sessionId);
+}
+
+/**
  * Forward a user input event from the canvas overlay to the headless browser
  * via CDP Input domain commands. This is the core mechanism that makes the
  * recorder interactive — without it the canvas is read-only and the user can

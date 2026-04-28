@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { actionsToPlaywrightCode } from "../src/runner/recorder.js";
+import { actionsToPlaywrightCode, forwardInput, _testSeedSession } from "../src/runner/recorder.js";
 
 let passed = 0;
 let failed = 0;
@@ -24,6 +24,31 @@ function test(name, fn) {
     console.log(`  ❌  ${name}`);
     console.log(`      ${err.message}`);
   }
+}
+
+async function asyncTest(name, fn) {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`  ✅  ${name}`);
+  } catch (err) {
+    failed += 1;
+    console.log(`  ❌  ${name}`);
+    console.log(`      ${err.message}`);
+  }
+}
+
+/**
+ * Tiny stand-in for a Playwright CDPSession. Records every `send(method, args)`
+ * call so tests can assert on the exact CDP commands forwardInput dispatches.
+ * @returns {{ send: Function, calls: Array<{method: string, args: Object}> }}
+ */
+function makeFakeCdp() {
+  const calls = [];
+  return {
+    calls,
+    async send(method, args) { calls.push({ method, args }); },
+  };
 }
 
 console.log("\n🧪 recorder — actionsToPlaywrightCode");
@@ -208,6 +233,145 @@ test("generated code is always syntactically parseable regardless of captured va
     );
   }
 });
+
+// ── DIF-015 / PR #115: forwardInput CDP dispatch ─────────────────────────
+// These tests verify the recorder's input-forwarding shim translates the
+// frontend's CDP-shaped events into the correct Input.dispatchMouseEvent /
+// Input.dispatchKeyEvent calls. The off-by-one mouse-button mapping was the
+// P1 bug Devin Review caught (left-click → "none") so we lock down the
+// numeric→string translation here.
+
+await (async () => {
+  console.log("\n🧪 recorder — forwardInput CDP dispatch");
+
+  await asyncTest("rejects when session does not exist", async () => {
+    await assert.rejects(
+      forwardInput("REC-does-not-exist", { type: "mousePressed", x: 1, y: 1 }),
+      /not found/i,
+    );
+  });
+
+  await asyncTest("rejects when session has no CDP session attached", async () => {
+    const dispose = _testSeedSession("REC-nocdp", { cdpSession: null });
+    try {
+      await assert.rejects(
+        forwardInput("REC-nocdp", { type: "mousePressed", x: 1, y: 1 }),
+        /no CDP session/i,
+      );
+    } finally { dispose(); }
+  });
+
+  await asyncTest("silently ignores input after status flips off 'recording'", async () => {
+    // Once stopRecording flips status to "stopping" the sweep races with
+    // any in-flight input from the canvas. We must drop those silently
+    // instead of throwing CDP errors at the user post-stop.
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-stopping", { status: "stopping", cdpSession: cdp });
+    try {
+      await forwardInput("REC-stopping", { type: "mousePressed", x: 1, y: 1, button: 0 });
+      assert.equal(cdp.calls.length, 0, "no CDP calls should be made after stop");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("maps DOM button 0 → CDP 'left' (PR #115 P1 regression)", async () => {
+    // The original implementation had `{0:"none",1:"left",2:"middle",3:"right"}`
+    // which silently dropped every left-click. Lock down 0→left so that
+    // regression cannot reappear.
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-btn0", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-btn0", { type: "mousePressed", x: 10, y: 20, button: 0, clickCount: 1 });
+      assert.equal(cdp.calls.length, 1);
+      assert.equal(cdp.calls[0].method, "Input.dispatchMouseEvent");
+      assert.equal(cdp.calls[0].args.button, "left", "DOM button 0 must map to CDP 'left'");
+      assert.equal(cdp.calls[0].args.type, "mousePressed");
+      assert.equal(cdp.calls[0].args.x, 10);
+      assert.equal(cdp.calls[0].args.y, 20);
+      assert.equal(cdp.calls[0].args.clickCount, 1);
+    } finally { dispose(); }
+  });
+
+  await asyncTest("maps DOM button 1 → CDP 'middle' and DOM 2 → CDP 'right'", async () => {
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-btn12", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-btn12", { type: "mousePressed", x: 0, y: 0, button: 1 });
+      await forwardInput("REC-btn12", { type: "mousePressed", x: 0, y: 0, button: 2 });
+      assert.equal(cdp.calls[0].args.button, "middle");
+      assert.equal(cdp.calls[1].args.button, "right");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("dispatches CDP button 'none' for moves with no button held", async () => {
+    // Hovering with no button down must not be interpreted as a left-drag.
+    // The route caller (LiveBrowserView) omits `button` for idle moves, so
+    // forwardInput must translate undefined → "none".
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-hover", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-hover", { type: "mouseMoved", x: 5, y: 5 });
+      assert.equal(cdp.calls[0].args.button, "none");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("scroll events become Input.dispatchMouseEvent type=mouseWheel", async () => {
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-scroll", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-scroll", { type: "scroll", x: 100, y: 200, deltaX: 0, deltaY: -50 });
+      assert.equal(cdp.calls[0].method, "Input.dispatchMouseEvent");
+      assert.equal(cdp.calls[0].args.type, "mouseWheel");
+      assert.equal(cdp.calls[0].args.deltaY, -50);
+    } finally { dispose(); }
+  });
+
+  await asyncTest("keyDown forwards key/code/text via Input.dispatchKeyEvent", async () => {
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-key", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-key", { type: "keyDown", key: "Enter", code: "Enter", text: "" });
+      assert.equal(cdp.calls[0].method, "Input.dispatchKeyEvent");
+      assert.equal(cdp.calls[0].args.type, "keyDown");
+      assert.equal(cdp.calls[0].args.key, "Enter");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("keyUp omits text even when caller supplies it", async () => {
+    // CDP rejects key events that include `text` on a keyUp. The shim must
+    // strip it regardless of what the caller sends.
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-keyup", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-keyup", { type: "keyUp", key: "a", code: "KeyA", text: "a" });
+      assert.equal(cdp.calls[0].args.text, "");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("char events forward text via Input.dispatchKeyEvent type=char", async () => {
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-char", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-char", { type: "char", text: "x" });
+      assert.equal(cdp.calls[0].args.type, "char");
+      assert.equal(cdp.calls[0].args.text, "x");
+    } finally { dispose(); }
+  });
+
+  await asyncTest("CDP send errors are swallowed (transient page-navigation race)", async () => {
+    // CDP calls fail when the page is navigating mid-event; the shim must
+    // not bubble that up to the user-facing route or the recorder UI would
+    // surface phantom errors during normal navigation.
+    const cdp = {
+      async send() { throw new Error("Target closed"); },
+    };
+    const dispose = _testSeedSession("REC-err", { cdpSession: cdp });
+    try {
+      await assert.doesNotReject(
+        forwardInput("REC-err", { type: "mousePressed", x: 1, y: 1, button: 0 }),
+      );
+    } finally { dispose(); }
+  });
+})();
 
 console.log("\n──────────────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);
