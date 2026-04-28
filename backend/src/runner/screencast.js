@@ -42,6 +42,7 @@ export async function startScreencast(page, runId) {
       maxHeight: 720,
       everyNthFrame: 2, // ~15 FPS source → ~7 FPS net
     });
+    console.log(formatLogLine("info", null, `[screencast] started for run=${runId}`));
   } catch (cdpErr) {
     console.warn(formatLogLine("warn", null, `[screencast] CDP screencast unavailable: ${cdpErr.message}`));
     return null;
@@ -51,8 +52,17 @@ export async function startScreencast(page, runId) {
   // a flag so bursting frames don't flood the SSE channel
   let rafScheduled = false;
   let pendingFrame = null;
+  // Diagnostic counter — print a one-liner when the first frame arrives so
+  // the operator can confirm the headless browser is actually rendering.
+  // Without this, a black canvas + zero logs leaves no way to tell whether
+  // frames are being produced or just lost in transit.
+  let frameCount = 0;
 
   cdpSession.on("Page.screencastFrame", async ({ data, sessionId }) => {
+    frameCount++;
+    if (frameCount === 1) {
+      console.log(formatLogLine("info", null, `[screencast] first frame received for run=${runId} (${data.length} bytes)`));
+    }
     pendingFrame = data;
     if (!rafScheduled) {
       rafScheduled = true;

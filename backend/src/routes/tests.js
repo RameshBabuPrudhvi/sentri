@@ -865,6 +865,11 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
   }
 
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
+  // Visible breadcrumb so the operator can see the recorder reaching the
+  // backend even when everything is working — useful for debugging the
+  // "canvas stays black" symptom where the request landed but a downstream
+  // step (browser launch, screencast attach) silently fails.
+  console.log(formatLogLine("info", null, `[recorder] launching session=${sessionId} project=${project.id} url=${startUrl}`));
   try {
     // Defence-in-depth: the partial unique index `idx_runs_one_active_per_project`
     // (migration 002) allows at most one `running` run per project. If a
@@ -903,6 +908,7 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       workspaceId: project.workspaceId || null,
     });
     await startRecording({ sessionId, projectId: project.id, startUrl });
+    console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
       detail: `Recorder started on ${startUrl}`, status: "running",
