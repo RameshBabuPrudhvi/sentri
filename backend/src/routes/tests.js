@@ -866,6 +866,20 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
 
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
   try {
+    // The frontend opens an SSE stream at /runs/:sessionId/events to receive
+    // live screencast frames. That endpoint validates the runId against the
+    // `runs` table — without a stub row here the SSE connection 404s and the
+    // canvas stays black ("Waiting for browser stream…"). Create a minimal
+    // running-row keyed by sessionId so SSE accepts it; stopRecording marks
+    // it completed so orphan recovery doesn't flag it as interrupted.
+    runRepo.create({
+      id: sessionId,
+      projectId: project.id,
+      type: "record",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      workspaceId: project.workspaceId || null,
+    });
     await startRecording({ sessionId, projectId: project.id, startUrl });
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
@@ -873,6 +887,9 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     });
     res.status(202).json({ sessionId, startUrl });
   } catch (err) {
+    // Roll back the stub row so a failed launch doesn't leave an orphaned
+    // "running" record that blocks future recordings or trips orphan recovery.
+    try { runRepo.update(sessionId, { status: "failed", finishedAt: new Date().toISOString(), error: err.message }); } catch { /* row may not exist */ }
     console.error(formatLogLine("error", null, `[POST projects/${project.id}/record] startRecording failed: ${err.message}`));
     res.status(500).json({ error: "Internal server error" });
   }
@@ -951,6 +968,15 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
       }
     }
   }
+
+  // Close out the stub `runs` row created by POST /record so the SSE channel
+  // releases its listener and orphan recovery doesn't pick this up later.
+  try {
+    runRepo.update(req.params.sessionId, {
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+    });
+  } catch { /* row may have been cleaned up already */ }
 
   if (discard) {
     logActivity({ ...actor(req),
