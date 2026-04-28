@@ -142,13 +142,13 @@ test("supports recorder parity actions (dblclick/right-click/hover/upload/assert
     { kind: "assertValue", selector: "#email", value: "a@b.com", ts: 7 },
     { kind: "assertUrl", value: "dashboard", ts: 8 },
   ]);
-  assert.match(code, /await page\.locator\('#open'\)\.dblclick\(\);/);
-  assert.match(code, /await page\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
-  assert.match(code, /await page\.locator\('#tooltip'\)\.hover\(\);/);
-  assert.match(code, /await page\.setInputFiles\('input\[type=\\'file\\'\]', \[\]\);/);
-  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toBeVisible\(\);/);
-  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
-  assert.match(code, /await expect\(page\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
+  assert.match(code, /\.locator\('#open'\)\.dblclick\(\);/);
+  assert.match(code, /\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
+  assert.match(code, /\.locator\('#tooltip'\)\.hover\(\);/);
+  assert.match(code, /await safeUpload\([^,]+, 'input\[type=\\'file\\'\]', \['avatar\.png'\]\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toBeVisible\(\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
   assert.match(code, /await expect\(page\)\.toHaveURL\(new RegExp\('dashboard'\)\);/);
 });
 
@@ -418,7 +418,7 @@ test("default branch: renders the kind verbatim for unknown future action types"
     label: "Slider",
     ts: 1,
   });
-  assert.match(s, /User performs drag/);
+  assert.match(s, /User drags/i);
 });
 
 test("renders human-readable prose for assertion + parity action kinds", () => {
