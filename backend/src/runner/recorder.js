@@ -58,6 +58,7 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
  * @property {Object}  [context]         - Playwright BrowserContext (internal).
  * @property {Object}  [page]            - Playwright Page (internal).
  * @property {Function} [stopScreencast]  - Cleanup fn returned by startScreencast.
+ * @property {Object}  [cdpSession]      - CDP session for input forwarding.
  */
 
 /** @type {Map<string, RecordingSession>} */
@@ -329,7 +330,13 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     });
 
     // Start CDP screencast so the RecorderModal can show the live browser.
-    session.stopScreencast = await startScreencast(page, sessionId);
+    // startScreencast now returns { stop, cdpSession } — store both so the
+    // recorder can forward mouse/keyboard events from the canvas overlay.
+    const screencastResult = await startScreencast(page, sessionId);
+    if (screencastResult) {
+      session.stopScreencast = screencastResult.stop;
+      session.cdpSession = screencastResult.cdpSession;
+    }
 
     // Defence-in-depth: if the client never calls stop/discard (e.g. tab
     // closed, network died) the browser would remain open forever. Force-kill
@@ -398,8 +405,87 @@ export function takeCompletedRecording(sessionId) {
 }
 
 /**
- * Stop an in-flight recording. Tears down the browser and returns the
- * captured actions plus a ready-to-persist Playwright test body.
+ * Forward a user input event from the canvas overlay to the headless browser
+ * via CDP Input domain commands. This is the core mechanism that makes the
+ * recorder interactive — without it the canvas is read-only and the user can
+ * never produce actions in the headless browser.
+ *
+ * Supported event types:
+ *   mousePressed / mouseReleased / mouseMoved  → Input.dispatchMouseEvent
+ *   keyDown / keyUp / char                     → Input.dispatchKeyEvent
+ *   scroll                                     → Input.dispatchMouseEvent (wheel)
+ *
+ * @param {string} sessionId
+ * @param {Object} event
+ * @param {"mousePressed"|"mouseReleased"|"mouseMoved"|"keyDown"|"keyUp"|"char"|"scroll"} event.type
+ * @param {number} [event.x]          - Viewport x (already scaled by caller).
+ * @param {number} [event.y]          - Viewport y (already scaled by caller).
+ * @param {number} [event.button]     - 0=none,1=left,2=middle,3=right.
+ * @param {number} [event.clickCount] - 1 for single click.
+ * @param {number} [event.deltaX]     - Horizontal scroll delta.
+ * @param {number} [event.deltaY]     - Vertical scroll delta.
+ * @param {string} [event.key]        - DOM key name, e.g. "Enter".
+ * @param {string} [event.code]       - DOM code, e.g. "KeyA".
+ * @param {string} [event.text]       - Printable text for char events.
+ * @param {number} [event.modifiers]  - Bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8.
+ * @returns {Promise<void>}
+ * @throws {Error} When the session is not found or has no CDP session.
+ */
+export async function forwardInput(sessionId, event) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (!session.cdpSession) throw new Error(`Session ${sessionId} has no CDP session — cannot forward input.`);
+  if (session.status !== "recording") return; // ignore input after stop is called
+
+  const cdp = session.cdpSession;
+  const { type } = event;
+
+  try {
+    if (type === "mousePressed" || type === "mouseReleased" || type === "mouseMoved") {
+      const buttonMap = { 0: "none", 1: "left", 2: "middle", 3: "right" };
+      await cdp.send("Input.dispatchMouseEvent", {
+        type,
+        x: Math.round(event.x ?? 0),
+        y: Math.round(event.y ?? 0),
+        button: buttonMap[event.button ?? 0] ?? "none",
+        clickCount: event.clickCount ?? (type === "mousePressed" ? 1 : 0),
+        modifiers: event.modifiers ?? 0,
+      });
+    } else if (type === "scroll") {
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: Math.round(event.x ?? 0),
+        y: Math.round(event.y ?? 0),
+        deltaX: event.deltaX ?? 0,
+        deltaY: event.deltaY ?? 0,
+        modifiers: event.modifiers ?? 0,
+      });
+    } else if (type === "keyDown" || type === "keyUp") {
+      await cdp.send("Input.dispatchKeyEvent", {
+        type,
+        key: event.key ?? "",
+        code: event.code ?? "",
+        text: type === "keyDown" ? (event.text ?? "") : "",
+        modifiers: event.modifiers ?? 0,
+      });
+    } else if (type === "char") {
+      await cdp.send("Input.dispatchKeyEvent", {
+        type: "char",
+        key: event.text ?? "",
+        text: event.text ?? "",
+        modifiers: event.modifiers ?? 0,
+      });
+    }
+  } catch (err) {
+    // CDP errors (e.g. page navigating mid-click) are transient — don't crash
+    // the session. Log at debug level so they don't flood production logs.
+    if (process.env.LOG_LEVEL === "debug") {
+      console.error(formatLogLine("debug", null, `[recorder] forwardInput CDP error: ${err.message}`));
+    }
+  }
+}
+
+/**
  *
  * @param {string} sessionId
  * @param {Object} [opts]

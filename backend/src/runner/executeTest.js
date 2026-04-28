@@ -266,7 +266,8 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   page.on("load", () => { injectCursorOverlay(page).catch(() => {}); });
 
   // Start CDP screencast (returns cleanup fn or null)
-  const stopScreencast = await startScreencast(page, runId);
+  const screencastResult = await startScreencast(page, runId);
+  const stopScreencast = screencastResult?.stop ?? null;
 
   // Attach network / console listeners — dispose() must be called before
   // page.close() to prevent async response handlers from crashing Node.

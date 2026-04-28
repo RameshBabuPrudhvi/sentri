@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../../api.js";
 import { API_PATH } from "../../utils/apiBase.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
@@ -33,6 +33,30 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   // Chromium process when the user navigates away mid-recording.
   const sessionIdRef = useRef(null);
   const projectIdRef = useRef(projectId);
+  // Throttle mouseMoved events — sending at 60fps would flood the server.
+  // We cap forwarded move events to ~30fps (every 33ms) which is smooth
+  // enough for hover effects without overwhelming the SSE/HTTP channel.
+  const lastMoveRef = useRef(0);
+
+  // Forward a canvas input event to the recorder browser via the API.
+  // mouseMoved events are throttled; all others (click, key, scroll) go
+  // through immediately so they feel instantaneous.
+  const handleInput = useCallback((event) => {
+    const sid = sessionIdRef.current;
+    const pid = projectIdRef.current;
+    if (!sid || !pid) return;
+
+    if (event.type === "mouseMoved") {
+      const now = Date.now();
+      if (now - lastMoveRef.current < 33) return; // ~30fps cap
+      lastMoveRef.current = now;
+    }
+
+    // Fire-and-forget — input forwarding errors are transient (page
+    // navigating, session ending) and must never block the UI or show
+    // error banners that interrupt recording flow.
+    api.recordInput(pid, sid, event).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setStartUrl(defaultUrl);
@@ -200,7 +224,13 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 )}
               </div>
             ) : (
-              <LiveBrowserView frames={frames} label={sessionId || ""} />
+              <LiveBrowserView
+                frames={frames}
+                label={sessionId || ""}
+                onInput={handleInput}
+                viewportW={1280}
+                viewportH={720}
+              />
             )}
           </div>
 

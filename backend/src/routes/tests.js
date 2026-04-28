@@ -48,7 +48,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -1003,6 +1003,56 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     actionCount: stopResult.actions.length,
     ...(recoveredFromAutoTimeout ? { recoveredFromAutoTimeout: true } : {}),
   });
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/input
+ *
+ * Forwards a single input event (mouse click/move, keyboard, scroll) from
+ * the browser-in-browser canvas in RecorderModal to the headless Playwright
+ * page via CDP. This is what makes the recorder interactive — without this
+ * route the canvas is a read-only screencast and the user can never produce
+ * any recorded actions.
+ *
+ * Intentionally no rate-limiter here: input events arrive at ~60fps during
+ * active use. The route is cheap (one async CDP send) and already gated
+ * behind requireRole("qa_lead") + workspace scope.
+ *
+ * @route POST /api/v1/projects/:id/record/:sessionId/input
+ * @auth requireRole("qa_lead")
+ * @body {{ type: string, x?: number, y?: number, button?: number,
+ *           clickCount?: number, key?: string, code?: string,
+ *           text?: string, modifiers?: number,
+ *           deltaX?: number, deltaY?: number }}
+ * @returns {200} { ok: true }
+ * @returns {400} { error: string } — missing/invalid event type
+ * @returns {404} { error: string } — session not found
+ */
+router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+
+  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll"]);
+  const { type } = req.body || {};
+  if (!type || !VALID_TYPES.has(type)) {
+    return res.status(400).json({ error: `Invalid event type. Must be one of: ${[...VALID_TYPES].join(", ")}` });
+  }
+
+  try {
+    await forwardInput(req.params.sessionId, req.body);
+    res.json({ ok: true });
+  } catch (err) {
+    // Session gone mid-flight (auto-timeout race) — treat as 404 not 500
+    if (/not found/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 /**

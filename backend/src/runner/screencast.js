@@ -68,9 +68,14 @@ export async function startScreencast(page, runId) {
     await cdpSession.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   });
 
-  // Return an async cleanup function
-  return async () => {
+  // Return both the cleanup function and the CDP session.
+  // Callers that only need cleanup (executeTest) ignore the second value.
+  // The recorder uses cdpSession to forward mouse/keyboard events from the
+  // browser-in-browser canvas back to the headless Playwright page so that
+  // the user's clicks and keystrokes actually reach the recorded page.
+  const stop = async () => {
     await cdpSession.send("Page.stopScreencast").catch(() => {});
     await cdpSession.detach().catch(() => {});
   };
+  return { stop, cdpSession };
 }
