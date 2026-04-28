@@ -866,6 +866,28 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
 
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
   try {
+    // Defence-in-depth: the partial unique index `idx_runs_one_active_per_project`
+    // (migration 002) allows at most one `running` run per project. If a
+    // previous recorder attempt crashed between `runRepo.create` and the
+    // rollback below, an orphan row blocks every subsequent recorder launch
+    // with a UNIQUE constraint error. Sweep any such orphans for THIS
+    // project before inserting the new stub so the user isn't permanently
+    // locked out of the recorder.
+    try {
+      const orphan = runRepo.findActiveByProjectId(project.id, ["record", "crawl", "test_run", "generate"]);
+      if (orphan) {
+        runRepo.update(orphan.id, {
+          status: "interrupted",
+          finishedAt: new Date().toISOString(),
+          error: "Cleared by recorder launch — previous run was orphaned",
+        });
+      }
+    } catch (sweepErr) {
+      // Non-fatal: log and continue. If the orphan really exists the create
+      // below will surface the UNIQUE error and the catch handles it.
+      console.warn(formatLogLine("warn", null, `[POST projects/${project.id}/record] orphan sweep failed: ${sweepErr.message}`));
+    }
+
     // The frontend opens an SSE stream at /runs/:sessionId/events to receive
     // live screencast frames. That endpoint validates the runId against the
     // `runs` table — without a stub row here the SSE connection 404s and the
