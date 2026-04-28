@@ -48,7 +48,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -1062,7 +1062,14 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     projectId: project.id,
     name,
     description: `Recorded from ${stopResult.url}`,
-    steps: dedupedActions.map((a, i) => `Step ${i + 1}: ${a.kind}${a.selector ? ` → ${a.selector}` : ""}${a.url ? ` → ${a.url}` : ""}`),
+    // Match the human-readable step convention used by the AI generate/crawl
+    // pipeline (`outputSchema.js`) and the manual-test creation path: short
+    // English sentences a manual tester can follow ("User clicks the Sign Up
+    // button"), NOT raw CDP-event strings like "Step 1: click → #login". The
+    // Test Detail page renders all three sources through the same Steps panel,
+    // so visual alignment matters — recorder tests previously stuck out as the
+    // only ones showing engineer-shaped output.
+    steps: dedupedActions.map((a) => recordedActionToStepText(a)),
     playwrightCode: stopResult.playwrightCode,
     priority: "medium",
     type: "recorded",

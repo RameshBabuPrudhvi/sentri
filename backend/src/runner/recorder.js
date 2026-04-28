@@ -189,6 +189,49 @@ function escapeJsSingleQuote(str) {
 }
 
 /**
+ * Render a captured action as a short, human-readable step sentence so the
+ * recorder's persisted `steps` array aligns visually with the AI generate /
+ * crawl pipeline output (`outputSchema.js`) and the manual-test creation path
+ * — both of which produce English prose like "User clicks the Sign Up button".
+ *
+ * Recorded actions only carry a CDP-style selector and (optionally) a typed
+ * value, so these sentences are best-effort: we surface the selector as the
+ * "target" verbatim. The Test Detail page renders all three sources through
+ * the same Steps panel, and previously the recorder was the only producer
+ * emitting engineer-shaped strings ("Step 1: click → #login"), making
+ * recorded tests stick out and look broken to manual reviewers.
+ *
+ * @param {RecordedAction} a
+ * @returns {string} A single step sentence suitable for the persisted `steps[]` array.
+ */
+export function recordedActionToStepText(a) {
+  const target = a.selector ? ` ${a.selector}` : "";
+  switch (a.kind) {
+    case "goto":
+      return `User navigates to ${a.url || ""}`.trim();
+    case "click":
+      return `User clicks${target}`;
+    case "fill":
+      // Recorded fill values can contain secrets (passwords, API keys). The
+      // raw value already lives in `playwrightCode`; truncate aggressively in
+      // the human-readable steps so the Test Detail page doesn't surface it.
+      return `User fills${target} with "${String(a.value || "").slice(0, 40)}"`;
+    case "press":
+      return `User presses ${a.key || ""}`.trim();
+    case "select":
+      return `User selects "${String(a.value || "").slice(0, 40)}" in${target}`;
+    case "check":
+      return `User checks${target}`;
+    case "uncheck":
+      return `User unchecks${target}`;
+    default:
+      // Fall back to the action kind so unknown future kinds still show
+      // something — better than emitting an empty string into the steps list.
+      return `User performs ${a.kind || "action"}${target}`;
+  }
+}
+
+/**
  * Convert a list of captured actions into a Playwright test body. The output
  * is wrapped in the repo-standard `test(...)` shape so the existing runner
  * (codeExecutor, codeParsing) treats it like any AI-generated test.

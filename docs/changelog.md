@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Recorder**: Typing in the recorder canvas no longer produces double characters. The frontend was sending both a CDP `keyDown` (with `text`) and a separate `char` event for every printable key, causing each character to be inserted twice (typing "hi" produced "hhii"). CDP's `keyDown` with non-empty `text` already synthesises text input — the duplicate `char` was removed (#115).
 - **Recorder**: Right- and middle-button drags now forward the correct CDP button. `MouseEvent.button` is always 0 during `mousemove` per the DOM spec; the held button is now derived from the `MouseEvent.buttons` bitmask (1=left, 2=right, 4=middle) so non-primary drags aren't mis-reported as left-button drags (#115).
 - **Recorder**: Scrolling inside the recorder canvas no longer scrolls the surrounding page underneath. React 18 registers `onWheel` as passive by default, so `e.preventDefault()` on the synthetic event was silently ignored. The wheel listener is now attached imperatively via `addEventListener('wheel', …, { passive: false })` (#115).
+- **Recorder**: Persisted `steps[]` are now short English sentences ("User clicks #login", "User fills #email with …") matching the format used by the AI generate/crawl pipeline (`outputSchema.js`) and the manual test creation path. Recorded tests previously stored engineer-shaped CDP-event strings like `"Step 1: click → #login"` that stuck out on the Test Detail page next to AI-generated and manually-created tests (#115).
 
 ## [1.6.7] — 2026-04-26
 
