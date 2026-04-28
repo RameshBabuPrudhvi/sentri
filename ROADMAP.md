@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** none ✅ · **Remaining:** 39 items
+> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 41 items
 
 ---
 
@@ -103,7 +103,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase | Scope | Status | Est. Duration |
 |-------|-------|--------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
-| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete (SEC-004 deferred) | 8–10 weeks |
+| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` (project credential edit) is 🟡 High; `SEC-004` deferred | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔲 Planned | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔲 Planned | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
@@ -340,6 +340,60 @@ The following items have been verified complete against the codebase and are **n
 - `backend/src/middleware/appSetup.js` — backward-compatibility redirects
 
 **Dependencies:** None
+
+---
+
+### INF-006 — Persistent storage on hosted deployments (Render disk + Postgres add-on) 🔴 Blocker
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — every Render redeploy wipes the SQLite DB, forcing fresh signup + project recreation)
+
+**Problem:** Sentri runs fine locally because `docker-compose.yml` mounts `backend/data/` as a named volume, but Render's web-service container filesystem is **ephemeral** — every redeploy gets a fresh disk and `backend/data/sentri.db` resets to empty. Operators dogfooding on Render must re-register, recreate every project, and re-run every crawl after every deploy. There is no `render.yaml` in the repo, no documented Render disk path, and no production-hardening callout that SQLite + free-tier Render is incompatible. INF-001 ✅ already shipped PostgreSQL adapter support, so the fix is partly configuration and partly documentation; the missing pieces are the deployment manifest and the operator guidance.
+
+**Fix:**
+- Add a `render.yaml` Blueprint at the repo root that declares the web service, mounts a Persistent Disk at `/app/backend/data` (1 GB, free tier), sets `DB_PATH=/app/backend/data/sentri.db`, and **also** declares a free Postgres add-on with `DATABASE_URL` wired in (commented out by default — operators uncomment to switch).
+- Update `backend/.env.example` with a `# Hosted deployment` section documenting both paths (disk-mounted SQLite vs Render Postgres) and the trade-off (SQLite + disk is simpler but doesn't scale beyond one instance; Postgres is required for INF-002 / INF-003 multi-instance work).
+- Add a "Production deployments" callout in `README.md` and `docs/` warning that running on Render / Fly / Railway free tiers without a persistent disk WILL wipe the database on redeploy, with copy-pasteable fixes for each platform.
+- Add a startup probe in `backend/src/index.js` that detects ephemeral storage (DB path inside `/tmp` or no recent writes from prior process) and emits a `formatLogLine("warn", …)` "DB path appears ephemeral — data will be lost on redeploy" so the symptom is visible in logs instead of mysterious data loss.
+
+**Files to change:**
+- New `render.yaml` — Render Blueprint with disk + optional Postgres add-on
+- `backend/.env.example` — hosted deployment section
+- `backend/src/index.js` — ephemeral-storage warning at boot
+- `README.md`, `docs/getting-started.md` — production deployment callout
+- `docs/changelog.md` — `### Added` entry once shipped
+
+**Acceptance criteria:**
+- A fresh Render deployment from `render.yaml` survives redeploys without wiping accounts, projects, tests, or runs.
+- Operators get a single visible log line at boot telling them when the DB path is ephemeral.
+- The README explicitly names this as a footgun and points to the Blueprint.
+
+**Dependencies:** None (INF-001 ✅ already shipped Postgres support; this item only adds deployment manifests + docs)
+
+---
+
+### ENH-036 — Project credential editing after creation 🟡 High
+
+**Status:** 🔲 Planned | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — operators must delete the project + every test to rotate a stale credential)
+
+**Problem:** `POST /api/v1/projects` accepts a `credentials` field (encrypted at `backend/src/routes/projects.js:59` via `encryptCredentials()`), but there is no `PATCH /api/v1/projects/:id` endpoint that allows editing those credentials after the project has been created. The only PATCH routes on `projects.js` are scoped to schedule (`projects.js:162`) and notifications (`projects.js:266`). When a target app's password rotates, an OAuth token expires, or an SSO config changes, operators have to **delete the entire project** — including every recorded/generated test, every run history record, every approved baseline — and recreate it from scratch with the new credentials. This is data loss for what should be a single field update.
+
+**Fix:** Add `PATCH /api/v1/projects/:id` accepting `{ name?, url?, credentials? }`, gated by `requireRole("qa_lead")` (matching the role gate on the existing project mutation routes). When `credentials` is present, run it through `encryptCredentials()` before persisting — never store plaintext. Add an "Edit project" affordance in the Project Detail header that opens the same form used at creation but pre-filled. Mirror the create-route validation (URL shape, credentials schema). Update `permissions.json` with the new entry. Add `api.updateProject(id, data)` to the frontend client. Add integration tests covering: 401 unauth, 403 viewer role, 400 invalid URL, 200 happy path with credential rotation, audit-log entry written.
+
+**Files to change:**
+- `backend/src/routes/projects.js` — new `PATCH /:id` route
+- `backend/src/middleware/permissions.json` — register new endpoint
+- `frontend/src/api.js` — `updateProject(id, data)` helper
+- `frontend/src/pages/ProjectDetail.jsx` — "Edit project" button + reuse the create form
+- `backend/tests/projects.test.js` (or sibling) — auth/role/validation/happy-path coverage
+- `docs/changelog.md` — `### Added` entry once shipped
+
+**Acceptance criteria:**
+- Rotating a project's credentials no longer requires deleting the project.
+- Tests, runs, baselines, schedules, notification settings on the project survive the credential change.
+- Viewer role gets `403`; QA lead and admin succeed.
+- New credentials are written through `encryptCredentials()` (verified by reading the column post-update — must not be plaintext).
+
+**Dependencies:** ACL-002 ✅ (role-based access control already exists)
 
 ---
 
@@ -1416,9 +1470,9 @@ Because it's marked internal, import risk is real — the path or signature coul
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
 | Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
-| Infrastructure | 5 | 5 | 0 | 0 | — |
+| Infrastructure | 6 | 5 | 0 | 1 | INF-006 |
 | Access Control | 2 | 2 | 0 | 0 | — |
-| Platform Features | 3 | 3 | 0 | 0 | — |
+| Platform Features | 4 | 3 | 0 | 1 | ENH-036 |
 | Differentiators | 19 | 9 | 0 | 10 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b |
 | Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
