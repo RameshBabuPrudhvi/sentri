@@ -48,7 +48,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -1166,6 +1166,32 @@ router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), asy
 });
 
 /**
+ * POST /api/v1/projects/:id/record/:sessionId/assertion
+ * Add a manual assertion step while recording.
+ */
+router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  try {
+    const action = addAssertionAction(req.params.sessionId, req.body || {});
+    res.status(201).json({ ok: true, action });
+  } catch (err) {
+    if (/Invalid assertion kind/i.test(err.message || "")) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (/not found|not recording/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/v1/projects/:id/record/:sessionId
  * Inspect an in-flight recording (action count, status). Used by the modal
  * to poll for captured actions while the browser is still open.
@@ -1183,7 +1209,7 @@ router.get("/projects/:id/record/:sessionId", (req, res) => {
     url: sess.url,
     startedAt: sess.startedAt,
     actionCount: sess.actions.length,
-    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, value: a.value, key: a.key, url: a.url, ts: a.ts })),
+    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, label: a.label, value: a.value, key: a.key, url: a.url, ts: a.ts })),
   });
 });
 

@@ -39,7 +39,7 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
 
 /**
  * @typedef {Object} RecordedAction
- * @property {"goto"|"click"|"fill"|"press"|"select"|"check"|"uncheck"} kind
+ * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
  * @property {string} [label]      - Human-readable label for the target
  *                                   element (aria-label / inner text /
@@ -151,6 +151,25 @@ const RECORDER_SCRIPT = `
       kind: "click", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
     });
   }, true);
+  document.addEventListener("dblclick", (ev) => {
+    const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "dblclick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+    });
+  }, true);
+  document.addEventListener("contextmenu", (ev) => {
+    const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "rightClick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+    });
+  }, true);
+  document.addEventListener("mouseover", (ev) => {
+    const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
+    if (!el || !bestSelector(el)) return;
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "hover", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+    });
+  }, true);
 
   document.addEventListener("change", (ev) => {
     const el = ev.target;
@@ -161,6 +180,13 @@ const RECORDER_SCRIPT = `
         selector: bestSelector(el),
         label: bestLabel(el),
         ts: Date.now(),
+      });
+    } else if (el.tagName === "INPUT" && el.type === "file") {
+      const names = (el.files && el.files.length)
+        ? Array.from(el.files).map((f) => f.name).join(", ")
+        : "";
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "upload", selector: bestSelector(el), label: bestLabel(el), value: names, ts: Date.now(),
       });
     } else if (el.tagName === "SELECT") {
       window.__sentriRecord && window.__sentriRecord({
@@ -288,6 +314,12 @@ export function recordedActionToStepText(a) {
       return `User navigates to ${shortUrl(a.url)}`.trim();
     case "click":
       return `User clicks${friendlyTarget(a, "button")}`;
+    case "dblclick":
+      return `User double-clicks${friendlyTarget(a, "element")}`;
+    case "rightClick":
+      return `User right-clicks${friendlyTarget(a, "element")}`;
+    case "hover":
+      return `User hovers over${friendlyTarget(a, "element")}`;
     case "fill":
       // Recorded fill values can contain secrets (passwords, API keys). The
       // raw value already lives in `playwrightCode`; truncate aggressively in
@@ -301,6 +333,16 @@ export function recordedActionToStepText(a) {
       return `User checks${friendlyTarget(a, "checkbox")}`;
     case "uncheck":
       return `User unchecks${friendlyTarget(a, "checkbox")}`;
+    case "upload":
+      return `User uploads "${String(a.value || "").slice(0, 40)}"${friendlyTarget(a, "file input") ? ` in${friendlyTarget(a, "file input")}` : ""}`;
+    case "assertVisible":
+      return `User asserts visibility of${friendlyTarget(a, "element")}`;
+    case "assertText":
+      return `User asserts text${friendlyTarget(a, "element")} contains "${String(a.value || "").slice(0, 40)}"`;
+    case "assertValue":
+      return `User asserts value${friendlyTarget(a, "field")} is "${String(a.value || "").slice(0, 40)}"`;
+    case "assertUrl":
+      return `User asserts URL contains "${String(a.value || "").slice(0, 60)}"`;
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
@@ -340,6 +382,15 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
     } else if (a.kind === "click" && sel) {
       lines.push(`// Step ${stepNo}: Click element`);
       lines.push(`await safeClick(page, '${sel}');`);
+    } else if (a.kind === "dblclick" && sel) {
+      lines.push(`// Step ${stepNo}: Double click element`);
+      lines.push(`await page.locator('${sel}').dblclick();`);
+    } else if (a.kind === "rightClick" && sel) {
+      lines.push(`// Step ${stepNo}: Right click element`);
+      lines.push(`await page.locator('${sel}').click({ button: 'right' });`);
+    } else if (a.kind === "hover" && sel) {
+      lines.push(`// Step ${stepNo}: Hover over element`);
+      lines.push(`await page.locator('${sel}').hover();`);
     } else if (a.kind === "fill" && sel) {
       lines.push(`// Step ${stepNo}: Fill field`);
       lines.push(`await safeFill(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
@@ -364,6 +415,24 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // recorded checkboxes benefit from for free.
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
       lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(page, '${sel}');`);
+    } else if (a.kind === "upload" && sel) {
+      lines.push(`// Step ${stepNo}: Upload file(s)`);
+      // Recorder cannot stream local filesystem blobs from the browser-in-browser.
+      // Preserve intent via assertion-friendly placeholder.
+      lines.push(`// NOTE: replace with real fixture path(s) before running outside recorder`);
+      lines.push(`await page.setInputFiles('${sel}', []);`);
+    } else if (a.kind === "assertVisible" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element is visible`);
+      lines.push(`await expect(page.locator('${sel}')).toBeVisible();`);
+    } else if (a.kind === "assertText" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element text`);
+      lines.push(`await expect(page.locator('${sel}')).toContainText('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertValue" && sel) {
+      lines.push(`// Step ${stepNo}: Assert field value`);
+      lines.push(`await expect(page.locator('${sel}')).toHaveValue('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertUrl" && a.value) {
+      lines.push(`// Step ${stepNo}: Assert URL`);
+      lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(a.value)}'));`);
     } else {
       continue;
     }
@@ -378,6 +447,32 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
     lines.map(l => "  " + l).join("\n") +
     "\n});\n"
   );
+}
+
+/**
+ * Append a manual assertion action to an in-flight recording session.
+ * Mirrors Playwright recorder's explicit "Add assertion" flow.
+ *
+ * @param {string} sessionId
+ * @param {RecordedAction} action
+ * @returns {RecordedAction}
+ */
+export function addAssertionAction(sessionId, action) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  const kind = String(action?.kind || "");
+  const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
+  if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
+  const row = {
+    kind,
+    selector: action?.selector ? String(action.selector).slice(0, 200) : undefined,
+    label: action?.label ? String(action.label).slice(0, 80) : undefined,
+    value: action?.value != null ? String(action.value).slice(0, 500) : undefined,
+    ts: Date.now(),
+  };
+  session.actions.push(row);
+  return row;
 }
 
 /**

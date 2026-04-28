@@ -131,6 +131,27 @@ test("skips actions with missing selectors / keys / urls", () => {
   assert.doesNotMatch(code, /await page\.keyboard\.press\('/);
 });
 
+test("supports recorder parity actions (dblclick/right-click/hover/upload/assertions)", () => {
+  const code = actionsToPlaywrightCode("Parity", "https://example.com", [
+    { kind: "dblclick", selector: "#open", ts: 1 },
+    { kind: "rightClick", selector: "#menu", ts: 2 },
+    { kind: "hover", selector: "#tooltip", ts: 3 },
+    { kind: "upload", selector: "input[type='file']", value: "avatar.png", ts: 4 },
+    { kind: "assertVisible", selector: "#toast", ts: 5 },
+    { kind: "assertText", selector: "#toast", value: "Saved", ts: 6 },
+    { kind: "assertValue", selector: "#email", value: "a@b.com", ts: 7 },
+    { kind: "assertUrl", value: "dashboard", ts: 8 },
+  ]);
+  assert.match(code, /await page\.locator\('#open'\)\.dblclick\(\);/);
+  assert.match(code, /await page\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
+  assert.match(code, /await page\.locator\('#tooltip'\)\.hover\(\);/);
+  assert.match(code, /await page\.setInputFiles\('input\[type=\\'file\\'\]', \[\]\);/);
+  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toBeVisible\(\);/);
+  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
+  assert.match(code, /await expect\(page\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
+  assert.match(code, /await expect\(page\)\.toHaveURL\(new RegExp\('dashboard'\)\);/);
+});
+
 // ── Devin Review BUG_0002 regression — URL escaping ────────────────────────
 
 test("escapes single quotes in the starting URL", () => {
@@ -398,6 +419,17 @@ test("default branch: renders the kind verbatim for unknown future action types"
     ts: 1,
   });
   assert.match(s, /User performs drag/);
+});
+
+test("renders human-readable prose for assertion + parity action kinds", () => {
+  assert.match(recordedActionToStepText({ kind: "dblclick", label: "Open", ts: 1 }), /double-clicks/i);
+  assert.match(recordedActionToStepText({ kind: "rightClick", label: "Menu", ts: 1 }), /right-clicks/i);
+  assert.match(recordedActionToStepText({ kind: "hover", label: "Help", ts: 1 }), /hovers/i);
+  assert.match(recordedActionToStepText({ kind: "upload", label: "Avatar", value: "avatar.png", ts: 1 }), /uploads/i);
+  assert.match(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), /asserts visibility/i);
+  assert.match(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), /contains "Saved"/i);
+  assert.match(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), /value/i);
+  assert.match(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), /URL contains "dashboard"/i);
 });
 
 test("never leaks raw role=…[name=\"…\"] or CSS selectors into the rendered step", () => {

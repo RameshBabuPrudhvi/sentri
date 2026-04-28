@@ -279,6 +279,14 @@ export const api = {
    */
   recordInput: (projectId, sessionId, event) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/input`, event),
+  /**
+   * Add a manual assertion action during recording.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {{kind: "assertVisible"|"assertText"|"assertValue"|"assertUrl", selector?: string, label?: string, value?: string}} action
+   */
+  recordAddAssertion: (projectId, sessionId, action) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/assertion`, action),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
