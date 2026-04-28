@@ -416,7 +416,7 @@ export function takeCompletedRecording(sessionId) {
  *
  * @param {string} sessionId
  * @param {Object} fields - Partial RecordingSession fields to seed.
- * @returns {() => void} Disposer that deletes the seeded session.
+ * @returns {Function} Disposer `() => void` that deletes the seeded session.
  * @private
  */
 export function _testSeedSession(sessionId, fields = {}) {
