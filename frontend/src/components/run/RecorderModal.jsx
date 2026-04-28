@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../../api.js";
 import { API_PATH } from "../../utils/apiBase.js";
+import { useSseStream } from "../../hooks/useSseStream.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
 
 /**
@@ -29,7 +30,6 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   // deployments that override the default 1280x720. Defaults match the
   // runner's defaults until `recordStart` returns the actual values.
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
-  const esRef = useRef(null);
   const pollRef = useRef(null);
   // Refs mirror sessionId + projectId so the unmount cleanup sees the latest
   // values. An empty-deps cleanup closure would otherwise capture the initial
@@ -69,10 +69,21 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
 
-  // Clean up SSE + polling AND server-side recording session on unmount.
+  // Subscribe to the SSE screencast channel via the shared `useSseStream`
+  // primitive. The hook handles connection lifecycle, JSON parsing, and
+  // teardown — we only need to dispatch by `event.type`. This replaces the
+  // earlier hand-rolled `EventSource` + `addEventListener("frame", …)` setup
+  // that silently swallowed every frame because the backend emits generic
+  // `data:` lines, not named events. See useSseStream.js module preamble.
+  const sseUrl = sessionId ? `${API_PATH}/runs/${sessionId}/events` : null;
+  useSseStream(sseUrl, useCallback((event) => {
+    if (event?.type === "frame" && event.data) setFrames([event.data]);
+  }, []), Boolean(sessionId));
+
+  // Clean up polling AND server-side recording session on unmount.
+  // SSE teardown is owned by useSseStream's effect cleanup.
   useEffect(() => {
     return () => {
-      if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       if (sessionIdRef.current && projectIdRef.current) {
         api.recordDiscard(projectIdRef.current, sessionIdRef.current).catch(() => {});
@@ -110,20 +121,9 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
 
-      // Open SSE to receive live screencast frames from the recorder browser.
-      // The server uses generic `data:` SSE lines (no `event:` field) and
-      // encodes the event type INSIDE the JSON payload. So we must listen
-      // on the default `message` channel and dispatch by `parsed.type` —
-      // an `addEventListener("frame", ...)` would never fire.
-      const es = new EventSource(`${API_PATH}/runs/${sid}/events`, { withCredentials: true });
-      esRef.current = es;
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if (data?.type === "frame" && data.data) setFrames([data.data]);
-        } catch { /* ignore malformed event */ }
-      };
-      es.onerror = () => { /* SSE auto-reconnects; no action needed */ };
+      // SSE subscription is owned by the `useSseStream` hook above — setting
+      // `sessionId` flips its `enabled` predicate and opens the connection
+      // automatically. No manual EventSource bookkeeping here.
 
       // Poll for the captured actions so the sidebar updates as the user clicks.
       pollRef.current = setInterval(async () => {
@@ -166,7 +166,8 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   }
 
   function teardownStreams() {
-    if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
+    // SSE teardown is automatic — clearing `sessionId` flips useSseStream's
+    // `enabled` flag and the hook's effect cleanup closes the EventSource.
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
