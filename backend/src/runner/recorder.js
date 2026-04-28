@@ -150,21 +150,21 @@ const RECORDER_SCRIPT = `
   // `dblclick` listener can cancel the queued clicks for the same target;
   // otherwise replay would re-run the click handler twice before the
   // intended double-click and toggle UI state / submit forms early.
-  const __sentriPendingClicks = new Map(); // selector -> timeout id
+  const pendingClickTimers = new Map(); // selector -> timeout id
   document.addEventListener("click", (ev) => {
     const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
     const sel = bestSelector(el);
     const label = bestLabel(el);
     const emit = () => {
-      __sentriPendingClicks.delete(sel);
+      pendingClickTimers.delete(sel);
       window.__sentriRecord && window.__sentriRecord({
         kind: "click", selector: sel, label, ts: Date.now(),
       });
     };
     if (!sel) { emit(); return; }
-    const prev = __sentriPendingClicks.get(sel);
+    const prev = pendingClickTimers.get(sel);
     if (prev) clearTimeout(prev);
-    __sentriPendingClicks.set(sel, setTimeout(emit, 250));
+    pendingClickTimers.set(sel, setTimeout(emit, 250));
   }, true);
   document.addEventListener("dblclick", (ev) => {
     const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
@@ -172,8 +172,8 @@ const RECORDER_SCRIPT = `
     // Cancel any queued click(s) for this selector — a dblclick supersedes
     // the two click events that preceded it.
     if (sel) {
-      const pending = __sentriPendingClicks.get(sel);
-      if (pending) { clearTimeout(pending); __sentriPendingClicks.delete(sel); }
+      const pending = pendingClickTimers.get(sel);
+      if (pending) { clearTimeout(pending); pendingClickTimers.delete(sel); }
     }
     window.__sentriRecord && window.__sentriRecord({
       kind: "dblclick", selector: sel, label: bestLabel(el), ts: Date.now(),
