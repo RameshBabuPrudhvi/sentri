@@ -124,11 +124,24 @@ export default function LiveBrowserView({
   }, [onInput, scaleCoords, modifiers]);
 
   // ── Keyboard handlers ─────────────────────────────────────────────────────
+  // CDP's Input.dispatchKeyEvent only triggers default actions for non-printable
+  // keys (Backspace, Enter, Tab, Arrows, etc.) when `windowsVirtualKeyCode` is
+  // supplied. We forward `e.keyCode` from the DOM event — it's deprecated for
+  // new code but still populated by every modern browser specifically for cases
+  // like this. Without it Backspace/Enter/Tab fire keyDown but the page never
+  // reacts (no character deleted, no form submitted, no focus change).
   const handleKeyDown = useCallback((e) => {
     if (!onInput) return;
     e.preventDefault(); // prevent browser shortcuts (Ctrl+W, etc.)
     pressedKeys.current.add(e.key);
-    onInput({ type: "keyDown", key: e.key, code: e.code, text: e.key.length === 1 ? e.key : "", modifiers: modifiers(e) });
+    onInput({
+      type: "keyDown",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      text: e.key.length === 1 ? e.key : "",
+      modifiers: modifiers(e),
+    });
     // For printable characters also send a char event so the page receives text input
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
       onInput({ type: "char", text: e.key, modifiers: modifiers(e) });
@@ -139,7 +152,13 @@ export default function LiveBrowserView({
     if (!onInput) return;
     e.preventDefault();
     pressedKeys.current.delete(e.key);
-    onInput({ type: "keyUp", key: e.key, code: e.code, modifiers: modifiers(e) });
+    onInput({
+      type: "keyUp",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      modifiers: modifiers(e),
+    });
   }, [onInput, modifiers]);
 
   // Release all held keys when the canvas loses focus so we never get stuck keys

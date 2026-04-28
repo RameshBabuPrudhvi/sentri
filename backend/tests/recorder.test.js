@@ -336,6 +336,31 @@ await (async () => {
     } finally { dispose(); }
   });
 
+  await asyncTest("keyDown forwards windowsVirtualKeyCode for non-printable keys", async () => {
+    // Backspace/Enter/Tab/Arrows only trigger their default action in CDP
+    // when `windowsVirtualKeyCode` is set. The frontend supplies `e.keyCode`
+    // and the shim must propagate it as both windows + native virtual codes.
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-keycode", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-keycode", { type: "keyDown", key: "Backspace", code: "Backspace", keyCode: 8 });
+      assert.equal(cdp.calls[0].args.windowsVirtualKeyCode, 8);
+      assert.equal(cdp.calls[0].args.nativeVirtualKeyCode, 8);
+    } finally { dispose(); }
+  });
+
+  await asyncTest("keyDown omits virtual keycode fields when keyCode is missing", async () => {
+    // Char-only sources (e.g. older clients) shouldn't send 0/undefined as
+    // the virtual code — that would tell CDP "no key" and break dispatch.
+    const cdp = makeFakeCdp();
+    const dispose = _testSeedSession("REC-nokeycode", { cdpSession: cdp });
+    try {
+      await forwardInput("REC-nokeycode", { type: "keyDown", key: "a", code: "KeyA", text: "a" });
+      assert.equal(cdp.calls[0].args.windowsVirtualKeyCode, undefined);
+      assert.equal(cdp.calls[0].args.nativeVirtualKeyCode, undefined);
+    } finally { dispose(); }
+  });
+
   await asyncTest("keyUp omits text even when caller supplies it", async () => {
     // CDP rejects key events that include `text` on a keyUp. The shim must
     // strip it regardless of what the caller sends.

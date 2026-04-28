@@ -457,6 +457,11 @@ export function _testSeedSession(sessionId, fields = {}) {
  * @param {number} [event.deltaY]     - Vertical scroll delta.
  * @param {string} [event.key]        - DOM key name, e.g. "Enter".
  * @param {string} [event.code]       - DOM code, e.g. "KeyA".
+ * @param {number} [event.keyCode]    - DOM virtual keycode (`e.keyCode`).
+ *                                      Required for non-printable keys —
+ *                                      without it CDP fires keyDown but
+ *                                      Backspace/Enter/Tab/Arrows have no
+ *                                      effect on the page.
  * @param {string} [event.text]       - Printable text for char events.
  * @param {number} [event.modifiers]  - Bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8.
  * @returns {Promise<void>}
@@ -497,13 +502,22 @@ export async function forwardInput(sessionId, event) {
         modifiers: event.modifiers ?? 0,
       });
     } else if (type === "keyDown" || type === "keyUp") {
-      await cdp.send("Input.dispatchKeyEvent", {
+      // `windowsVirtualKeyCode` is what makes Backspace/Enter/Tab/Arrows
+      // actually trigger their default action in the page. Without it CDP
+      // fires the event but the page receives no operation. The frontend
+      // forwards `e.keyCode` from the DOM event for this purpose.
+      const args = {
         type,
         key: event.key ?? "",
         code: event.code ?? "",
         text: type === "keyDown" ? (event.text ?? "") : "",
         modifiers: event.modifiers ?? 0,
-      });
+      };
+      if (typeof event.keyCode === "number" && event.keyCode > 0) {
+        args.windowsVirtualKeyCode = event.keyCode;
+        args.nativeVirtualKeyCode = event.keyCode;
+      }
+      await cdp.send("Input.dispatchKeyEvent", args);
     } else if (type === "char") {
       await cdp.send("Input.dispatchKeyEvent", {
         type: "char",
