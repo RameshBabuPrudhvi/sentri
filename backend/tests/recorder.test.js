@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { actionsToPlaywrightCode, forwardInput, _testSeedSession } from "../src/runner/recorder.js";
+import { actionsToPlaywrightCode, forwardInput, recordedActionToStepText, _testSeedSession } from "../src/runner/recorder.js";
 
 let passed = 0;
 let failed = 0;
@@ -231,6 +231,193 @@ test("generated code is always syntactically parseable regardless of captured va
       () => new AsyncFunction("page", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", bodyMatch[1]),
       `generated body should parse for input ${JSON.stringify(s)}`,
     );
+  }
+});
+
+// ── PR #115: recordedActionToStepText (human-readable Steps panel prose) ─
+// These tests lock down the contract that the persisted `steps[]` array on a
+// recorded test renders as English prose — matching how the AI generate /
+// crawl pipeline (`outputSchema.js`) and the manual test creation path render
+// steps. The Test Detail page renders all three sources through the same
+// Steps panel, so any drift between them is immediately user-visible.
+
+console.log("\n🧪 recorder — recordedActionToStepText");
+
+test("goto: renders origin + pathname only, not full URL with query string", () => {
+  // Recorder pages frequently navigate to query-heavy URLs (Amazon search,
+  // OAuth redirects). Surfacing the raw URL in the Steps panel makes recorded
+  // tests look noisier than AI-generated equivalents. Strip the query string
+  // for display only — the playwrightCode still uses the full URL.
+  const s = recordedActionToStepText({
+    kind: "goto",
+    url: "https://www.amazon.in/s?k=iphone+17+pro&crid=ABC&ref=tracking",
+    ts: 1,
+  });
+  assert.equal(s, "User navigates to https://www.amazon.in/s");
+});
+
+test("goto: renders the full URL when there is no query string", () => {
+  const s = recordedActionToStepText({ kind: "goto", url: "https://www.amazon.in/", ts: 1 });
+  assert.equal(s, "User navigates to https://www.amazon.in/");
+});
+
+test("goto: falls back to the raw string when URL parsing fails", () => {
+  // Defensive — `framenavigated` can technically emit non-URL strings (e.g.
+  // `about:blank`). Don't crash the step formatter.
+  const s = recordedActionToStepText({ kind: "goto", url: "about:blank", ts: 1 });
+  assert.match(s, /User navigates to about:blank/);
+});
+
+test("click: prefers the captured friendly label over the raw selector", () => {
+  // The recorder now captures `label` alongside `selector` so the Steps
+  // panel can read "User clicks the Sign in button" instead of leaking the
+  // role= / CSS selector to reviewers.
+  const s = recordedActionToStepText({
+    kind: "click",
+    selector: 'role=button[name="Sign in"]',
+    label: "Sign in",
+    ts: 1,
+  });
+  assert.equal(s, 'User clicks the "Sign in" button');
+});
+
+test("click: derives a friendly target from a role=foo[name=\"bar\"] selector when no label was captured", () => {
+  // Older recordings made before the `label` field landed only carry the
+  // selector. The formatter parses `role=…[name="…"]` so legacy steps don't
+  // suddenly render as engineer-shaped strings after this upgrade ships.
+  const s = recordedActionToStepText({
+    kind: "click",
+    selector: 'role=button[name="Save changes"]',
+    ts: 1,
+  });
+  assert.equal(s, 'User clicks the "Save changes" button');
+});
+
+test("click: degrades cleanly to a target-less sentence when neither label nor role selector is present", () => {
+  // A bare `#login` selector is engineer-shaped — leaking it into the Steps
+  // panel was the original bug. Render a plain "User clicks" instead so the
+  // step still reads as English even when we can't recover a label.
+  const s = recordedActionToStepText({ kind: "click", selector: "#login", ts: 1 });
+  assert.equal(s, "User clicks");
+  assert.doesNotMatch(s, /#login/, "raw selector must not leak into the Steps panel");
+});
+
+test("fill: includes the captured value, truncated to avoid leaking long secrets", () => {
+  // Recorded fill values can contain passwords / API keys. The full value
+  // already lives in playwrightCode (where it's needed for replay), but the
+  // human-readable steps must truncate aggressively so the Test Detail page
+  // doesn't surface the full secret.
+  const longPassword = "a".repeat(200);
+  const s = recordedActionToStepText({
+    kind: "fill",
+    selector: "#password",
+    label: "Password",
+    value: longPassword,
+    ts: 1,
+  });
+  assert.match(s, /^User fills the "Password" field with "/);
+  // Value must be truncated to <=40 chars (per the helper's slice).
+  const valueMatch = s.match(/with "([^"]*)"/);
+  assert.ok(valueMatch, "step should expose a value segment");
+  assert.ok(valueMatch[1].length <= 40, `value must be truncated, got ${valueMatch[1].length} chars`);
+});
+
+test("fill: handles missing value cleanly", () => {
+  const s = recordedActionToStepText({
+    kind: "fill",
+    selector: "#email",
+    label: "Email",
+    ts: 1,
+  });
+  assert.equal(s, 'User fills the "Email" field with ""');
+});
+
+test("press: renders the key without leaking the selector", () => {
+  // press is target-agnostic from the user's perspective — the panel should
+  // read "User presses Enter" not "User presses Enter on #form".
+  const s = recordedActionToStepText({ kind: "press", key: "Enter", selector: "#form", ts: 1 });
+  assert.equal(s, "User presses Enter");
+});
+
+test("press: handles missing key by trimming the trailing space", () => {
+  const s = recordedActionToStepText({ kind: "press", ts: 1 });
+  assert.equal(s, "User presses");
+});
+
+test("select: renders selected value with friendly target dropdown noun", () => {
+  const s = recordedActionToStepText({
+    kind: "select",
+    selector: "#country",
+    label: "Country",
+    value: "United Kingdom",
+    ts: 1,
+  });
+  assert.equal(s, 'User selects "United Kingdom" in the "Country" dropdown');
+});
+
+test("select: omits the trailing 'in …' clause when no target can be derived", () => {
+  // When neither label nor role-selector is available, the formatter renders
+  // just the selected value rather than appending an empty " in" clause.
+  const s = recordedActionToStepText({
+    kind: "select",
+    selector: ".some-class",
+    value: "US",
+    ts: 1,
+  });
+  assert.equal(s, 'User selects "US"');
+  assert.doesNotMatch(s, /\bin\s*$/);
+});
+
+test("check / uncheck: render with the checkbox noun and friendly label", () => {
+  const checked = recordedActionToStepText({
+    kind: "check",
+    selector: "#agree",
+    label: "I agree",
+    ts: 1,
+  });
+  const unchecked = recordedActionToStepText({
+    kind: "uncheck",
+    selector: "#agree",
+    label: "I agree",
+    ts: 2,
+  });
+  assert.equal(checked, 'User checks the "I agree" checkbox');
+  assert.equal(unchecked, 'User unchecks the "I agree" checkbox');
+});
+
+test("default branch: renders the kind verbatim for unknown future action types", () => {
+  // Forward-compat: if the recorder script gains a new action kind without
+  // the formatter being updated, we still emit something sensible instead
+  // of producing an empty step that would render as a blank row.
+  const s = recordedActionToStepText({
+    kind: "drag",
+    selector: "#handle",
+    label: "Slider",
+    ts: 1,
+  });
+  assert.match(s, /User performs drag/);
+});
+
+test("never leaks raw role=…[name=\"…\"] or CSS selectors into the rendered step", () => {
+  // Property-style guard: feed every supported kind a worst-case role
+  // selector with no label, and assert the rendered step never contains the
+  // raw `role=` token or the CSS-prefix tokens that make AI-generated steps
+  // look engineer-shaped. This is the regression contract for PR #115.
+  const kinds = ["click", "fill", "press", "select", "check", "uncheck"];
+  for (const kind of kinds) {
+    const s = recordedActionToStepText({
+      kind,
+      selector: 'role=button[name="Sign in"]',
+      key: "Enter",
+      value: "x",
+      ts: 1,
+    });
+    assert.doesNotMatch(s, /role=[a-z]+\[/i, `${kind} step leaked raw role= selector: ${s}`);
+    // Note: the friendlyTarget fallback successfully extracts "Sign in" from
+    // `role=button[name="Sign in"]`, so the rendered step is allowed to
+    // contain quoted "Sign in" — what it must NOT contain is the raw `role=`
+    // token, the surrounding `[name="…"]` brackets, or a leading `#` / `.`
+    // CSS prefix. The role= regex above covers the first two cases.
   }
 });
 
