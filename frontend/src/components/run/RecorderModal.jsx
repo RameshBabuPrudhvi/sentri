@@ -111,14 +111,18 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       setPhase("recording");
 
       // Open SSE to receive live screencast frames from the recorder browser.
+      // The server uses generic `data:` SSE lines (no `event:` field) and
+      // encodes the event type INSIDE the JSON payload. So we must listen
+      // on the default `message` channel and dispatch by `parsed.type` —
+      // an `addEventListener("frame", ...)` would never fire.
       const es = new EventSource(`${API_PATH}/runs/${sid}/events`, { withCredentials: true });
       esRef.current = es;
-      es.addEventListener("frame", (ev) => {
+      es.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
-          if (data && data.data) setFrames([data.data]);
-        } catch { /* ignore malformed frame */ }
-      });
+          if (data?.type === "frame" && data.data) setFrames([data.data]);
+        } catch { /* ignore malformed event */ }
+      };
       es.onerror = () => { /* SSE auto-reconnects; no action needed */ };
 
       // Poll for the captured actions so the sidebar updates as the user clicks.
