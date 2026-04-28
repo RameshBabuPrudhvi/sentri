@@ -29,6 +29,7 @@
 import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } from "./config.js";
 import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 
 // Hard cap for how long a single recording session may stay open. Defence-in-
 // depth for the case where a client disconnects without hitting stop/discard
@@ -358,6 +359,19 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
         const purge = setTimeout(() => completedSessions.delete(sessionId), COMPLETED_TTL_MS);
         purge.unref?.();
       } catch { /* session may already be gone; nothing to stash */ }
+      // Close out the stub `runs` row created by POST /record. Without this,
+      // the row stays in `status: "running"` forever and the partial unique
+      // index `idx_runs_one_active_per_project` blocks every future run on
+      // this project (crawl/test_run/generate report opaque UNIQUE errors;
+      // the next recorder launch's orphan sweep is the only path that
+      // recovers, but only for `record` rows).
+      try {
+        runRepo.update(sessionId, {
+          status: "interrupted",
+          finishedAt: new Date().toISOString(),
+          error: `Recorder exceeded MAX_RECORDING_MS (${MAX_RECORDING_MS}ms) — auto-torn-down`,
+        });
+      } catch { /* row may not exist (e.g. tests that bypass route layer) */ }
     }, MAX_RECORDING_MS);
     // Node's timer would keep the process alive; recorder sessions are
     // per-request resources, so let the event loop exit if everything else

@@ -879,12 +879,20 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     // project before inserting the new stub so the user isn't permanently
     // locked out of the recorder.
     try {
-      const orphan = runRepo.findActiveByProjectId(project.id, ["record", "crawl", "test_run", "generate"]);
+      // Only sweep orphaned RECORDER rows. Including crawl/test_run/generate
+      // here would silently kill a legitimately in-progress regression or
+      // crawl run when the user opens the recorder, leading to data loss
+      // (the runner process keeps executing in memory unaware that its DB
+      // status was overwritten). The partial unique index allows one active
+      // run per project across all types — so a concurrent recorder + run is
+      // intentionally not supported, and the create() below will surface a
+      // UNIQUE constraint error that the outer catch handles cleanly.
+      const orphan = runRepo.findActiveByProjectId(project.id, ["record"]);
       if (orphan) {
         runRepo.update(orphan.id, {
           status: "interrupted",
           finishedAt: new Date().toISOString(),
-          error: "Cleared by recorder launch — previous run was orphaned",
+          error: "Cleared by recorder launch — previous recording session was orphaned",
         });
       }
     } catch (sweepErr) {
@@ -1034,7 +1042,12 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   // `actionsToPlaywrightCode` so the human-readable steps and generated code
   // stay aligned.
   const dedupedActions = [];
-  let lastGotoUrl = null;
+  // Match `actionsToPlaywrightCode`'s init: it seeds `lastGotoUrl` with
+  // `startUrl` so the initial `{ kind: "goto", url: startUrl }` action that
+  // `startRecording` always pushes as actions[0] is suppressed (the generated
+  // code already emits an explicit `page.goto(startUrl)` at the top, and the
+  // human-readable steps shouldn't include a redundant initial Step 1).
+  let lastGotoUrl = String(stopResult.url || "");
   for (const a of stopResult.actions) {
     if (a.kind === "goto" && a.url) {
       if (a.url === lastGotoUrl) continue;

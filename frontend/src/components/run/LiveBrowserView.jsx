@@ -155,6 +155,11 @@ export default function LiveBrowserView({
     if (!onInput) return;
     e.preventDefault(); // prevent browser shortcuts (Ctrl+W, etc.)
     pressedKeys.current.add(e.key);
+    // CDP `Input.dispatchKeyEvent` with type=keyDown and a non-empty `text`
+    // field already synthesises text input in the page. Sending a separate
+    // `char` event for the same key would insert the character a second time
+    // (e.g. typing "hi" produces "hhii"). Only emit keyDown — with `text`
+    // populated for printable characters — and let CDP handle text insertion.
     onInput({
       type: "keyDown",
       key: e.key,
@@ -163,10 +168,6 @@ export default function LiveBrowserView({
       text: e.key.length === 1 ? e.key : "",
       modifiers: modifiers(e),
     });
-    // For printable characters also send a char event so the page receives text input
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-      onInput({ type: "char", text: e.key, modifiers: modifiers(e) });
-    }
   }, [onInput, modifiers]);
 
   const handleKeyUp = useCallback((e) => {
@@ -227,7 +228,9 @@ export default function LiveBrowserView({
         onMouseDown={isInteractive ? handleMouseDown : undefined}
         onMouseUp={isInteractive ? handleMouseUp : undefined}
         onMouseMove={isInteractive ? handleMouseMove : undefined}
-        onWheel={isInteractive ? handleWheel : undefined}
+        // Wheel listener is attached imperatively in a useEffect with
+        // { passive: false } so preventDefault() actually works (React 18
+        // registers onWheel as passive). See the wheel-listener effect above.
         // Keyboard events — canvas must be focusable (tabIndex=0) to receive these
         onKeyDown={isInteractive ? handleKeyDown : undefined}
         onKeyUp={isInteractive ? handleKeyUp : undefined}
