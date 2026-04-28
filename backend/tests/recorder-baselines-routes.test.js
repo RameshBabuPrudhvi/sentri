@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
+import { _testSeedSession } from "../src/runner/recorder.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
@@ -241,22 +242,32 @@ async function main() {
     });
 
     await test("POST /projects/:id/record/:sessionId/input 400 for missing type", async () => {
-      out = await req(base, `/api/projects/${projectId}/record/REC-ghost/input`, {
-        method: "POST", cookie: authCookie, body: { x: 1, y: 1 },
-      });
-      assert.equal(out.res.status, 400);
-      assert.match(out.json.error, /Invalid event type/i);
+      // Seed a fake recorder session so we hit the type-validation branch.
+      // Without this we'd 404 on the session-existence check that runs first.
+      const sid = "REC-validate-1";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/input`, {
+          method: "POST", cookie: authCookie, body: { x: 1, y: 1 },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid event type/i);
+      } finally { dispose(); }
     });
 
     await test("POST /projects/:id/record/:sessionId/input 400 for unknown event type", async () => {
       // Defence-in-depth: only the allowlisted CDP-shaped types are accepted.
       // A typo or attacker-supplied "doSomethingEvil" must be rejected before
       // reaching forwardInput().
-      out = await req(base, `/api/projects/${projectId}/record/REC-ghost/input`, {
-        method: "POST", cookie: authCookie, body: { type: "doSomethingEvil" },
-      });
-      assert.equal(out.res.status, 400);
-      assert.match(out.json.error, /Invalid event type/i);
+      const sid = "REC-validate-2";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/input`, {
+          method: "POST", cookie: authCookie, body: { type: "doSomethingEvil" },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid event type/i);
+      } finally { dispose(); }
     });
 
     await test("POST /projects/:id/record/:sessionId/input 403 for viewer role", async () => {
