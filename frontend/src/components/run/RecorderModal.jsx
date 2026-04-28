@@ -25,6 +25,10 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [frames, setFrames] = useState([]);
   const [name, setName] = useState("");
   const [error, setError] = useState(null);
+  // Server-reported viewport so forwarded pointer coords scale correctly on
+  // deployments that override the default 1280x720. Defaults match the
+  // runner's defaults until `recordStart` returns the actual values.
+  const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const esRef = useRef(null);
   const pollRef = useRef(null);
   // Refs mirror sessionId + projectId so the unmount cleanup sees the latest
@@ -101,8 +105,9 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     teardownStreams();
     setPhase("starting");
     try {
-      const { sessionId: sid } = await api.recordStart(projectId, { startUrl });
+      const { sessionId: sid, viewport: vp } = await api.recordStart(projectId, { startUrl });
       setSessionId(sid);
+      if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
 
       // Open SSE to receive live screencast frames from the recorder browser.
@@ -228,8 +233,8 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 frames={frames}
                 label={sessionId || ""}
                 onInput={handleInput}
-                viewportW={1280}
-                viewportH={720}
+                viewportW={viewport.width}
+                viewportH={viewport.height}
               />
             )}
           </div>

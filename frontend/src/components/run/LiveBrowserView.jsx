@@ -108,7 +108,12 @@ export default function LiveBrowserView({
   const handleMouseMove = useCallback((e) => {
     if (!onInput) return;
     const { x, y } = scaleCoords(e.clientX, e.clientY);
-    onInput({ type: "mouseMoved", x, y, button: e.buttons > 0 ? e.button : 0, modifiers: modifiers(e) });
+    // Only include `button` when a button is actually held — otherwise the
+    // backend must dispatch CDP button "none" so an idle hover isn't
+    // interpreted as a held left-click drag.
+    const evt = { type: "mouseMoved", x, y, modifiers: modifiers(e) };
+    if (e.buttons > 0) evt.button = e.button;
+    onInput(evt);
   }, [onInput, scaleCoords, modifiers]);
 
   const handleWheel = useCallback((e) => {

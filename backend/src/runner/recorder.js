@@ -420,7 +420,9 @@ export function takeCompletedRecording(sessionId) {
  * @param {"mousePressed"|"mouseReleased"|"mouseMoved"|"keyDown"|"keyUp"|"char"|"scroll"} event.type
  * @param {number} [event.x]          - Viewport x (already scaled by caller).
  * @param {number} [event.y]          - Viewport y (already scaled by caller).
- * @param {number} [event.button]     - 0=none,1=left,2=middle,3=right.
+ * @param {number} [event.button]     - DOM MouseEvent.button: 0=left, 1=middle, 2=right.
+ *                                      Pass `undefined` (omit) for moves with no
+ *                                      button held — CDP requires `"none"` then.
  * @param {number} [event.clickCount] - 1 for single click.
  * @param {number} [event.deltaX]     - Horizontal scroll delta.
  * @param {number} [event.deltaY]     - Vertical scroll delta.
@@ -442,12 +444,17 @@ export async function forwardInput(sessionId, event) {
 
   try {
     if (type === "mousePressed" || type === "mouseReleased" || type === "mouseMoved") {
-      const buttonMap = { 0: "none", 1: "left", 2: "middle", 3: "right" };
+      // DOM MouseEvent.button: 0=left, 1=middle, 2=right. CDP uses string
+      // names. For `mouseMoved` with no button held the caller should omit
+      // `event.button` so we dispatch `"none"` — otherwise CDP interprets a
+      // numeric 0 as a held left-button and treats the move as a drag.
+      const buttonMap = { 0: "left", 1: "middle", 2: "right" };
+      const cdpButton = event.button == null ? "none" : (buttonMap[event.button] ?? "none");
       await cdp.send("Input.dispatchMouseEvent", {
         type,
         x: Math.round(event.x ?? 0),
         y: Math.round(event.y ?? 0),
-        button: buttonMap[event.button ?? 0] ?? "none",
+        button: cdpButton,
         clickCount: event.clickCount ?? (type === "mousePressed" ? 1 : 0),
         modifiers: event.modifiers ?? 0,
       });

@@ -45,7 +45,7 @@ import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
-import { SHOTS_DIR, BASELINES_DIR, resolveBrowser } from "../runner/config.js";
+import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput } from "../runner/recorder.js";
@@ -885,7 +885,14 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       type: "test.record_start", projectId: project.id, projectName: project.name,
       detail: `Recorder started on ${startUrl}`, status: "running",
     });
-    res.status(202).json({ sessionId, startUrl });
+    // Return the server-side viewport so the frontend can scale forwarded
+    // pointer coordinates correctly on deployments that override the default
+    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars.
+    res.status(202).json({
+      sessionId,
+      startUrl,
+      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+    });
   } catch (err) {
     // Roll back the stub row so a failed launch doesn't leave an orphaned
     // "running" record that blocks future recordings or trips orphan recovery.
