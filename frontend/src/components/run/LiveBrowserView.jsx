@@ -111,17 +111,38 @@ export default function LiveBrowserView({
     // Only include `button` when a button is actually held — otherwise the
     // backend must dispatch CDP button "none" so an idle hover isn't
     // interpreted as a held left-click drag.
+    // `MouseEvent.button` is always 0 during `mousemove` per the DOM spec —
+    // only `MouseEvent.buttons` (bitmask: 1=left, 2=right, 4=middle) reflects
+    // which button is currently pressed. Derive the held button from the
+    // bitmask so right-/middle-button drags forward the correct CDP button.
     const evt = { type: "mouseMoved", x, y, modifiers: modifiers(e) };
-    if (e.buttons > 0) evt.button = e.button;
+    if (e.buttons > 0) {
+      evt.button = (e.buttons & 2) ? 2 : (e.buttons & 4) ? 1 : 0;
+    }
     onInput(evt);
   }, [onInput, scaleCoords, modifiers]);
 
-  const handleWheel = useCallback((e) => {
-    if (!onInput) return;
-    e.preventDefault();
-    const { x, y } = scaleCoords(e.clientX, e.clientY);
-    onInput({ type: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY, modifiers: modifiers(e) });
-  }, [onInput, scaleCoords, modifiers]);
+  // Wheel events are forwarded via a non-passive native listener (see effect
+  // below). React 18 registers `onWheel` as passive by default, so calling
+  // `preventDefault()` on the synthetic event is silently ignored — without
+  // the imperative listener the surrounding modal/page would scroll
+  // underneath the canvas while the user scrolls inside the recorded browser.
+  useEffect(() => {
+    if (!onInput) return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const onWheelNative = (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const x = (e.clientX - rect.left) * (viewportW / rect.width);
+      const y = (e.clientY - rect.top) * (viewportH / rect.height);
+      const mods = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+      onInput({ type: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY, modifiers: mods });
+    };
+    canvas.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheelNative);
+  }, [onInput, viewportW, viewportH]);
 
   // ── Keyboard handlers ─────────────────────────────────────────────────────
   // CDP's Input.dispatchKeyEvent only triggers default actions for non-printable
