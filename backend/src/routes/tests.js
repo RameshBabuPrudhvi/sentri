@@ -1025,13 +1025,31 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     return res.status(400).json({ error: "no actions were captured — nothing to save" });
   }
 
+  // Dedupe consecutive `goto` actions to the same URL before formatting steps.
+  // `startRecording` always pushes the initial `{ kind: "goto", url: startUrl }`
+  // as actions[0], and the page's `framenavigated` listener echoes another
+  // `goto` for the resolved URL right after. Without this filter the Test
+  // Details page shows two redundant Step 1 / Step 2 navigations to the same
+  // (or query-string-permuted) URL. Mirrors the dedup in
+  // `actionsToPlaywrightCode` so the human-readable steps and generated code
+  // stay aligned.
+  const dedupedActions = [];
+  let lastGotoUrl = null;
+  for (const a of stopResult.actions) {
+    if (a.kind === "goto" && a.url) {
+      if (a.url === lastGotoUrl) continue;
+      lastGotoUrl = a.url;
+    }
+    dedupedActions.push(a);
+  }
+
   const testId = generateTestId();
   const test = {
     id: testId,
     projectId: project.id,
     name,
     description: `Recorded from ${stopResult.url}`,
-    steps: stopResult.actions.map((a, i) => `Step ${i + 1}: ${a.kind}${a.selector ? ` → ${a.selector}` : ""}${a.url ? ` → ${a.url}` : ""}`),
+    steps: dedupedActions.map((a, i) => `Step ${i + 1}: ${a.kind}${a.selector ? ` → ${a.selector}` : ""}${a.url ? ` → ${a.url}` : ""}`),
     playwrightCode: stopResult.playwrightCode,
     priority: "medium",
     type: "recorded",
