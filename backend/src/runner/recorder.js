@@ -190,26 +190,26 @@ const RECORDER_SCRIPT = `
   // after the pointer has rested on the same interactive ancestor for
   // ~600ms — long enough to filter out drive-by mouseover events while
   // still catching deliberate hovers (tooltips, dropdown triggers).
-  let __sentriHoverTimer = null;
-  let __sentriHoverLastSel = "";
+  let hoverDwellTimer = null;
+  let lastHoverSelector = "";
   document.addEventListener("mouseover", (ev) => {
     const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
     if (!el) return;
     const sel = bestSelector(el);
     if (!sel) return;
-    if (sel === __sentriHoverLastSel) return; // already pending / just emitted for this target
-    if (__sentriHoverTimer) { clearTimeout(__sentriHoverTimer); __sentriHoverTimer = null; }
-    __sentriHoverTimer = setTimeout(() => {
-      __sentriHoverTimer = null;
-      __sentriHoverLastSel = sel;
+    if (sel === lastHoverSelector) return; // already pending / just emitted for this target
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    hoverDwellTimer = setTimeout(() => {
+      hoverDwellTimer = null;
+      lastHoverSelector = sel;
       window.__sentriRecord && window.__sentriRecord({
         kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
       });
     }, 600);
   }, true);
   document.addEventListener("mouseout", () => {
-    if (__sentriHoverTimer) { clearTimeout(__sentriHoverTimer); __sentriHoverTimer = null; }
-    __sentriHoverLastSel = "";
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    lastHoverSelector = "";
   }, true);
 
   document.addEventListener("change", (ev) => {
