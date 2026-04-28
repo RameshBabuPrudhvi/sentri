@@ -163,12 +163,31 @@ const RECORDER_SCRIPT = `
       kind: "rightClick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
     });
   }, true);
+  // Hover capture uses a dwell timer so casual pointer movement through
+  // nested DOM doesn't flood the action log. We only emit a `hover` action
+  // after the pointer has rested on the same interactive ancestor for
+  // ~600ms — long enough to filter out drive-by mouseover events while
+  // still catching deliberate hovers (tooltips, dropdown triggers).
+  let __sentriHoverTimer = null;
+  let __sentriHoverLastSel = "";
   document.addEventListener("mouseover", (ev) => {
     const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
-    if (!el || !bestSelector(el)) return;
-    window.__sentriRecord && window.__sentriRecord({
-      kind: "hover", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
-    });
+    if (!el) return;
+    const sel = bestSelector(el);
+    if (!sel) return;
+    if (sel === __sentriHoverLastSel) return; // already pending / just emitted for this target
+    if (__sentriHoverTimer) { clearTimeout(__sentriHoverTimer); __sentriHoverTimer = null; }
+    __sentriHoverTimer = setTimeout(() => {
+      __sentriHoverTimer = null;
+      __sentriHoverLastSel = sel;
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
+      });
+    }, 600);
+  }, true);
+  document.addEventListener("mouseout", () => {
+    if (__sentriHoverTimer) { clearTimeout(__sentriHoverTimer); __sentriHoverTimer = null; }
+    __sentriHoverLastSel = "";
   }, true);
 
   document.addEventListener("change", (ev) => {
@@ -464,11 +483,23 @@ export function addAssertionAction(sessionId, action) {
   const kind = String(action?.kind || "");
   const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
   if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
+  const selector = action?.selector ? String(action.selector).slice(0, 200) : undefined;
+  const value = action?.value != null ? String(action.value).slice(0, 500) : undefined;
+  // Reject payloads that would later be silently dropped by
+  // `actionsToPlaywrightCode` — assertions without their required field
+  // would render in the Steps panel but disappear from the generated test
+  // code, leaving users with assertions they think exist but don't.
+  if (kind !== "assertUrl" && !selector) {
+    throw new Error(`Invalid assertion: selector is required for ${kind}.`);
+  }
+  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl") && !value) {
+    throw new Error(`Invalid assertion: value is required for ${kind}.`);
+  }
   const row = {
     kind,
-    selector: action?.selector ? String(action.selector).slice(0, 200) : undefined,
+    selector,
     label: action?.label ? String(action.label).slice(0, 80) : undefined,
-    value: action?.value != null ? String(action.value).slice(0, 500) : undefined,
+    value,
     ts: Date.now(),
   };
   session.actions.push(row);
@@ -522,7 +553,7 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     await context.exposeBinding("__sentriRecord", (_source, action) => {
       if (session.status !== "recording") return;
       if (!action || typeof action !== "object") return;
-      session.actions.push({
+      const row = {
         kind: String(action.kind || ""),
         selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
         label: action.label ? String(action.label).slice(0, 80) : undefined,
@@ -530,7 +561,22 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
         ts: Number(action.ts) || Date.now(),
-      });
+      };
+      // Browsers fire two `click` events before a `dblclick`. Without
+      // suppression a user double-click replays as click, click, dblclick
+      // — running the same handler three times. Drop trailing clicks on
+      // the same selector that arrived within the OS double-click window
+      // (~500ms) so the recorded action list matches user intent.
+      if (row.kind === "dblclick" && row.selector) {
+        for (let i = session.actions.length - 1; i >= 0; i--) {
+          const prev = session.actions[i];
+          if (row.ts - (prev.ts || 0) > 500) break;
+          if (prev.kind === "click" && prev.selector === row.selector) {
+            session.actions.splice(i, 1);
+          }
+        }
+      }
+      session.actions.push(row);
     });
     await context.addInitScript(RECORDER_SCRIPT);
 
