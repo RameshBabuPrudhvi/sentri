@@ -459,19 +459,26 @@ Each area uses this format:
 **Preconditions:** Project exists; recorder extension/feature available.
 
 **Steps & expected:**
-1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast and persists a Draft test with `safeClick` / `safeFill` (see `docs/changelog.md` DIF-015).
-2. Perform actions captured by the recorder (per `docs/changelog.md` DIF-015): **click, fill (type), press (keyboard), select (dropdown), navigate**. File upload, hover, and scroll are **not** captured — confirm they are silently ignored, not crashing the recorder.
-   - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Uses `safeClick` / `safeFill` so self-healing engages at run time.
-3. Stop and save → test appears in Tests page with all steps intact after refresh.
+1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast; the canvas is **interactive** — pointer / keyboard / wheel events are forwarded to the headless browser via the new `POST /api/v1/projects/:id/record/:sessionId/input` route (see `docs/changelog.md` DIF-015 + PR #115). Persists a Draft test with `safeClick` / `safeFill`.
+2. Perform actions captured by the recorder (PR #115 expanded scope): **click, fill (type), press (keyboard), select (dropdown), check / uncheck, navigate, and scroll** (forwarded to the headless browser; not stored as discrete steps but reflected in `framenavigated` URL changes). Mouse moves are forwarded but throttled to ~30fps and not stored as steps.
+   - **Hover** (mousemove with no button held) is forwarded for visual feedback only; not captured as a discrete action.
+   - **File upload / drag-and-drop / right-click / double-click** are still **not captured** as actions — confirm the recorder does not crash on these gestures and continues forwarding the underlying mouse events to the canvas.
+   - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Persisted `steps[]` are short English sentences (`User clicks the "Sign in" button`, `User fills the "Email" field with "…"`) — **never raw selectors** like `role=button[name="…"]` or `#login`. Generated `playwrightCode` uses `safeClick` / `safeFill` so self-healing engages at run time.
+3. Stop and save → test appears in Tests page with all steps intact after refresh. The Test Detail Steps panel renders the recorded test identically to AI-generated and manually-created tests (no engineer-shaped strings).
 4. Replay the recorded test → all steps execute; pass status reported.
+5. **Default Chromium headless mode** — confirm `BROWSER_HEADLESS=true` (the default) no longer produces "no actions were captured" (PR #115). The previous bug was that the canvas was read-only — it now forwards input correctly even when the headless Chromium has no visible window.
 
 **Negative / edge:**
-- ⚠️ Known: empty-steps bug — verify every recorded step has a selector and action.
-- Record on SPA with client-side routing → navigations captured correctly.
-- Record on iframe / shadow DOM content → document support status.
+- ⚠️ Known: empty-steps bug (legacy) — verify every recorded step has a selector and action.
+- Record on SPA with client-side routing → navigations captured correctly; consecutive `goto` actions whose URLs differ only by query string collapse to a single Step (PR #115).
+- Record on iframe / shadow DOM content → document support status (recorder selector quality is tracked under DIF-015b).
 - Record across tabs/popups → document support status.
-- Close tab mid-recording → partial recording saved or discarded cleanly (no corrupted state).
+- Close tab mid-recording → partial recording saved or discarded cleanly (no corrupted state). The `MAX_RECORDING_MS` safety-net teardown closes the stub `runs` row so subsequent runs on the project are not blocked (PR #115).
 - Record on site with dynamic IDs → selectors are stable (data-testid / text / role), not brittle.
+- **Scroll inside the canvas** → only the recorded page scrolls; the surrounding modal / page must not scroll underneath (PR #115 — non-passive wheel listener).
+- **Type printable characters** → each character appears once in the recorded form input. (PR #115 fixed a regression where every keystroke was inserted twice.)
+- **Right-/middle-click drag** → forwards the correct CDP button. Verify by recording a right-click context menu on a page that has one — the menu opens, no left-click drag artefact appears.
+- **Re-recording after a previous crashed session** → opens cleanly; no UNIQUE constraint error on the `runs` row (PR #115 orphan sweep).
 
 ---
 
