@@ -25,17 +25,17 @@ If the user asks for… read only this section:
 |---|---|---|
 | "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 240–339 |
 | "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 94–108, 418–453 |
-| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 926–941 |
-| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 504–527 |
-| "Record a test" | [Recorder](#-recorder) | 457–475 |
-| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 478–501 |
-| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 530–559 |
-| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 562–586 |
-| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 589–606 |
+| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 943–958 |
+| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 521–543 |
+| "Record a test" | [Recorder](#-recorder) | 457–491 |
+| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 495–517 |
+| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 547–575 |
+| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 579–602 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 606–622 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
-| "Verify security / authorization" | [Security](#-security) | 766–794 |
-| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 873–900 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1081 |
+| "Verify security / authorization" | [Security](#-security) | 783–810 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 890–917 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1065–1098 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
@@ -45,43 +45,43 @@ authentication:      { lines: 353-376 }
 workspaces:          { lines: 379-395 }
 projects:            { lines: 399-414 }
 tests-page:          { lines: 418-453 }
-recorder:            { lines: 457-475 }
-runs:                { lines: 478-501 }
-ai-fix:              { lines: 504-527 }
-test-code-editing:   { lines: 530-559 }
-automation:          { lines: 562-586 }
-visual-testing:      { lines: 589-606 }
-dashboard:           { lines: 609-625 }
-ai-chat:             { lines: 629-658 }
-settings:            { lines: 662-679 }
-account-gdpr:        { lines: 683-692 }
-email-verification:  { lines: 696-703 }
-recycle-bin:         { lines: 707-716 }
-audit-log:           { lines: 720-728 }
-notifications:       { lines: 732-762 }
-security:            { lines: 766-794 }
-reports-pdf:         { lines: 797-812 }
-system-diagnostics:  { lines: 816-825 }
-new-project:         { lines: 829-840 }
-runs-list:           { lines: 844-854 }
-project-detail:      { lines: 858-869 }
-bulk-actions:        { lines: 873-900 }
-modals:              { lines: 904-922 }
-api-test-imports:    { lines: 926-941 }
-onboarding:          { lines: 945-954 }
-demo-mode:           { lines: 958-969 }
-settings-data-tab:   { lines: 973-987 }
-workspace-switcher:  { lines: 991-999 }
+recorder:            { lines: 457-491 }
+runs:                { lines: 495-517 }
+ai-fix:              { lines: 521-543 }
+test-code-editing:   { lines: 547-575 }
+automation:          { lines: 579-602 }
+visual-testing:      { lines: 606-622 }
+dashboard:           { lines: 626-642 }
+ai-chat:             { lines: 646-675 }
+settings:            { lines: 679-696 }
+account-gdpr:        { lines: 700-709 }
+email-verification:  { lines: 713-720 }
+recycle-bin:         { lines: 724-733 }
+audit-log:           { lines: 737-745 }
+notifications:       { lines: 749-779 }
+security:            { lines: 783-810 }
+reports-pdf:         { lines: 814-829 }
+system-diagnostics:  { lines: 833-842 }
+new-project:         { lines: 846-857 }
+runs-list:           { lines: 861-871 }
+project-detail:      { lines: 875-886 }
+bulk-actions:        { lines: 890-917 }
+modals:              { lines: 921-939 }
+api-test-imports:    { lines: 943-958 }
+onboarding:          { lines: 962-971 }
+demo-mode:           { lines: 975-986 }
+settings-data-tab:   { lines: 990-1004 }
+workspace-switcher:  { lines: 1008-1016 }
 
 # Meta sections
 golden-happy-path:       { lines: 240-339 }
 canonical-ui-test-shape: { lines: 94-108 }
 permissions-matrix:      { lines: 151-199 }
 setup:                   { lines: 203-237 }
-cross-cutting-checks:    { lines: 1003-1029 }
-known-issues:            { lines: 1033-1044 }
-bug-template:            { lines: 1048-1081 }
-coverage-checklist:      { lines: 1085-1129 }
+cross-cutting-checks:    { lines: 1020-1046 }
+known-issues:            { lines: 1050-1061 }
+bug-template:            { lines: 1065-1098 }
+coverage-checklist:      { lines: 1102-1146 }
 ```
 
 > **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
