@@ -21,6 +21,7 @@
  * | `GET`    | `/api/v1/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
  * | `GET`    | `/api/v1/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
  * | `GET`    | `/api/v1/projects/:id/tests/traceability`        | Traceability matrix                 |
+ * | `GET`    | `/api/v1/projects/:id/export/playwright`         | Export approved tests as Playwright ZIP |
  */
 
 import { Router } from "express";
@@ -35,7 +36,7 @@ import { hasProvider, isLocalProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
-import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
+import { buildZephyrCsv, buildTestRailCsv, buildPlaywrightZip } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -674,6 +675,20 @@ router.get("/projects/:id/tests/export/testrail", (req, res) => {
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-testrail.csv"`);
   res.send(csv);
+});
+
+router.get("/projects/:id/export/playwright", async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const allTests = testRepo.getByProjectId(req.params.id);
+  const approvedTests = allTests.filter(t => t.reviewStatus === "approved");
+
+  const zipBuffer = await buildPlaywrightZip(project, approvedTests);
+  const safeProjectName = project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="sentri-${safeProjectName}-playwright.zip"`);
+  res.send(zipBuffer);
 });
 
 // GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)
