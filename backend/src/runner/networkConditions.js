@@ -22,8 +22,18 @@ const SLOW_3G_LATENCY_MS = 400;
 const SLOW_3G_THROUGHPUT_BPS = (400 * 1024) / 8;
 
 /**
- * @param {{ networkCondition?: string, context: any, page: any }} args
- * @returns {Promise<{ teardown: () => Promise<void> }>}
+ * @typedef {Object} ApplyNetworkConditionArgs
+ * @property {string} [networkCondition] - "fast" | "slow3g" | "offline".
+ * @property {*} context - Playwright BrowserContext.
+ * @property {*} page - Playwright Page bound to `context`.
+ *
+ * @typedef {Object} NetworkConditionHandle
+ * @property {Function} teardown - Async function; must be awaited before closing the page.
+ */
+
+/**
+ * @param {ApplyNetworkConditionArgs} args
+ * @returns {Promise<NetworkConditionHandle>}
  */
 export async function applyNetworkCondition({ networkCondition, context, page }) {
   if (networkCondition === "offline") {
