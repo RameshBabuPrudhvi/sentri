@@ -298,14 +298,15 @@ test("goto: falls back to the raw string (truncated) when URL parsing fails", ()
 test("click: prefers the captured friendly label over the raw selector", () => {
   // The recorder now captures `label` alongside `selector` so the Steps
   // panel can read "User clicks the Sign in button" instead of leaking the
-  // role= / CSS selector to reviewers.
+  // role= / CSS selector to reviewers. Single quotes match the AI pipeline
+  // convention defined in `outputSchema.js:74-78`.
   const s = recordedActionToStepText({
     kind: "click",
     selector: 'role=button[name="Sign in"]',
     label: "Sign in",
     ts: 1,
   });
-  assert.equal(s, 'User clicks the "Sign in" button');
+  assert.equal(s, "User clicks the 'Sign in' button");
 });
 
 test("click: derives a friendly target from a role=foo[name=\"bar\"] selector when no label was captured", () => {
@@ -317,7 +318,7 @@ test("click: derives a friendly target from a role=foo[name=\"bar\"] selector wh
     selector: 'role=button[name="Save changes"]',
     ts: 1,
   });
-  assert.equal(s, 'User clicks the "Save changes" button');
+  assert.equal(s, "User clicks the 'Save changes' button");
 });
 
 test("click: degrades cleanly to a target-less sentence when neither label nor role selector is present", () => {
@@ -333,7 +334,9 @@ test("fill: includes the captured value, truncated to avoid leaking long secrets
   // Recorded fill values can contain passwords / API keys. The full value
   // already lives in playwrightCode (where it's needed for replay), but the
   // human-readable steps must truncate aggressively so the Test Detail page
-  // doesn't surface the full secret.
+  // doesn't surface the full secret. Phrasing matches the AI pipeline's
+  // "User fills in X with 'value'" form (outputSchema.js:74-78) so recorded
+  // and AI-generated steps render interchangeably on the Test Detail page.
   const longPassword = "a".repeat(200);
   const s = recordedActionToStepText({
     kind: "fill",
@@ -342,9 +345,9 @@ test("fill: includes the captured value, truncated to avoid leaking long secrets
     value: longPassword,
     ts: 1,
   });
-  assert.match(s, /^User fills the "Password" field with "/);
+  assert.match(s, /^User fills in the 'Password' field with '/);
   // Value must be truncated to <=40 chars (per the helper's slice).
-  const valueMatch = s.match(/with "([^"]*)"/);
+  const valueMatch = s.match(/with '([^']*)'/);
   assert.ok(valueMatch, "step should expose a value segment");
   assert.ok(valueMatch[1].length <= 40, `value must be truncated, got ${valueMatch[1].length} chars`);
 });
@@ -356,7 +359,7 @@ test("fill: handles missing value cleanly", () => {
     label: "Email",
     ts: 1,
   });
-  assert.equal(s, 'User fills the "Email" field with ""');
+  assert.equal(s, "User fills in the 'Email' field with ''");
 });
 
 test("press: renders the key without leaking the selector", () => {
@@ -379,7 +382,7 @@ test("select: renders selected value with friendly target dropdown noun", () => 
     value: "United Kingdom",
     ts: 1,
   });
-  assert.equal(s, 'User selects "United Kingdom" in the "Country" dropdown');
+  assert.equal(s, "User selects 'United Kingdom' in the 'Country' dropdown");
 });
 
 test("select: omits the trailing 'in …' clause when no target can be derived", () => {
@@ -391,7 +394,7 @@ test("select: omits the trailing 'in …' clause when no target can be derived",
     value: "US",
     ts: 1,
   });
-  assert.equal(s, 'User selects "US"');
+  assert.equal(s, "User selects 'US'");
   assert.doesNotMatch(s, /\bin\s*$/);
 });
 
@@ -408,8 +411,8 @@ test("check / uncheck: render with the checkbox noun and friendly label", () => 
     label: "I agree",
     ts: 2,
   });
-  assert.equal(checked, 'User checks the "I agree" checkbox');
-  assert.equal(unchecked, 'User unchecks the "I agree" checkbox');
+  assert.equal(checked, "User checks the 'I agree' checkbox");
+  assert.equal(unchecked, "User unchecks the 'I agree' checkbox");
 });
 
 test("default branch: renders the kind verbatim for unknown future action types", () => {
@@ -426,14 +429,49 @@ test("default branch: renders the kind verbatim for unknown future action types"
 });
 
 test("renders human-readable prose for assertion + parity action kinds", () => {
+  // Assertion kinds use AI-pipeline-style outcome phrasing ("The X is
+  // visible", "The X contains 'Y'") so they render alongside AI-generated
+  // assertions on the Test Detail page without sticking out as
+  // engineer-shaped strings.
   assert.match(recordedActionToStepText({ kind: "dblclick", label: "Open", ts: 1 }), /double-clicks/i);
   assert.match(recordedActionToStepText({ kind: "rightClick", label: "Menu", ts: 1 }), /right-clicks/i);
   assert.match(recordedActionToStepText({ kind: "hover", label: "Help", ts: 1 }), /hovers/i);
   assert.match(recordedActionToStepText({ kind: "upload", label: "Avatar", value: "avatar.png", ts: 1 }), /uploads/i);
-  assert.match(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), /asserts visibility/i);
-  assert.match(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), /contains "Saved"/i);
-  assert.match(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), /value/i);
-  assert.match(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), /URL contains "dashboard"/i);
+  assert.match(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), /^The .* is visible$/);
+  assert.match(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), /contains 'Saved'/);
+  assert.match(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), /has value 'a@b\.com'/);
+  assert.match(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), /^The URL contains 'dashboard'$/);
+});
+
+test("drag: renders both source and drop-target in the persisted step", () => {
+  // The previous formatter dropped the target half of the gesture entirely
+  // ("User drags the 'Card 1' element"), making it impossible to follow the
+  // recorded flow from steps alone. The drop-target carries no `label`
+  // (only `target` selector), so we recover the friendly name from a
+  // role-style selector on the target.
+  const s = recordedActionToStepText({
+    kind: "drag",
+    selector: 'role=listitem[name="Card 1"]',
+    label: "Card 1",
+    target: 'role=region[name="Done"]',
+    ts: 1,
+  });
+  assert.equal(s, "User drags the 'Card 1' element onto the 'Done' element");
+});
+
+test("drag: degrades to source-only sentence when target selector cannot be parsed", () => {
+  // CSS-style target selectors don't yield a friendly name, so render only
+  // the source rather than emitting a malformed " onto" clause with nothing
+  // after it.
+  const s = recordedActionToStepText({
+    kind: "drag",
+    label: "Card 1",
+    target: ".drop-zone",
+    ts: 1,
+  });
+  assert.equal(s, "User drags the 'Card 1' element");
+  assert.doesNotMatch(s, /onto\s*$/);
+  assert.doesNotMatch(s, /\.drop-zone/, "raw CSS target must not leak into the Steps panel");
 });
 
 test("never leaks raw role=…[name=\"…\"] or CSS selectors into the rendered step", () => {
@@ -453,7 +491,7 @@ test("never leaks raw role=…[name=\"…\"] or CSS selectors into the rendered 
     assert.doesNotMatch(s, /role=[a-z]+\[/i, `${kind} step leaked raw role= selector: ${s}`);
     // Note: the friendlyTarget fallback successfully extracts "Sign in" from
     // `role=button[name="Sign in"]`, so the rendered step is allowed to
-    // contain quoted "Sign in" — what it must NOT contain is the raw `role=`
+    // contain quoted 'Sign in' — what it must NOT contain is the raw `role=`
     // token, the surrounding `[name="…"]` brackets, or a leading `#` / `.`
     // CSS prefix. The role= regex above covers the first two cases.
   }

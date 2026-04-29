@@ -172,11 +172,11 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   async function handleAddAssertion() {
     if (!sessionId) return;
     if (assertKind !== "assertUrl" && !assertSelector.trim()) {
-      setError("Selector is required for this assertion.");
+      setError("Selector is required for this verification.");
       return;
     }
     if ((assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && !assertValue.trim()) {
-      setError("Value is required for this assertion.");
+      setError("Value is required for this verification.");
       return;
     }
     setError(null);
@@ -189,7 +189,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       });
       setAssertValue("");
     } catch (e) {
-      setError(e.message || "failed to add assertion");
+      setError(e.message || "failed to add verification");
     }
   }
 
@@ -300,7 +300,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
             {phase === "recording" && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                  Add assertion
+                  Add verification
                 </div>
                 <select className="input" value={assertKind} onChange={(e) => setAssertKind(e.target.value)} style={{ width: "100%", marginBottom: 6 }}>
                   <option value="assertVisible">Element visible</option>
@@ -334,7 +334,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   />
                 )}
                 <button className="btn btn-ghost" onClick={handleAddAssertion} style={{ width: "100%", marginBottom: 12 }}>
-                  Add assertion step
+                  Add verification step
                 </button>
                 <label className="text-sm font-semi" style={{ display: "block", marginBottom: 6 }}>Test name</label>
                 <input

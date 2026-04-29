@@ -371,7 +371,7 @@ function escapeJsSingleQuote(str) {
 function friendlyTarget(a, noun = "") {
   const raw = (a.label || "").trim();
   if (raw) {
-    return noun ? ` the "${raw}" ${noun}` : ` "${raw}"`;
+    return noun ? ` the '${raw}' ${noun}` : ` '${raw}'`;
   }
   // Legacy actions captured before the `label` field existed only carry the
   // selector. Try to recover a name from `role=foo[name="bar"]` so older
@@ -381,10 +381,34 @@ function friendlyTarget(a, noun = "") {
   if (m) {
     const role = m[1].toLowerCase();
     const name = m[2];
-    return noun || role ? ` the "${name}" ${noun || role}` : ` "${name}"`;
+    return noun || role ? ` the '${name}' ${noun || role}` : ` '${name}'`;
   }
   // No label, no role selector — return empty so the sentence reads cleanly
   // ("User clicks") instead of leaking a CSS selector to the reviewer.
+  return "";
+}
+
+/**
+ * Same as {@link friendlyTarget} but operates on a raw selector/label pair
+ * pulled from a different action's drop-target fields (`a.target` is a
+ * selector string only — there's no separate `targetLabel`). Used by the
+ * `drag` step formatter so the rendered sentence reads as
+ * `User drags the 'Card 1' card onto the 'Done' column` instead of dropping
+ * the target half of the gesture entirely.
+ *
+ * @param {string} selector - Raw selector to extract a friendly name from.
+ * @param {string} [noun]   - Element noun (`"element"`, `"column"`).
+ * @returns {string}        - ` the '<name>' <noun>`, ` '<name>'`, or `""`.
+ */
+function friendlyTargetFromSelector(selector, noun = "") {
+  const sel = String(selector || "");
+  if (!sel) return "";
+  const m = sel.match(/role=([a-z]+)\[name="([^"]+)"\]/i);
+  if (m) {
+    const role = m[1].toLowerCase();
+    const name = m[2];
+    return noun || role ? ` the '${name}' ${noun || role}` : ` '${name}'`;
+  }
   return "";
 }
 
@@ -406,6 +430,12 @@ function shortUrl(u) {
 }
 
 export function recordedActionToStepText(a) {
+  // Recorded `fill` / `select` / `upload` / `assert*` values can contain
+  // secrets (passwords, API keys). The raw value already lives in
+  // `playwrightCode`; truncate aggressively in the human-readable steps so
+  // the Test Detail page doesn't surface it.
+  const truncVal = (v, n = 40) => String(v ?? "").slice(0, n);
+
   switch (a.kind) {
     case "goto":
       return `User navigates to ${shortUrl(a.url)}`.trim();
@@ -418,30 +448,45 @@ export function recordedActionToStepText(a) {
     case "hover":
       return `User hovers over${friendlyTarget(a, "element")}`;
     case "fill":
-      // Recorded fill values can contain secrets (passwords, API keys). The
-      // raw value already lives in `playwrightCode`; truncate aggressively in
-      // the human-readable steps so the Test Detail page doesn't surface it.
-      return `User fills${friendlyTarget(a, "field")} with "${String(a.value || "").slice(0, 40)}"`;
+      // Match the AI pipeline's "User fills in X with 'value'" phrasing
+      // (outputSchema.js:74-78) — recorder previously used "User fills the
+      // 'Email' field with …" which read differently from AI-generated and
+      // manually-created steps on the same Test Detail page.
+      return `User fills in${friendlyTarget(a, "field")} with '${truncVal(a.value)}'`;
     case "press":
       return `User presses ${a.key || ""}`.trim();
     case "select":
-      return `User selects "${String(a.value || "").slice(0, 40)}"${friendlyTarget(a, "dropdown") ? ` in${friendlyTarget(a, "dropdown")}` : ""}`;
+      return `User selects '${truncVal(a.value)}'${friendlyTarget(a, "dropdown") ? ` in${friendlyTarget(a, "dropdown")}` : ""}`;
     case "check":
       return `User checks${friendlyTarget(a, "checkbox")}`;
     case "uncheck":
       return `User unchecks${friendlyTarget(a, "checkbox")}`;
     case "upload":
-      return `User uploads "${String(a.value || "").slice(0, 40)}"${friendlyTarget(a, "file input") ? ` in${friendlyTarget(a, "file input")}` : ""}`;
-    case "drag":
-      return `User drags${friendlyTarget(a, "element")}`;
+      return `User uploads '${truncVal(a.value)}'${friendlyTarget(a, "file input") ? ` in${friendlyTarget(a, "file input")}` : ""}`;
+    case "drag": {
+      // Surface BOTH source and drop-target so reviewers can follow the
+      // gesture from the persisted steps alone. The previous formatter
+      // dropped the target entirely, leaving "User drags the 'Card 1'"
+      // with no indication of where it landed.
+      const source = friendlyTarget(a, "element");
+      const target = friendlyTargetFromSelector(a.target, "element");
+      return target
+        ? `User drags${source} onto${target}`
+        : `User drags${source}`;
+    }
     case "assertVisible":
-      return `User asserts visibility of${friendlyTarget(a, "element")}`;
+      // Match the AI pipeline's outcome-style assertions ("the 'Sign in'
+      // button is visible") rather than our previous engineer-shaped
+      // "User asserts visibility of …" phrasing. The Steps panel renders
+      // recorded + AI-generated tests through the same component, so the
+      // sentence shapes need to be interchangeable.
+      return `The${friendlyTarget(a, "element") || " element"} is visible`;
     case "assertText":
-      return `User asserts text${friendlyTarget(a, "element")} contains "${String(a.value || "").slice(0, 40)}"`;
+      return `The${friendlyTarget(a, "element") || " element"} contains '${truncVal(a.value)}'`;
     case "assertValue":
-      return `User asserts value${friendlyTarget(a, "field")} is "${String(a.value || "").slice(0, 40)}"`;
+      return `The${friendlyTarget(a, "field") || " field"} has value '${truncVal(a.value)}'`;
     case "assertUrl":
-      return `User asserts URL contains "${String(a.value || "").slice(0, 60)}"`;
+      return `The URL contains '${truncVal(a.value, 60)}'`;
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
