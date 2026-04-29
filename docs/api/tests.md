@@ -260,12 +260,17 @@ will create a fresh baseline from its capture. Idempotent — returns
 ## Interactive Recorder (DIF-015)
 
 Opens a server-side Playwright browser at the project URL, streams the live
-CDP screencast to the frontend via SSE, and captures click / fill / press /
-select / navigation events. On stop, captured actions are transformed into a
-Playwright test body and persisted as a Draft test using `safeClick` /
-`safeFill` so the self-healing transform takes over at execution time.
+CDP screencast to the frontend via SSE, and forwards canvas pointer /
+keyboard / wheel events back into the headless page via CDP `Input.dispatch*`
+calls. The recorder captures click / dblclick / rightClick / hover / fill /
+press / select / check / uncheck / upload / drag / navigation events plus
+manual assertions (visible / text / value / URL). On stop, captured actions
+are transformed into a Playwright test body and persisted as a Draft test
+using `safeClick` / `safeFill` so the self-healing transform takes over at
+execution time.
 
-> The recorder requires a headed Chromium (`BROWSER_HEADLESS=false`). See
+> The recorder works with the default `BROWSER_HEADLESS=true` (PR #115) —
+> the canvas is interactive even when Chromium has no visible window. See
 > REVIEW.md § "Testing DIF-001 (Visual Regression) and DIF-015 (Recorder)"
 > for the full gotcha list.
 
@@ -282,9 +287,11 @@ Requires `qa_lead` role. Rate-limited via the expensive-operations limiter.
 { "startUrl": "https://example.com" }
 ```
 
-Defaults to the project's configured URL. Returns `{ sessionId, startUrl }`.
-The frontend subscribes to `/api/v1/runs/:sessionId/events` for live
-screencast frames.
+Defaults to the project's configured URL. Returns
+`{ sessionId, startUrl, viewport: { width, height } }`. The `viewport`
+reflects the server-side `VIEWPORT_WIDTH` / `VIEWPORT_HEIGHT` so the
+frontend can scale forwarded pointer coordinates correctly. The frontend
+subscribes to `/api/v1/runs/:sessionId/events` for live screencast frames.
 
 ### Stop / Save / Discard
 
@@ -310,6 +317,64 @@ timeout already tore down the session, the response additionally includes
 
 Tears down the server-side browser without creating a Draft test.
 
+### Forward Canvas Input Events
+
+```
+POST /api/v1/projects/:id/record/:sessionId/input
+```
+
+Requires `qa_lead` role. Exempt from the global rate limiter — input events
+arrive at ~30fps during active use; the route is cheap (one async CDP
+`Input.dispatch*` send) and already gated by role + workspace scope.
+
+**Body** (CDP-shaped):
+```json
+{
+  "type": "mousePressed",
+  "x": 320, "y": 180,
+  "button": 0,
+  "clickCount": 1,
+  "modifiers": 0
+}
+```
+
+`type` must be one of `mousePressed`, `mouseReleased`, `mouseMoved`,
+`keyDown`, `keyUp`, `char`, `scroll`. For mouse events, `button` follows the
+DOM `MouseEvent.button` convention (0=left, 1=middle, 2=right); omit for
+idle moves so CDP dispatches `"none"` instead of interpreting an idle
+hover as a left-button drag. For non-printable keys, include the DOM
+`keyCode` so CDP populates `windowsVirtualKeyCode` — without it Backspace,
+Enter, Tab, and arrow keys fire but have no effect on the page.
+
+Returns `200 { ok: true }`. Returns 404 if the session has ended (auto
+timeout) or if `req.params.id` doesn't match the session's project.
+
+### Add a Manual Assertion
+
+```
+POST /api/v1/projects/:id/record/:sessionId/assertion
+```
+
+Requires `qa_lead` role. Adds an assertion step to the in-flight recording
+without forwarding any browser input.
+
+**Body:**
+```json
+{
+  "kind": "assertText",
+  "selector": "#toast",
+  "label": "Save confirmation",
+  "value": "Saved"
+}
+```
+
+`kind` must be one of `assertVisible`, `assertText`, `assertValue`,
+`assertUrl`. `selector` is required for everything except `assertUrl`;
+`value` is required for `assertText`, `assertValue`, and `assertUrl`. Returns
+`201 { ok: true, action }`. Returns 400 on incomplete payloads — the route
+rejects assertions that would later be silently dropped by the codegen
+(e.g. an `assertText` without a value).
+
 ### Poll Recording Status
 
 ```
@@ -328,8 +393,19 @@ RecorderModal sidebar:
   "actionCount": 3,
   "actions": [
     { "kind": "goto",  "url": "https://example.com", "ts": 1713873600000 },
-    { "kind": "click", "selector": "#login", "ts": 1713873601500 },
-    { "kind": "fill",  "selector": "#email", "value": "u@x.com", "ts": 1713873602100 }
+    { "kind": "click", "selector": "role=button[name=\"Sign in\"]", "label": "Sign in", "ts": 1713873601500 },
+    { "kind": "fill",  "selector": "#email", "label": "Email", "value": "u@x.com", "ts": 1713873602100 }
   ]
 }
 ```
+
+Each action additionally carries (when applicable):
+
+- `label` — friendly label (aria-label / inner text / placeholder) used by
+  the Test Detail Steps panel so reviewers see `User clicks the "Sign in"
+  button` instead of the raw selector.
+- `target` — for `drag` actions, the drop-target selector.
+- `pageAlias` — `"page"` for the main tab, `"popup1"`, `"popup2"`, … for
+  popups. Wired through to the generated Playwright code via `ensurePopup()`.
+- `frameUrl` — when the action originated inside an iframe, the frame's URL
+  (used by `ensureFrame()` in the generated code).
