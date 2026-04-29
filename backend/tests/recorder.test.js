@@ -81,7 +81,7 @@ test("deduplicates consecutive gotos to the same URL", () => {
 test("emits a runnable test skeleton even for zero actions", () => {
   const code = actionsToPlaywrightCode("Empty", "https://example.com", []);
   assert.match(code, /import \{ test, expect \} from '@playwright\/test';/);
-  assert.match(code, /test\('Empty', async \(\{ page \}\) => \{/);
+  assert.match(code, /test\('Empty', async \(\{ page, context \}\) => \{/);
   assert.match(code, /await page\.goto\('https:\/\/example\.com'\);/);
   assert.match(code, /await expect\(page\)\.toHaveURL\(\/\.\*\/\);/);
 });
@@ -142,13 +142,17 @@ test("supports recorder parity actions (dblclick/right-click/hover/upload/assert
     { kind: "assertValue", selector: "#email", value: "a@b.com", ts: 7 },
     { kind: "assertUrl", value: "dashboard", ts: 8 },
   ]);
-  assert.match(code, /await page\.locator\('#open'\)\.dblclick\(\);/);
-  assert.match(code, /await page\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
-  assert.match(code, /await page\.locator\('#tooltip'\)\.hover\(\);/);
-  assert.match(code, /await page\.setInputFiles\('input\[type=\\'file\\'\]', \[\]\);/);
-  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toBeVisible\(\);/);
-  assert.match(code, /await expect\(page\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
-  assert.match(code, /await expect\(page\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
+  assert.match(code, /\.locator\('#open'\)\.dblclick\(\);/);
+  assert.match(code, /\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
+  assert.match(code, /\.locator\('#tooltip'\)\.hover\(\);/);
+  // Recorder cannot ship local file bytes from the browser, so it emits a
+  // placeholder `[]` payload and surfaces the captured filename(s) in a
+  // NOTE comment for the reviewer to wire up real fixtures.
+  assert.match(code, /NOTE: recorder captured filenames \[\"avatar\.png\"\]/);
+  assert.match(code, /await safeUpload\([^,]+, 'input\[type=\\'file\\'\]', \[\]\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toBeVisible\(\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
   assert.match(code, /await expect\(page\)\.toHaveURL\(new RegExp\('dashboard'\)\);/);
 });
 
@@ -242,14 +246,14 @@ test("generated code is always syntactically parseable regardless of captured va
     // and prepends an `import` line. Strip both so we can parse just the body
     // as a Function and validate that every interpolated string literal is
     // syntactically valid.
-    const bodyMatch = code.match(/async \(\{ page \}\) => \{\n([\s\S]*)\n\}\);\n$/);
+    const bodyMatch = code.match(/async \(\{ page, context \}\) => \{\n([\s\S]*)\n\}\);\n$/);
     assert.ok(bodyMatch, `generated code should have the expected wrapper shape for input ${JSON.stringify(s)}`);
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     assert.doesNotThrow(
       // All self-healing helper names must be in scope for the parsed body —
       // the generated code now references safeSelect / safeCheck / safeUncheck
       // in addition to safeClick / safeFill.
-      () => new AsyncFunction("page", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", bodyMatch[1]),
+      () => new AsyncFunction("page", "context", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", "safeUpload", bodyMatch[1]),
       `generated body should parse for input ${JSON.stringify(s)}`,
     );
   }
@@ -418,7 +422,7 @@ test("default branch: renders the kind verbatim for unknown future action types"
     label: "Slider",
     ts: 1,
   });
-  assert.match(s, /User performs drag/);
+  assert.match(s, /User drags/i);
 });
 
 test("renders human-readable prose for assertion + parity action kinds", () => {
