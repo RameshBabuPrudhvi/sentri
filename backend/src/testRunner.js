@@ -31,7 +31,8 @@
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
-import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
+import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
@@ -65,6 +66,7 @@ async function poolMap(items, concurrency, fn, signal) {
   await Promise.all(workers);
   return results;
 }
+
 
 /**
  * Execute an array of approved tests against a project using Playwright.
@@ -224,7 +226,20 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const result = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation });
+        const { result, retryCount } = await executeWithRetries(async (attempt) => {
+          if (attempt > 0) {
+            logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
+          }
+          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation });
+          if (attemptResult.status === "failed") {
+            const retryErr = new Error(attemptResult.error || "Test failed");
+            retryErr.result = attemptResult;
+            throw retryErr;
+          }
+          return attemptResult;
+        }, MAX_TEST_RETRIES);
+        result.retryCount = retryCount;
+        result.failedAfterRetry = false;
         structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
         processResult(test, result);
       } catch (err) {
@@ -232,11 +247,18 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // `result` and `snapshot` events are emitted — otherwise the
         // frontend progress bar stalls during parallel execution.
         structuredLog("test.crash", { runId, testId: test.id, error: err.message?.slice(0, 200) });
-        const errorResult = {
+        const errorResult = err.result || {
           testId: test.id, testName: test.name,
           status: "failed", error: err.message,
           durationMs: 0, network: [], consoleLogs: [],
         };
+        // Prefer the actual retry count surfaced by executeWithRetries —
+        // synchronous crashes from executeTest may exhaust fewer attempts
+        // than MAX_TEST_RETRIES suggests.
+        errorResult.retryCount = typeof err.retryCount === "number"
+          ? err.retryCount
+          : MAX_TEST_RETRIES;
+        errorResult.failedAfterRetry = true;
         processResult(test, errorResult);
       }
     }, signal);
@@ -265,6 +287,12 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     run.videoSegments = allVideoSegments;
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
+
+  // AUTO-005: aggregate per-result retry telemetry onto the run record so
+  // the dedicated `runs.retryCount` / `runs.failedAfterRetry` columns
+  // (migration 011) are populated for run-level analytics queries.
+  run.retryCount = run.results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
+  run.failedAfterRetry = run.results.filter(r => r.failedAfterRetry).length;
 
   // NOTE: We intentionally keep run.status === "running" here so that:
   //   1. The abort endpoint (POST /api/runs/:id/abort) still works during the

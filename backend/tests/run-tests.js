@@ -55,6 +55,7 @@ const files = [
   "tests/test-connection.test.js",
   "tests/cross-browser.test.js",
   "tests/playwright-export.test.js",
+  "tests/test-retry.test.js",
 ];
 
 let passed = 0;

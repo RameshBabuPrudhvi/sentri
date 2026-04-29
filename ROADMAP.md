@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-005` — Automatic test retry with flake isolation · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 41 items
+> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 40 items
 
 ---
 
@@ -96,6 +96,7 @@ The following items have been verified complete against the codebase and are **n
 | DIF-015 | Interactive browser recorder for test creation | PR #94 |
 | AUTO-007 | Geolocation / locale / timezone testing | PR #94 |
 | DIF-006 | Standalone Playwright export (zero vendor lock-in) | PR #1 |
+| AUTO-005 | Automatic test retry with flake isolation | PR #2 |
 
 ---
 
@@ -1014,7 +1015,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-005 — Automatic test retry with flake isolation 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #2) | **Effort:** M | **Source:** Competitive Gap Analysis
 
 **Problem:** When a test fails, Sentri marks it failed immediately. An autonomous system should auto-retry failed tests (1–3 retries, configurable) before recording a true failure. The `retry()` function in `selfHealing.js` retries individual element lookups, but there is no test-level retry. This item implements test-level retry for all run types.
 

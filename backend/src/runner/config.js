@@ -116,6 +116,17 @@ export const DEFAULT_PARALLEL_WORKERS = Math.max(1, Math.min(10,
   parseInt(process.env.PARALLEL_WORKERS, 10) || 1
 ));
 
+// Automatic test retry budget (AUTO-005).
+// Value is the number of retries after the first attempt.
+// Parse explicitly so `MAX_TEST_RETRIES=0` (disable retries) is honoured —
+// `parseInt(...) || 2` would treat 0 as falsy and silently fall back to 2.
+export const MAX_TEST_RETRIES = (() => {
+  const raw = process.env.MAX_TEST_RETRIES;
+  const n = raw == null || raw === "" ? NaN : parseInt(raw, 10);
+  const v = Number.isFinite(n) ? n : 2;
+  return Math.max(0, Math.min(10, v));
+})();
+
 // ── Conversation limits ───────────────────────────────────────────────────────
 // Maximum number of user↔assistant turn pairs to keep in the AI chat context
 // window. When the conversation exceeds this, older turns in the middle are
@@ -188,4 +199,3 @@ export function resolveDevice(deviceName) {
   if (!descriptor) return null;
   return descriptor;
 }
-

@@ -116,10 +116,10 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // TODO(AUTO-005): When test-level retry is implemented, gate this call
-          // so notifications only fire after all retries are exhausted. Currently
-          // fires on first failure, which will cause premature alerts if retries
-          // are added without updating this callsite.
+          // AUTO-005: per-test retry runs inside testRunner.js before results
+          // are tallied, so `finishedRun.failed` only counts tests with
+          // `failedAfterRetry: true` — notifications correctly fire only after
+          // the retry budget is exhausted.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
@@ -214,10 +214,10 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         }),
         actorInfo: actor(req),
         onComplete: async (finishedRun) => {
-          // TODO(AUTO-005): When test-level retry is implemented, gate this call
-          // so notifications only fire after all retries are exhausted. Currently
-          // fires on first failure, which will cause premature alerts if retries
-          // are added without updating this callsite.
+          // AUTO-005: per-test retry runs inside testRunner.js before results
+          // are tallied, so `finishedRun.failed` only counts tests with
+          // `failedAfterRetry: true` — notifications correctly fire only after
+          // the retry budget is exhausted.
           try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
         },
       },
