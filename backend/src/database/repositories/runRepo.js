@@ -289,6 +289,11 @@ export function create(run) {
   }
   if (params.tests == null) params.tests = "[]";
   if (params.results == null) params.results = "[]";
+  // AUTO-005: migration 011 declares these columns NOT NULL DEFAULT 0.
+  // Coerce undefined/null to 0 so create() works for callers (e.g. crawl/
+  // generate runs) that never set retry telemetry.
+  if (params.retryCount == null) params.retryCount = 0;
+  if (params.failedAfterRetry == null) params.failedAfterRetry = 0;
   db.prepare(INSERT_SQL).run(params);
 }
 
