@@ -676,25 +676,29 @@ Because it's marked internal, import risk is real — the path or signature coul
 
 #### Gap 1 — Expanded action vocabulary
 
-`RECORDER_SCRIPT` (`backend/src/runner/recorder.js:98-161`) listens for only `click`, `change`, `keydown`. Seven common gestures produce zero captured actions:
+> **Update (PR #118):** This gap was originally written against the PR #115 baseline where `RECORDER_SCRIPT` listened for only `click`, `change`, `keydown`. PR #118 (folding in PR #116 / #117) extended the listener set to also cover `dblclick`, `contextmenu`, `mouseover`/`mouseout`, `input`, `dragstart`/`drop`, plus the existing `change` branch for `<input type="file">`. The corresponding action kinds (`dblclick`, `rightClick`, `hover`, `fill` debounced, `upload`, `drag`) all flow through `actionsToPlaywrightCode` (`backend/src/runner/recorder.js:677-817`) and `recordedActionToStepText` (`backend/src/runner/recorder.js:521-616`) with regression tests in `backend/tests/recorder.test.js`. The remaining work is **paste** (and the deferred items below).
 
-| Gesture | Why it matters | Suggested mapping |
-|---|---|---|
-| **Drag-and-drop** | Trello, Notion, kanban boards, file pickers | `dragstart`+`drop` paired → `page.dragAndDrop(src, dst)` |
-| **Double-click** | Inline editors, text selection | `dblclick` → `page.dblclick(sel)` |
-| **Right-click** | Context menus | `contextmenu` → `page.click(sel, { button: 'right' })` |
-| **File upload** | `<input type="file">` content | filename only (no full path — leaks tmpdir) → `page.setInputFiles(sel, [name])` |
-| **Paste** | Pasted tokens / addresses / JSON | `paste` event clipboard text → `safeFill(sel, '<text>')` truncated to 500 chars (matches `fill`) |
-| **Hover with intent** | Hover-only menus, tooltips | Out of scope — too noisy without UX work |
-| **Keyboard shortcuts** | Ctrl+A / Ctrl+C / Cmd+Enter | Out of scope — needs explicit "record this shortcut" UX |
+`RECORDER_SCRIPT` (`backend/src/runner/recorder.js:180-395`) currently listens for `click`, `dblclick`, `contextmenu`, `mouseover`/`mouseout`, `input`, `change`, `keydown`, `dragstart`, `drop`. Two common gestures still produce zero captured actions:
 
-Each new kind requires a typedef union member, an `actionsToPlaywrightCode` branch, a `recordedActionToStepText` branch, and a regression test. Coordinate with DIF-015b (selectorGenerator) to avoid `RECORDER_SCRIPT` merge conflicts.
+| Gesture | Why it matters | Status | Suggested mapping |
+|---|---|---|---|
+| **Drag-and-drop** | Trello, Notion, kanban boards, file pickers | ✅ shipped (PR #118) | `dragstart`+`drop` paired → `locator.dragTo(targetLocator)` |
+| **Double-click** | Inline editors, text selection | ✅ shipped (PR #118) | `dblclick` → `locator.dblclick()` |
+| **Right-click** | Context menus | ✅ shipped (PR #118) | `contextmenu` → `locator.click({ button: 'right' })` |
+| **File upload** | `<input type="file">` content | ✅ shipped (PR #118 — placeholder fixture path, captured filename in NOTE comment) | `change` on file input → `safeUpload(sel, [])` + comment with captured names |
+| **Hover with intent** | Hover-only menus, tooltips | ✅ shipped (PR #118 — 600 ms dwell timer) | sustained `mouseover` → `locator.hover()` |
+| **Paste** | Pasted tokens / addresses / JSON | 🔲 Planned | `paste` event clipboard text → `safeFill(sel, '<text>')` truncated to 500 chars (matches `fill`) |
+| **Keyboard shortcuts** | Ctrl+A / Ctrl+C / Cmd+Enter | 🔲 Planned (deferred) | Needs explicit "record this shortcut" UX — printable single-char keys on editable fields are intentionally suppressed (`backend/src/runner/recorder.js:370-372`) to avoid double-typing alongside `fill`, but `ev.ctrlKey || ev.metaKey` chords already flow through to `press` actions today |
+
+Each remaining kind requires a typedef union member, an `actionsToPlaywrightCode` branch, a `recordedActionToStepText` branch, an `isEmittableAction` branch (`backend/src/runner/recorder.js:634-654` — single source of truth for the "is this action well-formed enough to emit code for?" predicate), and a regression test. Coordinate with DIF-015b (selectorGenerator) to avoid `RECORDER_SCRIPT` merge conflicts.
 
 #### Gap 2 — Inline assertion authoring during recording
 
-The recorder captures *what the user did* but never *what they expected*. Stage 6 of the AI pipeline infers assertions post-hoc, which produces weak / missing assertions for negative tests, state-dependent flows ("cart count is 3"), cross-page assertions, and count assertions. Competitors (BearQ, Mabl, Testim) all let the user toggle into "assert mode" mid-recording, click an element, and pick an assertion type from a popover (`is visible` / `has text` / `has count` / `URL matches` / `has class`).
+> **Update (PR #118):** Partially shipped. PR #118 added `POST /api/v1/projects/:id/record/:sessionId/assertion` (`backend/src/routes/tests.js:1164-1184`) and the matching server-side `addAssertionAction()` (`backend/src/runner/recorder.js:827-855`), supporting `assertVisible`, `assertText`, `assertValue`, and `assertUrl`. The frontend `RecorderModal` already exposes an "Add assertion" form alongside the live canvas. What's missing is the **point-and-click** UX: the user has to manually paste a selector into the form rather than hovering an element on the canvas to highlight it. The visual / hover-to-pick affordance (the part competitors charge for) is still planned.
 
-Implementation sketch: add an Assert toggle to `RecorderModal` next to Stop & Save; when active, the canvas suppresses `forwardInput` and instead highlights the hovered element + opens an assertion picker. Captured `assert` actions slot into `actionsToPlaywrightCode` as `await expect(...)` calls. The Steps panel reads `Then the "Sign in" button is visible`.
+The recorder captures *what the user did* but never *what they expected* unless the user explicitly opens the assertion form. Stage 6 of the AI pipeline infers assertions post-hoc, which produces weak / missing assertions for negative tests, state-dependent flows ("cart count is 3"), cross-page assertions, and count assertions. Competitors (BearQ, Mabl, Testim) all let the user toggle into "assert mode" mid-recording, click an element, and pick an assertion type from a popover (`is visible` / `has text` / `has count` / `URL matches` / `has class`).
+
+Remaining implementation: when the assert toggle in `RecorderModal` is active, suppress `forwardInput` on the canvas, highlight the hovered element via CDP `Overlay.highlightNode`, and open the assertion picker pre-filled with that element's `bestSelector()` output. The route + step rendering already exist — this is purely a frontend / UX change in `frontend/src/components/run/RecorderModal.jsx` and `frontend/src/components/run/LiveBrowserView.jsx` (an `assertMode` prop that suppresses input forwarding and surfaces hover targets back to the modal). `assertCount` and `assertHasClass` would need a new action kind on the backend; the other four are already wired.
 
 #### Gap 3 — Pause / resume + undo last action
 
@@ -730,14 +734,14 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 **Suggested split into PRs:**
 
-| Sub-item | Effort | Priority |
-|---|---|---|
-| Gap 1 — Expanded action vocabulary | M | 🟡 High |
-| Gap 2 — Inline assertion authoring | M | 🟢 Differentiator (parity with BearQ) |
-| Gap 3 — Pause / resume + undo | S | 🔵 Medium |
-| Gap 4 — Auth / storageState integration | M | 🔵 Medium (depends on DIF-010) |
-| Gap 5 — Device profile during recording | S | 🔵 Medium |
-| Gap 6 — Stealth launch profile | S | 🔵 Medium |
+| Sub-item | Effort | Priority | Status |
+|---|---|---|---|
+| Gap 1 — Expanded action vocabulary | M | 🟡 High | 🔄 Mostly shipped (PR #118) — paste + opt-in keyboard shortcuts remain |
+| Gap 2 — Inline assertion authoring | S | 🟢 Differentiator (parity with BearQ) | 🔄 Backend shipped (PR #118); point-and-click UX + `assertCount` / `assertHasClass` remain |
+| Gap 3 — Pause / resume + undo | S | 🔵 Medium | 🔲 Planned |
+| Gap 4 — Auth / storageState integration | M | 🔵 Medium (depends on DIF-010) | 🔲 Planned |
+| Gap 5 — Device profile during recording | S | 🔵 Medium | 🔲 Planned |
+| Gap 6 — Stealth launch profile | S | 🔵 Medium | 🔲 Planned |
 
 **Files to change** (per sub-item — not all-at-once):
 - `backend/src/runner/recorder.js` — RECORDER_SCRIPT extensions, action typedef, code/step generators
