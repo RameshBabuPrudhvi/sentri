@@ -381,7 +381,12 @@ function friendlyTarget(a, noun = "") {
   if (m) {
     const role = m[1].toLowerCase();
     const name = m[2];
-    return noun || role ? ` the '${name}' ${noun || role}` : ` '${name}'`;
+    // Caller passed a noun (e.g. "button") → use it. Otherwise omit the
+    // role name entirely — silently substituting the role for the noun
+    // (e.g. " the 'Done' region") leaks a developer-facing concept and
+    // also breaks "The …" prefixing in assertion-style step formatters
+    // (would produce "The the 'Done' region is visible").
+    return noun ? ` the '${name}' ${noun}` : ` '${name}'`;
   }
   // No label, no role selector — return empty so the sentence reads cleanly
   // ("User clicks") instead of leaking a CSS selector to the reviewer.
@@ -405,9 +410,11 @@ function friendlyTargetFromSelector(selector, noun = "") {
   if (!sel) return "";
   const m = sel.match(/role=([a-z]+)\[name="([^"]+)"\]/i);
   if (m) {
-    const role = m[1].toLowerCase();
     const name = m[2];
-    return noun || role ? ` the '${name}' ${noun || role}` : ` '${name}'`;
+    // Same rationale as friendlyTarget: only include a noun when the caller
+    // explicitly asked for one. Substituting the parsed role (e.g.
+    // "region") leaks developer-facing terminology into the persisted step.
+    return noun ? ` the '${name}' ${noun}` : ` '${name}'`;
   }
   return "";
 }
@@ -503,10 +510,17 @@ export function recordedActionToStepText(a) {
       return friendlyTarget(a)
         ? `The${friendlyTarget(a)} contains '${truncVal(a.value)}'`
         : `The page contains '${truncVal(a.value)}'`;
-    case "assertValue":
-      return friendlyTarget(a, "field")
-        ? `The${friendlyTarget(a, "field")} has value '${truncVal(a.value)}'`
+    case "assertValue": {
+      // `friendlyTarget(a, "field")` returns " the 'Email' field" (with a
+      // lowercase leading "the"), so we splice the captured label into the
+      // sentence directly rather than prefixing another "The" — the
+      // resulting "The the …" duplication was a CI failure on the previous
+      // pass.
+      const t = friendlyTarget(a, "field");
+      return t
+        ? `The${t.replace(/^ the /, " ")} has value '${truncVal(a.value)}'`
         : `The field has value '${truncVal(a.value)}'`;
+    }
     case "assertUrl":
       // "URL" is engineer-speak; manual testers think "page address". Use
       // "page address" so the persisted step reads naturally next to AI-
