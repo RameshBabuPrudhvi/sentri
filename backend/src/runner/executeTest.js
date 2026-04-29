@@ -28,6 +28,7 @@ import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, 
 import { formatLogLine } from "../utils/logFormatter.js";
 import { injectCursorOverlay } from "./cursorOverlay.js";
 import { diffScreenshot } from "./visualDiff.js";
+import { applyNetworkCondition } from "./networkConditions.js";
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -181,6 +182,7 @@ function formatTestError(err) {
  * @param {string}  [opts.locale]     - AUTO-007: BCP 47 locale (e.g. `"fr-FR"`).
  * @param {string}  [opts.timezoneId] - AUTO-007: IANA timezone (e.g. `"Europe/Paris"`).
  * @param {Object}  [opts.geolocation] - AUTO-007: `{ latitude, longitude }`.
+ * @param {string}  [opts.networkCondition] - AUTO-006: `fast|slow3g|offline`.
  */
 export async function executeTest(test, browser, runId, stepIndex, runStart, opts = {}) {
   // ── API-only test path: no browser context needed ──────────────────────
@@ -251,6 +253,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
   }
 
   const page = await context.newPage();
+
+  // AUTO-006: Apply per-run network condition (offline / slow3g / fast).
+  // Returns a teardown handle that must run before page.close() so the
+  // slow3g route handler is unrouted and doesn't fire on teardown traffic.
+  const networkConditionHandle = await applyNetworkCondition({
+    networkCondition: opts.networkCondition,
+    context,
+    page,
+  });
 
   // Auto-accept dialogs (window.alert, confirm, prompt) so they don't hang
   // the test until timeout. Tests that need to dismiss can override with
@@ -458,6 +469,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     for (const p of context.pages()) {
       if (p !== page) await p.close().catch(() => {});
     }
+
+    // AUTO-006: Tear down network-condition state (e.g. slow3g route handler)
+    // before closing the page so it doesn't fire on in-flight teardown requests.
+    await networkConditionHandle.teardown();
 
     // Close page first then context — this flushes video to disk
     await page.close().catch(() => {});

@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 42 items
+> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 37 items
 
 ---
 
@@ -95,6 +95,11 @@ The following items have been verified complete against the codebase and are **n
 | DIF-002b | Cross-browser polish: browser-aware baselines, UI badges, CI coverage | PR #107, PR #110 |
 | DIF-015 | Interactive browser recorder for test creation | PR #94 |
 | AUTO-007 | Geolocation / locale / timezone testing | PR #94 |
+| DIF-006 | Standalone Playwright export (zero vendor lock-in) | PR #1 |
+| AUTO-005 | Automatic test retry with flake isolation | PR #2 |
+| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3 |
+| AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
+| DIF-015b | Recorder selector quality: rename to selectorGenerator | PR #3 |
 
 ---
 
@@ -631,7 +636,9 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Follow-on from DIF-015
+**Status:** ✅ Partially Complete (PR #3 — naming alignment only) | **Effort:** S | **Source:** Follow-on from DIF-015
+
+> **PR #3 scope note:** The injected helper in `RECORDER_SCRIPT` was renamed from `bestSelector` to `selectorGenerator` and the JSDoc / inline comments were updated to reflect Playwright-style intent. The 5-strategy fallback chain itself (data-testid → role+name → label → placeholder → CSS) is unchanged in this PR — true adoption of Playwright's internal `selectorGenerator` algorithm (scoring, `>> nth=N` disambiguation, iframe / shadow-DOM handling) is still planned and tracked as a follow-on. If a deeper algorithmic upgrade is wanted, reopen this item with a new PR-#.
 
 **Problem:** The DIF-015 recorder captures user interactions correctly but the selectors it emits are noticeably lower-quality than what Playwright's own `codegen` tool produces. Three concrete gaps:
 
@@ -775,7 +782,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### DIF-006 — Standalone Playwright export (zero vendor lock-in) 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
 **Problem:** The biggest objection to AI QA tools is vendor lock-in. Teams want to know they can eject at any time. QA Wolf offers this; Sentri does not. Tests are viewable in the UI but not independently runnable.
 
@@ -900,7 +907,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### DIF-013 — Anonymous usage telemetry with opt-out 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Audit
+**Status:** ✅ Complete (PR #3) | **Effort:** S | **Source:** Audit
 
 **Problem:** Sentri has zero telemetry. The team has no visibility into feature usage, crawl success rates, model performance comparisons, or error frequency. Data-driven prioritisation is impossible.
 
@@ -1013,7 +1020,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-005 — Automatic test retry with flake isolation 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #2) | **Effort:** M | **Source:** Competitive Gap Analysis
 
 **Problem:** When a test fails, Sentri marks it failed immediately. An autonomous system should auto-retry failed tests (1–3 retries, configurable) before recording a true failure. The `retry()` function in `selfHealing.js` retries individual element lookups, but there is no test-level retry. This item implements test-level retry for all run types.
 
@@ -1032,7 +1039,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-006 — Network condition simulation (throttling, offline) 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #3) | **Effort:** M | **Source:** Competitive Gap Analysis
 
 **Problem:** There is no ability to test under slow 3G, offline, or high-latency conditions. Playwright supports `page.route()` for network throttling and `context.setOffline()`. This is table stakes for mobile-first applications.
 

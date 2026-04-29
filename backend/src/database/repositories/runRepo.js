@@ -73,6 +73,7 @@ const INSERT_COLS = [
   "pipelineStats", "feedbackLoop", "currentStep",
   "rateLimitError", "qualityAnalytics", "workspaceId", "pages",
   "browser", // DIF-002: chromium | firefox | webkit
+  "retryCount", "failedAfterRetry", // AUTO-005: aggregated retry telemetry
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
