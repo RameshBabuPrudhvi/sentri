@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-006` — Standalone Playwright export · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 42 items
+> **Current sprint:** `AUTO-005` — Automatic test retry with flake isolation · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 41 items
 
 ---
 
@@ -95,6 +95,7 @@ The following items have been verified complete against the codebase and are **n
 | DIF-002b | Cross-browser polish: browser-aware baselines, UI badges, CI coverage | PR #107, PR #110 |
 | DIF-015 | Interactive browser recorder for test creation | PR #94 |
 | AUTO-007 | Geolocation / locale / timezone testing | PR #94 |
+| DIF-006 | Standalone Playwright export (zero vendor lock-in) | PR #1 |
 
 ---
 
@@ -775,7 +776,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### DIF-006 — Standalone Playwright export (zero vendor lock-in) 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive
+**Status:** ✅ Complete | **Effort:** M | **Source:** Competitive
 
 **Problem:** The biggest objection to AI QA tools is vendor lock-in. Teams want to know they can eject at any time. QA Wolf offers this; Sentri does not. Tests are viewable in the UI but not independently runnable.
 

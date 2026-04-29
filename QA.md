@@ -302,7 +302,7 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open.
 32. Open **`/reports`** page → renders run/test reports for the workspace.
 33. From Dashboard, export the **executive PDF report** → file downloads, opens, contains pass-rate / defect breakdown / trends matching on-screen widgets.
-34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), public/shareable report links. Do not test these.
+34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), public/shareable report links. Do not test these. Standalone Playwright project export (`DIF-006`) **is** shipped — it has its own line item under "Export & traceability" below.
 
 ### 13. Notifications
 35. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
@@ -315,6 +315,7 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 ### 15. Export & traceability
 39. Export tests as **Zephyr CSV** and **TestRail CSV** → non-empty files, correct headers.
 40. Open **Traceability matrix** → maps tests ↔ source URLs / requirements.
+41. **Standalone Playwright project ZIP** (DIF-006) — `GET /api/v1/projects/:id/export/playwright` → ZIP downloads with `Content-Type: application/zip`, contains `package.json`, `playwright.config.ts` (with `baseURL` from project), `README.md`, and one `tests/<slug>.spec.ts` per **approved** test (drafts and rejected tests excluded). Unzip, `npm install`, `npx playwright test` runs the suite without modification.
 
 ### 16. AI Chat
 41. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
@@ -443,7 +444,8 @@ Each area uses this format:
    - `GET /api/v1/projects/:id/tests/export/zephyr` — Zephyr Scale CSV.
    - `GET /api/v1/projects/:id/tests/export/testrail` — TestRail CSV.
    - `GET /api/v1/projects/:id/tests/traceability` — traceability matrix.
-   Each downloads a non-empty file with correct headers; re-importing into the target tool round-trips cleanly.
+   - `GET /api/v1/projects/:id/export/playwright` — standalone Playwright project ZIP (approved tests only — DIF-006).
+   Each downloads a non-empty file with correct headers; re-importing into the target tool round-trips cleanly. The Playwright ZIP must run with `npm install && npx playwright test` after unzipping.
 
 **Negative / edge:**
 - Crawl an unreachable URL → clear error, no infinite spinner.
@@ -1143,7 +1145,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page and Dashboard PDF export **are** shipped and must be tested.
+> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, and standalone Playwright project export (`DIF-006`) **are** shipped and must be tested.
 
 ---
 
