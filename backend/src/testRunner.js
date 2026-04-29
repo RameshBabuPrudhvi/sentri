@@ -87,7 +87,7 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
 
@@ -230,7 +230,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
-          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation });
+          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
           if (attemptResult.status === "failed") {
             const retryErr = new Error(attemptResult.error || "Test failed");
             retryErr.result = attemptResult;
@@ -342,3 +342,4 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     emitRunEvent(run.id, "done", { status: run.status, passed: run.passed, failed: run.failed, total: run.total });
   }
 }
+

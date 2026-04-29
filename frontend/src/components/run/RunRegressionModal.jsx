@@ -45,6 +45,12 @@ const LOCALE_PRESETS = [
   { label: "Hindi", value: "hi-IN" },
 ];
 
+const NETWORK_PRESETS = [
+  { label: "Fast (default)", value: "fast" },
+  { label: "Slow 3G", value: "slow3g" },
+  { label: "Offline", value: "offline" },
+];
+
 const TIMEZONE_PRESETS = [
   { label: "Default", value: "" },
   { label: "UTC", value: "UTC" },
@@ -76,6 +82,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   const [device, setDevice] = useState("");
   const [locale, setLocale] = useState("");
   const [timezoneId, setTimezoneId] = useState("");
+  const [networkCondition, setNetworkCondition] = useState("fast");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -99,6 +106,10 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
       if (device) body.device = device;
       if (locale) body.locale = locale;
       if (timezoneId) body.timezoneId = timezoneId;
+      // Always send networkCondition — backend defaults to "fast" if omitted,
+      // but always sending it keeps the run record explicit and avoids the
+      // dead-import / undefined-vs-"fast" inconsistency in the runner path.
+      body.networkCondition = networkCondition || "fast";
       const { runId } = await api.runTests(projectId, Object.keys(body).length > 0 ? body : undefined);
       onClose();
       navigate(`/runs/${runId}`);
@@ -182,7 +193,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           </select>
         </div>
 
-        {/* AUTO-007: Locale and timezone selectors */}
+        {/* AUTO-007/AUTO-006: Locale, timezone, network selectors */}
         <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
             <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -216,6 +227,13 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
               ))}
             </select>
           </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label>Network condition</label>
+          <select className="input" value={networkCondition} onChange={(e) => setNetworkCondition(e.target.value)} style={{ height: 38 }}>
+            {NETWORK_PRESETS.map((n) => (<option key={n.value} value={n.value}>{n.label}</option>))}
+          </select>
         </div>
 
         {error && (

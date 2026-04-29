@@ -1,9 +1,6 @@
 /**
  * @module tests/test-retry
- * @description Unit tests for AUTO-005 — `executeWithRetries()` helper in
- * `backend/src/runner/retry.js`. Verifies the retry budget is honoured, that
- * a successful later attempt surfaces the correct `retryCount`, and that the
- * last error propagates after retries are exhausted.
+ * @description Unit tests for `executeWithRetries` (AUTO-005).
  */
 
 import assert from "node:assert/strict";
@@ -24,47 +21,38 @@ async function test(name, fn) {
   }
 }
 
-async function main() {
-  console.log("\n🧪 executeWithRetries()");
+console.log("\n🧪 executeWithRetries");
 
-  try {
-    await test("returns retryCount when a later attempt succeeds", async () => {
-      let tries = 0;
-      const { result, retryCount } = await executeWithRetries(async () => {
-        tries += 1;
-        if (tries === 1) throw new Error("first fail");
-        return { status: "passed" };
-      }, 2);
+await test("returns retryCount when later attempt succeeds", async () => {
+  let tries = 0;
+  const { result, retryCount } = await executeWithRetries(async () => {
+    tries += 1;
+    if (tries === 1) throw new Error("first fail");
+    return { status: "passed" };
+  }, 2);
 
-      assert.equal(retryCount, 1);
-      assert.equal(result.status, "passed");
-      assert.equal(tries, 2);
-    });
+  assert.equal(retryCount, 1);
+  assert.equal(result.status, "passed");
+  assert.equal(tries, 2);
+});
 
-    await test("throws the last error after retries are exhausted", async () => {
-      let tries = 0;
-      await assert.rejects(async () => {
-        await executeWithRetries(async () => {
-          tries += 1;
-          throw new Error("always fails");
-        }, 2);
-      }, /always fails/);
-      assert.equal(tries, 3);
-    });
-  } finally {
-    console.log("\n──────────────────────────────────────────────────");
-    console.log(`Results: ${passed} passed, ${failed} failed`);
+await test("throws after retries exhausted", async () => {
+  let tries = 0;
+  await assert.rejects(async () => {
+    await executeWithRetries(async () => {
+      tries += 1;
+      throw new Error("always fails");
+    }, 2);
+  }, /always fails/);
+  assert.equal(tries, 3);
+});
 
-    if (failed > 0) {
-      console.log("\n⚠️  retry tests failed");
-      process.exit(1);
-    }
+console.log("\n──────────────────────────────────────────────────");
+console.log(`Results: ${passed} passed, ${failed} failed`);
 
-    console.log("\n🎉 All retry tests passed!");
-  }
+if (failed > 0) {
+  console.log("\n⚠️  Test-retry tests failed");
+  process.exit(1);
 }
 
-main().catch((err) => {
-  console.error("❌ test-retry failed:", err);
-  process.exit(1);
-});
+console.log("\n🎉 Test-retry tests passed");

@@ -69,24 +69,15 @@ Per-project `qualityGates` config (min pass rate, max flaky %, max failures). On
 
 ---
 
-### 4 · AUTO-006 — Network condition simulation (slow 3G / offline)
-**Effort:** M | **Priority:** 🟡 High | **Dependencies:** none
-
-Per-run network condition presets (offline, slow-3G, fast-3G, regular-4G) applied via CDP `Network.emulateNetworkConditions`. Surface as a Test Dials dropdown so flaky-network bugs can be reproduced deterministically.
-
-**Files:** `backend/src/runner/config.js` · `backend/src/runner/executeTest.js` · `frontend/src/components/TestDials.jsx` · `backend/.env.example`
-
----
-
 ## 🔀 Parallel opportunities (small items, no queue conflicts)
 
 These can be picked up by a second engineer alongside the current PR without file conflicts:
 
 | ID | Title | Effort | Shared files? |
 |----|-------|--------|---------------|
-| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | S | None |
-| DIF-015b | Recorder selector quality: adopt Playwright's selectorGenerator | S | `recorder.js` only |
-| AUTO-006 | Network condition simulation (slow 3G / offline) | M | None |
+| AUTO-017 | Performance budget testing (Web Vitals) | M | None |
+| AUTO-019 | Run diffing: per-test comparison across runs | M | None |
+| DIF-007 | Conversational test editor connected to /chat | M | None |
 
 ---
 
@@ -94,8 +85,8 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
-| AUTO-005 | Automatic test retry with flake isolation | #2 |
-| FEA-002 | TanStack React Query data layer | #107 |
-| MNT-011 | Persist crawl/generate dialsConfig on run record | #107 |
+| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | #3 |
+| AUTO-006 | Network condition simulation (slow 3G / offline) | #3 |
+| DIF-015b | Recorder selectorGenerator naming alignment | #3 |
 
 *Full completed list → ROADMAP.md § Completed Work*

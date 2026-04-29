@@ -147,6 +147,7 @@ async function processJob(job) {
         locale: options.locale || null,
         timezoneId: options.timezoneId || null,
         geolocation: options.geolocation || null,
+        networkCondition: options.networkCondition || "fast", // AUTO-006
         signal,
       });
 
