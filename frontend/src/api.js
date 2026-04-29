@@ -269,6 +269,24 @@ export const api = {
    */
   recordStatus: (projectId, sessionId) =>
     req("GET", `/projects/${projectId}/record/${sessionId}`),
+  /**
+   * Forward a single input event from the canvas overlay to the headless
+   * browser. Called at pointer/keyboard event frequency (~60fps on fast
+   * machines) so it intentionally skips JSON response parsing on success.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {Object} event - { type, x?, y?, button?, key?, text?, ... }
+   */
+  recordInput: (projectId, sessionId, event) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/input`, event),
+  /**
+   * Add a manual assertion action during recording.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {{kind: "assertVisible"|"assertText"|"assertValue"|"assertUrl", selector?: string, label?: string, value?: string}} action
+   */
+  recordAddAssertion: (projectId, sessionId, action) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/assertion`, action),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */

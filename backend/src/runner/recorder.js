@@ -29,20 +29,96 @@
 import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } from "./config.js";
 import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import * as runRepo from "../database/repositories/runRepo.js";
 
-// Hard cap for how long a single recording session may stay open. Defence-in-
-// depth for the case where a client disconnects without hitting stop/discard
-// (e.g. browser tab closed, network cut). After this timeout the server tears
-// down the Chromium process and deletes the session from the map.
-const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS || "1800000", 10) || 1_800_000);
+/**
+ * Tunable timing constants for the recorder. Centralised so reviewers can
+ * see every magic number in one place and so operators can override the
+ * server-side ones via environment variables without grepping through the
+ * file.
+ *
+ * The in-page timings (DBLCLICK_DEFER_MS, HOVER_DWELL_MS, FILL_DEBOUNCE_MS,
+ * DBLCLICK_WINDOW_MS) are inlined into `RECORDER_SCRIPT` because that
+ * string runs in the browser context where this module's bindings are not
+ * in scope. Keep this block in sync if you change them inside the script
+ * — a mismatch is silent and can produce confusing replay behaviour.
+ *
+ * @internal
+ */
+const TIMINGS = {
+  /**
+   * Hard cap for how long a single recording session may stay open.
+   * Defence-in-depth for the case where a client disconnects without
+   * hitting stop/discard (e.g. browser tab closed, network cut). After
+   * this timeout the server tears down the Chromium process and deletes
+   * the session from the map.
+   * @env MAX_RECORDING_MS (default 1_800_000 = 30 min, floor 60_000)
+   */
+  MAX_RECORDING_MS: Math.max(
+    60_000,
+    parseInt(process.env.MAX_RECORDING_MS || "1800000", 10) || 1_800_000,
+  ),
+  /**
+   * TTL for the cache of auto-torn-down recordings. A user who clicks
+   * "Stop & Save" within this window of the safety-net timeout firing
+   * still recovers their captured actions instead of seeing a 500 error.
+   * @env RECORDER_COMPLETED_TTL_MS (default 120_000 = 2 min, floor 10_000)
+   */
+  COMPLETED_TTL_MS: Math.max(
+    10_000,
+    parseInt(process.env.RECORDER_COMPLETED_TTL_MS || "120000", 10) || 120_000,
+  ),
+  /**
+   * Hard window in which a trailing `dblclick` event can cancel the two
+   * preceding `click` events captured by `__sentriRecord`. CDP/browser
+   * dispatches click→click→dblclick in that order; without this dedup the
+   * recorded action list would replay all three handlers in sequence.
+   * Used in `exposeBinding`'s consumer; see also DBLCLICK_DEFER_MS below,
+   * which is the in-page equivalent applied to the click event itself.
+   */
+  DBLCLICK_WINDOW_MS: 500,
+  /**
+   * In-page deferral window for emitting captured `click` actions. Browser
+   * dispatch order is click→click→dblclick, so a trailing `dblclick`
+   * listener inside the page can cancel the queued clicks for the same
+   * selector before the binding flushes them to Node. Interpolated into
+   * `RECORDER_SCRIPT` because that body runs in the browser context.
+   */
+  DBLCLICK_DEFER_MS: 250,
+  /**
+   * In-page dwell time before a sustained pointer hover is emitted as a
+   * `hover` action. Filters out drive-by mouseovers while still catching
+   * deliberate hovers (tooltips, dropdown triggers).
+   */
+  HOVER_DWELL_MS: 600,
+  /**
+   * In-page debounce window after the last keystroke in a text field
+   * before the resulting `fill` action is emitted. Coalesces a multi-
+   * character entry into a single recorded fill.
+   */
+  FILL_DEBOUNCE_MS: 300,
+};
+
+// Backwards-compatible aliases used elsewhere in the module / tests.
+const MAX_RECORDING_MS = TIMINGS.MAX_RECORDING_MS;
 
 /**
  * @typedef {Object} RecordedAction
- * @property {"goto"|"click"|"fill"|"press"|"select"|"check"|"uncheck"} kind
+ * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
+ * @property {string} [label]      - Human-readable label for the target
+ *                                   element (aria-label / inner text /
+ *                                   placeholder / `name`). Used by the Test
+ *                                   Detail Steps panel so reviewers see "the
+ *                                   Search button" instead of `role=button…`.
+ *                                   The selector is still the source of truth
+ *                                   for the generated Playwright code.
  * @property {string} [value]      - For `fill`, the final value typed.
  * @property {string} [url]        - For `goto`.
  * @property {string} [key]        - For `press`.
+ * @property {string} [frameUrl]    - URL of iframe containing the action.
+ * @property {string} [pageAlias]   - "page" for main tab, "popupN" for popups.
+ * @property {string} [target]      - For drag/drop target selector.
  * @property {number}  ts          - Epoch ms when the action was captured.
  */
 
@@ -58,6 +134,7 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
  * @property {Object}  [context]         - Playwright BrowserContext (internal).
  * @property {Object}  [page]            - Playwright Page (internal).
  * @property {Function} [stopScreencast]  - Cleanup fn returned by startScreencast.
+ * @property {Object}  [cdpSession]      - CDP session for input forwarding.
  */
 
 /** @type {Map<string, RecordingSession>} */
@@ -82,7 +159,7 @@ const sessions = new Map();
  * @type {Map<string, CompletedRecording>}
  */
 const completedSessions = new Map();
-const COMPLETED_TTL_MS = Math.max(10_000, parseInt(process.env.RECORDER_COMPLETED_TTL_MS || "120000", 10) || 120_000);
+const COMPLETED_TTL_MS = TIMINGS.COMPLETED_TTL_MS;
 
 /**
  * JS source injected into every page frame. It captures pointer/keyboard
@@ -93,6 +170,12 @@ const COMPLETED_TTL_MS = Math.max(10_000, parseInt(process.env.RECORDER_COMPLETE
  * `bestSelector` intentionally mirrors Playwright's own heuristics loosely:
  * prefer role-based selectors, then data-testid, then aria-label, then
  * a short CSS chain.
+ *
+ * Built once at module load — the timing constants come from `TIMINGS`
+ * (Node-side) and are baked into the script as numeric literals before
+ * `addInitScript` ships it to the page. This keeps a single source of
+ * truth across the Node boundary; previously the same values lived as
+ * inline magic numbers inside the script.
  */
 const RECORDER_SCRIPT = `
 (() => {
@@ -101,14 +184,44 @@ const RECORDER_SCRIPT = `
 
   function bestSelector(el) {
     if (!el || el.nodeType !== 1) return "";
-    if (el.getAttribute("data-testid")) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
+    const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
+    if (testId) return 'data-testid=' + JSON.stringify(testId.trim());
     const role = el.getAttribute("role") || roleFromTag(el.tagName);
-    const label = (el.getAttribute("aria-label") || el.innerText || "").trim().slice(0, 50);
-    if (role && label) return 'role=' + role + '[name="' + label.replace(/"/g, '\\\\"') + '"]';
+    const label = (el.getAttribute("aria-label") || "").trim().slice(0, 80);
+    if (role && label) return 'role=' + role + '[name=' + JSON.stringify(label) + ']';
+    if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") && el.labels && el.labels[0]) {
+      const l = (el.labels[0].innerText || el.labels[0].textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
+      if (l) return 'label=' + JSON.stringify(l);
+    }
+    const ph = (el.getAttribute("placeholder") || "").trim();
+    if (ph) return 'placeholder=' + JSON.stringify(ph.slice(0, 80));
+    const alt = (el.getAttribute("alt") || "").trim();
+    if (alt) return 'alt=' + JSON.stringify(alt.slice(0, 80));
+    const title = (el.getAttribute("title") || "").trim();
+    if (title) return 'title=' + JSON.stringify(title.slice(0, 80));
+    const txt = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
+    if (txt && txt.length >= 2) return 'text=' + JSON.stringify(txt);
     if (el.id) return "#" + CSS.escape(el.id);
     if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
     const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
     return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+  }
+  // Friendly label for the human-readable Steps panel. Mirrors how AI-
+  // generated steps reference elements ("the Search button", "the Email
+  // field") rather than CSS / role= selectors. Falls through a priority
+  // chain: aria-label → trimmed inner text → placeholder → name → "" so
+  // the caller can fall back to a kind-only sentence ("User clicks").
+  function bestLabel(el) {
+    if (!el || el.nodeType !== 1) return "";
+    const aria = (el.getAttribute("aria-label") || "").trim();
+    if (aria) return aria.slice(0, 60);
+    const text = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ");
+    if (text && text.length <= 60) return text;
+    if (text) return text.slice(0, 57) + "…";
+    const ph = (el.getAttribute && el.getAttribute("placeholder")) || "";
+    if (ph) return ph.trim().slice(0, 60);
+    if (el.name) return String(el.name).slice(0, 60);
+    return "";
   }
   function roleFromTag(tag) {
     tag = (tag || "").toLowerCase();
@@ -119,42 +232,200 @@ const RECORDER_SCRIPT = `
     return "";
   }
 
+  // Browser dispatches click → click → dblclick for a double-click gesture.
+  // Defer click emission by one OS double-click window so a trailing
+  // "dblclick" listener can cancel the queued clicks for the same target;
+  // otherwise replay would re-run the click handler twice before the
+  // intended double-click and toggle UI state / submit forms early.
+  const pendingClickTimers = new Map(); // selector -> timeout id
+  function eventElement(ev) {
+    const p = ev.composedPath && ev.composedPath();
+    return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
+  }
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    const sel = bestSelector(el);
+    const label = bestLabel(el);
+    const emit = () => {
+      pendingClickTimers.delete(sel);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "click", selector: sel, label, ts: Date.now(),
+      });
+    };
+    if (!sel) { emit(); return; }
+    const prev = pendingClickTimers.get(sel);
+    if (prev) clearTimeout(prev);
+    pendingClickTimers.set(sel, setTimeout(emit, ${TIMINGS.DBLCLICK_DEFER_MS}));
+  }, true);
+  document.addEventListener("dblclick", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    const sel = bestSelector(el);
+    // Cancel any queued click(s) for this selector — a dblclick supersedes
+    // the two click events that preceded it.
+    if (sel) {
+      const pending = pendingClickTimers.get(sel);
+      if (pending) { clearTimeout(pending); pendingClickTimers.delete(sel); }
+    }
     window.__sentriRecord && window.__sentriRecord({
-      kind: "click", selector: bestSelector(el), ts: Date.now(),
+      kind: "dblclick", selector: sel, label: bestLabel(el), ts: Date.now(),
     });
+  }, true);
+  document.addEventListener("contextmenu", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "rightClick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+    });
+  }, true);
+  // Hover capture uses a dwell timer so casual pointer movement through
+  // nested DOM doesn't flood the action log. We only emit a "hover" action
+  // after the pointer has rested on the same interactive ancestor for
+  // \`TIMINGS.HOVER_DWELL_MS\` — long enough to filter out drive-by
+  // mouseover events while still catching deliberate hovers (tooltips,
+  // dropdown triggers).
+  let hoverDwellTimer = null;
+  let lastHoverSelector = "";
+  document.addEventListener("mouseover", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    if (!el) return;
+    const sel = bestSelector(el);
+    if (!sel) return;
+    if (sel === lastHoverSelector) return; // already pending / just emitted for this target
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    hoverDwellTimer = setTimeout(() => {
+      hoverDwellTimer = null;
+      lastHoverSelector = sel;
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
+      });
+    }, ${TIMINGS.HOVER_DWELL_MS});
+  }, true);
+  document.addEventListener("mouseout", () => {
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    lastHoverSelector = "";
+  }, true);
+
+  // Per-selector fill-debounce timers AND a "last emitted" cache. The two
+  // work together to dedupe fill actions across the input + change handlers:
+  //   - The "input" handler captures normal typing as a debounced fill and
+  //     records the emitted value in \`lastEmittedFill\`.
+  //   - The "change" handler is the safety-net for browser autofill / paste
+  //     scenarios that bypass the "input" event entirely. It checks
+  //     \`lastEmittedFill\` and skips the redundant fill when the input
+  //     handler already covered the same selector + value.
+  // Without this dedup, typing "hello" then blurring fired two identical
+  // \`fill\` actions and produced two consecutive \`safeFill(sel, 'hello')\`
+  // calls in the generated code. The lastEmittedFill entry is purged after
+  // the change event so a subsequent retype of the same value re-fires.
+  const inputTimers = new Map();
+  const lastEmittedFill = new Map();
+  document.addEventListener("input", (ev) => {
+    const el = eventElement(ev);
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return;
+    const sel = bestSelector(el);
+    if (!sel) return;
+    const prev = inputTimers.get(sel);
+    if (prev) clearTimeout(prev);
+    inputTimers.set(sel, setTimeout(() => {
+      inputTimers.delete(sel);
+      const value = el.value;
+      lastEmittedFill.set(sel, value);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
+      });
+    }, ${TIMINGS.FILL_DEBOUNCE_MS}));
   }, true);
 
   document.addEventListener("change", (ev) => {
-    const el = ev.target;
+    const el = eventElement(ev);
     if (!el) return;
     if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
       window.__sentriRecord && window.__sentriRecord({
         kind: el.checked ? "check" : "uncheck",
         selector: bestSelector(el),
+        label: bestLabel(el),
         ts: Date.now(),
+      });
+    } else if (el.tagName === "INPUT" && el.type === "file") {
+      const names = (el.files && el.files.length)
+        ? Array.from(el.files).map((f) => f.name).join(", ")
+        : "";
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "upload", selector: bestSelector(el), label: bestLabel(el), value: names, ts: Date.now(),
       });
     } else if (el.tagName === "SELECT") {
       window.__sentriRecord && window.__sentriRecord({
-        kind: "select", selector: bestSelector(el), value: el.value, ts: Date.now(),
+        kind: "select", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      // Safety-net branch for autofill / paste / programmatic value changes
+      // that bypass the "input" event. Skip when the "input" handler already
+      // emitted a fill for this selector + value. If a debounced "input"
+      // fill is still pending, flush it synchronously here so the recorded
+      // action carries the latest value (the user committed it by blurring).
+      const sel = bestSelector(el);
+      if (!sel) return;
+      const pending = inputTimers.get(sel);
+      if (pending) {
+        clearTimeout(pending);
+        inputTimers.delete(sel);
+        // Fall through to emit below; the input handler hadn't fired yet.
+      } else if (lastEmittedFill.get(sel) === el.value) {
+        // Already emitted by the input handler with the exact same value —
+        // the change event is the trailing duplicate. Drop it and clear
+        // the dedup entry so a subsequent retype of the same value still
+        // gets recorded.
+        lastEmittedFill.delete(sel);
+        return;
+      }
+      lastEmittedFill.set(sel, el.value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: bestSelector(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     }
   }, true);
 
   document.addEventListener("keydown", (ev) => {
-    // Only capture "meaningful" keys — skip modifier-only taps so we don't
-    // spam the timeline. Enter, Escape, Tab, and arrows are useful; everything
-    // else is already captured via "change" on input/textarea elements.
-    const interestingKeys = ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
-    if (!interestingKeys.includes(ev.key)) return;
+    // Keep modifier-only events out, but capture regular typing + editing
+    // keys so replay preserves keyboard-driven interactions.
+    if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") return;
+    // If a printable single character is being typed into an editable field,
+    // the "input" handler above already captures the resulting fill via
+    // \`safeFill(sel, '<value>')\`. Emitting an additional per-keystroke
+    // press here would generate redundant \`keyboard.press('h')\` calls
+    // alongside the fill — replay would type each character once via press,
+    // then clear-and-retype the whole string via safeFill, breaking React
+    // controlled inputs / autocompletes / char-by-char validators that fire
+    // mid-typing. Keyboard shortcuts (Ctrl+A, Cmd+V, Ctrl+Enter) and editing
+    // keys (Enter, Tab, Backspace, arrows) are still captured because they
+    // don't conflict with the fill capture.
+    const t = ev.target;
+    const isEditable = !!(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
+    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;
+    if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),
+      });
+    }
+  }, true);
+
+  let dragSource = "";
+  document.addEventListener("dragstart", (ev) => {
+    const el = eventElement(ev);
+    dragSource = bestSelector(el);
+  }, true);
+  document.addEventListener("drop", (ev) => {
+    const target = eventElement(ev);
+    const targetSel = bestSelector(target);
+    if (!dragSource || !targetSel) return;
     window.__sentriRecord && window.__sentriRecord({
-      kind: "press", key: ev.key, selector: bestSelector(ev.target), ts: Date.now(),
+      kind: "drag", selector: dragSource, target: targetSel, label: bestLabel(target), ts: Date.now(),
     });
+    dragSource = "";
   }, true);
 })();
 `;
@@ -187,6 +458,249 @@ function escapeJsSingleQuote(str) {
 }
 
 /**
+ * Derive a human-readable target phrase from a recorded action — prefers the
+ * captured `label` (aria-label / inner text / placeholder), then falls back
+ * to extracting a friendly name from a Playwright role selector
+ * (`role=button[name="Sign in"]` → `the "Sign in" button`), and finally to
+ * an empty string so the caller can degrade to a target-less sentence.
+ *
+ * Important: callers must NOT splice raw selectors into the persisted steps
+ * — the AI generate / crawl pipeline ("User clicks the Sign Up button") and
+ * the manual-test path both produce English prose, and recorded steps need
+ * to render alongside them on the Test Detail page without leaking
+ * `role=…[name="…"]` or CSS into the reviewer's view.
+ *
+ * @param {RecordedAction} a
+ * @returns {string} Either ` the "<label>" <noun>`, ` "<label>"`, or `""`.
+ */
+function friendlyTarget(a, noun = "") {
+  const raw = (a.label || "").trim();
+  if (raw) {
+    return noun ? ` the '${raw}' ${noun}` : ` '${raw}'`;
+  }
+  // Legacy actions captured before the `label` field existed only carry the
+  // selector. Try to recover a name from `role=foo[name="bar"]` so older
+  // recordings still render readable steps after this upgrade ships.
+  const sel = a.selector || "";
+  const m = sel.match(/role=([a-z]+)\[name="([^"]+)"\]/i);
+  if (m) {
+    const role = m[1].toLowerCase();
+    const name = m[2];
+    // Caller passed a noun (e.g. "button") → use it. Otherwise omit the
+    // role name entirely — silently substituting the role for the noun
+    // (e.g. " the 'Done' region") leaks a developer-facing concept and
+    // also breaks "The …" prefixing in assertion-style step formatters
+    // (would produce "The the 'Done' region is visible").
+    return noun ? ` the '${name}' ${noun}` : ` '${name}'`;
+  }
+  // No label, no role selector — return empty so the sentence reads cleanly
+  // ("User clicks") instead of leaking a CSS selector to the reviewer.
+  return "";
+}
+
+/**
+ * Same as {@link friendlyTarget} but operates on a raw selector/label pair
+ * pulled from a different action's drop-target fields (`a.target` is a
+ * selector string only — there's no separate `targetLabel`). Used by the
+ * `drag` step formatter so the rendered sentence reads as
+ * `User drags the 'Card 1' card onto the 'Done' column` instead of dropping
+ * the target half of the gesture entirely.
+ *
+ * @param {string} selector - Raw selector to extract a friendly name from.
+ * @param {string} [noun]   - Element noun (`"element"`, `"column"`).
+ * @returns {string}        - ` the '<name>' <noun>`, ` '<name>'`, or `""`.
+ */
+function friendlyTargetFromSelector(selector, noun = "") {
+  const sel = String(selector || "");
+  if (!sel) return "";
+  const m = sel.match(/role=([a-z]+)\[name="([^"]+)"\]/i);
+  if (m) {
+    const name = m[2];
+    // Same rationale as friendlyTarget: only include a noun when the caller
+    // explicitly asked for one. Substituting the parsed role (e.g.
+    // "region") leaks developer-facing terminology into the persisted step.
+    return noun ? ` the '${name}' ${noun}` : ` '${name}'`;
+  }
+  return "";
+}
+
+/**
+ * Trim a captured URL for display in the Steps panel. Strips the query
+ * string + fragment (which dominate noisy recorder URLs like Amazon search
+ * pages with 6 tracking params) and caps the rendered length so a single
+ * step doesn't push the panel sideways.
+ */
+function shortUrl(u) {
+  if (!u) return "";
+  try {
+    const url = new URL(u);
+    const base = `${url.origin}${url.pathname}`;
+    return base.length > 80 ? base.slice(0, 77) + "…" : base;
+  } catch {
+    return String(u).slice(0, 80);
+  }
+}
+
+/**
+ * Render a captured action as a short, human-readable step sentence so the
+ * recorder's persisted `steps[]` array aligns visually with the AI generate /
+ * crawl pipeline output (`outputSchema.js`) and the manual-test creation path
+ * — both of which produce English prose like "User clicks the Sign Up
+ * button". The Test Detail page renders all three sources through the same
+ * Steps panel, and previously the recorder was the only producer emitting
+ * engineer-shaped strings ("Step 1: click → #login"), making recorded tests
+ * stick out and look broken to manual reviewers.
+ *
+ * @param {RecordedAction} a
+ * @returns {string} A single step sentence suitable for the persisted `steps[]` array.
+ */
+export function recordedActionToStepText(a) {
+  // Recorded `fill` / `select` / `upload` / `assert*` values can contain
+  // secrets (passwords, API keys). The raw value already lives in
+  // `playwrightCode`; truncate aggressively in the human-readable steps so
+  // the Test Detail page doesn't surface it.
+  const truncVal = (v, n = 40) => String(v ?? "").slice(0, n);
+
+  switch (a.kind) {
+    case "goto":
+      return `User navigates to ${shortUrl(a.url)}`.trim();
+    case "click":
+      return `User clicks${friendlyTarget(a, "button")}`;
+    case "dblclick":
+      // "double-clicks" is technical jargon to a manual tester. The AI
+      // pipeline (`outputSchema.js:74-78`) favours plain user-intent prose,
+      // so describe the gesture as a repeated click on the target instead.
+      // Drop the "element" fallback noun — it reads as developer jargon
+      // ("clicks the Save element"). With a captured label the sentence
+      // says "User clicks 'Save' twice"; without one it degrades to a clean
+      // "User clicks twice".
+      return `User clicks${friendlyTarget(a)} twice`;
+    case "rightClick":
+      // Same rationale as dblclick — "right-clicks" leaks the input device.
+      // The user-visible outcome of a right-click is the context menu, so
+      // describe that instead.
+      return `User opens the context menu on${friendlyTarget(a)}`;
+    case "hover":
+      return `User hovers over${friendlyTarget(a)}`;
+    case "fill":
+      // Match the AI pipeline's "User fills in X with 'value'" phrasing
+      // (outputSchema.js:74-78) — recorder previously used "User fills the
+      // 'Email' field with …" which read differently from AI-generated and
+      // manually-created steps on the same Test Detail page.
+      return `User fills in${friendlyTarget(a, "field")} with '${truncVal(a.value)}'`;
+    case "press":
+      return `User presses ${a.key || ""}`.trim();
+    case "select":
+      return `User selects '${truncVal(a.value)}'${friendlyTarget(a, "dropdown") ? ` in${friendlyTarget(a, "dropdown")}` : ""}`;
+    case "check":
+      return `User checks${friendlyTarget(a, "checkbox")}`;
+    case "uncheck":
+      return `User unchecks${friendlyTarget(a, "checkbox")}`;
+    case "upload":
+      // Drop the "file input" noun — manual testers don't think in input
+      // types. "User uploads 'resume.pdf' for the 'Attach CV' field" reads
+      // closer to the user's intent than "… in the 'Attach CV' file input".
+      return `User uploads '${truncVal(a.value)}'${friendlyTarget(a, "field") ? ` for${friendlyTarget(a, "field")}` : ""}`;
+    case "drag": {
+      // Surface BOTH source and drop-target so reviewers can follow the
+      // gesture from the persisted steps alone. The previous formatter
+      // dropped the target entirely, leaving "User drags 'Card 1'" with no
+      // indication of where it landed. No "element" fallback noun — it
+      // reads as developer jargon when reviewers see it in the Steps panel.
+      const source = friendlyTarget(a);
+      const target = friendlyTargetFromSelector(a.target);
+      return target
+        ? `User drags${source} onto${target}`
+        : `User drags${source}`;
+    }
+    case "assertVisible":
+      // Match the AI pipeline's outcome-style assertions ("the 'Sign in'
+      // button is visible") rather than our previous engineer-shaped
+      // "User asserts visibility of …" phrasing. The Steps panel renders
+      // recorded + AI-generated tests through the same component, so the
+      // sentence shapes need to be interchangeable. Fall back to "An
+      // element" (capitalised, no jargon "the element") when no friendly
+      // label can be recovered.
+      return friendlyTarget(a)
+        ? `The${friendlyTarget(a)} is visible`
+        : `The expected content is visible`;
+    case "assertText":
+      return friendlyTarget(a)
+        ? `The${friendlyTarget(a)} contains '${truncVal(a.value)}'`
+        : `The page contains '${truncVal(a.value)}'`;
+    case "assertValue": {
+      // `friendlyTarget(a, "field")` returns " the 'Email' field" (with a
+      // lowercase leading "the"), so we splice the captured label into the
+      // sentence directly rather than prefixing another "The" — the
+      // resulting "The the …" duplication was a CI failure on the previous
+      // pass.
+      const t = friendlyTarget(a, "field");
+      return t
+        ? `The${t.replace(/^ the /, " ")} has value '${truncVal(a.value)}'`
+        : `The field has value '${truncVal(a.value)}'`;
+    }
+    case "assertUrl":
+      // "URL" is engineer-speak; manual testers think "page address". Use
+      // "page address" so the persisted step reads naturally next to AI-
+      // generated steps like "User opens the dashboard page".
+      return `The page address contains '${truncVal(a.value, 60)}'`;
+    default:
+      // Fall back to the action kind so unknown future kinds still show
+      // something — better than emitting an empty string into the steps list.
+      return `User performs ${a.kind || "action"}${friendlyTarget(a)}`;
+  }
+}
+
+/**
+ * Predicate matching the required-field branches in
+ * {@link actionsToPlaywrightCode}. Returns `true` iff the action carries
+ * enough information for the code generator to emit a corresponding line.
+ *
+ * Exported so route handlers building the persisted human-readable
+ * `steps[]` array can filter with the **same** rules the code generator
+ * applies — without this shared predicate the two would drift, causing
+ * `steps.length !== playwrightCode` step counts on the Test Detail page
+ * (and breaking step-based edit/regeneration that indexes by position).
+ * If you add a new action kind to {@link actionsToPlaywrightCode}, add the
+ * matching branch here too.
+ *
+ * @param {RecordedAction} a
+ * @returns {boolean}
+ */
+export function isEmittableAction(a) {
+  switch (a?.kind) {
+    case "goto":         return !!a.url;
+    case "click":
+    case "dblclick":
+    case "rightClick":
+    case "hover":
+    case "fill":
+    case "select":
+    case "check":
+    case "uncheck":
+    case "upload":
+    case "assertVisible":
+    case "assertText":
+    case "assertValue":  return !!a.selector;
+    case "press":        return !!a.key;
+    case "drag":         return !!a.selector && !!a.target;
+    case "assertUrl":    return !!a.value;
+    default:             return false;
+  }
+}
+
+/**
+ * Filter a list of captured actions down to the ones the code generator
+ * would actually emit. Convenience wrapper around {@link isEmittableAction}.
+ *
+ * @param {Array<RecordedAction>} actions
+ * @returns {Array<RecordedAction>}
+ */
+export function filterEmittableActions(actions) {
+  return (actions || []).filter(isEmittableAction);
+}
+
+/**
  * Convert a list of captured actions into a Playwright test body. The output
  * is wrapped in the repo-standard `test(...)` shape so the existing runner
  * (codeExecutor, codeParsing) treats it like any AI-generated test.
@@ -200,6 +714,34 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   const safeName = escapeJsSingleQuote(testName || "Recorded test");
   const safeStartUrl = escapeJsSingleQuote(startUrl || "");
   const lines = [];
+  const actorExpr = (action) => {
+    const alias = escapeJsSingleQuote(action?.pageAlias || "page");
+    const base = alias === "page" ? "page" : `(await ensurePopup('${alias}'))`;
+    const frameUrl = String(action?.frameUrl || "");
+    if (!frameUrl) return base;
+    return `(await ensureFrame(${base}, '${escapeJsSingleQuote(frameUrl)}'))`;
+  };
+  lines.push(`const __popupPages = new Map();`);
+  lines.push(`context.on('page', (p) => {`);
+  lines.push(`  const alias = 'popup' + (__popupPages.size + 1);`);
+  lines.push(`  __popupPages.set(alias, p);`);
+  lines.push(`});`);
+  lines.push(`const ensurePopup = async (alias) => {`);
+  lines.push(`  for (let i = 0; i < 50; i++) {`);
+  lines.push(`    const p = __popupPages.get(alias);`);
+  lines.push(`    if (p) return p;`);
+  lines.push(`    await page.waitForTimeout(100);`);
+  lines.push(`  }`);
+  lines.push(`  throw new Error('Popup not found: ' + alias);`);
+  lines.push(`};`);
+  lines.push(`const ensureFrame = async (p, frameUrl) => {`);
+  lines.push(`  for (let i = 0; i < 50; i++) {`);
+  lines.push(`    const f = p.frames().find((fr) => fr.url().includes(frameUrl));`);
+  lines.push(`    if (f) return f;`);
+  lines.push(`    await p.waitForTimeout(100);`);
+  lines.push(`  }`);
+  lines.push(`  throw new Error('Frame not found for URL: ' + frameUrl);`);
+  lines.push(`};`);
   lines.push(`await page.goto('${safeStartUrl}');`);
   // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
   // (and `framenavigated` can echo the same URL). We emit the initial goto
@@ -209,21 +751,37 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   let stepNo = 1;
   for (const a of actions) {
     const sel = escapeJsSingleQuote(a.selector || "");
+    const targetSel = escapeJsSingleQuote(a.target || "");
+    const actor = actorExpr(a);
     if (a.kind === "goto" && a.url) {
       if (a.url === lastGotoUrl) continue;
       lastGotoUrl = a.url;
       const safeUrl = escapeJsSingleQuote(a.url);
+      const gotoActor = a.pageAlias && a.pageAlias !== "page" ? `(await ensurePopup('${escapeJsSingleQuote(a.pageAlias)}'))` : "page";
       lines.push(`// Step ${stepNo}: Navigate`);
-      lines.push(`await page.goto('${safeUrl}');`);
+      lines.push(`await ${gotoActor}.goto('${safeUrl}');`);
     } else if (a.kind === "click" && sel) {
       lines.push(`// Step ${stepNo}: Click element`);
-      lines.push(`await safeClick(page, '${sel}');`);
+      lines.push(`await safeClick(${actor}, '${sel}');`);
+    } else if (a.kind === "dblclick" && sel) {
+      lines.push(`// Step ${stepNo}: Double click element`);
+      lines.push(`await ${actor}.locator('${sel}').dblclick();`);
+    } else if (a.kind === "rightClick" && sel) {
+      lines.push(`// Step ${stepNo}: Right click element`);
+      lines.push(`await ${actor}.locator('${sel}').click({ button: 'right' });`);
+    } else if (a.kind === "hover" && sel) {
+      lines.push(`// Step ${stepNo}: Hover over element`);
+      lines.push(`await ${actor}.locator('${sel}').hover();`);
     } else if (a.kind === "fill" && sel) {
       lines.push(`// Step ${stepNo}: Fill field`);
-      lines.push(`await safeFill(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if (a.kind === "press" && a.key) {
+      // `keyboard` only exists on Page (not Frame), so always route key
+      // presses through the owning page even when the action originated
+      // inside an iframe — keyboard input is page-scoped in CDP anyway.
+      const pageActor = a.pageAlias && a.pageAlias !== "page" ? `(await ensurePopup('${escapeJsSingleQuote(a.pageAlias)}'))` : "page";
       lines.push(`// Step ${stepNo}: Press ${escapeJsSingleQuote(a.key)}`);
-      lines.push(`await page.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
+      lines.push(`await ${pageActor}.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
     } else if (a.kind === "select" && sel) {
       // Route through the self-healing helper so recorded selects benefit
       // from the safeSelect waterfall (getByLabel → getByRole('combobox') →
@@ -233,7 +791,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // stay consistent with how `safeClick` and `safeFill` are handled
       // above.
       lines.push(`// Step ${stepNo}: Select option`);
-      lines.push(`await safeSelect(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      lines.push(`await safeSelect(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if ((a.kind === "check" || a.kind === "uncheck") && sel) {
       // Same rationale as safeSelect above — the recorder's CSS-looking
       // selectors bypass the applyHealingTransforms regex guard, so emit
@@ -241,7 +799,43 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // scoped fallbacks in PR #103 for TodoMVC-style patterns, which
       // recorded checkboxes benefit from for free.
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
-      lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(page, '${sel}');`);
+      lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(${actor}, '${sel}');`);
+    } else if (a.kind === "upload" && sel) {
+      // The recorder only sees browser-side `File.name` values — it has no
+      // access to the original bytes or a server-side path. Emit the
+      // captured filenames as a comment so reviewers can wire up real
+      // fixtures, but ship a no-op `[]` payload so replay doesn't crash
+      // with ENOENT trying to read non-existent local files.
+      const capturedNames = String(a.value || "").split(",").map((n) => n.trim()).filter(Boolean);
+      lines.push(`// Step ${stepNo}: Upload file(s)`);
+      if (capturedNames.length) {
+        lines.push(`// NOTE: recorder captured filenames ${JSON.stringify(capturedNames)} — replace [] with real fixture path(s) before running outside the recorder`);
+      } else {
+        lines.push(`// NOTE: replace with real fixture path(s) before running outside the recorder`);
+      }
+      lines.push(`await safeUpload(${actor}, '${sel}', []);`);
+    } else if (a.kind === "drag" && sel && targetSel) {
+      lines.push(`// Step ${stepNo}: Drag and drop`);
+      lines.push(`await ${actor}.locator('${sel}').dragTo(${actor}.locator('${targetSel}'));`);
+    } else if (a.kind === "assertVisible" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element is visible`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toBeVisible();`);
+    } else if (a.kind === "assertText" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element text`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toContainText('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertValue" && sel) {
+      lines.push(`// Step ${stepNo}: Assert field value`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveValue('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertUrl" && a.value) {
+      // The frontend prompts for a "URL fragment or regex text", and most
+      // users type a plain URL fragment containing regex metacharacters
+      // (`?`, `[`, `(`, `+`, `.`) that would either crash `new RegExp(...)`
+      // with a SyntaxError or silently change semantics (e.g. `?` making
+      // the previous char optional). Escape regex metacharacters so the
+      // captured value matches literally — that's what users expect.
+      const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      lines.push(`// Step ${stepNo}: Assert URL`);
+      lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
     } else {
       continue;
     }
@@ -252,10 +846,48 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
 
   return (
     `import { test, expect } from '@playwright/test';\n\n` +
-    `test('${safeName}', async ({ page }) => {\n` +
+    `test('${safeName}', async ({ page, context }) => {\n` +
     lines.map(l => "  " + l).join("\n") +
     "\n});\n"
   );
+}
+
+/**
+ * Append a manual assertion action to an in-flight recording session.
+ * Mirrors Playwright recorder's explicit "Add assertion" flow.
+ *
+ * @param {string} sessionId
+ * @param {RecordedAction} action
+ * @returns {RecordedAction}
+ */
+export function addAssertionAction(sessionId, action) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  const kind = String(action?.kind || "");
+  const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
+  if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
+  const selector = action?.selector ? String(action.selector).slice(0, 200) : undefined;
+  const value = action?.value != null ? String(action.value).slice(0, 500) : undefined;
+  // Reject payloads that would later be silently dropped by
+  // `actionsToPlaywrightCode` — assertions without their required field
+  // would render in the Steps panel but disappear from the generated test
+  // code, leaving users with assertions they think exist but don't.
+  if (kind !== "assertUrl" && !selector) {
+    throw new Error(`Invalid assertion: selector is required for ${kind}.`);
+  }
+  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl") && !value) {
+    throw new Error(`Invalid assertion: value is required for ${kind}.`);
+  }
+  const row = {
+    kind,
+    selector,
+    label: action?.label ? String(action.label).slice(0, 80) : undefined,
+    value,
+    ts: Date.now(),
+  };
+  session.actions.push(row);
+  return row;
 }
 
 /**
@@ -298,38 +930,78 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       context,
     });
 
+    const pageAliases = new Map();
     page = await context.newPage();
+    pageAliases.set(page, "page");
     session.page = page;
+    context.on("page", (p) => {
+      if (pageAliases.has(p)) return;
+      pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
+      p.on("framenavigated", (frame) => {
+        if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+          session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
+        }
+      });
+    });
 
     // Expose a binding for the injected script to relay captured events.
-    await context.exposeBinding("__sentriRecord", (_source, action) => {
+    await context.exposeBinding("__sentriRecord", (source, action) => {
       if (session.status !== "recording") return;
       if (!action || typeof action !== "object") return;
-      session.actions.push({
+      const sourcePage = source?.page || null;
+      const sourceFrame = source?.frame || null;
+      const isMainFrame = !!(sourcePage && sourceFrame && sourcePage.mainFrame() === sourceFrame);
+      const row = {
         kind: String(action.kind || ""),
         selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+        target: action.target ? String(action.target).slice(0, 200) : undefined,
+        label: action.label ? String(action.label).slice(0, 80) : undefined,
         value: action.value != null ? String(action.value).slice(0, 500) : undefined,
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
+        pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
+        frameUrl: !isMainFrame && sourceFrame?.url ? String(sourceFrame.url()).slice(0, 500) : undefined,
         ts: Number(action.ts) || Date.now(),
-      });
+      };
+      // Browsers fire two `click` events before a `dblclick`. Without
+      // suppression a user double-click replays as click, click, dblclick
+      // — running the same handler three times. Drop trailing clicks on
+      // the same selector that arrived within the OS double-click window
+      // (`TIMINGS.DBLCLICK_WINDOW_MS`) so the recorded action list matches
+      // user intent.
+      if (row.kind === "dblclick" && row.selector) {
+        for (let i = session.actions.length - 1; i >= 0; i--) {
+          const prev = session.actions[i];
+          if (row.ts - (prev.ts || 0) > TIMINGS.DBLCLICK_WINDOW_MS) break;
+          if (prev.kind === "click" && prev.selector === row.selector) {
+            session.actions.splice(i, 1);
+          }
+        }
+      }
+      session.actions.push(row);
     });
     await context.addInitScript(RECORDER_SCRIPT);
 
     // Navigate to the starting URL and record it as the first action.
     await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
-    session.actions.push({ kind: "goto", url: startUrl, ts: Date.now() });
+    session.actions.push({ kind: "goto", pageAlias: "page", url: startUrl, ts: Date.now() });
 
     // Capture subsequent in-page navigations (form submit, link click that
     // triggers a full load) so the generated script replays them via goto.
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame() && frame.url() && frame.url() !== "about:blank") {
-        session.actions.push({ kind: "goto", url: frame.url(), ts: Date.now() });
+        session.actions.push({ kind: "goto", pageAlias: "page", url: frame.url(), ts: Date.now() });
       }
     });
 
     // Start CDP screencast so the RecorderModal can show the live browser.
-    session.stopScreencast = await startScreencast(page, sessionId);
+    // startScreencast now returns { stop, cdpSession } — store both so the
+    // recorder can forward mouse/keyboard events from the canvas overlay.
+    const screencastResult = await startScreencast(page, sessionId);
+    if (screencastResult) {
+      session.stopScreencast = screencastResult.stop;
+      session.cdpSession = screencastResult.cdpSession;
+    }
 
     // Defence-in-depth: if the client never calls stop/discard (e.g. tab
     // closed, network died) the browser would remain open forever. Force-kill
@@ -351,6 +1023,19 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
         const purge = setTimeout(() => completedSessions.delete(sessionId), COMPLETED_TTL_MS);
         purge.unref?.();
       } catch { /* session may already be gone; nothing to stash */ }
+      // Close out the stub `runs` row created by POST /record. Without this,
+      // the row stays in `status: "running"` forever and the partial unique
+      // index `idx_runs_one_active_per_project` blocks every future run on
+      // this project (crawl/test_run/generate report opaque UNIQUE errors;
+      // the next recorder launch's orphan sweep is the only path that
+      // recovers, but only for `record` rows).
+      try {
+        runRepo.update(sessionId, {
+          status: "interrupted",
+          finishedAt: new Date().toISOString(),
+          error: `Recorder exceeded MAX_RECORDING_MS (${MAX_RECORDING_MS}ms) — auto-torn-down`,
+        });
+      } catch { /* row may not exist (e.g. tests that bypass route layer) */ }
     }, MAX_RECORDING_MS);
     // Node's timer would keep the process alive; recorder sessions are
     // per-request resources, so let the event loop exit if everything else
@@ -398,8 +1083,146 @@ export function takeCompletedRecording(sessionId) {
 }
 
 /**
- * Stop an in-flight recording. Tears down the browser and returns the
- * captured actions plus a ready-to-persist Playwright test body.
+ * Test-only seam: install a fake recording session keyed by `sessionId` so
+ * unit tests can exercise {@link forwardInput} (and its CDP dispatch logic)
+ * without launching a real Chromium. Returns a disposer that removes the
+ * session from the in-memory map.
+ *
+ * Intentionally not part of the public API — only the module's own test file
+ * imports this. The `_test` prefix and JSDoc tag should keep it out of normal
+ * usage; reviewers should reject any non-test caller.
+ *
+ * @param {string} sessionId
+ * @param {Object} fields - Partial RecordingSession fields to seed.
+ * @returns {Function} Disposer `() => void` that deletes the seeded session.
+ * @private
+ */
+export function _testSeedSession(sessionId, fields = {}) {
+  sessions.set(sessionId, {
+    id: sessionId,
+    projectId: fields.projectId ?? "TEST-PROJECT",
+    url: fields.url ?? "https://example.com",
+    status: fields.status ?? "recording",
+    actions: [],
+    startedAt: Date.now(),
+    cdpSession: fields.cdpSession,
+    ...fields,
+  });
+  return () => sessions.delete(sessionId);
+}
+
+/**
+ * Forward a user input event from the canvas overlay to the headless browser
+ * via CDP Input domain commands. This is the core mechanism that makes the
+ * recorder interactive — without it the canvas is read-only and the user can
+ * never produce actions in the headless browser.
+ *
+ * Supported event types:
+ *   mousePressed / mouseReleased / mouseMoved  → Input.dispatchMouseEvent
+ *   keyDown / keyUp / char                     → Input.dispatchKeyEvent
+ *   scroll                                     → Input.dispatchMouseEvent (wheel)
+ *
+ * @param {string} sessionId
+ * @param {Object} event
+ * @param {"mousePressed"|"mouseReleased"|"mouseMoved"|"keyDown"|"keyUp"|"char"|"scroll"} event.type
+ * @param {number} [event.x]          - Viewport x (already scaled by caller).
+ * @param {number} [event.y]          - Viewport y (already scaled by caller).
+ * @param {number} [event.button]     - DOM MouseEvent.button: 0=left, 1=middle, 2=right.
+ *                                      Pass `undefined` (omit) for moves with no
+ *                                      button held — CDP requires `"none"` then.
+ * @param {number} [event.clickCount] - 1 for single click.
+ * @param {number} [event.deltaX]     - Horizontal scroll delta.
+ * @param {number} [event.deltaY]     - Vertical scroll delta.
+ * @param {string} [event.key]        - DOM key name, e.g. "Enter".
+ * @param {string} [event.code]       - DOM code, e.g. "KeyA".
+ * @param {number} [event.keyCode]    - DOM virtual keycode (`e.keyCode`).
+ *                                      Required for non-printable keys —
+ *                                      without it CDP fires keyDown but
+ *                                      Backspace/Enter/Tab/Arrows have no
+ *                                      effect on the page.
+ * @param {string} [event.text]       - Printable text for char events.
+ * @param {number} [event.modifiers]  - Bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8.
+ * @returns {Promise<void>}
+ * @throws {Error} When the session is not found or has no CDP session.
+ */
+export async function forwardInput(sessionId, event) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (!session.cdpSession) throw new Error(`Session ${sessionId} has no CDP session — cannot forward input.`);
+  if (session.status !== "recording") return; // ignore input after stop is called
+
+  const cdp = session.cdpSession;
+  const { type } = event;
+
+  try {
+    if (type === "mousePressed" || type === "mouseReleased" || type === "mouseMoved") {
+      // DOM MouseEvent.button: 0=left, 1=middle, 2=right. CDP uses string
+      // names. For `mouseMoved` with no button held the caller should omit
+      // `event.button` so we dispatch `"none"` — otherwise CDP interprets a
+      // numeric 0 as a held left-button and treats the move as a drag.
+      const buttonMap = { 0: "left", 1: "middle", 2: "right" };
+      const cdpButton = event.button == null ? "none" : (buttonMap[event.button] ?? "none");
+      await cdp.send("Input.dispatchMouseEvent", {
+        type,
+        x: Math.round(event.x ?? 0),
+        y: Math.round(event.y ?? 0),
+        button: cdpButton,
+        clickCount: event.clickCount ?? (type === "mousePressed" ? 1 : 0),
+        modifiers: event.modifiers ?? 0,
+      });
+    } else if (type === "scroll") {
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: Math.round(event.x ?? 0),
+        y: Math.round(event.y ?? 0),
+        deltaX: event.deltaX ?? 0,
+        deltaY: event.deltaY ?? 0,
+        modifiers: event.modifiers ?? 0,
+      });
+    } else if (type === "keyDown" || type === "keyUp") {
+      // `windowsVirtualKeyCode` is what makes Backspace/Enter/Tab/Arrows
+      // actually trigger their default action in the page. Without it CDP
+      // fires the event but the page receives no operation. The frontend
+      // forwards `e.keyCode` from the DOM event for this purpose.
+      const args = {
+        type,
+        key: event.key ?? "",
+        code: event.code ?? "",
+        text: type === "keyDown" ? (event.text ?? "") : "",
+        modifiers: event.modifiers ?? 0,
+      };
+      if (typeof event.keyCode === "number" && event.keyCode > 0) {
+        args.windowsVirtualKeyCode = event.keyCode;
+        args.nativeVirtualKeyCode = event.keyCode;
+      }
+      await cdp.send("Input.dispatchKeyEvent", args);
+    } else if (type === "char") {
+      await cdp.send("Input.dispatchKeyEvent", {
+        type: "char",
+        key: event.text ?? "",
+        text: event.text ?? "",
+        modifiers: event.modifiers ?? 0,
+      });
+    }
+  } catch (err) {
+    // CDP errors (e.g. page navigating mid-click) are transient — don't crash
+    // the session. Log at debug level so they don't flood production logs.
+    if (process.env.LOG_LEVEL === "debug") {
+      console.error(formatLogLine("debug", null, `[recorder] forwardInput CDP error: ${err.message}`));
+    }
+  }
+}
+
+/**
+ * Stop an in-flight recording session, tear down the Playwright browser,
+ * and return the captured actions transformed into Playwright source. The
+ * generated code is wrapped in the repo-standard `test(...)` shape so the
+ * caller can persist it as a Draft test row and re-run it through the
+ * normal runner.
+ *
+ * Idempotent w.r.t. the in-memory map: the session is removed regardless
+ * of whether teardown errors. The browser/context/page cleanup calls are
+ * `.catch(() => {})`-shielded so a half-closed browser never leaks state.
  *
  * @param {string} sessionId
  * @param {Object} [opts]

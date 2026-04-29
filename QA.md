@@ -25,17 +25,17 @@ If the user asks for… read only this section:
 |---|---|---|
 | "Run / write all happy paths" | [Golden E2E Happy Path](#-golden-e2e-happy-path-must-pass-before-release) | 240–339 |
 | "Write Playwright tests for the deployed app" | [Canonical UI test shape](#canonical-ui-test-shape--emit-this-by-default) + [Tests Page §3](#-tests-page) | 94–108, 418–453 |
-| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 926–941 |
-| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 504–527 |
-| "Record a test" | [Recorder](#-recorder) | 457–475 |
-| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 478–501 |
-| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 530–559 |
-| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 562–586 |
-| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 589–606 |
+| "Write an API test" | [Tests Page §4](#-tests-page) + [API Test Imports](#-api-test-imports-openapi-har-plain-english-api) | 418–453, 943–958 |
+| "Fix a failing test" | [AI Fix](#-ai-fix-failed-test-recovery) | 521–543 |
+| "Record a test" | [Recorder](#-recorder) | 457–491 |
+| "Run tests / regression" | [Runs](#%EF%B8%8F-runs) | 495–517 |
+| "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 547–575 |
+| "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 579–602 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 606–622 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
-| "Verify security / authorization" | [Security](#-security) | 766–794 |
-| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 873–900 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1048–1081 |
+| "Verify security / authorization" | [Security](#-security) | 783–810 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 890–917 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1065–1098 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
@@ -45,43 +45,43 @@ authentication:      { lines: 353-376 }
 workspaces:          { lines: 379-395 }
 projects:            { lines: 399-414 }
 tests-page:          { lines: 418-453 }
-recorder:            { lines: 457-475 }
-runs:                { lines: 478-501 }
-ai-fix:              { lines: 504-527 }
-test-code-editing:   { lines: 530-559 }
-automation:          { lines: 562-586 }
-visual-testing:      { lines: 589-606 }
-dashboard:           { lines: 609-625 }
-ai-chat:             { lines: 629-658 }
-settings:            { lines: 662-679 }
-account-gdpr:        { lines: 683-692 }
-email-verification:  { lines: 696-703 }
-recycle-bin:         { lines: 707-716 }
-audit-log:           { lines: 720-728 }
-notifications:       { lines: 732-762 }
-security:            { lines: 766-794 }
-reports-pdf:         { lines: 797-812 }
-system-diagnostics:  { lines: 816-825 }
-new-project:         { lines: 829-840 }
-runs-list:           { lines: 844-854 }
-project-detail:      { lines: 858-869 }
-bulk-actions:        { lines: 873-900 }
-modals:              { lines: 904-922 }
-api-test-imports:    { lines: 926-941 }
-onboarding:          { lines: 945-954 }
-demo-mode:           { lines: 958-969 }
-settings-data-tab:   { lines: 973-987 }
-workspace-switcher:  { lines: 991-999 }
+recorder:            { lines: 457-491 }
+runs:                { lines: 495-517 }
+ai-fix:              { lines: 521-543 }
+test-code-editing:   { lines: 547-575 }
+automation:          { lines: 579-602 }
+visual-testing:      { lines: 606-622 }
+dashboard:           { lines: 626-642 }
+ai-chat:             { lines: 646-675 }
+settings:            { lines: 679-696 }
+account-gdpr:        { lines: 700-709 }
+email-verification:  { lines: 713-720 }
+recycle-bin:         { lines: 724-733 }
+audit-log:           { lines: 737-745 }
+notifications:       { lines: 749-779 }
+security:            { lines: 783-810 }
+reports-pdf:         { lines: 814-829 }
+system-diagnostics:  { lines: 833-842 }
+new-project:         { lines: 846-857 }
+runs-list:           { lines: 861-871 }
+project-detail:      { lines: 875-886 }
+bulk-actions:        { lines: 890-917 }
+modals:              { lines: 921-939 }
+api-test-imports:    { lines: 943-958 }
+onboarding:          { lines: 962-971 }
+demo-mode:           { lines: 975-986 }
+settings-data-tab:   { lines: 990-1004 }
+workspace-switcher:  { lines: 1008-1016 }
 
 # Meta sections
 golden-happy-path:       { lines: 240-339 }
 canonical-ui-test-shape: { lines: 94-108 }
 permissions-matrix:      { lines: 151-199 }
 setup:                   { lines: 203-237 }
-cross-cutting-checks:    { lines: 1003-1029 }
-known-issues:            { lines: 1033-1044 }
-bug-template:            { lines: 1048-1081 }
-coverage-checklist:      { lines: 1085-1129 }
+cross-cutting-checks:    { lines: 1020-1046 }
+known-issues:            { lines: 1050-1061 }
+bug-template:            { lines: 1065-1098 }
+coverage-checklist:      { lines: 1102-1146 }
 ```
 
 > **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
@@ -459,19 +459,36 @@ Each area uses this format:
 **Preconditions:** Project exists; recorder extension/feature available.
 
 **Steps & expected:**
-1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast and persists a Draft test with `safeClick` / `safeFill` (see `docs/changelog.md` DIF-015).
-2. Perform actions captured by the recorder (per `docs/changelog.md` DIF-015): **click, fill (type), press (keyboard), select (dropdown), navigate**. File upload, hover, and scroll are **not** captured — confirm they are silently ignored, not crashing the recorder.
-   - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Uses `safeClick` / `safeFill` so self-healing engages at run time.
-3. Stop and save → test appears in Tests page with all steps intact after refresh.
+1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast; the canvas is **interactive** — pointer / keyboard / wheel events are forwarded to the headless browser via the new `POST /api/v1/projects/:id/record/:sessionId/input` route (see `docs/changelog.md` DIF-015 + PR #115). Persists a Draft test with `safeClick` / `safeFill`.
+2. Perform actions captured by the recorder (PR #115 + #118 expanded scope): **click, double-click, right-click, hover, fill (type), press (keyboard shortcut), select (dropdown), check / uncheck, file upload, drag-and-drop, and navigate**. Mouse moves and scroll are forwarded to the headless browser but not stored as discrete steps. Mouse moves are throttled to ~30 fps client-side.
+   - **Hover with intent** — pointer rests on the same interactive element for ≥ 600 ms IS captured as a discrete `hover` step. Drive-by mouseovers are filtered out by the dwell timer (`backend/src/runner/recorder.js:282-309`).
+   - **Double-click** — the two preceding `click` events captured for the same selector are dropped within the OS double-click window (`TIMINGS.DBLCLICK_WINDOW_MS` = 500 ms) so the recorded action list reads as a single dblclick, not click-click-dblclick (`backend/src/runner/recorder.js:931-944`).
+   - **Right-click** records as `rightClick` and emits `locator.click({ button: 'right' })` so context-menu-driven flows replay correctly.
+   - **File upload** captures filenames only (no full paths — would leak tmpdir). The generated code emits a `safeUpload(sel, [])` placeholder + a `// NOTE: recorder captured filenames […]` comment; reviewers must wire up real fixture paths before running outside the recorder.
+   - **Drag-and-drop** pairs `dragstart` + `drop` → `locator.dragTo(targetLocator)` in the generated code.
+   - **Printable characters typed into INPUT/TEXTAREA/contenteditable** are intentionally NOT captured as `press` steps — the `input` event handler captures them as a debounced `fill`, so emitting per-keystroke `keyboard.press` would double-type the value at replay (`backend/src/runner/recorder.js:370-372`). Keyboard chords with `Ctrl`/`Cmd` modifiers, plus editing keys (Enter, Tab, Backspace, arrows, Escape), still flow through to `press` actions.
+   - **Manual assertions** (PR #118) — while recording, use the "Add assertion" form in `RecorderModal` to insert assertion steps. Four assertion kinds are supported: `assertVisible`, `assertText`, `assertValue`, `assertUrl` (`backend/src/routes/tests.js:1164-1184`, `backend/src/runner/recorder.js:827-855`). Server-side validation rejects assertions missing required fields (selector for visible/text/value, value for text/value/url) with a 400.
+   - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Persisted `steps[]` are short English sentences with **single quotes** (`User clicks the 'Sign in' button`, `User fills in the 'Email' field with 'user@example.com'`, `The 'Toast' is visible`) — **never raw selectors** like `role=button[name="…"]` or `#login`. Generated `playwrightCode` uses `safeClick` / `safeFill` / `safeSelect` / `safeCheck` / `safeUncheck` / `safeUpload` so self-healing engages at run time. The persisted `steps[]` count exactly matches the `// Step N:` comment count in `playwrightCode` — the shared `filterEmittableActions` predicate (`backend/src/runner/recorder.js:634-665`) drops actions missing required fields from both outputs identically (PR #118).
+3. Stop and save → test appears in Tests page with all steps intact after refresh. The Test Detail Steps panel renders the recorded test identically to AI-generated and manually-created tests (no engineer-shaped strings).
 4. Replay the recorded test → all steps execute; pass status reported.
+5. **Default Chromium headless mode** — confirm `BROWSER_HEADLESS=true` (the default) no longer produces "no actions were captured" (PR #115). The previous bug was that the canvas was read-only — it now forwards input correctly even when the headless Chromium has no visible window.
 
 **Negative / edge:**
-- ⚠️ Known: empty-steps bug — verify every recorded step has a selector and action.
-- Record on SPA with client-side routing → navigations captured correctly.
-- Record on iframe / shadow DOM content → document support status.
-- Record across tabs/popups → document support status.
-- Close tab mid-recording → partial recording saved or discarded cleanly (no corrupted state).
-- Record on site with dynamic IDs → selectors are stable (data-testid / text / role), not brittle.
+- ⚠️ Known: empty-steps bug (legacy) — verify every recorded step has a selector and action. PR #118's `filterEmittableActions` drops ill-formed actions from both `steps[]` and `playwrightCode` so the two stay in lock-step.
+- Record on SPA with client-side routing → navigations captured correctly. Consecutive `goto` actions to the **exact same URL** collapse to a single Step (e.g. `framenavigated` echoes); query-string-distinct navigations (`/search?q=iphone` → `/search?q=macbook`, pagination `?page=N`) are preserved as separate Steps so query-driven flows replay correctly (PR #115 + PR #118 fix).
+- Record on iframe / shadow DOM content → recorder captures iframe-scoped actions and emits the correct `frameLocator(…)` chain in generated code (`backend/src/runner/recorder.js:677-707` — `ensureFrame` helper). Selector quality inside iframes still tracked under DIF-015b.
+- Record across tabs/popups → popups are aliased as `popup1`, `popup2`, etc., and the generated code includes an `ensurePopup(alias)` helper (`backend/src/runner/recorder.js:688-700`). The `pageAlias` field on each captured action routes the replay through the correct page.
+- Close tab mid-recording → partial recording saved or discarded cleanly (no corrupted state). The `MAX_RECORDING_MS` safety-net teardown closes the stub `runs` row so subsequent runs on the project are not blocked (PR #115). Operators who hit "Stop & Save" within `RECORDER_COMPLETED_TTL_MS` (default 2 min) of the auto-teardown still recover their captured actions from the completed-recordings cache (`backend/src/runner/recorder.js:143-162`).
+- Record on site with dynamic IDs → selectors are stable (data-testid / role+name / label / text / placeholder fallback chain), not brittle.
+- **Scroll inside the canvas** → only the recorded page scrolls; the surrounding modal / page must not scroll underneath (PR #115 — non-passive wheel listener).
+- **Type printable characters** → each character appears once in the recorded form input. (PR #115 fixed a regression where every keystroke was inserted twice; PR #118 added the editable-field guard at `backend/src/runner/recorder.js:370-372` and a regression test in `backend/tests/recorder.test.js` to lock it down.)
+- **Left / middle / right mouse button** → CDP receives the correct button name. PR #115 P1 fix mapped DOM `MouseEvent.button` 0→`"left"`, 1→`"middle"`, 2→`"right"`. Idle hovers (no button held) dispatch `"none"` so the move isn't interpreted as a left-button drag. Regression test at `backend/tests/recorder.test.js` (`maps DOM button 0 → CDP 'left'`).
+- **Right-/middle-click drag** → forwards the correct CDP button. Verify by recording a right-click context menu on a page that has one — the menu opens, no left-click drag artefact appears.
+- **Re-recording after a previous crashed session** → opens cleanly; no UNIQUE constraint error on the `runs` row. The orphan sweep at `POST /record` (`backend/src/routes/tests.js:881-902`) only clears `record`-type orphans — concurrent crawl / regression / generate runs are intentionally left alone.
+- **Permissions** — every recorder route is gated by `requireRole("qa_lead")`: `POST /record`, `POST /record/:sessionId/input`, `POST /record/:sessionId/assertion`, `POST /record/:sessionId/stop`. Viewer attempts return 403 (`backend/src/middleware/permissions.json:22, 30-32`).
+- **Rate limiting** — the `/input` route is exempt from the global rate limiter (`backend/src/middleware/appSetup.js`) because canvas events arrive at ~60 fps during active use. The exemption is scoped to `POST` requests matching `/record/:sessionId/input` only; `/record` and `/record/:sessionId/stop` are still rate-limited.
+- **Assertion validation** — `POST /record/:sessionId/assertion` rejects payloads with invalid `kind` (anything other than `assertVisible` / `assertText` / `assertValue` / `assertUrl`) with 400. Missing `selector` for non-`assertUrl` kinds → 400. Missing `value` for `assertText` / `assertValue` / `assertUrl` → 400. Verify each branch returns a clear error message.
+- **Step prose contract** — the persisted `steps[]` array must NEVER leak raw `role=…[name="…"]` selectors, `#id` CSS, or `.class` selectors into the rendered step. The fallback chain (`label` → role-selector name extraction → empty target phrase) at `backend/src/runner/recorder.js:440-489` is property-tested at `backend/tests/recorder.test.js` (`never leaks raw role=…[name="…"] or CSS selectors into the rendered step`).
 
 ---
 
@@ -1040,7 +1057,7 @@ Per the codebase, recorder (DIF-015) and visual diff (DIF-001) were implemented/
 
 | Issue | Ticket | Repro | Workaround |
 |---|---|---|---|
-| Recorder empty-steps (regression) | _open_ | Record a simple flow; verify each step has selector + action | Re-record; file bug |
+| Recorder empty-steps | ✅ Fixed in PR #118 — `filterEmittableActions` (`backend/src/runner/recorder.js:634-665`) drops ill-formed actions from both `steps[]` and `playwrightCode`. Locked down by a regression test in `backend/tests/recorder.test.js`. Leave the row here for one release as a verification reference. | Record a simple flow; verify `steps.length` equals the number of `// Step N:` comments in the Source tab. | n/a — should not reproduce. File a P1 bug if it does. |
 | Visual diff false positives | _open_ | Re-run unchanged suite; check flagged steps | Tune `VISUAL_DIFF_THRESHOLD` / `VISUAL_DIFF_PIXEL_TOLERANCE` |
 
 ---

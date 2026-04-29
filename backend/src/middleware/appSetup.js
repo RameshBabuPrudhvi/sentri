@@ -311,7 +311,20 @@ const generalApiLimiter = rateLimit({
   max:              300,               // 300 requests per window per IP
   standardHeaders:  "draft-7",         // Retry-After, X-RateLimit-* headers
   legacyHeaders:    false,
-  skip:             (req) => req.method === "OPTIONS", // never block preflight
+  skip:             (req) => {
+    // Never block preflight.
+    if (req.method === "OPTIONS") return true;
+    // DIF-015 (PR #115): the recorder forwards every canvas pointer/keyboard
+    // event through POST /record/:sessionId/input. Mouse moves are throttled
+    // to ~30fps client-side but a single recording session still produces
+    // hundreds of requests in seconds, which exhausts the 300/15min global
+    // budget and breaks the subsequent /stop call. The /input route is cheap
+    // (one async CDP send), already gated by requireRole("qa_lead") + workspace
+    // scope, and has a dedicated allowlist of valid event types — exempting it
+    // here is safe and necessary for the recorder to function at all.
+    if (req.method === "POST" && /\/record\/[^/]+\/input$/.test(req.path)) return true;
+    return false;
+  },
   ..._makeRedisStore("sentri:rl:general:"),
   handler: (_req, res) => {
     res.status(429).json({

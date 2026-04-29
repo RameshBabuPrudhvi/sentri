@@ -106,5 +106,6 @@ These can be picked up by a second engineer alongside the current PR without fil
 | FEA-002 | TanStack React Query data layer | #107 |
 | MNT-011 | Persist crawl/generate dialsConfig on run record | #107 |
 | DIF-002b | Cross-browser polish: browser-aware baselines + badges | #110 |
+| DIF-015 | Recorder canvas input forwarding + step format alignment + Playwright-recorder action parity | #118 |
 
 *Full completed list → ROADMAP.md § Completed Work*

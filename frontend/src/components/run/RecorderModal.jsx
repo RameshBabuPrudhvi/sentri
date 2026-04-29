@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { api } from "../../api.js";
 import { API_PATH } from "../../utils/apiBase.js";
+import { useSseStream } from "../../hooks/useSseStream.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
 
 /**
@@ -24,8 +25,15 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [actions, setActions] = useState([]);
   const [frames, setFrames] = useState([]);
   const [name, setName] = useState("");
+  const [assertKind, setAssertKind] = useState("assertVisible");
+  const [assertSelector, setAssertSelector] = useState("");
+  const [assertValue, setAssertValue] = useState("");
+  const [assertLabel, setAssertLabel] = useState("");
   const [error, setError] = useState(null);
-  const esRef = useRef(null);
+  // Server-reported viewport so forwarded pointer coords scale correctly on
+  // deployments that override the default 1280x720. Defaults match the
+  // runner's defaults until `recordStart` returns the actual values.
+  const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const pollRef = useRef(null);
   // Refs mirror sessionId + projectId so the unmount cleanup sees the latest
   // values. An empty-deps cleanup closure would otherwise capture the initial
@@ -33,6 +41,30 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   // Chromium process when the user navigates away mid-recording.
   const sessionIdRef = useRef(null);
   const projectIdRef = useRef(projectId);
+  // Throttle mouseMoved events — sending at 60fps would flood the server.
+  // We cap forwarded move events to ~30fps (every 33ms) which is smooth
+  // enough for hover effects without overwhelming the SSE/HTTP channel.
+  const lastMoveRef = useRef(0);
+
+  // Forward a canvas input event to the recorder browser via the API.
+  // mouseMoved events are throttled; all others (click, key, scroll) go
+  // through immediately so they feel instantaneous.
+  const handleInput = useCallback((event) => {
+    const sid = sessionIdRef.current;
+    const pid = projectIdRef.current;
+    if (!sid || !pid) return;
+
+    if (event.type === "mouseMoved") {
+      const now = Date.now();
+      if (now - lastMoveRef.current < 33) return; // ~30fps cap
+      lastMoveRef.current = now;
+    }
+
+    // Fire-and-forget — input forwarding errors are transient (page
+    // navigating, session ending) and must never block the UI or show
+    // error banners that interrupt recording flow.
+    api.recordInput(pid, sid, event).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setStartUrl(defaultUrl);
@@ -41,10 +73,21 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { projectIdRef.current = projectId; }, [projectId]);
 
-  // Clean up SSE + polling AND server-side recording session on unmount.
+  // Subscribe to the SSE screencast channel via the shared `useSseStream`
+  // primitive. The hook handles connection lifecycle, JSON parsing, and
+  // teardown — we only need to dispatch by `event.type`. This replaces the
+  // earlier hand-rolled `EventSource` + `addEventListener("frame", …)` setup
+  // that silently swallowed every frame because the backend emits generic
+  // `data:` lines, not named events. See useSseStream.js module preamble.
+  const sseUrl = sessionId ? `${API_PATH}/runs/${sessionId}/events` : null;
+  useSseStream(sseUrl, useCallback((event) => {
+    if (event?.type === "frame" && event.data) setFrames([event.data]);
+  }, []), Boolean(sessionId));
+
+  // Clean up polling AND server-side recording session on unmount.
+  // SSE teardown is owned by useSseStream's effect cleanup.
   useEffect(() => {
     return () => {
-      if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       if (sessionIdRef.current && projectIdRef.current) {
         api.recordDiscard(projectIdRef.current, sessionIdRef.current).catch(() => {});
@@ -77,20 +120,14 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     teardownStreams();
     setPhase("starting");
     try {
-      const { sessionId: sid } = await api.recordStart(projectId, { startUrl });
+      const { sessionId: sid, viewport: vp } = await api.recordStart(projectId, { startUrl });
       setSessionId(sid);
+      if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
 
-      // Open SSE to receive live screencast frames from the recorder browser.
-      const es = new EventSource(`${API_PATH}/runs/${sid}/events`, { withCredentials: true });
-      esRef.current = es;
-      es.addEventListener("frame", (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if (data && data.data) setFrames([data.data]);
-        } catch { /* ignore malformed frame */ }
-      });
-      es.onerror = () => { /* SSE auto-reconnects; no action needed */ };
+      // SSE subscription is owned by the `useSseStream` hook above — setting
+      // `sessionId` flips its `enabled` predicate and opens the connection
+      // automatically. No manual EventSource bookkeeping here.
 
       // Poll for the captured actions so the sidebar updates as the user clicks.
       pollRef.current = setInterval(async () => {
@@ -132,8 +169,33 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     }
   }
 
+  async function handleAddAssertion() {
+    if (!sessionId) return;
+    if (assertKind !== "assertUrl" && !assertSelector.trim()) {
+      setError("Selector is required for this verification.");
+      return;
+    }
+    if ((assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && !assertValue.trim()) {
+      setError("Value is required for this verification.");
+      return;
+    }
+    setError(null);
+    try {
+      await api.recordAddAssertion(projectId, sessionId, {
+        kind: assertKind,
+        selector: assertKind === "assertUrl" ? undefined : assertSelector.trim(),
+        label: assertLabel.trim() || undefined,
+        value: assertValue.trim() || undefined,
+      });
+      setAssertValue("");
+    } catch (e) {
+      setError(e.message || "failed to add verification");
+    }
+  }
+
   function teardownStreams() {
-    if (esRef.current) { try { esRef.current.close(); } catch {} esRef.current = null; }
+    // SSE teardown is automatic — clearing `sessionId` flips useSseStream's
+    // `enabled` flag and the hook's effect cleanup closes the EventSource.
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
   }
 
@@ -200,7 +262,13 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 )}
               </div>
             ) : (
-              <LiveBrowserView frames={frames} label={sessionId || ""} />
+              <LiveBrowserView
+                frames={frames}
+                label={sessionId || ""}
+                onInput={handleInput}
+                viewportW={viewport.width}
+                viewportH={viewport.height}
+              />
             )}
           </div>
 
@@ -231,6 +299,43 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
 
             {phase === "recording" && (
               <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  Add verification
+                </div>
+                <select className="input" value={assertKind} onChange={(e) => setAssertKind(e.target.value)} style={{ width: "100%", marginBottom: 6 }}>
+                  <option value="assertVisible">Element visible</option>
+                  <option value="assertText">Element contains text</option>
+                  <option value="assertValue">Field has value</option>
+                  <option value="assertUrl">URL contains</option>
+                </select>
+                {assertKind !== "assertUrl" && (
+                  <input
+                    className="input"
+                    value={assertSelector}
+                    onChange={(e) => setAssertSelector(e.target.value)}
+                    placeholder="selector (e.g. role=button[name=&quot;Checkout&quot;])"
+                    style={{ width: "100%", marginBottom: 6 }}
+                  />
+                )}
+                <input
+                  className="input"
+                  value={assertLabel}
+                  onChange={(e) => setAssertLabel(e.target.value)}
+                  placeholder="friendly label (optional)"
+                  style={{ width: "100%", marginBottom: 6 }}
+                />
+                {(assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && (
+                  <input
+                    className="input"
+                    value={assertValue}
+                    onChange={(e) => setAssertValue(e.target.value)}
+                    placeholder={assertKind === "assertUrl" ? "URL fragment or regex text" : "expected value"}
+                    style={{ width: "100%", marginBottom: 8 }}
+                  />
+                )}
+                <button className="btn btn-ghost" onClick={handleAddAssertion} style={{ width: "100%", marginBottom: 12 }}>
+                  Add verification step
+                </button>
                 <label className="text-sm font-semi" style={{ display: "block", marginBottom: 6 }}>Test name</label>
                 <input
                   className="input"
