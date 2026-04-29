@@ -1181,7 +1181,7 @@ router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"),
     const action = addAssertionAction(req.params.sessionId, req.body || {});
     res.status(201).json({ ok: true, action });
   } catch (err) {
-    if (/Invalid assertion kind/i.test(err.message || "")) {
+    if (/Invalid assertion/i.test(err.message || "")) {
       return res.status(400).json({ error: err.message });
     }
     if (/not found|not recording/i.test(err.message || "")) {

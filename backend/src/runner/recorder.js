@@ -576,8 +576,15 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: Assert field value`);
       lines.push(`await expect(${actor}.locator('${sel}')).toHaveValue('${escapeJsSingleQuote(a.value || "")}');`);
     } else if (a.kind === "assertUrl" && a.value) {
+      // The frontend prompts for a "URL fragment or regex text", and most
+      // users type a plain URL fragment containing regex metacharacters
+      // (`?`, `[`, `(`, `+`, `.`) that would either crash `new RegExp(...)`
+      // with a SyntaxError or silently change semantics (e.g. `?` making
+      // the previous char optional). Escape regex metacharacters so the
+      // captured value matches literally — that's what users expect.
+      const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       lines.push(`// Step ${stepNo}: Assert URL`);
-      lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(a.value)}'));`);
+      lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
     } else {
       continue;
     }
