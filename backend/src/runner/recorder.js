@@ -285,6 +285,19 @@ const RECORDER_SCRIPT = `
     // Keep modifier-only events out, but capture regular typing + editing
     // keys so replay preserves keyboard-driven interactions.
     if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") return;
+    // If a printable single character is being typed into an editable field,
+    // the "input" handler above already captures the resulting fill via
+    // \`safeFill(sel, '<value>')\`. Emitting an additional per-keystroke
+    // press here would generate redundant \`keyboard.press('h')\` calls
+    // alongside the fill — replay would type each character once via press,
+    // then clear-and-retype the whole string via safeFill, breaking React
+    // controlled inputs / autocompletes / char-by-char validators that fire
+    // mid-typing. Keyboard shortcuts (Ctrl+A, Cmd+V, Ctrl+Enter) and editing
+    // keys (Enter, Tab, Backspace, arrows) are still captured because they
+    // don't conflict with the fill capture.
+    const t = ev.target;
+    const isEditable = !!(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
+    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;
     if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
       window.__sentriRecord && window.__sentriRecord({
         kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),

@@ -1059,6 +1059,37 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     dedupedActions.push(a);
   }
 
+  // Drop actions that `actionsToPlaywrightCode` would silently skip due to
+  // missing required fields (e.g. click/fill/select with empty selector,
+  // press with empty key, drag missing target, assertUrl with empty value).
+  // Without this filter, the persisted `steps[]` array would include
+  // sentences like "User clicks" for actions that produce no corresponding
+  // line in `playwrightCode`, breaking the side-by-side alignment on the
+  // Test Detail page (and breaking step-based edit/regeneration that
+  // indexes by position). Mirror the predicate logic in `actionsToPlaywrightCode`.
+  const isEmittable = (a) => {
+    switch (a.kind) {
+      case "goto":         return !!a.url;
+      case "click":
+      case "dblclick":
+      case "rightClick":
+      case "hover":
+      case "fill":
+      case "select":
+      case "check":
+      case "uncheck":
+      case "upload":
+      case "assertVisible":
+      case "assertText":
+      case "assertValue":  return !!a.selector;
+      case "press":        return !!a.key;
+      case "drag":         return !!a.selector && !!a.target;
+      case "assertUrl":    return !!a.value;
+      default:             return false;
+    }
+  };
+  const emittableActions = dedupedActions.filter(isEmittable);
+
   const testId = generateTestId();
   const test = {
     id: testId,
@@ -1072,7 +1103,7 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     // Test Detail page renders all three sources through the same Steps panel,
     // so visual alignment matters — recorder tests previously stuck out as the
     // only ones showing engineer-shaped output.
-    steps: dedupedActions.map((a) => recordedActionToStepText(a)),
+    steps: emittableActions.map((a) => recordedActionToStepText(a)),
     playwrightCode: stopResult.playwrightCode,
     priority: "medium",
     type: "recorded",
