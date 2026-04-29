@@ -547,6 +547,55 @@ export function recordedActionToStepText(a) {
 }
 
 /**
+ * Predicate matching the required-field branches in
+ * {@link actionsToPlaywrightCode}. Returns `true` iff the action carries
+ * enough information for the code generator to emit a corresponding line.
+ *
+ * Exported so route handlers building the persisted human-readable
+ * `steps[]` array can filter with the **same** rules the code generator
+ * applies — without this shared predicate the two would drift, causing
+ * `steps.length !== playwrightCode` step counts on the Test Detail page
+ * (and breaking step-based edit/regeneration that indexes by position).
+ * If you add a new action kind to {@link actionsToPlaywrightCode}, add the
+ * matching branch here too.
+ *
+ * @param {RecordedAction} a
+ * @returns {boolean}
+ */
+export function isEmittableAction(a) {
+  switch (a?.kind) {
+    case "goto":         return !!a.url;
+    case "click":
+    case "dblclick":
+    case "rightClick":
+    case "hover":
+    case "fill":
+    case "select":
+    case "check":
+    case "uncheck":
+    case "upload":
+    case "assertVisible":
+    case "assertText":
+    case "assertValue":  return !!a.selector;
+    case "press":        return !!a.key;
+    case "drag":         return !!a.selector && !!a.target;
+    case "assertUrl":    return !!a.value;
+    default:             return false;
+  }
+}
+
+/**
+ * Filter a list of captured actions down to the ones the code generator
+ * would actually emit. Convenience wrapper around {@link isEmittableAction}.
+ *
+ * @param {Array<RecordedAction>} actions
+ * @returns {Array<RecordedAction>}
+ */
+export function filterEmittableActions(actions) {
+  return (actions || []).filter(isEmittableAction);
+}
+
+/**
  * Convert a list of captured actions into a Playwright test body. The output
  * is wrapped in the repo-standard `test(...)` shape so the existing runner
  * (codeExecutor, codeParsing) treats it like any AI-generated test.

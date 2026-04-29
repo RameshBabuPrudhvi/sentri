@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { actionsToPlaywrightCode, forwardInput, recordedActionToStepText, _testSeedSession } from "../src/runner/recorder.js";
+import { actionsToPlaywrightCode, forwardInput, recordedActionToStepText, _testSeedSession, isEmittableAction, filterEmittableActions } from "../src/runner/recorder.js";
 
 let passed = 0;
 let failed = 0;
@@ -685,6 +685,113 @@ await (async () => {
         forwardInput("REC-err", { type: "mousePressed", x: 1, y: 1, button: 0 }),
       );
     } finally { dispose(); }
+  });
+})();
+
+// ── Regression: steps[] / playwrightCode step-count alignment ────────────
+// The persisted `steps[]` array on the recorded test row and the generated
+// `playwrightCode` are rendered side-by-side on the Test Detail page. If
+// they fall out of sync (different step counts, off-by-one positions),
+// step-based edit / regeneration breaks because callers index by position.
+// `filterEmittableActions` is the single source of truth that keeps the
+// route handler's filter predicate aligned with the code generator's
+// required-field branches.
+console.log("\n🧪 recorder — isEmittableAction (steps/code alignment)");
+
+test("isEmittableAction: matches required-field branches in actionsToPlaywrightCode", () => {
+  // Positive cases — minimum viable payload for each kind.
+  assert.equal(isEmittableAction({ kind: "goto", url: "https://x" }), true);
+  assert.equal(isEmittableAction({ kind: "click", selector: "#a" }), true);
+  assert.equal(isEmittableAction({ kind: "press", key: "Enter" }), true);
+  assert.equal(isEmittableAction({ kind: "drag", selector: "#a", target: "#b" }), true);
+  assert.equal(isEmittableAction({ kind: "assertUrl", value: "/dashboard" }), true);
+
+  // Missing required field for each branch — must be rejected.
+  assert.equal(isEmittableAction({ kind: "goto" }), false);
+  assert.equal(isEmittableAction({ kind: "click" }), false);
+  assert.equal(isEmittableAction({ kind: "press" }), false);
+  assert.equal(isEmittableAction({ kind: "drag", selector: "#a" }), false);
+  assert.equal(isEmittableAction({ kind: "drag", target: "#b" }), false);
+  assert.equal(isEmittableAction({ kind: "assertUrl" }), false);
+
+  // Defensive — null / undefined / unknown kinds.
+  assert.equal(isEmittableAction(null), false);
+  assert.equal(isEmittableAction({}), false);
+  assert.equal(isEmittableAction({ kind: "unknownFutureKind", selector: "#a" }), false);
+});
+
+test("filterEmittableActions: produces the same step count as actionsToPlaywrightCode emits", () => {
+  // This is the contract: for any action list, the number of human-readable
+  // steps the route persists must equal the number of `// Step N:` comments
+  // the code generator emits. Lock that contract down with a worst-case
+  // input that mixes well-formed actions with several "skipped" shapes.
+  const startUrl = "https://example.com";
+  const actions = [
+    // Initial goto matching startUrl — generator suppresses (already emitted
+    // at top of body). filterEmittableActions does NOT model that suppression
+    // because the route handler runs its own startUrl-aware dedup BEFORE
+    // calling filterEmittableActions, so the action that reaches the filter
+    // is already deduped. That's why this test feeds a goto to a different
+    // URL — to keep both paths counting the same emittable actions.
+    { kind: "goto", url: "https://example.com/dashboard", ts: 1 },
+    { kind: "click", selector: "#ok", ts: 2 },
+    { kind: "click", ts: 3 },                              // skipped: no selector
+    { kind: "press", key: "Enter", ts: 4 },
+    { kind: "press", ts: 5 },                              // skipped: no key
+    { kind: "fill", selector: "#email", value: "x", ts: 6 },
+    { kind: "drag", selector: "#a", target: "#b", ts: 7 },
+    { kind: "drag", selector: "#a", ts: 8 },               // skipped: no target
+    { kind: "assertUrl", value: "/done", ts: 9 },
+    { kind: "assertUrl", ts: 10 },                         // skipped: no value
+    { kind: "unknownFutureKind", selector: "#x", ts: 11 }, // skipped: unknown
+  ];
+
+  const emittable = filterEmittableActions(actions);
+  const code = actionsToPlaywrightCode("Align", startUrl, actions);
+  const stepComments = code.match(/\/\/ Step \d+:/g) || [];
+  // The generator also appends a final "// Step N: Verify page is still
+  // reachable" line for the trailing toHaveURL probe — that's not derived
+  // from any captured action, so it's expected to be exactly +1 over the
+  // emittable count.
+  assert.equal(
+    stepComments.length,
+    emittable.length + 1,
+    `step-comment count (${stepComments.length}) must equal filterEmittableActions count (${emittable.length}) + 1 trailing probe`,
+  );
+});
+
+// ── Regression: keydown handler must not emit per-keystroke `press` actions
+// when the user is typing into an editable field — the `input` handler
+// already captures the resulting `fill`. Without the editable-field guard,
+// typing "hello" produces both `keyboard.press('h'/.../'o')` AND
+// `safeFill(sel, 'hello')`, so replay double-types the value and breaks
+// React-controlled inputs / autocomplete / char-validators that fire
+// mid-typing. We can't run the in-page script here (no DOM), so instead
+// assert the source of `RECORDER_SCRIPT` carries the editable-field guard.
+console.log("\n🧪 recorder — RECORDER_SCRIPT keydown guard");
+
+await (async () => {
+  await asyncTest("RECORDER_SCRIPT skips printable single-char keydown on INPUT/TEXTAREA/contenteditable", async () => {
+    // The script is embedded as a string constant in recorder.js; read the
+    // file directly so the guard text can be asserted without running the
+    // capture in a real browser.
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const here = url.fileURLToPath(new URL(".", import.meta.url));
+    const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+    // The guard reads
+    //   `if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;`
+    // Match it loosely so harmless reformatting doesn't fail the test.
+    assert.match(
+      src,
+      /ev\.key\.length\s*===\s*1\s*&&\s*isEditable\s*&&\s*!ev\.ctrlKey\s*&&\s*!ev\.metaKey/,
+      "RECORDER_SCRIPT must guard printable keydowns on editable fields",
+    );
+    // Also confirm the isEditable predicate covers all three editable host
+    // shapes — INPUT, TEXTAREA, contenteditable.
+    assert.match(src, /tagName\s*===\s*"INPUT"/);
+    assert.match(src, /tagName\s*===\s*"TEXTAREA"/);
+    assert.match(src, /isContentEditable/);
   });
 })();
 

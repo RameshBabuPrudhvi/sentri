@@ -48,7 +48,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -1060,35 +1060,12 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   }
 
   // Drop actions that `actionsToPlaywrightCode` would silently skip due to
-  // missing required fields (e.g. click/fill/select with empty selector,
-  // press with empty key, drag missing target, assertUrl with empty value).
-  // Without this filter, the persisted `steps[]` array would include
-  // sentences like "User clicks" for actions that produce no corresponding
-  // line in `playwrightCode`, breaking the side-by-side alignment on the
-  // Test Detail page (and breaking step-based edit/regeneration that
-  // indexes by position). Mirror the predicate logic in `actionsToPlaywrightCode`.
-  const isEmittable = (a) => {
-    switch (a.kind) {
-      case "goto":         return !!a.url;
-      case "click":
-      case "dblclick":
-      case "rightClick":
-      case "hover":
-      case "fill":
-      case "select":
-      case "check":
-      case "uncheck":
-      case "upload":
-      case "assertVisible":
-      case "assertText":
-      case "assertValue":  return !!a.selector;
-      case "press":        return !!a.key;
-      case "drag":         return !!a.selector && !!a.target;
-      case "assertUrl":    return !!a.value;
-      default:             return false;
-    }
-  };
-  const emittableActions = dedupedActions.filter(isEmittable);
+  // missing required fields. `filterEmittableActions` is the shared predicate
+  // exported by the recorder module — using it here keeps the persisted
+  // `steps[]` array and the generated `playwrightCode` in lock-step (any
+  // drift breaks side-by-side rendering on the Test Detail page and
+  // step-based edit/regeneration that indexes by position).
+  const emittableActions = filterEmittableActions(dedupedActions);
 
   const testId = generateTestId();
   const test = {
