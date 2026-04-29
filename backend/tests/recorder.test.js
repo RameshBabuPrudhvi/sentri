@@ -433,22 +433,49 @@ test("renders human-readable prose for assertion + parity action kinds", () => {
   // visible", "The X contains 'Y'") so they render alongside AI-generated
   // assertions on the Test Detail page without sticking out as
   // engineer-shaped strings.
-  assert.match(recordedActionToStepText({ kind: "dblclick", label: "Open", ts: 1 }), /double-clicks/i);
-  assert.match(recordedActionToStepText({ kind: "rightClick", label: "Menu", ts: 1 }), /right-clicks/i);
-  assert.match(recordedActionToStepText({ kind: "hover", label: "Help", ts: 1 }), /hovers/i);
-  assert.match(recordedActionToStepText({ kind: "upload", label: "Avatar", value: "avatar.png", ts: 1 }), /uploads/i);
-  assert.match(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), /^The .* is visible$/);
-  assert.match(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), /contains 'Saved'/);
-  assert.match(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), /has value 'a@b\.com'/);
-  assert.match(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), /^The URL contains 'dashboard'$/);
+  // dblclick / rightClick render as outcome-style prose ("clicks … twice",
+  // "opens the context menu on …") rather than leaking the input-device
+  // jargon ("double-clicks", "right-clicks") into the Steps panel.
+  // Mouse-action steps deliberately omit the "element" fallback noun — it
+  // reads as developer jargon when manual testers review the Steps panel.
+  assert.equal(recordedActionToStepText({ kind: "dblclick", label: "Open", ts: 1 }), "User clicks 'Open' twice");
+  assert.equal(recordedActionToStepText({ kind: "rightClick", label: "Menu", ts: 1 }), "User opens the context menu on 'Menu'");
+  assert.equal(recordedActionToStepText({ kind: "hover", label: "Help", ts: 1 }), "User hovers over 'Help'");
+  assert.equal(recordedActionToStepText({ kind: "upload", label: "Avatar", value: "avatar.png", ts: 1 }), "User uploads 'avatar.png' for the 'Avatar' field");
+  // Assertions read as outcomes ("The X is visible") and the "page address"
+  // term replaces engineer-speak "URL" so manual testers can scan the steps
+  // without translating jargon.
+  assert.equal(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), "The 'Toast' is visible");
+  assert.equal(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), "The 'Toast' contains 'Saved'");
+  assert.equal(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), "The 'Email' field has value 'a@b.com'");
+  assert.equal(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), "The page address contains 'dashboard'");
+});
+
+test("assertion fallbacks degrade cleanly when no friendly label is available", () => {
+  // Without a label or role-style selector, the formatter must NOT emit
+  // "the element" or "the field" — that's developer jargon. Fall back to
+  // generic English ("expected content", "page", "field") so the Steps
+  // panel still reads as natural prose.
+  assert.equal(
+    recordedActionToStepText({ kind: "assertVisible", selector: ".x", ts: 1 }),
+    "The expected content is visible",
+  );
+  assert.equal(
+    recordedActionToStepText({ kind: "assertText", selector: ".x", value: "Saved", ts: 1 }),
+    "The page contains 'Saved'",
+  );
+  assert.equal(
+    recordedActionToStepText({ kind: "assertValue", selector: ".x", value: "a", ts: 1 }),
+    "The field has value 'a'",
+  );
 });
 
 test("drag: renders both source and drop-target in the persisted step", () => {
   // The previous formatter dropped the target half of the gesture entirely
-  // ("User drags the 'Card 1' element"), making it impossible to follow the
-  // recorded flow from steps alone. The drop-target carries no `label`
-  // (only `target` selector), so we recover the friendly name from a
-  // role-style selector on the target.
+  // ("User drags 'Card 1'"), making it impossible to follow the recorded
+  // flow from steps alone. The drop-target carries no `label` (only `target`
+  // selector), so we recover the friendly name from a role-style selector
+  // on the target. No "element" jargon — the labels speak for themselves.
   const s = recordedActionToStepText({
     kind: "drag",
     selector: 'role=listitem[name="Card 1"]',
@@ -456,7 +483,7 @@ test("drag: renders both source and drop-target in the persisted step", () => {
     target: 'role=region[name="Done"]',
     ts: 1,
   });
-  assert.equal(s, "User drags the 'Card 1' element onto the 'Done' element");
+  assert.equal(s, "User drags 'Card 1' onto 'Done'");
 });
 
 test("drag: degrades to source-only sentence when target selector cannot be parsed", () => {
@@ -469,7 +496,7 @@ test("drag: degrades to source-only sentence when target selector cannot be pars
     target: ".drop-zone",
     ts: 1,
   });
-  assert.equal(s, "User drags the 'Card 1' element");
+  assert.equal(s, "User drags 'Card 1'");
   assert.doesNotMatch(s, /onto\s*$/);
   assert.doesNotMatch(s, /\.drop-zone/, "raw CSS target must not leak into the Steps panel");
 });

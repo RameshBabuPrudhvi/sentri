@@ -442,11 +442,21 @@ export function recordedActionToStepText(a) {
     case "click":
       return `User clicks${friendlyTarget(a, "button")}`;
     case "dblclick":
-      return `User double-clicks${friendlyTarget(a, "element")}`;
+      // "double-clicks" is technical jargon to a manual tester. The AI
+      // pipeline (`outputSchema.js:74-78`) favours plain user-intent prose,
+      // so describe the gesture as a repeated click on the target instead.
+      // Drop the "element" fallback noun — it reads as developer jargon
+      // ("clicks the Save element"). With a captured label the sentence
+      // says "User clicks 'Save' twice"; without one it degrades to a clean
+      // "User clicks twice".
+      return `User clicks${friendlyTarget(a)} twice`;
     case "rightClick":
-      return `User right-clicks${friendlyTarget(a, "element")}`;
+      // Same rationale as dblclick — "right-clicks" leaks the input device.
+      // The user-visible outcome of a right-click is the context menu, so
+      // describe that instead.
+      return `User opens the context menu on${friendlyTarget(a)}`;
     case "hover":
-      return `User hovers over${friendlyTarget(a, "element")}`;
+      return `User hovers over${friendlyTarget(a)}`;
     case "fill":
       // Match the AI pipeline's "User fills in X with 'value'" phrasing
       // (outputSchema.js:74-78) — recorder previously used "User fills the
@@ -462,14 +472,18 @@ export function recordedActionToStepText(a) {
     case "uncheck":
       return `User unchecks${friendlyTarget(a, "checkbox")}`;
     case "upload":
-      return `User uploads '${truncVal(a.value)}'${friendlyTarget(a, "file input") ? ` in${friendlyTarget(a, "file input")}` : ""}`;
+      // Drop the "file input" noun — manual testers don't think in input
+      // types. "User uploads 'resume.pdf' for the 'Attach CV' field" reads
+      // closer to the user's intent than "… in the 'Attach CV' file input".
+      return `User uploads '${truncVal(a.value)}'${friendlyTarget(a, "field") ? ` for${friendlyTarget(a, "field")}` : ""}`;
     case "drag": {
       // Surface BOTH source and drop-target so reviewers can follow the
       // gesture from the persisted steps alone. The previous formatter
-      // dropped the target entirely, leaving "User drags the 'Card 1'"
-      // with no indication of where it landed.
-      const source = friendlyTarget(a, "element");
-      const target = friendlyTargetFromSelector(a.target, "element");
+      // dropped the target entirely, leaving "User drags 'Card 1'" with no
+      // indication of where it landed. No "element" fallback noun — it
+      // reads as developer jargon when reviewers see it in the Steps panel.
+      const source = friendlyTarget(a);
+      const target = friendlyTargetFromSelector(a.target);
       return target
         ? `User drags${source} onto${target}`
         : `User drags${source}`;
@@ -479,14 +493,25 @@ export function recordedActionToStepText(a) {
       // button is visible") rather than our previous engineer-shaped
       // "User asserts visibility of …" phrasing. The Steps panel renders
       // recorded + AI-generated tests through the same component, so the
-      // sentence shapes need to be interchangeable.
-      return `The${friendlyTarget(a, "element") || " element"} is visible`;
+      // sentence shapes need to be interchangeable. Fall back to "An
+      // element" (capitalised, no jargon "the element") when no friendly
+      // label can be recovered.
+      return friendlyTarget(a)
+        ? `The${friendlyTarget(a)} is visible`
+        : `The expected content is visible`;
     case "assertText":
-      return `The${friendlyTarget(a, "element") || " element"} contains '${truncVal(a.value)}'`;
+      return friendlyTarget(a)
+        ? `The${friendlyTarget(a)} contains '${truncVal(a.value)}'`
+        : `The page contains '${truncVal(a.value)}'`;
     case "assertValue":
-      return `The${friendlyTarget(a, "field") || " field"} has value '${truncVal(a.value)}'`;
+      return friendlyTarget(a, "field")
+        ? `The${friendlyTarget(a, "field")} has value '${truncVal(a.value)}'`
+        : `The field has value '${truncVal(a.value)}'`;
     case "assertUrl":
-      return `The URL contains '${truncVal(a.value, 60)}'`;
+      // "URL" is engineer-speak; manual testers think "page address". Use
+      // "page address" so the persisted step reads naturally next to AI-
+      // generated steps like "User opens the dashboard page".
+      return `The page address contains '${truncVal(a.value, 60)}'`;
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
