@@ -81,7 +81,7 @@ test("deduplicates consecutive gotos to the same URL", () => {
 test("emits a runnable test skeleton even for zero actions", () => {
   const code = actionsToPlaywrightCode("Empty", "https://example.com", []);
   assert.match(code, /import \{ test, expect \} from '@playwright\/test';/);
-  assert.match(code, /test\('Empty', async \(\{ page \}\) => \{/);
+  assert.match(code, /test\('Empty', async \(\{ page, context \}\) => \{/);
   assert.match(code, /await page\.goto\('https:\/\/example\.com'\);/);
   assert.match(code, /await expect\(page\)\.toHaveURL\(\/\.\*\/\);/);
 });
@@ -129,6 +129,31 @@ test("skips actions with missing selectors / keys / urls", () => {
   const clicks = code.match(/await safeClick/g) || [];
   assert.equal(clicks.length, 1, "only the well-formed click should be emitted");
   assert.doesNotMatch(code, /await page\.keyboard\.press\('/);
+});
+
+test("supports recorder parity actions (dblclick/right-click/hover/upload/assertions)", () => {
+  const code = actionsToPlaywrightCode("Parity", "https://example.com", [
+    { kind: "dblclick", selector: "#open", ts: 1 },
+    { kind: "rightClick", selector: "#menu", ts: 2 },
+    { kind: "hover", selector: "#tooltip", ts: 3 },
+    { kind: "upload", selector: "input[type='file']", value: "avatar.png", ts: 4 },
+    { kind: "assertVisible", selector: "#toast", ts: 5 },
+    { kind: "assertText", selector: "#toast", value: "Saved", ts: 6 },
+    { kind: "assertValue", selector: "#email", value: "a@b.com", ts: 7 },
+    { kind: "assertUrl", value: "dashboard", ts: 8 },
+  ]);
+  assert.match(code, /\.locator\('#open'\)\.dblclick\(\);/);
+  assert.match(code, /\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
+  assert.match(code, /\.locator\('#tooltip'\)\.hover\(\);/);
+  // Recorder cannot ship local file bytes from the browser, so it emits a
+  // placeholder `[]` payload and surfaces the captured filename(s) in a
+  // NOTE comment for the reviewer to wire up real fixtures.
+  assert.match(code, /NOTE: recorder captured filenames \[\"avatar\.png\"\]/);
+  assert.match(code, /await safeUpload\([^,]+, 'input\[type=\\'file\\'\]', \[\]\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toBeVisible\(\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
+  assert.match(code, /await expect\(page\)\.toHaveURL\(new RegExp\('dashboard'\)\);/);
 });
 
 // ── Devin Review BUG_0002 regression — URL escaping ────────────────────────
@@ -221,14 +246,14 @@ test("generated code is always syntactically parseable regardless of captured va
     // and prepends an `import` line. Strip both so we can parse just the body
     // as a Function and validate that every interpolated string literal is
     // syntactically valid.
-    const bodyMatch = code.match(/async \(\{ page \}\) => \{\n([\s\S]*)\n\}\);\n$/);
+    const bodyMatch = code.match(/async \(\{ page, context \}\) => \{\n([\s\S]*)\n\}\);\n$/);
     assert.ok(bodyMatch, `generated code should have the expected wrapper shape for input ${JSON.stringify(s)}`);
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     assert.doesNotThrow(
       // All self-healing helper names must be in scope for the parsed body —
       // the generated code now references safeSelect / safeCheck / safeUncheck
       // in addition to safeClick / safeFill.
-      () => new AsyncFunction("page", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", bodyMatch[1]),
+      () => new AsyncFunction("page", "context", "expect", "safeClick", "safeFill", "safeSelect", "safeCheck", "safeUncheck", "safeUpload", bodyMatch[1]),
       `generated body should parse for input ${JSON.stringify(s)}`,
     );
   }
@@ -397,7 +422,18 @@ test("default branch: renders the kind verbatim for unknown future action types"
     label: "Slider",
     ts: 1,
   });
-  assert.match(s, /User performs drag/);
+  assert.match(s, /User drags/i);
+});
+
+test("renders human-readable prose for assertion + parity action kinds", () => {
+  assert.match(recordedActionToStepText({ kind: "dblclick", label: "Open", ts: 1 }), /double-clicks/i);
+  assert.match(recordedActionToStepText({ kind: "rightClick", label: "Menu", ts: 1 }), /right-clicks/i);
+  assert.match(recordedActionToStepText({ kind: "hover", label: "Help", ts: 1 }), /hovers/i);
+  assert.match(recordedActionToStepText({ kind: "upload", label: "Avatar", value: "avatar.png", ts: 1 }), /uploads/i);
+  assert.match(recordedActionToStepText({ kind: "assertVisible", label: "Toast", ts: 1 }), /asserts visibility/i);
+  assert.match(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), /contains "Saved"/i);
+  assert.match(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), /value/i);
+  assert.match(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), /URL contains "dashboard"/i);
 });
 
 test("never leaks raw role=…[name=\"…\"] or CSS selectors into the rendered step", () => {

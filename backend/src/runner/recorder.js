@@ -39,7 +39,7 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
 
 /**
  * @typedef {Object} RecordedAction
- * @property {"goto"|"click"|"fill"|"press"|"select"|"check"|"uncheck"} kind
+ * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
  * @property {string} [label]      - Human-readable label for the target
  *                                   element (aria-label / inner text /
@@ -51,6 +51,9 @@ const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS 
  * @property {string} [value]      - For `fill`, the final value typed.
  * @property {string} [url]        - For `goto`.
  * @property {string} [key]        - For `press`.
+ * @property {string} [frameUrl]    - URL of iframe containing the action.
+ * @property {string} [pageAlias]   - "page" for main tab, "popupN" for popups.
+ * @property {string} [target]      - For drag/drop target selector.
  * @property {number}  ts          - Epoch ms when the action was captured.
  */
 
@@ -110,10 +113,23 @@ const RECORDER_SCRIPT = `
 
   function bestSelector(el) {
     if (!el || el.nodeType !== 1) return "";
-    if (el.getAttribute("data-testid")) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
+    const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
+    if (testId) return 'data-testid=' + JSON.stringify(testId.trim());
     const role = el.getAttribute("role") || roleFromTag(el.tagName);
-    const label = (el.getAttribute("aria-label") || el.innerText || "").trim().slice(0, 50);
-    if (role && label) return 'role=' + role + '[name="' + label.replace(/"/g, '\\\\"') + '"]';
+    const label = (el.getAttribute("aria-label") || "").trim().slice(0, 80);
+    if (role && label) return 'role=' + role + '[name=' + JSON.stringify(label) + ']';
+    if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") && el.labels && el.labels[0]) {
+      const l = (el.labels[0].innerText || el.labels[0].textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
+      if (l) return 'label=' + JSON.stringify(l);
+    }
+    const ph = (el.getAttribute("placeholder") || "").trim();
+    if (ph) return 'placeholder=' + JSON.stringify(ph.slice(0, 80));
+    const alt = (el.getAttribute("alt") || "").trim();
+    if (alt) return 'alt=' + JSON.stringify(alt.slice(0, 80));
+    const title = (el.getAttribute("title") || "").trim();
+    if (title) return 'title=' + JSON.stringify(title.slice(0, 80));
+    const txt = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
+    if (txt && txt.length >= 2) return 'text=' + JSON.stringify(txt);
     if (el.id) return "#" + CSS.escape(el.id);
     if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
     const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
@@ -145,15 +161,100 @@ const RECORDER_SCRIPT = `
     return "";
   }
 
+  // Browser dispatches click → click → dblclick for a double-click gesture.
+  // Defer click emission by one OS double-click window so a trailing
+  // "dblclick" listener can cancel the queued clicks for the same target;
+  // otherwise replay would re-run the click handler twice before the
+  // intended double-click and toggle UI state / submit forms early.
+  const pendingClickTimers = new Map(); // selector -> timeout id
+  function eventElement(ev) {
+    const p = ev.composedPath && ev.composedPath();
+    return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
+  }
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("a, button, input, [role], [data-testid]") || ev.target;
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    const sel = bestSelector(el);
+    const label = bestLabel(el);
+    const emit = () => {
+      pendingClickTimers.delete(sel);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "click", selector: sel, label, ts: Date.now(),
+      });
+    };
+    if (!sel) { emit(); return; }
+    const prev = pendingClickTimers.get(sel);
+    if (prev) clearTimeout(prev);
+    pendingClickTimers.set(sel, setTimeout(emit, 250));
+  }, true);
+  document.addEventListener("dblclick", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    const sel = bestSelector(el);
+    // Cancel any queued click(s) for this selector — a dblclick supersedes
+    // the two click events that preceded it.
+    if (sel) {
+      const pending = pendingClickTimers.get(sel);
+      if (pending) { clearTimeout(pending); pendingClickTimers.delete(sel); }
+    }
     window.__sentriRecord && window.__sentriRecord({
-      kind: "click", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+      kind: "dblclick", selector: sel, label: bestLabel(el), ts: Date.now(),
     });
+  }, true);
+  document.addEventListener("contextmenu", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "rightClick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+    });
+  }, true);
+  // Hover capture uses a dwell timer so casual pointer movement through
+  // nested DOM doesn't flood the action log. We only emit a "hover" action
+  // after the pointer has rested on the same interactive ancestor for
+  // ~600ms — long enough to filter out drive-by mouseover events while
+  // still catching deliberate hovers (tooltips, dropdown triggers).
+  let hoverDwellTimer = null;
+  let lastHoverSelector = "";
+  document.addEventListener("mouseover", (ev) => {
+    const raw = eventElement(ev);
+    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    if (!el) return;
+    const sel = bestSelector(el);
+    if (!sel) return;
+    if (sel === lastHoverSelector) return; // already pending / just emitted for this target
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    hoverDwellTimer = setTimeout(() => {
+      hoverDwellTimer = null;
+      lastHoverSelector = sel;
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
+      });
+    }, 600);
+  }, true);
+  document.addEventListener("mouseout", () => {
+    if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
+    lastHoverSelector = "";
+  }, true);
+
+  const inputTimers = new Map();
+  document.addEventListener("input", (ev) => {
+    const el = eventElement(ev);
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return;
+    const sel = bestSelector(el);
+    if (!sel) return;
+    const prev = inputTimers.get(sel);
+    if (prev) clearTimeout(prev);
+    inputTimers.set(sel, setTimeout(() => {
+      inputTimers.delete(sel);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
+      });
+    }, 300));
   }, true);
 
   document.addEventListener("change", (ev) => {
-    const el = ev.target;
+    const el = eventElement(ev);
     if (!el) return;
     if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
       window.__sentriRecord && window.__sentriRecord({
@@ -161,6 +262,13 @@ const RECORDER_SCRIPT = `
         selector: bestSelector(el),
         label: bestLabel(el),
         ts: Date.now(),
+      });
+    } else if (el.tagName === "INPUT" && el.type === "file") {
+      const names = (el.files && el.files.length)
+        ? Array.from(el.files).map((f) => f.name).join(", ")
+        : "";
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "upload", selector: bestSelector(el), label: bestLabel(el), value: names, ts: Date.now(),
       });
     } else if (el.tagName === "SELECT") {
       window.__sentriRecord && window.__sentriRecord({
@@ -174,14 +282,29 @@ const RECORDER_SCRIPT = `
   }, true);
 
   document.addEventListener("keydown", (ev) => {
-    // Only capture "meaningful" keys — skip modifier-only taps so we don't
-    // spam the timeline. Enter, Escape, Tab, and arrows are useful; everything
-    // else is already captured via "change" on input/textarea elements.
-    const interestingKeys = ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
-    if (!interestingKeys.includes(ev.key)) return;
+    // Keep modifier-only events out, but capture regular typing + editing
+    // keys so replay preserves keyboard-driven interactions.
+    if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") return;
+    if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),
+      });
+    }
+  }, true);
+
+  let dragSource = "";
+  document.addEventListener("dragstart", (ev) => {
+    const el = eventElement(ev);
+    dragSource = bestSelector(el);
+  }, true);
+  document.addEventListener("drop", (ev) => {
+    const target = eventElement(ev);
+    const targetSel = bestSelector(target);
+    if (!dragSource || !targetSel) return;
     window.__sentriRecord && window.__sentriRecord({
-      kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),
+      kind: "drag", selector: dragSource, target: targetSel, label: bestLabel(target), ts: Date.now(),
     });
+    dragSource = "";
   }, true);
 })();
 `;
@@ -288,6 +411,12 @@ export function recordedActionToStepText(a) {
       return `User navigates to ${shortUrl(a.url)}`.trim();
     case "click":
       return `User clicks${friendlyTarget(a, "button")}`;
+    case "dblclick":
+      return `User double-clicks${friendlyTarget(a, "element")}`;
+    case "rightClick":
+      return `User right-clicks${friendlyTarget(a, "element")}`;
+    case "hover":
+      return `User hovers over${friendlyTarget(a, "element")}`;
     case "fill":
       // Recorded fill values can contain secrets (passwords, API keys). The
       // raw value already lives in `playwrightCode`; truncate aggressively in
@@ -301,6 +430,18 @@ export function recordedActionToStepText(a) {
       return `User checks${friendlyTarget(a, "checkbox")}`;
     case "uncheck":
       return `User unchecks${friendlyTarget(a, "checkbox")}`;
+    case "upload":
+      return `User uploads "${String(a.value || "").slice(0, 40)}"${friendlyTarget(a, "file input") ? ` in${friendlyTarget(a, "file input")}` : ""}`;
+    case "drag":
+      return `User drags${friendlyTarget(a, "element")}`;
+    case "assertVisible":
+      return `User asserts visibility of${friendlyTarget(a, "element")}`;
+    case "assertText":
+      return `User asserts text${friendlyTarget(a, "element")} contains "${String(a.value || "").slice(0, 40)}"`;
+    case "assertValue":
+      return `User asserts value${friendlyTarget(a, "field")} is "${String(a.value || "").slice(0, 40)}"`;
+    case "assertUrl":
+      return `User asserts URL contains "${String(a.value || "").slice(0, 60)}"`;
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
@@ -322,6 +463,34 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   const safeName = escapeJsSingleQuote(testName || "Recorded test");
   const safeStartUrl = escapeJsSingleQuote(startUrl || "");
   const lines = [];
+  const actorExpr = (action) => {
+    const alias = escapeJsSingleQuote(action?.pageAlias || "page");
+    const base = alias === "page" ? "page" : `(await ensurePopup('${alias}'))`;
+    const frameUrl = String(action?.frameUrl || "");
+    if (!frameUrl) return base;
+    return `(await ensureFrame(${base}, '${escapeJsSingleQuote(frameUrl)}'))`;
+  };
+  lines.push(`const __popupPages = new Map();`);
+  lines.push(`context.on('page', (p) => {`);
+  lines.push(`  const alias = 'popup' + (__popupPages.size + 1);`);
+  lines.push(`  __popupPages.set(alias, p);`);
+  lines.push(`});`);
+  lines.push(`const ensurePopup = async (alias) => {`);
+  lines.push(`  for (let i = 0; i < 50; i++) {`);
+  lines.push(`    const p = __popupPages.get(alias);`);
+  lines.push(`    if (p) return p;`);
+  lines.push(`    await page.waitForTimeout(100);`);
+  lines.push(`  }`);
+  lines.push(`  throw new Error('Popup not found: ' + alias);`);
+  lines.push(`};`);
+  lines.push(`const ensureFrame = async (p, frameUrl) => {`);
+  lines.push(`  for (let i = 0; i < 50; i++) {`);
+  lines.push(`    const f = p.frames().find((fr) => fr.url().includes(frameUrl));`);
+  lines.push(`    if (f) return f;`);
+  lines.push(`    await p.waitForTimeout(100);`);
+  lines.push(`  }`);
+  lines.push(`  throw new Error('Frame not found for URL: ' + frameUrl);`);
+  lines.push(`};`);
   lines.push(`await page.goto('${safeStartUrl}');`);
   // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
   // (and `framenavigated` can echo the same URL). We emit the initial goto
@@ -331,21 +500,37 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   let stepNo = 1;
   for (const a of actions) {
     const sel = escapeJsSingleQuote(a.selector || "");
+    const targetSel = escapeJsSingleQuote(a.target || "");
+    const actor = actorExpr(a);
     if (a.kind === "goto" && a.url) {
       if (a.url === lastGotoUrl) continue;
       lastGotoUrl = a.url;
       const safeUrl = escapeJsSingleQuote(a.url);
+      const gotoActor = a.pageAlias && a.pageAlias !== "page" ? `(await ensurePopup('${escapeJsSingleQuote(a.pageAlias)}'))` : "page";
       lines.push(`// Step ${stepNo}: Navigate`);
-      lines.push(`await page.goto('${safeUrl}');`);
+      lines.push(`await ${gotoActor}.goto('${safeUrl}');`);
     } else if (a.kind === "click" && sel) {
       lines.push(`// Step ${stepNo}: Click element`);
-      lines.push(`await safeClick(page, '${sel}');`);
+      lines.push(`await safeClick(${actor}, '${sel}');`);
+    } else if (a.kind === "dblclick" && sel) {
+      lines.push(`// Step ${stepNo}: Double click element`);
+      lines.push(`await ${actor}.locator('${sel}').dblclick();`);
+    } else if (a.kind === "rightClick" && sel) {
+      lines.push(`// Step ${stepNo}: Right click element`);
+      lines.push(`await ${actor}.locator('${sel}').click({ button: 'right' });`);
+    } else if (a.kind === "hover" && sel) {
+      lines.push(`// Step ${stepNo}: Hover over element`);
+      lines.push(`await ${actor}.locator('${sel}').hover();`);
     } else if (a.kind === "fill" && sel) {
       lines.push(`// Step ${stepNo}: Fill field`);
-      lines.push(`await safeFill(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if (a.kind === "press" && a.key) {
+      // `keyboard` only exists on Page (not Frame), so always route key
+      // presses through the owning page even when the action originated
+      // inside an iframe — keyboard input is page-scoped in CDP anyway.
+      const pageActor = a.pageAlias && a.pageAlias !== "page" ? `(await ensurePopup('${escapeJsSingleQuote(a.pageAlias)}'))` : "page";
       lines.push(`// Step ${stepNo}: Press ${escapeJsSingleQuote(a.key)}`);
-      lines.push(`await page.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
+      lines.push(`await ${pageActor}.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
     } else if (a.kind === "select" && sel) {
       // Route through the self-healing helper so recorded selects benefit
       // from the safeSelect waterfall (getByLabel → getByRole('combobox') →
@@ -355,7 +540,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // stay consistent with how `safeClick` and `safeFill` are handled
       // above.
       lines.push(`// Step ${stepNo}: Select option`);
-      lines.push(`await safeSelect(page, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      lines.push(`await safeSelect(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if ((a.kind === "check" || a.kind === "uncheck") && sel) {
       // Same rationale as safeSelect above — the recorder's CSS-looking
       // selectors bypass the applyHealingTransforms regex guard, so emit
@@ -363,7 +548,43 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // scoped fallbacks in PR #103 for TodoMVC-style patterns, which
       // recorded checkboxes benefit from for free.
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
-      lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(page, '${sel}');`);
+      lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(${actor}, '${sel}');`);
+    } else if (a.kind === "upload" && sel) {
+      // The recorder only sees browser-side `File.name` values — it has no
+      // access to the original bytes or a server-side path. Emit the
+      // captured filenames as a comment so reviewers can wire up real
+      // fixtures, but ship a no-op `[]` payload so replay doesn't crash
+      // with ENOENT trying to read non-existent local files.
+      const capturedNames = String(a.value || "").split(",").map((n) => n.trim()).filter(Boolean);
+      lines.push(`// Step ${stepNo}: Upload file(s)`);
+      if (capturedNames.length) {
+        lines.push(`// NOTE: recorder captured filenames ${JSON.stringify(capturedNames)} — replace [] with real fixture path(s) before running outside the recorder`);
+      } else {
+        lines.push(`// NOTE: replace with real fixture path(s) before running outside the recorder`);
+      }
+      lines.push(`await safeUpload(${actor}, '${sel}', []);`);
+    } else if (a.kind === "drag" && sel && targetSel) {
+      lines.push(`// Step ${stepNo}: Drag and drop`);
+      lines.push(`await ${actor}.locator('${sel}').dragTo(${actor}.locator('${targetSel}'));`);
+    } else if (a.kind === "assertVisible" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element is visible`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toBeVisible();`);
+    } else if (a.kind === "assertText" && sel) {
+      lines.push(`// Step ${stepNo}: Assert element text`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toContainText('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertValue" && sel) {
+      lines.push(`// Step ${stepNo}: Assert field value`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveValue('${escapeJsSingleQuote(a.value || "")}');`);
+    } else if (a.kind === "assertUrl" && a.value) {
+      // The frontend prompts for a "URL fragment or regex text", and most
+      // users type a plain URL fragment containing regex metacharacters
+      // (`?`, `[`, `(`, `+`, `.`) that would either crash `new RegExp(...)`
+      // with a SyntaxError or silently change semantics (e.g. `?` making
+      // the previous char optional). Escape regex metacharacters so the
+      // captured value matches literally — that's what users expect.
+      const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      lines.push(`// Step ${stepNo}: Assert URL`);
+      lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
     } else {
       continue;
     }
@@ -374,10 +595,48 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
 
   return (
     `import { test, expect } from '@playwright/test';\n\n` +
-    `test('${safeName}', async ({ page }) => {\n` +
+    `test('${safeName}', async ({ page, context }) => {\n` +
     lines.map(l => "  " + l).join("\n") +
     "\n});\n"
   );
+}
+
+/**
+ * Append a manual assertion action to an in-flight recording session.
+ * Mirrors Playwright recorder's explicit "Add assertion" flow.
+ *
+ * @param {string} sessionId
+ * @param {RecordedAction} action
+ * @returns {RecordedAction}
+ */
+export function addAssertionAction(sessionId, action) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  const kind = String(action?.kind || "");
+  const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
+  if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
+  const selector = action?.selector ? String(action.selector).slice(0, 200) : undefined;
+  const value = action?.value != null ? String(action.value).slice(0, 500) : undefined;
+  // Reject payloads that would later be silently dropped by
+  // `actionsToPlaywrightCode` — assertions without their required field
+  // would render in the Steps panel but disappear from the generated test
+  // code, leaving users with assertions they think exist but don't.
+  if (kind !== "assertUrl" && !selector) {
+    throw new Error(`Invalid assertion: selector is required for ${kind}.`);
+  }
+  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl") && !value) {
+    throw new Error(`Invalid assertion: value is required for ${kind}.`);
+  }
+  const row = {
+    kind,
+    selector,
+    label: action?.label ? String(action.label).slice(0, 80) : undefined,
+    value,
+    ts: Date.now(),
+  };
+  session.actions.push(row);
+  return row;
 }
 
 /**
@@ -420,34 +679,66 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       context,
     });
 
+    const pageAliases = new Map();
     page = await context.newPage();
+    pageAliases.set(page, "page");
     session.page = page;
+    context.on("page", (p) => {
+      if (pageAliases.has(p)) return;
+      pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
+      p.on("framenavigated", (frame) => {
+        if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+          session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
+        }
+      });
+    });
 
     // Expose a binding for the injected script to relay captured events.
-    await context.exposeBinding("__sentriRecord", (_source, action) => {
+    await context.exposeBinding("__sentriRecord", (source, action) => {
       if (session.status !== "recording") return;
       if (!action || typeof action !== "object") return;
-      session.actions.push({
+      const sourcePage = source?.page || null;
+      const sourceFrame = source?.frame || null;
+      const isMainFrame = !!(sourcePage && sourceFrame && sourcePage.mainFrame() === sourceFrame);
+      const row = {
         kind: String(action.kind || ""),
         selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+        target: action.target ? String(action.target).slice(0, 200) : undefined,
         label: action.label ? String(action.label).slice(0, 80) : undefined,
         value: action.value != null ? String(action.value).slice(0, 500) : undefined,
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
+        pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
+        frameUrl: !isMainFrame && sourceFrame?.url ? String(sourceFrame.url()).slice(0, 500) : undefined,
         ts: Number(action.ts) || Date.now(),
-      });
+      };
+      // Browsers fire two `click` events before a `dblclick`. Without
+      // suppression a user double-click replays as click, click, dblclick
+      // — running the same handler three times. Drop trailing clicks on
+      // the same selector that arrived within the OS double-click window
+      // (~500ms) so the recorded action list matches user intent.
+      if (row.kind === "dblclick" && row.selector) {
+        for (let i = session.actions.length - 1; i >= 0; i--) {
+          const prev = session.actions[i];
+          if (row.ts - (prev.ts || 0) > 500) break;
+          if (prev.kind === "click" && prev.selector === row.selector) {
+            session.actions.splice(i, 1);
+          }
+        }
+      }
+      session.actions.push(row);
     });
     await context.addInitScript(RECORDER_SCRIPT);
 
     // Navigate to the starting URL and record it as the first action.
     await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
-    session.actions.push({ kind: "goto", url: startUrl, ts: Date.now() });
+    session.actions.push({ kind: "goto", pageAlias: "page", url: startUrl, ts: Date.now() });
 
     // Capture subsequent in-page navigations (form submit, link click that
     // triggers a full load) so the generated script replays them via goto.
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame() && frame.url() && frame.url() !== "about:blank") {
-        session.actions.push({ kind: "goto", url: frame.url(), ts: Date.now() });
+        session.actions.push({ kind: "goto", pageAlias: "page", url: frame.url(), ts: Date.now() });
       }
     });
 

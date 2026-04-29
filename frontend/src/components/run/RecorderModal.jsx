@@ -25,6 +25,10 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [actions, setActions] = useState([]);
   const [frames, setFrames] = useState([]);
   const [name, setName] = useState("");
+  const [assertKind, setAssertKind] = useState("assertVisible");
+  const [assertSelector, setAssertSelector] = useState("");
+  const [assertValue, setAssertValue] = useState("");
+  const [assertLabel, setAssertLabel] = useState("");
   const [error, setError] = useState(null);
   // Server-reported viewport so forwarded pointer coords scale correctly on
   // deployments that override the default 1280x720. Defaults match the
@@ -165,6 +169,30 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     }
   }
 
+  async function handleAddAssertion() {
+    if (!sessionId) return;
+    if (assertKind !== "assertUrl" && !assertSelector.trim()) {
+      setError("Selector is required for this assertion.");
+      return;
+    }
+    if ((assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && !assertValue.trim()) {
+      setError("Value is required for this assertion.");
+      return;
+    }
+    setError(null);
+    try {
+      await api.recordAddAssertion(projectId, sessionId, {
+        kind: assertKind,
+        selector: assertKind === "assertUrl" ? undefined : assertSelector.trim(),
+        label: assertLabel.trim() || undefined,
+        value: assertValue.trim() || undefined,
+      });
+      setAssertValue("");
+    } catch (e) {
+      setError(e.message || "failed to add assertion");
+    }
+  }
+
   function teardownStreams() {
     // SSE teardown is automatic — clearing `sessionId` flips useSseStream's
     // `enabled` flag and the hook's effect cleanup closes the EventSource.
@@ -271,6 +299,43 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
 
             {phase === "recording" && (
               <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  Add assertion
+                </div>
+                <select className="input" value={assertKind} onChange={(e) => setAssertKind(e.target.value)} style={{ width: "100%", marginBottom: 6 }}>
+                  <option value="assertVisible">Element visible</option>
+                  <option value="assertText">Element contains text</option>
+                  <option value="assertValue">Field has value</option>
+                  <option value="assertUrl">URL contains</option>
+                </select>
+                {assertKind !== "assertUrl" && (
+                  <input
+                    className="input"
+                    value={assertSelector}
+                    onChange={(e) => setAssertSelector(e.target.value)}
+                    placeholder="selector (e.g. role=button[name=&quot;Checkout&quot;])"
+                    style={{ width: "100%", marginBottom: 6 }}
+                  />
+                )}
+                <input
+                  className="input"
+                  value={assertLabel}
+                  onChange={(e) => setAssertLabel(e.target.value)}
+                  placeholder="friendly label (optional)"
+                  style={{ width: "100%", marginBottom: 6 }}
+                />
+                {(assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && (
+                  <input
+                    className="input"
+                    value={assertValue}
+                    onChange={(e) => setAssertValue(e.target.value)}
+                    placeholder={assertKind === "assertUrl" ? "URL fragment or regex text" : "expected value"}
+                    style={{ width: "100%", marginBottom: 8 }}
+                  />
+                )}
+                <button className="btn btn-ghost" onClick={handleAddAssertion} style={{ width: "100%", marginBottom: 12 }}>
+                  Add assertion step
+                </button>
                 <label className="text-sm font-semi" style={{ display: "block", marginBottom: 6 }}>Test name</label>
                 <input
                   className="input"

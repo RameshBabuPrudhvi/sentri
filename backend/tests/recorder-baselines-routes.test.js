@@ -288,6 +288,33 @@ async function main() {
       // Restore role for the remaining tests.
       db.prepare("UPDATE workspace_members SET role = 'admin' WHERE userId = (SELECT id FROM users WHERE email = ?) AND workspaceId = ?").run(email, row.workspaceId);
     });
+
+    await test("POST /projects/:id/record/:sessionId/assertion 400 for invalid assertion kind", async () => {
+      const sid = "REC-assert-1";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/assertion`, {
+          method: "POST", cookie: authCookie, body: { kind: "assertSomethingElse" },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid assertion kind/i);
+      } finally { dispose(); }
+    });
+
+    await test("POST /projects/:id/record/:sessionId/assertion accepts supported assertion kind", async () => {
+      const sid = "REC-assert-2";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/assertion`, {
+          method: "POST",
+          cookie: authCookie,
+          body: { kind: "assertText", selector: "#toast", value: "Saved" },
+        });
+        assert.equal(out.res.status, 201);
+        assert.equal(out.json.ok, true);
+        assert.equal(out.json.action.kind, "assertText");
+      } finally { dispose(); }
+    });
   } finally {
     summary("recorder/baseline routes");
     env.restore();
