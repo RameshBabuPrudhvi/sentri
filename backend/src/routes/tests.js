@@ -677,18 +677,33 @@ router.get("/projects/:id/tests/export/testrail", (req, res) => {
   res.send(csv);
 });
 
+// GET /api/projects/:id/export/playwright — runnable Playwright project ZIP (DIF-006)
+//
+// Note on access control: matches the convention used by every other route
+// in this file — `getByIdInWorkspace` returns null for both "doesn't exist"
+// and "not a workspace member", and we collapse both into 404 to avoid
+// leaking project existence across workspace boundaries (ACL-001).
 router.get("/projects/:id/export/playwright", async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const allTests = testRepo.getByProjectId(req.params.id);
-  const approvedTests = allTests.filter(t => t.reviewStatus === "approved");
+  try {
+    const allTests = testRepo.getByProjectId(req.params.id);
+    const approvedTests = allTests.filter(t => t.reviewStatus === "approved");
 
-  const zipBuffer = await buildPlaywrightZip(project, approvedTests);
-  const safeProjectName = project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="sentri-${safeProjectName}-playwright.zip"`);
-  res.send(zipBuffer);
+    const zipBuffer = await buildPlaywrightZip(project, approvedTests);
+    const safeProjectName = project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="sentri-${safeProjectName}-playwright.zip"`);
+    res.send(zipBuffer);
+  } catch (err) {
+    // Async route handlers in Express 4 do NOT auto-catch rejected promises;
+    // without this try/catch the request hangs indefinitely on any failure
+    // (e.g. system `zip` binary missing). Match the error-handling style of
+    // the recorder and PATCH handlers above — log internally, return generic.
+    console.error(formatLogLine("error", null, `[GET projects/${req.params.id}/export/playwright] export failed: ${err.message}`));
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)

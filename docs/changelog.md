@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **API**: Standalone Playwright export — `GET /api/v1/projects/:id/export/playwright` returns a runnable Playwright project ZIP containing `package.json`, `playwright.config.ts` (with `baseURL` from project), `README.md`, and one `tests/<slug>.spec.ts` per **approved** test. Lets users eject from Sentri and run their suite locally with `npm install && npx playwright test`. Draft and rejected tests are excluded; filenames are de-duplicated when two tests normalize to the same slug. Implementation shells out to the system `zip` binary (no new npm runtime dep) — installations without `zip`/`unzip` will return 500 (DIF-006) (#1).
+
 ## [1.6.8] — 2026-04-29
 
 ### Fixed

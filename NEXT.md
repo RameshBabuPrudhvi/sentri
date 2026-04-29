@@ -8,68 +8,49 @@
 
 ---
 
-## ▶ Current PR — DIF-006
+## ▶ Current PR — AUTO-005
 
-**Title:** Standalone Playwright export (zero vendor lock-in)
-**Branch:** `feat/DIF-006-playwright-export`
-**Effort:** M (3–5 days) | **Priority:** 🟢 Differentiator
+**Title:** Automatic test retry with flake isolation
+**Branch:** `feat/AUTO-005-test-retry`
+**Effort:** M | **Priority:** 🟡 High
 **All dependencies:** ✅ none
 
 ### What to build
 
-Add a download endpoint that zips all approved tests for a project as a runnable Playwright project — so users can eject from Sentri at any time.
-
-The zip must contain:
-- `playwright.config.ts` — pre-configured for the project's base URL
-- `tests/<test-name>.spec.ts` per approved test — existing Playwright code wrapped in a proper `test('name', async ({ page }) => { … })` block
-- `README.md` — instructions to `npm install && npx playwright test`
+Wrap per-test execution in a retry loop (default: 2 retries) before marking a test failed. Record `retryCount` and `failedAfterRetry` on the result. Only fire notifications and increment failure counts after all retries are exhausted.
 
 ### Files to change
 
 | File | Change |
 |------|--------|
-| `backend/src/utils/exportFormats.js` | Add `buildPlaywrightZip(project, tests)` — assemble the zip using `archiver` or `jszip` |
-| `backend/src/routes/tests.js` | Add `GET /api/v1/projects/:id/export/playwright` — fetch approved tests, call builder, stream zip |
-| `frontend/src/pages/Tests.jsx` | Add "Export as Playwright project" button that triggers a file download |
+| `backend/src/testRunner.js` | Wrap per-test execution in a retry loop (env: `MAX_TEST_RETRIES`, default 2) |
+| `backend/src/database/migrations/` | Add `retryCount`, `failedAfterRetry` columns to run results |
+| `backend/.env.example` | Document `MAX_TEST_RETRIES` |
 
 ### Lanes (for AGENT.md § Branch co-ownership protocol)
 
-- **agent-scope:** `backend/src/utils/exportFormats.js`, `backend/src/routes/tests.js`, `backend/tests/**` (new tests for the endpoint + builder) — claimable by any single agent (devin / claude / codex / cursor / copilot)
-- **human-scope:** `frontend/src/pages/Tests.jsx` and any other `frontend/**` change
+- **agent-scope:** `backend/src/testRunner.js`, `backend/src/runner/**`, `backend/src/database/migrations/**`, `backend/.env.example`, `backend/tests/**` — claimable by any single agent
+- **human-scope:** any frontend surfacing of retry counts on the run detail page
 - **shared (coordinate via PR comment before editing):** `docs/changelog.md`, `ROADMAP.md`, this file
 
 ### Acceptance criteria
 
-- [ ] `GET /api/v1/projects/:id/export/playwright` returns `Content-Type: application/zip`
-- [ ] Unzipping the download and running `npx playwright test` executes all approved tests without modification
-- [ ] Button appears only when the project has ≥1 approved test
-- [ ] Endpoint returns 404 if project not found, 403 if not workspace member
-
-### Watch out for
-
-- `exportFormats.js` is a shared file — **MNT-005** (Gherkin export) will also modify it. If MNT-005 is being worked in parallel, coordinate on this file before branching.
-- Wrap each test's raw Playwright code in `test.describe` only if it spans multiple steps — single-action tests should be flat `test()` blocks.
+- [ ] A test that fails on attempt 1 but passes on attempt 2 is reported as `passed` with `retryCount: 1`
+- [ ] A test that fails all attempts has `failedAfterRetry: true` on its result
+- [ ] Notifications and failure counters only fire after the final retry is exhausted
+- [ ] `MAX_TEST_RETRIES` env var controls the retry budget; default is 2
 
 ### PR checklist
 
-- [ ] Update `DIF-006` status in `ROADMAP.md` to ✅ Complete with PR number
-- [ ] Update this file: move DIF-006 to "Recently completed", promote AUTO-005 to "Current PR"
+- [ ] Update `AUTO-005` status in `ROADMAP.md` to ✅ Complete with PR number
+- [ ] Update this file: move AUTO-005 to "Recently completed", promote AUTO-016 to "Current PR"
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
 
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · AUTO-005 — Automatic test retry with flake isolation
-**Effort:** M | **Priority:** 🟡 High | **Dependencies:** none
-
-Wrap per-test execution in a retry loop (default: 2 retries) before marking a test failed. Record `retryCount` and `failedAfterRetry` on the result. Only fire notifications and increment failure counts after all retries are exhausted.
-
-**Files:** `backend/src/testRunner.js` · `backend/src/database/migrations/` (add `retryCount`, `failedAfterRetry` to run results) · `backend/.env.example` (document `MAX_TEST_RETRIES`)
-
----
-
-### 3 · AUTO-016 — Accessibility testing (axe-core)
+### 2 · AUTO-016 — Accessibility testing (axe-core)
 **Effort:** M | **Priority:** 🟡 High | **Dependencies:** none
 
 During crawl, inject `@axe-core/playwright` and run `checkA11y()` on each page. Store violations in a new `accessibility_violations` table. Surface per-page report in crawl results and dashboard.
@@ -78,7 +59,7 @@ During crawl, inject `@axe-core/playwright` and run `checkA11y()` on each page. 
 
 ---
 
-### 4 · MNT-006 — Object storage for artifacts (S3 / R2)
+### 3 · MNT-006 — Object storage for artifacts (S3 / R2)
 **Effort:** M | **Priority:** 🟡 High | **Dependencies:** none
 
 Add `objectStorage` abstraction with local-disk adapter (current behaviour) and S3/R2 adapter. Switch via `STORAGE_BACKEND=s3`. Update artifact read/write paths and `signArtifactUrl()` to produce pre-signed S3 URLs.
@@ -107,5 +88,6 @@ These can be picked up by a second engineer alongside the current PR without fil
 | MNT-011 | Persist crawl/generate dialsConfig on run record | #107 |
 | DIF-002b | Cross-browser polish: browser-aware baselines + badges | #110 |
 | DIF-015 | Recorder canvas input forwarding + step format alignment + Playwright-recorder action parity | #118 |
+| DIF-006 | Standalone Playwright export (zero vendor lock-in) | #1 |
 
 *Full completed list → ROADMAP.md § Completed Work*

@@ -128,9 +128,15 @@ export function buildTestRailCsv(tests) {
 }
 
 /**
+ * @typedef {Object} PlaywrightExportProject
+ * @property {string} name
+ * @property {string} [url]
+ */
+
+/**
  * buildPlaywrightZip(project, tests) → Promise<Buffer> (ZIP)
  *
- * @param {{ name: string, url?: string }} project
+ * @param {PlaywrightExportProject} project
  * @param {object[]} tests
  * @returns {Promise<Buffer>}
  */
@@ -147,15 +153,16 @@ export async function buildPlaywrightZip(project, tests) {
   mkdirSync(testsDir, { recursive: true });
   const baseUrl = project?.url || "http://localhost:3000";
 
-  writeFileSync(path.join(projectRoot, "package.json"), JSON.stringify({
-    name: "sentri-playwright-export",
-    private: true,
-    version: "1.0.0",
-    scripts: { test: "playwright test" },
-    devDependencies: { "@playwright/test": "^1.58.2" },
-  }, null, 2));
+  try {
+    writeFileSync(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "sentri-playwright-export",
+      private: true,
+      version: "1.0.0",
+      scripts: { test: "playwright test" },
+      devDependencies: { "@playwright/test": "^1.58.2" },
+    }, null, 2));
 
-  writeFileSync(path.join(projectRoot, "playwright.config.ts"), `import { defineConfig } from '@playwright/test';
+    writeFileSync(path.join(projectRoot, "playwright.config.ts"), `import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
@@ -166,7 +173,7 @@ export default defineConfig({
 });
 `);
 
-  writeFileSync(path.join(projectRoot, "README.md"), `# Playwright export from Sentri
+    writeFileSync(path.join(projectRoot, "README.md"), `# Playwright export from Sentri
 
 ## Run tests
 
@@ -176,26 +183,40 @@ npx playwright test
 \`\`\`
 `);
 
-  tests.forEach((testCase, idx) => {
-    const safeName = String(testCase?.name || `test-${idx + 1}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || `test-${idx + 1}`;
-    const rawCode = String(testCase?.playwrightCode || "").trim();
-    const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
-    const testBody = bodyMatch ? bodyMatch[1].trimEnd() : (rawCode || "  // No Playwright code available for this test.");
-    const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
-    const wrappedCode = `import { test, expect } from '@playwright/test';
+    // Track filenames to disambiguate collisions when two tests normalize
+    // to the same slug (e.g. "Login Test!" and "Login Test?"). Without this
+    // the second writeFileSync silently overwrites the first.
+    const usedNames = new Set();
+    tests.forEach((testCase, idx) => {
+      const baseSlug = String(testCase?.name || `test-${idx + 1}`)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `test-${idx + 1}`;
+      let safeName = baseSlug;
+      let suffix = 2;
+      while (usedNames.has(safeName)) {
+        safeName = `${baseSlug}-${suffix}`;
+        suffix += 1;
+      }
+      usedNames.add(safeName);
+      const rawCode = String(testCase?.playwrightCode || "").trim();
+      const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
+      const testBody = bodyMatch ? bodyMatch[1].trimEnd() : (rawCode || "  // No Playwright code available for this test.");
+      const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
+      const wrappedCode = `import { test, expect } from '@playwright/test';
 
 test(${JSON.stringify(testCase?.name || `Test ${idx + 1}`)}, async ({ page }) => {
 ${indentedBody}
 });
 `;
-    writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), wrappedCode);
-  });
+      writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), wrappedCode);
+    });
 
-  execFileSync("zip", ["-rq", outPath, "."], { cwd: projectRoot });
-  const zipBuffer = readFileSync(outPath);
-  rmSync(tmpRoot, { recursive: true, force: true });
-  return zipBuffer;
+    execFileSync("zip", ["-rq", outPath, "."], { cwd: projectRoot });
+    return readFileSync(outPath);
+  } finally {
+    // Always clean up the temp directory, even if zip/readFile threw.
+    // Without this, every failed export leaks a temp dir under the OS tmp folder.
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
 }
