@@ -31,11 +31,76 @@ import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 
-// Hard cap for how long a single recording session may stay open. Defence-in-
-// depth for the case where a client disconnects without hitting stop/discard
-// (e.g. browser tab closed, network cut). After this timeout the server tears
-// down the Chromium process and deletes the session from the map.
-const MAX_RECORDING_MS = Math.max(60_000, parseInt(process.env.MAX_RECORDING_MS || "1800000", 10) || 1_800_000);
+/**
+ * Tunable timing constants for the recorder. Centralised so reviewers can
+ * see every magic number in one place and so operators can override the
+ * server-side ones via environment variables without grepping through the
+ * file.
+ *
+ * The in-page timings (DBLCLICK_DEFER_MS, HOVER_DWELL_MS, FILL_DEBOUNCE_MS,
+ * DBLCLICK_WINDOW_MS) are inlined into `RECORDER_SCRIPT` because that
+ * string runs in the browser context where this module's bindings are not
+ * in scope. Keep this block in sync if you change them inside the script
+ * — a mismatch is silent and can produce confusing replay behaviour.
+ *
+ * @internal
+ */
+const TIMINGS = {
+  /**
+   * Hard cap for how long a single recording session may stay open.
+   * Defence-in-depth for the case where a client disconnects without
+   * hitting stop/discard (e.g. browser tab closed, network cut). After
+   * this timeout the server tears down the Chromium process and deletes
+   * the session from the map.
+   * @env MAX_RECORDING_MS (default 1_800_000 = 30 min, floor 60_000)
+   */
+  MAX_RECORDING_MS: Math.max(
+    60_000,
+    parseInt(process.env.MAX_RECORDING_MS || "1800000", 10) || 1_800_000,
+  ),
+  /**
+   * TTL for the cache of auto-torn-down recordings. A user who clicks
+   * "Stop & Save" within this window of the safety-net timeout firing
+   * still recovers their captured actions instead of seeing a 500 error.
+   * @env RECORDER_COMPLETED_TTL_MS (default 120_000 = 2 min, floor 10_000)
+   */
+  COMPLETED_TTL_MS: Math.max(
+    10_000,
+    parseInt(process.env.RECORDER_COMPLETED_TTL_MS || "120000", 10) || 120_000,
+  ),
+  /**
+   * Hard window in which a trailing `dblclick` event can cancel the two
+   * preceding `click` events captured by `__sentriRecord`. CDP/browser
+   * dispatches click→click→dblclick in that order; without this dedup the
+   * recorded action list would replay all three handlers in sequence.
+   * Used in `exposeBinding`'s consumer; see also DBLCLICK_DEFER_MS below,
+   * which is the in-page equivalent applied to the click event itself.
+   */
+  DBLCLICK_WINDOW_MS: 500,
+  /**
+   * In-page deferral window for emitting captured `click` actions. Browser
+   * dispatch order is click→click→dblclick, so a trailing `dblclick`
+   * listener inside the page can cancel the queued clicks for the same
+   * selector before the binding flushes them to Node. Interpolated into
+   * `RECORDER_SCRIPT` because that body runs in the browser context.
+   */
+  DBLCLICK_DEFER_MS: 250,
+  /**
+   * In-page dwell time before a sustained pointer hover is emitted as a
+   * `hover` action. Filters out drive-by mouseovers while still catching
+   * deliberate hovers (tooltips, dropdown triggers).
+   */
+  HOVER_DWELL_MS: 600,
+  /**
+   * In-page debounce window after the last keystroke in a text field
+   * before the resulting `fill` action is emitted. Coalesces a multi-
+   * character entry into a single recorded fill.
+   */
+  FILL_DEBOUNCE_MS: 300,
+};
+
+// Backwards-compatible aliases used elsewhere in the module / tests.
+const MAX_RECORDING_MS = TIMINGS.MAX_RECORDING_MS;
 
 /**
  * @typedef {Object} RecordedAction
@@ -94,7 +159,7 @@ const sessions = new Map();
  * @type {Map<string, CompletedRecording>}
  */
 const completedSessions = new Map();
-const COMPLETED_TTL_MS = Math.max(10_000, parseInt(process.env.RECORDER_COMPLETED_TTL_MS || "120000", 10) || 120_000);
+const COMPLETED_TTL_MS = TIMINGS.COMPLETED_TTL_MS;
 
 /**
  * JS source injected into every page frame. It captures pointer/keyboard
@@ -105,6 +170,12 @@ const COMPLETED_TTL_MS = Math.max(10_000, parseInt(process.env.RECORDER_COMPLETE
  * `bestSelector` intentionally mirrors Playwright's own heuristics loosely:
  * prefer role-based selectors, then data-testid, then aria-label, then
  * a short CSS chain.
+ *
+ * Built once at module load — the timing constants come from `TIMINGS`
+ * (Node-side) and are baked into the script as numeric literals before
+ * `addInitScript` ships it to the page. This keeps a single source of
+ * truth across the Node boundary; previously the same values lived as
+ * inline magic numbers inside the script.
  */
 const RECORDER_SCRIPT = `
 (() => {
@@ -185,7 +256,7 @@ const RECORDER_SCRIPT = `
     if (!sel) { emit(); return; }
     const prev = pendingClickTimers.get(sel);
     if (prev) clearTimeout(prev);
-    pendingClickTimers.set(sel, setTimeout(emit, 250));
+    pendingClickTimers.set(sel, setTimeout(emit, ${TIMINGS.DBLCLICK_DEFER_MS}));
   }, true);
   document.addEventListener("dblclick", (ev) => {
     const raw = eventElement(ev);
@@ -211,8 +282,9 @@ const RECORDER_SCRIPT = `
   // Hover capture uses a dwell timer so casual pointer movement through
   // nested DOM doesn't flood the action log. We only emit a "hover" action
   // after the pointer has rested on the same interactive ancestor for
-  // ~600ms — long enough to filter out drive-by mouseover events while
-  // still catching deliberate hovers (tooltips, dropdown triggers).
+  // \`TIMINGS.HOVER_DWELL_MS\` — long enough to filter out drive-by
+  // mouseover events while still catching deliberate hovers (tooltips,
+  // dropdown triggers).
   let hoverDwellTimer = null;
   let lastHoverSelector = "";
   document.addEventListener("mouseover", (ev) => {
@@ -229,7 +301,7 @@ const RECORDER_SCRIPT = `
       window.__sentriRecord && window.__sentriRecord({
         kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
       });
-    }, 600);
+    }, ${TIMINGS.HOVER_DWELL_MS});
   }, true);
   document.addEventListener("mouseout", () => {
     if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
@@ -250,7 +322,7 @@ const RECORDER_SCRIPT = `
       window.__sentriRecord && window.__sentriRecord({
         kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
       });
-    }, 300));
+    }, ${TIMINGS.FILL_DEBOUNCE_MS}));
   }, true);
 
   document.addEventListener("change", (ev) => {
@@ -350,22 +422,6 @@ function escapeJsSingleQuote(str) {
 }
 
 /**
- * Render a captured action as a short, human-readable step sentence so the
- * recorder's persisted `steps` array aligns visually with the AI generate /
- * crawl pipeline output (`outputSchema.js`) and the manual-test creation path
- * — both of which produce English prose like "User clicks the Sign Up button".
- *
- * Recorded actions only carry a CDP-style selector and (optionally) a typed
- * value, so these sentences are best-effort: we surface the selector as the
- * "target" verbatim. The Test Detail page renders all three sources through
- * the same Steps panel, and previously the recorder was the only producer
- * emitting engineer-shaped strings ("Step 1: click → #login"), making
- * recorded tests stick out and look broken to manual reviewers.
- *
- * @param {RecordedAction} a
- * @returns {string} A single step sentence suitable for the persisted `steps[]` array.
- */
-/**
  * Derive a human-readable target phrase from a recorded action — prefers the
  * captured `label` (aria-label / inner text / placeholder), then falls back
  * to extracting a friendly name from a Playwright role selector
@@ -449,6 +505,19 @@ function shortUrl(u) {
   }
 }
 
+/**
+ * Render a captured action as a short, human-readable step sentence so the
+ * recorder's persisted `steps[]` array aligns visually with the AI generate /
+ * crawl pipeline output (`outputSchema.js`) and the manual-test creation path
+ * — both of which produce English prose like "User clicks the Sign Up
+ * button". The Test Detail page renders all three sources through the same
+ * Steps panel, and previously the recorder was the only producer emitting
+ * engineer-shaped strings ("Step 1: click → #login"), making recorded tests
+ * stick out and look broken to manual reviewers.
+ *
+ * @param {RecordedAction} a
+ * @returns {string} A single step sentence suitable for the persisted `steps[]` array.
+ */
 export function recordedActionToStepText(a) {
   // Recorded `fill` / `select` / `upload` / `assert*` values can contain
   // secrets (passwords, API keys). The raw value already lives in
@@ -862,11 +931,12 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       // suppression a user double-click replays as click, click, dblclick
       // — running the same handler three times. Drop trailing clicks on
       // the same selector that arrived within the OS double-click window
-      // (~500ms) so the recorded action list matches user intent.
+      // (`TIMINGS.DBLCLICK_WINDOW_MS`) so the recorded action list matches
+      // user intent.
       if (row.kind === "dblclick" && row.selector) {
         for (let i = session.actions.length - 1; i >= 0; i--) {
           const prev = session.actions[i];
-          if (row.ts - (prev.ts || 0) > 500) break;
+          if (row.ts - (prev.ts || 0) > TIMINGS.DBLCLICK_WINDOW_MS) break;
           if (prev.kind === "click" && prev.selector === row.selector) {
             session.actions.splice(i, 1);
           }
@@ -1108,6 +1178,15 @@ export async function forwardInput(sessionId, event) {
 }
 
 /**
+ * Stop an in-flight recording session, tear down the Playwright browser,
+ * and return the captured actions transformed into Playwright source. The
+ * generated code is wrapped in the repo-standard `test(...)` shape so the
+ * caller can persist it as a Draft test row and re-run it through the
+ * normal runner.
+ *
+ * Idempotent w.r.t. the in-memory map: the session is removed regardless
+ * of whether teardown errors. The browser/context/page cleanup calls are
+ * `.catch(() => {})`-shielded so a half-closed browser never leaks state.
  *
  * @param {string} sessionId
  * @param {Object} [opts]

@@ -793,6 +793,31 @@ await (async () => {
     assert.match(src, /tagName\s*===\s*"TEXTAREA"/);
     assert.match(src, /isContentEditable/);
   });
+
+  await asyncTest("RECORDER_SCRIPT source uses TIMINGS interpolation (single source of truth)", async () => {
+    // Regression guard for the TIMINGS → RECORDER_SCRIPT refactor. The
+    // script's setTimeout durations (click defer, hover dwell, fill
+    // debounce) are baked from the Node-side TIMINGS constant via
+    // template-literal interpolation at module load. If anyone replaces
+    // these with bare numeric literals again, the magic numbers can drift
+    // out of sync with the docs in TIMINGS — which silently changes replay
+    // behaviour. Lock the interpolation pattern down via source assertion.
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const here = url.fileURLToPath(new URL(".", import.meta.url));
+    const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+    const scriptStart = src.indexOf("const RECORDER_SCRIPT = `");
+    const scriptEnd = src.indexOf("`;", scriptStart);
+    assert.ok(scriptStart >= 0 && scriptEnd > scriptStart, "RECORDER_SCRIPT template not found");
+    const scriptBody = src.slice(scriptStart, scriptEnd);
+    assert.match(scriptBody, /\$\{TIMINGS\.DBLCLICK_DEFER_MS\}/);
+    assert.match(scriptBody, /\$\{TIMINGS\.HOVER_DWELL_MS\}/);
+    assert.match(scriptBody, /\$\{TIMINGS\.FILL_DEBOUNCE_MS\}/);
+    // Sanity: importing the module must not throw. A typo in any of the
+    // interpolations would surface as a ReferenceError at module load.
+    const recorderMod = await import("../src/runner/recorder.js");
+    assert.ok(typeof recorderMod.actionsToPlaywrightCode === "function");
+  });
 })();
 
 console.log("\n──────────────────────────────────────────────────");
