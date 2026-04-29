@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 
 /**
  * LiveBrowserView
@@ -7,19 +7,39 @@ import { useRef, useEffect, useState } from "react";
  * Uses a requestAnimationFrame-throttled paint loop so burst frames from
  * the SSE channel don't overwhelm the GPU.
  *
+ * When `onInput` is provided the canvas becomes interactive: pointer events
+ * (click, mousedown, mouseup, mousemove, wheel) and keyboard events are
+ * captured, scaled from CSS pixels to the browser viewport coordinate space,
+ * and forwarded to the server via `onInput(event)`. This is what makes the
+ * recorder actually work — without forwarding, the canvas is read-only.
+ *
  * Props:
  *   frames      — array, we only use frames[0] (latest frame).
- *                 Keeping it as an array lets the parent just call setFrames([data]).
- *   fallback    — ReactNode to render when no frames have arrived yet
- *   label       — optional string shown in the corner overlay
+ *   fallback    — ReactNode to render when no frames have arrived yet.
+ *   label       — optional string shown in the corner overlay.
+ *   onInput     — optional (event: Object) => void  — when provided the
+ *                 canvas captures pointer+keyboard events and calls this
+ *                 with CDP-shaped event objects. The parent is responsible
+ *                 for forwarding to the server.
+ *   viewportW   — server-side browser viewport width (default 1280).
+ *   viewportH   — server-side browser viewport height (default 720).
  */
-export default function LiveBrowserView({ frames = [], fallback = null, label = "" }) {
+export default function LiveBrowserView({
+  frames = [],
+  fallback = null,
+  label = "",
+  onInput = null,
+  viewportW = 1280,
+  viewportH = 720,
+}) {
   const canvasRef = useRef(null);
   const pendingRef = useRef(null); // latest base64 not yet painted
   const rafRef = useRef(null);
   const [hasFrames, setHasFrames] = useState(false);
+  // Track pressed keys so we can emit keyUp on blur (prevents stuck keys)
+  const pressedKeys = useRef(new Set());
 
-  // Queue the latest frame; paint via rAF so we never paint faster than display refresh
+  // ── Paint loop ────────────────────────────────────────────────────────────
   useEffect(() => {
     const frame = frames[0];
     if (!frame) return;
@@ -27,7 +47,7 @@ export default function LiveBrowserView({ frames = [], fallback = null, label = 
     setHasFrames(true);
     pendingRef.current = frame;
 
-    if (rafRef.current) return; // paint already scheduled
+    if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       const data = pendingRef.current;
@@ -47,8 +67,133 @@ export default function LiveBrowserView({ frames = [], fallback = null, label = 
     });
   }, [frames]);
 
-  // Cleanup pending rAF on unmount
   useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+  // ── Coordinate scaling ────────────────────────────────────────────────────
+  // The canvas CSS size differs from the logical viewport size on the server.
+  // We must scale pointer coordinates so a click at CSS position (x,y) maps
+  // to the correct pixel in the 1280×720 (or configured) headless browser.
+  const scaleCoords = useCallback((cssX, cssY) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (cssX - rect.left) * (viewportW / rect.width),
+      y: (cssY - rect.top) * (viewportH / rect.height),
+    };
+  }, [viewportW, viewportH]);
+
+  // ── Modifier bitmask ──────────────────────────────────────────────────────
+  // CDP modifiers: Alt=1, Ctrl=2, Meta=4, Shift=8
+  const modifiers = useCallback((e) => (
+    (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
+  ), []);
+
+  // ── Pointer handlers ──────────────────────────────────────────────────────
+  const handleMouseDown = useCallback((e) => {
+    if (!onInput) return;
+    e.preventDefault();
+    canvasRef.current?.focus();
+    const { x, y } = scaleCoords(e.clientX, e.clientY);
+    onInput({ type: "mousePressed", x, y, button: e.button, clickCount: 1, modifiers: modifiers(e) });
+  }, [onInput, scaleCoords, modifiers]);
+
+  const handleMouseUp = useCallback((e) => {
+    if (!onInput) return;
+    e.preventDefault();
+    const { x, y } = scaleCoords(e.clientX, e.clientY);
+    onInput({ type: "mouseReleased", x, y, button: e.button, clickCount: 1, modifiers: modifiers(e) });
+  }, [onInput, scaleCoords, modifiers]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!onInput) return;
+    const { x, y } = scaleCoords(e.clientX, e.clientY);
+    // Only include `button` when a button is actually held — otherwise the
+    // backend must dispatch CDP button "none" so an idle hover isn't
+    // interpreted as a held left-click drag.
+    // `MouseEvent.button` is always 0 during `mousemove` per the DOM spec —
+    // only `MouseEvent.buttons` (bitmask: 1=left, 2=right, 4=middle) reflects
+    // which button is currently pressed. Derive the held button from the
+    // bitmask so right-/middle-button drags forward the correct CDP button.
+    const evt = { type: "mouseMoved", x, y, modifiers: modifiers(e) };
+    if (e.buttons > 0) {
+      evt.button = (e.buttons & 2) ? 2 : (e.buttons & 4) ? 1 : 0;
+    }
+    onInput(evt);
+  }, [onInput, scaleCoords, modifiers]);
+
+  // Wheel events are forwarded via a non-passive native listener (see effect
+  // below). React 18 registers `onWheel` as passive by default, so calling
+  // `preventDefault()` on the synthetic event is silently ignored — without
+  // the imperative listener the surrounding modal/page would scroll
+  // underneath the canvas while the user scrolls inside the recorded browser.
+  useEffect(() => {
+    if (!onInput) return undefined;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const onWheelNative = (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const x = (e.clientX - rect.left) * (viewportW / rect.width);
+      const y = (e.clientY - rect.top) * (viewportH / rect.height);
+      const mods = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+      onInput({ type: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY, modifiers: mods });
+    };
+    canvas.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheelNative);
+  }, [onInput, viewportW, viewportH]);
+
+  // ── Keyboard handlers ─────────────────────────────────────────────────────
+  // CDP's Input.dispatchKeyEvent only triggers default actions for non-printable
+  // keys (Backspace, Enter, Tab, Arrows, etc.) when `windowsVirtualKeyCode` is
+  // supplied. We forward `e.keyCode` from the DOM event — it's deprecated for
+  // new code but still populated by every modern browser specifically for cases
+  // like this. Without it Backspace/Enter/Tab fire keyDown but the page never
+  // reacts (no character deleted, no form submitted, no focus change).
+  const handleKeyDown = useCallback((e) => {
+    if (!onInput) return;
+    e.preventDefault(); // prevent browser shortcuts (Ctrl+W, etc.)
+    pressedKeys.current.add(e.key);
+    // CDP `Input.dispatchKeyEvent` with type=keyDown and a non-empty `text`
+    // field already synthesises text input in the page. Sending a separate
+    // `char` event for the same key would insert the character a second time
+    // (e.g. typing "hi" produces "hhii"). Only emit keyDown — with `text`
+    // populated for printable characters — and let CDP handle text insertion.
+    onInput({
+      type: "keyDown",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      text: e.key.length === 1 ? e.key : "",
+      modifiers: modifiers(e),
+    });
+  }, [onInput, modifiers]);
+
+  const handleKeyUp = useCallback((e) => {
+    if (!onInput) return;
+    e.preventDefault();
+    pressedKeys.current.delete(e.key);
+    onInput({
+      type: "keyUp",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      modifiers: modifiers(e),
+    });
+  }, [onInput, modifiers]);
+
+  // Release all held keys when the canvas loses focus so we never get stuck keys
+  const handleBlur = useCallback(() => {
+    if (!onInput) return;
+    for (const key of pressedKeys.current) {
+      onInput({ type: "keyUp", key, code: "", modifiers: 0 });
+    }
+    pressedKeys.current.clear();
+  }, [onInput]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  const isInteractive = Boolean(onInput);
 
   if (!hasFrames) {
     return fallback ?? (
@@ -73,7 +218,25 @@ export default function LiveBrowserView({ frames = [], fallback = null, label = 
     <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", background: "#000", aspectRatio: "16/9", width: "100%" }}>
       <canvas
         ref={canvasRef}
-        style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+        tabIndex={isInteractive ? 0 : undefined}
+        style={{
+          width: "100%", height: "100%", objectFit: "contain", display: "block",
+          cursor: isInteractive ? "crosshair" : "default",
+          outline: "none", // hide focus ring on canvas; we show our own indicator
+        }}
+        // Pointer events
+        onMouseDown={isInteractive ? handleMouseDown : undefined}
+        onMouseUp={isInteractive ? handleMouseUp : undefined}
+        onMouseMove={isInteractive ? handleMouseMove : undefined}
+        // Wheel listener is attached imperatively in a useEffect with
+        // { passive: false } so preventDefault() actually works (React 18
+        // registers onWheel as passive). See the wheel-listener effect above.
+        // Keyboard events — canvas must be focusable (tabIndex=0) to receive these
+        onKeyDown={isInteractive ? handleKeyDown : undefined}
+        onKeyUp={isInteractive ? handleKeyUp : undefined}
+        onBlur={isInteractive ? handleBlur : undefined}
+        // Prevent context menu from stealing right-click events
+        onContextMenu={isInteractive ? (e) => e.preventDefault() : undefined}
       />
       {/* Live indicator badge */}
       <div style={{
@@ -96,6 +259,18 @@ export default function LiveBrowserView({ frames = [], fallback = null, label = 
           </span>
         )}
       </div>
+      {/* Interactive mode hint — shown briefly when canvas gains focus */}
+      {isInteractive && (
+        <div style={{
+          position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          borderRadius: 6, padding: "3px 10px",
+          fontSize: "0.65rem", color: "rgba(255,255,255,0.7)",
+          pointerEvents: "none", whiteSpace: "nowrap",
+        }}>
+          Click inside to interact · scroll to scroll · type to type
+        </div>
+      )}
     </div>
   );
 }

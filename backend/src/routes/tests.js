@@ -45,10 +45,10 @@ import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
-import { SHOTS_DIR, BASELINES_DIR, resolveBrowser } from "../runner/config.js";
+import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -865,14 +865,74 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
   }
 
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
+  // Visible breadcrumb so the operator can see the recorder reaching the
+  // backend even when everything is working — useful for debugging the
+  // "canvas stays black" symptom where the request landed but a downstream
+  // step (browser launch, screencast attach) silently fails.
+  console.log(formatLogLine("info", null, `[recorder] launching session=${sessionId} project=${project.id} url=${startUrl}`));
   try {
+    // Defence-in-depth: the partial unique index `idx_runs_one_active_per_project`
+    // (migration 002) allows at most one `running` run per project. If a
+    // previous recorder attempt crashed between `runRepo.create` and the
+    // rollback below, an orphan row blocks every subsequent recorder launch
+    // with a UNIQUE constraint error. Sweep any such orphans for THIS
+    // project before inserting the new stub so the user isn't permanently
+    // locked out of the recorder.
+    try {
+      // Only sweep orphaned RECORDER rows. Including crawl/test_run/generate
+      // here would silently kill a legitimately in-progress regression or
+      // crawl run when the user opens the recorder, leading to data loss
+      // (the runner process keeps executing in memory unaware that its DB
+      // status was overwritten). The partial unique index allows one active
+      // run per project across all types — so a concurrent recorder + run is
+      // intentionally not supported, and the create() below will surface a
+      // UNIQUE constraint error that the outer catch handles cleanly.
+      const orphan = runRepo.findActiveByProjectId(project.id, ["record"]);
+      if (orphan) {
+        runRepo.update(orphan.id, {
+          status: "interrupted",
+          finishedAt: new Date().toISOString(),
+          error: "Cleared by recorder launch — previous recording session was orphaned",
+        });
+      }
+    } catch (sweepErr) {
+      // Non-fatal: log and continue. If the orphan really exists the create
+      // below will surface the UNIQUE error and the catch handles it.
+      console.warn(formatLogLine("warn", null, `[POST projects/${project.id}/record] orphan sweep failed: ${sweepErr.message}`));
+    }
+
+    // The frontend opens an SSE stream at /runs/:sessionId/events to receive
+    // live screencast frames. That endpoint validates the runId against the
+    // `runs` table — without a stub row here the SSE connection 404s and the
+    // canvas stays black ("Waiting for browser stream…"). Create a minimal
+    // running-row keyed by sessionId so SSE accepts it; stopRecording marks
+    // it completed so orphan recovery doesn't flag it as interrupted.
+    runRepo.create({
+      id: sessionId,
+      projectId: project.id,
+      type: "record",
+      status: "running",
+      startedAt: new Date().toISOString(),
+      workspaceId: project.workspaceId || null,
+    });
     await startRecording({ sessionId, projectId: project.id, startUrl });
+    console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
       detail: `Recorder started on ${startUrl}`, status: "running",
     });
-    res.status(202).json({ sessionId, startUrl });
+    // Return the server-side viewport so the frontend can scale forwarded
+    // pointer coordinates correctly on deployments that override the default
+    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars.
+    res.status(202).json({
+      sessionId,
+      startUrl,
+      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+    });
   } catch (err) {
+    // Roll back the stub row so a failed launch doesn't leave an orphaned
+    // "running" record that blocks future recordings or trips orphan recovery.
+    try { runRepo.update(sessionId, { status: "failed", finishedAt: new Date().toISOString(), error: err.message }); } catch { /* row may not exist */ }
     console.error(formatLogLine("error", null, `[POST projects/${project.id}/record] startRecording failed: ${err.message}`));
     res.status(500).json({ error: "Internal server error" });
   }
@@ -952,6 +1012,15 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     }
   }
 
+  // Close out the stub `runs` row created by POST /record so the SSE channel
+  // releases its listener and orphan recovery doesn't pick this up later.
+  try {
+    runRepo.update(req.params.sessionId, {
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+    });
+  } catch { /* row may have been cleaned up already */ }
+
   if (discard) {
     logActivity({ ...actor(req),
       type: "test.record_discard", projectId: project.id, projectName: project.name,
@@ -964,13 +1033,54 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     return res.status(400).json({ error: "no actions were captured — nothing to save" });
   }
 
+  // Dedupe consecutive `goto` actions to the same URL before formatting steps.
+  // `startRecording` always pushes the initial `{ kind: "goto", url: startUrl }`
+  // as actions[0], and the page's `framenavigated` listener echoes another
+  // `goto` for the resolved URL right after. Without this filter the Test
+  // Details page shows two redundant Step 1 / Step 2 navigations to the same
+  // (or query-string-permuted) URL. Mirrors the dedup in
+  // `actionsToPlaywrightCode` so the human-readable steps and generated code
+  // stay aligned.
+  const dedupedActions = [];
+  // Match `actionsToPlaywrightCode`'s init: it seeds `lastGotoUrl` with
+  // `startUrl` so the initial `{ kind: "goto", url: startUrl }` action that
+  // `startRecording` always pushes as actions[0] is suppressed (the generated
+  // code already emits an explicit `page.goto(startUrl)` at the top, and the
+  // human-readable steps shouldn't include a redundant initial Step 1).
+  // Compare by origin + pathname so visually-identical consecutive gotos
+  // collapse — recorder pages frequently echo `framenavigated` events with
+  // re-ordered query strings (e.g. Amazon search pages add tracking params
+  // after the first hit), which would otherwise produce two adjacent
+  // "User navigates to https://amazon.in/s" steps in the persisted test.
+  const gotoKey = (u) => {
+    if (!u) return "";
+    try { const x = new URL(u); return `${x.origin}${x.pathname}`; }
+    catch { return String(u); }
+  };
+  let lastGotoKey = gotoKey(stopResult.url || "");
+  for (const a of stopResult.actions) {
+    if (a.kind === "goto" && a.url) {
+      const k = gotoKey(a.url);
+      if (k === lastGotoKey) continue;
+      lastGotoKey = k;
+    }
+    dedupedActions.push(a);
+  }
+
   const testId = generateTestId();
   const test = {
     id: testId,
     projectId: project.id,
     name,
     description: `Recorded from ${stopResult.url}`,
-    steps: stopResult.actions.map((a, i) => `Step ${i + 1}: ${a.kind}${a.selector ? ` → ${a.selector}` : ""}${a.url ? ` → ${a.url}` : ""}`),
+    // Match the human-readable step convention used by the AI generate/crawl
+    // pipeline (`outputSchema.js`) and the manual-test creation path: short
+    // English sentences a manual tester can follow ("User clicks the Sign Up
+    // button"), NOT raw CDP-event strings like "Step 1: click → #login". The
+    // Test Detail page renders all three sources through the same Steps panel,
+    // so visual alignment matters — recorder tests previously stuck out as the
+    // only ones showing engineer-shaped output.
+    steps: dedupedActions.map((a) => recordedActionToStepText(a)),
     playwrightCode: stopResult.playwrightCode,
     priority: "medium",
     type: "recorded",
@@ -1006,6 +1116,82 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
 });
 
 /**
+ * POST /api/v1/projects/:id/record/:sessionId/input
+ *
+ * Forwards a single input event (mouse click/move, keyboard, scroll) from
+ * the browser-in-browser canvas in RecorderModal to the headless Playwright
+ * page via CDP. This is what makes the recorder interactive — without this
+ * route the canvas is a read-only screencast and the user can never produce
+ * any recorded actions.
+ *
+ * Intentionally no rate-limiter here: input events arrive at ~60fps during
+ * active use. The route is cheap (one async CDP send) and already gated
+ * behind requireRole("qa_lead") + workspace scope.
+ *
+ * @route POST /api/v1/projects/:id/record/:sessionId/input
+ * @auth requireRole("qa_lead")
+ * @body {{ type: string, x?: number, y?: number, button?: number,
+ *           clickCount?: number, key?: string, code?: string,
+ *           text?: string, modifiers?: number,
+ *           deltaX?: number, deltaY?: number }}
+ * @returns {200} { ok: true }
+ * @returns {400} { error: string } — missing/invalid event type
+ * @returns {404} { error: string } — session not found
+ */
+router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+
+  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll"]);
+  const { type } = req.body || {};
+  if (!type || !VALID_TYPES.has(type)) {
+    return res.status(400).json({ error: `Invalid event type. Must be one of: ${[...VALID_TYPES].join(", ")}` });
+  }
+
+  try {
+    await forwardInput(req.params.sessionId, req.body);
+    res.json({ ok: true });
+  } catch (err) {
+    // Session gone mid-flight (auto-timeout race) — treat as 404 not 500
+    if (/not found/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/assertion
+ * Add a manual assertion step while recording.
+ */
+router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  try {
+    const action = addAssertionAction(req.params.sessionId, req.body || {});
+    res.status(201).json({ ok: true, action });
+  } catch (err) {
+    if (/Invalid assertion/i.test(err.message || "")) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (/not found|not recording/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/v1/projects/:id/record/:sessionId
  * Inspect an in-flight recording (action count, status). Used by the modal
  * to poll for captured actions while the browser is still open.
@@ -1023,7 +1209,7 @@ router.get("/projects/:id/record/:sessionId", (req, res) => {
     url: sess.url,
     startedAt: sess.startedAt,
     actionCount: sess.actions.length,
-    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, value: a.value, key: a.key, url: a.url, ts: a.ts })),
+    actions: sess.actions.map(a => ({ kind: a.kind, selector: a.selector, label: a.label, value: a.value, key: a.key, url: a.url, ts: a.ts })),
   });
 });
 

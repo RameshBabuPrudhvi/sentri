@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
+import { _testSeedSession } from "../src/runner/recorder.js";
 import { createTestContext } from "./helpers/test-base.js";
 
 const t = createTestContext();
@@ -206,6 +207,113 @@ async function main() {
         method: "POST", cookie: authCookie, body: { name: "x" },
       });
       assert.equal(out.res.status, 404);
+    });
+
+    // ── DIF-015: input forwarding endpoint (PR #115) ──────────────────────
+    // The /input endpoint forwards canvas pointer/keyboard events to the
+    // headless recorder via CDP. We exercise the validation + 404 paths
+    // here without launching a real Chromium — the full CDP wiring is
+    // covered by manual end-to-end testing per the recorder.test.js
+    // module preamble.
+
+    await test("POST /projects/:id/record/:sessionId/input 401 without auth", async () => {
+      const r = await fetch(`${base}/api/projects/${projectId}/record/REC-ghost/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "mousePressed", x: 10, y: 10 }),
+      });
+      assert.equal(r.status, 401);
+    });
+
+    await test("POST /projects/:id/record/:sessionId/input 404 for unknown project", async () => {
+      out = await req(base, "/api/projects/PRJ-GHOST/record/REC-ghost/input", {
+        method: "POST", cookie: authCookie, body: { type: "mousePressed", x: 1, y: 1 },
+      });
+      assert.equal(out.res.status, 404);
+      assert.match(out.json.error, /project not found/i);
+    });
+
+    await test("POST /projects/:id/record/:sessionId/input 404 for unknown session", async () => {
+      out = await req(base, `/api/projects/${projectId}/record/REC-ghost/input`, {
+        method: "POST", cookie: authCookie, body: { type: "mousePressed", x: 1, y: 1 },
+      });
+      assert.equal(out.res.status, 404);
+      assert.match(out.json.error, /session not found/i);
+    });
+
+    await test("POST /projects/:id/record/:sessionId/input 400 for missing type", async () => {
+      // Seed a fake recorder session so we hit the type-validation branch.
+      // Without this we'd 404 on the session-existence check that runs first.
+      const sid = "REC-validate-1";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/input`, {
+          method: "POST", cookie: authCookie, body: { x: 1, y: 1 },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid event type/i);
+      } finally { dispose(); }
+    });
+
+    await test("POST /projects/:id/record/:sessionId/input 400 for unknown event type", async () => {
+      // Defence-in-depth: only the allowlisted CDP-shaped types are accepted.
+      // A typo or attacker-supplied "doSomethingEvil" must be rejected before
+      // reaching forwardInput().
+      const sid = "REC-validate-2";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/input`, {
+          method: "POST", cookie: authCookie, body: { type: "doSomethingEvil" },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid event type/i);
+      } finally { dispose(); }
+    });
+
+    await test("POST /projects/:id/record/:sessionId/input 403 for viewer role", async () => {
+      // Demote our user to viewer for the active workspace, send a valid
+      // payload, and assert that requireRole("qa_lead") blocks it.
+      const db = getDatabase();
+      const row = db.prepare(
+        "SELECT workspaceId FROM workspace_members WHERE userId = (SELECT id FROM users WHERE email = ?) LIMIT 1",
+      ).get(email);
+      db.prepare("UPDATE workspace_members SET role = 'viewer' WHERE userId = (SELECT id FROM users WHERE email = ?) AND workspaceId = ?").run(email, row.workspaceId);
+
+      out = await req(base, `/api/projects/${projectId}/record/REC-ghost/input`, {
+        method: "POST", cookie: authCookie, body: { type: "mousePressed", x: 1, y: 1 },
+      });
+      assert.equal(out.res.status, 403);
+      assert.match(out.json.error, /qa_lead/i);
+
+      // Restore role for the remaining tests.
+      db.prepare("UPDATE workspace_members SET role = 'admin' WHERE userId = (SELECT id FROM users WHERE email = ?) AND workspaceId = ?").run(email, row.workspaceId);
+    });
+
+    await test("POST /projects/:id/record/:sessionId/assertion 400 for invalid assertion kind", async () => {
+      const sid = "REC-assert-1";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/assertion`, {
+          method: "POST", cookie: authCookie, body: { kind: "assertSomethingElse" },
+        });
+        assert.equal(out.res.status, 400);
+        assert.match(out.json.error, /Invalid assertion kind/i);
+      } finally { dispose(); }
+    });
+
+    await test("POST /projects/:id/record/:sessionId/assertion accepts supported assertion kind", async () => {
+      const sid = "REC-assert-2";
+      const dispose = _testSeedSession(sid, { projectId });
+      try {
+        out = await req(base, `/api/projects/${projectId}/record/${sid}/assertion`, {
+          method: "POST",
+          cookie: authCookie,
+          body: { kind: "assertText", selector: "#toast", value: "Saved" },
+        });
+        assert.equal(out.res.status, 201);
+        assert.equal(out.json.ok, true);
+        assert.equal(out.json.action.kind, "assertText");
+      } finally { dispose(); }
     });
   } finally {
     summary("recorder/baseline routes");
