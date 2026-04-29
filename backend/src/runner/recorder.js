@@ -525,8 +525,12 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: Fill field`);
       lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
     } else if (a.kind === "press" && a.key) {
+      // `keyboard` only exists on Page (not Frame), so always route key
+      // presses through the owning page even when the action originated
+      // inside an iframe — keyboard input is page-scoped in CDP anyway.
+      const pageActor = a.pageAlias && a.pageAlias !== "page" ? `(await ensurePopup('${escapeJsSingleQuote(a.pageAlias)}'))` : "page";
       lines.push(`// Step ${stepNo}: Press ${escapeJsSingleQuote(a.key)}`);
-      lines.push(`await ${actor}.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
+      lines.push(`await ${pageActor}.keyboard.press('${escapeJsSingleQuote(a.key)}');`);
     } else if (a.kind === "select" && sel) {
       // Route through the self-healing helper so recorded selects benefit
       // from the safeSelect waterfall (getByLabel → getByRole('combobox') →
@@ -573,7 +577,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
 
   return (
     `import { test, expect } from '@playwright/test';\n\n` +
-    `test('${safeName}', async ({ page }) => {\n` +
+    `test('${safeName}', async ({ page, context }) => {\n` +
     lines.map(l => "  " + l).join("\n") +
     "\n});\n"
   );
