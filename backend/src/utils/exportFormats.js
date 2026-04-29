@@ -200,7 +200,13 @@ npx playwright test
       }
       usedNames.add(safeName);
       const rawCode = String(testCase?.playwrightCode || "").trim();
-      const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\{\s*page\s*\}\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
+      // Accept any destructured fixture object that includes `page` — e.g.
+      // `async ({ page })`, `async ({ page, context })`, `async ({ context, page, request })`.
+      // The previous regex only matched the bare `{ page }` signature, which
+      // caused any test recorded/generated with a broader fixture set to fall
+      // through to the raw-source branch below, producing invalid nested
+      // `test(...)` wrappers (and inlined `import` lines) in the output.
+      const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\s*\{[^}]*\bpage\b[^}]*\}\s*(?:,\s*[^)]*)?\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
       const testBody = bodyMatch ? bodyMatch[1].trimEnd() : (rawCode || "  // No Playwright code available for this test.");
       const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
       const wrappedCode = `import { test, expect } from '@playwright/test';
