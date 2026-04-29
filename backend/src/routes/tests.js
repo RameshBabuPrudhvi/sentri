@@ -1037,32 +1037,24 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   // `startRecording` always pushes the initial `{ kind: "goto", url: startUrl }`
   // as actions[0], and the page's `framenavigated` listener echoes another
   // `goto` for the resolved URL right after. Without this filter the Test
-  // Details page shows two redundant Step 1 / Step 2 navigations to the same
-  // (or query-string-permuted) URL. Mirrors the dedup in
-  // `actionsToPlaywrightCode` so the human-readable steps and generated code
-  // stay aligned.
+  // Details page shows two redundant navigation steps for what is really a
+  // single navigation.
+  //
+  // Match `actionsToPlaywrightCode`'s exact-URL comparison so the persisted
+  // human-readable `steps[]` array and the generated `playwrightCode` stay
+  // in lock-step — they are rendered side-by-side on the Test Detail page,
+  // and any drift in step count between the two is immediately visible to
+  // reviewers (and breaks step-based edits/regeneration that index by
+  // position). Origin+pathname dedup would silently drop legitimate
+  // query-distinct navigations (e.g. `/search?q=iphone` → `/search?q=macbook`,
+  // pagination via `?page=N`, OAuth redirects with state tokens), which
+  // matters for any flow that exercises query-driven UI state.
   const dedupedActions = [];
-  // Match `actionsToPlaywrightCode`'s init: it seeds `lastGotoUrl` with
-  // `startUrl` so the initial `{ kind: "goto", url: startUrl }` action that
-  // `startRecording` always pushes as actions[0] is suppressed (the generated
-  // code already emits an explicit `page.goto(startUrl)` at the top, and the
-  // human-readable steps shouldn't include a redundant initial Step 1).
-  // Compare by origin + pathname so visually-identical consecutive gotos
-  // collapse — recorder pages frequently echo `framenavigated` events with
-  // re-ordered query strings (e.g. Amazon search pages add tracking params
-  // after the first hit), which would otherwise produce two adjacent
-  // "User navigates to https://amazon.in/s" steps in the persisted test.
-  const gotoKey = (u) => {
-    if (!u) return "";
-    try { const x = new URL(u); return `${x.origin}${x.pathname}`; }
-    catch { return String(u); }
-  };
-  let lastGotoKey = gotoKey(stopResult.url || "");
+  let lastGotoUrl = String(stopResult.url || "");
   for (const a of stopResult.actions) {
     if (a.kind === "goto" && a.url) {
-      const k = gotoKey(a.url);
-      if (k === lastGotoKey) continue;
-      lastGotoKey = k;
+      if (a.url === lastGotoUrl) continue;
+      lastGotoUrl = a.url;
     }
     dedupedActions.push(a);
   }
