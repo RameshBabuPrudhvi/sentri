@@ -550,8 +550,19 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: ${a.kind === "check" ? "Check" : "Uncheck"}`);
       lines.push(`await ${a.kind === "check" ? "safeCheck" : "safeUncheck"}(${actor}, '${sel}');`);
     } else if (a.kind === "upload" && sel) {
+      // The recorder only sees browser-side `File.name` values — it has no
+      // access to the original bytes or a server-side path. Emit the
+      // captured filenames as a comment so reviewers can wire up real
+      // fixtures, but ship a no-op `[]` payload so replay doesn't crash
+      // with ENOENT trying to read non-existent local files.
+      const capturedNames = String(a.value || "").split(",").map((n) => n.trim()).filter(Boolean);
       lines.push(`// Step ${stepNo}: Upload file(s)`);
-      lines.push(`await safeUpload(${actor}, '${sel}', [${String(a.value || "").split(",").map((n) => `'${escapeJsSingleQuote(n.trim())}'`).filter(Boolean).join(", ")}]);`);
+      if (capturedNames.length) {
+        lines.push(`// NOTE: recorder captured filenames ${JSON.stringify(capturedNames)} — replace [] with real fixture path(s) before running outside the recorder`);
+      } else {
+        lines.push(`// NOTE: replace with real fixture path(s) before running outside the recorder`);
+      }
+      lines.push(`await safeUpload(${actor}, '${sel}', []);`);
     } else if (a.kind === "drag" && sel && targetSel) {
       lines.push(`// Step ${stepNo}: Drag and drop`);
       lines.push(`await ${actor}.locator('${sel}').dragTo(${actor}.locator('${targetSel}'));`);
