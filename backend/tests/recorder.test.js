@@ -818,6 +818,65 @@ await (async () => {
     const recorderMod = await import("../src/runner/recorder.js");
     assert.ok(typeof recorderMod.actionsToPlaywrightCode === "function");
   });
+
+  await asyncTest("RECORDER_SCRIPT dedupes fill between input + change handlers (no double safeFill on type-then-blur)", async () => {
+    // Both the debounced "input" handler and the "change" safety-net
+    // handler in RECORDER_SCRIPT emit `fill` actions for INPUT/TEXTAREA.
+    // Without dedup, the typical type-then-blur flow produces two identical
+    // `fill` actions and the generated code emits two consecutive
+    // `safeFill(sel, 'value')` calls — the second is a no-op but
+    // `steps.length` drifts from the `// Step N:` comment count and the
+    // Steps panel renders the same row twice.
+    //
+    // The fix uses a `lastEmittedFill` Map that the "input" handler writes
+    // to and the "change" handler reads to skip the duplicate. We can't
+    // run the in-page script here (no DOM), so assert the contract via
+    // source inspection.
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const here = url.fileURLToPath(new URL(".", import.meta.url));
+    const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+    const scriptStart = src.indexOf("const RECORDER_SCRIPT = `");
+    const scriptEnd = src.indexOf("`;", scriptStart);
+    const scriptBody = src.slice(scriptStart, scriptEnd);
+
+    // The shared dedup Map must exist.
+    assert.match(
+      scriptBody,
+      /const\s+lastEmittedFill\s*=\s*new\s+Map\(\)/,
+      "RECORDER_SCRIPT must declare a lastEmittedFill Map for input/change dedup",
+    );
+    // The "input" handler must populate the dedup cache when it fires.
+    assert.match(
+      scriptBody,
+      /lastEmittedFill\.set\(sel,\s*value\)/,
+      "input handler must record emitted (selector, value) into lastEmittedFill",
+    );
+    // The "change" handler's text-INPUT/TEXTAREA branch must consult the
+    // dedup cache and bail out when the input handler already covered the
+    // same selector + value. Match the exact comparison shape so the
+    // contract is tight against accidental refactors.
+    assert.match(
+      scriptBody,
+      /lastEmittedFill\.get\(sel\)\s*===\s*el\.value/,
+      "change handler must skip emission when (sel, value) already emitted by input handler",
+    );
+    // The change handler must also flush any still-pending input-handler
+    // timer so the latest value is captured rather than dropped on blur.
+    assert.match(
+      scriptBody,
+      /inputTimers\.get\(sel\)/,
+      "change handler must coordinate with the pending input-handler debounce timer",
+    );
+    // Defence-in-depth: the change handler's checkbox / radio / file /
+    // SELECT branches must remain — those are the sole capture paths for
+    // those element types. The reviewer's fix description called this out
+    // explicitly; lock it down so a future "simplify" PR can't drop them.
+    assert.match(scriptBody, /el\.type\s*===\s*"checkbox"/);
+    assert.match(scriptBody, /el\.type\s*===\s*"radio"/);
+    assert.match(scriptBody, /el\.type\s*===\s*"file"/);
+    assert.match(scriptBody, /tagName\s*===\s*"SELECT"/);
+  });
 })();
 
 console.log("\n──────────────────────────────────────────────────");

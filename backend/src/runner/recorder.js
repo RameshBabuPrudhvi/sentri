@@ -308,7 +308,20 @@ const RECORDER_SCRIPT = `
     lastHoverSelector = "";
   }, true);
 
+  // Per-selector fill-debounce timers AND a "last emitted" cache. The two
+  // work together to dedupe fill actions across the input + change handlers:
+  //   - The "input" handler captures normal typing as a debounced fill and
+  //     records the emitted value in \`lastEmittedFill\`.
+  //   - The "change" handler is the safety-net for browser autofill / paste
+  //     scenarios that bypass the "input" event entirely. It checks
+  //     \`lastEmittedFill\` and skips the redundant fill when the input
+  //     handler already covered the same selector + value.
+  // Without this dedup, typing "hello" then blurring fired two identical
+  // \`fill\` actions and produced two consecutive \`safeFill(sel, 'hello')\`
+  // calls in the generated code. The lastEmittedFill entry is purged after
+  // the change event so a subsequent retype of the same value re-fires.
   const inputTimers = new Map();
+  const lastEmittedFill = new Map();
   document.addEventListener("input", (ev) => {
     const el = eventElement(ev);
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
@@ -319,8 +332,10 @@ const RECORDER_SCRIPT = `
     if (prev) clearTimeout(prev);
     inputTimers.set(sel, setTimeout(() => {
       inputTimers.delete(sel);
+      const value = el.value;
+      lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
       });
     }, ${TIMINGS.FILL_DEBOUNCE_MS}));
   }, true);
@@ -347,8 +362,29 @@ const RECORDER_SCRIPT = `
         kind: "select", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      // Safety-net branch for autofill / paste / programmatic value changes
+      // that bypass the "input" event. Skip when the "input" handler already
+      // emitted a fill for this selector + value. If a debounced "input"
+      // fill is still pending, flush it synchronously here so the recorded
+      // action carries the latest value (the user committed it by blurring).
+      const sel = bestSelector(el);
+      if (!sel) return;
+      const pending = inputTimers.get(sel);
+      if (pending) {
+        clearTimeout(pending);
+        inputTimers.delete(sel);
+        // Fall through to emit below; the input handler hadn't fired yet.
+      } else if (lastEmittedFill.get(sel) === el.value) {
+        // Already emitted by the input handler with the exact same value —
+        // the change event is the trailing duplicate. Drop it and clear
+        // the dedup entry so a subsequent retype of the same value still
+        // gets recorded.
+        lastEmittedFill.delete(sel);
+        return;
+      }
+      lastEmittedFill.set(sel, el.value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     }
   }, true);
