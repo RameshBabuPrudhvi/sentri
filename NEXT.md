@@ -94,7 +94,5 @@ These can be picked up by a second engineer alongside the current PR without fil
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | #121 |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out, full event set) | #3, #120 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) + run persistence | #3, #120 |
-| DIF-015b Gap 1 | Recorder selectorGenerator naming + nth=N disambiguation | #3, #120 |
-| DIF-006 (frontend) | "Playwright project ZIP" entry in Project Detail Export dropdown | #120 |
 
 *Full completed list → ROADMAP.md § Completed Work*
