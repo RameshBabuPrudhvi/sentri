@@ -75,9 +75,15 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | Effort | Shared files? |
 |----|-------|--------|---------------|
+| **DIF-015b Gap 2** | **Recorder selectorGenerator: data-testid quality scoring** | **S** | **`backend/src/runner/recorder.js` only — no overlap with AUTO-016 / MNT-006 / AUTO-012** |
+| DIF-015b Gap 3 | Recorder selectorGenerator: iframe + shadow-DOM traversal | M | `backend/src/runner/recorder.js` only |
 | AUTO-017 | Performance budget testing (Web Vitals) | M | None |
 | AUTO-019 | Run diffing: per-test comparison across runs | M | None |
 | DIF-007 | Conversational test editor connected to /chat | M | None |
+
+> **DIF-015b follow-up priority:** Gap 2 (data-testid scoring) is the highest-value next step — it's a small, contained edit to the priority chain in `selectorGenerator()` and unblocks DIF-015b flipping to ✅ Complete in ROADMAP.md once Gap 3 also ships. Both gaps are documented in `ROADMAP.md` § DIF-015b with concrete heuristics, files-to-change, and acceptance criteria. Pick Gap 2 next; defer Gap 3 to a separate PR (different effort tier).
+>
+> Why these aren't promoted to "Current PR" yet: AUTO-016 (axe-core) is the queued sprint item with a higher priority label (🟡 High) than DIF-015b sub-items (🔵 Medium). The recorder gaps are tracked here so they don't get lost — pick them up alongside AUTO-016 if a second agent has bandwidth.
 
 ---
 
@@ -85,8 +91,9 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
-| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | #3 |
-| AUTO-006 | Network condition simulation (slow 3G / offline) | #3 |
-| DIF-015b | Recorder selectorGenerator naming alignment | #3 |
+| DIF-013 | Anonymous usage telemetry (PostHog + opt-out, full event set) | #3, #120 |
+| AUTO-006 | Network condition simulation (slow 3G / offline) + run persistence | #3, #120 |
+| DIF-015b Gap 1 | Recorder selectorGenerator naming + nth=N disambiguation | #3, #120 |
+| DIF-006 (frontend) | "Playwright project ZIP" entry in Project Detail Export dropdown | #120 |
 
 *Full completed list → ROADMAP.md § Completed Work*

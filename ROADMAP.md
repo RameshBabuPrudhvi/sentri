@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 37 items
+> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 37 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -99,7 +99,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-005 | Automatic test retry with flake isolation | PR #2 |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
-| DIF-015b | Recorder selector quality: rename to selectorGenerator | PR #3 |
+| DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned) |
 
 ---
 
@@ -636,9 +636,36 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
 
-**Status:** ✅ Partially Complete (PR #3 — naming + nth=N disambiguation; PR #120 added the disambiguator) | **Effort:** S | **Source:** Follow-on from DIF-015
+**Status:** 🔄 In Progress (PR #3 — naming alignment; PR #120 — Gap 1 nth=N disambiguation) | **Effort:** S | **Source:** Follow-on from DIF-015
 
-> **PR #3 / PR #120 scope note:** The injected helper in `RECORDER_SCRIPT` was renamed from `bestSelector` to `selectorGenerator`, the JSDoc / inline comments were updated to reflect Playwright-style intent, AND the CSS-fallback branch now emits `cssSelector >> nth=N` when the bare selector matches more than one element on the page (PR #120). This closes Gap 1 from the original problem statement (no disambiguation for duplicate matches). Gap 2 (data-testid scoring — preferring auto-generated `data-testid="el_abc123"` vs role+name) and Gap 3 (iframe + shadow-DOM traversal) remain — neither requires importing Playwright internals; both are in-page DOM walks that can ship as follow-on PRs without changing this item's contract.
+> **Progress:** Gap 1 (nth=N disambiguation) is shipped. Gap 2 (data-testid quality scoring) and Gap 3 (iframe + shadow-DOM traversal) remain. Tracked as separate sub-items below so a follow-up PR can pick them off cleanly without re-litigating scope. Item flips to ✅ Complete when both remaining sub-items ship.
+
+#### ✅ Gap 1 — nth=N disambiguation for duplicate CSS matches (PR #120)
+
+When the CSS-fallback branch of `selectorGenerator` produces a selector that matches multiple elements on the page (e.g. three identical `button.btn-primary`), the recorder now appends a Playwright `>> nth=N` token so replay clicks the same element the user clicked. Implementation lives at `backend/src/runner/recorder.js` in `disambiguateCss()` — a single `document.querySelectorAll` call, scoped to CSS-fallback selectors only (semantic selectors like `data-testid=`, `role=`, `text=` pass through unchanged because an `aria-label` collision is a real test smell that should surface, not be silently disambiguated away).
+
+#### 🔲 Gap 2 — data-testid quality scoring
+
+**Status:** 🔲 Planned | **Effort:** S | **Priority:** 🔵 Medium
+
+The current chain unconditionally prefers `data-testid` over role+name, even when the test-id is a useless auto-generated string (e.g. `data-testid="el_abc123"` from React Testing Library or `data-testid="comp-7af3"` from a CSS-in-JS lib). Codegen-style scoring would weight a high-quality semantic anchor (role + accessible name) above a noise testid. Concretely:
+
+- Detect noise testids via heuristic: short prefix (`el_`, `comp-`, `t-`) + hex/numeric tail, all-numeric, or length > 30 with no separators.
+- Demote noise testids below role+name in the priority chain; keep them above the bare CSS fallback so they're still preferred over a `.btn-primary` chain.
+- Pure DOM logic — no Playwright internals to import.
+
+**Files:** `backend/src/runner/recorder.js` — extend `selectorGenerator` priority chain · `backend/tests/recorder.test.js` — add fixture for noise vs. semantic testids.
+
+#### 🔲 Gap 3 — iframe and shadow-DOM traversal
+
+**Status:** 🔲 Planned | **Effort:** M | **Priority:** 🔵 Medium
+
+Recorded clicks inside an `<iframe>` produce a selector scoped to the main document, which fails at replay because the element doesn't exist in the top-level DOM. Likewise shadow roots: clicking inside a `<my-card>` web component's shadow DOM produces a selector that the page-context `document.querySelector` can't see. Both require structural changes:
+
+- **iframes:** the `__sentriRecord` binding already records the source frame's URL (`frameUrl` field on the action). Wire `actionsToPlaywrightCode` to materialise a `frameLocator(frameUrl).locator(sel)` chain for actions whose `frameUrl !== mainFrame`. Already partially done at the action layer — the missing piece is the codegen branch.
+- **shadow DOM:** walk up via `getRootNode()` until reaching a shadow host or document, build a chain of `host >> shadowRoot >> el` selectors. Playwright's `>> ` selector pierces shadow boundaries automatically.
+
+**Files:** `backend/src/runner/recorder.js` — `selectorGenerator` shadow-walk + `actionsToPlaywrightCode` frameLocator branch · `backend/tests/recorder.test.js` — fixtures for shadow-DOM Web Component + iframe form.
 
 **Problem:** The DIF-015 recorder captures user interactions correctly but the selectors it emits are noticeably lower-quality than what Playwright's own `codegen` tool produces. Three concrete gaps:
 
