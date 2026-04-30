@@ -515,11 +515,17 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               contentType: "video/webm",
             });
           } catch (uploadErr) {
+            // If writeArtifactBuffer threw before the local write completed,
+            // dst won't exist — preserve src by renaming it as a last-resort
+            // fallback so we don't lose the only copy of the video.
+            if (!fs.existsSync(dst)) {
+              try { fs.renameSync(src, dst); } catch { /* ignore */ }
+            }
             console.warn(formatLogLine("warn", null,
               `[executeTest] S3 video upload failed for step ${stepIndex}, falling back to local path: ${uploadErr.message}`));
           }
-          fs.unlinkSync(src);
-          result.videoPath = `/artifacts/videos/${videoName}`;
+          if (fs.existsSync(src)) fs.unlinkSync(src);
+          if (fs.existsSync(dst)) result.videoPath = `/artifacts/videos/${videoName}`;
         }
         fs.rmSync(testVideoDir, { recursive: true, force: true });
       } catch (videoErr) {
