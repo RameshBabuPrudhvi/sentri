@@ -134,6 +134,28 @@ export function isS3Storage() {
 }
 
 /**
+ * Origin (scheme + host, no path) that pre-signed S3 artifact URLs are served
+ * from. Used by the CSP middleware in `appSetup.js` to allow the browser to
+ * load `<img>` / `<video>` artifacts from the configured object store.
+ *
+ * Returns `null` when S3 is not configured or the endpoint cannot be parsed —
+ * callers should treat that as "no S3 origin to allow" and fall back to
+ * same-origin-only CSP.
+ *
+ * @returns {string|null}
+ */
+export function s3PublicOrigin() {
+  if (STORAGE_BACKEND !== "s3") return null;
+  try {
+    if (S3_ENDPOINT) return new URL(S3_ENDPOINT).origin;
+    if (!S3_BUCKET) return null;
+    return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read an artifact buffer. In local mode, reads from `absolutePath`. In s3
  * mode, fetches the object via a short-lived pre-signed GET URL and falls
  * back to the local copy (dual-write safety net) on failure.
