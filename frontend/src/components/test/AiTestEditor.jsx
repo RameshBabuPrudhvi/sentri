@@ -5,7 +5,7 @@ import extractCodeBlock from "../../utils/extractCodeBlock.js";
 
 const DiffView = lazy(() => import("../ai/DiffView.jsx"));
 
-export default function AiTestEditor({ test, testId, onApplied, onAfterApply }) {
+export default function AiTestEditor({ test, testId, onApplied }) {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiCodeProposal, setAiCodeProposal] = useState("");
   const [aiEditing, setAiEditing] = useState(false);
@@ -51,10 +51,9 @@ export default function AiTestEditor({ test, testId, onApplied, onAfterApply }) 
     setAiError("");
     try {
       const updated = await api.updateTest(testId, { playwrightCode: aiCodeProposal });
-      onApplied?.(updated);
       setAiPrompt("");
       setAiCodeProposal("");
-      onAfterApply?.();
+      onApplied?.(updated);
     } catch (err) {
       setAiError(err.message || "Failed to apply AI edit.");
     } finally {
