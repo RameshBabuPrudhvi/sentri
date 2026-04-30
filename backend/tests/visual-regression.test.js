@@ -202,8 +202,8 @@ await test("deleteByTestId() removes all rows for a test", () => {
 
 console.log("\n🧪 visualDiff");
 
-await test("diffScreenshot() rejects an empty buffer with status=error", () => {
-  const res = diffScreenshot({
+await test("diffScreenshot() rejects an empty buffer with status=error", async () => {
+  const res = await diffScreenshot({
     runId: "RUN-TEST-1",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -213,9 +213,9 @@ await test("diffScreenshot() rejects an empty buffer with status=error", () => {
   assert.match(res.message, /empty/i);
 });
 
-await test("diffScreenshot() creates a baseline on first run", () => {
+await test("diffScreenshot() creates a baseline on first run", async () => {
   const buf = solidPng(20, 20, { r: 255, g: 0, b: 0 });
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-2",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -229,9 +229,9 @@ await test("diffScreenshot() creates a baseline on first run", () => {
   assert.ok(baselineRepo.get("TC-VR-2", 0), "baseline DB row should exist");
 });
 
-await test("diffScreenshot() creates browser-scoped baseline directories", () => {
+await test("diffScreenshot() creates browser-scoped baseline directories", async () => {
   const firefoxBuf = solidPng(20, 20, { r: 0, g: 0, b: 0 });
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-FF",
     testId: "TC-VR-2",
     browser: "firefox",
@@ -244,7 +244,7 @@ await test("diffScreenshot() creates browser-scoped baseline directories", () =>
   assert.ok(fs.existsSync(absPath), `firefox baseline should exist at ${absPath}`);
 });
 
-await test("diffScreenshot() honours legacy chromium baseline path post-migration 010", () => {
+await test("diffScreenshot() honours legacy chromium baseline path post-migration 010", async () => {
   // Migration 010 rewrites baseline DB rows to be browser-scoped but cannot
   // move PNG files on disk. `ensureBaseline()` must therefore fall back to
   // the legacy `<testId>/step-N.png` layout (no browser subdir) for chromium
@@ -274,7 +274,7 @@ await test("diffScreenshot() honours legacy chromium baseline path post-migratio
   // Diffing the same image against the legacy baseline must report `match`,
   // not `baseline_created`. This is the only assertion that catches a
   // regression in the legacy-path fallback.
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-LEGACY",
     testId,
     browser: "chromium",
@@ -289,12 +289,12 @@ await test("diffScreenshot() honours legacy chromium baseline path post-migratio
   baselineRepo.deleteByTestId(testId);
 });
 
-await test("baselinePath and diffPath contain raw testId (no %-encoding) for filesystem-URL parity", () => {
+await test("baselinePath and diffPath contain raw testId (no %-encoding) for filesystem-URL parity", async () => {
   // Reviewer's concern: encodeURIComponent(testId) in the filename writes
   // `%XX` bytes to disk, but Express URL-decodes the path before
   // filesystem / HMAC lookup — producing a 404 / invalid signature.
   const buf = splitPng(20, 20, { r: 255, g: 0, b: 0 }, { r: 0, g: 0, b: 255 }, 0.5);
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-ENC",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -310,9 +310,9 @@ await test("baselinePath and diffPath contain raw testId (no %-encoding) for fil
   assert.ok(fs.existsSync(path.join(DIFFS_DIR, diskName)), `diff PNG should exist on disk at ${diskName}`);
 });
 
-await test("diffScreenshot() returns status=match when the capture is identical", () => {
+await test("diffScreenshot() returns status=match when the capture is identical", async () => {
   const buf = solidPng(20, 20, { r: 255, g: 0, b: 0 });
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-3",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -323,10 +323,10 @@ await test("diffScreenshot() returns status=match when the capture is identical"
   assert.ok(res.diffPath?.endsWith(".png"));
 });
 
-await test("diffScreenshot() flags a regression when pixels differ beyond the threshold", () => {
+await test("diffScreenshot() flags a regression when pixels differ beyond the threshold", async () => {
   // Change ~50% of rows to blue — well above the default 2% threshold.
   const buf = splitPng(20, 20, { r: 255, g: 0, b: 0 }, { r: 0, g: 0, b: 255 }, 0.5);
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-4",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -339,10 +339,10 @@ await test("diffScreenshot() flags a regression when pixels differ beyond the th
     "diff PNG should be written to artifacts/diffs/");
 });
 
-await test("diffScreenshot() short-circuits with status=error on dimension mismatch", () => {
+await test("diffScreenshot() short-circuits with status=error on dimension mismatch", async () => {
   // The baseline is 20×20; feed a 10×10 capture.
   const buf = solidPng(10, 10, { r: 255, g: 0, b: 0 });
-  const res = diffScreenshot({
+  const res = await diffScreenshot({
     runId: "RUN-TEST-5",
     testId: "TC-VR-2",
     stepNumber: 0,
@@ -360,7 +360,7 @@ await test("acceptBaseline() promotes a source PNG to the new baseline and refre
   const before = baselineRepo.get("TC-VR-2", 0);
   await new Promise((r) => setTimeout(r, 5));
 
-  const res = acceptBaseline({
+  const res = await acceptBaseline({
     testId: "TC-VR-2",
     browser: "chromium",
     stepNumber: 0,
@@ -372,7 +372,7 @@ await test("acceptBaseline() promotes a source PNG to the new baseline and refre
   assert.notEqual(after.updatedAt, before.updatedAt, "updatedAt should change after accept");
 
   // Diffing the new baseline against itself should now match.
-  const res2 = diffScreenshot({
+  const res2 = await diffScreenshot({
     runId: "RUN-TEST-6",
     testId: "TC-VR-2",
     stepNumber: 0,
