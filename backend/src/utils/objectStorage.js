@@ -33,8 +33,14 @@ function s3Host() {
 }
 
 function s3BaseUrl() {
-  if (S3_ENDPOINT) return S3_ENDPOINT.replace(/\/$/, "");
+  if (S3_ENDPOINT) return `${S3_ENDPOINT.replace(/\/$/, "")}/${S3_BUCKET}`;
   return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com`;
+}
+
+function s3CanonicalUri(key) {
+  const encoded = encodeURI(key).replace(/%2F/g, "/");
+  if (S3_ENDPOINT) return `/${S3_BUCKET}/${encoded}`;
+  return `/${encoded}`;
 }
 
 function s3SignKey(dateStamp) {
@@ -49,9 +55,13 @@ function toObjectKey(artifactPath) {
 }
 
 export async function writeArtifactBuffer({ artifactPath, absolutePath, buffer, contentType = "application/octet-stream" }) {
+  // Always persist to local disk so downstream code paths that still read from
+  // the filesystem (e.g. baseline acceptance, video/trace post-processing)
+  // continue to work even when STORAGE_BACKEND=s3. In s3 mode we additionally
+  // upload the buffer to the configured object store below.
+  ensureDir(absolutePath);
+  fs.writeFileSync(absolutePath, buffer);
   if (STORAGE_BACKEND !== "s3") {
-    ensureDir(absolutePath);
-    fs.writeFileSync(absolutePath, buffer);
     return;
   }
   const key = toObjectKey(artifactPath);
@@ -64,7 +74,7 @@ export async function writeArtifactBuffer({ artifactPath, absolutePath, buffer, 
   const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
   const canonicalRequest = [
     "PUT",
-    `/${encodeURI(key).replace(/%2F/g, "/")}`,
+    s3CanonicalUri(key),
     "",
     canonicalHeaders,
     signedHeaders,
@@ -107,7 +117,7 @@ export function signS3ArtifactUrl(artifactPath, ttlMs) {
   });
   const canonicalRequest = [
     "GET",
-    `/${encodeURI(key).replace(/%2F/g, "/")}`,
+    s3CanonicalUri(key),
     params.toString(),
     `host:${host}\n`,
     "host",
