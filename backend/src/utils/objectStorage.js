@@ -37,9 +37,36 @@ function s3BaseUrl() {
   return `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com`;
 }
 
+/**
+ * RFC 3986 encoder per AWS SigV4 spec. `encodeURIComponent` is RFC 3986
+ * compliant except it does not encode `!*'()` — AWS requires those encoded
+ * (except in the path, where `/` is preserved by joining segments).
+ */
+function rfc3986(str) {
+  return encodeURIComponent(str).replace(/[!*'()]/g, c =>
+    "%" + c.charCodeAt(0).toString(16).toUpperCase()
+  );
+}
+
+function encodeS3Key(key) {
+  // Encode each path segment individually so `/` separators are preserved
+  // but `#`, `?`, `&`, `=`, `@`, spaces, etc. inside a segment are escaped.
+  return key.split("/").map(rfc3986).join("/");
+}
+
+function canonicalQueryString(params) {
+  // AWS V4 requires sorted keys and RFC 3986 encoding of both keys & values.
+  // URLSearchParams uses form-encoding (`+` for space) which breaks signing
+  // for any value containing a space or reserved char. Build it manually.
+  return [...params.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`)
+    .join("&");
+}
+
 function s3CanonicalUri(key) {
-  const encoded = encodeURI(key).replace(/%2F/g, "/");
-  if (S3_ENDPOINT) return `/${S3_BUCKET}/${encoded}`;
+  const encoded = encodeS3Key(key);
+  if (S3_ENDPOINT) return `/${rfc3986(S3_BUCKET)}/${encoded}`;
   return `/${encoded}`;
 }
 
@@ -84,7 +111,7 @@ export async function writeArtifactBuffer({ artifactPath, absolutePath, buffer, 
   const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256Hex(canonicalRequest)}`;
   const signature = hmac(s3SignKey(dateStamp), stringToSign, "hex");
   const authorization = `AWS4-HMAC-SHA256 Credential=${S3_ACCESS_KEY_ID}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const res = await fetch(`${s3BaseUrl()}/${key}`, {
+  const res = await fetch(`${s3BaseUrl()}/${encodeS3Key(key)}`, {
     method: "PUT",
     headers: {
       "Content-Type": contentType,
@@ -118,7 +145,7 @@ export function signS3ArtifactUrl(artifactPath, ttlMs) {
   const canonicalRequest = [
     "GET",
     s3CanonicalUri(key),
-    params.toString(),
+    canonicalQueryString(params),
     `host:${host}\n`,
     "host",
     "UNSIGNED-PAYLOAD",
@@ -126,7 +153,7 @@ export function signS3ArtifactUrl(artifactPath, ttlMs) {
   const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256Hex(canonicalRequest)}`;
   const signature = hmac(s3SignKey(dateStamp), stringToSign, "hex");
   params.set("X-Amz-Signature", signature);
-  return `${s3BaseUrl()}/${key}?${params.toString()}`;
+  return `${s3BaseUrl()}/${encodeS3Key(key)}?${canonicalQueryString(params)}`;
 }
 
 export function isS3Storage() {
