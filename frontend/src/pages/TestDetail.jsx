@@ -266,12 +266,21 @@ export default function TestDetail() {
     setAiCodeProposal("");
     try {
       let raw = "";
+      // Track SSE error callbacks synchronously — React state updates are
+      // async, so we cannot read `aiError` after `await api.chat()` resolves
+      // to know whether the stream surfaced a provider error. Without this
+      // flag, the "no code block" branch below would overwrite the real
+      // provider error message with a misleading generic one.
+      let hadError = false;
       await api.chat(
         [{ role: "user", content: aiPrompt.trim() }],
         (token) => {
           raw += token;
         },
-        (message) => setAiError(message || "AI edit failed."),
+        (message) => {
+          hadError = true;
+          setAiError(message || "AI edit failed.");
+        },
         undefined,
         {
           mode: "test_edit",
@@ -280,6 +289,7 @@ export default function TestDetail() {
           testCode: test.playwrightCode || "",
         },
       );
+      if (hadError) return;
       const code = extractCodeBlock(raw);
       if (!code) {
         setAiError("AI response did not include updated code. Try a more specific instruction.");
