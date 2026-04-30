@@ -318,26 +318,26 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 41. **Standalone Playwright project ZIP** (DIF-006) — `GET /api/v1/projects/:id/export/playwright` → ZIP downloads with `Content-Type: application/zip`, contains `package.json`, `playwright.config.ts` (with `baseURL` from project), `README.md`, and one `tests/<slug>.spec.ts` per **approved** test (drafts and rejected tests excluded). Unzip, `npm install`, `npx playwright test` runs the suite without modification.
 
 ### 16. AI Chat
-41. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
-42. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
-43. Export the session as Markdown and JSON.
+42. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
+43. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
+44. Export the session as Markdown and JSON.
 
 ### 17. Dashboard
-44. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
+45. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
 
 ### 18. Recycle bin & audit
-45. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
-46. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
+46. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
+47. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
 
 ### 19. Account / GDPR
-47. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
-48. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
+48. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
+49. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
 
 ### 20. Permissions sanity (negative)
-49. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
-50. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
+50. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
+51. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
 
-> ✅ **Pass criterion:** all 50 steps green. Any failure = release blocker.
+> ✅ **Pass criterion:** all 51 steps green. Any failure = release blocker.
 
 ---
 
@@ -1107,7 +1107,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 
 | Area | Chrome | Firefox | Safari | Edge | Notes / Bug links |
 |---|---|---|---|---|---|
-| **Golden E2E Happy Path (all 50 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Golden E2E Happy Path (all 51 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Authentication | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Email Verification | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
@@ -1152,7 +1152,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 ## ✅ Sign-off Criteria
 
 A release is QA-approved only when **all** of the following are true:
-- The **Golden E2E Happy Path** (50 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
+- The **Golden E2E Happy Path** (51 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
 - Every row in the coverage checklist is ✅ across the required browser matrix.
 - The permissions matrix has been verified end-to-end, including Outsider access attempts.
 - All Security authorization checks return 403/404 (never the resource).
