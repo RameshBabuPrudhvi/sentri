@@ -13,6 +13,7 @@ const files = [
   "tests/test-fix.test.js",
   "tests/command-palette.test.js",
   "tests/query-client.test.js",
+  "tests/extractCodeBlock.test.js",
 ];
 
 let passed = 0;
