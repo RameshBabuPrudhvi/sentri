@@ -487,12 +487,22 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
           const src = path.join(testVideoDir, files[0]);
           const videoName = `${runId}-step${stepIndex}.webm`;
           const dst = path.join(VIDEOS_DIR, videoName);
-          await writeArtifactBuffer({
-            artifactPath: `/artifacts/videos/${videoName}`,
-            absolutePath: dst,
-            buffer: fs.readFileSync(src),
-            contentType: "video/webm",
-          });
+          // writeArtifactBuffer always persists to local disk first
+          // (objectStorage.js:62-63), so if the optional S3 upload fails
+          // the artifact is still available via the local path. Mirror the
+          // trace handling pattern in testRunner.js: swallow upload errors
+          // here so cleanup and videoPath assignment still run.
+          try {
+            await writeArtifactBuffer({
+              artifactPath: `/artifacts/videos/${videoName}`,
+              absolutePath: dst,
+              buffer: fs.readFileSync(src),
+              contentType: "video/webm",
+            });
+          } catch (uploadErr) {
+            console.warn(formatLogLine("warn", null,
+              `[executeTest] S3 video upload failed for step ${stepIndex}, falling back to local path: ${uploadErr.message}`));
+          }
           fs.unlinkSync(src);
           result.videoPath = `/artifacts/videos/${videoName}`;
         }
