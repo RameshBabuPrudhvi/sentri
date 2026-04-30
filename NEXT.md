@@ -8,55 +8,55 @@
 
 ---
 
-## ▶ Current PR — AUTO-016
+## ▶ Current PR — MNT-006
 
-**Title:** Accessibility testing (axe-core integration)
-**Branch:** `feat/AUTO-016-axe-core`
+**Title:** Object storage for artifacts (S3 / R2)
+**Branch:** `feat/MNT-006-object-storage`
 **Effort:** M | **Priority:** 🟡 High
 **All dependencies:** ✅ none
 
 ### What to build
 
-During crawl, inject `@axe-core/playwright` and run `checkA11y()` on each page. Store violations in a new `accessibility_violations` table. Surface per-page report in crawl results and dashboard.
+Add `objectStorage` abstraction with local-disk adapter (current behaviour) and S3/R2 adapter. Switch via `STORAGE_BACKEND=s3`. Update artifact read/write paths and `signArtifactUrl()` to produce pre-signed S3 URLs.
 
 ### Files to change
 
 | File | Change |
 |------|--------|
-| `backend/src/pipeline/crawlBrowser.js` | Inject `@axe-core/playwright` and call `checkA11y()` after page settles |
-| `backend/src/database/migrations/` | Add `accessibility_violations` table |
-| `frontend/src/components/crawl/CrawlView.jsx` | Per-page accessibility violation panel |
-| `backend/package.json` | Add `@axe-core/playwright` |
+| `backend/src/utils/objectStorage.js` (new) | Adapter abstraction (local-disk default, S3/R2 optional) |
+| `backend/src/runner/pageCapture.js` | Route artifact writes through the adapter |
+| `backend/src/runner/screencast.js` | Route artifact writes through the adapter |
+| `backend/src/middleware/appSetup.js` | `signArtifactUrl()` returns pre-signed S3 URLs when `STORAGE_BACKEND=s3` |
+| `backend/.env.example` | Document `STORAGE_BACKEND`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT` |
 
 ### Lanes (for AGENT.md § Branch co-ownership protocol)
 
-- **agent-scope:** `backend/src/pipeline/**`, `backend/src/database/migrations/**`, `backend/package.json`, `backend/tests/**` — claimable by any single agent
-- **human-scope:** `frontend/src/components/crawl/CrawlView.jsx` — UI surfacing of violations
+- **agent-scope:** `backend/src/utils/objectStorage.js`, `backend/src/runner/**`, `backend/src/middleware/appSetup.js` (artifact-signing block only), `backend/.env.example`, `backend/tests/**`
 - **shared (coordinate via PR comment before editing):** `docs/changelog.md`, `ROADMAP.md`, this file
 
 ### Acceptance criteria
 
-- [ ] Each crawled page produces an `accessibility_violations` row per detected WCAG 2.1 violation
-- [ ] CrawlView surfaces per-page accessibility report with severity + WCAG criterion
-- [ ] axe-core injection is best-effort — a failure does not abort the crawl
-- [ ] No violations produced on a clean fixture page (sanity test)
+- [ ] Default deployment (no `STORAGE_BACKEND` env var) keeps writing to `artifacts/` on local disk — zero behaviour change
+- [ ] `STORAGE_BACKEND=s3` plus credentials routes screenshot / video / trace writes to the configured bucket
+- [ ] `signArtifactUrl()` emits HMAC-signed local URLs in the default mode and S3 pre-signed URLs in S3 mode (TTL respects `ARTIFACT_TOKEN_TTL_MS`)
+- [ ] Adapter unit tests cover both backends; S3 path uses a mock client (no live AWS in CI)
 
 ### PR checklist
 
-- [ ] Update `AUTO-016` status in `ROADMAP.md` to ✅ Complete with PR number
-- [ ] Update this file: move AUTO-016 to "Recently completed", promote MNT-006 to "Current PR"
+- [ ] Update `MNT-006` status in `ROADMAP.md` to ✅ Complete with PR number
+- [ ] Update this file: move MNT-006 to "Recently completed", promote next item from Queue to "Current PR"
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
 
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · MNT-006 — Object storage for artifacts (S3 / R2)
-**Effort:** M | **Priority:** 🟡 High | **Dependencies:** none
+### 2 · AUTO-016b — Frontend CrawlView accessibility violation panel
+**Effort:** S | **Priority:** 🟡 High | **Dependencies:** AUTO-016 ✅ (PR #121)
 
-Add `objectStorage` abstraction with local-disk adapter (current behaviour) and S3/R2 adapter. Switch via `STORAGE_BACKEND=s3`. Update artifact read/write paths and `signArtifactUrl()` to produce pre-signed S3 URLs.
+Backend half of AUTO-016 shipped in PR #121 (axe-core scan + persistence + per-page summary on `run.pages[].accessibilityViolations`). This item adds the human-scope UI: a per-page accessibility panel in `frontend/src/components/crawl/CrawlView.jsx` showing severity + WCAG criterion + collapsed node-list, plus a "Top accessibility offenders" rollup on the dashboard.
 
-**Files:** `backend/src/runner/pageCapture.js` · `backend/src/runner/screencast.js` · `backend/src/utils/objectStorage.js` (new) · `backend/.env.example`
+**Files:** `frontend/src/components/crawl/CrawlView.jsx` · `frontend/src/pages/Dashboard.jsx` · `backend/src/routes/dashboard.js` (a11y rollup field) · optional new `GET /api/v1/runs/:id/accessibility` endpoint backed by `accessibilityViolationRepo.getByRunId()`
 
 ---
 
@@ -91,9 +91,8 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
+| AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | #121 |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out, full event set) | #3, #120 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) + run persistence | #3, #120 |
-| DIF-015b Gap 1 | Recorder selectorGenerator naming + nth=N disambiguation | #3, #120 |
-| DIF-006 (frontend) | "Playwright project ZIP" entry in Project Detail Export dropdown | #120 |
 
 *Full completed list → ROADMAP.md § Completed Work*

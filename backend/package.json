@@ -25,7 +25,8 @@
     "pixelmatch": "^6.0.0",
     "playwright": "^1.50.1",
     "pngjs": "^7.0.0",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "@axe-core/playwright": "^4.10.2"
   },
   "optionalDependencies": {
     "bullmq": "^5.34.0",

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Crawler**: Accessibility scanning during crawl (AUTO-016) — every crawled page is now scanned with `@axe-core/playwright` after the DOM settles, and each WCAG violation is persisted to a new `accessibility_violations` table (migration `013_accessibility_violations.sql`) keyed by `(runId, pageUrl, ruleId)` with the axe-core node array stored as JSON. Violations are also attached to per-page snapshots (`accessibilityViolations` summary array of `{ ruleId, impact, wcagCriterion, help, description }`) and propagated to `run.pages[]` so the frontend `CrawlView` panel (tracked separately as the human-scope deliverable for AUTO-016) can render per-page reports without an extra round-trip. Persistence goes through a new `accessibilityViolationRepo.bulkCreate()` (`backend/src/database/repositories/accessibilityViolationRepo.js`) — no raw SQL in the pipeline module per AGENT.md. Scans are best-effort: a failure logs `logWarn(run, ...)` and never aborts the crawl. New dep `@axe-core/playwright` added to `backend/package.json` (#121).
+
 ## [1.6.9] — 2026-04-30
 
 ### Added

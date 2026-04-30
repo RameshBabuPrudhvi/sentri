@@ -17,9 +17,38 @@ import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
+import * as accessibilityViolationRepo from "../database/repositories/accessibilityViolationRepo.js";
+import { AxeBuilder } from "@axe-core/playwright";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
 const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
+
+/**
+ * Normalize axe-core results into persistable records.
+ *
+ * @param {string} runId
+ * @param {string} pageUrl
+ * @param {object} results - Axe-core results object (`{ violations: [...] }`), or null/undefined.
+ * @returns {object[]} Array of persistable violation records with shape
+ *   `{ runId, pageUrl, ruleId, impact, wcagCriterion, help, description, nodesJson }`.
+ */
+export function mapA11yViolations(runId, pageUrl, results) {
+  const violations = Array.isArray(results?.violations) ? results.violations : [];
+  return violations.map((violation) => {
+    const tags = Array.isArray(violation.tags) ? violation.tags : [];
+    const wcagTag = tags.find((tag) => /^wcag\d{3,4}$/i.test(tag)) || null;
+    return {
+      runId,
+      pageUrl,
+      ruleId: violation.id || "unknown",
+      impact: violation.impact || null,
+      wcagCriterion: wcagTag,
+      help: violation.help || "",
+      description: violation.description || "",
+      nodesJson: JSON.stringify(Array.isArray(violation.nodes) ? violation.nodes : []),
+    };
+  });
+}
 
 /**
  * Check if two URLs share the same effective origin (protocol + host + port).
@@ -230,6 +259,14 @@ export async function crawlPages(project, run, { signal } = {}) {
 
         const snapshot = await takeSnapshot(page);
 
+        let a11yViolations = [];
+        try {
+          const axeResults = await new AxeBuilder({ page }).analyze();
+          a11yViolations = mapA11yViolations(run.id, url, axeResults);
+        } catch (a11yErr) {
+          logWarn(run, `Accessibility scan failed on ${url}: ${a11yErr.message}`);
+        }
+
         // Merge shadow elements into the snapshot's element list so they flow
         // through elementFilter.js scoring alongside regular DOM elements.
         if (shadowElements.length > 0) {
@@ -245,11 +282,34 @@ export async function crawlPages(project, run, { signal } = {}) {
         }
         crawlQueue.markStructureSeen(structureFP);
 
+        // Persist accessibility violations only after the page is confirmed
+        // kept — avoids orphaned rows for URLs filtered out by the
+        // structure-duplicate check above.
+        if (a11yViolations.length > 0) {
+          try {
+            accessibilityViolationRepo.bulkCreate(a11yViolations);
+          } catch (persistErr) {
+            logWarn(run, `Failed to persist accessibility violations for ${url}: ${persistErr.message}`);
+          }
+        }
+
         snapshots.push(snapshot);
+        snapshot.accessibilityViolations = a11yViolations.map(v => ({
+          ruleId: v.ruleId,
+          impact: v.impact,
+          wcagCriterion: v.wcagCriterion,
+          help: v.help,
+          description: v.description,
+        }));
         snapshotsByUrl[url] = snapshot;
         run.pagesFound = snapshots.length;
         // Keep run.pages in sync so the frontend site graph updates live
-        run.pages = snapshots.map(s => ({ url: s.url, title: s.title || s.url, status: "crawled" }));
+        run.pages = snapshots.map(s => ({
+          url: s.url,
+          title: s.title || s.url,
+          status: "crawled",
+          accessibilityViolations: s.accessibilityViolations || [],
+        }));
         // Persist to DB so the site map renders after page reload
         runRepo.update(run.id, { pages: run.pages, pagesFound: run.pagesFound });
         // Sign artifact URLs before emitting SSE snapshot (matches testRunner.js pattern)

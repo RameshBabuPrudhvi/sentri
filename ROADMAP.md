@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 37 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `MNT-006` — Object storage for artifacts (S3 / R2) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 36 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs; AUTO-016 backend slice ✅ shipped in PR #121, frontend `CrawlView` panel tracked as AUTO-016b)
 
 ---
 
@@ -100,6 +100,7 @@ The following items have been verified complete against the codebase and are **n
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
 | DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned) |
+| AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121 |
 
 ---
 
@@ -109,8 +110,8 @@ The following items have been verified complete against the codebase and are **n
 |-------|-------|--------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` (project credential edit) is 🟡 High; `SEC-004` deferred | 8–10 weeks |
-| Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔲 Planned | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔲 Planned | 14–18 weeks |
+| Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-007–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013 ✅, AUTO-016 backend ✅ (PR #121); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-016b (UI), AUTO-017–019 | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
 
 ---
@@ -971,7 +972,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
 
-> **Note:** Some Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above (e.g. `AUTO-007`, `AUTO-013`). The remaining ~20 items are scoped here and ready to start.
+> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-013` (stale test detection, PR #99), and `AUTO-016` backend slice (axe-core scan + persistence, PR #121). The remaining ~14 items are scoped here and ready to start; `AUTO-016b` (frontend `CrawlView` accessibility panel) is the immediate follow-up tracked in `NEXT.md`.
 
 ---
 
@@ -1237,7 +1238,9 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-016 — Accessibility testing (axe-core integration) 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (backend slice — PR #121) | **Effort:** M | **Source:** Competitive Gap Analysis
+
+> **Shipped scope (PR #121):** Backend half — `@axe-core/playwright` scan on every crawled page, normalised via `mapA11yViolations()`, persisted through `accessibilityViolationRepo.bulkCreate()` (`backend/src/database/repositories/accessibilityViolationRepo.js`) into the new `accessibility_violations` table (migration `013_accessibility_violations.sql`). Best-effort: scan failures log a warning and do not abort the crawl. Per-page summary attached to snapshots and `run.pages[].accessibilityViolations` so the frontend has the data without a second round-trip. The frontend `CrawlView` violation panel (NEXT.md `human-scope`) is **not** in this PR — track follow-up as **AUTO-016b** when it lands.
 
 **Problem:** No accessibility testing exists. Playwright has first-class support for `@axe-core/playwright`. An autonomous QA platform should run WCAG 2.1 checks on every crawled page and flag violations. This is increasingly a legal requirement (ADA, European Accessibility Act).
 
@@ -1560,7 +1563,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Capability | Sentri | Mabl | Testim | SmartBear / BearQ | Playwright OSS |
 |---|---|---|---|---|---|
 | AI test generation | ✅ 8-stage pipeline | ✅ Auto-heal only | ✅ AI recorder | ✅ BearQ AI generation † | ❌ Manual |
-| Interactive recorder | ❌ → DIF-015 | ✅ | ✅ | ✅ BearQ recorder † | Via codegen |
+| Interactive recorder | ✅ DIF-015 | ✅ | ✅ | ✅ BearQ recorder † | Via codegen |
 | Self-healing selectors | ✅ Multi-strategy waterfall | ✅ ML-based | ✅ Smart locators | ✅ BearQ AI healing † | ❌ |
 | AI auto-repair on failure | ✅ Feedback loop | ✅ | ✅ | ✅ BearQ † | ❌ |
 | Human review queue | ✅ Draft → Approve flow | ❌ | ❌ | ❌ | ❌ |
@@ -1571,21 +1574,23 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Self-hosted / private | ✅ Docker | ❌ SaaS only | ❌ SaaS only | Partial | ✅ |
 | Multi-provider LLM | ✅ Anthropic/OpenAI/Google/Ollama | ❌ | ❌ | ❌ | ❌ |
 | Parallel execution | ✅ 1–10 workers | ✅ Cloud | ✅ Cloud | ✅ Cloud | ✅ CLI sharding |
-| Visual regression | ❌ → DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
+| Visual regression | ✅ DIF-001 | ✅ Native | ✅ Native | ✅ VisualTest | Via plugins |
 | Cross-browser | ✅ DIF-002 | ✅ Chrome+Firefox | ✅ Chrome+Firefox | ✅ All | ✅ All 3 |
 | Mobile / device emulation | ✅ DIF-003 | ✅ | ✅ | ✅ | ✅ Native |
 | Failure notifications | ✅ Teams/email/webhook | ✅ Slack/email | ✅ Slack/email | ✅ | N/A |
 | Multi-tenancy / RBAC | ✅ ACL-001/ACL-002 | ✅ | ✅ | ✅ | N/A |
-| Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
+| Standalone export | ✅ DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
-| Accessibility testing | ❌ → AUTO-016 | ✅ | ❌ | Partial | Via plugins |
+| Accessibility testing | ✅ (backend) / 🔄 AUTO-016b (UI) | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
 | Quality gate enforcement | ❌ → AUTO-012 | ✅ | ✅ | ✅ | Via Playwright |
 
-**Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone export (planned). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
+**Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone Playwright export (✅ DIF-006). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close first:** DIF-001 (visual regression) · DIF-002 (cross-browser) · DIF-015 (recorder)
+**Critical gaps to close next:** AUTO-001 (risk-based test selection) · AUTO-012 (quality gate enforcement) · AUTO-017 (performance budgets) · AUTO-016b (accessibility UI surfacing — backend ✅ in PR #121) · MNT-006 (object storage for hosted artifacts)
+
+> **Previous priorities ✅ shipped:** DIF-001 (visual regression, PR #94) · DIF-002 (cross-browser, PR #94) · DIF-015 (recorder, PR #94) · DIF-006 (Playwright export, PR #1) · AUTO-005 (test retry, PR #2) · AUTO-016 backend (axe-core scan + persistence, PR #121).
 
 ---
 
@@ -1598,11 +1603,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 4 | 3 | 0 | 1 | ENH-036 |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
-| Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
+| Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **28** | **0** | **42** | |
+| **Totals** | **70** | **31** | **0** | **39** | |
 
-**Total tracked items:** 70 across 7 categories — **28 complete** (40%), **0 in progress**, **42 remaining**
+**Total tracked items:** 70 across 7 categories — **31 complete** (44%), **0 in progress**, **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
@@ -1610,10 +1615,12 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-006` (Playwright export — biggest lock-in objection handler) → `AUTO-005` (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` (accessibility via axe-core) → `MNT-006` (S3 object storage — production prerequisite)
+`DIF-006` ✅ (Playwright export — biggest lock-in objection handler) → `AUTO-005` ✅ (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` ✅ backend (accessibility via axe-core, PR #121; UI tracked as `AUTO-016b`) → `MNT-006` (S3 object storage — production prerequisite)
 
-**Lowest effort / highest immediate value:**
-~~MNT-011 (S)~~ ✅ · ~~AUTO-007 (S)~~ ✅ · DIF-006 (M) · AUTO-005 (M) · DIF-013 (S — telemetry)
+**Lowest effort / highest immediate value (next):**
+AUTO-016b (S — frontend `CrawlView` accessibility panel; backend ✅ PR #121) · MNT-006 (M — object storage) · AUTO-012 (M — quality gate enforcement) · ENH-036 (S — project credential edit) · DIF-007 (M — conversational test editor)
+
+> **Previously shipped from this list:** ~~MNT-011 (S)~~ ✅ · ~~AUTO-007 (S)~~ ✅ · ~~DIF-006 (M)~~ ✅ (PR #1) · ~~AUTO-005 (M)~~ ✅ (PR #2) · ~~DIF-013 (S — telemetry)~~ ✅ (PR #3)
 
 ---
 
