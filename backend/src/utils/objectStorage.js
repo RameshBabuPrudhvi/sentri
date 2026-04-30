@@ -6,6 +6,16 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import dotenv from "dotenv";
+
+// MNT-006: this module is statically imported by appSetup.js. In ESM, static
+// imports are evaluated before the importer's module body runs, so reading
+// process.env at module-eval time would fire *before* appSetup.js's
+// dotenv.config() call — silently leaving STORAGE_BACKEND="local" even when
+// .env declares STORAGE_BACKEND=s3. Mirror appSetup.js's pattern: call
+// dotenv.config() here too. dotenv does not overwrite already-set env vars,
+// so calling it from multiple modules is safe.
+dotenv.config();
 
 const STORAGE_BACKEND = (process.env.STORAGE_BACKEND || "local").toLowerCase();
 const S3_BUCKET = process.env.S3_BUCKET || "";
