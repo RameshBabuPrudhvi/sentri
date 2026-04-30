@@ -576,6 +576,25 @@ Each area uses this format:
 - Edit Source to invalid JS → server validation rejects (test would fail to compile at run time); confirm clear error.
 - Viewer attempts edit → 403.
 
+**Edit with AI panel** (DIF-007 — `frontend/src/components/test/AiTestEditor.jsx`, `backend/src/routes/chat.js` `test_edit` mode):
+
+**Preconditions:** Test with `playwrightCode` exists; AI provider configured; role `qa_lead` or `admin`.
+
+1. Open TestDetail → toolbar shows **"Edit with AI"** button (only when `playwrightCode` is present).
+2. Click → AI editor panel expands with prompt textarea, Generate / Apply buttons.
+3. Enter a natural-language instruction (e.g. "Add an assertion that cart total updates after quantity change") → click **Generate edit**.
+4. Backend receives `POST /api/v1/chat` with `context: { mode: "test_edit", testName, testSteps, testCode }` → uses dedicated `TEST_EDIT_SYSTEM_PROMPT`; SSE stream returns Markdown with `### Summary` + a fenced ` ```javascript ` block.
+5. Frontend extracts the code block via `extractCodeBlock()` → renders a **DiffView** showing before/after.
+6. Click **Apply** → `PATCH` saves new `playwrightCode`; panel closes; view switches to **Source** tab; verify code is updated and persisted across refresh.
+
+**Negative / edge:**
+- No AI provider configured → server returns **503**; error surfaces in the panel (not silent).
+- Empty / whitespace-only prompt → **Generate edit** button disabled.
+- AI response without a fenced code block → user-friendly error: "AI response did not include updated code. Try a more specific instruction."; original code untouched.
+- SSE provider error mid-stream → real provider message preserved (not overwritten by the generic "no code" message — see `hadError` flag in `AiTestEditor.jsx`).
+- Click **Hide AI Editor** mid-generation → panel hides; in-flight stream behavior should not corrupt state (note: in-flight `fetch` continues until completion — see review thread on AbortController).
+- Viewer attempts → 403 on save.
+
 ---
 
 ### ⚡ Automation (CI/CD + Scheduled Runs)
