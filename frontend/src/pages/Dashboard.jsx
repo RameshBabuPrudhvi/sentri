@@ -275,6 +275,30 @@ export default function Dashboard() {
             </div>
           )}
 
+          {(data?.topAccessibilityOffenders?.length ?? 0) > 0 && (
+            <div className="card card-padded mb-md">
+              <div className="flex-between" style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Activity size={14} color="var(--red)" />
+                  <span className="section-title" style={{ marginBottom: 0 }}>Top Accessibility Offenders</span>
+                </div>
+                <span className="text-xs text-muted">{data.topAccessibilityOffenders.length} project{data.topAccessibilityOffenders.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="flex-col gap-sm">
+                {data.topAccessibilityOffenders.map((row) => (
+                  <div key={row.projectId} className="list-row">
+                    <div style={{ flex: 1, minWidth: 0, fontSize: "0.86rem", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {row.projectName}
+                    </div>
+                    <span className="badge badge-red" style={{ fontSize: "0.68rem" }}>
+                      {row.violations} violations
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── Row 4: Run Status Distribution ── */}
           {data?.totalRuns > 0 && (() => {
             const segs = [

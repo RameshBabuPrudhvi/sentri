@@ -1,11 +1,12 @@
 /**
  * @module tests/api-versioning
- * @description Integration tests for INF-005 API versioning and DIF-011 testsByUrl.
+ * @description Integration tests for INF-005 API versioning, DIF-011 testsByUrl, and AUTO-016b dashboard rollups.
  *
  * Verifies:
  * - Legacy /api/* paths are 308-redirected to /api/v1/*
  * - Versioned /api/v1/* endpoints respond correctly
  * - Dashboard response includes testsByUrl (DIF-011)
+ * - Dashboard response includes topAccessibilityOffenders (AUTO-016b)
  */
 
 import assert from "node:assert/strict";
@@ -98,6 +99,15 @@ async function main() {
       const out = await req(base, "/api/v1/dashboard", { token });
       assert.equal(out.res.status, 200);
       assert.deepEqual(out.json.testsByUrl, {}, "testsByUrl should be empty with no approved tests");
+    });
+
+    console.log("\n🧪 AUTO-016b: topAccessibilityOffenders in dashboard response");
+
+    await test("dashboard response includes topAccessibilityOffenders array", async () => {
+      const out = await req(base, "/api/v1/dashboard", { token });
+      assert.equal(out.res.status, 200);
+      assert.ok("topAccessibilityOffenders" in out.json, "Expected topAccessibilityOffenders key in dashboard response");
+      assert.equal(Array.isArray(out.json.topAccessibilityOffenders), true, "topAccessibilityOffenders should be an array");
     });
 
   } finally {

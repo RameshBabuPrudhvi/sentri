@@ -14,6 +14,7 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import * as accessibilityViolationRepo from "../database/repositories/accessibilityViolationRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
 import { getTopFlakyTests } from "../utils/flakyDetector.js";
 
@@ -190,6 +191,27 @@ router.get("/dashboard", (req, res) => {
 
   // DIF-004: Top flaky tests — persisted flakyScore from the flaky detector
   const topFlakyTests = getTopFlakyTests(projectIds, 10);
+  const topAccessibilityOffenders = [];
+  for (const projectId of projectIds) {
+    const runIds = runs
+      .filter((run) => run.projectId === projectId && (run.type === "crawl" || run.type === "generate"))
+      .sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0))
+      .slice(0, 5)
+      .map((run) => run.id);
+    if (!runIds.length) continue;
+    let count = 0;
+    for (const runId of runIds) {
+      count += accessibilityViolationRepo.getByRunId(runId).length;
+    }
+    if (count > 0) {
+      topAccessibilityOffenders.push({
+        projectId,
+        projectName: projectsById[projectId]?.name || "Unknown project",
+        violations: count,
+      });
+    }
+  }
+  topAccessibilityOffenders.sort((a, b) => b.violations - a.violations);
 
   res.json({
     totalProjects: projects.length,
@@ -214,6 +236,7 @@ router.get("/dashboard", (req, res) => {
     testGrowth,
     mttrMs,
     testsByUrl,
+    topAccessibilityOffenders: topAccessibilityOffenders.slice(0, 5),
   });
 });
 
