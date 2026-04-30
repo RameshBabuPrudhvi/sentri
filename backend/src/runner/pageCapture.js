@@ -13,8 +13,8 @@
  */
 
 import path from "path";
-import fs from "fs";
 import { SHOTS_DIR } from "./config.js";
+import { writeArtifactBuffer } from "../utils/objectStorage.js";
 
 
 /**
@@ -150,7 +150,12 @@ export async function captureScreenshot(page, runId, stepIndex, { failed = false
   const shotName = `${runId}-step${stepIndex}${suffix}.png`;
   const shotPath = path.join(SHOTS_DIR, shotName);
   const buf = await page.screenshot({ type: "png", fullPage: false });
-  fs.writeFileSync(shotPath, buf);
+  await writeArtifactBuffer({
+    artifactPath: `/artifacts/screenshots/${shotName}`,
+    absolutePath: shotPath,
+    buffer: buf,
+    contentType: "image/png",
+  });
   return {
     base64: buf.toString("base64"),
     artifactPath: `/artifacts/screenshots/${shotName}`,

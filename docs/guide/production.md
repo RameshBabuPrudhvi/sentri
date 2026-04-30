@@ -23,7 +23,7 @@
 - [x] ~~Graceful shutdown~~ — Done (MAINT-013). Drains in-flight runs on SIGTERM/SIGINT.
 - [x] ~~BullMQ durable background run execution~~ — Done (INF-003). When `REDIS_URL` is set and `bullmq` is installed, runs execute via a durable job queue with crash recovery, retry, and global concurrency control (`MAX_WORKERS`). Falls back to in-process execution without Redis.
 - [x] ~~Failure notifications (Teams/email/webhook)~~ — Done (FEA-001). Configure per-project via `PATCH /api/projects/:id/notifications`. Dispatches on run completion with failures.
-- [ ] Store videos and screenshots to S3/R2 instead of local disk (MNT-006)
+- [x] ~~Store screenshots and visual-diff baselines/diffs to S3/R2 instead of local disk~~ — Done (MNT-006, PR #122). Set `STORAGE_BACKEND=s3` plus `S3_BUCKET` / `S3_REGION` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (and optional `S3_ENDPOINT` for Cloudflare R2 / MinIO) to upload screenshots, baselines, and visual-diff PNGs to an S3-compatible object store with SigV4 pre-signed GET URLs. Dual-writes to local disk so baseline acceptance and other filesystem-readers keep working. Playwright video and trace artifacts are still written by Playwright to local disk — sync those out-of-band if you need them in object storage.
 - [x] ~~Workspace/organisation scoping for multi-tenancy~~ — Done (ACL-001). Every entity is scoped to a workspace via `workspaceId`. Workspaces auto-created on first login. Existing data backfilled on startup.
 - [x] ~~Role-based access control~~ — Done (ACL-002). Three roles: Admin / QA Lead / Viewer. `requireRole()` middleware guards all mutating routes. Frontend gates Settings to admins and hides actions for insufficient roles.
 

@@ -41,6 +41,8 @@ import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
+import { writeArtifactBuffer } from "./utils/objectStorage.js";
+import fs from "fs";
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -269,7 +271,22 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     if (traceContext) {
       try {
         await traceContext.tracing.stop({ path: tracePath });
-        run.tracePath = `/artifacts/traces/${runId}.zip`;
+        // Route through the storage adapter so S3-mode deployments upload
+        // the trace zip; in local mode this is effectively a no-op rewrite
+        // of the same file Playwright just produced.
+        try {
+          const traceArtifactPath = `/artifacts/traces/${runId}.zip`;
+          await writeArtifactBuffer({
+            artifactPath: traceArtifactPath,
+            absolutePath: tracePath,
+            buffer: fs.readFileSync(tracePath),
+            contentType: "application/zip",
+          });
+          run.tracePath = traceArtifactPath;
+        } catch (uploadErr) {
+          logWarn(run, `Trace upload failed: ${uploadErr.message}`);
+          run.tracePath = `/artifacts/traces/${runId}.zip`;
+        }
         log(run, `📊 Trace saved`);
       } catch (e) {
         logWarn(run, `Trace save failed: ${e.message}`);

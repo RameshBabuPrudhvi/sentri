@@ -146,6 +146,48 @@ BullMQ is detected automatically when both `REDIS_URL` is set and the `bullmq` p
 | `APP_BASE_PATH` | `/` | Frontend base path prefix (e.g. `/sentri` for GitHub Pages) |
 | `BACKEND_URL` | auto-detect | Backend URL override for cross-origin cookie detection |
 
+### Object Storage (MNT-006)
+
+Sentri stores test artifacts (screenshots, videos, traces, visual-diff PNGs) on the local `artifacts/` directory by default. Set `STORAGE_BACKEND=s3` to upload supported artifacts to an S3-compatible object store (AWS S3, Cloudflare R2, MinIO).
+
+| Variable | Default | Description |
+|---|---|---|
+| `STORAGE_BACKEND` | `local` | `local` (default) or `s3`. Anything other than `s3` keeps local-disk behaviour. |
+| `S3_BUCKET` | — | **Required when `STORAGE_BACKEND=s3`.** Bucket name. For custom-endpoint providers (R2/MinIO) it is included path-style in upload + presigned URLs. |
+| `S3_REGION` | `us-east-1` | AWS region used for SigV4 signing. For Cloudflare R2 use `auto`. |
+| `S3_ACCESS_KEY_ID` | — | **Required when `STORAGE_BACKEND=s3`.** Access key ID. |
+| `S3_SECRET_ACCESS_KEY` | — | **Required when `STORAGE_BACKEND=s3`.** Secret access key. |
+| `S3_ENDPOINT` | — | Optional custom endpoint for S3-compatible providers. Leave unset for AWS S3 (virtual-hosted style). When set, path-style addressing is used. |
+
+**Scope:** Screenshot, visual-diff baseline, and visual-diff PNG writes route through `writeArtifactBuffer()`, which uploads to S3 and dual-writes to local disk in `s3` mode (so baseline acceptance and other code paths that still read from the filesystem continue to work). When `STORAGE_BACKEND=s3` is active, `signArtifactUrl()` emits S3 pre-signed GET URLs for every `/artifacts/*` path. Playwright video and trace artifacts are written by Playwright itself to local disk via `recordVideo` / `tracing.stop()` and are served from there — operators who need those in object storage today can sync `artifacts/videos` and `artifacts/traces` out-of-band.
+
+**Provider examples:**
+
+```bash
+# AWS S3
+STORAGE_BACKEND=s3
+S3_BUCKET=my-sentri-artifacts
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=AKIA…
+S3_SECRET_ACCESS_KEY=…
+
+# Cloudflare R2
+STORAGE_BACKEND=s3
+S3_BUCKET=sentri-artifacts
+S3_REGION=auto
+S3_ACCESS_KEY_ID=…
+S3_SECRET_ACCESS_KEY=…
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+
+# MinIO (self-hosted)
+STORAGE_BACKEND=s3
+S3_BUCKET=sentri
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_ENDPOINT=https://minio.internal:9000
+```
+
 ### Test Execution
 
 | Variable | Default | Description |

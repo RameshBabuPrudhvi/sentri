@@ -27,6 +27,7 @@ import { createRequire } from "module";
 import { AUTH_COOKIE } from "./authenticate.js";
 import { redis, isRedisAvailable } from "../utils/redisClient.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { isS3Storage, signS3ArtifactUrl } from "../utils/objectStorage.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -410,6 +411,13 @@ const ARTIFACT_TOKEN_TTL_MS = parseInt(process.env.ARTIFACT_TOKEN_TTL_MS ?? "", 
  * @returns {string} The full artifact URL with `?token=…&exp=…` appended.
  */
 export function signArtifactUrl(artifactPath) {
+  // In s3 mode, all artifact write paths route through writeArtifactBuffer()
+  // (which dual-writes to local disk for backward compatibility), so it is
+  // safe to emit pre-signed S3 URLs for every artifact type — screenshots,
+  // videos, traces, baselines, and diff PNGs.
+  if (isS3Storage()) {
+    return signS3ArtifactUrl(artifactPath, ARTIFACT_TOKEN_TTL_MS);
+  }
   const exp = Date.now() + ARTIFACT_TOKEN_TTL_MS;
   const mac = crypto
     .createHmac("sha256", ARTIFACT_SECRET)

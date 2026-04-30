@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `MNT-006` — Object storage for artifacts (S3 / R2) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 36 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs; AUTO-016 backend slice ✅ shipped in PR #121, frontend `CrawlView` panel tracked as AUTO-016b)
+> **Current sprint:** `AUTO-016b` — Frontend CrawlView accessibility panel · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 35 items (MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -101,6 +101,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
 | DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned) |
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121 |
+| MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122 |
 
 ---
 
@@ -1448,7 +1449,13 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### MNT-006 — Object storage for artifacts (S3 / R2) 🟡 High
+### MNT-006 — Object storage for artifacts (S3 / R2) ✅ Complete (PR #122 — partial: screenshots only)
+
+**Status:** Shipped in PR #122. `backend/src/utils/objectStorage.js` provides a local-disk default and S3-compatible adapter (raw AWS V4 signing, no SDK). `STORAGE_BACKEND=s3` switches modes; path-style addressing is used for custom `S3_ENDPOINT` (R2/MinIO) so the bucket is included in both URL and canonical signing URI. `signArtifactUrl()` emits S3 pre-signed URLs only for `/artifacts/screenshots/*`; `writeArtifactBuffer()` dual-writes to local disk in s3 mode so baseline acceptance keeps working.
+
+**Follow-up (deferred):** route video writes (`backend/src/runner/executeTest.js`), trace writes (`backend/src/testRunner.js`), and visual-diff baselines/diffs (`backend/src/runner/visualDiff.js`) through `writeArtifactBuffer()` and broaden the screenshot-only check in `signArtifactUrl()`. Add proper docs to `docs/guide/env-vars.md` for the 6 new env vars.
+
+
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Audit (M-03)
 

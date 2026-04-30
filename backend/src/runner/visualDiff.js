@@ -29,6 +29,7 @@ import path from "path";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
+import { writeArtifactBuffer } from "../utils/objectStorage.js";
 import {
   BASELINES_DIR,
   DIFFS_DIR,
@@ -97,11 +98,15 @@ function readPng(absPath) {
  * @param {Buffer} pngBuffer
  * @returns {{ absPath: string, publicPath: string, width: number, height: number }}
  */
-function persistBaseline(testId, stepNumber, browser, pngBuffer) {
-  const dir = path.join(BASELINES_DIR, testId, browser);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+async function persistBaseline(testId, stepNumber, browser, pngBuffer) {
   const absPath = baselineAbsPath(testId, browser, stepNumber);
-  fs.writeFileSync(absPath, pngBuffer);
+  const publicPath = baselinePublicPath(testId, browser, stepNumber);
+  await writeArtifactBuffer({
+    artifactPath: publicPath,
+    absolutePath: absPath,
+    buffer: pngBuffer,
+    contentType: "image/png",
+  });
 
   // Decode header only to capture dimensions — safe on failure.
   let width = null;
@@ -112,7 +117,6 @@ function persistBaseline(testId, stepNumber, browser, pngBuffer) {
     height = decoded.height;
   } catch { /* keep null dimensions */ }
 
-  const publicPath = baselinePublicPath(testId, browser, stepNumber);
   baselineRepo.upsert({ testId, stepNumber, browser, imagePath: publicPath, width, height });
   return { absPath, publicPath, width, height };
 }
@@ -157,7 +161,7 @@ export function ensureBaseline(testId, stepNumber = 0, browser = "chromium") {
  * @param {Buffer} args.pngBuffer - Raw PNG bytes of the captured screenshot.
  * @returns {VisualDiffResult}
  */
-export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber = 0, pngBuffer }) {
+export async function diffScreenshot({ runId, testId, browser = "chromium", stepNumber = 0, pngBuffer }) {
   if (!pngBuffer || !Buffer.isBuffer(pngBuffer) || pngBuffer.length === 0) {
     return { status: "error", message: "empty screenshot buffer" };
   }
@@ -165,7 +169,7 @@ export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber
   // ── First run for this step — create baseline and bail out early ──
   const existing = ensureBaseline(testId, stepNumber, browser);
   if (!existing) {
-    const { publicPath, width, height } = persistBaseline(testId, stepNumber, browser, pngBuffer);
+    const { publicPath, width, height } = await persistBaseline(testId, stepNumber, browser, pngBuffer);
     return {
       status: "baseline_created",
       baselinePath: publicPath,
@@ -210,8 +214,14 @@ export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber
   // path-safe (uppercase + digits + hyphens).
   const diffName = `${runId}-${testId}-step${stepNumber}.png`;
   const diffAbs = path.join(DIFFS_DIR, diffName);
+  const diffPublic = `/artifacts/diffs/${diffName}`;
   try {
-    fs.writeFileSync(diffAbs, PNG.sync.write(diff));
+    await writeArtifactBuffer({
+      artifactPath: diffPublic,
+      absolutePath: diffAbs,
+      buffer: PNG.sync.write(diff),
+      contentType: "image/png",
+    });
   } catch {
     return { status: "error", message: "failed to write diff PNG" };
   }
@@ -227,7 +237,7 @@ export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber
     diffRatio,
     threshold: VISUAL_DIFF_THRESHOLD,
     baselinePath: existing.row.imagePath,
-    diffPath: `/artifacts/diffs/${diffName}`,
+    diffPath: diffPublic,
   };
 }
 
@@ -244,8 +254,8 @@ export function diffScreenshot({ runId, testId, browser = "chromium", stepNumber
  * @returns {{ baselinePath: string }}
  * @throws {Error} When the source file cannot be read.
  */
-export function acceptBaseline({ testId, browser = "chromium", stepNumber = 0, sourceAbsPath }) {
+export async function acceptBaseline({ testId, browser = "chromium", stepNumber = 0, sourceAbsPath }) {
   const buf = fs.readFileSync(sourceAbsPath);
-  const { publicPath } = persistBaseline(testId, stepNumber, browser, buf);
+  const { publicPath } = await persistBaseline(testId, stepNumber, browser, buf);
   return { baselinePath: publicPath };
 }

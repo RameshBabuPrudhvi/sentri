@@ -29,6 +29,7 @@ import { formatLogLine } from "../utils/logFormatter.js";
 import { injectCursorOverlay } from "./cursorOverlay.js";
 import { diffScreenshot } from "./visualDiff.js";
 import { applyNetworkCondition } from "./networkConditions.js";
+import { writeArtifactBuffer } from "../utils/objectStorage.js";
 
 
 // ─── Non-visual action detection (S3-06) ──────────────────────────────────────
@@ -352,7 +353,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
               // because a step capture must never break test execution.
               let visualDiff = null;
               try {
-                visualDiff = diffScreenshot({
+                visualDiff = await diffScreenshot({
                   runId,
                   testId: test.id,
                   browser: browserName,
@@ -407,7 +408,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         // DIF-001: Diff the final screenshot against the test's baseline
         // (stepNumber 0 is reserved for the end-of-test capture).
         try {
-          result.visualDiff = diffScreenshot({
+          result.visualDiff = await diffScreenshot({
             runId,
             testId: test.id,
             browser: browserName,
@@ -486,7 +487,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
           const src = path.join(testVideoDir, files[0]);
           const videoName = `${runId}-step${stepIndex}.webm`;
           const dst = path.join(VIDEOS_DIR, videoName);
-          fs.renameSync(src, dst);
+          await writeArtifactBuffer({
+            artifactPath: `/artifacts/videos/${videoName}`,
+            absolutePath: dst,
+            buffer: fs.readFileSync(src),
+            contentType: "video/webm",
+          });
+          fs.unlinkSync(src);
           result.videoPath = `/artifacts/videos/${videoName}`;
         }
         fs.rmSync(testVideoDir, { recursive: true, force: true });
