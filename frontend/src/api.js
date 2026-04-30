@@ -703,14 +703,14 @@ export const api = {
    * @param   {AbortSignal}            [signal] - Optional abort signal to cancel the stream.
    * @returns {Promise<void>}
    */
-  chat: async (messages, onToken, onError, signal) => {
+  chat: async (messages, onToken, onError, signal, context = null) => {
     const res = await fetch(`${BASE}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-CSRF-Token": getCsrfToken(),
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, context }),
       credentials: "include",
       signal,
     });

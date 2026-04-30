@@ -53,6 +53,19 @@ IMPORTANT — Response format rules:
 - When the user asks about their tests, runs, projects, or failures, use the workspace context provided below to give specific, actionable answers.
 - If the workspace context is empty or not relevant to the question, answer using your general QA expertise.`;
 
+const TEST_EDIT_SYSTEM_PROMPT = `You are Sentri AI operating in test-edit mode.
+You will receive an existing Playwright test and a user edit request.
+
+Return two sections in Markdown:
+1) "### Summary" with a short explanation of the change
+2) "### Updated Playwright Code" followed by exactly one \`\`\`javascript fenced code block containing the full updated test code.
+
+Rules:
+- Return complete runnable code, not partial snippets.
+- Keep existing imports/setup unless the requested change requires edits.
+- Do not include JSON wrappers.
+- Do not omit the code block.`;
+
 /**
  * Build a compact workspace snapshot for the system prompt.
  * Kept small to avoid wasting tokens — only includes actionable data.
@@ -338,7 +351,7 @@ router.post("/chat", async (req, res) => {
     });
   }
 
-  const { messages: rawMessages } = req.body;
+  const { messages: rawMessages, context = null } = req.body;
   if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
     return res.status(400).json({ error: "messages array is required." });
   }
@@ -359,7 +372,7 @@ router.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "Last message must be from the user." });
   }
 
-  const userContent = history
+  let userContent = history
     ? `Previous conversation:\n${history}\n\nUser: ${lastMessage.content}`
     : lastMessage.content;
 
@@ -388,9 +401,29 @@ router.post("/chat", async (req, res) => {
   const workspaceContext = isLocal ? "" : buildWorkspaceContext(ctx);
   const entityContext = buildEntityContext(ctx, lastMessage.content, { compact: isLocal });
   const contextParts = [workspaceContext, entityContext].filter(Boolean).join("\n\n");
-  const systemPrompt = contextParts
+  let systemPrompt = contextParts
     ? `${BASE_SYSTEM_PROMPT}\n\n${contextParts}`
     : BASE_SYSTEM_PROMPT;
+
+  if (context?.mode === "test_edit") {
+    const testCode = typeof context.testCode === "string" ? context.testCode : "";
+    const testName = typeof context.testName === "string" ? context.testName : "Unnamed test";
+    const testSteps = Array.isArray(context.testSteps) ? context.testSteps : [];
+    const compactSteps = testSteps.slice(0, 20).map((step, i) => `${i + 1}. ${step}`).join("\n");
+    systemPrompt = TEST_EDIT_SYSTEM_PROMPT;
+    userContent = `Test name: ${testName}
+
+User request:
+${lastMessage.content}
+
+Current steps:
+${compactSteps || "(none)"}
+
+Current Playwright code:
+\`\`\`javascript
+${testCode}
+\`\`\``;
+  }
 
   // Log prompt metadata at info level (always visible) and full prompt at debug
   const promptCharCount = systemPrompt.length + userContent.length;
