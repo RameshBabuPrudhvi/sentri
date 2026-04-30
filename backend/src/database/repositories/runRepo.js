@@ -74,6 +74,7 @@ const INSERT_COLS = [
   "rateLimitError", "qualityAnalytics", "workspaceId", "pages",
   "browser", // DIF-002: chromium | firefox | webkit
   "retryCount", "failedAfterRetry", // AUTO-005: aggregated retry telemetry
+  "networkCondition", // AUTO-006: fast | slow3g | offline (migration 012)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -86,6 +87,7 @@ const LEAN_COLS = [
   "duration", "error", "errorCategory", "passed", "failed", "total",
   "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
   "browser", // DIF-002 — surfaces browser badge on runs list without a second query
+  "networkCondition", // AUTO-006 — surfaces network-condition badge on runs list without a second query
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;
