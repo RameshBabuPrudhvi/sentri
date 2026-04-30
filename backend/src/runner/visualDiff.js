@@ -254,8 +254,8 @@ export async function diffScreenshot({ runId, testId, browser = "chromium", step
  * @returns {{ baselinePath: string }}
  * @throws {Error} When the source file cannot be read.
  */
-export function acceptBaseline({ testId, browser = "chromium", stepNumber = 0, sourceAbsPath }) {
+export async function acceptBaseline({ testId, browser = "chromium", stepNumber = 0, sourceAbsPath }) {
   const buf = fs.readFileSync(sourceAbsPath);
-  const { publicPath } = persistBaseline(testId, stepNumber, browser, buf);
+  const { publicPath } = await persistBaseline(testId, stepNumber, browser, buf);
   return { baselinePath: publicPath };
 }

@@ -817,7 +817,7 @@ router.get("/tests/:testId/baselines", (req, res) => {
  *   - For stepNumber = 0, the run result's `screenshotPath` is used.
  *   - For stepNumber >= 1, the matching entry in `stepCaptures[]` is used.
  */
-router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"), (req, res) => {
+router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"), async (req, res) => {
   const test = testRepo.getById(req.params.testId);
   if (!test) return res.status(404).json({ error: "test not found" });
   const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
@@ -870,7 +870,7 @@ router.post("/tests/:testId/baselines/:stepNumber/accept", requireRole("qa_lead"
   }
 
   try {
-    const { baselinePath } = acceptBaseline({ testId: test.id, browser, stepNumber, sourceAbsPath });
+    const { baselinePath } = await acceptBaseline({ testId: test.id, browser, stepNumber, sourceAbsPath });
     logActivity({ ...actor(req),
       type: "test.baseline_accept", projectId: project.id, projectName: project.name,
       detail: `Accepted visual baseline for ${test.id} [${browser}] step ${stepNumber}`, status: "success",
