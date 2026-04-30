@@ -34,8 +34,6 @@ Backend half of AUTO-016 shipped in PR #121 (axe-core scan + persistence + per-p
 - [ ] Update this file: move AUTO-016b to "Recently completed", promote next item from Queue
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
 
-> **MNT-006 follow-ups (not blocking):** Only screenshots are currently routed through `writeArtifactBuffer` and only screenshot URLs are S3-signed. Migrating videos (`backend/src/runner/executeTest.js`), traces (`backend/src/testRunner.js`), and visual-diff baselines/diffs (`backend/src/runner/visualDiff.js`) is tracked as a follow-up. Until then `writeArtifactBuffer` dual-writes to local disk in s3 mode so baseline acceptance keeps working.
-
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
@@ -71,7 +69,7 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
-| MNT-006 | Object storage abstraction (local-disk default + S3/R2 pre-signed URLs for screenshots; videos/traces follow-up) | #122 |
+| MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | #122 |
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | #121 |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out, full event set) | #3, #120 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) + run persistence | #3, #120 |
