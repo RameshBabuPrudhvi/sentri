@@ -1457,17 +1457,10 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit (M-03)
 
-**Problem:** Screenshots, videos, and Playwright traces are stored on local disk (`data/screenshots/`, `data/videos/`). In a Docker or multi-instance deployment, these are lost on container restart and cannot be shared across instances. This is acknowledged in the README production checklist.
 
-**Fix:** Add an `objectStorage` abstraction with a local-disk adapter (current behaviour) and an S3/R2 adapter (using `@aws-sdk/client-s3`). Switch based on `STORAGE_BACKEND=s3`. Update all artifact read/write paths. Update `signArtifactUrl()` to produce pre-signed S3 URLs when using the S3 backend.
 
-**Files to change:**
-- `backend/src/runner/pageCapture.js` — use storage abstraction
-- `backend/src/runner/screencast.js` — use storage abstraction
-- New `backend/src/utils/objectStorage.js` — local + S3/R2 adapter
-- `backend/.env.example` — document `STORAGE_BACKEND`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`
+
 
 ---
 
