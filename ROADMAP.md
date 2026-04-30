@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-016` — Accessibility testing (axe-core) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 37 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `MNT-006` — Object storage for artifacts (S3 / R2) · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 36 items (DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs; AUTO-016 backend slice ✅ shipped in PR #121, frontend `CrawlView` panel tracked as AUTO-016b)
 
 ---
 
@@ -1237,7 +1237,9 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-016 — Accessibility testing (axe-core integration) 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (backend slice — PR #121) | **Effort:** M | **Source:** Competitive Gap Analysis
+
+> **Shipped scope (PR #121):** Backend half — `@axe-core/playwright` scan on every crawled page, normalised via `mapA11yViolations()`, persisted through `accessibilityViolationRepo.bulkCreate()` (`backend/src/database/repositories/accessibilityViolationRepo.js`) into the new `accessibility_violations` table (migration `013_accessibility_violations.sql`). Best-effort: scan failures log a warning and do not abort the crawl. Per-page summary attached to snapshots and `run.pages[].accessibilityViolations` so the frontend has the data without a second round-trip. The frontend `CrawlView` violation panel (NEXT.md `human-scope`) is **not** in this PR — track follow-up as **AUTO-016b** when it lands.
 
 **Problem:** No accessibility testing exists. Playwright has first-class support for `@axe-core/playwright`. An autonomous QA platform should run WCAG 2.1 checks on every crawled page and flag violations. This is increasingly a legal requirement (ADA, European Accessibility Act).
 

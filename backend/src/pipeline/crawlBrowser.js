@@ -17,7 +17,7 @@ import { decryptCredentials } from "../utils/credentialEncryption.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
-import { getDatabase } from "../database/sqlite.js";
+import * as accessibilityViolationRepo from "../database/repositories/accessibilityViolationRepo.js";
 import { AxeBuilder } from "@axe-core/playwright";
 
 const MAX_PAGES = parseInt(process.env.CRAWL_MAX_PAGES, 10) || 30;
@@ -77,7 +77,6 @@ function isSameEffectiveOrigin(urlA, urlB) {
  */
 export async function crawlPages(project, run, { signal } = {}) {
   const browser = await launchBrowser();
-  const db = getDatabase();
 
   const snapshots = [];
   const snapshotsByUrl = {};
@@ -264,27 +263,7 @@ export async function crawlPages(project, run, { signal } = {}) {
         try {
           const axeResults = await new AxeBuilder({ page }).analyze();
           a11yViolations = mapA11yViolations(run.id, url, axeResults);
-          if (a11yViolations.length > 0) {
-            const insertViolation = db.prepare(
-              `INSERT INTO accessibility_violations
-                (runId, pageUrl, ruleId, impact, wcagCriterion, help, description, nodesJson, createdAt)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            );
-            const createdAt = new Date().toISOString();
-            for (const violation of a11yViolations) {
-              insertViolation.run(
-                violation.runId,
-                violation.pageUrl,
-                violation.ruleId,
-                violation.impact,
-                violation.wcagCriterion,
-                violation.help,
-                violation.description,
-                violation.nodesJson,
-                createdAt
-              );
-            }
-          }
+          accessibilityViolationRepo.bulkCreate(a11yViolations);
         } catch (a11yErr) {
           logWarn(run, `Accessibility scan failed on ${url}: ${a11yErr.message}`);
         }
