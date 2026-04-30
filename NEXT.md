@@ -45,6 +45,20 @@ Per-project `qualityGates` config (min pass rate, max flaky %, max failures). On
 
 **Files:** `backend/src/routes/projects.js` · `backend/src/testRunner.js` · `backend/src/routes/trigger.js` · `frontend/src/pages/ProjectDetail.jsx`
 
+### 3 · DIF-015b Gap 2 — Recorder selectorGenerator: data-testid quality scoring
+**Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** none
+
+Score data-testid candidates in the recorder's `selectorGenerator()` priority chain so generic / auto-generated ids (e.g. `data-testid="btn-1"`, hash-suffixed values) are demoted in favour of stable semantic ids. Highest-value next step toward flipping DIF-015b to ✅ Complete in `ROADMAP.md` once Gap 3 also ships. Heuristics + acceptance criteria documented in `ROADMAP.md § DIF-015b`.
+
+**Files:** `backend/src/runner/recorder.js` (only)
+
+### 4 · AUTO-017 — Performance budget testing (Web Vitals)
+**Effort:** M | **Priority:** 🔵 Medium | **Dependencies:** none
+
+Capture Web Vitals (LCP, CLS, INP, TTFB) per page during runs and compare against per-project budgets. Surface budget violations as a new run-result section and gate runs when budgets are exceeded.
+
+**Files:** `backend/src/runner/pageCapture.js` · `backend/src/testRunner.js` · `frontend/src/components/run/StepResultsView.jsx`
+
 ---
 
 ## 🔀 Parallel opportunities (small items, no queue conflicts)
@@ -72,6 +86,5 @@ These can be picked up by a second engineer alongside the current PR without fil
 | MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | #122 |
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | #121 |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out, full event set) | #3, #120 |
-| AUTO-006 | Network condition simulation (slow 3G / offline) + run persistence | #3, #120 |
 
 *Full completed list → ROADMAP.md § Completed Work*
