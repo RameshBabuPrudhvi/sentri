@@ -100,6 +100,7 @@ The following items have been verified complete against the codebase and are **n
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3 |
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
 | DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned) |
+| AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121 |
 
 ---
 
@@ -1581,7 +1582,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Standalone export | ❌ → DIF-006 | ❌ Lock-in | ❌ Lock-in | ❌ Lock-in | N/A |
 | Flaky test detection | ✅ DIF-004 | ✅ | ✅ | ✅ | ❌ |
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
-| Accessibility testing | ❌ → AUTO-016 | ✅ | ❌ | Partial | Via plugins |
+| Accessibility testing | ✅ (backend) / 🔄 AUTO-016b (UI) | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
 | Quality gate enforcement | ❌ → AUTO-012 | ✅ | ✅ | ✅ | Via Playwright |
 
@@ -1612,7 +1613,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 **All blockers resolved.** ✅
 
 **Recommended PR order (next):**
-`DIF-006` (Playwright export — biggest lock-in objection handler) → `AUTO-005` (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` (accessibility via axe-core) → `MNT-006` (S3 object storage — production prerequisite)
+`DIF-006` ✅ (Playwright export — biggest lock-in objection handler) → `AUTO-005` ✅ (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` ✅ backend (accessibility via axe-core, PR #121; UI tracked as `AUTO-016b`) → `MNT-006` (S3 object storage — production prerequisite)
 
 **Lowest effort / highest immediate value:**
 ~~MNT-011 (S)~~ ✅ · ~~AUTO-007 (S)~~ ✅ · DIF-006 (M) · AUTO-005 (M) · DIF-013 (S — telemetry)
