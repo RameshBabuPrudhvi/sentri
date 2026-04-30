@@ -1603,11 +1603,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 4 | 3 | 0 | 1 | ENH-036 |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
-| Autonomous Intelligence | 22 | 2 | 0 | 20 | AUTO-001–006, 008–012, 014–022 |
+| Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **28** | **0** | **42** | |
+| **Totals** | **70** | **31** | **0** | **39** | |
 
-**Total tracked items:** 70 across 7 categories — **28 complete** (40%), **0 in progress**, **42 remaining**
+**Total tracked items:** 70 across 7 categories — **31 complete** (44%), **0 in progress**, **39 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅
