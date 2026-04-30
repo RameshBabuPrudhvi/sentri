@@ -18,7 +18,7 @@
  * check) for both context shapes.
  */
 import assert from "node:assert/strict";
-import { requireAuth } from "../src/routes/auth.js";
+import authRouter, { requireAuth } from "../src/routes/auth.js";
 import chatRouter from "../src/routes/chat.js";
 import { createTestContext } from "./helpers/test-base.js";
 
@@ -28,8 +28,10 @@ const { app, workspaceScope } = t;
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
-  // Mirror the production mount in backend/src/index.js so /api/v1/chat
+  // Mount auth at /api/auth so test-base.js `registerAndLogin` works, then
+  // mirror the production mount in backend/src/index.js so /api/v1/chat
   // resolves to the chat router under the same auth + workspace stack.
+  app.use("/api/auth", authRouter);
   app.use("/api/v1", requireAuth, workspaceScope, chatRouter);
   mounted = true;
 }
