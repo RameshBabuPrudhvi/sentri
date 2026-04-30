@@ -30,6 +30,7 @@
 
 import { getProviderName } from "./aiProvider.js";
 import { throwIfAborted, finalizeRunIfNotAborted } from "./utils/abortHelper.js";
+import { trackTelemetry } from "./utils/telemetry.js";
 import { filterElements, filterStats } from "./pipeline/elementFilter.js";
 import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifier.js";
 import { generateAllTests, generateFromDescription, generateApiTests } from "./pipeline/journeyGenerator.js";
@@ -115,6 +116,15 @@ async function filterAndClassify(snapshots, snapshotsByUrl, project, run, signal
 export async function generateFromUserDescription(project, run, { name, description, dialsPrompt = "", testCount = "ai_decides", signal }) {
   const runStart = Date.now();
   structuredLog("generate.start", { runId: run.id, projectId: project.id, mode: "description", name });
+  // DIF-013: anonymous opt-out telemetry — coarse-grained event with PII
+  // stripped (URL → domain via sanitizeProps).
+  trackTelemetry("generate.start", {
+    projectId: project.id,
+    provider: getProviderName(),
+    testCount,
+    descriptionLength: (description || "").length,
+    url: project.url,
+  });
   log(run, `✦ Starting test generation from requirement for "${name}"`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️ Run config:`);
@@ -168,6 +178,15 @@ export async function generateFromUserDescription(project, run, { name, descript
     log(run, `Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
     logSuccess(run, `Done! ${run.tests.length} test(s) generated from description for "${name}".`);
     structuredLog("generate.complete", { runId: run.id, projectId: project.id, tests: run.tests.length, durationMs: run.duration });
+    // DIF-013: report generation outcome (count + rejection rate proxy).
+    trackTelemetry("generate.complete", {
+      projectId: project.id,
+      provider: getProviderName(),
+      testsGenerated: run.tests.length,
+      rejected,
+      durationMs: run.duration,
+      url: project.url,
+    });
     emitRunEvent(run.id, "done", { status: "completed", testsGenerated: run.tests.length });
   });
 
@@ -194,6 +213,15 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
 
   // ── Step 1: Smart crawl or state exploration ─────────────────────────────
   structuredLog("crawl.start", { runId: run.id, projectId: project.id, mode, url: project.url });
+  // DIF-013: report crawl/state-explore launch. URL is stripped to domain
+  // by sanitizeProps before sending — no full URLs leave the host.
+  trackTelemetry("crawl.start", {
+    projectId: project.id,
+    mode,
+    provider: getProviderName(),
+    testCount,
+    url: project.url,
+  });
   log(run, `🕷️  Starting ${mode === "state" ? "state exploration" : "smart crawl"} of ${project.url}`);
   log(run, `🤖 AI provider: ${getProviderName()}`);
   log(run, `⚙️ Run config:`);
@@ -411,6 +439,20 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       runId: run.id, projectId: project.id, mode,
       pages: snapshots.length, tests: run.tests.length, durationMs: run.duration,
       apiEndpoints: apiEndpoints.length,
+    });
+    // DIF-013: report crawl outcome with the same shape as crawl.start so
+    // PostHog funnels (start → complete) line up. `status` distinguishes
+    // success from `completed_empty` so we can measure crawl quality.
+    trackTelemetry("crawl.complete", {
+      projectId: project.id,
+      mode,
+      status: run.status,
+      pages: snapshots.length,
+      testsGenerated: run.tests.length,
+      apiEndpoints: apiEndpoints.length,
+      rateLimitHit: !!run.rateLimitError,
+      durationMs: run.duration,
+      url: project.url,
     });
     emitRunEvent(run.id, "done", { status: run.status, testsGenerated: run.tests.length });
   });

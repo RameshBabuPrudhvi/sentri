@@ -27,6 +27,7 @@ import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
+import { trackTelemetry } from "./utils/telemetry.js";
 import { initScheduler, stopAllTasks } from "./scheduler.js";
 import { closeRedis } from "./utils/redisClient.js";
 import { ensureDefaultWorkspaces } from "./database/repositories/workspaceRepo.js";
@@ -353,4 +354,13 @@ const PORT = process.env.PORT || 3001;
 _server = app.listen(PORT, () => {
   console.log(formatLogLine("info", null, `🐻 Sentri API running on port ${PORT}`));
   structuredLog("server.start", { port: PORT });
+  // DIF-013: lifetime-once `install.first_run` event — deduped by the
+  // ONCE_PER_INSTALL set in telemetry.js via data/telemetry-cache.json,
+  // so restarting the server does not re-fire this. Safe no-op when
+  // telemetry is disabled or no POSTHOG_API_KEY is set.
+  trackTelemetry("install.first_run", {
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+  });
 });

@@ -40,6 +40,7 @@ import { buildZephyrCsv, buildTestRailCsv, buildPlaywrightZip } from "../utils/e
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { trackTelemetry } from "../utils/telemetry.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
 import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
@@ -550,6 +551,15 @@ router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
+  // DIF-013: approval/rejection rate telemetry. `generatedFrom` tells us
+  // whether AI-generated, recorded, or manual tests are more likely to be
+  // approved — useful for measuring pipeline quality over time.
+  trackTelemetry("test.review", {
+    projectId: req.params.id,
+    decision: "approved",
+    generatedFrom: test.generatedFrom || null,
+    isBulk: false,
+  });
   res.json(testRepo.getById(test.id));
 });
 
@@ -566,6 +576,13 @@ router.patch("/projects/:id/tests/:testId/reject", requireRole("qa_lead"), (req,
     type: "test.reject", projectId: req.params.id, projectName: project.name,
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
+  });
+  // DIF-013: see approve handler above for rationale.
+  trackTelemetry("test.review", {
+    projectId: req.params.id,
+    decision: "rejected",
+    generatedFrom: test.generatedFrom || null,
+    isBulk: false,
   });
   res.json(testRepo.getById(test.id));
 });
@@ -631,6 +648,17 @@ router.post("/projects/:id/tests/bulk", requireRole("qa_lead"), (req, res) => {
       type: `test.bulk_${action}`, projectId: req.params.id, projectName: project.name,
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
+    // DIF-013: emit ONE bulk event (not N per-test) to keep PostHog volume
+    // reasonable. The aggregated count is what we need for approval-rate
+    // analytics; per-test granularity would dominate the event stream.
+    if (action === "approve" || action === "reject") {
+      trackTelemetry("test.review", {
+        projectId: req.params.id,
+        decision: action === "approve" ? "approved" : "rejected",
+        count: updated.length,
+        isBulk: true,
+      });
+    }
   }
   res.json({ updated: updated.length, tests: updated });
 });

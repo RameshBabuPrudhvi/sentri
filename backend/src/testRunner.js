@@ -34,6 +34,7 @@ import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
+import { trackTelemetry } from "./utils/telemetry.js";
 import { emitRunEvent, log, logWarn, logError, logSuccess } from "./utils/runLogger.js";
 import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
@@ -332,6 +333,23 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       runId, projectId: project.id,
       passed: run.passed, failed: run.failed, total: run.total,
       durationMs: run.duration,
+    });
+    // DIF-013: report run outcome (regression / single-test / scheduled run).
+    // `run.started` is emitted at the route layer when the run is enqueued —
+    // this is the matching `complete` event for funnel analysis. Retry
+    // telemetry (AUTO-005) is included so we can measure flake-isolation
+    // impact in aggregate.
+    trackTelemetry("run.complete", {
+      projectId: project.id,
+      browser: resolvedBrowser,
+      total: run.total,
+      passed: run.passed,
+      failed: run.failed,
+      retryCount: run.retryCount || 0,
+      failedAfterRetry: run.failedAfterRetry || 0,
+      parallelWorkers: workers,
+      durationMs: run.duration,
+      url: project.url,
     });
   });
 
