@@ -218,7 +218,26 @@ ${indentedBody}
       writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), wrappedCode);
     });
 
-    execFileSync("zip", ["-rq", outPath, "."], { cwd: projectRoot });
+    try {
+      execFileSync("zip", ["-rq", outPath, "."], { cwd: projectRoot });
+    } catch (zipErr) {
+      // Distinguish "zip binary not installed" from "zip ran but failed" so
+      // the route handler can surface an actionable error. Without this,
+      // both cases bubble up as opaque 500s and operators on minimal Docker
+      // bases / Windows dev boxes have no way to know they're missing the
+      // zip binary (documented in docs/api/tests.md but not self-evident).
+      // ENOENT is what Node's execFileSync throws when the binary isn't on
+      // $PATH. Every other failure is a genuine runtime error and keeps its
+      // original message.
+      if (zipErr.code === "ENOENT") {
+        const err = new Error(
+          "System `zip` binary not found on PATH. Install it (apt: `apt-get install zip`; alpine: `apk add zip`; macOS: included) or use a Docker image that ships it. See docs/api/tests.md § Standalone Playwright project ZIP for details."
+        );
+        err.code = "ZIP_BINARY_MISSING";
+        throw err;
+      }
+      throw zipErr;
+    }
     return readFileSync(outPath);
   } finally {
     // Always clean up the temp directory, even if zip/readFile threw.

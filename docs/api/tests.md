@@ -190,11 +190,17 @@ rejected tests are excluded. The archive contains:
 
 Returns `404` when the project does not exist or is outside the caller's
 workspace (matches the convention used by every other route to avoid leaking
-project existence across workspaces — ACL-001). Returns `500` when the
-implementation cannot complete the archive — note that the implementation
-shells out to the system `zip` binary instead of pulling in a new npm
-runtime dependency, so deployments without `zip` available on `$PATH` will
-return `500`.
+project existence across workspaces — ACL-001).
+
+Returns `503` with `{ code: "ZIP_BINARY_MISSING", error, hint }` when the
+backend host is missing the system `zip` binary. The implementation shells
+out to `zip` instead of pulling in a new npm runtime dependency, so
+deployments on minimal Docker bases (e.g. `node:alpine` without `apk add
+zip`) or Windows dev boxes without the binary on `$PATH` surface this as an
+operator-fixable 503 rather than an opaque 500. Install `zip` on the host
+(`apt-get install zip` / `apk add zip`; macOS ships it) to resolve.
+
+Returns `500` for any other internal failure during archive assembly.
 
 ### Traceability Matrix
 

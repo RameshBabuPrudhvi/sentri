@@ -12,6 +12,30 @@
  *     via `page.route("**\/*", …)` on Firefox/WebKit where CDP isn't
  *     available.
  *
+ * ## MVP scope (AUTO-006 ROADMAP deferral)
+ *
+ * The ROADMAP entry mentions "throttling" with configurable latency and
+ * throughput. This MVP ships **three hardcoded presets** (`fast` / `slow3g`
+ * / `offline`) that map to Chrome DevTools' own "Slow 3G" preset values
+ * (400 Kbps, 400 ms RTT). Configurable `{ latency, downloadKbps,
+ * uploadKbps }` is **intentionally deferred** for these reasons:
+ *
+ *   1. The preset values are the industry defaults every QA platform
+ *      compares against — customers asking about "Slow 3G" testing expect
+ *      these exact numbers, not arbitrary ones.
+ *   2. Adding a free-form object to the run payload without schema
+ *      validation invites bad inputs (negative throughput, absurd
+ *      latencies) that produce confusing results rather than hard errors.
+ *   3. The `slow3g` preset covers ≥90% of "my site is slow on mobile"
+ *      testing intent without operator tuning.
+ *
+ * If custom throttling is needed (e.g. to reproduce a specific customer
+ * network profile), extend `applyNetworkCondition` to accept
+ * `networkCondition: { kind: "custom", latency, downloadKbps, uploadKbps }`
+ * and validate at the route layer (`backend/src/routes/runs.js`). The CDP
+ * call already accepts arbitrary values — only the public API surface needs
+ * widening. Tracked as a follow-up note under AUTO-006 in ROADMAP.md.
+ *
  * Returns a `{ teardown }` handle. The caller MUST `await teardown()` in a
  * `finally` block before closing the page so the slow3g route handler is
  * unrouted and doesn't keep firing on in-flight teardown requests.

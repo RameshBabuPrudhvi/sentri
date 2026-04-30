@@ -9,6 +9,18 @@ Only `JWT_SECRET` and one AI provider key are required to get started — everyt
 
 Anonymous opt-out telemetry via PostHog. All variables are optional; telemetry is a no-op unless `POSTHOG_API_KEY` is set.
 
+> **Posture:** Sentri is self-hosted, so telemetry follows the posture of
+> tools like Next.js / Vite / Playwright: **effectively opt-in** (no
+> `POSTHOG_API_KEY` → zero network traffic, zero events, zero `data/`
+> cache writes) with an **opt-out signal** (`SENTRI_TELEMETRY=0` or
+> `DO_NOT_TRACK=1`) for operators who *do* configure a key but want to
+> disable collection per-deployment. There is no in-product banner or
+> first-run consent prompt — telemetry cannot start without the operator
+> explicitly providing an API key, which is itself the consent signal.
+> If you need a consent banner for end-user-facing deployments, file an
+> issue against DIF-013; the telemetry module's opt-out branches are
+> already exposed so a UI-level gate is additive work.
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `POSTHOG_API_KEY` | _(unset)_ | PostHog project API key. When unset, `trackTelemetry()` is a no-op regardless of other settings. |

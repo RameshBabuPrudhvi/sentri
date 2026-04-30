@@ -1078,6 +1078,8 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 **Dependencies:** None
 
+> **Shipped MVP scope (PR #3 + #120):** Three hardcoded presets only — `fast` / `slow3g` / `offline`. The `slow3g` preset matches Chrome DevTools' own preset (400 Kbps, 400 ms RTT) via CDP `Network.emulateNetworkConditions` on Chromium, with a `page.route()` 400 ms delay fallback for Firefox / WebKit. Migration 012 persists the chosen preset on the run record for analytics. Configurable `{ latency, downloadKbps, uploadKbps }` is intentionally deferred — see the JSDoc on `backend/src/runner/networkConditions.js` § "MVP scope" for the rationale (industry-default preset values match customer expectations; free-form object would need schema validation; `slow3g` covers ≥90% of "my site is slow on mobile" intent). Reopen as **AUTO-006b** if a customer asks for a custom profile.
+
 ---
 
 ### AUTO-007 — Geolocation / locale / timezone testing 🔵 Medium
