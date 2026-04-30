@@ -53,6 +53,7 @@
     "GET /api/v1/projects",
     "GET /api/v1/projects/:id",
     "GET /api/v1/projects/:id/tests",
+    "GET /api/v1/projects/:id/export/playwright",
     "GET /api/v1/tests/:testId",
     "GET /api/v1/recycle-bin",
     "GET /api/v1/auth/export",
@@ -63,7 +64,6 @@
     "$comment": "Endpoints / flows present in code but not yet shipped end-to-end. Do NOT manually QA — file enhancement requests instead.",
     "items": [
       "DIF-005 — embedded Playwright trace viewer",
-      "DIF-006 — standalone Playwright project export",
       "SEC-004 — MFA / 2FA",
       "Public / shareable test report links",
       "Jira integration",
