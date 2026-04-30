@@ -279,7 +279,7 @@ Historical record of completed security work. **Do not "re-fix" these** — they
 | Reset token exposure | Forgot-password endpoint returns the reset token only when `ENABLE_DEV_RESET_TOKENS=true` is explicitly set. |
 | DB-backed reset tokens | Persisted in `password_reset_tokens` (migration 003) via `passwordResetTokenRepo`. Atomic `claim()` prevents TOCTOU double-use. `usedAt` provides one-time-use audit trail. |
 | Per-user audit trail | Activity log records `userId` + `userName` (migration 001). `actor(req)` extracts identity from `req.authUser`. Bulk approve/reject/restore log per-test entries with the acting user. |
-| Artifact authentication | `/artifacts` route protected by HMAC-SHA256 signed `?token=&exp=` query params (1hr TTL via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` required in production. `signArtifactUrl()` in `appSetup.js` generates URLs. `Cache-Control: private, no-store`. |
+| Artifact authentication | `/artifacts` route protected by HMAC-SHA256 signed `?token=&exp=` query params (1hr TTL via `ARTIFACT_TOKEN_TTL_MS`). `ARTIFACT_SECRET` required in production. `signArtifactUrl()` in `appSetup.js` generates URLs. `Cache-Control: private, no-store`. When `STORAGE_BACKEND=s3` (MNT-006), `signArtifactUrl()` instead returns SigV4 pre-signed S3 GET URLs (same TTL); see `utils/objectStorage.js` and env vars `S3_BUCKET` / `S3_REGION` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_ENDPOINT`. |
 | Secrets scanning | Gitleaks runs on every PR/push to `main` via the `secrets` CI job. `lint` and `build` jobs depend on it. Config in `.github/.gitleaks.toml`. |
 | Nonce-based CSP | Per-request nonce via `crypto.randomBytes(16)` in `appSetup.js`, passed to Helmet CSP `scriptSrc` as `'nonce-<value>'`. Vite `transformIndexHtml` injects `nonce="__CSP_NONCE__"`; `serveIndexWithNonce()` replaces at serve-time (SEC-002). |
 | GDPR/CCPA export & delete | `GET /api/auth/export` returns JSON archive of all user-owned data (`passwordHash` stripped). `DELETE /api/auth/account` hard-deletes user + owned data in a transaction. Both require password confirmation. Frontend Account tab with two-click confirm flow (SEC-003). |
@@ -326,8 +326,14 @@ Not yet implemented; address before production:
 | `HEALING_VISIBLE_WAIT_CAP` | No | `1200` | Max `waitFor` timeout per strategy in `firstVisible` (ms) |
 | `ENABLE_DEV_RESET_TOKENS` | No | `false` | When `"true"`, forgot-password response includes the reset token (dev/test only) |
 | `MAX_CONVERSATION_TURNS` | No | `20` | Max user↔assistant turn pairs in chat context window |
-| `ARTIFACT_SECRET` | Yes (prod) | random (dev) | HMAC-SHA256 key for signing artifact URLs |
-| `ARTIFACT_TOKEN_TTL_MS` | No | `3600000` | Lifetime of signed artifact URL tokens (ms) |
+| `ARTIFACT_SECRET` | Yes (prod) | random (dev) | HMAC-SHA256 key for signing artifact URLs (local-storage mode only) |
+| `ARTIFACT_TOKEN_TTL_MS` | No | `3600000` | Lifetime of signed artifact URL tokens (ms). Also used as the TTL for SigV4 pre-signed S3 URLs when `STORAGE_BACKEND=s3` |
+| `STORAGE_BACKEND` | No | `local` | MNT-006: `local` (default) or `s3`. When `s3`, artifact writes dual-write to disk + upload to the configured bucket and `signArtifactUrl()` emits SigV4 pre-signed GET URLs |
+| `S3_BUCKET` | If `STORAGE_BACKEND=s3` | — | S3-compatible bucket name (path-style when `S3_ENDPOINT` is set) |
+| `S3_REGION` | No | `us-east-1` | AWS region used for SigV4 signing; use `auto` for Cloudflare R2 |
+| `S3_ACCESS_KEY_ID` | If `STORAGE_BACKEND=s3` | — | Access key ID for the configured bucket |
+| `S3_SECRET_ACCESS_KEY` | If `STORAGE_BACKEND=s3` | — | Secret access key for the configured bucket |
+| `S3_ENDPOINT` | No | — | Optional custom endpoint for S3-compatible providers (Cloudflare R2, MinIO). Leave unset for AWS S3 |
 | `RESEND_API_KEY` | No | — | Resend API key for transactional email |
 | `SMTP_HOST` | No | — | SMTP server host |
 | `SMTP_PORT` | No | `587` | SMTP server port |

@@ -159,7 +159,7 @@ Sentri stores test artifacts (screenshots, videos, traces, visual-diff PNGs) on 
 | `S3_SECRET_ACCESS_KEY` | — | **Required when `STORAGE_BACKEND=s3`.** Secret access key. |
 | `S3_ENDPOINT` | — | Optional custom endpoint for S3-compatible providers. Leave unset for AWS S3 (virtual-hosted style). When set, path-style addressing is used. |
 
-**Scope:** Screenshot, visual-diff baseline, and visual-diff PNG writes route through `writeArtifactBuffer()`, which uploads to S3 and dual-writes to local disk in `s3` mode (so baseline acceptance and other code paths that still read from the filesystem continue to work). When `STORAGE_BACKEND=s3` is active, `signArtifactUrl()` emits S3 pre-signed GET URLs for every `/artifacts/*` path. Playwright video and trace artifacts are written by Playwright itself to local disk via `recordVideo` / `tracing.stop()` and are served from there — operators who need those in object storage today can sync `artifacts/videos` and `artifacts/traces` out-of-band.
+**Scope:** Screenshots, visual-diff baselines, visual-diff PNGs, Playwright videos, and trace zips all route through `writeArtifactBuffer()` in `s3` mode, which uploads to S3 and dual-writes to local disk so baseline acceptance and other code paths that still read from the filesystem continue to work. When `STORAGE_BACKEND=s3` is active, `signArtifactUrl()` emits S3 pre-signed GET URLs for every `/artifacts/*` path. Video and trace uploads are best-effort: if S3 upload fails the run still reports the local artifact path so the run isn't flipped to failed by a transient storage outage.
 
 **Provider examples:**
 
