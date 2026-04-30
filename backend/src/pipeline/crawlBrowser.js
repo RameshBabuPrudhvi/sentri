@@ -263,7 +263,6 @@ export async function crawlPages(project, run, { signal } = {}) {
         try {
           const axeResults = await new AxeBuilder({ page }).analyze();
           a11yViolations = mapA11yViolations(run.id, url, axeResults);
-          accessibilityViolationRepo.bulkCreate(a11yViolations);
         } catch (a11yErr) {
           logWarn(run, `Accessibility scan failed on ${url}: ${a11yErr.message}`);
         }
@@ -282,6 +281,17 @@ export async function crawlPages(project, run, { signal } = {}) {
           continue;
         }
         crawlQueue.markStructureSeen(structureFP);
+
+        // Persist accessibility violations only after the page is confirmed
+        // kept — avoids orphaned rows for URLs filtered out by the
+        // structure-duplicate check above.
+        if (a11yViolations.length > 0) {
+          try {
+            accessibilityViolationRepo.bulkCreate(a11yViolations);
+          } catch (persistErr) {
+            logWarn(run, `Failed to persist accessibility violations for ${url}: ${persistErr.message}`);
+          }
+        }
 
         snapshots.push(snapshot);
         snapshot.accessibilityViolations = a11yViolations.map(v => ({
