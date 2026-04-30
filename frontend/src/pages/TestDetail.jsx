@@ -26,6 +26,7 @@ import playwrightToCurl from "../utils/playwrightToCurl.js";
 import splitCodeBySteps from "../utils/splitCodeBySteps.js";
 import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
 import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
+import AiTestEditor from "../components/test/AiTestEditor.jsx";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
 // ── Run status icon (used in Recent Test Runs table) ─────────────────────────
@@ -131,10 +132,6 @@ export default function TestDetail() {
   // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
   const [showAiEditor, setShowAiEditor] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiCodeProposal, setAiCodeProposal] = useState("");
-  const [aiEditing, setAiEditing] = useState(false);
-  const [aiError, setAiError] = useState("");
 
   // ── Code regeneration review state ──────────────────────────────────────
   const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
@@ -252,73 +249,6 @@ export default function TestDetail() {
   function cancelEditing() {
     setEditing(false);
     setEditError(null);
-  }
-
-  function extractCodeBlock(markdown) {
-    const match = markdown.match(/```(?:javascript|js)?\n([\s\S]*?)```/i);
-    return match?.[1]?.trim() || "";
-  }
-
-  async function handleAiEditRequest() {
-    if (!aiPrompt.trim() || !test?.playwrightCode) return;
-    setAiEditing(true);
-    setAiError("");
-    setAiCodeProposal("");
-    try {
-      let raw = "";
-      // Track SSE error callbacks synchronously — React state updates are
-      // async, so we cannot read `aiError` after `await api.chat()` resolves
-      // to know whether the stream surfaced a provider error. Without this
-      // flag, the "no code block" branch below would overwrite the real
-      // provider error message with a misleading generic one.
-      let hadError = false;
-      await api.chat(
-        [{ role: "user", content: aiPrompt.trim() }],
-        (token) => {
-          raw += token;
-        },
-        (message) => {
-          hadError = true;
-          setAiError(message || "AI edit failed.");
-        },
-        undefined,
-        {
-          mode: "test_edit",
-          testName: test.name || "",
-          testSteps: test.steps || [],
-          testCode: test.playwrightCode || "",
-        },
-      );
-      if (hadError) return;
-      const code = extractCodeBlock(raw);
-      if (!code) {
-        setAiError("AI response did not include updated code. Try a more specific instruction.");
-        return;
-      }
-      setAiCodeProposal(code);
-    } catch (err) {
-      setAiError(err.message || "AI edit failed.");
-    } finally {
-      setAiEditing(false);
-    }
-  }
-
-  async function applyAiCodeProposal() {
-    if (!aiCodeProposal.trim()) return;
-    setAiEditing(true);
-    setAiError("");
-    try {
-      const updated = await api.updateTest(testId, { playwrightCode: aiCodeProposal });
-      setTest(updated);
-      setShowAiEditor(false);
-      setAiPrompt("");
-      setAiCodeProposal("");
-      setStepsView("source");
-    } catch (err) {
-      setAiError(err.message || "Failed to apply AI edit.");
-    } finally {
-      setAiEditing(false);
-    }
   }
 
   function updateEditStep(i, val) {
@@ -598,34 +528,16 @@ export default function TestDetail() {
 
           {/* Test Steps card */}
           <div className="card" style={{ padding: 24 }}>
-            {showAiEditor && test.playwrightCode && (
-              <div style={{ marginBottom: 16, border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg2)" }}>
-                <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: 8 }}>Edit with AI</div>
-                <textarea
-                  className="input"
-                  rows={3}
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Example: Add an assertion that cart total updates after quantity change."
-                  style={{ marginBottom: 8 }}
-                />
-                <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  <button className="btn btn-primary btn-sm" onClick={handleAiEditRequest} disabled={aiEditing || !aiPrompt.trim()}>
-                    {aiEditing ? <RefreshCw size={14} className="spin" /> : <Wand2 size={14} />} Generate edit
-                  </button>
-                  {aiCodeProposal && (
-                    <button className="btn btn-sm" onClick={applyAiCodeProposal} disabled={aiEditing}>
-                      <Save size={14} /> Apply
-                    </button>
-                  )}
-                </div>
-                {aiError && <div style={{ color: "var(--red)", fontSize: "0.75rem", marginBottom: 8 }}>{aiError}</div>}
-                {aiCodeProposal && (
-                  <Suspense fallback={<div style={{ height: 60, background: "var(--bg3)", borderRadius: 6 }} />}>
-                    <DiffView before={test.playwrightCode || ""} after={aiCodeProposal} />
-                  </Suspense>
-                )}
-              </div>
+            {showAiEditor && (
+              <AiTestEditor
+                test={test}
+                testId={testId}
+                onApplied={(updated) => {
+                  setTest(updated);
+                  setShowAiEditor(false);
+                  setStepsView("source");
+                }}
+              />
             )}
             {/* ── Card header with Steps / Source tab toggle ── */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>

@@ -28,6 +28,7 @@ import { classifyError } from "../utils/errorClassifier.js";
 import { formatLogLine, shouldLog } from "../utils/logFormatter.js";
 import { MAX_CONVERSATION_TURNS } from "../runner/config.js";
 import { hasActiveRunForProvider } from "../utils/activeRuns.js";
+import { buildTestEditPrompt } from "./testEdit.js";
 
 const router = Router();
 
@@ -52,19 +53,6 @@ IMPORTANT — Response format rules:
 - When showing code, use fenced Markdown code blocks with language tags (e.g. \`\`\`javascript ... \`\`\`).
 - When the user asks about their tests, runs, projects, or failures, use the workspace context provided below to give specific, actionable answers.
 - If the workspace context is empty or not relevant to the question, answer using your general QA expertise.`;
-
-const TEST_EDIT_SYSTEM_PROMPT = `You are Sentri AI operating in test-edit mode.
-You will receive an existing Playwright test and a user edit request.
-
-Return two sections in Markdown:
-1) "### Summary" with a short explanation of the change
-2) "### Updated Playwright Code" followed by exactly one \`\`\`javascript fenced code block containing the full updated test code.
-
-Rules:
-- Return complete runnable code, not partial snippets.
-- Keep existing imports/setup unless the requested change requires edits.
-- Do not include JSON wrappers.
-- Do not omit the code block.`;
 
 /**
  * Build a compact workspace snapshot for the system prompt.
@@ -406,23 +394,7 @@ router.post("/chat", async (req, res) => {
     : BASE_SYSTEM_PROMPT;
 
   if (context?.mode === "test_edit") {
-    const testCode = typeof context.testCode === "string" ? context.testCode : "";
-    const testName = typeof context.testName === "string" ? context.testName : "Unnamed test";
-    const testSteps = Array.isArray(context.testSteps) ? context.testSteps : [];
-    const compactSteps = testSteps.slice(0, 20).map((step, i) => `${i + 1}. ${step}`).join("\n");
-    systemPrompt = TEST_EDIT_SYSTEM_PROMPT;
-    userContent = `Test name: ${testName}
-
-User request:
-${lastMessage.content}
-
-Current steps:
-${compactSteps || "(none)"}
-
-Current Playwright code:
-\`\`\`javascript
-${testCode}
-\`\`\``;
+    ({ systemPrompt, userContent } = buildTestEditPrompt(context, lastMessage));
   }
 
   // Log prompt metadata at info level (always visible) and full prompt at debug
