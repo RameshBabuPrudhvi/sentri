@@ -207,15 +207,56 @@ npx playwright test
       // through to the raw-source branch below, producing invalid nested
       // `test(...)` wrappers (and inlined `import` lines) in the output.
       const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\s*\{[^}]*\bpage\b[^}]*\}\s*(?:,\s*[^)]*)?\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
-      const testBody = bodyMatch ? bodyMatch[1].trimEnd() : (rawCode || "  // No Playwright code available for this test.");
-      const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
-      const wrappedCode = `import { test, expect } from '@playwright/test';
+
+      // Detect "already a complete Playwright test file" — both an `import …
+      // from '@playwright/test'` line AND a `test(…)` call. If the extraction
+      // regex couldn't pull a body but the raw code IS a full spec file (e.g.
+      // unusual test wrapper syntax the regex doesn't handle: `async function`,
+      // `test.describe` block, trailing comments after the closing paren), we
+      // must NOT wrap it again — that produces an invalid .spec.ts with nested
+      // `import` lines and a `test()` call inside another `test()`. Write the
+      // raw source directly and let Playwright's own parser handle it.
+      const hasPlaywrightImport = /import\s*\{[^}]*\b(?:test|expect)\b[^}]*\}\s*from\s*['"]@playwright\/test['"]/.test(rawCode);
+      const hasTestCall = /\btest(?:\.only|\.skip|\.describe)?\s*\(/.test(rawCode);
+      const isCompleteSpec = hasPlaywrightImport && hasTestCall;
+
+      let fileContents;
+      if (bodyMatch) {
+        // Standard path: extract the body from a recognised `test(…, async ({ page, … }) => { … })`
+        // wrapper and re-wrap with a canonical `{ page }` fixture. The canonical
+        // wrapper is fine here because the body only references what it captured
+        // from its own closure — `page` is always available, other fixtures
+        // (context, request) pass through Playwright's test runner if referenced.
+        const testBody = bodyMatch[1].trimEnd();
+        const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
+        fileContents = `import { test, expect } from '@playwright/test';
 
 test(${JSON.stringify(testCase?.name || `Test ${idx + 1}`)}, async ({ page }) => {
 ${indentedBody}
 });
 `;
-      writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), wrappedCode);
+      } else if (isCompleteSpec) {
+        // Edge-case path: regex failed but rawCode is already a full spec file
+        // (regex didn't recognise the wrapper shape — e.g. `async function`
+        // expression, `test.describe` block, non-standard formatting). Ship
+        // the file verbatim. Playwright's own parser is strictly more capable
+        // than our regex; if the spec runs under `npx playwright test` in the
+        // source project, it will run in the exported ZIP too.
+        fileContents = rawCode.endsWith("\n") ? rawCode : `${rawCode}\n`;
+      } else {
+        // Raw-body path: rawCode is a naked body (no `import`, no `test()`
+        // wrapper) or empty. Wrap it in the canonical shell so the exported
+        // file is runnable.
+        const testBody = rawCode || "  // No Playwright code available for this test.";
+        const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
+        fileContents = `import { test, expect } from '@playwright/test';
+
+test(${JSON.stringify(testCase?.name || `Test ${idx + 1}`)}, async ({ page }) => {
+${indentedBody}
+});
+`;
+      }
+      writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), fileContents);
     });
 
     try {
