@@ -132,3 +132,25 @@ export function signS3ArtifactUrl(artifactPath, ttlMs) {
 export function isS3Storage() {
   return STORAGE_BACKEND === "s3";
 }
+
+/**
+ * Read an artifact buffer. In local mode, reads from `absolutePath`. In s3
+ * mode, fetches the object via a short-lived pre-signed GET URL and falls
+ * back to the local copy (dual-write safety net) on failure.
+ *
+ * @param {Object} args
+ * @param {string} args.artifactPath - URL path, e.g. `/artifacts/baselines/…`
+ * @param {string} args.absolutePath - Local filesystem fallback path.
+ * @returns {Promise<Buffer|null>}
+ */
+export async function readArtifactBuffer({ artifactPath, absolutePath }) {
+  if (STORAGE_BACKEND !== "s3") {
+    try { return fs.readFileSync(absolutePath); } catch { return null; }
+  }
+  try {
+    const url = signS3ArtifactUrl(artifactPath, 60 * 1000);
+    const res = await fetch(url, { method: "GET" });
+    if (res.ok) return Buffer.from(await res.arrayBuffer());
+  } catch { /* fall through to local */ }
+  try { return fs.readFileSync(absolutePath); } catch { return null; }
+}

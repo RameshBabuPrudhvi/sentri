@@ -411,12 +411,11 @@ const ARTIFACT_TOKEN_TTL_MS = parseInt(process.env.ARTIFACT_TOKEN_TTL_MS ?? "", 
  * @returns {string} The full artifact URL with `?token=…&exp=…` appended.
  */
 export function signArtifactUrl(artifactPath) {
-  // Only screenshots are currently uploaded to S3 via writeArtifactBuffer().
-  // Videos, traces, baselines, and diff PNGs are still written to local disk,
-  // so signing them with S3 pre-signed URLs would produce broken links. Until
-  // those write paths are migrated, scope S3 signing to screenshot artifacts
-  // and fall back to the HMAC-signed local URL for everything else.
-  if (isS3Storage() && artifactPath.startsWith("/artifacts/screenshots/")) {
+  // In s3 mode, all artifact write paths route through writeArtifactBuffer()
+  // (which dual-writes to local disk for backward compatibility), so it is
+  // safe to emit pre-signed S3 URLs for every artifact type — screenshots,
+  // videos, traces, baselines, and diff PNGs.
+  if (isS3Storage()) {
     return signS3ArtifactUrl(artifactPath, ARTIFACT_TOKEN_TTL_MS);
   }
   const exp = Date.now() + ARTIFACT_TOKEN_TTL_MS;
