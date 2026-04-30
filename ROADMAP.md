@@ -1448,7 +1448,13 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### MNT-006 — Object storage for artifacts (S3 / R2) 🟡 High
+### MNT-006 — Object storage for artifacts (S3 / R2) ✅ Complete (PR #122 — partial: screenshots only)
+
+**Status:** Shipped in PR #122. `backend/src/utils/objectStorage.js` provides a local-disk default and S3-compatible adapter (raw AWS V4 signing, no SDK). `STORAGE_BACKEND=s3` switches modes; path-style addressing is used for custom `S3_ENDPOINT` (R2/MinIO) so the bucket is included in both URL and canonical signing URI. `signArtifactUrl()` emits S3 pre-signed URLs only for `/artifacts/screenshots/*`; `writeArtifactBuffer()` dual-writes to local disk in s3 mode so baseline acceptance keeps working.
+
+**Follow-up (deferred):** route video writes (`backend/src/runner/executeTest.js`), trace writes (`backend/src/testRunner.js`), and visual-diff baselines/diffs (`backend/src/runner/visualDiff.js`) through `writeArtifactBuffer()` and broaden the screenshot-only check in `signArtifactUrl()`. Add proper docs to `docs/guide/env-vars.md` for the 6 new env vars.
+
+
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Audit (M-03)
 
