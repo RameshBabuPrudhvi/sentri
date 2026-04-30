@@ -401,23 +401,38 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
       if (!skipVisualArtifacts) {
         result.domSnapshot = await captureDomSnapshot(page);
 
-        const shot = await captureScreenshot(page, runId, stepIndex);
-        result.screenshot = shot.base64;
-        result.screenshotPath = shot.artifactPath;
+        // Success-path artifact capture is best-effort: a transient S3
+        // upload failure inside captureScreenshot (or any other artifact
+        // helper) must not flip an otherwise-passing test to "failed".
+        // Each block is guarded independently so one failure doesn't
+        // cascade into the next.
+        let shot = null;
+        try {
+          shot = await captureScreenshot(page, runId, stepIndex);
+          result.screenshot = shot.base64;
+          result.screenshotPath = shot.artifactPath;
+        } catch (shotErr) {
+          console.warn(formatLogLine("warn", null,
+            `[executeTest] Success-path screenshot capture failed for step ${stepIndex}: ${shotErr.message}`));
+        }
 
         // DIF-001: Diff the final screenshot against the test's baseline
         // (stepNumber 0 is reserved for the end-of-test capture).
-        try {
-          result.visualDiff = await diffScreenshot({
-            runId,
-            testId: test.id,
-            browser: browserName,
-            stepNumber: 0,
-            pngBuffer: Buffer.from(shot.base64, "base64"),
-          });
-        } catch { /* visual diff is best-effort */ }
+        if (shot) {
+          try {
+            result.visualDiff = await diffScreenshot({
+              runId,
+              testId: test.id,
+              browser: browserName,
+              stepNumber: 0,
+              pngBuffer: Buffer.from(shot.base64, "base64"),
+            });
+          } catch { /* visual diff is best-effort */ }
+        }
 
-        result.boundingBoxes = await captureBoundingBoxes(page);
+        try {
+          result.boundingBoxes = await captureBoundingBoxes(page);
+        } catch { /* bounding-box capture is best-effort */ }
       }
     })();
 
