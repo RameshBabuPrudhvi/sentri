@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy } from "react";
+import React, { useState, Suspense, lazy, useRef, useEffect } from "react";
 import { RefreshCw, Save, Wand2 } from "lucide-react";
 import { api } from "../../api.js";
 import extractCodeBlock from "../../utils/extractCodeBlock.js";
@@ -10,12 +10,21 @@ export default function AiTestEditor({ test, testId, onApplied }) {
   const [aiCodeProposal, setAiCodeProposal] = useState("");
   const [aiEditing, setAiEditing] = useState(false);
   const [aiError, setAiError] = useState("");
+  const abortRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   async function handleAiEditRequest() {
     if (!aiPrompt.trim() || !test?.playwrightCode) return;
     setAiEditing(true);
     setAiError("");
     setAiCodeProposal("");
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     try {
       let raw = "";
       let hadError = false;
@@ -23,7 +32,7 @@ export default function AiTestEditor({ test, testId, onApplied }) {
         [{ role: "user", content: aiPrompt.trim() }],
         (token) => { raw += token; },
         (message) => { hadError = true; setAiError(message || "AI edit failed."); },
-        undefined,
+        abortRef.current.signal,
         {
           mode: "test_edit",
           testName: test.name || "",
