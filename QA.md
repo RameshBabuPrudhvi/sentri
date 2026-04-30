@@ -302,7 +302,7 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open.
 32. Open **`/reports`** page → renders run/test reports for the workspace.
 33. From Dashboard, export the **executive PDF report** → file downloads, opens, contains pass-rate / defect breakdown / trends matching on-screen widgets.
-34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), public/shareable report links. Do not test these.
+34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), public/shareable report links. Do not test these. Standalone Playwright project export (`DIF-006`) **is** shipped — it has its own line item under "Export & traceability" below.
 
 ### 13. Notifications
 35. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
@@ -315,28 +315,29 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 ### 15. Export & traceability
 39. Export tests as **Zephyr CSV** and **TestRail CSV** → non-empty files, correct headers.
 40. Open **Traceability matrix** → maps tests ↔ source URLs / requirements.
+41. **Standalone Playwright project ZIP** (DIF-006) — `GET /api/v1/projects/:id/export/playwright` → ZIP downloads with `Content-Type: application/zip`, contains `package.json`, `playwright.config.ts` (with `baseURL` from project), `README.md`, and one `tests/<slug>.spec.ts` per **approved** test (drafts and rejected tests excluded). Unzip, `npm install`, `npx playwright test` runs the suite without modification.
 
 ### 16. AI Chat
-41. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
-42. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
-43. Export the session as Markdown and JSON.
+42. Open `/chat`. Ask: "How many tests failed in the last run?" → matches RunDetail.
+43. Ask: "Why did test X fail?" in same session → multi-turn context preserved; answer references actual logs.
+44. Export the session as Markdown and JSON.
 
 ### 17. Dashboard
-44. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
+45. Open Dashboard → pass-rate, defect breakdown, flaky detection, MTTR, growth trends all populated and match RunDetail / Tests source-of-truth counts.
 
 ### 18. Recycle bin & audit
-45. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
-46. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
+46. Delete a test → it appears in **Settings → Recycle Bin**. Restore it → reappears in active list with steps intact.
+47. Open **Audit Log** → every approve/reject/run/fix/restore action above is recorded with `userId` + `userName`.
 
 ### 19. Account / GDPR
-47. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
-48. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
+48. Settings → Account → **Export account data** (password-confirmed) → JSON downloads with workspaces/projects/tests/runs/activities/schedules/notification settings.
+49. Two-click **Delete account** with 5s auto-disarm → account gone; subsequent login fails.
 
 ### 20. Permissions sanity (negative)
-49. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
-50. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
+50. As User C (`viewer`), confirm: cannot create/edit/delete projects, cannot trigger runs, cannot accept baselines, cannot create trigger tokens or schedules. Each blocked action returns 403, not a silent no-op.
+51. As User D (outsider), confirm: any direct URL or API request for WS-1 resources returns 403, never empty 200.
 
-> ✅ **Pass criterion:** all 50 steps green. Any failure = release blocker.
+> ✅ **Pass criterion:** all 51 steps green. Any failure = release blocker.
 
 ---
 
@@ -443,7 +444,8 @@ Each area uses this format:
    - `GET /api/v1/projects/:id/tests/export/zephyr` — Zephyr Scale CSV.
    - `GET /api/v1/projects/:id/tests/export/testrail` — TestRail CSV.
    - `GET /api/v1/projects/:id/tests/traceability` — traceability matrix.
-   Each downloads a non-empty file with correct headers; re-importing into the target tool round-trips cleanly.
+   - `GET /api/v1/projects/:id/export/playwright` — standalone Playwright project ZIP (approved tests only — DIF-006).
+   Each downloads a non-empty file with correct headers; re-importing into the target tool round-trips cleanly. The Playwright ZIP must run with `npm install && npx playwright test` after unzipping.
 
 **Negative / edge:**
 - Crawl an unreachable URL → clear error, no infinite spinner.
@@ -511,7 +513,7 @@ Each area uses this format:
 - Trigger run while another is in progress → concurrency = `PARALLEL_WORKERS` (default **1**, `AGENT.md`). Extra runs queue; no crash.
 - Run test against unreachable target → fails with clear network error, not timeout silence.
 - Long-running / hung test → aborted at `BROWSER_TEST_TIMEOUT` with a clear timeout error.
-- Flaky test (intermittent failure) → no product-level auto-retry is documented. Rely on `safeClick` / `safeFill` self-healing (see `docs/changelog.md` DIF-015); confirm behavior, file if retry is expected.
+- **Flaky test (intermittent failure)** → product-level auto-retry **IS** wired (AUTO-005, PR #2). Each test failure triggers up to `MAX_TEST_RETRIES` retries (default **2**, max 10, set to `0` to disable) before the result is recorded as truly failed. Verify via `result.retryCount` (number of retries actually consumed) and `result.failedAfterRetry` (true only when all attempts failed). A test that fails once then passes shows `retryCount: 1, status: "passed"` — notifications and failure counters fire only on `failedAfterRetry: true` (`backend/src/runner/retry.js`, `backend/src/testRunner.js:229-240`). **Note:** only the FINAL attempt's video / screenshots / trace are preserved on disk — earlier attempts overwrite each other (intentional; see retry.js JSDoc § "Artifact overwrite behaviour"). Self-healing (`safeClick` / `safeFill` selector waterfall) is a separate, lower-level recovery layer — DIF-015b's nth=N disambiguation also reduces flake at recording time.
 - Viewer attempts to trigger run → blocked.
 - `qa_lead` stops another user's run → **allowed** (no per-user "own runs" gate exists in code, `routes/runs.js:257` only requires `qa_lead`). If product intent is to restrict to the run's owner, file as security enhancement.
 - Browser close mid-run → run continues on backend; status visible on return.
@@ -928,7 +930,7 @@ For each modal: open → fill → submit → close behavior.
 |---|---|---|
 | **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal. **Output: UI / browser tests** (Draft) — `page.goto` + role selectors + `safeClick` / `safeFill`; same-origin fetch/XHR additionally yields API tests |
 | **GenerateTestModal** | "Generate Test" | **Default output: UI / browser tests** from the crawl context. API-shaped inputs (plain-English endpoint, OpenAPI upload, HAR upload, `METHOD /path` paste) produce API tests only when explicitly used; submit creates Draft tests |
-| **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, parallelism 1–10; submit opens RunDetail |
+| **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, locale/timezone/geolocation (AUTO-007), network condition (`fast` / `slow3g` / `offline`, AUTO-006), parallelism 1–10; submit opens RunDetail |
 | **ReviewModal** | "Review" / opening a Draft | Step-by-step approval queue; Approve/Reject/Skip; advances to next test |
 | **RecorderModal** | "Record a test" | Live CDP screencast; record/stop controls; on stop saves Draft |
 | **AiFixPanel** | "Fix with AI" on failed test | SSE token stream; diff vs current code; Accept/Discard |
@@ -1105,7 +1107,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 
 | Area | Chrome | Firefox | Safari | Edge | Notes / Bug links |
 |---|---|---|---|---|---|
-| **Golden E2E Happy Path (all 50 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Golden E2E Happy Path (all 51 steps)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Authentication | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Email Verification | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Workspaces | ⬜ | ⬜ | ⬜ | ⬜ | |
@@ -1143,14 +1145,14 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), standalone Playwright project export (`DIF-006`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page and Dashboard PDF export **are** shipped and must be tested.
+> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, and standalone Playwright project export (`DIF-006`) **are** shipped and must be tested.
 
 ---
 
 ## ✅ Sign-off Criteria
 
 A release is QA-approved only when **all** of the following are true:
-- The **Golden E2E Happy Path** (50 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
+- The **Golden E2E Happy Path** (51 steps) passes end-to-end on Chrome **and** at least one other browser from the matrix.
 - Every row in the coverage checklist is ✅ across the required browser matrix.
 - The permissions matrix has been verified end-to-end, including Outsider access attempts.
 - All Security authorization checks return 403/404 (never the resource).

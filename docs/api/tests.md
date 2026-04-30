@@ -168,6 +168,40 @@ GET /api/v1/projects/:id/tests/export/testrail?status=approved
 
 Returns a CSV file formatted for TestRail bulk import. Optional `status` filter.
 
+### Standalone Playwright project ZIP (DIF-006)
+
+```
+GET /api/v1/projects/:id/export/playwright
+```
+
+Returns a ZIP archive (`Content-Type: application/zip`) containing a runnable
+Playwright project assembled from the project's **approved** tests. Draft and
+rejected tests are excluded. The archive contains:
+
+- `package.json` — declares `@playwright/test` as a dev dependency
+- `playwright.config.ts` — `baseURL` is set to the project's `url` (or
+  `http://localhost:3000` when the project has no URL)
+- `README.md` — instructions to run `npm install && npx playwright test`
+- `tests/<slug>.spec.ts` — one file per approved test, wrapped in a
+  canonical `test('<name>', async ({ page }) => { … })` block. Filenames are
+  slugged from the test name (`[^a-z0-9]+` → `-`); collisions across tests
+  with names that normalize to the same slug are disambiguated with a numeric
+  suffix (`-2`, `-3`, …).
+
+Returns `404` when the project does not exist or is outside the caller's
+workspace (matches the convention used by every other route to avoid leaking
+project existence across workspaces — ACL-001).
+
+Returns `503` with `{ code: "ZIP_BINARY_MISSING", error, hint }` when the
+backend host is missing the system `zip` binary. The implementation shells
+out to `zip` instead of pulling in a new npm runtime dependency, so
+deployments on minimal Docker bases (e.g. `node:alpine` without `apk add
+zip`) or Windows dev boxes without the binary on `$PATH` surface this as an
+operator-fixable 503 rather than an opaque 500. Install `zip` on the host
+(`apt-get install zip` / `apk add zip`; macOS ships it) to resolve.
+
+Returns `500` for any other internal failure during archive assembly.
+
 ### Traceability Matrix
 
 ```

@@ -452,6 +452,37 @@ export const api = {
   exportZephyrUrl:   (projectId, status) => api._exportUrl(projectId, "zephyr", status),
   /** @param {string} projectId @param {string} [status] @returns {string} Download URL (same-origin only). */
   exportTestRailUrl: (projectId, status) => api._exportUrl(projectId, "testrail", status),
+
+  /**
+   * Download a runnable Playwright project ZIP for the given project (DIF-006).
+   * Endpoint path differs from the CSV exports (`/projects/:id/export/playwright`
+   * vs `/projects/:id/tests/export/:format`), so it can't reuse `_exportUrl`.
+   * Filters to approved tests server-side — no `status` param is accepted.
+   * @param {string} projectId
+   * @returns {Promise<void>}
+   */
+  downloadPlaywrightExport: async (projectId) => {
+    const url = `${BASE}/projects/${projectId}/export/playwright`;
+    if (!API_BASE || new URL(url).origin === window.location.origin) {
+      window.open(url, "_blank");
+      return;
+    }
+    const res = await fetch(url, { credentials: "include" });
+    const csrfHdr = res.headers.get("X-CSRF-Token");
+    if (csrfHdr) setCsrfToken(csrfHdr);
+    if (res.status === 401) { handleUnauthorized(); throw new Error("Session expired."); }
+    if (!res.ok) throw new Error(`Playwright export failed (${res.status})`);
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match?.[1] || `sentri-${projectId}-playwright.zip`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+  },
   /** @param {string} projectId @returns {Promise<Object>} Traceability matrix. */
   getTraceability:   (projectId)         => req("GET", `/projects/${projectId}/tests/traceability`),
 

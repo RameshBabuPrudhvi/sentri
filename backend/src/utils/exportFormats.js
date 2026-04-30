@@ -126,3 +126,163 @@ export function buildTestRailCsv(tests) {
 
   return [headers.map(esc).join(","), ...rows].join("\n");
 }
+
+/**
+ * @typedef {Object} PlaywrightExportProject
+ * @property {string} name
+ * @property {string} [url]
+ */
+
+/**
+ * buildPlaywrightZip(project, tests) → Promise<Buffer> (ZIP)
+ *
+ * @param {PlaywrightExportProject} project
+ * @param {object[]} tests
+ * @returns {Promise<Buffer>}
+ */
+export async function buildPlaywrightZip(project, tests) {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("fs");
+  const { tmpdir } = await import("os");
+  const path = await import("path");
+  const { execFileSync } = await import("child_process");
+
+  const tmpRoot = mkdtempSync(path.join(tmpdir(), "sentri-playwright-export-"));
+  const projectRoot = path.join(tmpRoot, "project");
+  const testsDir = path.join(projectRoot, "tests");
+  const outPath = path.join(tmpRoot, "playwright-export.zip");
+  mkdirSync(testsDir, { recursive: true });
+  const baseUrl = project?.url || "http://localhost:3000";
+
+  try {
+    writeFileSync(path.join(projectRoot, "package.json"), JSON.stringify({
+      name: "sentri-playwright-export",
+      private: true,
+      version: "1.0.0",
+      scripts: { test: "playwright test" },
+      devDependencies: { "@playwright/test": "^1.58.2" },
+    }, null, 2));
+
+    writeFileSync(path.join(projectRoot, "playwright.config.ts"), `import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests',
+  use: {
+    baseURL: ${JSON.stringify(baseUrl)},
+    trace: 'on-first-retry',
+  },
+});
+`);
+
+    writeFileSync(path.join(projectRoot, "README.md"), `# Playwright export from Sentri
+
+## Run tests
+
+\`\`\`bash
+npm install
+npx playwright test
+\`\`\`
+`);
+
+    // Track filenames to disambiguate collisions when two tests normalize
+    // to the same slug (e.g. "Login Test!" and "Login Test?"). Without this
+    // the second writeFileSync silently overwrites the first.
+    const usedNames = new Set();
+    tests.forEach((testCase, idx) => {
+      const baseSlug = String(testCase?.name || `test-${idx + 1}`)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `test-${idx + 1}`;
+      let safeName = baseSlug;
+      let suffix = 2;
+      while (usedNames.has(safeName)) {
+        safeName = `${baseSlug}-${suffix}`;
+        suffix += 1;
+      }
+      usedNames.add(safeName);
+      const rawCode = String(testCase?.playwrightCode || "").trim();
+      // Accept any destructured fixture object that includes `page` — e.g.
+      // `async ({ page })`, `async ({ page, context })`, `async ({ context, page, request })`.
+      // The previous regex only matched the bare `{ page }` signature, which
+      // caused any test recorded/generated with a broader fixture set to fall
+      // through to the raw-source branch below, producing invalid nested
+      // `test(...)` wrappers (and inlined `import` lines) in the output.
+      const bodyMatch = rawCode.match(/test(?:\.only|\.skip)?\s*\([^]*?async\s*\(\s*\{[^}]*\bpage\b[^}]*\}\s*(?:,\s*[^)]*)?\)\s*=>\s*\{([^]*)\}\s*\)\s*;?\s*$/m);
+
+      // Detect "already a complete Playwright test file" — both an `import …
+      // from '@playwright/test'` line AND a `test(…)` call. If the extraction
+      // regex couldn't pull a body but the raw code IS a full spec file (e.g.
+      // unusual test wrapper syntax the regex doesn't handle: `async function`,
+      // `test.describe` block, trailing comments after the closing paren), we
+      // must NOT wrap it again — that produces an invalid .spec.ts with nested
+      // `import` lines and a `test()` call inside another `test()`. Write the
+      // raw source directly and let Playwright's own parser handle it.
+      const hasPlaywrightImport = /import\s*\{[^}]*\b(?:test|expect)\b[^}]*\}\s*from\s*['"]@playwright\/test['"]/.test(rawCode);
+      const hasTestCall = /\btest(?:\.only|\.skip|\.describe)?\s*\(/.test(rawCode);
+      const isCompleteSpec = hasPlaywrightImport && hasTestCall;
+
+      let fileContents;
+      if (bodyMatch) {
+        // Standard path: extract the body from a recognised `test(…, async ({ page, … }) => { … })`
+        // wrapper and re-wrap with a canonical `{ page }` fixture. The canonical
+        // wrapper is fine here because the body only references what it captured
+        // from its own closure — `page` is always available, other fixtures
+        // (context, request) pass through Playwright's test runner if referenced.
+        const testBody = bodyMatch[1].trimEnd();
+        const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
+        fileContents = `import { test, expect } from '@playwright/test';
+
+test(${JSON.stringify(testCase?.name || `Test ${idx + 1}`)}, async ({ page }) => {
+${indentedBody}
+});
+`;
+      } else if (isCompleteSpec) {
+        // Edge-case path: regex failed but rawCode is already a full spec file
+        // (regex didn't recognise the wrapper shape — e.g. `async function`
+        // expression, `test.describe` block, non-standard formatting). Ship
+        // the file verbatim. Playwright's own parser is strictly more capable
+        // than our regex; if the spec runs under `npx playwright test` in the
+        // source project, it will run in the exported ZIP too.
+        fileContents = rawCode.endsWith("\n") ? rawCode : `${rawCode}\n`;
+      } else {
+        // Raw-body path: rawCode is a naked body (no `import`, no `test()`
+        // wrapper) or empty. Wrap it in the canonical shell so the exported
+        // file is runnable.
+        const testBody = rawCode || "  // No Playwright code available for this test.";
+        const indentedBody = testBody.split("\n").map(line => `  ${line}`).join("\n");
+        fileContents = `import { test, expect } from '@playwright/test';
+
+test(${JSON.stringify(testCase?.name || `Test ${idx + 1}`)}, async ({ page }) => {
+${indentedBody}
+});
+`;
+      }
+      writeFileSync(path.join(testsDir, `${safeName}.spec.ts`), fileContents);
+    });
+
+    try {
+      execFileSync("zip", ["-rq", outPath, "."], { cwd: projectRoot });
+    } catch (zipErr) {
+      // Distinguish "zip binary not installed" from "zip ran but failed" so
+      // the route handler can surface an actionable error. Without this,
+      // both cases bubble up as opaque 500s and operators on minimal Docker
+      // bases / Windows dev boxes have no way to know they're missing the
+      // zip binary (documented in docs/api/tests.md but not self-evident).
+      // ENOENT is what Node's execFileSync throws when the binary isn't on
+      // $PATH. Every other failure is a genuine runtime error and keeps its
+      // original message.
+      if (zipErr.code === "ENOENT") {
+        const err = new Error(
+          "System `zip` binary not found on PATH. Install it (apt: `apt-get install zip`; alpine: `apk add zip`; macOS: included) or use a Docker image that ships it. See docs/api/tests.md § Standalone Playwright project ZIP for details."
+        );
+        err.code = "ZIP_BINARY_MISSING";
+        throw err;
+      }
+      throw zipErr;
+    }
+    return readFileSync(outPath);
+  } finally {
+    // Always clean up the temp directory, even if zip/readFile threw.
+    // Without this, every failed export leaks a temp dir under the OS tmp folder.
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}

@@ -142,6 +142,20 @@ export default function ProjectHeader({
                           <div className="pd-dropdown-item-desc">{fmt.desc}</div>
                         </button>
                       ))}
+                      {/* DIF-006: Standalone Playwright project ZIP. Sits alongside
+                          the CSV exports so users see all three export targets in
+                          one list. The endpoint always filters to approved tests
+                          server-side, so the desc line calls that out — drafts and
+                          rejected tests are excluded regardless of which project
+                          stat the dropdown was opened against. */}
+                      <button
+                        onClick={() => { setShowExportMenu(false); api.downloadPlaywrightExport(projectId); }}
+                        className="pd-dropdown-item"
+                        style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
+                      >
+                        <div className="pd-dropdown-item-title">Playwright project ZIP</div>
+                        <div className="pd-dropdown-item-desc">Runnable Playwright project (approved tests only)</div>
+                      </button>
                       {approvedTests.length > 0 && (
                         <>
                           <hr className="divider" style={{ margin: "4px 0" }} />

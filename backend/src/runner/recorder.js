@@ -167,9 +167,24 @@ const COMPLETED_TTL_MS = TIMINGS.COMPLETED_TTL_MS;
  * de-duplicate by dispatch target + event type so that a single click
  * doesn't emit multiple entries when bubbling through the DOM.
  *
- * `bestSelector` intentionally mirrors Playwright's own heuristics loosely:
+ * `selectorGenerator` mirrors Playwright-style priority heuristics (DIF-015b):
  * prefer role-based selectors, then data-testid, then aria-label, then
  * a short CSS chain.
+ *
+ * **Disambiguation (DIF-015b follow-up):** when the chosen CSS-fallback
+ * selector matches more than one element on the page, append a Playwright
+ * `>> nth=N` token so replay targets the same element the user clicked.
+ * Without this, three identical `button.btn-primary` on a page would all
+ * replay against the first match. Role/data-testid/label/text selectors are
+ * NOT disambiguated by index — they're already semantic anchors and adding
+ * `nth=N` to them would mask a real test smell (multiple identical labels
+ * on the same page is a symptom worth surfacing, not silently fixing).
+ *
+ * **Shadow DOM and iframes** still fall through to the host-document selector
+ * (this PR's scope is naming + nth disambiguation only). Iframe support is
+ * partially handled at the action layer via `frameUrl` capture — see the
+ * `__sentriRecord` binding. Full shadow-root traversal is tracked as a
+ * follow-up sub-item under DIF-015b in ROADMAP.md.
  *
  * Built once at module load — the timing constants come from `TIMINGS`
  * (Node-side) and are baked into the script as numeric literals before
@@ -182,7 +197,33 @@ const RECORDER_SCRIPT = `
   if (window.__sentriRecorderInstalled) return;
   window.__sentriRecorderInstalled = true;
 
-  function bestSelector(el) {
+  // CSS-only fallback used both as the final branch in selectorGenerator
+  // AND by the nth=N disambiguator (which needs a CSS string to count
+  // matches via document.querySelectorAll).
+  function cssFallback(el) {
+    if (el.id) return "#" + CSS.escape(el.id);
+    if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
+    const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
+    return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+  }
+
+  // DIF-015b: append ">> nth=N" if the CSS fallback matches multiple elements.
+  // Only applied to CSS-fallback selectors — semantic selectors (role=, text=,
+  // data-testid=, label=, placeholder=, alt=, title=) intentionally pass
+  // through unchanged. Bail out cheaply on a unique match so the common case
+  // pays nothing beyond a single querySelectorAll call.
+  function disambiguateCss(el, cssSel) {
+    if (!cssSel || el.id) return cssSel; // #id selectors are unique by definition
+    let matches;
+    try { matches = document.querySelectorAll(cssSel); }
+    catch { return cssSel; } // malformed selector — let replay fail visibly instead of corrupting it
+    if (matches.length <= 1) return cssSel;
+    const idx = Array.prototype.indexOf.call(matches, el);
+    if (idx < 0) return cssSel; // el is in a shadow root or detached — querySelectorAll can't see it
+    return cssSel + " >> nth=" + idx;
+  }
+
+  function selectorGenerator(el) {
     if (!el || el.nodeType !== 1) return "";
     const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
     if (testId) return 'data-testid=' + JSON.stringify(testId.trim());
@@ -201,10 +242,9 @@ const RECORDER_SCRIPT = `
     if (title) return 'title=' + JSON.stringify(title.slice(0, 80));
     const txt = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
     if (txt && txt.length >= 2) return 'text=' + JSON.stringify(txt);
-    if (el.id) return "#" + CSS.escape(el.id);
-    if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
-    const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
-    return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+    // CSS fallback — disambiguate with nth=N when the selector matches
+    // multiple elements. Semantic selectors above are intentionally exempt.
+    return disambiguateCss(el, cssFallback(el));
   }
   // Friendly label for the human-readable Steps panel. Mirrors how AI-
   // generated steps reference elements ("the Search button", "the Email
@@ -245,7 +285,7 @@ const RECORDER_SCRIPT = `
   document.addEventListener("click", (ev) => {
     const raw = eventElement(ev);
     const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
-    const sel = bestSelector(el);
+    const sel = selectorGenerator(el);
     const label = bestLabel(el);
     const emit = () => {
       pendingClickTimers.delete(sel);
@@ -261,7 +301,7 @@ const RECORDER_SCRIPT = `
   document.addEventListener("dblclick", (ev) => {
     const raw = eventElement(ev);
     const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
-    const sel = bestSelector(el);
+    const sel = selectorGenerator(el);
     // Cancel any queued click(s) for this selector — a dblclick supersedes
     // the two click events that preceded it.
     if (sel) {
@@ -276,7 +316,7 @@ const RECORDER_SCRIPT = `
     const raw = eventElement(ev);
     const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
     window.__sentriRecord && window.__sentriRecord({
-      kind: "rightClick", selector: bestSelector(el), label: bestLabel(el), ts: Date.now(),
+      kind: "rightClick", selector: selectorGenerator(el), label: bestLabel(el), ts: Date.now(),
     });
   }, true);
   // Hover capture uses a dwell timer so casual pointer movement through
@@ -291,7 +331,7 @@ const RECORDER_SCRIPT = `
     const raw = eventElement(ev);
     const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
     if (!el) return;
-    const sel = bestSelector(el);
+    const sel = selectorGenerator(el);
     if (!sel) return;
     if (sel === lastHoverSelector) return; // already pending / just emitted for this target
     if (hoverDwellTimer) { clearTimeout(hoverDwellTimer); hoverDwellTimer = null; }
@@ -326,7 +366,7 @@ const RECORDER_SCRIPT = `
     const el = eventElement(ev);
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
     if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return;
-    const sel = bestSelector(el);
+    const sel = selectorGenerator(el);
     if (!sel) return;
     const prev = inputTimers.get(sel);
     if (prev) clearTimeout(prev);
@@ -346,7 +386,7 @@ const RECORDER_SCRIPT = `
     if (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) {
       window.__sentriRecord && window.__sentriRecord({
         kind: el.checked ? "check" : "uncheck",
-        selector: bestSelector(el),
+        selector: selectorGenerator(el),
         label: bestLabel(el),
         ts: Date.now(),
       });
@@ -355,11 +395,11 @@ const RECORDER_SCRIPT = `
         ? Array.from(el.files).map((f) => f.name).join(", ")
         : "";
       window.__sentriRecord && window.__sentriRecord({
-        kind: "upload", selector: bestSelector(el), label: bestLabel(el), value: names, ts: Date.now(),
+        kind: "upload", selector: selectorGenerator(el), label: bestLabel(el), value: names, ts: Date.now(),
       });
     } else if (el.tagName === "SELECT") {
       window.__sentriRecord && window.__sentriRecord({
-        kind: "select", selector: bestSelector(el), label: bestLabel(el), value: el.value, ts: Date.now(),
+        kind: "select", selector: selectorGenerator(el), label: bestLabel(el), value: el.value, ts: Date.now(),
       });
     } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       // Safety-net branch for autofill / paste / programmatic value changes
@@ -367,7 +407,7 @@ const RECORDER_SCRIPT = `
       // emitted a fill for this selector + value. If a debounced "input"
       // fill is still pending, flush it synchronously here so the recorded
       // action carries the latest value (the user committed it by blurring).
-      const sel = bestSelector(el);
+      const sel = selectorGenerator(el);
       if (!sel) return;
       const pending = inputTimers.get(sel);
       if (pending) {
@@ -408,7 +448,7 @@ const RECORDER_SCRIPT = `
     if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;
     if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
       window.__sentriRecord && window.__sentriRecord({
-        kind: "press", key: ev.key, selector: bestSelector(ev.target), label: bestLabel(ev.target), ts: Date.now(),
+        kind: "press", key: ev.key, selector: selectorGenerator(ev.target), label: bestLabel(ev.target), ts: Date.now(),
       });
     }
   }, true);
@@ -416,11 +456,11 @@ const RECORDER_SCRIPT = `
   let dragSource = "";
   document.addEventListener("dragstart", (ev) => {
     const el = eventElement(ev);
-    dragSource = bestSelector(el);
+    dragSource = selectorGenerator(el);
   }, true);
   document.addEventListener("drop", (ev) => {
     const target = eventElement(ev);
-    const targetSel = bestSelector(target);
+    const targetSel = selectorGenerator(target);
     if (!dragSource || !targetSel) return;
     window.__sentriRecord && window.__sentriRecord({
       kind: "drag", selector: dragSource, target: targetSel, label: bestLabel(target), ts: Date.now(),
@@ -786,7 +826,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       // Route through the self-healing helper so recorded selects benefit
       // from the safeSelect waterfall (getByLabel → getByRole('combobox') →
       // aria-label fallback). `applyHealingTransforms` won't rewrite a raw
-      // `page.selectOption('#css', ...)` because `bestSelector()` always
+      // `page.selectOption('#css', ...)` because `selectorGenerator()` always
       // produces CSS-looking output, so emit `safeSelect` directly here to
       // stay consistent with how `safeClick` and `safeFill` are handled
       // above.

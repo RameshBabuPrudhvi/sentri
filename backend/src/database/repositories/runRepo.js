@@ -73,6 +73,8 @@ const INSERT_COLS = [
   "pipelineStats", "feedbackLoop", "currentStep",
   "rateLimitError", "qualityAnalytics", "workspaceId", "pages",
   "browser", // DIF-002: chromium | firefox | webkit
+  "retryCount", "failedAfterRetry", // AUTO-005: aggregated retry telemetry
+  "networkCondition", // AUTO-006: fast | slow3g | offline (migration 012)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -85,6 +87,7 @@ const LEAN_COLS = [
   "duration", "error", "errorCategory", "passed", "failed", "total",
   "pagesFound", "parallelWorkers", "currentStep", "rateLimitError",
   "browser", // DIF-002 — surfaces browser badge on runs list without a second query
+  "networkCondition", // AUTO-006 — surfaces network-condition badge on runs list without a second query
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;
@@ -288,6 +291,11 @@ export function create(run) {
   }
   if (params.tests == null) params.tests = "[]";
   if (params.results == null) params.results = "[]";
+  // AUTO-005: migration 011 declares these columns NOT NULL DEFAULT 0.
+  // Coerce undefined/null to 0 so create() works for callers (e.g. crawl/
+  // generate runs) that never set retry telemetry.
+  if (params.retryCount == null) params.retryCount = 0;
+  if (params.failedAfterRetry == null) params.failedAfterRetry = 0;
   db.prepare(INSERT_SQL).run(params);
 }
 

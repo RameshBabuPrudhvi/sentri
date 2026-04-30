@@ -351,3 +351,8 @@ Not yet implemented; address before production:
 | `MAX_RECORDING_MS` | No | `1800000` | Safety-net timeout for an interactive recorder session (30 min) |
 | `RECORDER_COMPLETED_TTL_MS` | No | `120000` | Lifetime of in-memory cache after recorder auto-teardown |
 | `BROWSER_DEFAULT` | No | `chromium` | Default browser engine. One of `chromium`, `firefox`, `webkit`. |
+| `MAX_TEST_RETRIES` | No | `2` | AUTO-005: per-test auto-retry budget. Each failed test is re-executed up to this many times before the result is recorded as truly failed. Clamped to `0..10`; `0` disables retries entirely. Only the final attempt's video / screenshots / trace are preserved on disk — earlier attempts overwrite each other (see `backend/src/runner/retry.js` JSDoc § "Artifact overwrite behaviour"). |
+| `POSTHOG_API_KEY` | No | _(unset)_ | DIF-013: PostHog project API key. When unset, `trackTelemetry()` is a no-op regardless of other settings — the telemetry module ships zero events. |
+| `POSTHOG_HOST` | No | `https://us.i.posthog.com` | DIF-013: PostHog ingestion host. Override for self-hosted PostHog (`https://your-posthog.example.com`) or EU region (`https://eu.i.posthog.com`). |
+| `SENTRI_TELEMETRY` | No | `1` | DIF-013: set to `0` to disable telemetry entirely (overrides `POSTHOG_API_KEY`). |
+| `DO_NOT_TRACK` | No | `0` | DIF-013: industry-standard opt-out signal. Set to `1` to disable telemetry. Equivalent to `SENTRI_TELEMETRY=0`. |

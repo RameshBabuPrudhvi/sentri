@@ -21,6 +21,7 @@
  * | `GET`    | `/api/v1/projects/:id/tests/export/zephyr`       | Zephyr Scale CSV export             |
  * | `GET`    | `/api/v1/projects/:id/tests/export/testrail`     | TestRail CSV export                 |
  * | `GET`    | `/api/v1/projects/:id/tests/traceability`        | Traceability matrix                 |
+ * | `GET`    | `/api/v1/projects/:id/export/playwright`         | Export approved tests as Playwright ZIP |
  */
 
 import { Router } from "express";
@@ -35,10 +36,11 @@ import { hasProvider, isLocalProvider } from "../aiProvider.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { generateFromUserDescription } from "../crawler.js";
 import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
-import { buildZephyrCsv, buildTestRailCsv } from "../utils/exportFormats.js";
+import { buildZephyrCsv, buildTestRailCsv, buildPlaywrightZip } from "../utils/exportFormats.js";
 import { validateTestPayload, validateTestUpdate, validateBulkAction } from "../utils/validate.js";
 import { isApiTest } from "../runner/codeParsing.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { trackTelemetry } from "../utils/telemetry.js";
 import { aiGenerationLimiter, expensiveOpLimiter } from "../middleware/appSetup.js";
 import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
@@ -549,6 +551,15 @@ router.patch("/projects/:id/tests/:testId/approve", requireRole("qa_lead"), (req
     testId: test.id, testName: test.name,
     detail: `Test approved — "${test.name}"`,
   });
+  // DIF-013: approval/rejection rate telemetry. `generatedFrom` tells us
+  // whether AI-generated, recorded, or manual tests are more likely to be
+  // approved — useful for measuring pipeline quality over time.
+  trackTelemetry("test.review", {
+    projectId: req.params.id,
+    decision: "approved",
+    generatedFrom: test.generatedFrom || null,
+    isBulk: false,
+  });
   res.json(testRepo.getById(test.id));
 });
 
@@ -565,6 +576,13 @@ router.patch("/projects/:id/tests/:testId/reject", requireRole("qa_lead"), (req,
     type: "test.reject", projectId: req.params.id, projectName: project.name,
     testId: test.id, testName: test.name,
     detail: `Test rejected — "${test.name}"`,
+  });
+  // DIF-013: see approve handler above for rationale.
+  trackTelemetry("test.review", {
+    projectId: req.params.id,
+    decision: "rejected",
+    generatedFrom: test.generatedFrom || null,
+    isBulk: false,
   });
   res.json(testRepo.getById(test.id));
 });
@@ -630,6 +648,17 @@ router.post("/projects/:id/tests/bulk", requireRole("qa_lead"), (req, res) => {
       type: `test.bulk_${action}`, projectId: req.params.id, projectName: project.name,
       detail: `Bulk ${action} — ${updated.length} test${updated.length !== 1 ? "s" : ""}`,
     });
+    // DIF-013: emit ONE bulk event (not N per-test) to keep PostHog volume
+    // reasonable. The aggregated count is what we need for approval-rate
+    // analytics; per-test granularity would dominate the event stream.
+    if (action === "approve" || action === "reject") {
+      trackTelemetry("test.review", {
+        projectId: req.params.id,
+        decision: action === "approve" ? "approved" : "rejected",
+        count: updated.length,
+        isBulk: true,
+      });
+    }
   }
   res.json({ updated: updated.length, tests: updated });
 });
@@ -674,6 +703,46 @@ router.get("/projects/:id/tests/export/testrail", (req, res) => {
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="sentri-${project.name.replace(/[^a-z0-9]+/gi, "-")}-testrail.csv"`);
   res.send(csv);
+});
+
+// GET /api/projects/:id/export/playwright — runnable Playwright project ZIP (DIF-006)
+//
+// Note on access control: matches the convention used by every other route
+// in this file — `getByIdInWorkspace` returns null for both "doesn't exist"
+// and "not a workspace member", and we collapse both into 404 to avoid
+// leaking project existence across workspace boundaries (ACL-001).
+router.get("/projects/:id/export/playwright", async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+
+  try {
+    const allTests = testRepo.getByProjectId(req.params.id);
+    const approvedTests = allTests.filter(t => t.reviewStatus === "approved");
+
+    const zipBuffer = await buildPlaywrightZip(project, approvedTests);
+    const safeProjectName = project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="sentri-${safeProjectName}-playwright.zip"`);
+    res.send(zipBuffer);
+  } catch (err) {
+    // Async route handlers in Express 4 do NOT auto-catch rejected promises;
+    // without this try/catch the request hangs indefinitely on any failure
+    // (e.g. system `zip` binary missing). Match the error-handling style of
+    // the recorder and PATCH handlers above — log internally, return generic.
+    console.error(formatLogLine("error", null, `[GET projects/${req.params.id}/export/playwright] export failed: ${err.message}`));
+    // ZIP_BINARY_MISSING is an operator-fixable deployment issue, not an
+    // internal bug — surface it as 503 with the actionable message so the
+    // user can install `zip` or switch to a base image that ships it.
+    // Every other failure stays a generic 500 (no internal detail leaked).
+    if (err.code === "ZIP_BINARY_MISSING") {
+      return res.status(503).json({
+        error: "Playwright export unavailable: system `zip` binary not installed on this deployment.",
+        code: "ZIP_BINARY_MISSING",
+        hint: "Install `zip` on the backend host (apt-get install zip / apk add zip) or use a Docker image that ships it.",
+      });
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // GET /api/projects/:id/tests/traceability — traceability matrix (requirement → test → result)
