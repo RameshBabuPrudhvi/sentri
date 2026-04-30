@@ -28,8 +28,9 @@ const MAX_DEPTH = parseInt(process.env.CRAWL_MAX_DEPTH, 10) || 3;
  *
  * @param {string} runId
  * @param {string} pageUrl
- * @param {import("@axe-core/playwright").AxeResults|null|undefined} results
- * @returns {Array<{runId:string,pageUrl:string,ruleId:string,impact:string|null,wcagCriterion:string|null,help:string,description:string,nodesJson:string}>}
+ * @param {object} results - Axe-core results object (`{ violations: [...] }`), or null/undefined.
+ * @returns {object[]} Array of persistable violation records with shape
+ *   `{ runId, pageUrl, ruleId, impact, wcagCriterion, help, description, nodesJson }`.
  */
 export function mapA11yViolations(runId, pageUrl, results) {
   const violations = Array.isArray(results?.violations) ? results.violations : [];
