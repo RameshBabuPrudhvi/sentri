@@ -171,6 +171,21 @@ const COMPLETED_TTL_MS = TIMINGS.COMPLETED_TTL_MS;
  * prefer role-based selectors, then data-testid, then aria-label, then
  * a short CSS chain.
  *
+ * **Disambiguation (DIF-015b follow-up):** when the chosen CSS-fallback
+ * selector matches more than one element on the page, append a Playwright
+ * `>> nth=N` token so replay targets the same element the user clicked.
+ * Without this, three identical `button.btn-primary` on a page would all
+ * replay against the first match. Role/data-testid/label/text selectors are
+ * NOT disambiguated by index — they're already semantic anchors and adding
+ * `nth=N` to them would mask a real test smell (multiple identical labels
+ * on the same page is a symptom worth surfacing, not silently fixing).
+ *
+ * **Shadow DOM and iframes** still fall through to the host-document selector
+ * (this PR's scope is naming + nth disambiguation only). Iframe support is
+ * partially handled at the action layer via `frameUrl` capture — see the
+ * `__sentriRecord` binding. Full shadow-root traversal is tracked as a
+ * follow-up sub-item under DIF-015b in ROADMAP.md.
+ *
  * Built once at module load — the timing constants come from `TIMINGS`
  * (Node-side) and are baked into the script as numeric literals before
  * `addInitScript` ships it to the page. This keeps a single source of
@@ -181,6 +196,32 @@ const RECORDER_SCRIPT = `
 (() => {
   if (window.__sentriRecorderInstalled) return;
   window.__sentriRecorderInstalled = true;
+
+  // CSS-only fallback used both as the final branch in selectorGenerator
+  // AND by the nth=N disambiguator (which needs a CSS string to count
+  // matches via document.querySelectorAll).
+  function cssFallback(el) {
+    if (el.id) return "#" + CSS.escape(el.id);
+    if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
+    const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
+    return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+  }
+
+  // DIF-015b: append ">> nth=N" if the CSS fallback matches multiple elements.
+  // Only applied to CSS-fallback selectors — semantic selectors (role=, text=,
+  // data-testid=, label=, placeholder=, alt=, title=) intentionally pass
+  // through unchanged. Bail out cheaply on a unique match so the common case
+  // pays nothing beyond a single querySelectorAll call.
+  function disambiguateCss(el, cssSel) {
+    if (!cssSel || el.id) return cssSel; // #id selectors are unique by definition
+    let matches;
+    try { matches = document.querySelectorAll(cssSel); }
+    catch { return cssSel; } // malformed selector — let replay fail visibly instead of corrupting it
+    if (matches.length <= 1) return cssSel;
+    const idx = Array.prototype.indexOf.call(matches, el);
+    if (idx < 0) return cssSel; // el is in a shadow root or detached — querySelectorAll can't see it
+    return cssSel + " >> nth=" + idx;
+  }
 
   function selectorGenerator(el) {
     if (!el || el.nodeType !== 1) return "";
@@ -201,10 +242,9 @@ const RECORDER_SCRIPT = `
     if (title) return 'title=' + JSON.stringify(title.slice(0, 80));
     const txt = (el.innerText || el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
     if (txt && txt.length >= 2) return 'text=' + JSON.stringify(txt);
-    if (el.id) return "#" + CSS.escape(el.id);
-    if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
-    const cls = (el.className && typeof el.className === "string") ? el.className.split(/\\s+/).filter(Boolean).slice(0, 2).join(".") : "";
-    return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+    // CSS fallback — disambiguate with nth=N when the selector matches
+    // multiple elements. Semantic selectors above are intentionally exempt.
+    return disambiguateCss(el, cssFallback(el));
   }
   // Friendly label for the human-readable Steps panel. Mirrors how AI-
   // generated steps reference elements ("the Search button", "the Email

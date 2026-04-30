@@ -636,9 +636,9 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
 
-**Status:** ✅ Partially Complete (PR #3 — naming alignment only) | **Effort:** S | **Source:** Follow-on from DIF-015
+**Status:** ✅ Partially Complete (PR #3 — naming + nth=N disambiguation; PR #120 added the disambiguator) | **Effort:** S | **Source:** Follow-on from DIF-015
 
-> **PR #3 scope note:** The injected helper in `RECORDER_SCRIPT` was renamed from `bestSelector` to `selectorGenerator` and the JSDoc / inline comments were updated to reflect Playwright-style intent. The 5-strategy fallback chain itself (data-testid → role+name → label → placeholder → CSS) is unchanged in this PR — true adoption of Playwright's internal `selectorGenerator` algorithm (scoring, `>> nth=N` disambiguation, iframe / shadow-DOM handling) is still planned and tracked as a follow-on. If a deeper algorithmic upgrade is wanted, reopen this item with a new PR-#.
+> **PR #3 / PR #120 scope note:** The injected helper in `RECORDER_SCRIPT` was renamed from `bestSelector` to `selectorGenerator`, the JSDoc / inline comments were updated to reflect Playwright-style intent, AND the CSS-fallback branch now emits `cssSelector >> nth=N` when the bare selector matches more than one element on the page (PR #120). This closes Gap 1 from the original problem statement (no disambiguation for duplicate matches). Gap 2 (data-testid scoring — preferring auto-generated `data-testid="el_abc123"` vs role+name) and Gap 3 (iframe + shadow-DOM traversal) remain — neither requires importing Playwright internals; both are in-page DOM walks that can ship as follow-on PRs without changing this item's contract.
 
 **Problem:** The DIF-015 recorder captures user interactions correctly but the selectors it emits are noticeably lower-quality than what Playwright's own `codegen` tool produces. Three concrete gaps:
 
