@@ -1597,11 +1597,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Risk-based test selection | ❌ → AUTO-001 | ✅ | Partial | ✅ BearQ smart selection † | ❌ |
 | Accessibility testing | ✅ (backend) / 🔄 AUTO-016b (UI) | ✅ | ❌ | Partial | Via plugins |
 | Performance budgets | ❌ → AUTO-017 | ❌ | ❌ | Via Lighthouse | ❌ |
-| Quality gate enforcement | ❌ → AUTO-012 | ✅ | ✅ | ✅ | Via Playwright |
+| Quality gate enforcement | ✅ AUTO-012 (PR #2) | ✅ | ✅ | ✅ | Via Playwright |
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone Playwright export (✅ DIF-006). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close next:** AUTO-001 (risk-based test selection) · AUTO-012 (quality gate enforcement) · AUTO-017 (performance budgets) · AUTO-016b (accessibility UI surfacing — backend ✅ in PR #121) · MNT-006 (object storage for hosted artifacts)
+**Critical gaps to close next:** AUTO-001 (risk-based test selection) · AUTO-017 (performance budgets) · DIF-005 (embedded Playwright trace viewer) · AUTO-019 (per-test run diffing)
 
 > **Previous priorities ✅ shipped:** DIF-001 (visual regression, PR #94) · DIF-002 (cross-browser, PR #94) · DIF-015 (recorder, PR #94) · DIF-006 (Playwright export, PR #1) · AUTO-005 (test retry, PR #2) · AUTO-016 backend (axe-core scan + persistence, PR #121).
 
@@ -1631,7 +1631,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 `DIF-006` ✅ (Playwright export — biggest lock-in objection handler) → `AUTO-005` ✅ (test retry with flake isolation — complements DIF-004 flaky detection) → `AUTO-016` ✅ backend (accessibility via axe-core, PR #121; UI tracked as `AUTO-016b`) → `MNT-006` (S3 object storage — production prerequisite)
 
 **Lowest effort / highest immediate value (next):**
-AUTO-016b (S — frontend `CrawlView` accessibility panel; backend ✅ PR #121) · MNT-006 (M — object storage) · AUTO-012 (M — quality gate enforcement) · ENH-036 (S — project credential edit) · DIF-007 (M — conversational test editor)
+AUTO-017 (M — Web Vitals performance budgets) · DIF-005 (M — embedded Playwright trace viewer) · AUTO-019 (M — per-test run diffing) · DIF-015b Gap 3 (M — recorder iframe + shadow-DOM traversal)
 
 > **Previously shipped from this list:** ~~MNT-011 (S)~~ ✅ · ~~AUTO-007 (S)~~ ✅ · ~~DIF-006 (M)~~ ✅ (PR #1) · ~~AUTO-005 (M)~~ ✅ (PR #2) · ~~DIF-013 (S — telemetry)~~ ✅ (PR #3)
 
