@@ -46,7 +46,15 @@ import fs from "fs";
 
 
 function evaluateQualityGates(gates, run) {
-  if (!gates || typeof gates !== "object") return null;
+  // Defense-in-depth: `validateQualityGates` in `backend/src/routes/projects.js`
+  // already rejects payloads that produce an empty object, but a corrupted DB
+  // row or direct DB manipulation could still surface `{}` here. Treat any
+  // non-object, array, or empty object as "no gates configured" and return
+  // null — same shape as the unconfigured case — so callers (trigger response,
+  // RunDetail UI, GateBadge) render legacy-style with no enforcement rather
+  // than silently reporting `{ passed: true }` from a misconfigured project.
+  if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
+  if (Object.keys(gates).length === 0) return null;
   const violations = [];
   const total = Number(run.total || 0);
   const failed = Number(run.failed || 0);

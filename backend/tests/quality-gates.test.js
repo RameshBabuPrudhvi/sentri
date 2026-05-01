@@ -74,6 +74,14 @@ async function main() {
       // No gates configured → null (acceptance criterion: legacy runs unaffected)
       assert.equal(__evaluateQualityGatesForTest(null, { total: 5, passed: 0, failed: 5 }), null);
 
+      // Defense-in-depth: empty object, array, and undefined all return null
+      // rather than silently reporting `{ passed: true }`. The API layer
+      // (`validateQualityGates`) rejects these payloads, but a corrupted DB
+      // row could still surface them — evaluator must be independently safe.
+      assert.equal(__evaluateQualityGatesForTest({}, { total: 5, passed: 0, failed: 5 }), null, "empty {} gates → null, not all-passed");
+      assert.equal(__evaluateQualityGatesForTest([], { total: 5, passed: 0, failed: 5 }), null, "array gates → null");
+      assert.equal(__evaluateQualityGatesForTest(undefined, { total: 5, passed: 0, failed: 5 }), null, "undefined gates → null");
+
       // All gates passing → passed: true
       // `flakyPct` is computed from `run.results[].retryCount > 0`, so we
       // pass a results array here rather than the run-level `retryCount` sum.
