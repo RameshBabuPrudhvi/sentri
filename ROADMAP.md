@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-015b Gap 2` — recorder data-testid quality scoring · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 30 items (AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `AUTO-017` — Web Vitals performance budgets · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 29 items (DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
 
 ---
 
@@ -99,7 +99,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-005 | Automatic test retry with flake isolation | PR #2                                                           |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3                                                           |
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3                                                           |
-| DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned)         |
+| DIF-015b (partial) | Recorder selector quality: naming alignment, nth=N disambiguation, Playwright `InjectedScript` delegation with hand-rolled fallback | PR #3, PR #120 (Gaps 1), PR #4 (Gap 2 — Gap 3 still 🔲 Planned) |
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121                                                         |
 | MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122                                                         |
 | DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123                                                         |
@@ -648,25 +648,26 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
 
-**Status:** 🔄 In Progress (PR #3 — naming alignment; PR #120 — Gap 1 nth=N disambiguation) | **Effort:** S | **Source:** Follow-on from DIF-015
+**Status:** 🔄 In Progress (PR #3 — naming alignment; PR #120 — Gap 1 nth=N disambiguation; PR #4 — Gap 2 Playwright `InjectedScript` delegation + fallback) | **Effort:** S | **Source:** Follow-on from DIF-015
 
-> **Progress:** Gap 1 (nth=N disambiguation) is shipped. Gap 2 (data-testid quality scoring) and Gap 3 (iframe + shadow-DOM traversal) remain. Tracked as separate sub-items below so a follow-up PR can pick them off cleanly without re-litigating scope. Item flips to ✅ Complete when both remaining sub-items ship.
+> **Progress:** Gaps 1 and 2 are shipped. Gap 3 (iframe + shadow-DOM traversal) remains. Tracked as a separate sub-item below so a follow-up PR can pick it off cleanly without re-litigating scope. Item flips to ✅ Complete when Gap 3 ships.
 
 #### ✅ Gap 1 — nth=N disambiguation for duplicate CSS matches (PR #120)
 
 When the CSS-fallback branch of `selectorGenerator` produces a selector that matches multiple elements on the page (e.g. three identical `button.btn-primary`), the recorder now appends a Playwright `>> nth=N` token so replay clicks the same element the user clicked. Implementation lives at `backend/src/runner/recorder.js` in `disambiguateCss()` — a single `document.querySelectorAll` call, scoped to CSS-fallback selectors only (semantic selectors like `data-testid=`, `role=`, `text=` pass through unchanged because an `aria-label` collision is a real test smell that should surface, not be silently disambiguated away).
 
-#### 🔲 Gap 2 — data-testid quality scoring
+#### ✅ Gap 2 — Playwright `InjectedScript` delegation with hand-rolled fallback (PR #4)
 
-**Status:** 🔲 Planned | **Effort:** S | **Priority:** 🔵 Medium
+**Status:** ✅ Complete (PR #4) | **Effort:** S | **Priority:** 🔵 Medium
 
-The current chain unconditionally prefers `data-testid` over role+name, even when the test-id is a useless auto-generated string (e.g. `data-testid="el_abc123"` from React Testing Library or `data-testid="comp-7af3"` from a CSS-in-JS lib). Codegen-style scoring would weight a high-quality semantic anchor (role + accessible name) above a noise testid. Concretely:
+Shipped two layers instead of the originally-scoped pure heuristic:
 
-- Detect noise testids via heuristic: short prefix (`el_`, `comp-`, `t-`) + hex/numeric tail, all-numeric, or length > 30 with no separators.
-- Demote noise testids below role+name in the priority chain; keep them above the bare CSS fallback so they're still preferred over a `.btn-primary` chain.
-- Pure DOM logic — no Playwright internals to import.
+1. **Primary path — Playwright delegation.** The recorder now loads Playwright's pre-bundled `playwright-core/lib/server/injected/injectedScriptSource.js` at server start (`backend/src/runner/playwrightSelectorGenerator.js`), evaluates it in page scope via `addInitScript`, constructs an `InjectedScript` instance with feature-detected constructor shapes, and exposes `window.__playwrightSelector(el)` as the in-page entry point. `selectorGenerator` inside `RECORDER_SCRIPT` calls it first — same algorithm Playwright's own `codegen` uses, so ancestor scoring, machine-generated-testid demotion, shadow-DOM traversal, and iframe locator chains come for free.
+2. **Fallback path — hand-rolled chain.** When the bundle can't be resolved (missing install, Playwright bumped to a layout-incompatible version, IIFE throws), the loader returns `available: false` and `selectorGenerator` drops through to the existing `data-testid → role+name → label → placeholder → CSS` chain. The fallback retains the originally-scoped noise-testid heuristic (`isNoisyTestId`: numeric-only, `el_`/`comp-`/`t-` + hex tail ≥4 chars, length > 30 with no separators) so a degraded recorder still demotes generated testids correctly.
 
-**Files:** `backend/src/runner/recorder.js` — extend `selectorGenerator` priority chain · `backend/tests/recorder.test.js` — add fixture for noise vs. semantic testids.
+**Risks knowingly accepted:** Playwright marks `lib/server/injected/*` as internal and **not covered by semver**. Symbol churn across minor releases will silently degrade the primary path to fallback. Track via the launch-time health probe (planned follow-up) and the `cross-browser-smoke`-style CI canary.
+
+**Files shipped:** new `backend/src/runner/playwrightSelectorGenerator.js` (loader + bootstrap) · `backend/src/runner/recorder.js` (delegation + fallback in `selectorGenerator`, init-script wiring in `startRecording`) · `backend/tests/recorder.test.js` (fixture tests for `isNoisyTestId`, simulation tests for fallback ordering, contract tests for the loader/bootstrap) · `docs/changelog.md` entry.
 
 #### 🔲 Gap 3 — iframe and shadow-DOM traversal
 
