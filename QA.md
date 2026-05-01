@@ -403,8 +403,15 @@ Each area uses this format:
 
 **Steps & expected:**
 1. Create project (`qa_lead` or `admin`, `routes/projects.js:46`) → appears in list; slug/URL unique.
-2. Edit project name/settings → persists after refresh.
-3. **Delete project (admin-only**, `routes/projects.js:84`) → moved to recycle bin, no longer in active list. As `qa_lead`, attempting delete returns **403**.
+2. **Edit project** (ENH-036, `qa_lead` or `admin`, `routes/projects.js:96` — `PATCH /api/v1/projects/:id`):
+   - Click the pencil-icon button on a project card in `/projects` → routes to `/projects/new?edit=<id>` with name/URL pre-filled.
+   - Auth toggle reflects whether credentials are configured server-side; password fields render `"•••••• (saved — leave blank to keep)"` placeholder.
+   - Change the name and URL only → save → server merges with existing encrypted `username`/`password` and legacy `usernameSelector`/`passwordSelector`/`submitSelector` (no data loss; secrets never round-trip through the client).
+   - Rotate the password (enter a new value) → save → next crawl uses the new credential. Verify by re-running the project's crawl.
+   - Clear the auth toggle → save → server stores `credentials: null` and the project crawls without auth.
+   - Edit a project that was created with explicit CSS selectors (legacy) → save name change only → confirm the legacy `usernameSelector` / `passwordSelector` / `submitSelector` are NOT silently wiped (regression guard for the merge logic).
+   - Pristine edit (open + Back without typing) → no "Leave without saving?" prompt fires (`isDirty` baseline check).
+3. **Delete project (admin-only**, `routes/projects.js:147`) → moved to recycle bin, no longer in active list. As `qa_lead`, attempting delete returns **403**.
 4. Restore from recycle bin (`qa_lead` or `admin`, `routes/recycleBin.js:54`) → returns to active list with data intact (tests, runs, baselines).
 5. **Permanently purge (admin-only**, `routes/recycleBin.js:132`) → unrecoverable; associated runs/tests gone. `qa_lead` purge attempt → 403.
 
@@ -1052,6 +1059,14 @@ Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
 - Browser back / forward — URL and UI stay in sync; no stale modals.
 - Open any page in a new tab via URL paste — loads correctly with auth.
 - Deep-link to a run/test/project while logged out — redirected to login, then back to the target.
+
+**Sidebar collapse / expand** (PR #1, `frontend/src/components/layout/Layout.jsx`, `frontend/src/components/layout/Sidebar.jsx`):
+- Click the `PanelLeftClose` icon in the sidebar header → sidebar collapses to a 64px icon-only rail. Logo, workspace avatar, nav icons (with `title` tooltips), and Settings icon (admin only) remain visible. Active route shows the accent indicator.
+- Click the logo or workspace avatar in the rail → sidebar expands back to 216px.
+- Refresh any page → collapsed/expanded state persists via `localStorage` key `ui.sidebar.collapsed` (`Layout.jsx:21`). Clearing that key restores the default expanded state.
+- Switch between pages while collapsed → main content fills the reclaimed horizontal space; no horizontal scroll.
+- Workspace switcher dropdown is closed automatically on collapse (so it doesn't float into the main content area).
+- Each rail nav item has a `title` attribute so hovering shows the page name (Dashboard, Projects, Tests, Runs, Reports, Automation, System, Settings).
 
 **Performance:**
 - Initial page load ≤ 3s on a local dev build over loopback (no formal SLO documented — file regressions against prior release).

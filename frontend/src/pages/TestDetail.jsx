@@ -1,19 +1,15 @@
-import React, { useEffect, useState, useCallback, Suspense, lazy } from "react";
+import React, { useEffect, useState, useCallback, useRef, Suspense, lazy } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Play, Edit2, RefreshCw, Download,
   CheckCircle2, Clock,
   ChevronRight, Calendar, GitCommit,
   RotateCcw, ExternalLink, X, Plus, Save, GitMerge,
-  Link2, Tag, Clipboard, Wand2,
+  Link2, Tag, Clipboard, Wand2, MoreHorizontal,
 } from "lucide-react";
 import { api } from "../api.js";
 import { queryClient, testQueryKeys } from "../queryClient.js";
 import { useTestDetailQuery } from "../hooks/queries/useTestDetailQuery.js";
-// Heavy components lazy-loaded — only fetched when the user actually needs them.
-// DiffView and AiFixPanel are only rendered on explicit user interaction (click to
-// show diff / click to open AI fix panel), so they are ideal lazy-load candidates.
-// This removes ~40KB from the initial TestDetail chunk.
 const DiffView    = lazy(() => import("../components/ai/DiffView.jsx"));
 const AiFixPanel  = lazy(() => import("../components/ai/AiFixPanel.jsx"));
 import { cleanTestName } from "../utils/formatTestName.js";
@@ -29,52 +25,37 @@ import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
 import AiTestEditor from "../components/test/AiTestEditor.jsx";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
 
-// ── Run status icon (used in Recent Test Runs table) ─────────────────────────
 function RunIcon({ status }) {
   if (status === "passed" || status === "completed")
-    return <span style={{ color: "var(--green)", fontSize: 16 }}>✓</span>;
+    return <span className="td-run-glyph td-run-glyph--pass">✓</span>;
   if (status === "failed")
-    return <span style={{ color: "var(--red)", fontSize: 16 }}>✗</span>;
+    return <span className="td-run-glyph td-run-glyph--fail">✗</span>;
   if (status === "running")
     return <RefreshCw size={14} color="var(--blue)" className="spin" />;
   return <Clock size={14} color="var(--text3)" />;
 }
 
-// ── Info Row (right sidebar) ──────────────────────────────────────────────────
 function InfoRow({ icon, label, children }) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div className="td-info-label">
-        {label}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {icon && <span style={{ color: "var(--accent)", flexShrink: 0 }}>{icon}</span>}
+    <div className="td-info-row">
+      <div className="td-info-label">{label}</div>
+      <div className="td-info-row-inner">
+        {icon && <span className="td-info-icon">{icon}</span>}
         {children}
       </div>
     </div>
   );
 }
 
-// ── Avatar chip ───────────────────────────────────────────────────────────────
 function AvatarChip({ name }) {
   const initials = (name || "U").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{
-        width: 24, height: 24, borderRadius: 6,
-        background: "var(--accent-bg)", color: "var(--accent)",
-        fontSize: "0.65rem", fontWeight: 700,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        border: "1px solid rgba(91,110,245,0.2)",
-      }}>
-        {initials}
-      </div>
-      <span style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--text)" }}>{name || "—"}</span>
+    <div className="td-avatar-chip">
+      <div className="td-avatar">{initials}</div>
+      <span className="td-avatar-name">{name || "—"}</span>
     </div>
   );
 }
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function TestDetail() {
   const { testId } = useParams();
@@ -87,9 +68,6 @@ export default function TestDetail() {
   const loading = detailQuery.isLoading;
   const [running, setRunning] = useState(false);
 
-  // Optimistic patch helper: mutate the test field of the composite cache
-  // entry so inline edits and approve/restore actions reflect immediately
-  // without re-fetching project + runs.
   const setTest = useCallback((updater) => {
     queryClient.setQueryData(testQueryKeys.detail(testId), (prev) => {
       if (!prev) return prev;
@@ -98,49 +76,50 @@ export default function TestDetail() {
     });
   }, [testId]);
 
-  // load() preserved as a public API for `.then(load)` callers below — it
-  // simply busts the cache so the query refetches.
   const load = useCallback(
     () => queryClient.invalidateQueries({ queryKey: testQueryKeys.detail(testId) }),
     [testId],
   );
 
-  // ── Edit mode state ──────────────────────────────────────────────────────
-  const [editing, setEditing]         = useState(false);
-  const [editName, setEditName]       = useState("");
-  const [editDesc, setEditDesc]       = useState("");
-  const [editSteps, setEditSteps]     = useState([]);
+  const [editing, setEditing]           = useState(false);
+  const [editName, setEditName]         = useState("");
+  const [editDesc, setEditDesc]         = useState("");
+  const [editSteps, setEditSteps]       = useState([]);
   const [editPriority, setEditPriority] = useState("medium");
-  const [saving, setSaving]           = useState(false);
-  const [editError, setEditError]     = useState(null);
+  const [saving, setSaving]             = useState(false);
+  const [editError, setEditError]       = useState(null);
 
-  // ── Traceability fields (inline editing) ──────────────────────────────────
   const [editingIssueKey, setEditingIssueKey] = useState(false);
   const [issueKeyDraft, setIssueKeyDraft]     = useState("");
   const [editingTags, setEditingTags]         = useState(false);
   const [tagsDraft, setTagsDraft]             = useState("");
 
-  // ── Runs pagination ──────────────────────────────────────────────────────
-  const [runPage, setRunPage] = useState(1);
+  const [runPage, setRunPage]     = useState(1);
+  const [stepsView, setStepsView] = useState("steps");
+  const [showDiff, setShowDiff]   = useState(false);
+  const [curlCopied, setCurlCopied] = useState(null);
+  const [prevSteps, setPrevSteps] = useState(null);
 
-  // ── Steps / Source tab toggle ────────────────────────────────────────────
-  const [stepsView, setStepsView] = useState("steps"); // "steps" | "source"
-  const [showDiff,  setShowDiff]  = useState(false);   // show diff when previous version exists
-  const [curlCopied, setCurlCopied] = useState(null);  // index of step whose cURL was just copied
-  const [prevSteps, setPrevSteps] = useState(null);     // previous steps for diff (captured before save)
-
-  // ── AI fix panel state ──────────────────────────────────────────────────
   const [showFixPanel, setShowFixPanel] = useState(false);
   const [showAiEditor, setShowAiEditor] = useState(false);
-
-  // ── Code regeneration review state ──────────────────────────────────────
-  const [codePreview, setCodePreview] = useState(null); // { generatedCode, originalCode }
+  const [codePreview, setCodePreview]   = useState(null);
   const [applyingPreview, setApplyingPreview] = useState(false);
-  const [regenWarning, setRegenWarning] = useState(null); // dismissible warning for regen failures
+  const [regenWarning, setRegenWarning] = useState(null);
+  const [editCode, setEditCode]         = useState("");
+  const [codeEdited, setCodeEdited]     = useState(false);
 
-  // ── Inline code editing state ─────────────────────────────────────────
-  const [editCode, setEditCode] = useState("");
-  const [codeEdited, setCodeEdited] = useState(false); // tracks if user manually touched code
+  // ── More-actions dropdown ──
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    function handleClick(e) {
+      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [moreOpen]);
 
   function startEditing() {
     setEditName(test.name || "");
@@ -155,56 +134,30 @@ export default function TestDetail() {
     setPrevSteps(null);
     setShowDiff(false);
     setRegenWarning(null);
+    setMoreOpen(false);
   }
 
   async function handleSaveEdit() {
     if (!editName.trim()) { setEditError("Test name is required."); return; }
-    setSaving(true);
-    setEditError(null);
+    setSaving(true); setEditError(null);
     try {
       const cleanSteps = editSteps.filter(s => s.trim());
-
-      // Capture previous steps before saving so we can show a diff
       const stepsChanged = JSON.stringify(cleanSteps) !== JSON.stringify(test.steps || []);
       if (stepsChanged && test.steps && test.steps.length > 0) {
-        setPrevSteps([...test.steps]);
-        setShowDiff(true); // auto-show the diff after save
+        setPrevSteps([...test.steps]); setShowDiff(true);
       }
-
-      const payload = {
-        name: editName.trim(),
-        description: editDesc.trim(),
-        steps: cleanSteps,
-        priority: editPriority,
-      };
-
+      const payload = { name: editName.trim(), description: editDesc.trim(), steps: cleanSteps, priority: editPriority };
       if (codeEdited) {
-        // User manually edited code — save it directly, skip AI regeneration.
-        // Empty string is valid (clears the code, making it a manual test).
         payload.playwrightCode = editCode;
       } else if (test.playwrightCode && stepsChanged) {
-        // Steps may have changed — request a code preview for review
         payload.previewCode = true;
       } else if (!test.playwrightCode && stepsChanged && cleanSteps.length > 0) {
-        // No existing code — generate for the first time (no preview needed
-        // since there's nothing to diff against).
         payload.regenerateCode = true;
       }
-
       const updated = await api.updateTest(testId, payload);
-      setTest(updated);
-      setEditing(false);
-      setStepsView("steps");
-
-      // If the backend returned a code preview, show the review panel
-      if (updated._codePreview) {
-        setCodePreview(updated._codePreview);
-      }
-      // If code regeneration failed (e.g. Ollama timeout), show a dismissible warning.
-      // Use a temporary alert since we've already exited edit mode at this point.
-      if (updated._regenerationError) {
-        setRegenWarning(updated._regenerationError);
-      }
+      setTest(updated); setEditing(false); setStepsView("steps");
+      if (updated._codePreview) setCodePreview(updated._codePreview);
+      if (updated._regenerationError) setRegenWarning(updated._regenerationError);
     } catch (err) {
       setEditError(err.message || "Failed to save changes.");
     } finally {
@@ -216,90 +169,46 @@ export default function TestDetail() {
     if (!codePreview?.generatedCode || applyingPreview) return;
     setApplyingPreview(true);
     try {
-      const updated = await api.updateTest(testId, {
-        playwrightCode: codePreview.generatedCode,
-      });
-      setTest(updated);
-      setCodePreview(null);
+      const updated = await api.updateTest(testId, { playwrightCode: codePreview.generatedCode });
+      setTest(updated); setCodePreview(null);
     } catch (err) {
       setRegenWarning(err.message || "Failed to apply generated code.");
-    } finally {
-      setApplyingPreview(false);
-    }
+    } finally { setApplyingPreview(false); }
   }
 
   function handleEditPreview() {
-    // Enter edit mode with the generated code pre-filled in the inline editor
-    setEditName(test.name || "");
-    setEditDesc(test.description || "");
-    setEditSteps([...(test.steps || [])]);
-    setEditPriority(test.priority || "medium");
-    setEditCode(codePreview.generatedCode);
-    setCodeEdited(true);
-    setEditError(null);
-    setEditing(true);
-    setStepsView("source");
-    setCodePreview(null);
+    setEditName(test.name || ""); setEditDesc(test.description || "");
+    setEditSteps([...(test.steps || [])]); setEditPriority(test.priority || "medium");
+    setEditCode(codePreview.generatedCode); setCodeEdited(true);
+    setEditError(null); setEditing(true); setStepsView("source"); setCodePreview(null);
   }
 
-  function handleDiscardPreview() {
-    setCodePreview(null);
-  }
+  function cancelEditing() { setEditing(false); setEditError(null); }
 
-  function cancelEditing() {
-    setEditing(false);
-    setEditError(null);
-  }
-
-  function updateEditStep(i, val) {
-    setEditSteps(prev => prev.map((s, idx) => idx === i ? val : s));
-  }
-  function removeEditStep(i) {
-    setEditSteps(prev => prev.filter((_, idx) => idx !== i));
-  }
-  function addEditStep() {
-    setEditSteps(prev => [...prev, ""]);
-  }
+  function updateEditStep(i, val) { setEditSteps(prev => prev.map((s, idx) => idx === i ? val : s)); }
+  function removeEditStep(i) { setEditSteps(prev => prev.filter((_, idx) => idx !== i)); }
+  function addEditStep() { setEditSteps(prev => [...prev, ""]); }
 
   function handleExport() {
     if (!test) return;
-
     const projectName = project?.name || "";
     const projectUrl  = project?.url  || "";
     const exportedAt  = new Date().toISOString();
     const steps       = (test.steps || []).length > 0 ? test.steps : [""];
-
     const runHistory = runs.slice(0, 20).map(run => {
       const result = run.results?.find(r => r.testId === testId);
-      return {
-        runId:      run.id,
-        status:     result?.status || run.status,
-        durationMs: result?.durationMs ?? "",
-        startedAt:  run.startedAt || "",
-      };
+      return { runId: run.id, status: result?.status || run.status, durationMs: result?.durationMs ?? "", startedAt: run.startedAt || "" };
     });
-
-    // Industry standard: Test ID | Name | Description | Step # | Step |
-    // Project | Priority | Type | Review Status | Status | Last Run At |
-    // Created At | Source URL | Journey | Run ID | Run Status | Duration (ms) | Run Started At | Exported At
-    const headers = [
-      "Test ID", "Name", "Description", "Step #", "Step",
-      "Project", "Priority", "Type", "Review Status",
-      "Status", "Last Run At", "Created At", "Source URL", "Journey",
-      "Run ID", "Run Status", "Run Duration (ms)", "Run Started At", "Exported At",
-    ];
-
+    const headers = ["Test ID","Name","Description","Step #","Step","Project","Priority","Type","Review Status","Status","Last Run At","Created At","Source URL","Journey","Run ID","Run Status","Run Duration (ms)","Run Started At","Exported At"];
     const rows = [];
     steps.forEach((step, stepIdx) => {
-      // Repeat run history per step row — if no runs, emit one row per step
       const runs_ = runHistory.length > 0 ? runHistory : [null];
       runs_.forEach((rh, rhIdx) => {
         rows.push([
           stepIdx === 0 && rhIdx === 0 ? test.id                                    : "",
           stepIdx === 0 && rhIdx === 0 ? cleanTestName(test.name)                   : "",
           stepIdx === 0 && rhIdx === 0 ? (test.description || "")                   : "",
-          step ? stepIdx + 1 : "",
-          step || "",
+          step ? stepIdx + 1 : "", step || "",
           stepIdx === 0 && rhIdx === 0 ? projectName                                : "",
           stepIdx === 0 && rhIdx === 0 ? (test.priority || "medium")                : "",
           stepIdx === 0 && rhIdx === 0 ? (test.type || "")                          : "",
@@ -309,16 +218,12 @@ export default function TestDetail() {
           stepIdx === 0 && rhIdx === 0 ? (test.createdAt || "")                     : "",
           stepIdx === 0 && rhIdx === 0 ? (test.sourceUrl || projectUrl || "")       : "",
           stepIdx === 0 && rhIdx === 0 ? (test.isJourneyTest ? "Yes" : "No")        : "",
-          rh ? rh.runId      : "",
-          rh ? rh.status     : "",
-          rh ? rh.durationMs : "",
-          rh ? rh.startedAt  : "",
+          rh ? rh.runId : "", rh ? rh.status : "", rh ? rh.durationMs : "", rh ? rh.startedAt : "",
           stepIdx === 0 && rhIdx === 0 ? exportedAt : "",
         ]);
       });
     });
-
-    const filename = `sentri-test-${cleanTestName(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `sentri-test-${cleanTestName(test.name || "export").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date().toISOString().slice(0,10)}.csv`;
     exportCsv(headers, rows, filename);
   }
 
@@ -335,59 +240,55 @@ export default function TestDetail() {
   }
 
   if (loading) return (
-    <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 4px" }}>
+    <div className="td-page td-page--padded">
       {[48, 200, 200].map((h, i) => (
-        <div key={i} className="skeleton" style={{ height: h, borderRadius: 12, marginBottom: 16 }} />
+        // Heights vary per skeleton row → keep the height inline; the rest
+        // (border-radius, margin) lives in `.td-skeleton`.
+        <div key={i} className="skeleton td-skeleton" style={{ height: h }} />
       ))}
     </div>
   );
 
   if (!test) return (
-    <div style={{ padding: 60, textAlign: "center", color: "var(--text2)" }}>
+    <div className="td-page--not-found">
       Test not found.{" "}
       <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Go back</button>
     </div>
   );
 
-  const author = test.author || project?.name || "Karthik kk";
+  const author = test.author || project?.name || "";
+
+  const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
+  const isFailed = test.lastResult === "failed" || latestRunResult?.status === "failed";
+  const showFixBtn = isFailed && test.playwrightCode && !showFixPanel;
 
   return (
-    <div className="fade-in" style={{ maxWidth: 980, margin: "0 auto" }}>
+    <div className="fade-in td-page">
 
-      {/* ── Breadcrumb + toolbar ─────────────────────────────────────────── */}
-      <div className="td-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        {/* Breadcrumb: Project > Tests > Test Details (when project is known) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "var(--text3)" }}>
+      {/* ── Breadcrumb + toolbar ── */}
+      <div className="td-toolbar">
+        <div className="td-breadcrumb">
           {project ? (
             <>
-              <button
-                onClick={() => navigate(`/projects/${test.projectId}`)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
-              >
+              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
                 {project.name}
               </button>
               <ChevronRight size={13} />
-              <button
-                onClick={() => navigate(`/projects/${test.projectId}`)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", padding: 0, fontSize: "0.82rem" }}
-              >
+              <button className="td-breadcrumb-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
                 Tests
               </button>
             </>
           ) : (
-            <button
-              onClick={() => navigate("/tests")}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: "0.82rem" }}
-            >
+            <button className="td-breadcrumb-btn" onClick={() => navigate("/tests")}>
               Tests
             </button>
           )}
           <ChevronRight size={13} />
-          <span style={{ color: "var(--text)" }}>Test Details</span>
+          <span className="td-breadcrumb-current">Test Details</span>
         </div>
 
-        {/* Action buttons */}
-        <div className="td-toolbar-actions" style={{ display: "flex", gap: 8 }}>
+        {/* ── Action buttons ── */}
+        <div className="td-toolbar-actions">
           {editing ? (
             <>
               <button className="btn btn-ghost btn-sm" onClick={cancelEditing} disabled={saving}>
@@ -395,50 +296,54 @@ export default function TestDetail() {
               </button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>
                 {saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
-                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating preview…" : "Saving…") : "Save Changes"}
+                {saving ? (test.playwrightCode && !codeEdited ? "Saving & generating…" : "Saving…") : "Save Changes"}
               </button>
             </>
           ) : (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={handleExport}>
-                <Download size={14} /> Export
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={startEditing}>
-                <Edit2 size={14} /> Edit Test
-              </button>
-              {test.playwrightCode && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setShowAiEditor(v => !v)}>
-                  <Wand2 size={14} /> {showAiEditor ? "Hide AI Editor" : "Edit with AI"}
+              {/* Fix with AI — only when latest result is failed */}
+              {showFixBtn && (
+                <button className="td-fix-btn" onClick={() => setShowFixPanel(true)}>
+                  <Wand2 size={14} /> Fix with AI
                 </button>
               )}
-              {/* Show "Fix with AI" when the test's lastResult is "failed" OR
-                  when the most recent run result for this test is "failed" (covers
-                  the case where the page was loaded before lastResult was flushed
-                  to SQLite, e.g. navigating from a just-finished run). */}
-              {(() => {
-                const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
-                const isFailed = test.lastResult === "failed" || latestRunResult?.status === "failed";
-                return isFailed && test.playwrightCode && !showFixPanel ? (
-                  <button
-                    className="btn btn-sm"
-                    style={{
-                      background: "var(--accent-bg)", color: "var(--accent)",
-                      border: "1px solid rgba(91,110,245,0.3)", fontWeight: 600,
-                    }}
-                    onClick={() => setShowFixPanel(true)}
-                  >
-                    <Wand2 size={14} /> Fix with AI
-                  </button>
-                ) : null;
-              })()}
+
+              {/* More actions (⋯) dropdown */}
+              <div className="td-more-wrap" ref={moreRef}>
+                <button
+                  className="td-more-btn"
+                  title="More actions"
+                  onClick={() => setMoreOpen(v => !v)}
+                  aria-haspopup="true"
+                  aria-expanded={moreOpen}
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+                {moreOpen && (
+                  <div className="td-more-menu" role="menu">
+                    <button className="td-more-item" onClick={() => { startEditing(); }}>
+                      <Edit2 size={14} /> Edit Test
+                    </button>
+                    {test.playwrightCode && (
+                      <button className="td-more-item" onClick={() => { setShowAiEditor(v => !v); setMoreOpen(false); }}>
+                        <Wand2 size={14} /> {showAiEditor ? "Hide AI Editor" : "Edit with AI"}
+                      </button>
+                    )}
+                    <hr className="td-more-separator" />
+                    <button className="td-more-item" onClick={() => { handleExport(); setMoreOpen(false); }}>
+                      <Download size={14} /> Export CSV
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Primary: Run Test */}
               <button
                 className="btn btn-primary btn-sm"
                 onClick={handleRunTest}
                 disabled={running}
               >
-                {running
-                  ? <RefreshCw size={14} className="spin" />
-                  : <Play size={14} />}
+                {running ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
                 Run Test
               </button>
             </>
@@ -446,193 +351,114 @@ export default function TestDetail() {
         </div>
       </div>
 
-      {/* ── Page title ───────────────────────────────────────────────────── */}
+      {/* ── Page title ── */}
       {editing ? (
-        <div style={{ marginBottom: 24 }}>
+        <div className="td-title-edit">
           <input
-            className="input"
+            className="input td-title-input"
             value={editName}
             onChange={e => setEditName(e.target.value)}
             placeholder="Test name"
-            style={{ fontSize: "1.3rem", fontWeight: 700, height: 48, marginBottom: 8 }}
             autoFocus
           />
-          {editError && (
-            <div style={{
-              background: "var(--red-bg)", color: "var(--red)",
-              borderRadius: "var(--radius)", padding: "8px 12px",
-              fontSize: "0.82rem",
-            }}>
-              {editError}
-            </div>
-          )}
+          {editError && <div className="td-edit-error">{editError}</div>}
         </div>
       ) : (
-        <h1 style={{ fontSize: "1.5rem", fontWeight: 700, marginBottom: 24 }}>
-          {cleanTestName(test.name)}
-        </h1>
+        <h1 className="td-title">{cleanTestName(test.name)}</h1>
       )}
 
-      {/* ── Regeneration warning (shown after save when AI code regen failed) ── */}
+      {/* ── Regen warning ── */}
       {regenWarning && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, marginBottom: 16,
-          padding: "10px 14px", borderRadius: 8,
-          background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
-          fontSize: "0.82rem", color: "#f59e0b",
-        }}>
-          <span style={{ flexShrink: 0 }}>⚠</span>
-          <span style={{ flex: 1 }}>{regenWarning}</span>
-          <button
-            onClick={() => setRegenWarning(null)}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#f59e0b", padding: 2, display: "flex" }}
-          >
+        <div className="td-regen-warning">
+          <span className="td-regen-icon">⚠</span>
+          <span className="td-regen-message">{regenWarning}</span>
+          <button className="td-regen-warning-close" onClick={() => setRegenWarning(null)}>
             <X size={14} />
           </button>
         </div>
       )}
 
-      {/* ── Two-column layout ────────────────────────────────────────────── */}
+      {/* ── Two-column layout ── */}
       <div className="td-layout">
 
         {/* LEFT COLUMN */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="td-left-col">
 
           {/* Description card */}
-          <div className="card" style={{ padding: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <div style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: "var(--bg2)", border: "1px solid var(--border)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <GitCommit size={14} color="var(--text2)" />
-              </div>
-              <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0 }}>Description</h2>
+          <div className="card card-padded">
+            <div className="td-card-header">
+              <div className="td-card-icon"><GitCommit size={14} color="var(--text2)" /></div>
+              <h2 className="td-card-title">Description</h2>
             </div>
             {editing ? (
               <textarea
-                className="input"
+                className="input td-desc-textarea"
                 value={editDesc}
                 onChange={e => setEditDesc(e.target.value)}
                 placeholder="Describe what this test verifies…"
                 rows={3}
-                style={{ fontSize: "0.875rem", lineHeight: 1.7, resize: "vertical" }}
               />
             ) : (
-              <p style={{ fontSize: "0.875rem", color: "var(--text)", lineHeight: 1.7, margin: 0 }}>
-                {test.description || <span style={{ color: "var(--text3)" }}>No description provided.</span>}
+              <p className="td-desc-text">
+                {test.description || <span className="td-desc-empty">No description provided.</span>}
               </p>
             )}
           </div>
 
           {/* Test Steps card */}
-          <div className="card" style={{ padding: 24 }}>
+          <div className="card card-padded">
             {showAiEditor && (
               <AiTestEditor
                 test={test}
                 testId={testId}
-                onApplied={(updated) => {
-                  setTest(updated);
-                  setShowAiEditor(false);
-                  setStepsView("source");
-                }}
+                onApplied={(updated) => { setTest(updated); setShowAiEditor(false); setStepsView("source"); }}
               />
             )}
-            {/* ── Card header with Steps / Source tab toggle ── */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-              <div style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: "var(--bg2)", border: "1px solid var(--border)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <CheckCircle2 size={14} color="var(--text2)" />
-              </div>
-              <h2 style={{ fontWeight: 700, fontSize: "1rem", margin: 0, flex: 1 }}>Test Steps</h2>
 
-              {/* Steps / Source pill toggle — always shown when code exists */}
+            <div className="td-steps-header">
+              <div className="td-card-icon"><CheckCircle2 size={14} color="var(--text2)" /></div>
+              <h2 className="td-card-title td-card-title--flex">Test Steps</h2>
+
+              {/* Steps / Source tab toggle */}
               {test.playwrightCode && (
-                <div style={{
-                  display: "flex", alignItems: "center",
-                  background: "var(--bg2)", border: "1px solid var(--border)",
-                  borderRadius: 8, padding: 3, gap: 2,
-                }}>
-                  {/* Steps pill */}
+                <div className="td-tab-group">
                   <button
+                    className={`td-tab-pill ${stepsView === "steps" ? "active" : ""}`}
                     onClick={() => setStepsView("steps")}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 5,
-                      padding: "5px 12px", borderRadius: 6, border: "none",
-                      cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
-                      transition: "all 0.15s",
-                      background: stepsView === "steps" ? "var(--surface)" : "transparent",
-                      color:      stepsView === "steps" ? "var(--text)"    : "var(--text3)",
-                      boxShadow:  stepsView === "steps" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
-                    }}
                   >
-                    <CheckCircle2 size={12} />
-                    Steps
+                    <CheckCircle2 size={12} /> Steps
                   </button>
-                  {/* Source pill — toggles inline code view (editable in edit mode) */}
                   <button
+                    className={`td-tab-pill ${stepsView === "source" ? "active-accent" : ""}`}
                     onClick={() => setStepsView(stepsView === "source" ? "steps" : "source")}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 5,
-                      padding: "5px 12px", borderRadius: 6, border: "none",
-                      cursor: "pointer", fontSize: "0.74rem", fontWeight: 600,
-                      transition: "all 0.15s",
-                      background: stepsView === "source" ? "var(--surface)" : "transparent",
-                      color:      stepsView === "source" ? "var(--accent)"  : "var(--text3)",
-                      boxShadow:  stepsView === "source" ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
-                    }}
                   >
                     {"</>"} Source
-                    {editing && codeEdited && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} title="Code edited" />}
+                    {editing && codeEdited && <span className="td-unsaved-dot" title="Code edited" />}
                   </button>
                 </div>
               )}
 
-              {/* Copy as cURL — only shown for API tests in view mode */}
+              {/* Copy as cURL */}
               {test.playwrightCode && !editing && test.isApiTest && (
                 <button
+                  className={`td-curl-btn ${curlCopied ? "copied" : ""}`}
+                  title="Copy all API calls as cURL commands"
                   onClick={async () => {
                     const curl = playwrightToCurl(test.playwrightCode);
                     if (!curl) return;
-                    try {
-                      await navigator.clipboard.writeText(curl);
-                      setCurlCopied(true);
-                      setTimeout(() => setCurlCopied(false), 2000);
-                    } catch { /* ignore */ }
+                    try { await navigator.clipboard.writeText(curl); setCurlCopied(true); setTimeout(() => setCurlCopied(false), 2000); } catch { /* ignore */ }
                   }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "5px 10px", borderRadius: 6,
-                    border: "1px solid var(--border)",
-                    background: curlCopied ? "var(--green-bg)" : "var(--bg2)",
-                    color: curlCopied ? "var(--green)" : "var(--text3)",
-                    fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                  title="Copy all API calls as cURL commands (paste into Postman, Insomnia, or terminal)"
                 >
                   {curlCopied ? <CheckCircle2 size={11} /> : <Clipboard size={11} />}
                   {curlCopied ? "Copied!" : "Copy as cURL"}
                 </button>
               )}
 
-              {/* Show changes — when a previous version exists (code or steps) */}
+              {/* Show changes diff toggle */}
               {(test.playwrightCodePrev || prevSteps) && !editing && (
                 <button
+                  className={`td-diff-btn ${showDiff ? "active" : ""}`}
                   onClick={() => setShowDiff(v => !v)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "5px 10px", borderRadius: 6,
-                    border: "1px solid var(--border)",
-                    background: showDiff ? "var(--accent-bg)" : "var(--bg2)",
-                    color: showDiff ? "var(--accent)" : "var(--text3)",
-                    fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
                 >
                   <GitMerge size={11} />
                   {showDiff ? "Hide diff" : "Show changes"}
@@ -640,145 +466,79 @@ export default function TestDetail() {
               )}
             </div>
 
-            {/* ── Edit mode ── */}
+            {/* ── Edit: Source tab ── */}
             {editing && stepsView === "source" && test.playwrightCode ? (
-              /* ── Inline code editor (edit mode + Source tab) ── */
               <InlineCodeEditor
                 code={editCode}
                 modified={codeEdited}
                 onChange={(val) => { setEditCode(val); setCodeEdited(true); }}
               />
+
+            /* ── Edit: Steps tab ── */
             ) : editing ? (
-              /* ── Step editor (edit mode + Steps tab) ── */
               <>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div className="td-step-editor-list">
                   {editSteps.map((step, idx) => (
-                    <div key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                      <div style={{
-                        width: 24, height: 24, borderRadius: "50%",
-                        background: "var(--bg3)", border: "1px solid var(--border)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: "0.65rem", fontWeight: 700, color: "var(--text3)",
-                        flexShrink: 0, marginTop: 7,
-                      }}>
-                        {idx + 1}
-                      </div>
+                    <div key={idx} className="td-step-editor-row">
+                      <div className="td-step-num-edit">{idx + 1}</div>
                       <input
-                        className="input"
+                        className="input td-step-edit-input"
                         value={step}
                         onChange={e => updateEditStep(idx, e.target.value)}
-                        style={{ flex: 1, height: 36, fontSize: "0.82rem" }}
                       />
-                      <button
-                        onClick={() => removeEditStep(idx)}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: "var(--text3)", padding: "6px 4px", flexShrink: 0,
-                          marginTop: 2,
-                        }}
-                        title="Remove step"
-                      >
+                      <button className="td-step-remove-btn" onClick={() => removeEditStep(idx)} title="Remove step">
                         <X size={14} />
                       </button>
                     </div>
                   ))}
                 </div>
-                <button
-                  onClick={addEditStep}
-                  style={{
-                    marginTop: 8, background: "none", border: "1px dashed var(--border)",
-                    borderRadius: 6, cursor: "pointer", color: "var(--text3)",
-                    fontSize: "0.78rem", padding: "5px 12px", width: "100%",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  }}
-                >
+                <button className="td-add-step-btn" onClick={addEditStep}>
                   <Plus size={12} /> Add step
                 </button>
               </>
+
+            /* ── View: Source tab ── */
             ) : stepsView === "source" && test.playwrightCode ? (
-              /* ── SOURCE view: numbered steps each with their code block ── */
               (() => {
                 const stepChunks = splitCodeBySteps(test.playwrightCode, (test.steps || []).length, test.steps);
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                    {/* Diff panel — shown above source when "Show changes" is active */}
+                  <div className="td-source-list">
                     {showDiff && test.playwrightCodePrev && (
-                      <div style={{ marginBottom: 16 }}>
-                        <Suspense fallback={<div style={{ height: 60, background: "var(--bg2)", borderRadius: 6 }} />}>
-                          <DiffView
-                            before={test.playwrightCodePrev}
-                            after={test.playwrightCode}
-                          />
+                      <div className="td-diff-block">
+                        <Suspense fallback={<div className="td-diff-fallback" />}>
+                          <DiffView before={test.playwrightCodePrev} after={test.playwrightCode} />
                         </Suspense>
                       </div>
                     )}
                     {(test.steps || []).map((step, idx) => (
-                      <div key={idx} style={{
-                        borderBottom: idx < (test.steps.length - 1) ? "1px solid var(--border)" : "none",
-                        paddingBottom: 16, marginBottom: idx < (test.steps.length - 1) ? 16 : 0,
-                      }}>
-                        {/* Step label row */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                          <div style={{
-                            width: 22, height: 22, borderRadius: "50%",
-                            background: "var(--accent-bg)", border: "1px solid rgba(91,110,245,0.3)",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: "0.65rem", fontWeight: 700, color: "var(--accent)",
-                            flexShrink: 0,
-                          }}>
-                            {idx + 1}
-                          </div>
-                          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text)" }}>
-                            {step}
-                          </span>
+                      <div key={idx} className="td-source-step">
+                        <div className="td-source-step-label">
+                          <div className="td-source-step-num">{idx + 1}</div>
+                          <span className="td-source-step-text">{step}</span>
                         </div>
-                        {/* Code block */}
                         {stepChunks[idx] ? (
-                          <div style={{
-                            background: "#13151c",
-                            borderRadius: 8,
-                            border: "1px solid #1e2130",
-                            overflow: "hidden",
-                          }}>
-                            <pre style={{
-                              margin: 0,
-                              padding: "14px 16px",
-                              fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-                              fontSize: "0.76rem",
-                              lineHeight: "1.75",
-                              color: "#cdd5f0",
-                              whiteSpace: "pre-wrap",
-                              wordBreak: "break-word",
-                              overflowX: "auto",
-                            }}
-                              dangerouslySetInnerHTML={{ __html: highlightCode(stepChunks[idx]) }}
-                            />
+                          <div className="td-source-code-block">
+                            <pre className="td-source-pre" dangerouslySetInnerHTML={{ __html: highlightCode(stepChunks[idx]) }} />
                           </div>
                         ) : (
-                          <div style={{ fontSize: "0.76rem", color: "var(--text3)", fontStyle: "italic", paddingLeft: 32 }}>
-                            No code for this step.
-                          </div>
+                          <div className="td-source-no-code">No code for this step.</div>
                         )}
                       </div>
                     ))}
                   </div>
                 );
               })()
+
+            /* ── View: Steps tab (default) ── */
             ) : (
-              /* ── STEPS view (default) ── */
               (!test.steps || test.steps.length === 0) ? (
-                <div style={{ color: "var(--text3)", fontSize: "0.875rem", padding: "20px 0" }}>
-                  No steps defined for this test.
-                </div>
+                <div className="td-steps-empty">No steps defined for this test.</div>
               ) : (
                 (() => {
-                  // Steps diff — shown above step list when "Show changes" is active
                   const stepsDiffPanel = showDiff && prevSteps ? (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        Steps changes
-                      </div>
-                      <Suspense fallback={<div style={{ height: 40, background: "var(--bg2)", borderRadius: 6 }} />}>
+                    <div className="td-diff-block">
+                      <div className="td-diff-section-label">Steps changes</div>
+                      <Suspense fallback={<div className="td-diff-fallback td-diff-fallback--sm" />}>
                         <DiffView
                           before={prevSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
                           after={(test.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n")}
@@ -786,25 +546,18 @@ export default function TestDetail() {
                       </Suspense>
                     </div>
                   ) : null;
+
                   const bdd = isBddTest(test.steps);
                   const gherkinKw = /^(Given|When|Then|And|But)\b/i;
-
-                  // Determine which step failed (if any) for highlighting
-                  const latestRunResult = runs[0]?.results?.find(r => r.testId === testId);
-                  const isFailed = test.lastResult === "failed" || latestRunResult?.status === "failed";
                   const failError = isFailed ? (latestRunResult?.error || "") : "";
                   let failedStepIdx = -1;
                   if (isFailed && test.steps.length > 0) {
                     const stepMatch = failError.match(/step\s+(\d+)/i);
-                    if (stepMatch) {
-                      failedStepIdx = parseInt(stepMatch[1], 10) - 1;
-                    } else {
-                      failedStepIdx = test.steps.length - 1;
-                    }
+                    failedStepIdx = stepMatch ? parseInt(stepMatch[1], 10) - 1 : test.steps.length - 1;
                   }
 
                   return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    <div className="td-step-list">
                       {stepsDiffPanel}
                       {test.steps.map((step, idx) => {
                         const trimmed = (step || "").trim();
@@ -815,56 +568,21 @@ export default function TestDetail() {
                         return (
                           <div
                             key={idx}
-                            className={isFailedStep && failError ? "td-step-row" : undefined}
-                            style={{
-                              display: "flex", alignItems: "flex-start", gap: 16,
-                              padding: "12px 0",
-                              borderBottom: idx < test.steps.length - 1 ? "1px solid var(--border)" : "none",
-                              position: "relative",
-                            }}
+                            className={`td-step-row${isFailedStep && failError ? "" : ""}`}
                           >
-                            <div style={{
-                              width: 26, height: 26, borderRadius: 6,
-                              background: isFailedStep ? "rgba(239,68,68,0.15)" : bdd ? "var(--accent-bg)" : "var(--bg2)",
-                              border: isFailedStep ? "1px solid rgba(239,68,68,0.4)" : bdd ? "1px solid rgba(91,110,245,0.3)" : "1px solid var(--border)",
-                              display: "flex", alignItems: "center", justifyContent: "center",
-                              fontSize: "0.75rem", fontWeight: 700,
-                              color: isFailedStep ? "var(--red)" : bdd ? "var(--accent)" : "var(--text2)",
-                              flexShrink: 0, marginTop: 1,
-                            }}>
+                            <div className={`td-step-num ${isFailedStep ? "failed" : bdd ? "bdd" : ""}`}>
                               {idx + 1}
                             </div>
-                            <span style={{ fontSize: "0.875rem", color: isFailedStep ? "var(--red)" : "var(--text)", lineHeight: 1.6, paddingTop: 3 }}>
+                            <span className={`td-step-text ${isFailedStep ? "failed" : ""}`}>
                               {keyword ? (
                                 <>
-                                  <span style={{
-                                    fontWeight: 700, color: isFailedStep ? "var(--red)" : "var(--accent)",
-                                    fontFamily: "var(--font-mono)", fontSize: "0.82rem",
-                                    letterSpacing: "0.01em",
-                                  }}>
-                                    {keyword}
-                                  </span>
+                                  <span className={`td-step-keyword ${isFailedStep ? "failed" : ""}`}>{keyword}</span>
                                   {rest}
                                 </>
                               ) : step}
                             </span>
-                            {/* Error popover — shown on hover via .td-step-row:hover CSS rule */}
                             {isFailedStep && failError && (
-                              <div
-                                data-error-popover
-                                style={{
-                                  position: "absolute", left: 42, right: 0, top: "100%",
-                                  zIndex: 10, marginTop: -4,
-                                  padding: "10px 12px",
-                                  background: "var(--surface)", borderRadius: 8,
-                                  border: "1px solid rgba(239,68,68,0.3)",
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-                                  fontSize: "0.72rem", color: "var(--red)",
-                                  fontFamily: "var(--font-mono)", lineHeight: 1.55,
-                                  wordBreak: "break-word", whiteSpace: "pre-wrap",
-                                  maxHeight: 160, overflowY: "auto",
-                                }}
-                              >
+                              <div data-error-popover className="td-step-error-popover">
                                 {failError}
                               </div>
                             )}
@@ -877,17 +595,10 @@ export default function TestDetail() {
               )
             )}
 
-            {/* Editing hint: code regeneration + source tab access */}
             {editing && test.playwrightCode && stepsView === "steps" && (
-              <div style={{
-                marginTop: 14, padding: "8px 12px",
-                background: "var(--accent-bg)", borderRadius: 6,
-                border: "1px solid rgba(91,110,245,0.2)",
-                fontSize: "0.78rem", color: "var(--accent)",
-                display: "flex", alignItems: "center", gap: 6,
-              }}>
+              <div className="td-regen-hint">
                 <RefreshCw size={12} />
-                Code will be regenerated on save — you'll review changes before applying.<br/>
+                Code will be regenerated on save — you'll review changes before applying.{" "}
                 <i>Switch to <strong>Source</strong> to edit code directly.</i>
               </div>
             )}
@@ -900,262 +611,166 @@ export default function TestDetail() {
               applying={applyingPreview}
               onAccept={handleAcceptPreview}
               onEdit={handleEditPreview}
-              onDiscard={handleDiscardPreview}
+              onDiscard={() => setCodePreview(null)}
             />
           )}
 
           {/* AI Fix Panel */}
           {showFixPanel && test.playwrightCode && (
-            <Suspense fallback={<div style={{ height: 120, background: "var(--bg2)", borderRadius: 8, margin: "0 0 16px" }} />}>
+            <Suspense fallback={<div className="td-fix-panel-fallback" />}>
               <AiFixPanel
                 testId={testId}
                 originalCode={test.playwrightCode}
-                onApplied={(updated) => {
-                  setTest(updated);
-                  setShowFixPanel(false);
-                }}
+                onApplied={(updated) => { setTest(updated); setShowFixPanel(false); }}
                 onClose={() => setShowFixPanel(false)}
               />
             </Suspense>
           )}
 
           {/* Recent Test Runs card */}
-          <div className="card td-runs-table" style={{ padding: 24 }}>
-            <h2 style={{ fontWeight: 700, fontSize: "1rem", marginBottom: 18, marginTop: 0 }}>
-              Recent Test Runs
-            </h2>
-
-            {/* Run type icon legend */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
+          <div className="card card-padded td-runs-table">
+            <h2 className="td-runs-title">Recent Test Runs</h2>
+            <div className="td-runs-legend">
               {[
                 { icon: "✓", color: "var(--green)",  label: "Passed" },
                 { icon: "✗", color: "var(--red)",    label: "Failed" },
                 { icon: "↺", color: "var(--blue)",   label: "Running" },
                 { icon: "✎", color: "var(--text3)",  label: "Manual" },
               ].map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.73rem", color: "var(--text3)" }}>
-                  <span style={{ color: item.color, fontSize: 13, fontWeight: 700 }}>{item.icon}</span>
+                <div key={i} className="td-runs-legend-item">
+                  {/* Per-row colour stays inline because it differs per legend entry. */}
+                  <span className="td-runs-legend-icon" style={{ color: item.color }}>{item.icon}</span>
                   {item.label}
                 </div>
               ))}
             </div>
 
             {runs.length === 0 ? (
-              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--text3)", fontSize: "0.875rem" }}>
+              <div className="td-runs-empty">
                 This test hasn't been run yet.{" "}
-                <button
-                  className="btn btn-ghost btn-xs"
-                  style={{ marginLeft: 4 }}
-                  onClick={handleRunTest}
-                  disabled={running}
-                >
+                <button className="btn btn-ghost btn-xs td-runs-empty-run-btn" onClick={handleRunTest} disabled={running}>
                   <Play size={11} /> Run now
                 </button>
               </div>
             ) : (
               <>
-              <table className="table" style={{ marginTop: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th>Duration</th>
-                    <th>ACU Usage</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.slice((runPage - 1) * PAGE_SIZE, runPage * PAGE_SIZE).map(run => {
-                    const result = run.results?.find(r => r.testId === testId);
-                    const status = result?.status || run.status;
-                    const duration = result?.durationMs;
-                    return (
-                      <tr
-                        key={run.id}
-                        style={{ cursor: "pointer" }}
-                        onClick={() => navigate(`/runs/${run.id}`)}
-                      >
-                        <td>
-                          <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-                            {fmtDateTime(run.startedAt)}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <RunIcon status={status} />
-                            <span style={{ fontSize: "0.82rem", color: "var(--text2)", textTransform: "capitalize" }}>
-                              {status || "—"}
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
-                            {duration ? (duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(1)}s`) : "—"}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: "0.82rem", color: "var(--text2)" }}>0.00</span>
-                        </td>
-                        <td>
-                          <ExternalLink size={12} color="var(--text3)" />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <TablePagination
-                total={runs.length}
-                page={runPage}
-                totalPages={Math.max(1, Math.ceil(runs.length / PAGE_SIZE))}
-                onPageChange={setRunPage}
-                label="runs"
-              />
+                <table className="table td-runs-table-inline">
+                  <thead>
+                    <tr>
+                      <th>Date</th><th>Status</th><th>Duration</th><th>ACU Usage</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runs.slice((runPage - 1) * PAGE_SIZE, runPage * PAGE_SIZE).map(run => {
+                      const result = run.results?.find(r => r.testId === testId);
+                      const status = result?.status || run.status;
+                      const duration = result?.durationMs;
+                      return (
+                        <tr key={run.id} className="td-runs-row" onClick={() => navigate(`/runs/${run.id}`)}>
+                          <td><span className="td-info-text">{fmtDateTime(run.startedAt)}</span></td>
+                          <td>
+                            <div className="td-runs-status-cell">
+                              <RunIcon status={status} />
+                              <span className="td-info-text td-runs-status-text">{status || "—"}</span>
+                            </div>
+                          </td>
+                          <td><span className="td-info-text">{duration ? (duration < 1000 ? `${duration}ms` : `${(duration/1000).toFixed(1)}s`) : "—"}</span></td>
+                          <td><span className="td-info-text">0.00</span></td>
+                          <td><ExternalLink size={12} color="var(--text3)" /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <TablePagination total={runs.length} page={runPage} totalPages={Math.max(1, Math.ceil(runs.length / PAGE_SIZE))} onPageChange={setRunPage} label="runs" />
               </>
             )}
           </div>
         </div>
 
         {/* RIGHT SIDEBAR */}
-        <div className="card" style={{ padding: 22 }}>
-          <h3 style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: 20, marginTop: 0 }}>
-            Test Information
-          </h3>
+        <div className="card td-sidebar">
+          <h3 className="td-sidebar-title">Test Information</h3>
 
-          {/* Test ID */}
           <InfoRow label="Test ID">
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text2)", userSelect: "all" }}>
-              {test.id}
-            </span>
+            <span className="td-info-mono">{test.id}</span>
           </InfoRow>
 
-          {/* Test type / review status */}
           <InfoRow label="Test type">
             <ReviewBadge status={test.reviewStatus} />
           </InfoRow>
 
-          {/* Latest result */}
           <InfoRow label="Latest test result">
             <StatusBadge result={test.lastResult} />
           </InfoRow>
 
-          {/* Quality score — computed by the deduplicator's scoreTest() (0–100).
-              Only shown when the value is present; tests generated before this
-              field was introduced have null and are silently skipped. */}
           {typeof test.qualityScore === "number" && (
-            <InfoRow
-              label="Quality score"
-              icon={null}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+            <InfoRow label="Quality score">
+              <div className="td-quality-wrap">
                 <span
-                  className={`badge ${
-                    test.qualityScore >= 70 ? "badge-green" :
-                    test.qualityScore >= 40 ? "badge-amber" : "badge-red"
-                  }`}
-                  title="AI-computed quality score (0–100). Rewards strong assertions, stable selectors, and meaningful test names. Penalises weak or missing assertions."
-                  style={{ fontFamily: "var(--font-mono)", fontWeight: 700, minWidth: 32, justifyContent: "center" }}
+                  className={`badge td-quality-score ${test.qualityScore >= 70 ? "badge-green" : test.qualityScore >= 40 ? "badge-amber" : "badge-red"}`}
+                  title="AI-computed quality score (0–100)"
                 >
                   {test.qualityScore}
                 </span>
-                <div
-                  title={`${test.qualityScore} / 100`}
-                  style={{ flex: 1, height: 4, background: "var(--bg3)", borderRadius: 99, overflow: "hidden" }}
-                >
-                  <div style={{
-                    height: "100%",
+                <div className="td-quality-bar-bg" title={`${test.qualityScore} / 100`}>
+                  <div className="td-quality-bar-fill" style={{
                     width: `${test.qualityScore}%`,
-                    background: test.qualityScore >= 70 ? "var(--green)" :
-                                test.qualityScore >= 40 ? "var(--amber)" : "var(--red)",
-                    borderRadius: 99,
-                    transition: "width 0.4s ease",
+                    background: test.qualityScore >= 70 ? "var(--green)" : test.qualityScore >= 40 ? "var(--amber)" : "var(--red)",
                   }} />
                 </div>
               </div>
             </InfoRow>
           )}
 
-          {/* Author */}
-          <InfoRow label="Author">
-            <AvatarChip name={author} />
-          </InfoRow>
-
-          {/* Last modified by */}
-          <InfoRow label="Last modified by">
-            <AvatarChip name={author} />
-          </InfoRow>
-
-          {/* Created */}
+          <InfoRow label="Author"><AvatarChip name={author} /></InfoRow>
+          <InfoRow label="Last modified by"><AvatarChip name={author} /></InfoRow>
           <InfoRow label="Created" icon={<Calendar size={14} />}>
-            <span className="text-sm text-sub">{fmtDate(test.createdAt)}</span>
+            <span className="td-info-text">{fmtDate(test.createdAt)}</span>
           </InfoRow>
-
-          {/* Last modified */}
           <InfoRow label="Last modified" icon={<Calendar size={14} />}>
-            <span className="text-sm text-sub">{fmtDate(test.reviewedAt || test.createdAt)}</span>
+            <span className="td-info-text">{fmtDate(test.reviewedAt || test.createdAt)}</span>
           </InfoRow>
-
-          {/* Last run */}
           {test.lastRunAt && (
             <InfoRow label="Last run" icon={<Clock size={14} />}>
-              <span className="text-sm text-sub">{fmtDateTime(test.lastRunAt)}</span>
+              <span className="td-info-text">{fmtDateTime(test.lastRunAt)}</span>
             </InfoRow>
           )}
 
-          {/* Divider */}
-          <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0 18px" }} />
+          <hr className="td-sidebar-divider" />
 
-          {/* Source URL */}
           {test.sourceUrl && (
             <InfoRow label="Source URL">
-              <a
-                href={test.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: "0.75rem", color: "var(--accent)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}
-              >
+              <a href={test.sourceUrl} target="_blank" rel="noreferrer" className="td-source-url-link">
                 {test.sourceUrl.replace(/^https?:\/\/[^/]+/, "") || "/"}
-                <ExternalLink size={10} style={{ marginLeft: 4, verticalAlign: "middle" }} />
+                <ExternalLink size={10} className="td-source-url-icon" />
               </a>
             </InfoRow>
           )}
 
-          {/* Priority */}
           <InfoRow label="Priority">
             {editing ? (
-              <select
-                className="input"
-                value={editPriority}
-                onChange={e => setEditPriority(e.target.value)}
-                style={{ height: 32, fontSize: "0.82rem", width: "auto" }}
-              >
+              <select className="input td-sidebar-select" value={editPriority} onChange={e => setEditPriority(e.target.value)}>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
               </select>
             ) : (
-              <span className={`badge ${
-                test.priority === "high"   ? "badge-red" :
-                test.priority === "medium" ? "badge-amber" : "badge-gray"
-              }`}>
+              <span className={`badge ${test.priority === "high" ? "badge-red" : test.priority === "medium" ? "badge-amber" : "badge-gray"}`}>
                 {test.priority || "medium"}
               </span>
             )}
           </InfoRow>
 
-          {/* Type */}
           {test.type && (
             <InfoRow label="Type">
-              <span className={`badge ${testTypeBadgeClass(test.type)}`}>
-                {testTypeLabel(test.type)}
-              </span>
+              <span className={`badge ${testTypeBadgeClass(test.type)}`}>{testTypeLabel(test.type)}</span>
             </InfoRow>
           )}
 
-          {/* Tags */}
           {(test.isJourneyTest || test.scenario || isBddTest(test.steps)) && (
             <InfoRow label="Tags">
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <div className="td-sidebar-tag-row">
                 <ScenarioBadges test={test} isBddTest={isBddTest} />
               </div>
             </InfoRow>
@@ -1164,43 +779,31 @@ export default function TestDetail() {
           {/* Linked Issue */}
           <InfoRow label="Linked Issue" icon={<Link2 size={14} />}>
             {editingIssueKey ? (
-              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+              <div className="td-inline-edit-row">
                 <input
-                  className="input"
+                  className="input td-inline-edit-input td-inline-edit-input--mono"
                   value={issueKeyDraft}
                   onChange={e => setIssueKeyDraft(e.target.value)}
                   placeholder="PROJ-123"
-                  style={{ height: 28, fontSize: "0.78rem", flex: 1, fontFamily: "var(--font-mono)" }}
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === "Enter") {
-                      api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); });
-                    }
+                    if (e.key === "Enter") api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); });
                     if (e.key === "Escape") setEditingIssueKey(false);
                   }}
                 />
-                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                <button className="btn btn-xs td-inline-save-btn"
                   onClick={() => api.updateTest(testId, { linkedIssueKey: issueKeyDraft.trim() }).then(t => { setTest(t); setEditingIssueKey(false); })}>
                   <Save size={10} />
                 </button>
-                <button className="btn btn-ghost btn-xs" onClick={() => setEditingIssueKey(false)}>
-                  <X size={10} />
-                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingIssueKey(false)}><X size={10} /></button>
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
-                {test.linkedIssueKey ? (
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: "var(--accent)", fontWeight: 500 }}>
-                    {test.linkedIssueKey}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Not linked</span>
-                )}
-                <button
-                  className="btn btn-ghost btn-xs"
-                  style={{ marginLeft: "auto", padding: "2px 6px" }}
-                  onClick={() => { setIssueKeyDraft(test.linkedIssueKey || ""); setEditingIssueKey(true); }}
-                >
+              <div className="td-inline-display-row">
+                {test.linkedIssueKey
+                  ? <span className="td-linked-issue-val">{test.linkedIssueKey}</span>
+                  : <span className="td-linked-issue-empty">Not linked</span>}
+                <button className="btn btn-ghost btn-xs td-edit-inline-btn"
+                  onClick={() => { setIssueKeyDraft(test.linkedIssueKey || ""); setEditingIssueKey(true); }}>
                   <Edit2 size={10} />
                 </button>
               </div>
@@ -1210,13 +813,12 @@ export default function TestDetail() {
           {/* Tags */}
           <InfoRow label="Tags" icon={<Tag size={14} />}>
             {editingTags ? (
-              <div style={{ display: "flex", gap: 4, flex: 1 }}>
+              <div className="td-inline-edit-row">
                 <input
-                  className="input"
+                  className="input td-inline-edit-input"
                   value={tagsDraft}
                   onChange={e => setTagsDraft(e.target.value)}
                   placeholder="smoke, regression, login"
-                  style={{ height: 28, fontSize: "0.78rem", flex: 1 }}
                   autoFocus
                   onKeyDown={e => {
                     if (e.key === "Enter") {
@@ -1226,80 +828,51 @@ export default function TestDetail() {
                     if (e.key === "Escape") setEditingTags(false);
                   }}
                 />
-                <button className="btn btn-xs" style={{ background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac" }}
+                <button className="btn btn-xs td-inline-save-btn"
                   onClick={() => {
                     const tags = tagsDraft.split(",").map(t => t.trim()).filter(Boolean);
                     api.updateTest(testId, { tags }).then(t => { setTest(t); setEditingTags(false); });
                   }}>
                   <Save size={10} />
                 </button>
-                <button className="btn btn-ghost btn-xs" onClick={() => setEditingTags(false)}>
-                  <X size={10} />
-                </button>
+                <button className="btn btn-ghost btn-xs" onClick={() => setEditingTags(false)}><X size={10} /></button>
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, flexWrap: "wrap" }}>
-                {(test.tags || []).length > 0 ? (
-                  test.tags.map((tag, i) => (
-                    <span key={i} className="badge badge-gray" style={{ fontSize: "0.7rem" }}>{tag}</span>
-                  ))
-                ) : (
-                  <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>No tags</span>
-                )}
-                <button
-                  className="btn btn-ghost btn-xs"
-                  style={{ marginLeft: "auto", padding: "2px 6px" }}
-                  onClick={() => { setTagsDraft((test.tags || []).join(", ")); setEditingTags(true); }}
-                >
+              <div className="td-tags-row">
+                {(test.tags || []).length > 0
+                  ? test.tags.map((tag, i) => <span key={i} className="badge badge-gray td-sidebar-tag-badge">{tag}</span>)
+                  : <span className="td-tags-empty">No tags</span>}
+                <button className="btn btn-ghost btn-xs td-edit-inline-btn"
+                  onClick={() => { setTagsDraft((test.tags || []).join(", ")); setEditingTags(true); }}>
                   <Edit2 size={10} />
                 </button>
               </div>
             )}
           </InfoRow>
 
-          {/* Prompt version / model (read-only, shown if available) */}
           {test.promptVersion && (
             <InfoRow label="Generated by">
-              <span style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
-                {test.modelUsed || "AI"} · prompt v{test.promptVersion}
-              </span>
+              <span className="td-info-text">{test.modelUsed || "AI"} · prompt v{test.promptVersion}</span>
             </InfoRow>
           )}
 
           {/* Quick actions */}
-          <div className="td-sidebar-actions" style={{ borderTop: "1px solid var(--border)", paddingTop: 16, marginTop: 4, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="td-sidebar-actions">
             {test.reviewStatus !== "approved" && (
-              <button
-                className="btn btn-sm"
-                style={{ width: "100%", background: "var(--green-bg)", color: "var(--green)", border: "1px solid #86efac", justifyContent: "center" }}
-                onClick={() => api.approveTest(test.projectId, testId).then(load)}
-              >
+              <button className={`btn btn-sm td-approve-btn`} onClick={() => api.approveTest(test.projectId, testId).then(load)}>
                 <CheckCircle2 size={13} /> Approve Test
               </button>
             )}
             {test.reviewStatus === "approved" && (
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ width: "100%", justifyContent: "center" }}
-                onClick={() => api.restoreTest(test.projectId, testId).then(load)}
-              >
+              <button className="btn btn-ghost btn-sm td-draft-btn" onClick={() => api.restoreTest(test.projectId, testId).then(load)}>
                 <RotateCcw size={13} /> Move to Draft
               </button>
             )}
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={handleRunTest}
-              disabled={running}
-            >
+            <button className="btn btn-primary btn-sm td-run-sidebar-btn" onClick={handleRunTest} disabled={running}>
               {running ? <RefreshCw size={13} className="spin" /> : <Play size={13} />}
               Run This Test
             </button>
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={() => navigate(`/projects/${test.projectId}`)}
-            >
+            <button className="btn btn-ghost btn-sm td-view-project-btn" onClick={() => navigate(`/projects/${test.projectId}`)}>
               View Project
             </button>
           </div>

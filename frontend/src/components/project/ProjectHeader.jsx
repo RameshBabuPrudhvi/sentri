@@ -12,11 +12,12 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Play, RefreshCw, Globe, Download, ChevronDown, Sparkles, ArrowRight, Zap, Clock,
+  Play, RefreshCw, Globe, Sparkles, ArrowRight, Zap, Clock,
 } from "lucide-react";
 import { PARALLEL_WORKERS_TUNING } from "../../config/testDialsConfig.js";
 import { api } from "../../api.js";
 import { fmtFutureRelative } from "../../utils/formatters.js";
+import ProjectExportMenu from "./ProjectExportMenu.jsx";
 
 /**
  * @param {Object} props
@@ -36,7 +37,6 @@ export default function ProjectHeader({
   actionLoading, onRun,
   stats,
 }) {
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const navigate = useNavigate();
 
   const { draftTests, approvedTests, rejectedTests, apiTests, uiTests, passed, failed } = stats;
@@ -117,67 +117,11 @@ export default function ProjectHeader({
 
           {/* ── Row 2: Export dropdown ── */}
           <div className="pd-header-row">
-            {totalTests > 0 && (
-              <div style={{ position: "relative" }}>
-                <button
-                  className="btn btn-ghost btn-xs"
-                  onClick={() => setShowExportMenu(v => !v)}
-                  style={{ gap: 4 }}
-                >
-                  <Download size={11} /> Export <ChevronDown size={10} />
-                </button>
-                {showExportMenu && (
-                  <>
-                    <div className="pd-popover-backdrop" onClick={() => setShowExportMenu(false)} />
-                    <div className="pd-dropdown" style={{ top: "calc(100% + 4px)", right: 0 }}>
-                      <div className="pd-dropdown-heading">
-                        Export all {totalTests} tests
-                      </div>
-                      {[
-                        { label: "Zephyr Scale CSV", desc: "Zephyr Scale / Zephyr Squad import", format: "zephyr" },
-                        { label: "TestRail CSV", desc: "TestRail bulk import", format: "testrail" },
-                      ].map(fmt => (
-                        <button key={fmt.label} onClick={() => { setShowExportMenu(false); api.downloadExport(projectId, fmt.format); }} className="pd-dropdown-item" style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}>
-                          <div className="pd-dropdown-item-title">{fmt.label}</div>
-                          <div className="pd-dropdown-item-desc">{fmt.desc}</div>
-                        </button>
-                      ))}
-                      {/* DIF-006: Standalone Playwright project ZIP. Sits alongside
-                          the CSV exports so users see all three export targets in
-                          one list. The endpoint always filters to approved tests
-                          server-side, so the desc line calls that out — drafts and
-                          rejected tests are excluded regardless of which project
-                          stat the dropdown was opened against. */}
-                      <button
-                        onClick={() => { setShowExportMenu(false); api.downloadPlaywrightExport(projectId); }}
-                        className="pd-dropdown-item"
-                        style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
-                      >
-                        <div className="pd-dropdown-item-title">Playwright project ZIP</div>
-                        <div className="pd-dropdown-item-desc">Runnable Playwright project (approved tests only)</div>
-                      </button>
-                      {approvedTests.length > 0 && (
-                        <>
-                          <hr className="divider" style={{ margin: "4px 0" }} />
-                          <div className="pd-dropdown-heading">
-                            Approved only ({approvedTests.length})
-                          </div>
-                          {[
-                            { label: "Zephyr CSV (approved)", format: "zephyr" },
-                            { label: "TestRail CSV (approved)", format: "testrail" },
-                          ].map(fmt => (
-                            <button key={fmt.label} onClick={() => { setShowExportMenu(false); api.downloadExport(projectId, fmt.format, "approved"); }}
-                              className="pd-dropdown-item" style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer", padding: "7px 12px", fontSize: "0.82rem" }}>
-                              {fmt.label}
-                            </button>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            <ProjectExportMenu
+              projectId={projectId}
+              totalTests={totalTests}
+              approvedCount={approvedTests.length}
+            />
           </div>
         </div>
       </div>

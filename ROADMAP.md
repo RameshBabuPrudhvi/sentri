@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 33 items (AUTO-016b ✅ shipped in PR #1; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 32 items (ENH-036 + ENH-036b ✅ shipped in PR #1; AUTO-016b ✅ shipped in PR #1; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -104,6 +104,8 @@ The following items have been verified complete against the codebase and are **n
 | MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122 |
 | DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123 |
 | AUTO-016b | Frontend CrawlView accessibility panel + dashboard "Top Accessibility Offenders" rollup | PR #1 |
+| ENH-036 | Project credential editing after creation (`PATCH /api/v1/projects/:id`) | PR #1 |
+| ENH-036b | Auto-detect login form fields — semantic-first locator waterfall removes need for hand-authored CSS selectors | PR #1 |
 
 ---
 
@@ -112,7 +114,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase | Scope | Status | Est. Duration |
 |-------|-------|--------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
-| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` (project credential edit) is 🟡 High; `SEC-004` deferred | 8–10 weeks |
+| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` ✅ shipped in PR #1 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019 | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
@@ -382,7 +384,11 @@ The following items have been verified complete against the codebase and are **n
 
 ### ENH-036 — Project credential editing after creation 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — operators must delete the project + every test to rotate a stale credential)
+**Status:** ✅ Complete (PR #1) | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — operators must delete the project + every test to rotate a stale credential)
+
+> **Shipped scope (PR #1):** `PATCH /api/v1/projects/:id` endpoint with `requireRole("qa_lead")`; credentials-merge preserves existing encrypted `username`/`password` and legacy `usernameSelector`/`passwordSelector`/`submitSelector` when the client sends blanks, so rotating a credential doesn't wipe the rest of the record. `api.updateProject(id, data)` client helper. Edit UI reuses `NewProject.jsx` via `?edit=<id>` — not ProjectDetail as originally scoped — with a pencil-icon button on the Projects list. Integration tests cover 401 unauth, 403 viewer, name/url update, blank-preserves-encrypted, fresh-replaces, `credentials: null` clears, and unknown-id 404.
+>
+> **Shipped additionally (PR #1, tracked as ENH-036b):** Auto-detect login form fields at crawl time — new `backend/src/pipeline/autoLogin.js` `performAutoLogin()` runs a semantic-first locator waterfall so the New/Edit Project form no longer needs the three selector inputs. `crawlBrowser.js` and `stateExplorer.js` gain a two-path login strategy (explicit selectors → auto-detect fallback).
 
 **Problem:** `POST /api/v1/projects` accepts a `credentials` field (encrypted at `backend/src/routes/projects.js:59` via `encryptCredentials()`), but there is no `PATCH /api/v1/projects/:id` endpoint that allows editing those credentials after the project has been created. The only PATCH routes on `projects.js` are scoped to schedule (`projects.js:162`) and notifications (`projects.js:266`). When a target app's password rotates, an OAuth token expires, or an SSO config changes, operators have to **delete the entire project** — including every recorded/generated test, every run history record, every approved baseline — and recreate it from scratch with the new credentials. This is data loss for what should be a single field update.
 
@@ -1605,13 +1611,13 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
 | Infrastructure | 6 | 5 | 0 | 1 | INF-006 |
 | Access Control | 2 | 2 | 0 | 0 | — |
-| Platform Features | 4 | 3 | 0 | 1 | ENH-036 |
+| Platform Features | 4 | 4 | 0 | 0 | — |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
 | Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **31** | **0** | **39** | |
+| **Totals** | **70** | **32** | **0** | **38** | |
 
-**Total tracked items:** 70 across 7 categories — **31 complete** (44%), **0 in progress**, **39 remaining**
+**Total tracked items:** 70 across 7 categories — **32 complete** (46%), **0 in progress**, **38 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅

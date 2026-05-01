@@ -1,0 +1,188 @@
+/**
+ * styles/features/recorder.css
+ * Styling for RecorderModal.jsx + LiveBrowserView.jsx.
+ * Replaces the large inline `style={{…}}` blocks introduced in the
+ * recorder UI rebuild. Naming follows BEM-ish conventions consistent
+ * with styles/pages/project-detail.css.
+ */
+
+/* ── Full-page modal shell ─────────────────────────────────────────── */
+.recorder-modal {
+  position: fixed; inset: 0;
+  width: 100vw; height: 100vh;
+  z-index: 99999;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────── */
+.recorder-topbar {
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 20px;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.recorder-topbar__title-group { flex: 1; display: flex; align-items: center; gap: 12px; }
+.recorder-topbar__title { font-weight: 700; font-size: 0.95rem; line-height: 1.2; }
+.recorder-topbar__subtitle { font-size: 0.74rem; color: var(--text3); }
+
+.recorder-pulse {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 20px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+.recorder-pulse__dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #dc2626;
+  animation: recorder-pulse-blink 1.4s ease-in-out infinite;
+}
+.recorder-pulse__label {
+  font-size: 0.72rem; font-weight: 700; color: #dc2626; letter-spacing: 0.04em;
+}
+@keyframes recorder-pulse-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+.recorder-stepcount { font-size: 0.78rem; color: var(--text3); margin-right: 8px; }
+.recorder-stepcount__num { font-weight: 700; color: var(--text); }
+
+.recorder-exit-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg2);
+  color: var(--text); font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+
+/* ── IDLE form ─────────────────────────────────────────────────────── */
+.recorder-idle {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  overflow: auto; background: var(--bg);
+}
+.recorder-idle__panel { width: 560px; }
+.recorder-idle__heading { font-size: 1.25rem; font-weight: 700; color: var(--text); margin-bottom: 20px; }
+.recorder-idle__fields { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
+.recorder-idle__label {
+  display: block;
+  font-size: 0.82rem; font-weight: 600; color: var(--text);
+  margin-bottom: 6px;
+}
+.recorder-idle__label--required { display: flex; align-items: center; gap: 4px; }
+.recorder-idle__required { color: var(--accent); }
+.recorder-idle__input { width: 100%; font-size: 0.9rem; }
+.recorder-idle__divider { border-top: 1px solid var(--border); margin-bottom: 20px; }
+.recorder-idle__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.recorder-idle__submit { min-width: 148px; }
+
+/* ── RECORDING two-pane layout ─────────────────────────────────────── */
+.recorder-stage {
+  flex: 1;
+  display: flex;
+  overflow: hidden; /* Prevents full-page scroll; sidebar scrolls internally. */
+}
+.recorder-stage__viewport { flex: 1; overflow: auto; padding: 16px; }
+
+.recorder-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg2, #f7f8fa);
+  border-left: 1px solid var(--border);
+}
+
+.recorder-sidebar__steps {
+  flex: 1; min-height: 0;
+  padding: 14px 14px 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.recorder-sidebar__heading {
+  flex-shrink: 0;
+  margin-bottom: 8px;
+  font-size: 0.7rem; font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.recorder-sidebar__steps-list {
+  flex: 1; min-height: 0;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg);
+  overflow: auto;
+}
+.recorder-sidebar__steps-empty {
+  padding: 14px;
+  font-size: 0.74rem; color: var(--text3); font-style: italic;
+}
+.recorder-sidebar__steps-ol {
+  margin: 0; padding: 10px 12px 10px 28px;
+  font-size: 0.73rem; font-family: var(--font-mono);
+  color: var(--text2);
+}
+.recorder-sidebar__steps-ol li { margin-bottom: 4px; line-height: 1.5; }
+.recorder-step__kind     { font-weight: 700; color: var(--accent); }
+.recorder-step__selector { color: var(--text3); }
+.recorder-step__value    { color: var(--green); }
+.recorder-step__url      { color: var(--blue); }
+.recorder-step__key      { color: var(--amber); }
+
+.recorder-sidebar__footer {
+  flex-shrink: 0;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg2, #f7f8fa);
+  border-top: 1px solid var(--border);
+}
+.recorder-sidebar__footer-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+.recorder-sidebar__footer-label { font-size: 0.78rem; font-weight: 600; color: var(--text); }
+.recorder-sidebar__footer-stop { width: 100%; font-weight: 700; margin-top: 2px; }
+
+/* ── Discard confirmation ──────────────────────────────────────────── */
+.recorder-confirm {
+  position: absolute; inset: 0;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.recorder-confirm__dialog {
+  width: 380px;
+  padding: 28px 28px 20px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.recorder-confirm__head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.recorder-confirm__icon {
+  flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 8px;
+  background: rgba(220, 38, 38, 0.1);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.recorder-confirm__title { font-size: 1rem; font-weight: 700; color: var(--text); }
+.recorder-confirm__body  { font-size: 0.85rem; color: var(--text2); line-height: 1.6; margin: 0 0 22px; }
+.recorder-confirm__actions {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+.recorder-confirm__keep,
+.recorder-confirm__discard {
+  padding: 7px 16px; border-radius: 7px;
+  font-size: 0.85rem; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.recorder-confirm__keep {
+  border: 1px solid var(--border); background: var(--bg2);
+  color: var(--text); font-weight: 600;
+}
+.recorder-confirm__discard {
+  border: none; background: #dc2626;
+  color: #fff; font-weight: 700;
+}
