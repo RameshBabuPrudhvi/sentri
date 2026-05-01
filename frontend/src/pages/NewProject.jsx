@@ -8,7 +8,7 @@ import { api } from "../api.js";
 import { emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
-function validateForm(form) {
+function validateForm(form, { isEdit = false, hasExistingCreds = false } = {}) {
   const errors = {};
   if (!form.name.trim()) errors.name = "Project name is required.";
   if (!form.url.trim()) {
@@ -24,19 +24,24 @@ function validateForm(form) {
     }
   }
   if (form.hasAuth) {
-    if (!form.usernameSelector.trim()) errors.usernameSelector = "Username selector is required.";
-    if (!form.username.trim())         errors.username         = "Username / email is required.";
-    if (!form.passwordSelector.trim()) errors.passwordSelector = "Password selector is required.";
-    if (!form.password.trim())         errors.password         = "Password is required.";
-    if (!form.submitSelector.trim())   errors.submitSelector   = "Submit button selector is required.";
+    // Selectors are auto-detected at crawl time by the backend's
+    // performAutoLogin() waterfall, so the user only needs to supply
+    // credentials. In edit mode, a blank username/password means "keep
+    // the existing encrypted value" (the server never returns secrets).
+    const skipSecretRequired = isEdit && hasExistingCreds;
+    if (!form.username.trim() && !skipSecretRequired) {
+      errors.username = "Username / email is required.";
+    }
+    if (!form.password.trim() && !skipSecretRequired) {
+      errors.password = "Password is required.";
+    }
   }
   return errors;
 }
 
 const EMPTY_FORM = {
   name: "", url: "", hasAuth: false,
-  usernameSelector: "", username: "",
-  passwordSelector: "", password: "", submitSelector: "",
+  username: "", password: "",
 };
 
 export default function NewProject() {
@@ -54,10 +59,18 @@ export default function NewProject() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [loadingEdit, setLoadingEdit] = useState(isEdit);
+  // Baseline form after load — used to detect real dirtiness in edit mode.
+  // In create mode it stays equal to EMPTY_FORM so any typing counts as dirty.
+  const [initialForm, setInitialForm] = useState(EMPTY_FORM);
   const [error, setError] = useState(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  // True when the loaded project already has credentials stored server-side.
+  // The backend never returns the encrypted username/password to the client
+  // (see projectSanitiser.js), so those fields arrive blank — we use this flag
+  // to relax validation and show a "leave blank to keep" hint.
+  const [hasExistingCreds, setHasExistingCreds] = useState(false);
 
   // Load existing project when editing
   useEffect(() => {
@@ -66,17 +79,17 @@ export default function NewProject() {
     api.getProject(editId)
       .then(data => {
         const p = data.project ?? data;
-        const creds = p.credentials || {};
-        setForm({
+        setHasExistingCreds(Boolean(p.credentials));
+        const loaded = {
           name: p.name || "",
           url:  p.url  || "",
           hasAuth: Boolean(p.credentials),
-          usernameSelector: creds.usernameSelector || "",
-          username:         creds.username         || "",
-          passwordSelector: creds.passwordSelector || "",
-          password:         creds.password         || "",
-          submitSelector:   creds.submitSelector   || "",
-        });
+          // Secrets are intentionally not returned by the API — leave blank.
+          username: "",
+          password: "",
+        };
+        setForm(loaded);
+        setInitialForm(loaded);
       })
       .catch(err => setError(`Could not load project: ${err.message}`))
       .finally(() => setLoadingEdit(false));
@@ -91,11 +104,8 @@ export default function NewProject() {
     const checked = e.target.checked;
     if (!checked && form.hasAuth) {
       setSavedAuthFields({
-        usernameSelector: form.usernameSelector,
         username: form.username,
-        passwordSelector: form.passwordSelector,
         password: form.password,
-        submitSelector: form.submitSelector,
       });
     }
     if (checked && savedAuthFields) {
@@ -128,7 +138,7 @@ export default function NewProject() {
   async function submit(e) {
     e.preventDefault();
     setError(null);
-    const errors = validateForm(form);
+    const errors = validateForm(form, { isEdit, hasExistingCreds });
     if (Object.keys(errors).length > 0) { setFieldErrors(errors); return; }
     setFieldErrors({});
     setLoading(true);
@@ -136,17 +146,17 @@ export default function NewProject() {
       const payload = {
         name: form.name.trim(),
         url:  form.url.trim(),
+        // Only credentials (username + password) are sent — login form
+        // selectors are auto-detected at crawl time. Blank username/password
+        // on edit means "keep existing"; the server merges blanks with the
+        // stored encrypted values.
         credentials: form.hasAuth ? {
-          usernameSelector: form.usernameSelector.trim(),
-          username:         form.username.trim(),
-          passwordSelector: form.passwordSelector.trim(),
-          password:         form.password,
-          submitSelector:   form.submitSelector.trim(),
+          username: form.username.trim(),
+          password: form.password,
         } : null,
       };
       if (isEdit) {
-        await api.req?.("PATCH", `/projects/${editId}`, payload)
-          .catch(() => { throw new Error("Edit not yet supported by server — changes not saved."); });
+        await api.updateProject(editId, payload);
         navigate(`/projects/${editId}`);
       } else {
         const project = await api.createProject(payload);
@@ -167,8 +177,10 @@ export default function NewProject() {
       </div>
     : null;
 
-  const isDirty = form.name.trim() || form.url.trim() ||
-    (form.hasAuth && (form.username.trim() || form.password.trim()));
+  // Compare against the baseline (EMPTY_FORM in create mode, loaded project
+  // in edit mode) so a pristine edit form doesn't trigger the leave-without-
+  // saving prompt.
+  const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
 
   function handleBack() {
     if (isDirty && !window.confirm("Leave without saving? Your changes will be lost.")) return;
@@ -214,29 +226,73 @@ export default function NewProject() {
           </div>
         </div>
 
-        {/* Step pills */}
-        {!isEdit && (
-          <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
-            {["Application details", "Auth (optional)", "Create"].map((s, i) => (
-              <div key={s} style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "4px 12px", borderRadius: 999,
-                background: i === 0 ? "var(--accent-bg)" : "var(--bg2)",
-                border: `1px solid ${i === 0 ? "var(--accent)" : "var(--border)"}`,
-                fontSize: "0.72rem", fontWeight: 500,
-                color: i === 0 ? "var(--accent)" : "var(--text3)",
-              }}>
-                <span style={{
-                  width: 16, height: 16, borderRadius: "50%", display: "inline-flex",
-                  alignItems: "center", justifyContent: "center", fontSize: "0.65rem",
-                  background: i === 0 ? "var(--accent)" : "var(--bg3)", color: i === 0 ? "#fff" : "var(--text3)",
-                  fontWeight: 700,
-                }}>{i + 1}</span>
-                {s}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Step pills — derived from form state, not hardcoded.
+            Step 1 (Application details) is complete when name + a valid URL
+            are present. Step 2 (Auth) is complete when the user has either
+            opted out (hasAuth=false) or filled in all auth fields.
+            Step 3 (Create) is active once both prior steps complete. */}
+        {!isEdit && (() => {
+          let urlValid = false;
+          if (form.url.trim()) {
+            try {
+              const parsed = new URL(form.url.trim());
+              urlValid = ["http:", "https:"].includes(parsed.protocol);
+            } catch { /* invalid URL */ }
+          }
+          const step1Complete = Boolean(form.name.trim()) && urlValid;
+          const authFieldsFilled = form.hasAuth
+            && form.username.trim()
+            && form.password.trim();
+          // hasAuth=false counts as "complete" — auth is genuinely optional.
+          const step2Complete = !form.hasAuth || Boolean(authFieldsFilled);
+          const stepStates = [
+            step1Complete ? "complete" : "active",
+            step1Complete ? (step2Complete ? "complete" : "active") : "pending",
+            step1Complete && step2Complete ? "active" : "pending",
+          ];
+          const styles = {
+            complete: {
+              bg: "var(--green-bg)", border: "var(--green)", text: "var(--green)",
+              numBg: "var(--green)", numFg: "#fff",
+            },
+            active: {
+              bg: "var(--accent-bg)", border: "var(--accent)", text: "var(--accent)",
+              numBg: "var(--accent)", numFg: "#fff",
+            },
+            pending: {
+              bg: "var(--bg2)", border: "var(--border)", text: "var(--text3)",
+              numBg: "var(--bg3)", numFg: "var(--text3)",
+            },
+          };
+          return (
+            <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
+              {["Application details", "Auth (optional)", "Create"].map((s, i) => {
+                const state = stepStates[i];
+                const c = styles[state];
+                return (
+                  <div key={s} style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "4px 12px", borderRadius: 999,
+                    background: c.bg,
+                    border: `1px solid ${c.border}`,
+                    fontSize: "0.72rem", fontWeight: 500,
+                    color: c.text,
+                    transition: "all 0.15s",
+                  }}>
+                    <span style={{
+                      width: 16, height: 16, borderRadius: "50%", display: "inline-flex",
+                      alignItems: "center", justifyContent: "center", fontSize: "0.65rem",
+                      background: c.numBg, color: c.numFg, fontWeight: 700,
+                    }}>
+                      {state === "complete" ? <CheckCircle2 size={11} /> : i + 1}
+                    </span>
+                    {s}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       <form onSubmit={submit} noValidate style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -409,33 +465,28 @@ export default function NewProject() {
 
           {form.hasAuth && (
             <div style={{ padding: 20, display: "grid", gap: 14 }}>
+              {/* Auto-detect hint */}
+              <div style={{
+                padding: "10px 12px", borderRadius: "var(--radius)",
+                background: "var(--accent-bg)", border: "1px solid var(--accent)",
+                fontSize: "0.78rem", color: "var(--accent)",
+                display: "flex", alignItems: "flex-start", gap: 8,
+              }}>
+                <ShieldCheck size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Sentri detects login form fields automatically — just enter your test credentials.
+                </span>
+              </div>
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: "0.83rem" }}>
-                    Username Selector <span style={{ color: "var(--red)" }}>*</span>
-                  </label>
-                  <input className="input" value={form.usernameSelector} onChange={set("usernameSelector")}
-                    placeholder="#email or input[name=email]"
-                    style={{ borderColor: fieldErrors.usernameSelector ? "var(--red)" : undefined }} />
-                  <FieldError name="usernameSelector" />
-                </div>
                 <div>
                   <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: "0.83rem" }}>
                     Username / Email <span style={{ color: "var(--red)" }}>*</span>
                   </label>
                   <input className="input" value={form.username} onChange={set("username")}
-                    placeholder="user@example.com"
+                    placeholder={isEdit && hasExistingCreds ? "•••••• (saved — leave blank to keep)" : "user@example.com"}
                     style={{ borderColor: fieldErrors.username ? "var(--red)" : undefined }} />
                   <FieldError name="username" />
-                </div>
-                <div>
-                  <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: "0.83rem" }}>
-                    Password Selector <span style={{ color: "var(--red)" }}>*</span>
-                  </label>
-                  <input className="input" value={form.passwordSelector} onChange={set("passwordSelector")}
-                    placeholder="#password or input[type=password]"
-                    style={{ borderColor: fieldErrors.passwordSelector ? "var(--red)" : undefined }} />
-                  <FieldError name="passwordSelector" />
                 </div>
                 <div>
                   <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: "0.83rem" }}>
@@ -447,7 +498,7 @@ export default function NewProject() {
                       type={showPassword ? "text" : "password"}
                       value={form.password}
                       onChange={set("password")}
-                      placeholder="••••••••"
+                      placeholder={isEdit && hasExistingCreds ? "•••••• (saved — leave blank to keep)" : "••••••••"}
                       style={{ paddingRight: 38, borderColor: fieldErrors.password ? "var(--red)" : undefined }}
                     />
                     <button
@@ -464,15 +515,6 @@ export default function NewProject() {
                   </div>
                   <FieldError name="password" />
                 </div>
-              </div>
-              <div>
-                <label style={{ display: "block", marginBottom: 6, fontWeight: 500, fontSize: "0.83rem" }}>
-                  Submit Button Selector <span style={{ color: "var(--red)" }}>*</span>
-                </label>
-                <input className="input" value={form.submitSelector} onChange={set("submitSelector")}
-                  placeholder="button[type=submit] or #login-btn"
-                  style={{ borderColor: fieldErrors.submitSelector ? "var(--red)" : undefined }} />
-                <FieldError name="submitSelector" />
               </div>
             </div>
           )}

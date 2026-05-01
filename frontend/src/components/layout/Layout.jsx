@@ -16,6 +16,16 @@ export default function Layout() {
   const [chatOpen, setChatOpen] = React.useState(false);
   const [chatQuery, setChatQuery] = React.useState("");
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
+  // Collapsed rail mode (Collabplace-style icon-only sidebar). Persisted across
+  // sessions in localStorage so the layout stays stable on reload.
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
+    try { return localStorage.getItem("sentri.sidebar.collapsed") === "1"; }
+    catch { return false; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem("sentri.sidebar.collapsed", sidebarCollapsed ? "1" : "0"); }
+    catch { /* localStorage unavailable */ }
+  }, [sidebarCollapsed]);
 
   function openPalette() {
     setPaletteOpen(true);
@@ -33,7 +43,11 @@ export default function Layout() {
         className={`sidebar-overlay${sidebarOpen ? " active" : ""}`}
         onClick={() => setSidebarOpen(false)}
       />
-      <Sidebar open={sidebarOpen} />
+      <Sidebar
+        open={sidebarOpen}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed(c => !c)}
+      />
       {/* Mobile hamburger toggle */}
       <button
         className="sidebar-toggle"

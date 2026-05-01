@@ -124,6 +124,12 @@ export const api = {
   getProjects:   ()     => req("GET",  "/projects"),
   /** @param {string} id - Project ID (e.g. `"PRJ-1"`). */
   getProject:    (id)   => req("GET",  `/projects/${id}`),
+  /**
+   * Update a project's name, URL, and/or credentials.
+   * @param {string} id   - Project ID.
+   * @param {Object} data - `{ name, url, credentials? }`.
+   */
+  updateProject: (id, data) => req("PATCH", `/projects/${id}`, data),
   /** @param {string} id - Deletes project and all its tests, runs, and history. */
   deleteProject: (id)   => req("DELETE", `/projects/${id}`),
 
