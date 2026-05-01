@@ -17,6 +17,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [assertValue, setAssertValue] = useState("");
   const [assertLabel, setAssertLabel] = useState("");
   const [error, setError] = useState(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const pollRef = useRef(null);
   const sessionIdRef = useRef(null);
@@ -128,10 +129,21 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   }
 
   function handleCancel() {
+    // If actively recording, show confirmation first
+    if (phase === "recording" || phase === "stopping") {
+      setConfirmDiscard(true);
+      return;
+    }
+    doDiscard();
+  }
+
+  function doDiscard() {
     if (sessionId) api.recordDiscard(projectId, sessionId).catch(() => {});
     teardownStreams();
     sessionIdRef.current = null;
-    setPhase("idle"); setSessionId(null);
+    setConfirmDiscard(false);
+    setPhase("idle");
+    setSessionId(null);
     onClose?.();
   }
 
@@ -386,6 +398,76 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Discard confirmation dialog ── */}
+      {confirmDiscard && (
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 10,
+          background: "rgba(0,0,0,0.45)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <div style={{
+            background: "var(--bg)",
+            borderRadius: 14,
+            padding: "28px 28px 20px",
+            width: 380,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            border: "1px solid var(--border)",
+          }}>
+            {/* Icon + title */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                background: "rgba(220,38,38,0.1)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                </svg>
+              </div>
+              <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>
+                Discard recording?
+              </div>
+            </div>
+
+            <p style={{ fontSize: "0.85rem", color: "var(--text2)", lineHeight: 1.6, margin: "0 0 22px" }}>
+              You have <strong>{actions.length} step{actions.length !== 1 ? "s" : ""}</strong> recorded.
+              Exiting now will permanently discard all of them.
+            </p>
+
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={() => setConfirmDiscard(false)}
+                style={{
+                  padding: "7px 16px", borderRadius: 7, border: "1px solid var(--border)",
+                  background: "var(--bg2)", color: "var(--text)", fontSize: "0.85rem",
+                  fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                Keep recording
+              </button>
+              <button
+                onClick={doDiscard}
+                style={{
+                  padding: "7px 16px", borderRadius: 7, border: "none",
+                  background: "#dc2626", color: "#fff", fontSize: "0.85rem",
+                  fontWeight: 700, cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                </svg>
+                Discard & exit
+              </button>
+            </div>
           </div>
         </div>
       )}
