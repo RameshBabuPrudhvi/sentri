@@ -107,29 +107,24 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
           overflowX: "hidden",
         }}
       >
-        {/* Logo + expand toggle — dedicated button mirrors the collapse
-            toggle's position in expanded mode (top-right of the header). */}
-        <div style={{
-          padding: "14px 8px", borderBottom: "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4,
-        }}>
-          <AppLogo size={26} variant="icon" />
-          <button
-            onClick={() => onToggleCollapsed?.()}
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 24, height: 24, borderRadius: "var(--radius)",
-              border: "none", background: "transparent", color: "var(--text3)",
-              cursor: "pointer", flexShrink: 0, transition: "background 0.12s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-          >
-            <PanelLeftOpen size={14} />
-          </button>
-        </div>
+        {/* Logo — doubles as expand toggle in collapsed mode so the toggle
+            lives in the same place (top) as the collapse toggle in expanded
+            mode, avoiding the footer/header asymmetry. */}
+        <button
+          onClick={() => onToggleCollapsed?.()}
+          title="Expand sidebar"
+          aria-label="Expand sidebar"
+          style={{
+            padding: "18px 0 16px", borderBottom: "1px solid var(--border)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: "none", background: "transparent", cursor: "pointer",
+            width: "100%", transition: "background 0.12s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--bg2)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+        >
+          <AppLogo size={28} variant="icon" />
+        </button>
 
         {/* Workspace avatar (clicking expands the sidebar so the user can switch) */}
         <div style={{
