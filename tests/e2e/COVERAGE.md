@@ -56,7 +56,7 @@ Items are grouped into three **tiers** by fixture cost. Stay within one tier per
 ### Tier 3 — real runs / browsers / LLM (hard; may need Playwright `route()` mocks)
 
 19. **Run regression — RunRegressionModal + live RunDetail** (`QA.md` §9 step 20–22) → new `tests/e2e/specs/run-regression-ui.spec.mjs`: open the modal, set `parallelWorkers: 2`, click Run, assert RunDetail SSE log streams in and the per-test status badges update. **UI-only** (SSE is the user surface; consume it via `page` not `request`). Recommend Playwright `route()` to stub the target site.
-20. **Quality gates — RunDetail badge + violation panel** (`QA.md` § Quality Gates) → extend existing `tests/e2e/specs/quality-gates-ui.spec.mjs` (Settings panel save already covered): trigger a sub-gate run, assert the red `Gates ✗` badge + inline violation panel render on RunDetail. **UI-only.** Depends on item 19's run-completion fixture pattern.
+20. ~~**Quality gates — RunDetail badge + violation panel**~~ ✅ shipped — `quality-gates-ui.spec.mjs` now covers RunDetail badge + violation panel via `page.route()` mock of `/api/v1/runs/:runId`. Replace with next Tier 3 candidate when picking up.
 
 **Why this ordering:** Tier 1 (8 specs) is parallelisable across agents with zero shared fixtures. Tier 2 (10 specs) should land a shared `tests/e2e/utils/fixtures.mjs` helper alongside its first 1–2 specs so subsequent ones reuse the seeded-test/run/workspace primitives instead of duplicating them. Tier 3 (2 specs) needs route-mocking infrastructure and should land last; the 🟥 rows it leaves behind (Crawl link mode, Visual baseline, AI Fix SSE, Generate AI test draft, Recorder start/stop, Edit Steps↔Source) are deferred to a follow-on sprint once Tier 3 patterns are proven.
 
@@ -117,7 +117,7 @@ Per-feature happy paths that aren't part of the Golden journey. Can ship indepen
 | 🧾 Audit Log | `userId` / `userName` per activity | 🟥 |
 | 🔔 Notifications | At-least-one-channel validation | 🟥 |
 | 🔒 Security | IDOR + cross-workspace 403 | 🟥 (UI: outsider hitting another workspace URL → redirect / 403 page) |
-| 🚦 Quality Gates (AUTO-012) | CRUD + evaluator + trigger response | 🟨 (UI: `quality-gates-ui.spec.mjs` covers Settings panel save round-trip; RunDetail gate badge + violation panel still pending — needs a real sub-gate run to seed `gateResult.passed === false`) |
+| 🚦 Quality Gates (AUTO-012) | CRUD + evaluator + trigger response | ✅ (UI: `quality-gates-ui.spec.mjs` covers Settings panel save round-trip + RunDetail gate badge + inline violation panel via `page.route()` mock of `/api/v1/runs/:runId`) |
 | 📑 Reports / PDF | Dashboard PDF export | 🟥 |
 | 🆕 New Project page | SSRF block on private URLs | 🟥 |
 | 📋 Runs list | Filter by status / project | 🟥 |
