@@ -294,13 +294,26 @@ export async function crawlPages(project, run, { signal } = {}) {
         }
 
         snapshots.push(snapshot);
-        snapshot.accessibilityViolations = a11yViolations.map(v => ({
-          ruleId: v.ruleId,
-          impact: v.impact,
-          wcagCriterion: v.wcagCriterion,
-          help: v.help,
-          description: v.description,
-        }));
+        snapshot.accessibilityViolations = a11yViolations.map(v => {
+          // Parse the persisted nodesJson to surface offending DOM target
+          // selectors to the frontend panel. Keep payload light by retaining
+          // only `target` (the CSS selector array axe produces).
+          let nodes = [];
+          try {
+            const parsed = JSON.parse(v.nodesJson || "[]");
+            if (Array.isArray(parsed)) {
+              nodes = parsed.map(n => ({ target: Array.isArray(n?.target) ? n.target : [] }));
+            }
+          } catch { /* nodesJson malformed — fall back to [] */ }
+          return {
+            ruleId: v.ruleId,
+            impact: v.impact,
+            wcagCriterion: v.wcagCriterion,
+            help: v.help,
+            description: v.description,
+            nodes,
+          };
+        });
         snapshotsByUrl[url] = snapshot;
         run.pagesFound = snapshots.length;
         // Keep run.pages in sync so the frontend site graph updates live

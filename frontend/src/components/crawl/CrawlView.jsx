@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Map, List } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SiteGraph from "./SiteGraph.jsx";
+import AccessibilityViolationsPanel from "./AccessibilityViolationsPanel.jsx";
 import useLogBuffer from "../../hooks/useLogBuffer.js";
 import PipelineCard from "../run/PipelineCard.jsx";
 import GenerationSuccessBanner from "../generate/GenerationSuccessBanner.jsx";
@@ -100,16 +101,6 @@ export default function CrawlView({ run, isRunning }) {
     },
   ];
 
-  const selectedPageA11y = Array.isArray(selectedPage?.accessibilityViolations)
-    ? selectedPage.accessibilityViolations
-    : [];
-  const severityColorByImpact = {
-    critical: "var(--red)",
-    serious: "var(--amber)",
-    moderate: "var(--blue)",
-    minor: "var(--text3)",
-  };
-
   return (
     <div
       className="run-grid"
@@ -205,39 +196,7 @@ export default function CrawlView({ run, isRunning }) {
                     + Generate test
                   </button>
                 </div>
-                {selectedPageA11y.length > 0 && (
-                  <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-                    <div style={{ fontSize: "0.68rem", fontWeight: 700, marginBottom: 8 }}>
-                      Accessibility violations ({selectedPageA11y.length})
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {selectedPageA11y.map((v, i) => (
-                        <details key={`${v.ruleId || "rule"}-${i}`} style={{ background: "var(--surface)", borderRadius: 6, padding: "6px 8px" }}>
-                          <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "center", listStyle: "none" }}>
-                            <span className="badge" style={{ fontSize: "0.6rem", color: severityColorByImpact[v.impact] || "var(--text2)", borderColor: severityColorByImpact[v.impact] || "var(--border)" }}>
-                              {(v.impact || "unknown").toUpperCase()}
-                            </span>
-                            <span style={{ fontSize: "0.68rem", color: "var(--text2)", flex: 1 }}>
-                              {v.ruleId || "Unknown rule"}
-                            </span>
-                            {v.wcagCriterion && (
-                              <span style={{ fontSize: "0.62rem", color: "var(--text3)", fontFamily: "var(--font-mono)" }}>
-                                WCAG {v.wcagCriterion}
-                              </span>
-                            )}
-                          </summary>
-                          <div style={{ marginTop: 6, fontSize: "0.65rem", color: "var(--text3)", display: "flex", flexDirection: "column", gap: 4 }}>
-                            {(Array.isArray(v.nodes) ? v.nodes : []).slice(0, 6).map((node, ni) => (
-                              <div key={`${ni}-${node?.target?.[0] || "node"}`} style={{ fontFamily: "var(--font-mono)", overflowX: "auto", whiteSpace: "nowrap" }}>
-                                {node?.target?.join(", ") || "Unknown node"}
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <AccessibilityViolationsPanel violations={selectedPage.accessibilityViolations} />
               </div>
             )}
           </div>

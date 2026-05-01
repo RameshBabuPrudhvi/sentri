@@ -74,3 +74,24 @@ export function getByRunAndPage(runId, pageUrl) {
     "SELECT * FROM accessibility_violations WHERE runId = ? AND pageUrl = ? ORDER BY ruleId ASC"
   ).all(runId, pageUrl);
 }
+
+/**
+ * Count violations grouped by runId for a set of run IDs.
+ *
+ * Used by the dashboard "top accessibility offenders" rollup so we can
+ * aggregate counts in a single query instead of N `SELECT *` calls.
+ *
+ * @param {Array<string>} runIds
+ * @returns {Record<string, number>} runId → violation count (only runs with > 0 are present)
+ */
+export function countByRunIds(runIds) {
+  if (!Array.isArray(runIds) || runIds.length === 0) return {};
+  const db = getDatabase();
+  const placeholders = runIds.map(() => "?").join(",");
+  const rows = db.prepare(
+    `SELECT runId, COUNT(*) AS count FROM accessibility_violations WHERE runId IN (${placeholders}) GROUP BY runId`
+  ).all(...runIds);
+  const out = {};
+  for (const row of rows) out[row.runId] = row.count;
+  return out;
+}
