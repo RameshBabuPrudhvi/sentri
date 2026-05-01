@@ -66,6 +66,7 @@ const files = [
   "tests/accessibility-repo.test.js",
   "tests/object-storage.test.js",
   "tests/ephemeral-storage-warning.test.js",
+  "tests/quality-gates.test.js",
 ];
 
 let passed = 0;

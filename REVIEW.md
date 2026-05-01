@@ -94,7 +94,7 @@ cd frontend && npm test
 | New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly | Dedicated file or `tests/auth-cookies.test.js` |
 | Security fix | Unit test for the fix mechanism AND integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
 | Pipeline stage change | Unit tests | `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` |
-| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | E2E spec exercising the full HTTP/UI flow **and** a corresponding section / Golden E2E step in [QA.md](./QA.md) | `tests/e2e/specs/<area>.spec.mjs` (see STANDARDS.md § E2E Tests); update `QA.md` at repo root |
+| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | **UI E2E spec** exercising the real browser flow (Playwright `page` fixture, role-based selectors, runs under `--project=ui-chromium`) **and** a corresponding section / Golden E2E step in [QA.md](./QA.md) **and** a ✅ row in [`tests/e2e/COVERAGE.md`](./tests/e2e/COVERAGE.md). The assertion that flips a row to ✅ must be `expect(page.…)` against rendered DOM — API specs alone never close a row; they are scaffolding only (e.g. seeding fixtures so the UI test can drive the page directly). The only exception is ⏭️ flows that genuinely have no user-facing UI (outbound notifications, ephemeral-storage probe). See [`tests/e2e/COVERAGE.md`](./tests/e2e/COVERAGE.md) § UI-only policy. | `tests/e2e/specs/<area>-ui.spec.mjs` for the UI spec (see STANDARDS.md § E2E Tests); update `QA.md` at repo root; flip the matching row in `tests/e2e/COVERAGE.md` from 🟥/🟨 to ✅ |
 
 **Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
 

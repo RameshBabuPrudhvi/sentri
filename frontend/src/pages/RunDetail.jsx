@@ -28,6 +28,7 @@ import GenerateView from "../components/generate/GenerateView";
 import TestRunView from "../components/run/TestRunView";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
+import GateBadge from "../components/shared/GateBadge.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -423,6 +424,12 @@ export default function RunDetail() {
             <BrowserBadge browser={run.browser} />
           )}
 
+          {/* Quality gate result (AUTO-012) — test runs only.
+              Renders nothing when gateResult is null (no gates configured). */}
+          {!isCrawl && !isGenerate && (
+            <GateBadge gateResult={run.gateResult} />
+          )}
+
           <div className="rd-header-actions" style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             {isRunning && (
               <button
@@ -633,6 +640,34 @@ export default function RunDetail() {
           </div>
         );
       })()}
+
+      {/* ── Quality gate violations (AUTO-012) ─────────────────────────── */}
+      {!isCrawl && !isGenerate && run.gateResult && run.gateResult.passed === false && Array.isArray(run.gateResult.violations) && run.gateResult.violations.length > 0 && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 10,
+          padding: "12px 16px", marginBottom: 16,
+          background: "var(--red-bg)", border: "1px solid #fca5a5",
+          borderRadius: 10, fontSize: "0.82rem", color: "var(--red)", lineHeight: 1.5,
+        }}>
+          <XCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              Quality Gate Failed ({run.gateResult.violations.length} violation{run.gateResult.violations.length !== 1 ? "s" : ""})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {run.gateResult.violations.map((v, i) => (
+                <div key={i} style={{ fontSize: "0.78rem" }}>
+                  <strong style={{ fontFamily: "var(--font-mono)" }}>{v.rule}</strong>
+                  : actual <strong>{v.actual}</strong> vs threshold <strong>{v.threshold}</strong>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 6, fontSize: "0.73rem", color: "#7f1d1d" }}>
+              CI pipelines polling the trigger endpoint receive <code>gateResult.passed: false</code> and should exit non-zero.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Main content ───────────────────────────────────────────────── */}
       {isCrawl ? (

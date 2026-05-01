@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 31 items (INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `DIF-015b Gap 2` — recorder data-testid quality scoring · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 30 items (AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -107,6 +107,7 @@ The following items have been verified complete against the codebase and are **n
 | ENH-036 | Project credential editing after creation (`PATCH /api/v1/projects/:id`) | PR #127                                                         |
 | ENH-036b | Auto-detect login form fields — semantic-first locator waterfall removes need for hand-authored CSS selectors | PR #127                                                         |
 | INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | PR #1                                                           |
+| AUTO-012 | SLA / quality gate enforcement — per-project `qualityGates` config, run-time evaluator, `gateResult` on runs + trigger responses, `QualityGatesPanel` under ProjectDetail → Settings, per-run `<GateBadge>` on Runs list / RunDetail header, inline violation panel on RunDetail, GH Actions + GitLab CI consumer examples in `docs/guide/ci-cd-triggers.md` that exit non-zero on `gateResult.passed === false` | PR #2                                                           |
 
 ---
 
@@ -117,7 +118,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` ✅ shipped in PR #1 (Render blueprint + ephemeral-storage warning); `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019                                | 14–18 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-017–019                                | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -982,7 +983,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
 
-> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), and `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1). The remaining ~14 items are scoped here and ready to start; the immediate next sprint item is `AUTO-012` (SLA / quality gate enforcement) tracked in `NEXT.md`.
+> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-012` (SLA / quality gate enforcement — full backend + UI + CI consumer docs, PR #2), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), and `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1). The remaining ~13 items are scoped here and ready to start; the immediate next sprint item is `DIF-015b Gap 2` (recorder data-testid quality scoring) tracked in `NEXT.md`.
 
 ---
 
@@ -1179,7 +1180,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-012 — SLA / quality gate enforcement 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #2) | **Effort:** M | **Source:** Competitive Gap Analysis
 
 **Problem:** There is no ability to define "this project must maintain >95% pass rate" and block deployments when it drops. The CI/CD trigger endpoint returns pass/fail counts but requires the caller to implement gate logic. An autonomous platform should provide configurable quality gates per project with first-class CI/CD integration.
 
@@ -1614,11 +1615,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 4 | 4 | 0 | 0 | — |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
-| Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
+| Autonomous Intelligence | 22 | 6 | 0 | 16 | AUTO-001–004, 008–011, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **33** | **0** | **37** | |
+| **Totals** | **70** | **34** | **0** | **36** | |
 
-**Total tracked items:** 70 across 7 categories — **33 complete** (47%), **0 in progress**, **37 remaining**
+**Total tracked items:** 70 across 7 categories — **34 complete** (49%), **0 in progress**, **36 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅

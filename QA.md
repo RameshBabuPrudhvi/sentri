@@ -116,7 +116,7 @@ No `import` lines. No `request.fetch` / `request.get` / `request.post`. Role-bas
 
 **When verifying a permissions claim:** read [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json), not the markdown matrix below — the JSON is the canonical machine-readable form. The markdown table mirrors it for humans.
 
-> **Automated coverage:** This manual plan is the human baseline. Automated unit / component / E2E tests are tracked in [#98](https://github.com/RameshBabuPrudhvi/sentri/issues/98). Sections already covered by automation should be tagged `_(automated by tests/…)_` — manual testers may skip those during release sign-off. When you add an automated test, update the matching `QA.md` section and Coverage Checklist row.
+> **Automated coverage:** This manual plan is the human baseline. Automated E2E specs live under [`tests/e2e/specs/`](./tests/e2e/specs/); the per-step automation matrix is at [`tests/e2e/COVERAGE.md`](./tests/e2e/COVERAGE.md) — check that first to see which Golden E2E steps and per-feature flows are already ✅ automated vs. still 🟥 manual-only. Sections already covered by automation should be tagged `_(automated: see tests/e2e/COVERAGE.md row …)_` — manual testers may skip those during release sign-off. When you add an automated test, update the matching `QA.md` section AND flip the row in `tests/e2e/COVERAGE.md`.
 
 ---
 
@@ -628,6 +628,58 @@ Each area uses this format:
 - Trigger run with revoked or wrong token → 401, no run created.
 - Schedule across DST transition → next-run time correct in target timezone.
 - Two schedules firing simultaneously → respect `PARALLEL_WORKERS` queue; no crash.
+
+---
+
+### 🚦 Quality Gates (AUTO-012)
+
+**Preconditions:** Project with ≥ 5 approved tests; `qa_lead` or `admin` logged in. Endpoints documented in `backend/src/routes/projects.js` and `backend/src/middleware/permissions.json`.
+
+**CRUD flow:**
+1. `GET /api/v1/projects/:id/quality-gates` (any workspace member, viewer+) → returns `{ qualityGates: null }` for an unconfigured project.
+2. `PATCH /api/v1/projects/:id/quality-gates` with `{ minPassRate: 95 }` (`qa_lead` or `admin`) → returns `{ qualityGates: { minPassRate: 95 } }`. Reload + GET → value persists across requests.
+3. PATCH `{ minPassRate: 80, maxFlakyPct: 10, maxFailures: 2 }` → all three fields persist together.
+4. `DELETE /api/v1/projects/:id/quality-gates` (`qa_lead` or `admin`) → returns `{ ok: true, qualityGates: null }`; subsequent GET returns null again.
+
+**Validation (each must return 400):**
+5. `minPassRate: 150` (out of 0–100 range) → 400 "minPassRate must be between 0 and 100".
+6. `maxFlakyPct: -1` → 400 "maxFlakyPct must be between 0 and 100".
+7. `maxFailures: 1.5` (non-integer) or `maxFailures: -1` → 400 "maxFailures must be a non-negative integer".
+8. PATCH with array body or non-object → 400 "qualityGates must be an object".
+
+**Run-time evaluation** (`backend/src/testRunner.js` `evaluateQualityGates`):
+9. Configure `{ minPassRate: 95 }`. Trigger a run that finishes 9/10 passed (90%) → `run.gateResult = { passed: false, violations: [{ rule: "minPassRate", threshold: 95, actual: 90 }] }`.
+10. Configure `{ maxFailures: 2 }` and finish a run with 3 failures → violation rule `maxFailures`, `actual: 3`.
+11. Configure `{ maxFlakyPct: 5 }` and finish a run where `retryCount / total * 100 > 5` → violation rule `maxFlakyPct`.
+12. All gates passing → `run.gateResult = { passed: true, violations: [] }`.
+13. Project with **no** gates configured → `run.gateResult` is `null` (legacy / pre-AUTO-012 runs are unaffected; CI consumers must treat null as "no gate").
+
+**CI/CD trigger integration** (`backend/src/routes/trigger.js`):
+14. Trigger a run via `POST /api/v1/projects/:id/trigger` with a Bearer token, then poll `GET /api/v1/projects/:id/trigger/runs/:runId` → response includes top-level `gateResult` matching what's persisted on the run.
+15. Provide `callbackUrl` on the trigger call → callback POST payload contains `gateResult: { passed, violations }` or `null`.
+16. Confirm `gateResult` is included regardless of run status (`completed` / `failed` / `aborted`) when gates are configured; `null` otherwise.
+
+**Permissions:**
+17. As `viewer`, `PATCH` and `DELETE` quality-gates endpoints → **403** (not 200, not silent no-op). `GET` is allowed.
+18. As `qa_lead` and `admin`, all three (GET / PATCH / DELETE) succeed.
+19. Cross-workspace isolation — outsider hitting another workspace's project → 404 (workspace scope enforced upstream by `workspaceScope` middleware).
+
+**UI surfaces (AUTO-012b):**
+20. ProjectDetail → **Settings** tab → "Quality Gates" panel renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
+21. Configure thresholds and click **Save** → toast "Quality gates saved"; reload tab → values persist.
+22. Click **Clear all** → confirmation prompt → on confirm, gates removed; toast "Quality gates cleared"; subsequent runs report `gateResult: null`.
+23. Enter all-blank fields and click Save → server-side `DELETE` is sent (config cleared) instead of saving an empty object — toast reads "Quality gates cleared".
+24. Validation: enter `minPassRate: 150` → server returns 400; the form surfaces the error message inline (red banner) and does not corrupt local state.
+25. Runs list (`/runs`) on a test run that has `gateResult` → green "Gates ✓" or red "Gates ✗" pill renders next to the status badge. Hover → tooltip lists violations.
+26. Project Detail → **Runs** tab → same gate badge appears in the per-row status cell.
+27. RunDetail header → gate badge appears next to the browser badge when `gateResult` is present. When gates failed, an inline red violation panel renders before the main content listing each `{ rule, threshold, actual }` entry.
+28. Test runs created before AUTO-012 shipped (with `gateResult: null`) → no badge, no panel — UI must not regress for legacy runs.
+
+**Negative / edge:**
+- PATCH against a non-existent project ID → 404 "not found".
+- Persisted JSON survives backend restart (column is `TEXT` JSON in migration `014_quality_gates.sql`).
+- Pre-existing runs created before AUTO-012 shipped still load and render correctly with `gateResult: null` (no badge / no panel).
+- Crawl and generate runs never carry `gateResult` even when configured (gates apply to test runs only) — verify badge / panel are suppressed in those views.
 
 ---
 
@@ -1154,6 +1206,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **AI Fix (manual + auto feedback loop)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Test Code Editing (Steps ↔ Source)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Automation (trigger tokens + schedules) | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Quality Gates (AUTO-012 — CRUD, evaluator, trigger response)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Visual Testing | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Dashboard | ⬜ | ⬜ | ⬜ | ⬜ | |
 | AI Chat + Chat History | ⬜ | ⬜ | ⬜ | ⬜ | |

@@ -61,6 +61,8 @@ Content-Type: application/json
 
 ## GitHub Actions Example
 
+The example below also enforces **quality gates** (AUTO-012): if the project has gates configured (e.g. `minPassRate: 95`), the trigger status response includes `gateResult.passed`, and the workflow exits non-zero when gates fail — even if every test technically completed. Configure gates from the **Settings** tab on the project page (see [Quality Gates](#quality-gates) below).
+
 ```yaml
 # .github/workflows/sentri.yml
 name: Sentri regression
@@ -83,18 +85,35 @@ jobs:
           echo "run_id=$(echo $response | jq -r .runId)" >> $GITHUB_OUTPUT
           echo "status_url=$(echo $response | jq -r .statusUrl)" >> $GITHUB_OUTPUT
 
-      - name: Wait for run to complete
+      - name: Wait for run to complete and enforce quality gates
         run: |
           status_url="${{ steps.trigger.outputs.status_url }}"
           for i in $(seq 1 60); do
-            status=$(curl -sf \
+            payload=$(curl -sf \
               -H "Authorization: Bearer ${{ secrets.SENTRI_TOKEN }}" \
-              "$status_url" | jq -r .status)
+              "$status_url")
+            status=$(echo "$payload" | jq -r .status)
             echo "Run status: $status"
             [ "$status" != "running" ] && break
             sleep 10
           done
-          [ "$status" = "completed" ] || exit 1
+
+          # 1. Run-level status — fail the build on any non-completed state.
+          if [ "$status" != "completed" ]; then
+            echo "::error::Run finished with status=$status"
+            exit 1
+          fi
+
+          # 2. Quality gates (AUTO-012) — gateResult is null when the project
+          #    has no gates configured, in which case we don't enforce anything.
+          gate_passed=$(echo "$payload" | jq -r '.gateResult.passed // "null"')
+          if [ "$gate_passed" = "false" ]; then
+            echo "::error::Quality gate failed:"
+            echo "$payload" | jq -r '.gateResult.violations[] |
+              "  - \(.rule): actual \(.actual) vs threshold \(.threshold)"'
+            exit 1
+          fi
+          echo "Run completed and quality gates passed."
 ```
 
 ## GitLab CI Example
@@ -111,14 +130,23 @@ sentri:
         "https://your-sentri-instance.com/api/v1/projects/PRJ-1/trigger")
       STATUS_URL=$(echo $response | jq -r .statusUrl)
       for i in $(seq 1 60); do
-        STATUS=$(curl -sf \
+        PAYLOAD=$(curl -sf \
           -H "Authorization: Bearer $SENTRI_TOKEN" \
-          "$STATUS_URL" | jq -r .status)
+          "$STATUS_URL")
+        STATUS=$(echo "$PAYLOAD" | jq -r .status)
         echo "Run status: $STATUS"
         [ "$STATUS" != "running" ] && break
         sleep 10
       done
-      [ "$STATUS" = "completed" ]
+      [ "$STATUS" = "completed" ] || exit 1
+      # AUTO-012: enforce quality gates when configured.
+      GATE_PASSED=$(echo "$PAYLOAD" | jq -r '.gateResult.passed // "null"')
+      if [ "$GATE_PASSED" = "false" ]; then
+        echo "Quality gate failed:"
+        echo "$PAYLOAD" | jq -r '.gateResult.violations[] |
+          "  - \(.rule): actual \(.actual) vs threshold \(.threshold)"'
+        exit 1
+      fi
 ```
 
 ## cURL (Direct)
@@ -146,14 +174,51 @@ Sentri will POST a JSON summary on **any terminal state** (completed, failed, or
 {
   "runId": "RUN-42",
   "status": "completed",
-  "passed": 15,
-  "failed": 0,
+  "passed": 14,
+  "failed": 1,
   "total": 15,
-  "error": null
+  "error": null,
+  "gateResult": {
+    "passed": false,
+    "violations": [
+      { "rule": "minPassRate", "threshold": 95, "actual": 93.33 }
+    ]
+  }
 }
 ```
 
-On failure, `status` will be `"failed"` and `error` will contain a human-readable message. On abort, `status` will be `"aborted"`.
+On failure, `status` will be `"failed"` and `error` will contain a human-readable message. On abort, `status` will be `"aborted"`. `gateResult` is `null` when the project has no quality gates configured (see below).
+
+## Quality Gates
+
+AUTO-012 lets you enforce per-project deploy-blocking thresholds without writing custom CI logic. Configure them under **Project → Settings → Quality Gates**; the form takes any subset of:
+
+| Field | Range | Meaning |
+|---|---|---|
+| `minPassRate` | 0–100 (%) | Run fails when pass rate drops below this. |
+| `maxFlakyPct` | 0–100 (%) | Run fails when flaky percentage exceeds this. |
+| `maxFailures` | integer ≥ 0 | Run fails when total failures exceed this. |
+
+On every test run, the backend evaluates the configured gates and persists the result on the run record. The trigger status response and the optional `callbackUrl` payload both include a `gateResult` field:
+
+```json
+"gateResult": {
+  "passed": false,
+  "violations": [
+    { "rule": "minPassRate", "threshold": 95, "actual": 90 }
+  ]
+}
+```
+
+- `gateResult: null` — no gates configured. CI should treat as "no enforcement" (legacy projects unaffected).
+- `gateResult.passed === true` — all configured thresholds met.
+- `gateResult.passed === false` — at least one violation; `violations[]` lists every failed rule with its threshold and the actual measured value.
+
+The CI examples above already enforce this: when `gateResult.passed === false` the workflow exits non-zero, blocking the deploy. When the project has no gates, the same scripts treat the run as a pure pass/fail based on `status` alone.
+
+::: tip
+You can set gates conservatively (e.g. `minPassRate: 95`, `maxFailures: 0`) for `main` and tune them per-environment by running separate Sentri projects against staging vs. production URLs.
+:::
 
 ## Security Notes
 
