@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 32 items (ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 31 items (INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -106,6 +106,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-016b | Frontend CrawlView accessibility panel + dashboard "Top Accessibility Offenders" rollup | PR #1                                                           |
 | ENH-036 | Project credential editing after creation (`PATCH /api/v1/projects/:id`) | PR #127                                                         |
 | ENH-036b | Auto-detect login form fields — semantic-first locator waterfall removes need for hand-authored CSS selectors | PR #127                                                         |
+| INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | PR #1                                                           |
 
 ---
 
@@ -114,7 +115,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase | Scope | Status                                                                                                                                                                                | Est. Duration |
 |-------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
-| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
+| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` ✅ shipped in PR #1 (Render blueprint + ephemeral-storage warning); `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019                                | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
@@ -356,7 +357,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### INF-006 — Persistent storage on hosted deployments (Render disk + Postgres add-on) 🔴 Blocker
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — every Render redeploy wipes the SQLite DB, forcing fresh signup + project recreation)
+**Status:** ✅ Complete (PR #1) | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — every Render redeploy wipes the SQLite DB, forcing fresh signup + project recreation)
 
 **Problem:** Sentri runs fine locally because `docker-compose.yml` mounts `backend/data/` as a named volume, but Render's web-service container filesystem is **ephemeral** — every redeploy gets a fresh disk and `backend/data/sentri.db` resets to empty. Operators dogfooding on Render must re-register, recreate every project, and re-run every crawl after every deploy. There is no `render.yaml` in the repo, no documented Render disk path, and no production-hardening callout that SQLite + free-tier Render is incompatible. INF-001 ✅ already shipped PostgreSQL adapter support, so the fix is partly configuration and partly documentation; the missing pieces are the deployment manifest and the operator guidance.
 
@@ -1609,15 +1610,15 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
 | Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
-| Infrastructure | 6 | 5 | 0 | 1 | INF-006 |
+| Infrastructure | 6 | 6 | 0 | 0 | — |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 4 | 4 | 0 | 0 | — |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
 | Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **32** | **0** | **38** | |
+| **Totals** | **70** | **33** | **0** | **37** | |
 
-**Total tracked items:** 70 across 7 categories — **32 complete** (46%), **0 in progress**, **38 remaining**
+**Total tracked items:** 70 across 7 categories — **33 complete** (47%), **0 in progress**, **37 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅

@@ -127,6 +127,16 @@ Full setup guide including Ollama: **[AI Providers →](https://rameshbabuprudhv
 
 ---
 
+## Production deployments (Render / Fly / Railway)
+
+> ⚠️ **Important:** free-tier root filesystems are usually ephemeral. If your SQLite DB lives on ephemeral storage, every redeploy can wipe accounts, projects, tests, and runs.
+
+Use the included [`render.yaml`](render.yaml) Blueprint on Render to mount a **1 GB Persistent Disk** at `/app/backend/data` and set `DB_PATH=/app/backend/data/sentri.db`.
+
+If you plan to run multiple instances, prefer managed Postgres and set `DATABASE_URL=postgres://...` instead of SQLite.
+
+---
+
 ## Documentation
 
 | | |

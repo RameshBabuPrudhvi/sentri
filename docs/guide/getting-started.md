@@ -6,6 +6,22 @@
 - An API key for at least one AI provider — **or** a local [Ollama](https://ollama.com) installation (free, no key needed)
 - Docker & Docker Compose (optional, for containerised deployment)
 
+## Hosted production note (Render / Fly / Railway)
+
+> ⚠️ Free-tier root filesystems are often ephemeral. Without a mounted persistent volume, SQLite data can be lost after redeploys.
+
+For Render, use the repo `render.yaml` Blueprint, which mounts a disk at `/app/backend/data` and uses:
+
+```bash
+DB_PATH=/app/backend/data/sentri.db
+```
+
+For horizontally-scaled deployments, switch to managed Postgres:
+
+```bash
+DATABASE_URL=postgres://user:pass@host:5432/sentri
+```
+
 ## Option A: Docker (Recommended)
 
 Works identically on macOS, Linux, and Windows (Docker Desktop).
