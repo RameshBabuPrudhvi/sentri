@@ -103,6 +103,24 @@ const TIMINGS = {
 const MAX_RECORDING_MS = TIMINGS.MAX_RECORDING_MS;
 
 /**
+ * Action kinds that represent a real user interaction (as opposed to a
+ * drive-by `hover` or a passive `goto`). Used by the `__sentriRecord`
+ * binding to strip a trailing `hover` action on the same selector when the
+ * very next action is an interaction — see the block that consumes this
+ * set for the full rationale.
+ *
+ * Lives at module scope (matching `TIMINGS` above) rather than inside the
+ * binding callback so we don't re-allocate a Set on every captured action
+ * event during an active recording session.
+ *
+ * @internal
+ */
+const INTERACTION_KINDS = new Set([
+  "click", "dblclick", "rightClick", "fill",
+  "select", "check", "uncheck", "upload", "press",
+]);
+
+/**
  * @typedef {Object} RecordedAction
  * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
@@ -1016,6 +1034,21 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
           if (prev.kind === "click" && prev.selector === row.selector) {
             session.actions.splice(i, 1);
           }
+        }
+      }
+      // Drop noisy hover actions that immediately precede a real interaction
+      // on the same selector. The in-page `HOVER_DWELL_MS` filter catches
+      // drive-by mouseovers, but a user pausing on a button before clicking
+      // it (very common — that's what "aim and click" looks like) still
+      // produces a junk `hover` action right before the `click`. Strip the
+      // trailing hover when the very next action is an interaction on the
+      // same target so the captured step list reflects user intent rather
+      // than mouse mechanics. `INTERACTION_KINDS` is defined at module
+      // scope above — don't re-allocate it per event.
+      if (INTERACTION_KINDS.has(row.kind) && row.selector) {
+        const last = session.actions[session.actions.length - 1];
+        if (last && last.kind === "hover" && last.selector === row.selector) {
+          session.actions.pop();
         }
       }
       session.actions.push(row);

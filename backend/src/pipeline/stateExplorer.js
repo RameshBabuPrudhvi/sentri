@@ -35,6 +35,7 @@ import { log, logWarn, logSuccess, emitRunEvent } from "../utils/runLogger.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { signRunArtifacts } from "../middleware/appSetup.js";
 import { decryptCredentials } from "../utils/credentialEncryption.js";
+import { performAutoLogin } from "./autoLogin.js";
 import { createHarCapture, summariseApiEndpoints } from "./harCapture.js";
 import { launchBrowser } from "../runner/config.js";
 import { loadRobotsRules, isAllowed, loadSitemapUrls } from "../utils/robotsSitemap.js";
@@ -318,16 +319,32 @@ export async function exploreStates(project, run, { signal, tuning } = {}) {
   try {
     const context = await browser.newContext({ userAgent: "Mozilla/5.0 (compatible; Sentri/1.0)" });
 
+    // Same two-path login as crawlBrowser.js — legacy explicit selectors
+    // take priority, falling back to auto-detect when only username +
+    // password are persisted.
     const creds = decryptCredentials(project.credentials);
-    if (creds?.usernameSelector) {
+    if (creds?.username && creds?.password) {
       const loginPage = await context.newPage();
       try {
         await loginPage.goto(project.url, { timeout: 15000 });
-        await loginPage.fill(creds.usernameSelector, creds.username);
-        await loginPage.fill(creds.passwordSelector, creds.password);
-        await loginPage.click(creds.submitSelector);
-        await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-        log(run, `🔑 Logged in as ${creds.username}`);
+        if (creds.usernameSelector && creds.passwordSelector && creds.submitSelector) {
+          await loginPage.fill(creds.usernameSelector, creds.username);
+          await loginPage.fill(creds.passwordSelector, creds.password);
+          await loginPage.click(creds.submitSelector);
+          await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+          log(run, `🔑 Logged in as ${creds.username}`);
+        } else {
+          const result = await performAutoLogin(loginPage, creds, {
+            timeout: 5000,
+            logger: (m) => log(run, `   ${m}`),
+          });
+          if (result.ok) {
+            await loginPage.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+            log(run, `🔑 Auto-logged in as ${creds.username}`);
+          } else {
+            logWarn(run, `Auto-login failed: ${result.reason}`);
+          }
+        }
       } catch (e) { logWarn(run, `Login failed: ${e.message}`); }
       finally { await loginPage.close().catch(() => {}); }
     }

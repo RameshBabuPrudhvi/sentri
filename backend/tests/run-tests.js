@@ -10,6 +10,8 @@ const files = [
   "tests/self-healing.test.js",
   "tests/pipeline.test.js",
   "tests/api-flow.test.js",
+  "tests/project-edit.test.js",
+  "tests/auto-login.test.js",
   "tests/integration-routes.test.js",
   "tests/auth-cookies.test.js",
   "tests/utils.test.js",

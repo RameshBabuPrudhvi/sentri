@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Search, Download, X, CheckCircle2, XCircle, Clock,
+  Search, X, CheckCircle2, XCircle, Clock,
   ChevronRight, Loader2, Play, Flag, Sparkles,
   AlertCircle, ArrowUpDown, Trash2,
   ThumbsUp, ThumbsDown, AlertTriangle, Video,
@@ -15,9 +15,9 @@ import RecorderModal from "../components/run/RecorderModal.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
 import ModalShell from "../components/shared/ModalShell.jsx";
+import ProjectExportMenu from "../components/project/ProjectExportMenu.jsx";
 import { cleanTestName } from "../utils/formatTestName.js";
 import { testTypeBadgeClass, testTypeLabel, isBddTest } from "../utils/testTypeLabels.js";
-import { exportCsv } from "../utils/exportCsv.js";
 import { StatusBadge, ScenarioBadges, StaleBadge, FlakyBadge } from "../components/shared/TestBadges.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination from "../components/shared/TablePagination.jsx";
@@ -517,59 +517,24 @@ export default function Tests() {
     return () => window.removeEventListener("keydown", handler);
   }, [selected, filtered]);
 
-  // ── Export filtered tests to CSV (fetches full test details including steps) ──
-  const [exportLoading, setExportLoading] = useState(false);
-
-  async function handleExportCSV() {
-    if (filtered.length === 0) return;
-    setExportLoading(true);
-    try {
-      // Fetch full test details for each filtered test so we get the steps array.
-      // We batch with Promise.allSettled so a single failure doesn't abort the export.
-      const fullTests = await Promise.allSettled(
-        filtered.map(t => api.getTest(t.id))
-      );
-
-      const headers = [
-        "Test ID", "Name", "Description", "Step #", "Step",
-        "Project", "Priority", "Type", "Category", "Review Status",
-        "Status", "Last Run At", "Created At", "Source URL", "Journey",
-      ];
-
-      const rows = [];
-      fullTests.forEach((result, idx) => {
-        const t = result.status === "fulfilled" ? result.value : filtered[idx];
-        const steps = Array.isArray(t.steps) && t.steps.length > 0 ? t.steps : [""];
-        steps.forEach((step, stepIdx) => {
-          rows.push([
-            stepIdx === 0 ? t.id : "",
-            stepIdx === 0 ? cleanTestName(t.name) : "",
-            stepIdx === 0 ? (t.description || "") : "",
-            step ? stepIdx + 1 : "",
-            step || "",
-            stepIdx === 0 ? (projMap[t.projectId]?.name || "") : "",
-            stepIdx === 0 ? (t.priority || "medium") : "",
-            stepIdx === 0 ? (t.type || "") : "",
-            stepIdx === 0 ? ((t.generatedFrom === "api_har_capture" || t.generatedFrom === "api_user_described") ? "API" : "UI") : "",
-            stepIdx === 0 ? (t.reviewStatus || "draft") : "",
-            stepIdx === 0 ? (t.lastResult || "") : "",
-            stepIdx === 0 ? (t.lastRunAt || "") : "",
-            stepIdx === 0 ? (t.createdAt || "") : "",
-            stepIdx === 0 ? (t.sourceUrl || "") : "",
-            stepIdx === 0 ? (t.isJourneyTest ? "Yes" : "No") : "",
-          ]);
-        });
-      });
-
-      exportCsv(headers, rows, `sentri-tests-${new Date().toISOString().slice(0, 10)}.csv`);
-    } catch (err) {
-      console.error("CSV export failed:", err);
-    } finally {
-      setExportLoading(false);
-    }
-  }
-
   const draftCount = tests.filter(t => !t.reviewStatus || t.reviewStatus === "draft").length;
+
+  // ── Export: unified with ProjectDetail via ProjectExportMenu (Zephyr / TestRail / Playwright ZIP).
+  // All three export targets are project-scoped server-side, so the menu
+  // surfaces one dropdown per project that has tests in the current workspace.
+  const projectsWithTests = useMemo(() => {
+    const counts = {};
+    for (const t of tests) {
+      if (!counts[t.projectId]) counts[t.projectId] = { total: 0, approved: 0 };
+      counts[t.projectId].total += 1;
+      if (t.reviewStatus === "approved") counts[t.projectId].approved += 1;
+    }
+    return projects.filter(p => counts[p.id]?.total > 0).map(p => ({
+      ...p,
+      totalTests: counts[p.id].total,
+      approvedTests: counts[p.id].approved,
+    }));
+  }, [projects, tests]);
 
   const quickActions = [
     {
@@ -630,15 +595,23 @@ export default function Tests() {
             Manage, run, and review test cases across all projects
           </p>
         </div>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={handleExportCSV}
-          disabled={filtered.length === 0 || exportLoading}
-          title={filtered.length === 0 ? "No tests to export" : `Export ${filtered.length} filtered test${filtered.length !== 1 ? "s" : ""} as CSV (includes test steps)`}
-        >
-          {exportLoading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-          {exportLoading ? "Exporting…" : "Export CSV"}
-        </button>
+        {/* Unified export — one menu per project (Zephyr / TestRail / Playwright ZIP).
+            Project-scoped because the backend export endpoints all take a projectId;
+            this matches the dropdown shown on ProjectDetail for consistency. */}
+        {projectsWithTests.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {projectsWithTests.map(p => (
+              <ProjectExportMenu
+                key={p.id}
+                projectId={p.id}
+                totalTests={p.totalTests}
+                approvedCount={p.approvedTests}
+                label={projectsWithTests.length === 1 ? "Export" : `Export · ${p.name}`}
+                buttonClassName="btn btn-ghost btn-sm"
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick Actions */}

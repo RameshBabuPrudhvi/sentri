@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 33 items (AUTO-016b ✅ shipped in PR #1; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 32 items (ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -41,81 +41,83 @@ The following items have been verified complete against the codebase and are **n
 
 > **Naming note:** Items numbered `MAINT-*` are legacy from prior roadmap versions. The current convention is `MNT-*`. Old IDs are preserved in PR descriptions and git history — do not rename them. Use `MNT-*` for all new maintenance items.
 
-| ID | Title | PR / Commit |
-|----|-------|-------------|
-| S3-02 | Shadow DOM support in crawler | PR #55 |
-| S3-04 | DOM stability wait before snapshot | PR #55 |
-| S3-08 | Disposable email address filter | PR #55 |
-| ENH-004 | Persist AI provider keys encrypted in database | PR #80 |
-| ENH-005 | Global API rate limiting (three-tier) | PR #78 |
-| ENH-006 | Test scheduling engine (cron + timezone) | PR #86 |
-| ENH-007 | Signed URL tokens for artifact serving | PR #79 |
-| ENH-008 | Move `runs.logs` to append-only `run_logs` table | PR #86 |
-| ENH-010 | Pagination on all list API endpoints | PR #78 |
-| ENH-011 | CI/CD webhook receiver + GitHub Actions integration | PR #86 |
-| ENH-013 | Persist password reset tokens in the database | PR #78 |
-| ENH-020 | Soft-delete with recycle bin for tests, projects, runs | PR #81 |
-| ENH-021 | `userId` + `userName` on activities for full audit trail | PR #78 |
-| ENH-024 | Frontend code splitting (React.lazy + Suspense) | PR #78 |
-| ENH-027 | Global React Error Boundary with crash reporting | PR #79 |
-| ENH-029 | Diff view for AI-regenerated test code | PR #81 |
-| ENH-030 | Secrets scanning in CI pipeline (Gitleaks) | PR #79 |
-| ENH-034 | Empty crawl result `completed_empty` status | PR #86 |
-| ENH-035 | No-provider-configured global banner (ProviderBanner) | PR #85 |
-| MAINT-010 | Semantic deduplication via TF-IDF + fuzzy matching | PR #55 |
-| MAINT-011 | Feature-sliced frontend component architecture | PR #81 |
-| MAINT-012 | Deep test validation (locator, action, assertion) | PR #57 |
-| MAINT-013 | Graceful shutdown with in-flight run draining | PR #86 |
-| MAINT-016 | Renovate for automated dependency updates | Renovate |
-| SEC-001 | Email verification on registration | PR #87 |
-| INF-001 | PostgreSQL support with SQLite fallback | PR #87 |
-| INF-002 | Redis for rate limiting, token revocation, and SSE pub/sub | PR #87 |
-| INF-003 | BullMQ job queue for durable run execution | PR #92 |
-| FEA-001 | Teams / email / webhook failure notifications | PR #92 |
-| SEC-002 | Nonce-based Content Security Policy | PR #92 |
-| SEC-003 | GDPR / CCPA account data export and deletion | PR #92 |
-| INF-005 | API versioning (`/api/v1/`) with 308 redirects | PR #94 |
-| FEA-003 | AI provider fallback chain + circuit breaker | PR #94 |
-| DIF-003 | Mobile viewport / device emulation | PR #94 |
-| DIF-011 | Coverage heatmap on site graph | PR #94 |
-| DIF-014 | Cursor overlay on live browser view | PR #94 |
-| DIF-016 | Step-level timing and per-step screenshots | PR #94 |
-| AUTO-013 | Stale test detection and cleanup | PR #99 |
-| MNT-007 | ARIA live regions for real-time updates | PR #99 |
-| DIF-004 | Flaky test detection and reporting | PR #99 |
-| MNT-009 | Tiered prompt system for local models (Ollama) | PR #100 |
-| MNT-010 | Re-run button on Run Detail page for crawl/generate runs | PR #100 |
-| FEA-002 | TanStack React Query data layer | PR #107 |
+| ID | Title | PR / Commit                                                     |
+|----|-------|-----------------------------------------------------------------|
+| S3-02 | Shadow DOM support in crawler | PR #55                                                          |
+| S3-04 | DOM stability wait before snapshot | PR #55                                                          |
+| S3-08 | Disposable email address filter | PR #55                                                          |
+| ENH-004 | Persist AI provider keys encrypted in database | PR #80                                                          |
+| ENH-005 | Global API rate limiting (three-tier) | PR #78                                                          |
+| ENH-006 | Test scheduling engine (cron + timezone) | PR #86                                                          |
+| ENH-007 | Signed URL tokens for artifact serving | PR #79                                                          |
+| ENH-008 | Move `runs.logs` to append-only `run_logs` table | PR #86                                                          |
+| ENH-010 | Pagination on all list API endpoints | PR #78                                                          |
+| ENH-011 | CI/CD webhook receiver + GitHub Actions integration | PR #86                                                          |
+| ENH-013 | Persist password reset tokens in the database | PR #78                                                          |
+| ENH-020 | Soft-delete with recycle bin for tests, projects, runs | PR #81                                                          |
+| ENH-021 | `userId` + `userName` on activities for full audit trail | PR #78                                                          |
+| ENH-024 | Frontend code splitting (React.lazy + Suspense) | PR #78                                                          |
+| ENH-027 | Global React Error Boundary with crash reporting | PR #79                                                          |
+| ENH-029 | Diff view for AI-regenerated test code | PR #81                                                          |
+| ENH-030 | Secrets scanning in CI pipeline (Gitleaks) | PR #79                                                          |
+| ENH-034 | Empty crawl result `completed_empty` status | PR #86                                                          |
+| ENH-035 | No-provider-configured global banner (ProviderBanner) | PR #85                                                          |
+| MAINT-010 | Semantic deduplication via TF-IDF + fuzzy matching | PR #55                                                          |
+| MAINT-011 | Feature-sliced frontend component architecture | PR #81                                                          |
+| MAINT-012 | Deep test validation (locator, action, assertion) | PR #57                                                          |
+| MAINT-013 | Graceful shutdown with in-flight run draining | PR #86                                                          |
+| MAINT-016 | Renovate for automated dependency updates | Renovate                                                        |
+| SEC-001 | Email verification on registration | PR #87                                                          |
+| INF-001 | PostgreSQL support with SQLite fallback | PR #87                                                          |
+| INF-002 | Redis for rate limiting, token revocation, and SSE pub/sub | PR #87                                                          |
+| INF-003 | BullMQ job queue for durable run execution | PR #92                                                          |
+| FEA-001 | Teams / email / webhook failure notifications | PR #92                                                          |
+| SEC-002 | Nonce-based Content Security Policy | PR #92                                                          |
+| SEC-003 | GDPR / CCPA account data export and deletion | PR #92                                                          |
+| INF-005 | API versioning (`/api/v1/`) with 308 redirects | PR #94                                                          |
+| FEA-003 | AI provider fallback chain + circuit breaker | PR #94                                                          |
+| DIF-003 | Mobile viewport / device emulation | PR #94                                                          |
+| DIF-011 | Coverage heatmap on site graph | PR #94                                                          |
+| DIF-014 | Cursor overlay on live browser view | PR #94                                                          |
+| DIF-016 | Step-level timing and per-step screenshots | PR #94                                                          |
+| AUTO-013 | Stale test detection and cleanup | PR #99                                                          |
+| MNT-007 | ARIA live regions for real-time updates | PR #99                                                          |
+| DIF-004 | Flaky test detection and reporting | PR #99                                                          |
+| MNT-009 | Tiered prompt system for local models (Ollama) | PR #100                                                         |
+| MNT-010 | Re-run button on Run Detail page for crawl/generate runs | PR #100                                                         |
+| FEA-002 | TanStack React Query data layer | PR #107                                                         |
 | MNT-011 | Persist crawl/generate dialsConfig on run record | Verified in PR #107 (fix landed in an earlier untracked commit) |
-| ACL-001 | Multi-tenancy: workspace ownership on all entities | PR #87 |
-| ACL-002 | Role-based access control (Admin / QA Lead / Viewer) | PR #87 |
-| INF-004 | OpenAPI specification and Swagger UI | PR #94 |
-| DIF-001 | Visual regression testing with baseline diffing | PR #94 |
-| DIF-002 | Cross-browser testing (Firefox, WebKit / Safari) | PR #94 |
-| DIF-002b | Cross-browser polish: browser-aware baselines, UI badges, CI coverage | PR #107, PR #110 |
-| DIF-015 | Interactive browser recorder for test creation | PR #94 |
-| AUTO-007 | Geolocation / locale / timezone testing | PR #94 |
-| DIF-006 | Standalone Playwright export (zero vendor lock-in) | PR #1 |
-| AUTO-005 | Automatic test retry with flake isolation | PR #2 |
-| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3 |
-| AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3 |
-| DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned) |
-| AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121 |
-| MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122 |
-| DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123 |
-| AUTO-016b | Frontend CrawlView accessibility panel + dashboard "Top Accessibility Offenders" rollup | PR #1 |
+| ACL-001 | Multi-tenancy: workspace ownership on all entities | PR #87                                                          |
+| ACL-002 | Role-based access control (Admin / QA Lead / Viewer) | PR #87                                                          |
+| INF-004 | OpenAPI specification and Swagger UI | PR #94                                                          |
+| DIF-001 | Visual regression testing with baseline diffing | PR #94                                                          |
+| DIF-002 | Cross-browser testing (Firefox, WebKit / Safari) | PR #94                                                          |
+| DIF-002b | Cross-browser polish: browser-aware baselines, UI badges, CI coverage | PR #107, PR #110                                                |
+| DIF-015 | Interactive browser recorder for test creation | PR #94                                                          |
+| AUTO-007 | Geolocation / locale / timezone testing | PR #94                                                          |
+| DIF-006 | Standalone Playwright export (zero vendor lock-in) | PR #1                                                           |
+| AUTO-005 | Automatic test retry with flake isolation | PR #2                                                           |
+| DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3                                                           |
+| AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3                                                           |
+| DIF-015b (partial) | Recorder selector quality: naming alignment + nth=N disambiguation | PR #3, PR #120 (Gap 1 only — Gaps 2+3 still 🔲 Planned)         |
+| AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121                                                         |
+| MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122                                                         |
+| DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123                                                         |
+| AUTO-016b | Frontend CrawlView accessibility panel + dashboard "Top Accessibility Offenders" rollup | PR #1                                                           |
+| ENH-036 | Project credential editing after creation (`PATCH /api/v1/projects/:id`) | PR #127                                                         |
+| ENH-036b | Auto-detect login form fields — semantic-first locator waterfall removes need for hand-authored CSS selectors | PR #127                                                         |
 
 ---
 
 ## Phase Summary
 
-| Phase | Scope | Status | Est. Duration |
-|-------|-------|--------|---------------|
-| Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
-| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` (project credential edit) is 🟡 High; `SEC-004` deferred | 8–10 weeks |
+| Phase | Scope | Status                                                                                                                                                                                | Est. Duration |
+|-------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
+| Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
+| Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019 | 14–18 weeks |
-| Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019                                | 14–18 weeks |
+| Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
 
@@ -382,7 +384,11 @@ The following items have been verified complete against the codebase and are **n
 
 ### ENH-036 — Project credential editing after creation 🟡 High
 
-**Status:** 🔲 Planned | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — operators must delete the project + every test to rotate a stale credential)
+**Status:** ✅ Complete (PR #127) | **Effort:** S | **Source:** Operational feedback (PR #115 dogfooding — operators must delete the project + every test to rotate a stale credential)
+
+> **Shipped scope (PR #1):** `PATCH /api/v1/projects/:id` endpoint with `requireRole("qa_lead")`; credentials-merge preserves existing encrypted `username`/`password` and legacy `usernameSelector`/`passwordSelector`/`submitSelector` when the client sends blanks, so rotating a credential doesn't wipe the rest of the record. `api.updateProject(id, data)` client helper. Edit UI reuses `NewProject.jsx` via `?edit=<id>` — not ProjectDetail as originally scoped — with a pencil-icon button on the Projects list. Integration tests cover 401 unauth, 403 viewer, name/url update, blank-preserves-encrypted, fresh-replaces, `credentials: null` clears, and unknown-id 404.
+>
+> **Shipped additionally (PR #1, tracked as ENH-036b):** Auto-detect login form fields at crawl time — new `backend/src/pipeline/autoLogin.js` `performAutoLogin()` runs a semantic-first locator waterfall so the New/Edit Project form no longer needs the three selector inputs. `crawlBrowser.js` and `stateExplorer.js` gain a two-path login strategy (explicit selectors → auto-detect fallback).
 
 **Problem:** `POST /api/v1/projects` accepts a `credentials` field (encrypted at `backend/src/routes/projects.js:59` via `encryptCredentials()`), but there is no `PATCH /api/v1/projects/:id` endpoint that allows editing those credentials after the project has been created. The only PATCH routes on `projects.js` are scoped to schedule (`projects.js:162`) and notifications (`projects.js:266`). When a target app's password rotates, an OAuth token expires, or an SSO config changes, operators have to **delete the entire project** — including every recorded/generated test, every run history record, every approved baseline — and recreate it from scratch with the new credentials. This is data loss for what should be a single field update.
 
@@ -1605,13 +1611,13 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Security & Compliance | 5 | 3 | 0 | 2 | SEC-004, SEC-005 |
 | Infrastructure | 6 | 5 | 0 | 1 | INF-006 |
 | Access Control | 2 | 2 | 0 | 0 | — |
-| Platform Features | 4 | 3 | 0 | 1 | ENH-036 |
+| Platform Features | 4 | 4 | 0 | 0 | — |
 | Differentiators | 20 | 9 | 0 | 11 | DIF-002c, 005, 006, 007, 008, 009, 010, 012, 013, 015b, 015c |
 | Autonomous Intelligence | 22 | 5 | 0 | 17 | AUTO-001–004, 008–012, 014, 015, 016b, 017–022 |
 | Maintenance | 11 | 4 | 0 | 7 | MNT-001–006, 008 |
-| **Totals** | **70** | **31** | **0** | **39** | |
+| **Totals** | **70** | **32** | **0** | **38** | |
 
-**Total tracked items:** 70 across 7 categories — **31 complete** (44%), **0 in progress**, **39 remaining**
+**Total tracked items:** 70 across 7 categories — **32 complete** (46%), **0 in progress**, **38 remaining**
 
 **Blockers (must ship before team deployment):**
 ~~SEC-001 (email verification)~~ ✅ · ~~INF-001 (PostgreSQL)~~ ✅ · ~~INF-002 (Redis)~~ ✅ · ~~ACL-001 (multi-tenancy)~~ ✅ · ~~ACL-002 (RBAC)~~ ✅

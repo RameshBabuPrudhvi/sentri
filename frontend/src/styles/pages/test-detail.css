@@ -1,221 +1,1150 @@
 /**
  * TestDetail — page-specific styles
  *
- * Code editor modal, sidebar info rows, breadcrumb, and step numbering.
  * Scoped by `.td-*` prefix (test-detail).
+ * All layout, toolbar, sidebar, step, code-editor, and responsive rules live here.
+ * No inline styles should exist in TestDetail.jsx — add new rules here instead.
  */
 
 /* ── Two-column layout ──────────────────────────────────────────────────────── */
 .td-layout {
-  display: grid; grid-template-columns: 1fr 280px;
-  gap: 20px; align-items: start;
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Left column: stacked cards ─────────────────────────────────────────────── */
+.td-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Toolbar (breadcrumb + action row) ──────────────────────────────────────── */
+.td-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.td-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ── Breadcrumb ─────────────────────────────────────────────────────────────── */
-.td-breadcrumb-btn {
-  background: none; border: none; cursor: pointer;
-  color: var(--text3); display: flex; align-items: center;
-  gap: 4px; padding: 0; font-size: 0.82rem;
+.td-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text3);
 }
 
-/* ── Sidebar info label (uppercase muted) ───────────────────────────────────── */
+.td-breadcrumb-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 0.82rem;
+  transition: color 0.12s;
+}
+
+.td-breadcrumb-btn:hover { color: var(--text); }
+
+.td-breadcrumb-current { color: var(--text); }
+
+/* ── Action button group: primary + dropdown trigger ────────────────────────── */
+/* Split-button: Run Test primary + caret for extra options */
+.td-run-group {
+  display: flex;
+  align-items: stretch;
+}
+
+.td-run-group .btn-primary {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 1px solid rgba(255,255,255,0.15);
+}
+
+.td-run-caret {
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  background: var(--accent);
+  border: none;
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  cursor: pointer;
+  color: #fff;
+  transition: background 0.12s;
+  position: relative;
+}
+
+.td-run-caret:hover { background: var(--accent-hover, #4455e8); }
+
+/* ── More-actions dropdown (⋯ button) ───────────────────────────────────────── */
+.td-more-wrap {
+  position: relative;
+}
+
+.td-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.td-more-btn:hover {
+  background: var(--bg2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.td-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 100;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 4px 0;
+  animation: td-menu-in 0.1s ease;
+}
+
+@keyframes td-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.td-more-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  font-size: 0.84rem;
+  color: var(--text2);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.td-more-item:hover {
+  background: var(--bg2);
+  color: var(--text);
+}
+
+.td-more-item.danger { color: var(--red); }
+.td-more-item.danger:hover { background: var(--red-bg); }
+
+.td-more-separator {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+/* ── Fix-with-AI badge button ───────────────────────────────────────────────── */
+.td-fix-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid rgba(91,110,245,0.3);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.td-fix-btn:hover { background: rgba(91,110,245,0.18); }
+
+/* ── Page title ─────────────────────────────────────────────────────────────── */
+.td-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 24px;
+  color: var(--text);
+}
+
+.td-title-input {
+  font-size: 1.3rem;
+  font-weight: 700;
+  height: 48px;
+  margin-bottom: 8px;
+}
+
+.td-edit-error {
+  background: var(--red-bg);
+  color: var(--red);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+/* ── Regen warning banner ───────────────────────────────────────────────────── */
+.td-regen-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(245,158,11,0.1);
+  border: 1px solid rgba(245,158,11,0.3);
+  font-size: 0.82rem;
+  color: #f59e0b;
+}
+
+.td-regen-warning-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #f59e0b;
+  padding: 2px;
+  display: flex;
+}
+
+/* ── Card: Description ──────────────────────────────────────────────────────── */
+.td-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.td-card-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.td-card-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0;
+}
+.td-card-title--flex { flex: 1; }
+
+.td-desc-text {
+  font-size: 0.875rem;
+  color: var(--text);
+  line-height: 1.7;
+  margin: 0;
+}
+
+.td-desc-empty {
+  color: var(--text3);
+}
+
+/* ── Card: Test Steps ───────────────────────────────────────────────────────── */
+.td-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+/* Steps/Source pill toggle */
+.td-tab-group {
+  display: flex;
+  align-items: center;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.td-tab-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  background: transparent;
+  color: var(--text3);
+}
+
+.td-tab-pill.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+}
+
+.td-tab-pill.active-accent {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+}
+
+.td-unsaved-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  display: inline-block;
+}
+
+/* cURL copy button */
+.td-curl-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.td-curl-btn.copied {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+/* Show-diff button */
+.td-diff-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.td-diff-btn.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* ── Step editor (edit mode) ────────────────────────────────────────────────── */
+.td-step-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.td-step-editor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.td-step-num-edit {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text3);
+  flex-shrink: 0;
+  margin-top: 7px;
+}
+
+.td-step-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text3);
+  padding: 6px 4px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.td-add-step-btn {
+  margin-top: 8px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text3);
+  font-size: 0.78rem;
+  padding: 5px 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+/* ── Step list (view mode) ──────────────────────────────────────────────────── */
+.td-step-list { display: flex; flex-direction: column; gap: 0; }
+
+.td-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.td-step-row:last-child { border-bottom: none; }
+
+.td-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+  /* variant colours applied via inline or modifier classes */
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+}
+
+.td-step-num.bdd {
+  background: var(--accent-bg);
+  border-color: rgba(91,110,245,0.3);
+  color: var(--accent);
+}
+
+.td-step-num.failed {
+  background: rgba(239,68,68,0.15);
+  border-color: rgba(239,68,68,0.4);
+  color: var(--red);
+}
+
+.td-step-text {
+  font-size: 0.875rem;
+  color: var(--text);
+  line-height: 1.6;
+  padding-top: 3px;
+}
+
+.td-step-text.failed { color: var(--red); }
+
+.td-step-keyword {
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+}
+
+.td-step-keyword.failed { color: var(--red); }
+
+/* Error popover on hover */
+.td-step-row [data-error-popover] { display: none; }
+.td-step-row:hover [data-error-popover] { display: block; }
+
+.td-step-error-popover {
+  position: absolute;
+  left: 42px;
+  right: 0;
+  top: 100%;
+  z-index: 10;
+  margin-top: -4px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid rgba(239,68,68,0.3);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  font-size: 0.72rem;
+  color: var(--red);
+  font-family: var(--font-mono);
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* ── Source view: step + code block ─────────────────────────────────────────── */
+.td-source-list { display: flex; flex-direction: column; gap: 0; }
+
+.td-source-step {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+}
+
+.td-source-step:last-child { border-bottom: none; margin-bottom: 0; }
+
+.td-source-step-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.td-source-step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  border: 1px solid rgba(91,110,245,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.td-source-step-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.td-source-code-block {
+  background: #13151c;
+  border-radius: 8px;
+  border: 1px solid #1e2130;
+  overflow: hidden;
+}
+
+.td-source-pre {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 0.76rem;
+  line-height: 1.75;
+  color: #cdd5f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.td-source-no-code {
+  font-size: 0.76rem;
+  color: var(--text3);
+  font-style: italic;
+  padding-left: 32px;
+}
+
+/* ── Edit mode: code regen hint ─────────────────────────────────────────────── */
+.td-regen-hint {
+  margin-top: 14px;
+  padding: 8px 12px;
+  background: var(--accent-bg);
+  border-radius: 6px;
+  border: 1px solid rgba(91,110,245,0.2);
+  font-size: 0.78rem;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Steps-changes diff label ───────────────────────────────────────────────── */
+.td-diff-section-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text3);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Empty steps message ────────────────────────────────────────────────────── */
+.td-steps-empty {
+  color: var(--text3);
+  font-size: 0.875rem;
+  padding: 20px 0;
+}
+
+/* ── Recent Runs card ───────────────────────────────────────────────────────── */
+.td-runs-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 18px;
+  margin-top: 0;
+}
+
+.td-runs-legend {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.td-runs-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.73rem;
+  color: var(--text3);
+}
+
+.td-runs-legend-icon {
+  font-size: 13px;
+  font-weight: 700;
+  /* color set inline — varies per legend entry. */
+}
+
+.td-runs-empty {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--text3);
+  font-size: 0.875rem;
+}
+
+/* ── Right sidebar ──────────────────────────────────────────────────────────── */
+.td-sidebar {
+  padding: 22px;
+}
+
+.td-sidebar-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+  margin-top: 0;
+}
+
+/* Sidebar info label (uppercase muted) */
 .td-info-label {
-  font-size: 0.73rem; color: var(--text3); font-weight: 600;
-  margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 0.73rem;
+  color: var(--text3);
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.td-info-row {
+  margin-bottom: 20px;
+}
+
+.td-info-row-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.td-info-icon { color: var(--accent); flex-shrink: 0; }
+
+.td-info-mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text2);
+  user-select: all;
+}
+
+.td-info-text { font-size: 0.82rem; color: var(--text2); }
+
+.td-sidebar-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0 18px;
+}
+
+/* Avatar chip */
+.td-avatar-chip { display: flex; align-items: center; gap: 8px; }
+
+.td-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(91,110,245,0.2);
+  flex-shrink: 0;
+}
+
+.td-avatar-name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Source URL link */
+.td-source-url-link {
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* Quality score bar */
+.td-quality-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.td-quality-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.td-quality-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+
+/* Linked Issue / Tags inline edit rows */
+.td-inline-edit-row {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.td-inline-display-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.td-linked-issue-val {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.td-linked-issue-empty,
+.td-tags-empty {
+  font-size: 0.78rem;
+  color: var(--text3);
+}
+
+.td-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.td-edit-inline-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+}
+
+/* Quick actions footer */
+.td-sidebar-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.td-approve-btn {
+  width: 100%;
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid #86efac;
+  justify-content: center;
+}
+
+.td-draft-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.td-run-sidebar-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.td-view-project-btn {
+  width: 100%;
+  justify-content: center;
 }
 
 /* ── Code editor modal ──────────────────────────────────────────────────────── */
 .td-editor-backdrop {
-  position: fixed; inset: 0; z-index: 1000;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
   background: rgba(0,0,0,0.55);
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
 }
 
 .td-editor-panel {
-  width: 100%; max-width: 880px; max-height: 90vh;
-  display: flex; flex-direction: column;
-  border-radius: 12px; overflow: hidden;
+  width: 100%;
+  max-width: 880px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
   border: 1px solid #2a2d3e;
   box-shadow: 0 32px 80px rgba(0,0,0,0.6);
 }
 
 .td-editor-header {
-  display: flex; align-items: center; gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 13px 18px;
-  background: var(--bg); border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
 }
 
 .td-editor-lang-pill {
-  display: flex; align-items: center; gap: 6px;
-  background: rgba(124,106,245,0.12); border: 1px solid rgba(124,106,245,0.3);
-  border-radius: 6px; padding: 4px 10px;
-  font-family: var(--font-mono); font-size: 0.72rem;
-  font-weight: 600; color: #a89cf7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(124,106,245,0.12);
+  border: 1px solid rgba(124,106,245,0.3);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #a89cf7;
 }
 
 .td-editor-tab-bar {
-  display: flex; align-items: center; padding: 0 16px;
-  background: #0d0f17; border-bottom: 1px solid #1e2130;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: #0d0f17;
+  border-bottom: 1px solid #1e2130;
 }
 
 .td-editor-tab {
-  display: flex; align-items: center; gap: 7px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 8px 14px;
-  font-size: 0.72rem; font-family: var(--font-mono);
-  color: #cdd5f0; border-bottom: 2px solid #7c6af5;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: #cdd5f0;
+  border-bottom: 2px solid #7c6af5;
   user-select: none;
 }
 
 .td-editor-info-bar {
-  display: flex; align-items: center; gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 16px;
-  background: #10121a; border-bottom: 1px solid #1e2130;
-  font-size: 0.68rem; color: #4a5070;
+  background: #10121a;
+  border-bottom: 1px solid #1e2130;
+  font-size: 0.68rem;
+  color: #4a5070;
 }
 
 .td-editor-body {
-  display: flex; background: #13151c;
-  flex: 1; overflow: hidden; min-height: 360px;
+  display: flex;
+  background: #13151c;
+  flex: 1;
+  overflow: hidden;
+  min-height: 360px;
 }
 
 .td-editor-line-nums {
-  padding: 14px 0; min-width: 48px; flex-shrink: 0;
+  padding: 14px 0;
+  min-width: 48px;
+  flex-shrink: 0;
   text-align: right;
   font-family: 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 0.78rem; line-height: 1.75;
-  color: #3a3f5c; border-right: 1px solid #1e2130;
-  user-select: none; overflow: hidden;
+  font-size: 0.78rem;
+  line-height: 1.75;
+  color: #3a3f5c;
+  border-right: 1px solid #1e2130;
+  user-select: none;
+  overflow: hidden;
 }
 
 .td-editor-highlight {
-  position: absolute; inset: 0;
-  margin: 0; padding: 14px 18px;
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 14px 18px;
   font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
-  font-size: 0.78rem; line-height: 1.75;
-  color: #cdd5f0; white-space: pre; overflow: auto;
-  pointer-events: none; background: transparent;
-  border: none; outline: none;
+  font-size: 0.78rem;
+  line-height: 1.75;
+  color: #cdd5f0;
+  white-space: pre;
+  overflow: auto;
+  pointer-events: none;
+  background: transparent;
+  border: none;
+  outline: none;
 }
 
 .td-editor-textarea {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  background: transparent; color: transparent;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: transparent;
   font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
-  font-size: 0.78rem; line-height: 1.75;
-  padding: 14px 18px; border: none; outline: none;
-  resize: none; box-sizing: border-box;
-  caret-color: #7c6af5; tab-size: 2;
-  white-space: pre; overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.75;
+  padding: 14px 18px;
+  border: none;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+  caret-color: #7c6af5;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
 }
 
-/* Unsaved-changes dot on the file tab */
 .td-editor-tab .td-unsaved-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #f59e0b; display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  display: inline-block;
 }
 
 .td-editor-footer {
-  display: flex; align-items: center; gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 16px;
-  background: var(--bg); border-top: 1px solid var(--border);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
 }
 
 .td-editor-footer-btn {
-  background: none; border: 1px solid var(--border);
-  border-radius: 6px; cursor: pointer; color: var(--text2);
-  padding: 6px 13px; font-size: 0.78rem;
-  display: flex; align-items: center; gap: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text2);
+  padding: 6px 13px;
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .td-editor-save-btn {
-  background: #5b4bdd; border: none;
-  border-radius: 6px; cursor: pointer; color: #fff;
-  padding: 6px 16px; font-size: 0.78rem; font-weight: 600;
-  display: flex; align-items: center; gap: 6px;
+  background: #5b4bdd;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #fff;
+  padding: 6px 16px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-
-/* ── Failed step error popover (CSS :hover instead of JS DOM manipulation) ── */
-.td-step-row [data-error-popover] { display: none; }
-.td-step-row:hover [data-error-popover] { display: block; }
 
 /* ── Keyboard shortcut badge ────────────────────────────────────────────────── */
 .td-kbd {
-  font-size: 0.62rem; padding: 1px 5px; border-radius: 3px;
-  background: #1e2130; border: 1px solid #2a2d3e; color: #6b7394;
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #1e2130;
+  border: 1px solid #2a2d3e;
+  color: #6b7394;
   font-family: var(--font-mono);
+}
+
+/* ── Page shell (loading + not-found + content wrapper) ────────────────────── */
+.td-page {
+  max-width: 980px;
+  margin: 0 auto;
+}
+.td-page--padded { padding: 0 4px; }
+.td-page--not-found {
+  padding: 60px;
+  text-align: center;
+  color: var(--text2);
+}
+
+/* ── RunIcon glyph variants (✓ / ✗ in run history) ─────────────────────────── */
+.td-run-glyph {
+  font-size: 16px;
+  font-weight: 700;
+}
+.td-run-glyph--pass { color: var(--green); }
+.td-run-glyph--fail { color: var(--red); }
+
+/* ── Edit-mode title input wrapper ─────────────────────────────────────────── */
+.td-title-edit { margin-bottom: 24px; }
+
+/* ── Description textarea (edit mode) ──────────────────────────────────────── */
+.td-desc-textarea {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* ── Step editor row input ─────────────────────────────────────────────────── */
+.td-step-edit-input {
+  flex: 1;
+  height: 36px;
+  font-size: 0.82rem;
+}
+
+/* ── Diff section spacing (Source view + Steps view) ───────────────────────── */
+.td-diff-block { margin-bottom: 16px; }
+.td-diff-fallback {
+  height: 60px;
+  background: var(--bg2);
+  border-radius: 6px;
+}
+.td-diff-fallback--sm { height: 40px; }
+
+/* ── Suspense fallback for AiFixPanel ──────────────────────────────────────── */
+.td-fix-panel-fallback {
+  height: 120px;
+  background: var(--bg2);
+  border-radius: 8px;
+  margin: 0 0 16px;
+}
+
+/* ── Recent runs table tweaks ──────────────────────────────────────────────── */
+.td-runs-table-inline { margin-top: 0; }
+.td-runs-row { cursor: pointer; }
+.td-runs-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.td-runs-status-text { text-transform: capitalize; }
+.td-runs-empty-run-btn { margin-left: 4px; }
+
+/* ── Sidebar — quality score badge ─────────────────────────────────────────── */
+.td-quality-score {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  min-width: 32px;
+  justify-content: center;
+}
+
+/* ── Sidebar — source URL external icon ────────────────────────────────────── */
+.td-source-url-icon {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* ── Sidebar — priority + tag badge selects (edit mode) ────────────────────── */
+.td-sidebar-select {
+  height: 32px;
+  font-size: 0.82rem;
+  width: auto;
+}
+.td-sidebar-tag-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.td-sidebar-tag-badge { font-size: 0.7rem; }
+
+/* ── Sidebar — inline edit row inputs (issue key + tags) ──────────────────── */
+.td-inline-edit-input {
+  height: 28px;
+  font-size: 0.78rem;
+  flex: 1;
+}
+.td-inline-edit-input--mono { font-family: var(--font-mono); }
+.td-inline-save-btn {
+  background: var(--green-bg);
+  color: var(--green);
+  border: 1px solid #86efac;
+}
+
+/* ── Regen warning row icons (small inline alignment) ─────────────────────── */
+.td-regen-icon { flex-shrink: 0; }
+.td-regen-message { flex: 1; }
+
+/* ── Skeleton blocks for loading state ─────────────────────────────────────── */
+.td-skeleton {
+  border-radius: 12px;
+  margin-bottom: 16px;
 }
 
 /* ── Responsive: 900px (icon-rail sidebar breakpoint) ───────────────────────── */
 @media (max-width: 900px) {
-  /* Two-column layout → single column; sidebar stacks below main content */
-  .td-layout {
-    grid-template-columns: 1fr;
-  }
-
-  /* Breadcrumb + toolbar: allow wrapping */
-  .td-toolbar {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  /* Recent runs table: hide ACU Usage column */
-  .td-runs-table .table th:nth-child(4),   /* ACU Usage */
-  .td-runs-table .table td:nth-child(4) {
-    display: none;
-  }
+  .td-layout { grid-template-columns: 1fr; }
+  .td-toolbar { flex-wrap: wrap; gap: 8px; }
+  .td-runs-table .table th:nth-child(4),
+  .td-runs-table .table td:nth-child(4) { display: none; }
 }
 
 /* ── Responsive: 600px (full-hide sidebar breakpoint) ───────────────────────── */
 @media (max-width: 600px) {
-  /* Breadcrumb + toolbar: stack breadcrumb above buttons */
-  .td-toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  /* Action buttons: full-width row */
-  .td-toolbar-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    width: 100%;
-  }
-
-  /* Code editor modal: reduce padding */
-  .td-editor-backdrop {
-    padding: 12px;
-  }
-
-  .td-editor-panel {
-    max-width: 100%;
-  }
-
-  /* Steps / Source pill toggle: allow wrapping */
-  .td-step-toggle {
-    flex-wrap: wrap;
-    gap: 6px;
-  }
+  .td-toolbar { flex-direction: column; align-items: flex-start; }
+  .td-toolbar-actions { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+  .td-editor-backdrop { padding: 12px; }
+  .td-editor-panel { max-width: 100%; }
+  .td-tab-group { flex-wrap: wrap; gap: 6px; }
 }
 
 /* ── Responsive: 480px (extra-small phones) ─────────────────────────────────── */
 @media (max-width: 480px) {
-  /* Recent runs table: also hide Duration column */
-  .td-runs-table .table th:nth-child(3),   /* Duration */
-  .td-runs-table .table td:nth-child(3) {
-    display: none;
-  }
-
-  /* Table cell padding: handled by shared rule in utilities.css */
-
-  /* Card padding: tighter on mobile */
-  .td-layout .card {
-    padding: 16px !important;
-  }
-
-  /* Sidebar quick actions: buttons full-width */
-  .td-sidebar-actions .btn {
-    font-size: 0.78rem;
-  }
+  .td-runs-table .table th:nth-child(3),
+  .td-runs-table .table td:nth-child(3) { display: none; }
+  .td-layout .card { padding: 16px !important; }
+  .td-sidebar-actions .btn { font-size: 0.78rem; }
 }

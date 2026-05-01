@@ -1,12 +1,14 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Globe, Lock, Plus, CheckCircle2, Loader2 } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import {
+  ArrowLeft, Globe, Lock, Plus, CheckCircle2, Loader2,
+  Eye, EyeOff, ShieldCheck, Wifi, WifiOff, Pencil, Save,
+} from "lucide-react";
 import { api } from "../api.js";
 import { emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 
-// Robust URL validation + required auth field enforcement
-function validateForm(form) {
+function validateForm(form, { isEdit = false, hasExistingCreds = false } = {}) {
   const errors = {};
   if (!form.name.trim()) errors.name = "Project name is required.";
   if (!form.url.trim()) {
@@ -22,52 +24,91 @@ function validateForm(form) {
     }
   }
   if (form.hasAuth) {
-    if (!form.usernameSelector.trim()) errors.usernameSelector = "Username selector is required.";
-    if (!form.username.trim())         errors.username         = "Username / email is required.";
-    if (!form.passwordSelector.trim()) errors.passwordSelector = "Password selector is required.";
-    if (!form.password.trim())         errors.password         = "Password is required.";
-    if (!form.submitSelector.trim())   errors.submitSelector   = "Submit button selector is required.";
+    // Selectors are auto-detected at crawl time by the backend's
+    // performAutoLogin() waterfall, so the user only needs to supply
+    // credentials. In edit mode, a blank username/password means "keep
+    // the existing encrypted value" (the server never returns secrets).
+    const skipSecretRequired = isEdit && hasExistingCreds;
+    if (!form.username.trim() && !skipSecretRequired) {
+      errors.username = "Username / email is required.";
+    }
+    if (!form.password.trim() && !skipSecretRequired) {
+      errors.password = "Password is required.";
+    }
   }
   return errors;
 }
 
+const EMPTY_FORM = {
+  name: "", url: "", hasAuth: false,
+  username: "", password: "",
+};
+
 export default function NewProject() {
-  usePageTitle("New Project");
+  // Support edit mode: /projects/new?edit=PRJ-1
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const editId = params.get("edit") || null;
+  const isEdit = Boolean(editId);
+
+  usePageTitle(isEdit ? "Edit Project" : "New Project");
   const navigate = useNavigate();
-  const [form, setForm] = useState({
-    name: "", url: "", hasAuth: false,
-    usernameSelector: "", username: "",
-    passwordSelector: "", password: "", submitSelector: "",
-  });
-  // Preserve auth field values when toggling checkbox
+
+  const [form, setForm] = useState(EMPTY_FORM);
   const [savedAuthFields, setSavedAuthFields] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [loadingEdit, setLoadingEdit] = useState(isEdit);
+  // Baseline form after load — used to detect real dirtiness in edit mode.
+  // In create mode it stays equal to EMPTY_FORM so any typing counts as dirty.
+  const [initialForm, setInitialForm] = useState(EMPTY_FORM);
   const [error, setError] = useState(null);
-  // Connection test
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [showPassword, setShowPassword] = useState(false);
+  // True when the loaded project already has credentials stored server-side.
+  // The backend never returns the encrypted username/password to the client
+  // (see projectSanitiser.js), so those fields arrive blank — we use this flag
+  // to relax validation and show a "leave blank to keep" hint.
+  const [hasExistingCreds, setHasExistingCreds] = useState(false);
+
+  // Load existing project when editing
+  useEffect(() => {
+    if (!editId) return;
+    setLoadingEdit(true);
+    api.getProject(editId)
+      .then(data => {
+        const p = data.project ?? data;
+        setHasExistingCreds(Boolean(p.credentials));
+        const loaded = {
+          name: p.name || "",
+          url:  p.url  || "",
+          hasAuth: Boolean(p.credentials),
+          // Secrets are intentionally not returned by the API — leave blank.
+          username: "",
+          password: "",
+        };
+        setForm(loaded);
+        setInitialForm(loaded);
+      })
+      .catch(err => setError(`Could not load project: ${err.message}`))
+      .finally(() => setLoadingEdit(false));
+  }, [editId]);
 
   const set = (k) => (e) => {
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+    setForm(f => ({ ...f, [k]: e.target.value }));
     if (fieldErrors[k]) setFieldErrors(fe => { const n = { ...fe }; delete n[k]; return n; });
   };
 
-  // Warn before discarding auth fields
   function toggleAuth(e) {
     const checked = e.target.checked;
     if (!checked && form.hasAuth) {
-      // Save current values so they can be restored
       setSavedAuthFields({
-        usernameSelector: form.usernameSelector,
         username: form.username,
-        passwordSelector: form.passwordSelector,
         password: form.password,
-        submitSelector: form.submitSelector,
       });
     }
     if (checked && savedAuthFields) {
-      // Restore previously entered values
       setForm(f => ({ ...f, hasAuth: true, ...savedAuthFields }));
       return;
     }
@@ -77,9 +118,7 @@ export default function NewProject() {
   async function testConnection() {
     let urlVal = form.url.trim();
     if (!urlVal) { setTestResult({ ok: false, msg: "Enter a URL first." }); return; }
-    // Apply the same https:// prefix that onBlur adds — avoids a race where
-    // blur hasn't updated state yet when the user clicks "Test" immediately.
-    if (urlVal && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlVal)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlVal)) {
       urlVal = "https://" + urlVal;
       setForm(f => ({ ...f, url: urlVal }));
     }
@@ -88,7 +127,7 @@ export default function NewProject() {
     setTestResult(null);
     try {
       await api.testConnection(urlVal);
-      setTestResult({ ok: true, msg: "URL is reachable." });
+      setTestResult({ ok: true, msg: "URL is reachable" });
     } catch (err) {
       setTestResult({ ok: false, msg: `Could not reach URL: ${err.message}` });
     } finally {
@@ -99,25 +138,31 @@ export default function NewProject() {
   async function submit(e) {
     e.preventDefault();
     setError(null);
-    const errors = validateForm(form);
+    const errors = validateForm(form, { isEdit, hasExistingCreds });
     if (Object.keys(errors).length > 0) { setFieldErrors(errors); return; }
     setFieldErrors({});
     setLoading(true);
     try {
       const payload = {
         name: form.name.trim(),
-        url: form.url.trim(),
+        url:  form.url.trim(),
+        // Only credentials (username + password) are sent — login form
+        // selectors are auto-detected at crawl time. Blank username/password
+        // on edit means "keep existing"; the server merges blanks with the
+        // stored encrypted values.
         credentials: form.hasAuth ? {
-          usernameSelector: form.usernameSelector.trim(),
           username: form.username.trim(),
-          passwordSelector: form.passwordSelector.trim(),
           password: form.password,
-          submitSelector: form.submitSelector.trim(),
         } : null,
       };
-      const project = await api.createProject(payload);
-      emitTourEvent("project-created");
-      navigate(`/projects/${project.id}`);
+      if (isEdit) {
+        await api.updateProject(editId, payload);
+        navigate(`/projects/${editId}`);
+      } else {
+        const project = await api.createProject(payload);
+        emitTourEvent("project-created");
+        navigate(`/projects/${project.id}`);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -126,135 +171,278 @@ export default function NewProject() {
   }
 
   const FieldError = ({ name }) => fieldErrors[name]
-    ? <div style={{ color: "var(--red)", fontSize: "0.75rem", marginTop: 4 }}>{fieldErrors[name]}</div>
+    ? (
+      <div className="np-field-error">
+        <span className="np-field-error__badge">!</span>
+        {fieldErrors[name]}
+      </div>
+    )
     : null;
 
-  const isDirty = form.name.trim() || form.url.trim() ||
-    (form.hasAuth && (form.username.trim() || form.password.trim()));
+  // Compare against the baseline (EMPTY_FORM in create mode, loaded project
+  // in edit mode) so a pristine edit form doesn't trigger the leave-without-
+  // saving prompt.
+  const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
 
   function handleBack() {
     if (isDirty && !window.confirm("Leave without saving? Your changes will be lost.")) return;
-    navigate(-1);
+    navigate(isEdit ? `/projects/${editId}` : -1);
+  }
+
+  if (loadingEdit) {
+    return (
+      <div className="np-loading">
+        <Loader2 size={18} className="spin" />
+        <span className="np-loading__label">Loading project…</span>
+      </div>
+    );
   }
 
   return (
-    <div className="fade-in" style={{ maxWidth: 640, margin: "0 auto" }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 24 }} onClick={handleBack}>
+    <div className="np fade-in">
+
+      {/* Back */}
+      <button className="btn btn-ghost btn-sm np__back-btn" onClick={handleBack}>
         <ArrowLeft size={14} /> Back
       </button>
 
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.9rem" }}>New Project</h1>
-        <p style={{ color: "var(--text2)", marginTop: 6 }}>Configure your web application for autonomous testing</p>
-      </div>
-
-      <form onSubmit={submit} noValidate>
-        {/* Basic Info */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-            <Globe size={16} color="var(--accent)" />
-            <span style={{ fontFamily: "var(--font-display)", fontWeight: 700 }}>Application Details</span>
+      {/* Header */}
+      <div className="np-header">
+        <div className="np-header__row">
+          <div className="np-header__icon-wrap">
+            {isEdit
+              ? <Pencil size={18} color="var(--accent)" />
+              : <Globe size={18} color="var(--accent)" />}
           </div>
-          <div style={{ display: "grid", gap: 16 }}>
-            <div>
-              <label>Project Name</label>
-              <input className="input" value={form.name} onChange={set("name")} placeholder="My Web App"
-                style={{ borderColor: fieldErrors.name ? "var(--red)" : undefined }} />
-              <FieldError name="name" />
-            </div>
-            <div>
-              <label>Application URL</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                <div style={{ flex: 1 }}>
-                  <input className="input" value={form.url} onChange={set("url")} placeholder="https://example.com"
-                    onBlur={() => {
-                      const v = form.url.trim();
-                      if (v && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(v)) {
-                        setForm(f => ({ ...f, url: "https://" + v }));
-                      }
-                    }}
-                    style={{ borderColor: fieldErrors.url ? "var(--red)" : undefined }} />
-                  <FieldError name="url" />
-                </div>
-                {/* Fix #19: test connection button */}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={testConnection} disabled={testing} style={{ flexShrink: 0, marginTop: 0 }}>
-                  {testing ? <Loader2 size={13} className="spin" /> : <CheckCircle2 size={13} />}
-                  Test
-                </button>
-              </div>
-              {testResult && (
-                <div style={{ fontSize: "0.75rem", marginTop: 5, color: testResult.ok ? "var(--green)" : "var(--red)" }}>
-                  {testResult.ok ? "✓ " : "✗ "}{testResult.msg}
-                </div>
-              )}
-            </div>
+          <div>
+            <h1 className="np-header__title">
+              {isEdit ? "Edit Project" : "New Project"}
+            </h1>
+            <p className="np-header__subtitle">
+              {isEdit ? "Update your project configuration" : "Configure your web application for autonomous testing"}
+            </p>
           </div>
         </div>
 
-        {/* Auth Toggle */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Lock size={16} color={form.hasAuth ? "var(--accent)" : "var(--text3)"} />
-              <div>
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 700 }}>Authentication</div>
-                <div style={{ color: "var(--text2)", fontSize: "0.82rem" }}>Does your app require login?</div>
+        {/* Step pills — derived from form state, not hardcoded.
+            Step 1 (Application details) is complete when name + a valid URL
+            are present. Step 2 (Auth) is complete when the user has either
+            opted out (hasAuth=false) or filled in all auth fields.
+            Step 3 (Create) is active once both prior steps complete. */}
+        {!isEdit && (() => {
+          let urlValid = false;
+          if (form.url.trim()) {
+            try {
+              const parsed = new URL(form.url.trim());
+              urlValid = ["http:", "https:"].includes(parsed.protocol);
+            } catch { /* invalid URL */ }
+          }
+          const step1Complete = Boolean(form.name.trim()) && urlValid;
+          const authFieldsFilled = form.hasAuth
+            && form.username.trim()
+            && form.password.trim();
+          // hasAuth=false counts as "complete" — auth is genuinely optional.
+          const step2Complete = !form.hasAuth || Boolean(authFieldsFilled);
+          const stepStates = [
+            step1Complete ? "complete" : "active",
+            step1Complete ? (step2Complete ? "complete" : "active") : "pending",
+            step1Complete && step2Complete ? "active" : "pending",
+          ];
+          return (
+            <div className="np-steps">
+              {["Application details", "Auth (optional)", "Create"].map((s, i) => {
+                const state = stepStates[i];
+                return (
+                  <div key={s} className={`np-step np-step--${state}`}>
+                    <span className="np-step__num">
+                      {state === "complete" ? <CheckCircle2 size={11} /> : i + 1}
+                    </span>
+                    {s}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+
+      <form onSubmit={submit} noValidate className="np-form">
+
+        {/* ── Application Details ── */}
+        <section className="np-section">
+          <div className="np-section__head">
+            <div className="np-section__head-icon">
+              <Globe size={14} color="var(--accent)" />
+            </div>
+            <span className="np-section__head-title">Application Details</span>
+          </div>
+
+          <div className="np-section__body">
+            {/* Project name */}
+            <div>
+              <label className="np-label">
+                Project Name <span className="np-required">*</span>
+              </label>
+              <input
+                className={`input${fieldErrors.name ? " np-input--error" : ""}`}
+                value={form.name}
+                onChange={set("name")}
+                placeholder="e.g. My Web App"
+                autoFocus={!isEdit}
+              />
+              <FieldError name="name" />
+            </div>
+
+            {/* URL + test button */}
+            <div>
+              <label className="np-label">
+                Application URL <span className="np-required">*</span>
+              </label>
+              <div className="np-url">
+                <div className="np-url__icon">
+                  <Globe size={14} />
+                </div>
+                <input
+                  className={`input np-url__input${fieldErrors.url ? " np-input--error" : ""}`}
+                  value={form.url}
+                  onChange={set("url")}
+                  placeholder="https://example.com"
+                  onBlur={() => {
+                    const v = form.url.trim();
+                    if (v && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(v)) {
+                      setForm(f => ({ ...f, url: "https://" + v }));
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="np-url__test-btn"
+                  onClick={testConnection}
+                  disabled={testing}
+                >
+                  {testing
+                    ? <Loader2 size={12} className="spin" />
+                    : testResult?.ok
+                      ? <Wifi size={12} className="np-url__test-icon--ok" />
+                      : testResult
+                        ? <WifiOff size={12} className="np-url__test-icon--err" />
+                        : <Wifi size={12} />}
+                  {testing ? "Testing…" : "Test"}
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`np-url__result np-url__result--${testResult.ok ? "ok" : "err"}`}>
+                  {testResult.ok ? <CheckCircle2 size={12} /> : <WifiOff size={12} />}
+                  {testResult.msg}
+                </div>
+              )}
+
+              <FieldError name="url" />
+            </div>
+          </div>
+        </section>
+
+        {/* ── Authentication ── */}
+        <section className={`np-section np-section--${form.hasAuth ? "auth-on" : "auth-off"}`}>
+          <div className="np-section__head np-section__head--justify">
+            <div className="np-section__head-title-group">
+              <div className={`np-section__head-icon${form.hasAuth ? "" : " np-section__head-icon--muted"}`}>
+                {form.hasAuth
+                  ? <ShieldCheck size={14} color="var(--accent)" />
+                  : <Lock size={14} color="var(--text3)" />}
+              </div>
+              <div className="np-section__head-meta">
+                <div className="np-section__head-title">Authentication</div>
+                <div className="np-section__head-subtitle">
+                  {form.hasAuth ? "Login credentials configured" : "Does your app require login?"}
+                </div>
               </div>
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", textTransform: "none", fontSize: "0.875rem" }}>
-              <input type="checkbox" checked={form.hasAuth} onChange={toggleAuth} style={{ width: 16, height: 16, accentColor: "var(--accent)" }} />
-              Enable
+
+            {/* Toggle switch */}
+            <label className="np-toggle">
+              <input
+                type="checkbox"
+                className="np-toggle__input"
+                checked={form.hasAuth}
+                onChange={toggleAuth}
+              />
+              <span className="np-toggle__track">
+                <span className="np-toggle__thumb" />
+              </span>
             </label>
           </div>
 
           {form.hasAuth && (
-            <div style={{ marginTop: 20, display: "grid", gap: 12 }}>
-              <div style={{ height: 1, background: "var(--border)" }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="np-section__body np-section__body--auth">
+              <div className="np-auth-hint">
+                <ShieldCheck size={14} className="np-auth-hint__icon" />
+                <span>
+                  Login form fields are detected automatically — just enter your test credentials.
+                </span>
+              </div>
+
+              <div className="np-auth-grid">
                 <div>
-                  <label>Username Selector <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input className="input" value={form.usernameSelector} onChange={set("usernameSelector")} placeholder="#email or input[name=email]"
-                    style={{ borderColor: fieldErrors.usernameSelector ? "var(--red)" : undefined }} />
-                  <FieldError name="usernameSelector" />
-                </div>
-                <div>
-                  <label>Username / Email <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input className="input" value={form.username} onChange={set("username")} placeholder="user@example.com"
-                    style={{ borderColor: fieldErrors.username ? "var(--red)" : undefined }} />
+                  <label className="np-label">
+                    Username / Email <span className="np-required">*</span>
+                  </label>
+                  <input
+                    className={`input${fieldErrors.username ? " np-input--error" : ""}`}
+                    value={form.username}
+                    onChange={set("username")}
+                    placeholder={isEdit && hasExistingCreds ? "•••••• (saved — leave blank to keep)" : "user@example.com"}
+                  />
                   <FieldError name="username" />
                 </div>
                 <div>
-                  <label>Password Selector <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input className="input" value={form.passwordSelector} onChange={set("passwordSelector")} placeholder="#password or input[type=password]"
-                    style={{ borderColor: fieldErrors.passwordSelector ? "var(--red)" : undefined }} />
-                  <FieldError name="passwordSelector" />
-                </div>
-                <div>
-                  <label>Password <span style={{ color: "var(--red)" }}>*</span></label>
-                  <input className="input" type="password" value={form.password} onChange={set("password")} placeholder="••••••••"
-                    style={{ borderColor: fieldErrors.password ? "var(--red)" : undefined }} />
+                  <label className="np-label">
+                    Password <span className="np-required">*</span>
+                  </label>
+                  <div className="np-password">
+                    <input
+                      className={`input np-password__input${fieldErrors.password ? " np-input--error" : ""}`}
+                      type={showPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={set("password")}
+                      placeholder={isEdit && hasExistingCreds ? "•••••• (saved — leave blank to keep)" : "••••••••"}
+                    />
+                    <button
+                      type="button"
+                      className="np-password__toggle"
+                      onClick={() => setShowPassword(v => !v)}
+                    >
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
                   <FieldError name="password" />
                 </div>
               </div>
-              <div>
-                <label>Submit Button Selector <span style={{ color: "var(--red)" }}>*</span></label>
-                <input className="input" value={form.submitSelector} onChange={set("submitSelector")} placeholder="button[type=submit] or #login-btn"
-                  style={{ borderColor: fieldErrors.submitSelector ? "var(--red)" : undefined }} />
-                <FieldError name="submitSelector" />
-              </div>
             </div>
           )}
-        </div>
+        </section>
 
+        {/* Error banner */}
         {error && (
-          <div style={{ padding: "12px 16px", background: "rgba(255,71,87,0.08)", border: "1px solid rgba(255,71,87,0.2)", borderRadius: "var(--radius)", color: "var(--red)", fontSize: "0.875rem", marginBottom: 16 }}>
+          <div className="np-error-banner">
+            <span className="np-error-banner__badge">!</span>
             {error}
           </div>
         )}
 
-        <button className="btn btn-primary" type="submit" disabled={loading} style={{ width: "100%", justifyContent: "center", padding: "12px" }}>
-          {loading ? <span className="spin" style={{ display: "inline-block", width: 16, height: 16, border: "2px solid #000", borderTopColor: "transparent", borderRadius: "50%" }} /> : <Plus size={16} />}
-          {loading ? "Creating…" : "Create Project"}
+        {/* Submit */}
+        <button
+          className="btn btn-primary np-submit"
+          type="submit"
+          disabled={loading}
+        >
+          {loading
+            ? <Loader2 size={16} className="spin" />
+            : isEdit ? <Save size={16} /> : <Plus size={16} />}
+          {loading
+            ? (isEdit ? "Saving…" : "Creating…")
+            : (isEdit ? "Save Changes" : "Create Project")}
         </button>
       </form>
     </div>
