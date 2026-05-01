@@ -191,27 +191,44 @@ router.get("/dashboard", (req, res) => {
 
   // DIF-004: Top flaky tests — persisted flakyScore from the flaky detector
   const topFlakyTests = getTopFlakyTests(projectIds, 10);
-  const topAccessibilityOffenders = [];
+  // ── Top accessibility offenders (AUTO-016b) ─────────────────────────────
+  // Group crawl/generate runs by project once, then issue a single
+  // `countByRunIds` query for all the recent run IDs across all projects.
+  // Avoids the per-project filter+sort+N+1 SELECT pattern.
+  const crawlGenRunsByProject = {};
+  for (const r of runs) {
+    if (r.type !== "crawl" && r.type !== "generate") continue;
+    (crawlGenRunsByProject[r.projectId] ??= []).push(r);
+  }
+  const projectRunIds = {};
+  const allRecentRunIds = [];
   for (const projectId of projectIds) {
-    const runIds = runs
-      .filter((run) => run.projectId === projectId && (run.type === "crawl" || run.type === "generate"))
+    const projectRuns = crawlGenRunsByProject[projectId];
+    if (!projectRuns?.length) continue;
+    const runIds = projectRuns
       .sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0))
       .slice(0, 5)
       .map((run) => run.id);
-    if (!runIds.length) continue;
-    let count = 0;
-    for (const runId of runIds) {
-      count += accessibilityViolationRepo.getByRunId(runId).length;
-    }
-    if (count > 0) {
-      topAccessibilityOffenders.push({
-        projectId,
-        projectName: projectsById[projectId]?.name || "Unknown project",
-        violations: count,
-      });
-    }
+    projectRunIds[projectId] = runIds;
+    allRecentRunIds.push(...runIds);
   }
-  topAccessibilityOffenders.sort((a, b) => b.violations - a.violations);
+  const violationCountsByRunId = accessibilityViolationRepo.countByRunIds(allRecentRunIds);
+  // Build minimal {projectId, violations} tuples, sort+slice, *then* attach
+  // project names so we don't retain strings for projects that won't make the cut.
+  const offenderCounts = [];
+  for (const projectId of projectIds) {
+    const runIds = projectRunIds[projectId];
+    if (!runIds) continue;
+    let count = 0;
+    for (const runId of runIds) count += violationCountsByRunId[runId] || 0;
+    if (count > 0) offenderCounts.push({ projectId, violations: count });
+  }
+  offenderCounts.sort((a, b) => b.violations - a.violations);
+  const topAccessibilityOffenders = offenderCounts.slice(0, 5).map((o) => ({
+    projectId: o.projectId,
+    projectName: projectsById[o.projectId]?.name || "Unknown project",
+    violations: o.violations,
+  }));
 
   res.json({
     totalProjects: projects.length,
@@ -236,7 +253,7 @@ router.get("/dashboard", (req, res) => {
     testGrowth,
     mttrMs,
     testsByUrl,
-    topAccessibilityOffenders: topAccessibilityOffenders.slice(0, 5),
+    topAccessibilityOffenders,
   });
 });
 

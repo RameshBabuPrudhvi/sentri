@@ -173,6 +173,37 @@ test("getByRunAndPage filters by (runId, pageUrl) and orders by ruleId", () => {
   runRepo.hardDeleteById(run.id);
 });
 
+test("countByRunIds returns {} for empty array", () => {
+  assert.deepEqual(accessibilityViolationRepo.countByRunIds([]), {});
+});
+
+test("countByRunIds returns {} for non-array input", () => {
+  assert.deepEqual(accessibilityViolationRepo.countByRunIds(null), {});
+  assert.deepEqual(accessibilityViolationRepo.countByRunIds(undefined), {});
+});
+
+test("countByRunIds aggregates counts per runId and omits zero-violation runs", () => {
+  const runA = makeRun(proj.id);
+  const runB = makeRun(proj.id);
+  const runC = makeRun(proj.id); // no violations — must be absent from result
+  runRepo.create(runA);
+  runRepo.create(runB);
+  runRepo.create(runC);
+  accessibilityViolationRepo.bulkCreate([
+    makeViolation(runA.id, "https://example.com/a", "label"),
+    makeViolation(runA.id, "https://example.com/a", "color-contrast"),
+    makeViolation(runA.id, "https://example.com/b", "image-alt"),
+    makeViolation(runB.id, "https://example.com/", "label"),
+  ]);
+  const counts = accessibilityViolationRepo.countByRunIds([runA.id, runB.id, runC.id]);
+  assert.equal(counts[runA.id], 3);
+  assert.equal(counts[runB.id], 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(counts, runC.id), false);
+  runRepo.hardDeleteById(runA.id);
+  runRepo.hardDeleteById(runB.id);
+  runRepo.hardDeleteById(runC.id);
+});
+
 test("violations cascade-delete when parent run is removed", () => {
   const run = makeRun(proj.id);
   runRepo.create(run);

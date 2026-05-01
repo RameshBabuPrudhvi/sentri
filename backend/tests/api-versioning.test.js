@@ -110,6 +110,54 @@ async function main() {
       assert.equal(Array.isArray(out.json.topAccessibilityOffenders), true, "topAccessibilityOffenders should be an array");
     });
 
+    await test("topAccessibilityOffenders aggregates per project, sorts desc, caps at 5", async () => {
+      // Register a fresh user and seed data in their workspace so the dashboard
+      // (scoped by req.workspaceId) returns the seeded offenders.
+      const seeder = await t.registerAndLogin(base, {
+        name: "Offender Seeder",
+        email: `offender-${Date.now()}@test.local`,
+        password: "Password123!",
+      });
+      const workspaceId = seeder.payload.workspaceId;
+      assert.ok(workspaceId, "test user should have a workspaceId in JWT");
+
+      const db = t.getDatabase();
+      const accessibilityViolationRepo = await import(
+        "../src/database/repositories/accessibilityViolationRepo.js"
+      );
+
+      // Seed 6 projects with descending violation counts to exercise both
+      // the desc sort and the slice(0, 5) cap.
+      const now = new Date().toISOString();
+      const counts = [60, 50, 40, 30, 20, 10];
+      for (let i = 0; i < counts.length; i++) {
+        const projectId = `PRJ-A11Y-${i}`;
+        const runId = `RUN-A11Y-${i}`;
+        db.prepare(
+          "INSERT INTO projects (id, name, url, createdAt, status, workspaceId) VALUES (?, ?, ?, ?, 'idle', ?)"
+        ).run(projectId, `A11y Project ${i}`, "https://example.com", now, workspaceId);
+        db.prepare(
+          "INSERT INTO runs (id, projectId, type, status, startedAt, workspaceId) VALUES (?, ?, 'crawl', 'completed', ?, ?)"
+        ).run(runId, projectId, now, workspaceId);
+        const rows = Array.from({ length: counts[i] }, (_, k) => ({
+          runId, pageUrl: "https://example.com", ruleId: `rule-${k}`,
+          impact: "minor", wcagCriterion: null, help: "", description: "", nodesJson: "[]",
+        }));
+        accessibilityViolationRepo.bulkCreate(rows);
+      }
+
+      const out = await req(base, "/api/v1/dashboard", { token: seeder.token });
+      assert.equal(out.res.status, 200);
+      const list = out.json.topAccessibilityOffenders;
+      assert.equal(list.length, 5, "should be capped at 5 entries");
+      assert.deepEqual(
+        list.map((o) => o.violations),
+        [60, 50, 40, 30, 20],
+        "should be sorted by violation count descending",
+      );
+      assert.equal(list[0].projectName, "A11y Project 0");
+    });
+
   } finally {
     env.restore();
     await new Promise((resolve) => server.close(resolve));

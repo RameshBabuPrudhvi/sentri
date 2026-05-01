@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-016b` — Frontend CrawlView accessibility panel · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 34 items (DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
+> **Current sprint:** `AUTO-012` — SLA / quality gate enforcement · **Blockers:** `INF-006` (hosted-deploy DB persistence — see below) · **Remaining:** 33 items (AUTO-016b ✅ shipped in PR #1; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gaps 2+3 tracked as sub-items, not separate IDs)
 
 ---
 
@@ -103,6 +103,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121 |
 | MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122 |
 | DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123 |
+| AUTO-016b | Frontend CrawlView accessibility panel + dashboard "Top Accessibility Offenders" rollup | PR #1 |
 
 ---
 
@@ -113,7 +114,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` (hosted-deploy persistence) is a new 🔴 Blocker; `ENH-036` (project credential edit) is 🟡 High; `SEC-004` deferred | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013 ✅, AUTO-016 backend ✅ (PR #121); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-016b (UI), AUTO-017–019 | 14–18 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/013/016 ✅ (AUTO-016b UI shipped in PR #1); remaining: AUTO-001/002/003/004, AUTO-008–012, AUTO-014/015, AUTO-017–019 | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous | — |
 
 ---
@@ -974,7 +975,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
 
-> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-013` (stale test detection, PR #99), and `AUTO-016` backend slice (axe-core scan + persistence, PR #121). The remaining ~14 items are scoped here and ready to start; `AUTO-016b` (frontend `CrawlView` accessibility panel) is the immediate follow-up tracked in `NEXT.md`.
+> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), and `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1). The remaining ~14 items are scoped here and ready to start; the immediate next sprint item is `AUTO-012` (SLA / quality gate enforcement) tracked in `NEXT.md`.
 
 ---
 
@@ -1240,9 +1241,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ### AUTO-016 — Accessibility testing (axe-core integration) 🟡 High
 
-**Status:** ✅ Complete (backend slice — PR #121) | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (backend slice — PR #121; frontend `CrawlView` panel + dashboard "Top Accessibility Offenders" rollup — PR #1) | **Effort:** M | **Source:** Competitive Gap Analysis
 
-> **Shipped scope (PR #121):** Backend half — `@axe-core/playwright` scan on every crawled page, normalised via `mapA11yViolations()`, persisted through `accessibilityViolationRepo.bulkCreate()` (`backend/src/database/repositories/accessibilityViolationRepo.js`) into the new `accessibility_violations` table (migration `013_accessibility_violations.sql`). Best-effort: scan failures log a warning and do not abort the crawl. Per-page summary attached to snapshots and `run.pages[].accessibilityViolations` so the frontend has the data without a second round-trip. The frontend `CrawlView` violation panel (NEXT.md `human-scope`) is **not** in this PR — track follow-up as **AUTO-016b** when it lands.
+> **Shipped scope (PR #121):** Backend half — `@axe-core/playwright` scan on every crawled page, normalised via `mapA11yViolations()`, persisted through `accessibilityViolationRepo.bulkCreate()` (`backend/src/database/repositories/accessibilityViolationRepo.js`) into the new `accessibility_violations` table (migration `013_accessibility_violations.sql`). Best-effort: scan failures log a warning and do not abort the crawl. Per-page summary attached to snapshots and `run.pages[].accessibilityViolations` so the frontend has the data without a second round-trip.
+>
+> **Shipped scope (PR #1, AUTO-016b):** Frontend half — per-page accessibility violations panel in `frontend/src/components/crawl/CrawlView.jsx` (severity badge, WCAG criterion, expandable node-selector list) plus a "Top Accessibility Offenders" rollup card on the Dashboard sourced from a new `topAccessibilityOffenders` field on `GET /api/v1/dashboard`.
 
 **Problem:** No accessibility testing exists. Playwright has first-class support for `@axe-core/playwright`. An autonomous QA platform should run WCAG 2.1 checks on every crawled page and flag violations. This is increasingly a legal requirement (ADA, European Accessibility Act).
 
