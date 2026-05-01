@@ -11,6 +11,7 @@ import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Ban } from "lucide-react";
 import TablePagination, { PAGE_SIZE } from "../shared/TablePagination.jsx";
+import GateBadge from "../shared/GateBadge.jsx";
 
 export default function RunsTab({ runs, meta, page: controlledPage, onPageChange }) {
   const navigate = useNavigate();
@@ -62,12 +63,16 @@ export default function RunsTab({ runs, meta, page: controlledPage, onPageChange
                     {!isCrawl && !isGenerate && !isRun && <span className="badge badge-gray">{r.type}</span>}
                   </td>
                   <td>
-                    {r.status === "completed"       && <span className="badge badge-green">✓ Completed</span>}
-                    {r.status === "completed_empty" && <span className="badge badge-amber">⚠ No Tests</span>}
-                    {r.status === "running"         && <span className="badge badge-blue" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>● Running</span>}
-                    {r.status === "failed"          && <span className="badge badge-red">✗ Failed</span>}
-                    {r.status === "aborted"         && <span className="badge badge-gray"><Ban size={10} /> Aborted</span>}
-                    {!["completed","completed_empty","running","failed","aborted"].includes(r.status) && <span className="badge badge-gray">{r.status}</span>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {r.status === "completed"       && <span className="badge badge-green">✓ Completed</span>}
+                      {r.status === "completed_empty" && <span className="badge badge-amber">⚠ No Tests</span>}
+                      {r.status === "running"         && <span className="badge badge-blue" style={{ animation: "pulse 1.5s ease-in-out infinite" }}>● Running</span>}
+                      {r.status === "failed"          && <span className="badge badge-red">✗ Failed</span>}
+                      {r.status === "aborted"         && <span className="badge badge-gray"><Ban size={10} /> Aborted</span>}
+                      {!["completed","completed_empty","running","failed","aborted"].includes(r.status) && <span className="badge badge-gray">{r.status}</span>}
+                      {/* AUTO-012: per-run gate result. Renders nothing when gateResult is null. */}
+                      {isRun && <GateBadge gateResult={r.gateResult} compact />}
+                    </div>
                   </td>
                   <td>
                     {isCrawl && (

@@ -26,6 +26,7 @@ import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import { formatLogLine, structuredLog } from "./utils/logFormatter.js";
+import { warnIfEphemeralStorage } from "./utils/ephemeralStorage.js";
 import { loadKeysFromDatabase } from "./aiProvider.js";
 import { trackTelemetry } from "./utils/telemetry.js";
 import { initScheduler, stopAllTasks } from "./scheduler.js";
@@ -82,6 +83,7 @@ process.on("unhandledRejection", (reason) => {
 // ─── DB init ──────────────────────────────────────────────────────────────────
 // 1. Open database (SQLite or PostgreSQL) and apply schema migrations
 getDatabase();
+warnIfEphemeralStorage();
 // 2. Migrate legacy sentri-db.json → SQLite (one-time, skips if already done)
 migrateFromJsonIfNeeded();
 // 3. Restore persisted AI provider keys from the database into the runtime cache.

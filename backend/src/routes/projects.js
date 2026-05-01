@@ -42,6 +42,33 @@ import cron from "node-cron";
 
 const router = Router();
 
+
+function validateQualityGates(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "qualityGates must be an object";
+  const gates = {};
+  if (payload.minPassRate != null) {
+    if (!Number.isFinite(payload.minPassRate) || payload.minPassRate < 0 || payload.minPassRate > 100) return "minPassRate must be between 0 and 100";
+    gates.minPassRate = payload.minPassRate;
+  }
+  if (payload.maxFlakyPct != null) {
+    if (!Number.isFinite(payload.maxFlakyPct) || payload.maxFlakyPct < 0 || payload.maxFlakyPct > 100) return "maxFlakyPct must be between 0 and 100";
+    gates.maxFlakyPct = payload.maxFlakyPct;
+  }
+  if (payload.maxFailures != null) {
+    if (!Number.isInteger(payload.maxFailures) || payload.maxFailures < 0) return "maxFailures must be a non-negative integer";
+    gates.maxFailures = payload.maxFailures;
+  }
+  // Reject empty payloads — without at least one gate field, the stored
+  // `{}` would render as "Active" in the UI and cause the evaluator to
+  // return `{ passed: true }` for every run despite no thresholds being
+  // configured. Clients clearing all gates should use DELETE instead.
+  if (Object.keys(gates).length === 0) {
+    return "qualityGates must contain at least one gate field (minPassRate, maxFlakyPct, maxFailures)";
+  }
+  return gates;
+}
+
+
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 router.post("/", requireRole("qa_lead"), (req, res) => {
@@ -203,6 +230,30 @@ router.delete("/:id", requireRole("admin"), (req, res) => {
     destroyedTokens: existingTokens.length,
     destroyedSchedule: !!existingSchedule,
   });
+});
+
+
+router.get("/:id/quality-gates", (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  res.json({ qualityGates: project.qualityGates || null });
+});
+
+router.patch("/:id/quality-gates", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const validated = validateQualityGates(req.body?.qualityGates ?? req.body);
+  if (typeof validated === "string") return res.status(400).json({ error: validated });
+  projectRepo.update(req.params.id, { qualityGates: validated });
+  const updated = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  res.json({ qualityGates: updated.qualityGates || null });
+});
+
+router.delete("/:id/quality-gates", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  projectRepo.update(req.params.id, { qualityGates: null });
+  res.json({ ok: true, qualityGates: null });
 });
 
 // ─── Schedule endpoints ───────────────────────────────────────────────────────

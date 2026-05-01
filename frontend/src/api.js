@@ -332,6 +332,30 @@ export const api = {
    */
   deleteTriggerToken: (projectId, tokenId) => req("DELETE", `/projects/${projectId}/trigger-tokens/${tokenId}`),
 
+  // ── Quality Gates (AUTO-012) ────────────────────────────────────────────────
+  /**
+   * Get the quality-gate config for a project, or null if unconfigured.
+   * Viewer+ can read.
+   * @param {string} projectId
+   * @returns {Promise<{qualityGates: {minPassRate?: number, maxFlakyPct?: number, maxFailures?: number} | null}>}
+   */
+  getQualityGates: (projectId) => req("GET", `/projects/${projectId}/quality-gates`),
+  /**
+   * Create or update the quality-gate config (qa_lead+).
+   * Server validates ranges (`minPassRate`/`maxFlakyPct` ∈ [0,100], `maxFailures` ≥ 0 integer).
+   * @param {string} projectId
+   * @param {{minPassRate?: number, maxFlakyPct?: number, maxFailures?: number}} gates
+   * @returns {Promise<{qualityGates: Object|null}>}
+   */
+  updateQualityGates: (projectId, gates) =>
+    req("PATCH", `/projects/${projectId}/quality-gates`, { qualityGates: gates }),
+  /**
+   * Clear the quality-gate config (qa_lead+) — runs will report `gateResult: null`.
+   * @param {string} projectId
+   * @returns {Promise<{ok: boolean, qualityGates: null}>}
+   */
+  deleteQualityGates: (projectId) => req("DELETE", `/projects/${projectId}/quality-gates`),
+
   // ── Notifications (FEA-001) ──────────────────────────────────────────────────
   /**
    * Get the notification settings for a project, or null if none exist.

@@ -9,6 +9,7 @@ import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
 import StatusBadge from "../components/shared/StatusBadge";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
+import GateBadge from "../components/shared/GateBadge.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
@@ -369,7 +370,13 @@ export default function Work() {
                       )}
                     </div>
                   </td>
-                  <td><StatusBadge status={run.status} /></td>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <StatusBadge status={run.status} />
+                      {/* AUTO-012: gate result on test runs only (crawls/generates have no gates). */}
+                      {run.type === "test_run" && <GateBadge gateResult={run.gateResult} compact />}
+                    </div>
+                  </td>
                   <td>
                     {run.type === "test_run"
                       ? <ProgressBar passed={run.passed || 0} failed={run.failed || 0} total={run.total || 0} />

@@ -44,6 +44,55 @@ import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 
+
+function evaluateQualityGates(gates, run) {
+  // Defense-in-depth: `validateQualityGates` in `backend/src/routes/projects.js`
+  // already rejects payloads that produce an empty object, but a corrupted DB
+  // row or direct DB manipulation could still surface `{}` here. Treat any
+  // non-object, array, or empty object as "no gates configured" and return
+  // null — same shape as the unconfigured case — so callers (trigger response,
+  // RunDetail UI, GateBadge) render legacy-style with no enforcement rather
+  // than silently reporting `{ passed: true }` from a misconfigured project.
+  if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
+  if (Object.keys(gates).length === 0) return null;
+  const violations = [];
+  const total = Number(run.total || 0);
+  const failed = Number(run.failed || 0);
+  const passed = Number(run.passed || 0);
+  const passRate = total > 0 ? (passed / total) * 100 : 100;
+
+  // `flakyPct` = % of tests that needed at least one retry, NOT the sum of
+  // retries across the suite. Using `run.retryCount` directly (sum of per-test
+  // retries — see line ~340 below) would let a single 3×-retried test push
+  // flakyPct above 100% on a 1-test run, which is both nonsensical and
+  // unreachable given `maxFlakyPct` is range-validated to 0–100 server-side
+  // (`backend/src/routes/projects.js`). Counting flaky *tests* instead matches
+  // the user-facing meaning and stays bounded in [0, 100]. Falls back to
+  // counting per-result retryCount > 0 when run.results is available; uses 0
+  // when results aren't populated yet (e.g. aborted runs).
+  const flakyTests = Array.isArray(run.results)
+    ? run.results.filter((r) => Number(r?.retryCount || 0) > 0).length
+    : 0;
+  const flakyPct = total > 0 ? (flakyTests / total) * 100 : 0;
+
+  if (Number.isFinite(gates.minPassRate) && passRate < gates.minPassRate) {
+    violations.push({ rule: "minPassRate", threshold: gates.minPassRate, actual: Number(passRate.toFixed(2)) });
+  }
+  if (Number.isFinite(gates.maxFlakyPct) && flakyPct > gates.maxFlakyPct) {
+    violations.push({ rule: "maxFlakyPct", threshold: gates.maxFlakyPct, actual: Number(flakyPct.toFixed(2)) });
+  }
+  if (Number.isFinite(gates.maxFailures) && failed > gates.maxFailures) {
+    violations.push({ rule: "maxFailures", threshold: gates.maxFailures, actual: failed });
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
+// Exported under a name-mangled alias so integration tests can exercise the
+// pure evaluator without pulling in the full runner surface. Not part of the
+// public module contract — callers outside tests should rely on run.gateResult.
+export { evaluateQualityGates as __evaluateQualityGatesForTest };
+
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
 // in `items` with at most `concurrency` in-flight at once. Results are returned
@@ -311,6 +360,8 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // (migration 011) are populated for run-level analytics queries.
   run.retryCount = run.results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
   run.failedAfterRetry = run.results.filter(r => r.failedAfterRetry).length;
+
+  run.gateResult = evaluateQualityGates(project.qualityGates, run);
 
   // NOTE: We intentionally keep run.status === "running" here so that:
   //   1. The abort endpoint (POST /api/runs/:id/abort) still works during the

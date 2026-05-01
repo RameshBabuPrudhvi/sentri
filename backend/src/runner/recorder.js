@@ -30,6 +30,7 @@ import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } fr
 import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import { buildInjectedBootstrapScript } from "./playwrightSelectorGenerator.js";
 
 /**
  * Tunable timing constants for the recorder. Centralised so reviewers can
@@ -119,6 +120,33 @@ const INTERACTION_KINDS = new Set([
   "click", "dblclick", "rightClick", "fill",
   "select", "check", "uncheck", "upload", "press",
 ]);
+
+/**
+ * DIF-015b — quality-scores a `data-testid` value. Returns `true` when the
+ * value looks machine-generated / random (numeric-only, `el_` / `comp-` /
+ * `t-` prefix + hex tail, or a long unseparated token).
+ *
+ * **This is only used by the hand-rolled fallback selectorGenerator** that
+ * runs when Playwright's `InjectedScript` source cannot be loaded (missing
+ * `playwright-core` install, Playwright bumped to a version with a different
+ * injected-bundle layout, etc.). The primary path delegates to Playwright's
+ * own selector generator which has its own — more sophisticated — noise
+ * scoring built in.
+ *
+ * Exported for unit tests that exercise the fallback path directly; callers
+ * outside the fallback should not depend on this heuristic.
+ *
+ * @param {string} value - Raw `data-testid` attribute value.
+ * @returns {boolean} `true` when the value looks noisy and should be demoted.
+ */
+export function isNoisyTestId(value) {
+  const v = (value || "").trim();
+  if (!v) return true;
+  if (/^\d+$/.test(v)) return true;
+  if (/^(?:el_|comp-|t-)[a-z0-9_-]*[0-9a-f]{4,}$/i.test(v)) return true;
+  if (v.length > 30 && !/[-_:.]/.test(v)) return true;
+  return false;
+}
 
 /**
  * @typedef {Object} RecordedAction
@@ -241,13 +269,40 @@ const RECORDER_SCRIPT = `
     return cssSel + " >> nth=" + idx;
   }
 
+  // DIF-015b Gap 2 — interpolated from the Node-side \`isNoisyTestId()\` export
+  // so the heuristic has a single source of truth across the Node boundary.
+  // Unit tests exercise the Node-side function with fixture values; this
+  // line keeps the in-page copy byte-identical without drift risk.
+  ${isNoisyTestId.toString()}
+
   function selectorGenerator(el) {
     if (!el || el.nodeType !== 1) return "";
-    const testId = el.getAttribute("data-testid") || el.getAttribute("data-test-id");
-    if (testId) return 'data-testid=' + JSON.stringify(testId.trim());
+    // Primary path: delegate to Playwright's own InjectedScript-based
+    // selector generator when its bootstrap script ran successfully. This
+    // is the same algorithm Playwright's \`codegen\` tool produces and
+    // covers ancestor scoring, noise-testid demotion, shadow-DOM
+    // traversal, and iframe locator chains — none of which the fallback
+    // below handles. If Playwright returns an empty string we fall
+    // through to the local heuristic so a single misclassified element
+    // doesn't break the recording.
+    if (typeof window.__playwrightSelector === "function") {
+      try {
+        const pw = window.__playwrightSelector(el);
+        if (pw && typeof pw === "string") return pw;
+      } catch (_) { /* fall through to hand-rolled fallback */ }
+    }
+    // Fallback path — runs when Playwright's InjectedScript source could
+    // not be loaded at server start, or its API surface drifted in a
+    // version bump and the bootstrap left __playwrightSelector
+    // unpopulated. Order matches the documented priority in the module
+    // JSDoc; the testid noise heuristic only matters here because
+    // Playwright's generator already handles it on the primary path.
+    const testId = (el.getAttribute("data-testid") || el.getAttribute("data-test-id") || "").trim();
     const role = el.getAttribute("role") || roleFromTag(el.tagName);
     const label = (el.getAttribute("aria-label") || "").trim().slice(0, 80);
+    if (testId && !isNoisyTestId(testId)) return 'data-testid=' + JSON.stringify(testId);
     if (role && label) return 'role=' + role + '[name=' + JSON.stringify(label) + ']';
+    if (testId) return 'data-testid=' + JSON.stringify(testId);
     if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") && el.labels && el.labels[0]) {
       const l = (el.labels[0].innerText || el.labels[0].textContent || "").trim().replace(/\\s+/g, " ").slice(0, 80);
       if (l) return 'label=' + JSON.stringify(l);
@@ -1053,6 +1108,16 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       }
       session.actions.push(row);
     });
+    // Inject Playwright's own InjectedScript bootstrap before our
+    // recorder script so `window.__playwrightSelector` is populated by
+    // the time selectorGenerator() runs on the first user interaction.
+    // `addInitScript` calls run in registration order, and the empty
+    // string from `buildInjectedBootstrapScript()` (when the bundle
+    // can't be loaded) is a no-op — addInitScript accepts empty strings
+    // without complaint, but skip the call to keep the page-init log
+    // clean.
+    const bootstrap = buildInjectedBootstrapScript();
+    if (bootstrap) await context.addInitScript(bootstrap);
     await context.addInitScript(RECORDER_SCRIPT);
 
     // Navigate to the starting URL and record it as the first action.

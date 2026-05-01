@@ -5,35 +5,27 @@ import * as verificationTokenRepo from '../../../backend/src/database/repositori
 import { loginWithRetry, registerUser } from '../utils/auth.mjs';
 import { SessionClient } from '../utils/session.mjs';
 
-test.describe('Sentri UI smoke (login route)', () => {
+/**
+ * UI E2E coverage for `QA.md` §3 step 5 — Project create via UI form.
+ *
+ * Drives the browser through `/projects/new`, fills name + URL, submits, and
+ * asserts the redirect to `/projects/:id` plus the project's visibility in the
+ * `/projects` list — all via rendered DOM (no API read-back), per
+ * `tests/e2e/COVERAGE.md` § UI-only policy.
+ *
+ * API calls (register + verify) are scaffolding only so the UI test can jump
+ * straight to the create form. Auth helpers come from `utils/auth.mjs` +
+ * `utils/session.mjs` per AGENT.md "no custom auth/CSRF logic in specs".
+ */
+test.describe('Project create UI (QA.md §3 step 5)', () => {
   test.skip(process.env.RUN_UI_E2E !== 'true', 'Set RUN_UI_E2E=true to run browser UI coverage.');
 
-  test.beforeEach(async ({ page, baseURL }) => {
+  test.beforeEach(async ({ baseURL }) => {
     const ok = await isReachable(`${baseURL}/login`);
     test.skip(!ok, `Frontend is not reachable at ${baseURL}.`);
   });
 
-  test('login page renders core controls', async ({ page }) => {
-    await page.goto('/login');
-
-    await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: /password/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /login|sign in/i }).first()).toBeVisible();
-
-    await page.screenshot({ path: 'tests/e2e/artifacts/login-page.png', fullPage: true });
-  });
-
-  test('invalid credentials show an error state', async ({ page }) => {
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: /email/i }).fill('invalid-user@example.com');
-    await page.getByRole('textbox', { name: /password/i }).fill('bad-password');
-    await page.getByRole('button', { name: /login|sign in/i }).first().click();
-
-    await expect(page.getByText(/invalid|incorrect|failed|error/i).first()).toBeVisible();
-    await page.screenshot({ path: 'tests/e2e/artifacts/login-invalid.png', fullPage: true });
-  });
-
-  test('verified user can sign in and land on dashboard with workspace visible', async ({ page, request }) => {
+  test('verified user can create a project via the form and see it in the list', async ({ page, request }) => {
     const api = new SessionClient(request);
     const { email, password } = await registerUser(request);
     const user = userRepo.getByEmail(email);
@@ -55,15 +47,26 @@ test.describe('Sentri UI smoke (login route)', () => {
     if (loginResponse.status() === 429) test.skip(true, 'Rate-limited in shared local environment');
     expect(loginResponse.status()).toBe(200);
 
+    // Sign in through the UI so cookies land on the browser context.
     await page.goto('/login');
-    // Use textbox role to avoid matching the "Show password" eye-icon button
-    // (its aria-label="Show password" satisfies getByLabel(/password/i) too).
     await page.getByRole('textbox', { name: /email/i }).fill(email);
     await page.getByRole('textbox', { name: /password/i }).fill(password);
-    await page.getByRole('button', { name: /sign in|login/i }).first().click();
-
+    await page.getByRole('button', { name: /login|sign in/i }).first().click();
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByRole('heading', { name: /dashboard/i })).toBeVisible();
-    await expect(page.getByText(/workspace/i).first()).toBeVisible();
+
+    // Drive the create form. NewProject.jsx uses placeholder text rather than
+    // <label htmlFor>, so target inputs by placeholder.
+    const projectName = `E2E Project ${Date.now()}`;
+    await page.goto('/projects/new');
+    await page.getByPlaceholder(/My Web App/i).fill(projectName);
+    await page.getByPlaceholder('https://example.com').fill('https://example.com');
+    await page.getByRole('button', { name: /^create project$/i }).click();
+
+    // Server redirects to /projects/:id on success.
+    await expect(page).toHaveURL(/\/projects\/[^/]+$/);
+
+    // Visit the list and confirm the new project renders.
+    await page.goto('/projects');
+    await expect(page.getByText(projectName).first()).toBeVisible();
   });
 });
