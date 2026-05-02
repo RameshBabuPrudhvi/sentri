@@ -42,7 +42,7 @@ Compare two runs' per-test results side-by-side and highlight tests that flipped
 ### PR checklist
 
 - [ ] Update `AUTO-019` status in `ROADMAP.md` to ✅ once shipped; decrement the `Remaining:` count in the fast-path section
-- [ ] Update this file: move AUTO-019 to "Recently completed", promote DIF-015b Gap 3 to Current PR, shift queue items up and add a new item 4
+- [ ] Update this file: move AUTO-019 to "Recently completed", promote the combined `DIF-015b Gap 3 + DIF-015c Gap 1` recorder PR to Current PR, shift queue items up and add a new item 4
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
 - [ ] Add unit/integration tests for the new `GET /runs/:runId/compare/:otherRunId` endpoint (auth, 404 on unknown run, diff correctness across flipped/added/removed statuses); register any new test files in `backend/tests/run-tests.js`
 
@@ -50,26 +50,36 @@ Compare two runs' per-test results side-by-side and highlight tests that flipped
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · DIF-015b Gap 3 — Recorder selectorGenerator: iframe + shadow-DOM traversal
-**Effort:** M | **Priority:** 🔵 Medium | **Dependencies:** PR #4 must be merged first (shares `backend/src/runner/recorder.js`)
+### 2 · DIF-015b Gap 3 + DIF-015c Gap 1 — Recorder: iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts
+**Effort:** M | **Priority:** 🟡 High | **Dependencies:** PR #4 merged (shared `backend/src/runner/recorder.js`)
 
-Recorded clicks inside an `<iframe>` produce a selector scoped to the main document, which fails at replay because the element doesn't exist in the top-level DOM. Same for shadow roots. Wire `actionsToPlaywrightCode` to materialise a `frameLocator(frameUrl).locator(sel)` chain when `frameUrl !== mainFrame`, and walk shadow boundaries via `getRootNode()` to build a `host >> shadowRoot >> el` selector chain. Note: most of this may already be handled by Playwright's `InjectedScript` on the primary path shipped in PR #4 — confirm via fixture tests before re-implementing in the fallback.
+Bundled into a single PR because both items touch `backend/src/runner/recorder.js` and `backend/tests/recorder.test.js`, and both improve replay fidelity of recorded actions — shipping together avoids a second review cycle on the same file and a merge-conflict window between two back-to-back recorder PRs.
 
-**Files:** `backend/src/runner/recorder.js` · `backend/tests/recorder.test.js`
+**A. Selector traversal across frame/shadow boundaries (was DIF-015b Gap 3)** — Recorded clicks inside an `<iframe>` produce a selector scoped to the main document, which fails at replay because the element doesn't exist in the top-level DOM. Same for shadow roots. Wire `actionsToPlaywrightCode` to materialise a `frameLocator(frameUrl).locator(sel)` chain when `frameUrl !== mainFrame`, and walk shadow boundaries via `getRootNode()` to build a `host >> shadowRoot >> el` chain. Most of this may already be handled by Playwright's `InjectedScript` on the primary path shipped in PR #4 — **confirm via fixture tests first** and only re-implement in the hand-rolled fallback if the primary path misses it.
 
-### 3 · DIF-015c Gap 1 — Recorder: paste action + opt-in keyboard shortcuts
-**Effort:** S | **Priority:** 🟡 High | **Dependencies:** none (scope is additive within `recorder.js`; no overlap with AUTO-019 file lists)
+**B. Paste action (was DIF-015c Gap 1, part 1)** — A pasted token / address / JSON block is currently captured as a sequence of individual keystrokes (fragile, slow at replay). Add a `paste` event listener that records a single `safeFill(sel, '<text>')` action (500-char truncated to match the existing `fill` action).
 
-The recorder's PR #118 expansion added `dblclick`, `contextmenu`, `hover` (600ms dwell), `upload`, and `drag` — but **paste** and **opt-in keyboard shortcuts** are still missing. A pasted token / address / JSON block is captured as a sequence of individual keystrokes (fragile, slow at replay). Keyboard shortcuts like Ctrl+A / Cmd+Enter are suppressed by the printable-key filter at `backend/src/runner/recorder.js:370-372`. Add a `paste` listener → `safeFill(sel, '<text>')` (500-char truncated to match `fill`), and a "record this shortcut" toggle in `RecorderModal` that flips the printable-key suppression off for the next N keystrokes.
+**C. Opt-in keyboard shortcuts (was DIF-015c Gap 1, part 2)** — Shortcuts like `Ctrl+A` / `Cmd+Enter` are suppressed by the printable-key filter at `backend/src/runner/recorder.js:370-372`. Add a "record this shortcut" toggle in `RecorderModal` that flips the printable-key suppression off for the next N keystrokes, so users can opt-in to capturing a shortcut without permanently polluting the recording with modifier-key noise.
 
 **Files:** `backend/src/runner/recorder.js` · `frontend/src/components/run/RecorderModal.jsx` · `backend/tests/recorder.test.js`
 
-### 4 · UI-REFACTOR-001 — Extract `ConfigurablePanel` abstraction
+**Fixture coverage required:**
+- Click inside iframe → recorded code uses `frameLocator(...)`
+- Click inside shadow root → recorded code uses `>> shadowRoot >>` chain (or confirms `InjectedScript` already handles it)
+- Paste event → single `fill` action, not keystroke stream
+- Shortcut toggle on → `Ctrl+A` captured; toggle off → printable-key filter still suppresses modifiers
+
+### 3 · UI-REFACTOR-001 — Extract `ConfigurablePanel` abstraction
 **Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** none (promoted from Parallel opportunities after DIF-005 shipped freed the queue slot)
 
 DRY up `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) into a shared `ConfigurablePanel` component so the next SLO-style config UIs (SEC-005 SSO config, DIF-008 Jira integration, future SLO panels) can ship as one-file PRs instead of copy-pasting the whole form scaffold. Full spec lives in `docs/roadmap-gaps-pr8.md`.
 
 **Files:** `frontend/src/components/project/ConfigurablePanel.jsx` (new) · `frontend/src/components/project/QualityGatesPanel.jsx` · `frontend/src/components/project/WebVitalsBudgetsPanel.jsx`
+
+### 4 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
+**Effort:** — | **Priority:** — | **Dependencies:** —
+
+Slot freed by combining the two recorder items above into a single PR. Next agent: pick the highest-priority unshipped item from `docs/roadmap-gaps-pr8.md` (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) or the next ROADMAP.md item with `Dependencies: none` and no file overlap with slots 2–3.
 
 <!-- Original DIF-005 spec preserved below for historical traceability. Remove on the next rotation. -->
 
@@ -129,10 +139,9 @@ These can be picked up by a second engineer alongside AUTO-019 without file conf
 
 | ID | Title | Effort | Shared files? |
 |----|-------|--------|---------------|
-| DIF-015c Gap 1 | Recorder: paste + opt-in keyboard shortcuts | S | None — touches `recorder.js` + `RecorderModal.jsx`; zero overlap with AUTO-019's `routes/runs.js` + `RunDetail.jsx` |
-| DIF-015b Gap 3 | Recorder selectorGenerator: iframe + shadow-DOM traversal | M | None — `recorder.js` only; zero overlap with AUTO-019 |
+| DIF-015b Gap 3 + DIF-015c Gap 1 (combined) | Recorder: iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts | M | None — `recorder.js` + `RecorderModal.jsx`; zero overlap with AUTO-019's `routes/runs.js` + `RunDetail.jsx` + new `RunCompareView.jsx` |
 
-> Why these aren't promoted to "Current PR": AUTO-019 is the sprint target. UI-REFACTOR-001 was promoted into queue slot 4 after DIF-005 shipped; both recorder gaps remain safe parallel picks because they don't touch any file AUTO-019 changes (`routes/runs.js`, `RunDetail.jsx`, new `RunCompareView.jsx`).
+> Why this isn't promoted to "Current PR": AUTO-019 is the sprint target. The combined recorder PR is safe to pick up in parallel because it doesn't touch any file AUTO-019 changes. UI-REFACTOR-001 was promoted into queue slot 3 after DIF-005 shipped and the two recorder gaps were merged into a single queued PR.
 >
 > **Other follow-up items identified during PR #8 review** (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) are tracked in `docs/roadmap-gaps-pr8.md`. Promote any of them here when the current sprint clears.
 
