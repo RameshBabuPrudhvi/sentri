@@ -69,6 +69,20 @@ function validateQualityGates(payload) {
 }
 
 
+function validateWebVitalsBudgets(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return "webVitalsBudgets must be an object";
+  const out = {};
+  for (const key of ["lcp", "cls", "inp", "ttfb"]) {
+    if (payload[key] != null) {
+      if (!Number.isFinite(payload[key]) || payload[key] < 0) return `${key} must be a non-negative number`;
+      out[key] = payload[key];
+    }
+  }
+  if (Object.keys(out).length === 0) return "webVitalsBudgets must include at least one of: lcp, cls, inp, ttfb";
+  return out;
+}
+
+
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
 
 router.post("/", requireRole("qa_lead"), (req, res) => {
@@ -254,6 +268,30 @@ router.delete("/:id/quality-gates", requireRole("qa_lead"), (req, res) => {
   if (!project) return res.status(404).json({ error: "not found" });
   projectRepo.update(req.params.id, { qualityGates: null });
   res.json({ ok: true, qualityGates: null });
+});
+
+
+router.get("/:id/web-vitals-budgets", (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  res.json({ webVitalsBudgets: project.webVitalsBudgets || null });
+});
+
+router.patch("/:id/web-vitals-budgets", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const validated = validateWebVitalsBudgets(req.body?.webVitalsBudgets ?? req.body);
+  if (typeof validated === "string") return res.status(400).json({ error: validated });
+  projectRepo.update(req.params.id, { webVitalsBudgets: validated });
+  const updated = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  res.json({ webVitalsBudgets: updated.webVitalsBudgets || null });
+});
+
+router.delete("/:id/web-vitals-budgets", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  projectRepo.update(req.params.id, { webVitalsBudgets: null });
+  res.json({ ok: true, webVitalsBudgets: null });
 });
 
 // ─── Schedule endpoints ───────────────────────────────────────────────────────

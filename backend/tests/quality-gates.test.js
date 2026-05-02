@@ -114,6 +114,28 @@ async function main() {
       assert.equal(bounded.violations.length, 1, "1 flaky test of 1 → 100% flaky, exceeds 99% threshold");
       assert.equal(bounded.violations[0].rule, "maxFlakyPct");
       assert.equal(bounded.violations[0].actual, 100, "flakyPct must be bounded at 100, not 500");
+
+
+      // ── Web vitals budgets CRUD + evaluator ───────────────────────────
+      out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "PATCH", token, body: { lcp: 2500, cls: 0.1 } });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.webVitalsBudgets.lcp, 2500);
+
+      out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "GET", token });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.webVitalsBudgets.cls, 0.1);
+
+      const vitalsResult = __evaluateWebVitalsBudgetsForTest(
+        { lcp: 2500, cls: 0.1 },
+        { results: [{ testId: "t1", testName: "x", webVitals: { lcp: 3100, cls: 0.05, inp: 120, ttfb: 200 } }] }
+      );
+      assert.equal(vitalsResult.passed, false);
+      assert.equal(vitalsResult.violations[0].rule, "lcp");
+
+      out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "DELETE", token });
+      assert.equal(out.res.status, 200);
+      assert.equal(out.json.webVitalsBudgets, null);
+
     } else {
       console.warn("  ⚠️  __evaluateQualityGatesForTest not exported — evaluator branch skipped");
     }

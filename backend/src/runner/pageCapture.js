@@ -10,6 +10,7 @@
  *   captureDomSnapshot(page)
  *   captureScreenshot(page, runId, stepIndex, { failed })
  *   captureBoundingBoxes(page)
+ *   captureWebVitals(page)
  */
 
 import path from "path";
@@ -197,5 +198,30 @@ export async function captureBoundingBoxes(page) {
     }).catch(() => []);
   } catch {
     return [];
+  }
+}
+
+
+export async function captureWebVitals(page) {
+  try {
+    await page.addScriptTag({ url: "https://unpkg.com/web-vitals@4/dist/web-vitals.iife.js" });
+    await page.waitForTimeout(50);
+    const metrics = await page.evaluate(async () => {
+      return await new Promise((resolve) => {
+        const out = { lcp: null, cls: null, inp: null, ttfb: null };
+        const done = () => resolve(out);
+        try {
+          if (!window.webVitals) return done();
+          window.webVitals.onLCP((m) => { out.lcp = Math.round(m.value); }, { reportAllChanges: true });
+          window.webVitals.onCLS((m) => { out.cls = Number(m.value.toFixed(3)); }, { reportAllChanges: true });
+          window.webVitals.onINP((m) => { out.inp = Math.round(m.value); }, { reportAllChanges: true });
+          window.webVitals.onTTFB((m) => { out.ttfb = Math.round(m.value); }, { reportAllChanges: true });
+          setTimeout(done, 1200);
+        } catch { done(); }
+      });
+    });
+    return metrics;
+  } catch {
+    return { lcp: null, cls: null, inp: null, ttfb: null };
   }
 }

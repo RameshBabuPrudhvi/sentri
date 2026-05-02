@@ -22,7 +22,7 @@ import { getHealingHistoryForTest } from "../selfHealing.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, SHOTS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -304,6 +304,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     stepTimings: [],    // DIF-016: per-step timing data
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
+    webVitals: null,
   };
 
   const start = Date.now();
@@ -433,6 +434,10 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         try {
           result.boundingBoxes = await captureBoundingBoxes(page);
         } catch { /* bounding-box capture is best-effort */ }
+
+        try {
+          result.webVitals = await captureWebVitals(page);
+        } catch { /* best-effort */ }
       }
     })();
 
