@@ -268,6 +268,12 @@ export default function RunDetail() {
     setFrames([]);
     setLlmTokens("");
     setInitialStatus(undefined);
+    // AUTO-019: also clear comparison state so a stale diff from the
+    // previously-viewed run doesn't render on the new run's page.
+    setCompareData(null);
+    setCompareLoading(false);
+    setCompareError(null);
+    setPriorRuns([]);
   }, [runId]);
 
   // SSE — receives live updates while the run is active.
