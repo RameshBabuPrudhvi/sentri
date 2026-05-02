@@ -9,6 +9,9 @@ docs/.vitepress/cache/
 # Generated API docs (JSDoc)
 backend/docs-api/
 
+# Generated trace viewer bundle (copied at install time by backend/scripts/copy-trace-viewer.js)
+backend/public/trace-viewer/
+
 # Environment files
 .env
 .env.local
