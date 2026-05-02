@@ -32,7 +32,7 @@ export { parsePagination };
 const JSON_FIELDS = [
   "tests", "results", "testQueue", "generateInput",
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
-  "qualityAnalytics", "pages", "gateResult",
+  "qualityAnalytics", "pages", "gateResult", "webVitalsResult",
 ];
 
 function rowToRun(row) {
@@ -76,6 +76,7 @@ const INSERT_COLS = [
   "retryCount", "failedAfterRetry", // AUTO-005: aggregated retry telemetry
   "networkCondition", // AUTO-006: fast | slow3g | offline (migration 012)
   "gateResult", // AUTO-012: quality gate pass/fail summary
+  "webVitalsResult", // AUTO-017: web vitals budget pass/fail summary
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -90,6 +91,7 @@ const LEAN_COLS = [
   "browser", // DIF-002 — surfaces browser badge on runs list without a second query
   "networkCondition", // AUTO-006 — surfaces network-condition badge on runs list without a second query
   "gateResult", // AUTO-012 — surfaces gate badge on runs list without a second query
+  "webVitalsResult", // AUTO-017 — surfaces vitals status without second query
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;
@@ -119,6 +121,13 @@ function parseLeanJson(row) {
       try { row.gateResult = JSON.parse(row.gateResult); } catch { row.gateResult = null; }
     } else {
       row.gateResult = null;
+    }
+  }
+  if ("webVitalsResult" in row) {
+    if (row.webVitalsResult) {
+      try { row.webVitalsResult = JSON.parse(row.webVitalsResult); } catch { row.webVitalsResult = null; }
+    } else {
+      row.webVitalsResult = null;
     }
   }
   return row;

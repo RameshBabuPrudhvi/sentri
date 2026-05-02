@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-017` — Web Vitals performance budgets · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 29 items (DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
+> **Current sprint:** `DIF-005` — Embedded Playwright trace viewer · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 28 items (AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
 
 ---
 
@@ -108,6 +108,7 @@ The following items have been verified complete against the codebase and are **n
 | ENH-036b | Auto-detect login form fields — semantic-first locator waterfall removes need for hand-authored CSS selectors | PR #127                                                         |
 | INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | PR #1                                                           |
 | AUTO-012 | SLA / quality gate enforcement — per-project `qualityGates` config, run-time evaluator, `gateResult` on runs + trigger responses, `QualityGatesPanel` under ProjectDetail → Settings, per-run `<GateBadge>` on Runs list / RunDetail header, inline violation panel on RunDetail, GH Actions + GitLab CI consumer examples in `docs/guide/ci-cd-triggers.md` that exit non-zero on `gateResult.passed === false` | PR #2                                                           |
+| AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | PR #8                                                           |
 
 ---
 
@@ -118,7 +119,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` ✅ shipped in PR #1 (Render blueprint + ephemeral-storage warning); `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-017–019                                | 14–18 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016/017 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2; AUTO-017 Web Vitals budgets shipped in PR #8); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-018–019                                | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -1270,9 +1271,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### AUTO-017 — Performance budget testing (Web Vitals) 🔵 Medium
+### AUTO-017 — Performance budget testing (Web Vitals) 🔵 Medium ✅
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
+**Status:** ✅ Complete (PR #8) | **Effort:** M | **Source:** Competitive Gap Analysis
+
+> **Shipped scope (PR #8):** Per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`) with CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations; role gates registered in `backend/src/middleware/permissions.json`). `captureWebVitals(page)` in `backend/src/runner/pageCapture.js` injects the **locally-bundled** `web-vitals@4` IIFE (resolved from `node_modules` via `createRequire` at module load — no runtime CDN dependency) and records LCP/CLS/INP/TTFB per page snapshot. Vitals capture runs unconditionally on the success path — independent of the `skipVisualArtifacts` gate — so tests that end on an assertion still contribute performance metrics. `evaluateWebVitalsBudgets()` in `backend/src/testRunner.js` produces `{ passed, violations: [{ rule, threshold, actual, testId, testName }] }` and persists it on the run record (migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` and `runs.webVitalsResult`). Trigger response and `callbackUrl` payload include `webVitalsResult` so CI consumers can fail the build on budget violation. `StepResultsView.jsx` renders an inline "Web Vitals Budget Failed" panel on RunDetail filtered to the currently-viewed test's `testId`. Pre-AUTO-017 runs persist `webVitalsResult: null` and render unchanged. CI consumer docs (`docs/guide/ci-cd-triggers.md`) include updated GitHub Actions + GitLab CI snippets that exit non-zero on `webVitalsResult.passed === false`, plus a new "Web Vitals Budgets" section. INP can be `null` for non-interactive tests (documented in the consumer guide); the evaluator's `Number.isFinite()` guard skips `null` metrics so an `inp` budget on an assertion-ending test is silently ignored rather than falsely failing.
 
 **Problem:** There is no performance testing. Playwright can capture Web Vitals (LCP, CLS, FID/INP) via `page.evaluate()`. Teams have no way to set performance budgets per page or know when a deployment degrades load times.
 

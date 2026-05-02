@@ -7,3 +7,8 @@ export { default as OnboardingTour } from "./OnboardingTour.jsx";
 export { default as ProviderBadge, invalidateConfigCache } from "./ProviderBadge.jsx";
 export { default as ProviderBanner } from "./ProviderBanner.jsx";
 export { default as ErrorBoundary } from "./ErrorBoundary.jsx";
+export { default as Sidebar } from "./Sidebar.jsx";
+export { default as TopBar } from "./TopBar.jsx";
+export { default as ThemeToggle } from "./ThemeToggle.jsx";
+export { default as NotificationBell } from "./NotificationBell.jsx";
+export { default as PageSkeleton } from "./PageSkeleton.jsx";

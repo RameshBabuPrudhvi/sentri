@@ -88,10 +88,38 @@ function evaluateQualityGates(gates, run) {
   return { passed: violations.length === 0, violations };
 }
 
+
+function evaluateWebVitalsBudgets(budgets, run) {
+  if (!budgets || typeof budgets !== "object" || Array.isArray(budgets) || Object.keys(budgets).length === 0) return null;
+  const violations = [];
+  // Track whether *any* metric was actually compared against a budget. If zero
+  // comparisons happened — e.g. the `web-vitals` IIFE failed to load and every
+  // captureWebVitals() returned all-null metrics — return null to match the
+  // "unconfigured" semantics. Otherwise CI consumers (trigger.js callback,
+  // status endpoint) would see `{ passed: true, violations: [] }` and falsely
+  // conclude the budgets passed when nothing was measured at all. Mirrors the
+  // defense-in-depth pattern in evaluateQualityGates above.
+  let anyMeasured = false;
+  const rows = Array.isArray(run.results) ? run.results : [];
+  for (const r of rows) {
+    const m = r?.webVitals;
+    if (!m || typeof m !== "object") continue;
+    for (const key of ["lcp", "cls", "inp", "ttfb"]) {
+      if (!Number.isFinite(budgets[key]) || !Number.isFinite(m[key])) continue;
+      anyMeasured = true;
+      if (m[key] > budgets[key]) {
+        violations.push({ rule: key, threshold: budgets[key], actual: m[key], testId: r.testId, testName: r.testName || null });
+      }
+    }
+  }
+  if (!anyMeasured) return null;
+  return { passed: violations.length === 0, violations };
+}
+
 // Exported under a name-mangled alias so integration tests can exercise the
 // pure evaluator without pulling in the full runner surface. Not part of the
 // public module contract — callers outside tests should rely on run.gateResult.
-export { evaluateQualityGates as __evaluateQualityGatesForTest };
+export { evaluateQualityGates as __evaluateQualityGatesForTest, evaluateWebVitalsBudgets as __evaluateWebVitalsBudgetsForTest };
 
 // ── Concurrency helper ────────────────────────────────────────────────────────
 // Lightweight promise pool — no external dependencies. Runs `fn` for each item
@@ -362,6 +390,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   run.failedAfterRetry = run.results.filter(r => r.failedAfterRetry).length;
 
   run.gateResult = evaluateQualityGates(project.qualityGates, run);
+  run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
 
   // NOTE: We intentionally keep run.status === "running" here so that:
   //   1. The abort endpoint (POST /api/runs/:id/abort) still works during the

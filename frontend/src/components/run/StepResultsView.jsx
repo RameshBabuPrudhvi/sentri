@@ -278,6 +278,12 @@ export default function StepResultsView({ result, run, onBack }) {
         { id: "dom",          label: "🧩 DOM"       },
       ];
 
+  // AUTO-017: Filter run-level violations down to the test currently being viewed.
+  // `run.webVitalsResult.violations` aggregates across every test in the run; the
+  // detail view only shows one test at a time, so display only its own offenders.
+  const webVitalsViolations = (Array.isArray(run?.webVitalsResult?.violations) ? run.webVitalsResult.violations : [])
+    .filter((v) => !result?.testId || v.testId === result.testId);
+
   return (
     <div className="srv-root">
 
@@ -303,6 +309,18 @@ export default function StepResultsView({ result, run, onBack }) {
           </>
         )}
       </div>
+
+      {run?.webVitalsResult && webVitalsViolations.length > 0 && (
+        <div className="card" style={{ marginBottom: 12, borderColor: "var(--red-200)" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Web Vitals Budget Failed ({webVitalsViolations.length})</div>
+          {webVitalsViolations.slice(0, 5).map((v, i) => (
+            <div key={i} style={{ fontSize: 12, color: "var(--text2)" }}>
+              <span className="badge badge-red" style={{ marginRight: 8 }}>{String(v.rule).toUpperCase()}</span>
+              threshold {v.threshold} · actual {v.actual}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Main split ── */}
       <div className="srv-grid">

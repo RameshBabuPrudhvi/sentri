@@ -113,7 +113,17 @@ jobs:
               "  - \(.rule): actual \(.actual) vs threshold \(.threshold)"'
             exit 1
           fi
-          echo "Run completed and quality gates passed."
+
+          # 3. Web Vitals budgets (AUTO-017) — webVitalsResult is null when the
+          #    project has no budgets configured, in which case we don't enforce.
+          vitals_passed=$(echo "$payload" | jq -r '.webVitalsResult.passed // "null"')
+          if [ "$vitals_passed" = "false" ]; then
+            echo "::error::Web Vitals budget failed:"
+            echo "$payload" | jq -r '.webVitalsResult.violations[] |
+              "  - \(.rule | ascii_upcase) on \(.testName // .testId): actual \(.actual) vs threshold \(.threshold)"'
+            exit 1
+          fi
+          echo "Run completed; quality gates and Web Vitals budgets passed."
 ```
 
 ## GitLab CI Example
@@ -145,6 +155,14 @@ sentri:
         echo "Quality gate failed:"
         echo "$PAYLOAD" | jq -r '.gateResult.violations[] |
           "  - \(.rule): actual \(.actual) vs threshold \(.threshold)"'
+        exit 1
+      fi
+      # AUTO-017: enforce Web Vitals budgets when configured.
+      VITALS_PASSED=$(echo "$PAYLOAD" | jq -r '.webVitalsResult.passed // "null"')
+      if [ "$VITALS_PASSED" = "false" ]; then
+        echo "Web Vitals budget failed:"
+        echo "$PAYLOAD" | jq -r '.webVitalsResult.violations[] |
+          "  - \(.rule | ascii_upcase) on \(.testName // .testId): actual \(.actual) vs threshold \(.threshold)"'
         exit 1
       fi
 ```
@@ -183,11 +201,17 @@ Sentri will POST a JSON summary on **any terminal state** (completed, failed, or
     "violations": [
       { "rule": "minPassRate", "threshold": 95, "actual": 93.33 }
     ]
+  },
+  "webVitalsResult": {
+    "passed": false,
+    "violations": [
+      { "rule": "lcp", "threshold": 2500, "actual": 3100, "testId": "TST-7", "testName": "Home page loads" }
+    ]
   }
 }
 ```
 
-On failure, `status` will be `"failed"` and `error` will contain a human-readable message. On abort, `status` will be `"aborted"`. `gateResult` is `null` when the project has no quality gates configured (see below).
+On failure, `status` will be `"failed"` and `error` will contain a human-readable message. On abort, `status` will be `"aborted"`. `gateResult` is `null` when the project has no quality gates configured (see below). `webVitalsResult` is `null` when the project has no Web Vitals budgets configured (see [Web Vitals Budgets](#web-vitals-budgets)).
 
 ## Quality Gates
 
@@ -218,6 +242,42 @@ The CI examples above already enforce this: when `gateResult.passed === false` t
 
 ::: tip
 You can set gates conservatively (e.g. `minPassRate: 95`, `maxFailures: 0`) for `main` and tune them per-environment by running separate Sentri projects against staging vs. production URLs.
+:::
+
+## Web Vitals Budgets
+
+AUTO-017 adds per-project performance budgets enforced from CI alongside `gateResult`. Sentri injects the [`web-vitals`](https://github.com/GoogleChrome/web-vitals) library at capture time and records LCP, CLS, INP, and TTFB on every captured page during a run. Configure budgets under **Automation → \[your project\] → Web Vitals Budgets** (or via `PATCH /api/v1/projects/:id/web-vitals-budgets`); the form takes any subset of:
+
+| Field | Unit | Meaning |
+|---|---|---|
+| `lcp` | milliseconds | Largest Contentful Paint — fail when any captured page exceeds this. |
+| `cls` | unitless (0–1) | Cumulative Layout Shift — fail when any captured page exceeds this. |
+| `inp` | milliseconds | Interaction to Next Paint — fail when any captured page exceeds this. |
+| `ttfb` | milliseconds | Time To First Byte — fail when any captured page exceeds this. |
+
+On every test run, the backend evaluates the configured budgets against the captured metrics and persists the result on the run record. The trigger status response and the optional `callbackUrl` payload both include a `webVitalsResult` field:
+
+```json
+"webVitalsResult": {
+  "passed": false,
+  "violations": [
+    { "rule": "lcp", "threshold": 2500, "actual": 3100, "testId": "TST-7", "testName": "Home page loads" }
+  ]
+}
+```
+
+- `webVitalsResult: null` — no budgets configured. CI should treat as "no enforcement" (legacy projects unaffected).
+- `webVitalsResult.passed === true` — every captured page met every configured threshold.
+- `webVitalsResult.passed === false` — at least one violation; `violations[]` lists every offending metric with the test it came from, the configured threshold, and the actual measured value.
+
+The CI examples above already enforce this: when `webVitalsResult.passed === false` the workflow exits non-zero, blocking the deploy. When the project has no budgets, the same scripts treat the run as a pure pass/fail based on `status` + `gateResult` alone.
+
+::: tip
+Budgets compose with quality gates — a run can pass functional gates (`gateResult.passed === true`) but still fail on performance (`webVitalsResult.passed === false`). Both fields are independent; CI should check both.
+:::
+
+::: warning INP can be `null` for non-interactive tests
+LCP, CLS, and TTFB are recorded reliably for every captured page because their `PerformanceObserver` reads buffered entries that the browser has already collected by the time the `web-vitals` library is injected. **INP** (Interaction to Next Paint), however, is only emitted after a user interaction (click / keypress / tap) occurs *during* the observation window — so tests that end on an assertion, navigation, or `waitForLoadState` without a final interaction will record `inp: null`. This is a Playwright-environment characteristic, not a Sentri bug. The evaluator skips `null` metrics (treats them as "not measured" rather than "0"), so an `inp` budget on an assertion-ending test is silently ignored rather than falsely passing or failing. If you need INP enforcement, ensure the test has at least one interaction (e.g. `page.click(...)`) before its final assertion.
 :::
 
 ## Security Notes

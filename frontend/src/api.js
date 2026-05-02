@@ -356,6 +356,31 @@ export const api = {
    */
   deleteQualityGates: (projectId) => req("DELETE", `/projects/${projectId}/quality-gates`),
 
+  // ── Web Vitals Budgets (AUTO-017) ───────────────────────────────────────────
+  /**
+   * Get the Web Vitals budgets config for a project, or null if unconfigured.
+   * Viewer+ can read.
+   * @param {string} projectId
+   * @returns {Promise<{webVitalsBudgets: {lcp?: number, cls?: number, inp?: number, ttfb?: number} | null}>}
+   */
+  getWebVitalsBudgets: (projectId) => req("GET", `/projects/${projectId}/web-vitals-budgets`),
+  /**
+   * Create or update the Web Vitals budgets config (qa_lead+).
+   * Server validates each field as a non-negative finite number; payload must
+   * include at least one of `lcp`, `cls`, `inp`, `ttfb`.
+   * @param {string} projectId
+   * @param {{lcp?: number, cls?: number, inp?: number, ttfb?: number}} budgets
+   * @returns {Promise<{webVitalsBudgets: Object|null}>}
+   */
+  updateWebVitalsBudgets: (projectId, budgets) =>
+    req("PATCH", `/projects/${projectId}/web-vitals-budgets`, { webVitalsBudgets: budgets }),
+  /**
+   * Clear the Web Vitals budgets (qa_lead+) — runs will report `webVitalsResult: null`.
+   * @param {string} projectId
+   * @returns {Promise<{ok: boolean, webVitalsBudgets: null}>}
+   */
+  deleteWebVitalsBudgets: (projectId) => req("DELETE", `/projects/${projectId}/web-vitals-budgets`),
+
   // ── Notifications (FEA-001) ──────────────────────────────────────────────────
   /**
    * Get the notification settings for a project, or null if none exist.

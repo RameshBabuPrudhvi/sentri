@@ -10,11 +10,90 @@
  *   captureDomSnapshot(page)
  *   captureScreenshot(page, runId, stepIndex, { failed })
  *   captureBoundingBoxes(page)
+ *   registerWebVitalsInitScript(context)  — AUTO-017.1: install vitals observers before navigation
+ *   captureWebVitals(page)                — AUTO-017.1: read accumulated vitals at test end
  */
 
 import path from "path";
+import fs from "fs";
+import { createRequire } from "module";
 import { SHOTS_DIR } from "./config.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
+
+// AUTO-017: Resolve and cache the locally-installed `web-vitals` IIFE bundle so
+// we can install it via `context.addInitScript({ content })` without hitting an
+// external CDN at test time. Falls back to `null` if the package isn't installed
+// (e.g. minimal Docker builds) — the init-script registration and capture both
+// no-op in that case, returning the empty-metrics shape rather than crashing.
+//
+// NOTE: we can't `req.resolve("web-vitals/dist/web-vitals.iife.js")` directly
+// because `web-vitals@4.x`'s `package.json` declares an `exports` field that
+// only exposes `.` and `./attribution` — Node 20 strictly enforces this and
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED. Instead we resolve the package's
+// `package.json` (which `exports` always exposes by convention) and derive the
+// IIFE path from the package root. This layout is stable across web-vitals
+// v3 / v4 / v5 — `dist/web-vitals.iife.js` is the canonical IIFE bundle.
+// We resolve the package's *main entry* (which `exports` always exposes as `.`)
+// and walk up to the package root, then derive the IIFE path. Resolving
+// `web-vitals/package.json` directly throws ERR_PACKAGE_PATH_NOT_EXPORTED on
+// Node 20 because `web-vitals@4.x`'s `exports` field only declares `.` and
+// `./attribution`. The IIFE bundle layout (`dist/web-vitals.iife.js`) is
+// stable across v3 / v4 / v5.
+let WEB_VITALS_IIFE = null;
+try {
+  const req = createRequire(import.meta.url);
+  const mainPath = req.resolve("web-vitals");
+  // The main entry lives at `<pkgRoot>/dist/web-vitals.js` (or similar inside
+  // dist/). Walk up until we find the package root (directory containing
+  // `package.json`), then join `dist/web-vitals.iife.js`.
+  let pkgRoot = path.dirname(mainPath);
+  while (pkgRoot !== path.dirname(pkgRoot) && !fs.existsSync(path.join(pkgRoot, "package.json"))) {
+    pkgRoot = path.dirname(pkgRoot);
+  }
+  const iifePath = path.join(pkgRoot, "dist", "web-vitals.iife.js");
+  WEB_VITALS_IIFE = fs.readFileSync(iifePath, "utf8");
+} catch { /* package not installed or layout changed — web-vitals helpers will no-op */ }
+
+// AUTO-017.1: Bootstrap that runs *after* the IIFE in the same init-script so
+// `window.webVitals` is already defined. Registers observers on every new
+// document (addInitScript fires on every frame navigation) so LCP / CLS / TTFB
+// are captured during the real page lifecycle instead of being injected
+// post-test (when buffered entries are unreliable and the cumulative CLS
+// observer has missed earlier shifts). Results accumulate on
+// `window.__sentriVitals` for `captureWebVitals()` to read at test end.
+const WEB_VITALS_BOOTSTRAP = `
+(function () {
+  try {
+    if (window.__sentriVitalsInstalled) return;
+    window.__sentriVitalsInstalled = true;
+    window.__sentriVitals = { lcp: null, cls: null, inp: null, ttfb: null };
+    if (!window.webVitals) return;
+    window.webVitals.onLCP(function (m) { window.__sentriVitals.lcp = Math.round(m.value); }, { reportAllChanges: true });
+    window.webVitals.onCLS(function (m) { window.__sentriVitals.cls = Number(m.value.toFixed(3)); }, { reportAllChanges: true });
+    window.webVitals.onINP(function (m) { window.__sentriVitals.inp = Math.round(m.value); }, { reportAllChanges: true });
+    window.webVitals.onTTFB(function (m) { window.__sentriVitals.ttfb = Math.round(m.value); }, { reportAllChanges: true });
+  } catch (e) { /* best-effort — never break the page */ }
+})();
+`;
+
+/**
+ * registerWebVitalsInitScript(context) — AUTO-017.1
+ *
+ * Installs the web-vitals IIFE + observer bootstrap on the browser context
+ * via `addInitScript`, so observers are active from the first byte of every
+ * navigation. Must be called once per context immediately after creation and
+ * before the first `page.goto()`.
+ *
+ * No-ops when the web-vitals package isn't installed — callers should still
+ * invoke `captureWebVitals(page)`, which returns the empty-metrics shape in
+ * that case.
+ */
+export async function registerWebVitalsInitScript(context) {
+  if (!WEB_VITALS_IIFE) return;
+  try {
+    await context.addInitScript({ content: WEB_VITALS_IIFE + "\n" + WEB_VITALS_BOOTSTRAP });
+  } catch { /* context may be closing — capture will fall back to nulls */ }
+}
 
 
 /**
@@ -197,5 +276,49 @@ export async function captureBoundingBoxes(page) {
     }).catch(() => []);
   } catch {
     return [];
+  }
+}
+
+
+/**
+ * captureWebVitals(page) — AUTO-017.1
+ *
+ * Reads the metrics accumulated on `window.__sentriVitals` by the observers
+ * installed via `registerWebVitalsInitScript` at context creation. Because the
+ * observers have been running during the entire page lifecycle, LCP / CLS /
+ * TTFB reflect actual measurements rather than post-hoc buffered replays.
+ *
+ * Waits up to 800ms (early-exiting as soon as LCP + TTFB + CLS are populated)
+ * to let any final `reportAllChanges` callbacks flush. INP is reported only
+ * after a user interaction — it stays `null` for non-interactive tests, which
+ * the evaluator treats as "not measured" rather than a failure.
+ *
+ * Falls back to the empty-metrics shape if the init script was never
+ * registered (e.g. web-vitals not installed, or context is an older run
+ * started before AUTO-017.1 landed).
+ */
+export async function captureWebVitals(page) {
+  if (!WEB_VITALS_IIFE) return { lcp: null, cls: null, inp: null, ttfb: null };
+  try {
+    const metrics = await page.evaluate(async () => {
+      return await new Promise((resolve) => {
+        const read = () => window.__sentriVitals || { lcp: null, cls: null, inp: null, ttfb: null };
+        // If the init script never ran (pre-AUTO-017.1 context, or navigation
+        // blocked before onload), bail immediately rather than waiting 800ms
+        // for metrics that will never arrive.
+        if (!window.__sentriVitalsInstalled) return resolve(read());
+        const started = Date.now();
+        const tick = () => {
+          const m = read();
+          const allCore = m.lcp != null && m.ttfb != null && m.cls != null;
+          if (allCore || Date.now() - started >= 800) return resolve(m);
+          setTimeout(tick, 100);
+        };
+        tick();
+      });
+    });
+    return metrics || { lcp: null, cls: null, inp: null, ttfb: null };
+  } catch {
+    return { lcp: null, cls: null, inp: null, ttfb: null };
   }
 }

@@ -22,7 +22,7 @@ import { getHealingHistoryForTest } from "../selfHealing.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, SHOTS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -253,6 +253,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     }
   }
 
+  // AUTO-017.1: Install web-vitals observers via addInitScript *before* the
+  // first page is created, so the observers fire from the first byte of the
+  // navigation rather than being injected post-test (which leaves LCP/CLS
+  // unreliable or null). Safe no-op when the web-vitals package isn't
+  // installed — `captureWebVitals` still returns the empty-metrics shape.
+  await registerWebVitalsInitScript(context);
+
   const page = await context.newPage();
 
   // AUTO-006: Apply per-run network condition (offline / slow3g / fast).
@@ -304,6 +311,7 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
     stepTimings: [],    // DIF-016: per-step timing data
     visualDiff: null,   // DIF-001: final-screenshot visual-regression result
     browser: opts.browser || "chromium", // DIF-002: browser engine this test ran under
+    webVitals: null,
   };
 
   const start = Date.now();
@@ -397,6 +405,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
       // hasn't visually changed so these artifacts are redundant. This saves
       // ~50-200ms per test. Failure screenshots are always captured regardless.
       const skipVisualArtifacts = endsWithNonVisualAction(test.playwrightCode);
+
+      // AUTO-017: Web Vitals capture is independent of visual-artifact gating.
+      // Performance metrics (LCP / CLS / INP / TTFB) must be collected for every
+      // successful test regardless of whether the test ends on an assertion,
+      // otherwise budget evaluation silently skips slow tests that happen to end
+      // on `expect(...)`. Best-effort — failures never flip a passing test.
+      try {
+        result.webVitals = await captureWebVitals(page);
+      } catch { /* best-effort */ }
 
       if (!skipVisualArtifacts) {
         result.domSnapshot = await captureDomSnapshot(page);

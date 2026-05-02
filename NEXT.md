@@ -26,75 +26,83 @@
 
 ---
 
-## ▶ Current PR — AUTO-017
+## ▶ Current PR — DIF-005
 
-**Title:** Web Vitals performance budgets
-**Branch:** `feat/AUTO-017-web-vitals-budgets`
-**Effort:** M | **Priority:** 🔵 Medium
+**Title:** Embedded Playwright trace viewer
+**Branch:** `feat/DIF-005-embedded-trace-viewer`
+**Effort:** M | **Priority:** 🟢 Differentiator
 **All dependencies:** None
+
+> AUTO-017 (Web Vitals performance budgets) ✅ shipped in PR #8 — see Recently completed below. Promoting DIF-005 from the queue per `NEXT.md` rotation rule.
 
 ### Why this is the next priority
 
-`DIF-015b Gap 2` ✅ shipped in PR #4 — recorder `selectorGenerator()` now delegates to Playwright's own `InjectedScript`-based selector generator (the same algorithm `codegen` uses), with a hand-rolled fallback chain that retains the originally-scoped noise-testid heuristic for environments where the Playwright bundle can't be loaded. AUTO-017 is the highest-value remaining sprint item per the 10-day plan: it's the first post-launch performance differentiator and has zero dependencies. Pattern-match the AUTO-012 quality-gate work — CRUD endpoint, run-time evaluator, persisted result on the run, surfaced in the trigger response.
+`AUTO-017` ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, and per-test-filtered RunDetail panel. DIF-005 is the next item per the 10-day plan: it's the last high-value remaining DIF item, has zero dependencies, and directly removes the single biggest debugging-friction point users hit today (downloading a `.zip` and needing a local Playwright install to open a trace). Playwright already ships a fully self-contained trace viewer build — this PR wires it into Sentri so traces open inline.
 
 ### What to build
 
-- Capture Web Vitals (LCP, CLS, INP, TTFB) per page during runs by injecting the `web-vitals` library at `pageCapture` time and reading values back via `page.evaluate`.
-- Persist a `webVitals` array on the run-result row (per-step or per-page granularity, whichever matches the existing `pageCapture` shape).
-- Add per-project `webVitalsBudgets` config (mirror the shape of `qualityGates` from AUTO-012 — CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets`, `requireRole("qa_lead")` on mutations).
-- Evaluate budgets on run completion alongside `gateResult` and persist `webVitalsResult: { passed, violations }` on the run.
-- Surface violations as a new section in `StepResultsView.jsx` and flow them into the trigger-response payload AUTO-012 added.
+- Copy Playwright's pre-built trace viewer bundle (`@playwright/test/lib/trace/viewer/` or `playwright-core/lib/vite/traceViewer/`) into `public/trace-viewer/` on `npm install` so the assets ship with the deployed app — no CDN dependency at runtime, same pattern AUTO-017 just established for `web-vitals`.
+- Serve the copied viewer as a static directory at `/trace-viewer/` from `backend/src/middleware/appSetup.js`, reusing the existing `express.static` mount scaffolding.
+- Add a "🔍 Open Trace" button on `frontend/src/pages/RunDetail.jsx` next to the existing trace-download link. On click, navigate to `/trace-viewer/?trace=<artifact-signed-url>` in a new tab (or embedded `<iframe>` modal — pick whichever matches the sibling "Open Video" affordance).
+- The trace-viewer HTML loads `trace=<url>` from its query string and fetches the zip over HTTPS; because `signArtifactUrl()` already emits HMAC-signed short-TTL URLs for `/artifacts/*`, the viewer works without any new auth surface.
+- Update CSP `frame-src` / `connect-src` / `worker-src` in `appSetup.js` to allow the self-origin trace viewer to load the trace zip and spawn its worker (check Playwright's trace-viewer docs for the exact directives — it uses a Service Worker to decode the zip).
 
 ### Files to change
 
 | File | Change |
 |------|--------|
-| `backend/src/runner/pageCapture.js` | Inject `web-vitals` library; capture LCP/CLS/INP/TTFB per page |
-| `backend/src/testRunner.js` | Evaluate `webVitalsBudgets` on completion; persist `webVitalsResult` |
-| `backend/src/routes/projects.js` | CRUD endpoints for `webVitalsBudgets` |
-| `backend/src/database/migrations/` | New migration adding `projects.webVitalsBudgets` + `runs.webVitalsResult` |
-| `frontend/src/components/run/StepResultsView.jsx` | Render Web Vitals section + budget-violation badges |
-| `backend/tests/` | Coverage for the budget evaluator |
+| `backend/src/middleware/appSetup.js` | Serve `public/trace-viewer/` at `/trace-viewer/`; extend CSP to allow the viewer's Service Worker + trace-zip fetch |
+| `frontend/src/pages/RunDetail.jsx` | "🔍 Open Trace" button next to existing trace-download link |
+| `backend/package.json` or a new `scripts/copy-trace-viewer.js` | `postinstall` hook that copies the Playwright trace viewer bundle into `backend/public/trace-viewer/` so the assets are present in production images |
+| `docs/changelog.md` | `### Added` entry under `## [Unreleased]` |
 
 ### Acceptance criteria
 
-- Each page captured during a run records `{ lcp, cls, inp, ttfb }` (LCP/INP/TTFB in milliseconds, CLS unitless).
-- A project with `webVitalsBudgets: { lcp: 2500, cls: 0.1 }` produces `webVitalsResult.passed === false` when any captured page exceeds either threshold.
-- The trigger response payload exposes `webVitalsResult` so CI consumers can fail the build on budget violation.
-- Pre-AUTO-017 runs persist `webVitalsResult: null` and render unchanged (parity with how AUTO-012 handles `gateResult: null`).
+- Clicking "Open Trace" on any run with a captured trace opens Playwright's trace viewer inline, pre-loaded with that run's trace — no `.zip` download, no local Playwright install.
+- The trace viewer works on hosted deployments (Render + GitHub Pages) without requiring an external CDN — all assets served from Sentri's own origin.
+- If the Playwright trace viewer bundle can't be resolved at install time (e.g. `playwright-core` bumped to a layout-incompatible version), the `postinstall` step logs a warning and the backend serves a 404 at `/trace-viewer/` — the "Open Trace" button falls back to the existing download link, never crashes the page.
+- Signed artifact URLs work as the trace source (no new auth surface).
+- CSP remains strict — only the additional directives required by the viewer's Service Worker are opened, scoped to `/trace-viewer/`.
+
+### Watch-outs
+
+- Playwright marks `lib/vite/traceViewer/` as internal (same risk class as DIF-015b Gap 2's `InjectedScript` import). A Playwright bump can move the path. Mitigate with a best-effort resolver in the `postinstall` script and a runtime 404 fallback — same pattern `backend/src/runner/playwrightSelectorGenerator.js` already uses.
+- The trace viewer spawns a Service Worker. Make sure `Service-Worker-Allowed` or scope setup is correct, and that the CSP `worker-src` directive includes `'self'` (not `'none'`).
+- Trace files can be large (tens of MB). The viewer fetches them; Sentri's signed-URL TTL (`ARTIFACT_TOKEN_TTL_MS`, default 1h) must be long enough for the whole load.
+- Test on a deployed environment, not just local — trace viewer behaviour differs under HTTPS + cross-origin artifact URLs (S3 mode) vs local disk.
 
 ### PR checklist
 
-- [ ] Update `AUTO-017` status in `ROADMAP.md` once shipped
-- [ ] Update this file: move AUTO-017 to "Recently completed", promote DIF-005 to Current PR
+- [ ] Update `DIF-005` status in `ROADMAP.md` to ✅ once shipped; decrement the `Remaining:` count in the fast-path section
+- [ ] Update this file: move DIF-005 to "Recently completed", promote the next queue item (AUTO-019) to Current PR, shift queue items up
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
-- [ ] Extend `backend/tests/` with budget-evaluator coverage; register any new test files in `backend/tests/run-tests.js`
-- [ ] Extend `docs/guide/ci-cd-triggers.md` with a `webVitalsResult.passed` snippet (mirror the AUTO-012 GitHub Actions / GitLab CI examples)
+- [ ] Extend `backend/tests/` with a smoke test that `/trace-viewer/index.html` serves a non-empty response when the bundle is present and 404s when it's missing; register any new test files in `backend/tests/run-tests.js`
+- [ ] Verify on a real deployment (Render or equivalent) that the trace viewer loads a signed-URL trace end-to-end — Service-Worker scope + CSP are easy to get wrong on a dev machine but fail in prod
 
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · DIF-005 — Embedded Playwright trace viewer
-**Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** none
-
-Copy the Playwright trace viewer build (`@playwright/test/lib/trace/viewer/`) into `public/trace-viewer/` and serve it at `/trace-viewer/`. The Run Detail page links to `/trace-viewer/?trace=<artifact-signed-url>` to open the trace inline in an iframe — eliminating the local-Playwright-install friction users hit today when debugging a failure. Highest-value remaining DIF item with no dependencies.
-
-**Files:** `backend/src/middleware/appSetup.js` · `frontend/src/pages/RunDetail.jsx` · build tooling (copy trace assets on `npm install`)
-
-### 3 · AUTO-019 — Run diffing: per-test comparison across runs
+### 2 · AUTO-019 — Run diffing: per-test comparison across runs
 **Effort:** M | **Priority:** 🔵 Medium | **Dependencies:** none
 
 Compare two runs' per-test results side-by-side and highlight tests that flipped status (passed → failed, failed → passed, newly added, removed). Surface as a "Compare" action on the Run Detail page that opens a diff view against the previous run by default, with a picker to choose any prior run.
 
 **Files:** `backend/src/routes/runs.js` (new `GET /runs/:runId/compare/:otherRunId`) · `frontend/src/pages/RunDetail.jsx` · new `frontend/src/components/run/RunCompareView.jsx`
 
-### 4 · DIF-015b Gap 3 — Recorder selectorGenerator: iframe + shadow-DOM traversal
+### 3 · DIF-015b Gap 3 — Recorder selectorGenerator: iframe + shadow-DOM traversal
 **Effort:** M | **Priority:** 🔵 Medium | **Dependencies:** PR #4 must be merged first (shares `backend/src/runner/recorder.js`)
 
 Recorded clicks inside an `<iframe>` produce a selector scoped to the main document, which fails at replay because the element doesn't exist in the top-level DOM. Same for shadow roots. Wire `actionsToPlaywrightCode` to materialise a `frameLocator(frameUrl).locator(sel)` chain when `frameUrl !== mainFrame`, and walk shadow boundaries via `getRootNode()` to build a `host >> shadowRoot >> el` selector chain. Note: most of this may already be handled by Playwright's `InjectedScript` on the primary path shipped in PR #4 — confirm via fixture tests before re-implementing in the fallback.
 
 **Files:** `backend/src/runner/recorder.js` · `backend/tests/recorder.test.js`
+
+### 4 · DIF-015c Gap 1 — Recorder: paste action + opt-in keyboard shortcuts
+**Effort:** S | **Priority:** 🟡 High | **Dependencies:** none (scope is additive within `recorder.js`; no overlap with DIF-005 / AUTO-019 file lists)
+
+The recorder's PR #118 expansion added `dblclick`, `contextmenu`, `hover` (600ms dwell), `upload`, and `drag` — but **paste** and **opt-in keyboard shortcuts** are still missing. A pasted token / address / JSON block is captured as a sequence of individual keystrokes (fragile, slow at replay). Keyboard shortcuts like Ctrl+A / Cmd+Enter are suppressed by the printable-key filter at `backend/src/runner/recorder.js:370-372`. Add a `paste` listener → `safeFill(sel, '<text>')` (500-char truncated to match `fill`), and a "record this shortcut" toggle in `RecorderModal` that flips the printable-key suppression off for the next N keystrokes.
+
+**Files:** `backend/src/runner/recorder.js` · `frontend/src/components/run/RecorderModal.jsx` · `backend/tests/recorder.test.js`
 
 ---
 
@@ -104,10 +112,13 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | Effort | Shared files? |
 |----|-------|--------|---------------|
-| AUTO-019 | Run diffing: per-test comparison across runs | M | None |
-| DIF-005 | Embedded Playwright trace viewer | M | None (only touches `appSetup.js`, `RunDetail.jsx`, build tooling — zero overlap with AUTO-017's `pageCapture.js` / `testRunner.js`) |
+| DIF-015c Gap 1 | Recorder: paste + opt-in keyboard shortcuts | S | None — touches `recorder.js` + `RecorderModal.jsx`; zero overlap with DIF-005's `appSetup.js` + `RunDetail.jsx` |
+| DIF-015b Gap 3 | Recorder selectorGenerator: iframe + shadow-DOM traversal | M | None — `recorder.js` only; zero overlap with DIF-005 |
+| UI-REFACTOR-001 | Extract `ConfigurablePanel` abstraction (DRY `QualityGatesPanel` + `WebVitalsBudgetsPanel`; unblocks SEC-005 / DIF-008 / SLO config UIs as one-file PRs) | S | None — only `frontend/src/components/project/*Panel.jsx`; zero overlap with DIF-005. Spec in `docs/roadmap-gaps-pr8.md`. |
 
-> Why these aren't promoted to "Current PR": AUTO-017 is the sprint target. AUTO-019 + DIF-005 are tracked here so they don't get lost — pick either up alongside AUTO-017 if a second agent has bandwidth.
+> Why these aren't promoted to "Current PR": DIF-005 is the sprint target. All three items are safe to pick up in parallel because they don't touch any file DIF-005 changes (`appSetup.js`, `RunDetail.jsx`, `public/trace-viewer/`). AUTO-019 is **not** listed here because it also edits `frontend/src/pages/RunDetail.jsx` — running it in parallel with DIF-005 would cause merge conflicts.
+>
+> **Other follow-up items identified during PR #8 review** (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) are tracked in `docs/roadmap-gaps-pr8.md`. Promote any of them here when the current sprint clears.
 
 ---
 
@@ -115,8 +126,8 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
+| AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | #8 |
 | DIF-015b Gap 2 | Recorder `selectorGenerator()` delegates to Playwright's own `InjectedScript`-based selector generator (same algorithm `codegen` uses) for ancestor scoring + machine-generated-testid demotion + shadow-DOM traversal + iframe locator chains. Loads `playwright-core/lib/server/injected/injectedScriptSource.js` best-effort at server start; falls back to a hand-rolled `data-testid → role+name → label → placeholder → CSS` chain (with the originally-scoped `el_`/`comp-`/`t-`+hex / all-numeric / long-unseparated noise-testid heuristic) when the bundle can't be resolved or its API surface drifts. New `backend/src/runner/playwrightSelectorGenerator.js` houses the loader + in-page bootstrap. | #4 |
 | AUTO-012 | SLA / quality gate enforcement — per-project `qualityGates` config, run-time evaluator, `gateResult` on runs + trigger responses, `QualityGatesPanel` under ProjectDetail → Settings, `<GateBadge>` on Runs list / ProjectDetail Runs tab / RunDetail header, inline violation panel on RunDetail, GH Actions + GitLab CI examples in `docs/guide/ci-cd-triggers.md` that exit non-zero on `gateResult.passed === false` | #2 |
-| INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | #1 |
 
 *Full completed list → ROADMAP.md § Completed Work*

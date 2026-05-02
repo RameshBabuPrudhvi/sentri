@@ -10,4 +10,6 @@ export { countActiveDials } from "./TestDials.jsx";
 export { default as DeleteProjectModal } from "./DeleteProjectModal.jsx";
 export { default as TablePagination, PAGE_SIZE } from "./TablePagination.jsx";
 export { StatusBadge as TestStatusBadge, ReviewBadge, ScenarioBadges } from "./TestBadges.jsx";
+export { default as BrowserBadge } from "./BrowserBadge.jsx";
+export { default as CopyButton } from "./CopyButton.jsx";
 

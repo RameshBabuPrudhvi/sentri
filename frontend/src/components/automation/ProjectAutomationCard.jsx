@@ -1,19 +1,24 @@
 /**
  * ProjectAutomationCard — expandable card for a single project's automation config.
  *
- * Shows CI/CD trigger token management. Future: scheduling (ENH-006),
- * notifications (ENH-017), monitoring mode (S4-06).
+ * Shows CI/CD trigger tokens, scheduled runs, quality gates (AUTO-012) and
+ * Web Vitals budgets (AUTO-017). All four belong here because they define
+ * *how* automated runs behave and what the CI/CD trigger response embeds
+ * (`gateResult`, `webVitalsResult`) — not what the tests *are* (which lives
+ * under ProjectDetail).
  *
- * @param {{ project: {id: string, name: string, url: string}, defaultExpanded?: boolean }} props
+ * @param {{ project: {id: string, name: string, url: string}, defaultExpanded?: boolean, canEdit?: boolean, onToast?: (msg: string, type?: string) => void }} props
  */
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, Globe, ExternalLink, Zap, Clock } from "lucide-react";
+import { ChevronDown, Globe, ExternalLink, Zap, Clock, ShieldCheck, Gauge } from "lucide-react";
 import TokenManager from "./TokenManager.jsx";
 import ScheduleManager from "./ScheduleManager.jsx";
+import QualityGatesPanel from "../project/QualityGatesPanel.jsx";
+import WebVitalsBudgetsPanel from "../project/WebVitalsBudgetsPanel.jsx";
 
-export default function ProjectAutomationCard({ project, defaultExpanded = false }) {
+export default function ProjectAutomationCard({ project, defaultExpanded = false, canEdit = false, onToast }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const navigate = useNavigate();
 
@@ -63,6 +68,28 @@ export default function ProjectAutomationCard({ project, defaultExpanded = false
               <span>Scheduled Runs</span>
             </div>
             <ScheduleManager projectId={project.id} />
+          </div>
+
+          {/* ── Quality Gates (AUTO-012) ──────────────────────────────── */}
+          {/* Gates the CI trigger response's `gateResult` — belongs here with */}
+          {/* the other "how runs behave" config rather than under ProjectDetail. */}
+          <div className="auto-card__section--bordered">
+            <div className="auto-card__section-title">
+              <ShieldCheck size={13} color="var(--accent)" />
+              <span>Quality Gates</span>
+            </div>
+            <QualityGatesPanel projectId={project.id} canEdit={canEdit} onToast={onToast} />
+          </div>
+
+          {/* ── Web Vitals Budgets (AUTO-017) ─────────────────────────── */}
+          {/* Gates the CI trigger response's `webVitalsResult` — colocated */}
+          {/* with Quality Gates so CI config is discoverable in one place. */}
+          <div className="auto-card__section--bordered">
+            <div className="auto-card__section-title">
+              <Gauge size={13} color="var(--accent)" />
+              <span>Web Vitals Budgets</span>
+            </div>
+            <WebVitalsBudgetsPanel projectId={project.id} canEdit={canEdit} onToast={onToast} />
           </div>
 
         </div>

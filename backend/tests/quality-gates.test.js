@@ -57,9 +57,29 @@ async function main() {
     assert.equal(out.res.status, 200);
     assert.equal(out.json.qualityGates, null);
 
-    // ── Evaluator: 90% pass rate vs minPassRate: 95 → violation ─────────
-    // Imported lazily so the test doesn't depend on runner boot order.
-    const { __evaluateQualityGatesForTest } = await import("../src/testRunner.js").catch(() => ({}));
+    // ── Web vitals budgets CRUD round-trip (AUTO-017) ──────────────────
+    // Pure HTTP tests against `/web-vitals-budgets` — must run unconditionally.
+    // Previously nested inside the quality-gates evaluator guard below, which
+    // silently skipped them whenever the dynamic import of `testRunner.js`
+    // failed (e.g. a missing transitive dependency in a future refactor).
+    out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "PATCH", token, body: { lcp: 2500, cls: 0.1 } });
+    assert.equal(out.res.status, 200);
+    assert.equal(out.json.webVitalsBudgets.lcp, 2500);
+
+    out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "GET", token });
+    assert.equal(out.res.status, 200);
+    assert.equal(out.json.webVitalsBudgets.cls, 0.1);
+
+    out = await t.req(base, `/api/v1/projects/${pid}/web-vitals-budgets`, { method: "DELETE", token });
+    assert.equal(out.res.status, 200);
+    assert.equal(out.json.webVitalsBudgets, null);
+
+    // ── Evaluators: import lazily so HTTP tests above don't depend on it ───
+    // Each evaluator is guarded independently — a future refactor that splits
+    // testRunner.js exports must not silently skip both suites.
+    const { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } = await import("../src/testRunner.js").catch(() => ({}));
+
+    // ── Quality gates evaluator: 90% pass rate vs minPassRate: 95 → violation ─
     if (typeof __evaluateQualityGatesForTest === "function") {
       const result = __evaluateQualityGatesForTest(
         { minPassRate: 95 },
@@ -114,8 +134,26 @@ async function main() {
       assert.equal(bounded.violations.length, 1, "1 flaky test of 1 → 100% flaky, exceeds 99% threshold");
       assert.equal(bounded.violations[0].rule, "maxFlakyPct");
       assert.equal(bounded.violations[0].actual, 100, "flakyPct must be bounded at 100, not 500");
-    } else {
-      console.warn("  ⚠️  __evaluateQualityGatesForTest not exported — evaluator branch skipped");
+    }
+
+    // ── Web vitals evaluator: LCP=3100 vs budget=2500 → violation (AUTO-017) ─
+    // Independently guarded from the quality-gates evaluator above so a future
+    // refactor that splits testRunner.js exports can't silently drop coverage.
+    if (typeof __evaluateWebVitalsBudgetsForTest === "function") {
+      const vitalsResult = __evaluateWebVitalsBudgetsForTest(
+        { lcp: 2500, cls: 0.1 },
+        { results: [{ testId: "t1", testName: "x", webVitals: { lcp: 3100, cls: 0.05, inp: 120, ttfb: 200 } }] }
+      );
+      assert.equal(vitalsResult.passed, false);
+      assert.equal(vitalsResult.violations[0].rule, "lcp");
+    }
+
+    if (typeof __evaluateQualityGatesForTest !== "function" || typeof __evaluateWebVitalsBudgetsForTest !== "function") {
+      const missing = [
+        typeof __evaluateQualityGatesForTest    !== "function" ? "__evaluateQualityGatesForTest"    : null,
+        typeof __evaluateWebVitalsBudgetsForTest !== "function" ? "__evaluateWebVitalsBudgetsForTest" : null,
+      ].filter(Boolean).join(" + ");
+      console.warn(`  ⚠️  ${missing} not exported — evaluator branch(es) skipped (CRUD round-trips above still ran)`);
     }
   } finally {
     env.restore();
