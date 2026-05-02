@@ -10,7 +10,7 @@
 
 ## 🚨 10-Day Production Readiness Plan
 
-> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; **`DIF-015b Gap 2` ✅ shipped in PR #4** — recorder now delegates to Playwright's own `InjectedScript`-based selector generator with a hand-rolled fallback (including the originally-scoped noise-testid heuristic). Every 🟡 High item in Phase 2 is also already ✅. The plan below is sequenced so the next few days clear Golden E2E and AUTO-017, leaving slack for review-thread cleanup and a stabilisation window before tag.
+> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; `AUTO-019` (run diffing) is the current sprint target per `## ▶ Current PR` above.
 
 | Day | Focus | Owner |
 |---|---|---|
@@ -18,11 +18,11 @@
 | 2–3 | Resolve **all open PR review threads** (start with `permissions.json` line numbers off by 5) | All |
 | 3–5 | Run **Golden E2E Happy Path** (`QA.md:240-340`, 51 steps) on Chrome + at least one other browser | QA |
 | 5–6 | **Fix any Blocker / Critical bugs** found during the QA pass | All |
-| 6–8 | **AUTO-017** — Web Vitals performance budgets (Effort: M) | Backend |
-| 7–9 | (optional) **DIF-005** — Embedded Playwright trace viewer (Effort: M) | Backend |
+| 6–8 | ~~AUTO-017 — Web Vitals performance budgets~~ ✅ shipped (PR #8) | Backend |
+| 7–9 | ~~DIF-005 — Embedded Playwright trace viewer~~ ✅ shipped (PR #9) | Backend |
 | 8–10 | Stabilisation window: CI green ≥ 2 days on `main`; cut release tag | All |
 
-**Explicitly deferred (do not ship in this window):** SEC-004 (MFA), SEC-005 (SSO), DIF-008 / DIF-009 / DIF-010 / DIF-012, all Phase 4 items except AUTO-017. Track post-launch on customer demand.
+**Explicitly deferred (do not ship in this window):** SEC-004 (MFA), SEC-005 (SSO), DIF-008 / DIF-009 / DIF-010 / DIF-012, all Phase 4 items except AUTO-019 (now in-flight as the current sprint target). Track post-launch on customer demand.
 
 ---
 
