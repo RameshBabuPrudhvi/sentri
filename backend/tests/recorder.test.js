@@ -130,8 +130,12 @@ test("RECORDER_SCRIPT primary path delegates to Playwright for shadow-DOM select
   // but the noise-testid heuristic in it is out of scope for shadow DOM —
   // just assert the delegation is first in the decision chain.
   const pwIdx = scriptBody.indexOf("window.__playwrightSelector");
-  const fallbackIdx = scriptBody.indexOf("data-testid");
-  assert.ok(pwIdx < fallbackIdx, "Playwright delegation must run before the hand-rolled fallback");
+  // Anchor on the fallback's distinctive noise-testid branch rather than the
+  // bare `data-testid` substring — the latter also appears in earlier
+  // event-handler `closest("..., [data-testid], ...")` calls that run before
+  // selectorGenerator, which would make this assertion spuriously fail.
+  const fallbackIdx = scriptBody.indexOf("if (testId && !isNoisyTestId(testId))");
+  assert.ok(pwIdx >= 0 && fallbackIdx > pwIdx, "Playwright delegation must run before the hand-rolled fallback");
 });
 
 // ── DIF-015c Gap 1 (part 2) — opt-in shortcut capture budget ──────────
