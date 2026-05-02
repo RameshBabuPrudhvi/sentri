@@ -25,12 +25,21 @@ import { writeArtifactBuffer } from "../utils/objectStorage.js";
 // external CDN at test time. Falls back to `null` if the package isn't installed
 // (e.g. minimal Docker builds) — the init-script registration and capture both
 // no-op in that case, returning the empty-metrics shape rather than crashing.
+//
+// NOTE: we can't `req.resolve("web-vitals/dist/web-vitals.iife.js")` directly
+// because `web-vitals@4.x`'s `package.json` declares an `exports` field that
+// only exposes `.` and `./attribution` — Node 20 strictly enforces this and
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED. Instead we resolve the package's
+// `package.json` (which `exports` always exposes by convention) and derive the
+// IIFE path from the package root. This layout is stable across web-vitals
+// v3 / v4 / v5 — `dist/web-vitals.iife.js` is the canonical IIFE bundle.
 let WEB_VITALS_IIFE = null;
 try {
   const req = createRequire(import.meta.url);
-  const iifePath = req.resolve("web-vitals/dist/web-vitals.iife.js");
+  const pkgJsonPath = req.resolve("web-vitals/package.json");
+  const iifePath = path.join(path.dirname(pkgJsonPath), "dist", "web-vitals.iife.js");
   WEB_VITALS_IIFE = fs.readFileSync(iifePath, "utf8");
-} catch { /* package not installed — web-vitals helpers will no-op */ }
+} catch { /* package not installed or layout changed — web-vitals helpers will no-op */ }
 
 // AUTO-017.1: Bootstrap that runs *after* the IIFE in the same init-script so
 // `window.webVitals` is already defined. Registers observers on every new
