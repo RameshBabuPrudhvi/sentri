@@ -248,14 +248,23 @@ router.get("/projects/:id/runs", (req, res) => {
 
 
 router.get("/runs/:runId/compare/:otherRunId", (req, res) => {
-  const baseRun = runRepo.getById(req.params.runId);
-  const otherRun = runRepo.getById(req.params.otherRunId);
-  if (!baseRun || !otherRun) return res.status(404).json({ error: "not found" });
+  const rawBaseRun = runRepo.getById(req.params.runId);
+  const rawOtherRun = runRepo.getById(req.params.otherRunId);
+  if (!rawBaseRun || !rawOtherRun) return res.status(404).json({ error: "not found" });
 
   // ACL-001: both runs must belong to projects in the caller's workspace.
-  const baseProject = projectRepo.getByIdInWorkspace(baseRun.projectId, req.workspaceId);
-  const otherProject = projectRepo.getByIdInWorkspace(otherRun.projectId, req.workspaceId);
+  const baseProject = projectRepo.getByIdInWorkspace(rawBaseRun.projectId, req.workspaceId);
+  const otherProject = projectRepo.getByIdInWorkspace(rawOtherRun.projectId, req.workspaceId);
   if (!baseProject || !otherProject) return res.status(404).json({ error: "not found" });
+
+  // Sign artifact paths up-front and build diffs from the signed copies so
+  // that nested `current` / `previous` result objects in `diffs[]` carry
+  // the same HMAC-signed `screenshotPath` / `videoPath` / `visualDiff.*Path`
+  // URLs as the top-level `baseRun` / `otherRun`. Without this, consumers
+  // loading artifact images via `diffs[i].current.screenshotPath` would hit
+  // 401 from the artifact-token validator.
+  const baseRun = signRunArtifacts(rawBaseRun);
+  const otherRun = signRunArtifacts(rawOtherRun);
 
   const baseResults = Array.isArray(baseRun.results) ? baseRun.results : [];
   const otherResults = Array.isArray(otherRun.results) ? otherRun.results : [];
@@ -296,8 +305,8 @@ router.get("/runs/:runId/compare/:otherRunId", (req, res) => {
   }, { total: 0, flipped: 0, added: 0, removed: 0, unchanged: 0 });
 
   res.json({
-    baseRun: signRunArtifacts(baseRun),
-    otherRun: signRunArtifacts(otherRun),
+    baseRun,
+    otherRun,
     summary,
     diffs,
   });
