@@ -59,7 +59,7 @@ async function main() {
 
     // ── Evaluator: 90% pass rate vs minPassRate: 95 → violation ─────────
     // Imported lazily so the test doesn't depend on runner boot order.
-    const { __evaluateQualityGatesForTest } = await import("../src/testRunner.js").catch(() => ({}));
+    const { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } = await import("../src/testRunner.js").catch(() => ({}));
     if (typeof __evaluateQualityGatesForTest === "function") {
       const result = __evaluateQualityGatesForTest(
         { minPassRate: 95 },
