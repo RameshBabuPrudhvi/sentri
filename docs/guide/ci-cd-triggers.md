@@ -276,6 +276,10 @@ The CI examples above already enforce this: when `webVitalsResult.passed === fal
 Budgets compose with quality gates — a run can pass functional gates (`gateResult.passed === true`) but still fail on performance (`webVitalsResult.passed === false`). Both fields are independent; CI should check both.
 :::
 
+::: warning INP can be `null` for non-interactive tests
+LCP, CLS, and TTFB are recorded reliably for every captured page because their `PerformanceObserver` reads buffered entries that the browser has already collected by the time the `web-vitals` library is injected. **INP** (Interaction to Next Paint), however, is only emitted after a user interaction (click / keypress / tap) occurs *during* the observation window — so tests that end on an assertion, navigation, or `waitForLoadState` without a final interaction will record `inp: null`. This is a Playwright-environment characteristic, not a Sentri bug. The evaluator skips `null` metrics (treats them as "not measured" rather than "0"), so an `inp` budget on an assertion-ending test is silently ignored rather than falsely passing or failing. If you need INP enforcement, ensure the test has at least one interaction (e.g. `page.click(...)`) before its final assertion.
+:::
+
 ## Security Notes
 
 - Tokens are stored as **SHA-256 hashes** — the plaintext is never persisted.
