@@ -300,6 +300,7 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 ### 12. Run results, artifacts & reports
 30. On RunDetail verify: per-test status, per-step screenshots, per-step timing, video, network logs, browser badge, parallelism used.
 31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open. **🔍 Open Trace** (DIF-005, #9): on a run with a captured trace, click the **Open Trace** action on RunDetail → a new browser tab opens at `/trace-viewer/?trace=<signed-url>` and loads Playwright's embedded trace viewer with the run's trace pre-loaded; verify the viewer's timeline / actions / network panels render. The Trace ZIP download link continues to work alongside as a fallback (served from `backend/public/trace-viewer/` via `backend/src/middleware/appSetup.js`).
+31a. **Compare runs** (AUTO-019, #10) — on a project with ≥ 2 completed test runs, open the newer RunDetail and click the **Compare** action in the header. The page renders a comparison card with summary chips (`Flipped: N · Added: N · Removed: N · Unchanged: N`) and per-test diff rows showing each test's `currentStatus` vs `previousStatus` with a `flipped` / `added` / `removed` / `unchanged` change-type badge (`backend/src/routes/runs.js` `GET /api/v1/runs/:runId/compare/:otherRunId`; `frontend/src/components/run/RunCompareView.jsx`). When > 1 prior test run exists, a `Compare against:` `<select>` picker appears above the card — switching the picker re-fetches the diff against the chosen run. The default target is the chronological predecessor (run immediately before the current one). The Compare action is suppressed for crawl and generate runs. Negative checks: outsider hitting `/api/v1/runs/:runId/compare/:otherRunId` for another workspace's runs → 404; unknown `otherRunId` → 404; no auth token → 401.
 32. Open **`/reports`** page → renders run/test reports for the workspace.
 33. From Dashboard, export the **executive PDF report** → file downloads, opens, contains pass-rate / defect breakdown / trends matching on-screen widgets.
 34. **Out of scope (planned, not shipped):** public/shareable report links. Do not test these. Standalone Playwright project export (`DIF-006`) and the embedded Playwright trace viewer (`DIF-005`) **are** shipped — DIF-006 has its own line item under "Export & traceability" below; DIF-005 is verified inline at step 31 above.
@@ -1211,6 +1212,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Test Code Editing (Steps ↔ Source)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Automation (trigger tokens + schedules) | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Quality Gates (AUTO-012 — CRUD, evaluator, trigger response)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Run comparison (AUTO-019 — Compare action, prior-run picker, summary + diff rows)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Visual Testing | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Dashboard | ⬜ | ⬜ | ⬜ | ⬜ | |
 | AI Chat + Chat History | ⬜ | ⬜ | ⬜ | ⬜ | |

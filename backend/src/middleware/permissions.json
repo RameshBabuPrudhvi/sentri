@@ -55,6 +55,7 @@
     "GET /api/v1/dashboard",
     "GET /api/v1/runs",
     "GET /api/v1/runs/:runId",
+    "GET /api/v1/runs/:runId/compare/:otherRunId",
     "GET /api/v1/projects",
     "GET /api/v1/projects/:id",
     "GET /api/v1/projects/:id/tests",

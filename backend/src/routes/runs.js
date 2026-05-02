@@ -246,6 +246,72 @@ router.get("/projects/:id/runs", (req, res) => {
   res.json(runs.map(signRunArtifacts));
 });
 
+
+router.get("/runs/:runId/compare/:otherRunId", (req, res) => {
+  const rawBaseRun = runRepo.getById(req.params.runId);
+  const rawOtherRun = runRepo.getById(req.params.otherRunId);
+  if (!rawBaseRun || !rawOtherRun) return res.status(404).json({ error: "not found" });
+
+  // ACL-001: both runs must belong to projects in the caller's workspace.
+  const baseProject = projectRepo.getByIdInWorkspace(rawBaseRun.projectId, req.workspaceId);
+  const otherProject = projectRepo.getByIdInWorkspace(rawOtherRun.projectId, req.workspaceId);
+  if (!baseProject || !otherProject) return res.status(404).json({ error: "not found" });
+
+  // Sign artifact paths up-front and build diffs from the signed copies so
+  // that nested `current` / `previous` result objects in `diffs[]` carry
+  // the same HMAC-signed `screenshotPath` / `videoPath` / `visualDiff.*Path`
+  // URLs as the top-level `baseRun` / `otherRun`. Without this, consumers
+  // loading artifact images via `diffs[i].current.screenshotPath` would hit
+  // 401 from the artifact-token validator.
+  const baseRun = signRunArtifacts(rawBaseRun);
+  const otherRun = signRunArtifacts(rawOtherRun);
+
+  const baseResults = Array.isArray(baseRun.results) ? baseRun.results : [];
+  const otherResults = Array.isArray(otherRun.results) ? otherRun.results : [];
+
+  const baseById = new Map(baseResults.map((r) => [r.testId, r]));
+  const otherById = new Map(otherResults.map((r) => [r.testId, r]));
+  const allTestIds = new Set([...baseById.keys(), ...otherById.keys()]);
+
+  const diffs = Array.from(allTestIds).map((testId) => {
+    const current = baseById.get(testId) || null;
+    const previous = otherById.get(testId) || null;
+    const currentStatus = current?.status || null;
+    const previousStatus = previous?.status || null;
+
+    let changeType = "unchanged";
+    if (current && !previous) changeType = "added";
+    else if (!current && previous) changeType = "removed";
+    else if (currentStatus !== previousStatus) changeType = "flipped";
+
+    return {
+      testId,
+      testName: current?.testName || previous?.testName || null,
+      currentStatus,
+      previousStatus,
+      changeType,
+      current,
+      previous,
+    };
+  });
+
+  const summary = diffs.reduce((acc, item) => {
+    acc.total += 1;
+    if (item.changeType === "flipped") acc.flipped += 1;
+    if (item.changeType === "added") acc.added += 1;
+    if (item.changeType === "removed") acc.removed += 1;
+    if (item.changeType === "unchanged") acc.unchanged += 1;
+    return acc;
+  }, { total: 0, flipped: 0, added: 0, removed: 0, unchanged: 0 });
+
+  res.json({
+    baseRun,
+    otherRun,
+    summary,
+    diffs,
+  });
+});
+
 router.get("/runs/:runId", (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });

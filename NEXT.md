@@ -10,7 +10,7 @@
 
 ## 🚨 10-Day Production Readiness Plan
 
-> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; `AUTO-019` (run diffing) is the current sprint target per `## ▶ Current PR` above.
+> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer); **`AUTO-019` ✅ shipped in PR #10** (per-test run diffing). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; the combined recorder PR (DIF-015b Gap 3 + DIF-015c Gap 1) is now the current sprint target per `## ▶ Current PR` above.
 
 | Day | Focus | Owner |
 |---|---|---|
@@ -26,31 +26,47 @@
 
 ---
 
-## ▶ Current PR — AUTO-019
+## ▶ Current PR — DIF-015b Gap 3 + DIF-015c Gap 1
 
-**Title:** Run diffing: per-test comparison across runs
-**Branch:** `feat/AUTO-019-run-diffing`
-**Effort:** M | **Priority:** 🔵 Medium
-**All dependencies:** None
+**Title:** Recorder: iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts
+**Branch:** `feat/recorder-iframe-shadow-paste-shortcuts`
+**Effort:** M | **Priority:** 🟡 High
+**All dependencies:** PR #4 merged (shared `backend/src/runner/recorder.js`)
 
-> DIF-005 (Embedded Playwright trace viewer) ✅ shipped in PR #9 — see Recently completed below. Promoting AUTO-019 from the queue per `NEXT.md` rotation rule.
+> AUTO-019 (per-test run diffing) ✅ shipped in PR #10 — see Recently completed below. Promoting the combined recorder PR from the queue per `NEXT.md` rotation rule.
 
-Compare two runs' per-test results side-by-side and highlight tests that flipped status (passed → failed, failed → passed, newly added, removed). Surface as a "Compare" action on the Run Detail page that opens a diff view against the previous run by default, with a picker to choose any prior run.
+Bundled into a single PR because both items touch `backend/src/runner/recorder.js` and `backend/tests/recorder.test.js`, and both improve replay fidelity of recorded actions — shipping together avoids a second review cycle on the same file and a merge-conflict window between two back-to-back recorder PRs. See queue entry below (now also at position 1 for historical traceability) for the full A/B/C breakdown.
 
-**Files:** `backend/src/routes/runs.js` (new `GET /runs/:runId/compare/:otherRunId`) · `frontend/src/pages/RunDetail.jsx` · new `frontend/src/components/run/RunCompareView.jsx`
+**Files:** `backend/src/runner/recorder.js` · `frontend/src/components/run/RecorderModal.jsx` · `backend/tests/recorder.test.js`
 
 ### PR checklist
 
-- [ ] Update `AUTO-019` status in `ROADMAP.md` to ✅ once shipped; decrement the `Remaining:` count in the fast-path section
-- [ ] Update this file: move AUTO-019 to "Recently completed", promote the combined `DIF-015b Gap 3 + DIF-015c Gap 1` recorder PR to Current PR, shift queue items up and add a new item 4
+- [ ] Update the recorder item status in `ROADMAP.md` (DIF-015b Gap 3 + DIF-015c Gap 1 rows) to ✅ once shipped
+- [ ] Update this file: move the recorder PR to "Recently completed", promote `UI-REFACTOR-001` (or the next highest-priority item from `docs/roadmap-gaps-pr8.md`) to Current PR, shift queue items up and add a new item 4
 - [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
-- [ ] Add unit/integration tests for the new `GET /runs/:runId/compare/:otherRunId` endpoint (auth, 404 on unknown run, diff correctness across flipped/added/removed statuses); register any new test files in `backend/tests/run-tests.js`
+- [ ] Fixture coverage: iframe → `frameLocator(...)`, shadow root → `>> shadowRoot >>` chain (or `InjectedScript` already handles), paste → single `fill`, shortcut toggle on → `Ctrl+A` captured; register any new test files in `backend/tests/run-tests.js`
 
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · DIF-015b Gap 3 + DIF-015c Gap 1 — Recorder: iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts
+### 2 · UI-REFACTOR-001 — Extract `ConfigurablePanel` abstraction
+**Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** none (promoted from slot 3 after AUTO-019 shipped)
+
+DRY up `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) into a shared `ConfigurablePanel` component so the next SLO-style config UIs (SEC-005 SSO config, DIF-008 Jira integration, future SLO panels) can ship as one-file PRs instead of copy-pasting the whole form scaffold. Full spec lives in `docs/roadmap-gaps-pr8.md`.
+
+**Files:** `frontend/src/components/project/ConfigurablePanel.jsx` (new) · `frontend/src/components/project/QualityGatesPanel.jsx` · `frontend/src/components/project/WebVitalsBudgetsPanel.jsx`
+
+### 3 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
+**Effort:** — | **Priority:** — | **Dependencies:** —
+
+Slot freed by AUTO-019 shipping and UI-REFACTOR-001 being promoted to slot 2. Next agent: pick the highest-priority unshipped item from `docs/roadmap-gaps-pr8.md` (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) or the next ROADMAP.md item with `Dependencies: none` and no file overlap with slots 1–2.
+
+### 4 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
+
+<!-- Original recorder-combined spec preserved below for historical traceability during this rotation. Remove on the next rotation. -->
+
+### Reference: combined recorder PR spec (now promoted to Current PR)
 **Effort:** M | **Priority:** 🟡 High | **Dependencies:** PR #4 merged (shared `backend/src/runner/recorder.js`)
 
 Bundled into a single PR because both items touch `backend/src/runner/recorder.js` and `backend/tests/recorder.test.js`, and both improve replay fidelity of recorded actions — shipping together avoids a second review cycle on the same file and a merge-conflict window between two back-to-back recorder PRs.
@@ -151,8 +167,8 @@ These can be picked up by a second engineer alongside AUTO-019 without file conf
 
 | ID | Title | PR |
 |----|-------|----|
+| AUTO-019 | Run diffing: per-test comparison across runs — new `GET /api/v1/runs/:runId/compare/:otherRunId` (`backend/src/routes/runs.js`) computes per-test diffs (`flipped`/`added`/`removed`/`unchanged`) under workspace ACL; Run Detail adds a **Compare** action with a prior-run picker that loads `RunCompareView` (`frontend/src/components/run/RunCompareView.jsx`) showing summary chips + per-test status badges. Integration test at `backend/tests/run-compare.test.js` covers happy path, 404, 401 unauth, and cross-workspace ACL. | #10 |
 | DIF-005 | Embedded Playwright trace viewer — install-time `postinstall` copier in `backend/scripts/copy-trace-viewer.js` resolves Playwright's prebuilt viewer (`playwright-core/lib/vite/traceViewer/` or `@playwright/test/lib/trace/viewer/`) and copies it to `backend/public/trace-viewer/`; `backend/src/middleware/appSetup.js` mounts it at `/trace-viewer/` with `Service-Worker-Allowed` for `sw.bundle.js` and a 5-minute cache. Run Detail adds a "🔍 Open Trace" action that opens `/trace-viewer/?trace=<signed-url>` in a new tab; the existing Trace ZIP download is preserved as fallback. Smoke test in `backend/tests/trace-viewer-static.test.js` asserts 200 when the bundle is present and 404 when removed. | #9 |
 | AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | #8 |
-| DIF-015b Gap 2 | Recorder `selectorGenerator()` delegates to Playwright's own `InjectedScript`-based selector generator (same algorithm `codegen` uses) for ancestor scoring + machine-generated-testid demotion + shadow-DOM traversal + iframe locator chains. Loads `playwright-core/lib/server/injected/injectedScriptSource.js` best-effort at server start; falls back to a hand-rolled `data-testid → role+name → label → placeholder → CSS` chain (with the originally-scoped `el_`/`comp-`/`t-`+hex / all-numeric / long-unseparated noise-testid heuristic) when the bundle can't be resolved or its API surface drifts. New `backend/src/runner/playwrightSelectorGenerator.js` houses the loader + in-page bootstrap. | #4 |
 
 *Full completed list → ROADMAP.md § Completed Work*

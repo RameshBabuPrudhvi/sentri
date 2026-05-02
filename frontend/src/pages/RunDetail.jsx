@@ -26,6 +26,7 @@ import { useNotifications } from "../context/NotificationContext.jsx";
 import CrawlView from "../components/crawl/CrawlView";
 import GenerateView from "../components/generate/GenerateView";
 import TestRunView from "../components/run/TestRunView";
+import RunCompareView from "../components/run/RunCompareView.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
@@ -128,6 +129,10 @@ export default function RunDetail() {
   const [llmTokens, setLlmTokens] = useState("");
   const [aborting, setAborting] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [compareData, setCompareData] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState(null);
+  const [priorRuns, setPriorRuns] = useState([]);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -158,6 +163,53 @@ export default function RunDetail() {
   );
 
   const fetchRun = useCallback(() => invalidateRunCache(runId), [runId]);
+
+  const runCompareAgainst = useCallback(async (otherRunId) => {
+    if (!run?.id || !otherRunId) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const diff = await api.getRunCompare(run.id, otherRunId);
+      setCompareData(diff);
+    } catch (err) {
+      setCompareError(err);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [run]);
+
+  const handleCompare = useCallback(async () => {
+    if (!run?.projectId) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const runs = await api.getRuns(run.projectId);
+      // AUTO-019: populate picker with all other test runs for this project
+      // so the user can choose any prior run, not just the most recent one.
+      // `runRepo.getByProjectId` returns runs sorted newest-first
+      // (`ORDER BY startedAt DESC` — see backend/src/database/repositories/runRepo.js:179),
+      // so the chronological predecessor of the current run is the next entry
+      // in the list AFTER the current run's index. Default to that rather than
+      // `others[0]` (which is just the newest other run, and is only the
+      // chronological predecessor when the current run is itself the newest).
+      const sortedRuns = (runs || []).filter((r) => r.type === "test_run");
+      const others = sortedRuns.filter((r) => r.id !== run.id);
+      setPriorRuns(others);
+      const idx = sortedRuns.findIndex((r) => r.id === run.id);
+      const predecessor = idx >= 0 && idx + 1 < sortedRuns.length ? sortedRuns[idx + 1] : null;
+      const previous = predecessor || others[0] || null;
+      if (!previous) {
+        setCompareData({ summary: { flipped: 0, added: 0, removed: 0, unchanged: 0 }, diffs: [] });
+        return;
+      }
+      const diff = await api.getRunCompare(run.id, previous.id);
+      setCompareData(diff);
+    } catch (err) {
+      setCompareError(err);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [run]);
 
   const handleAbort = useCallback(async () => {
     if (aborting) return;
@@ -216,6 +268,12 @@ export default function RunDetail() {
     setFrames([]);
     setLlmTokens("");
     setInitialStatus(undefined);
+    // AUTO-019: also clear comparison state so a stale diff from the
+    // previously-viewed run doesn't render on the new run's page.
+    setCompareData(null);
+    setCompareLoading(false);
+    setCompareError(null);
+    setPriorRuns([]);
   }, [runId]);
 
   // SSE — receives live updates while the run is active.
@@ -471,6 +529,9 @@ export default function RunDetail() {
                 </a>
               </>
             )}
+            {!isCrawl && !isGenerate && (
+              <button className="btn btn-ghost btn-sm" onClick={handleCompare}>Compare</button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={fetchRun}>
               <RefreshCw size={12} /> Refresh
             </button>
@@ -508,6 +569,32 @@ export default function RunDetail() {
           )}
         </div>
       </div>
+
+      {!isCrawl && !isGenerate && (compareData || compareLoading || compareError) && (
+        <>
+          {priorRuns.length > 1 && (
+            <div className="card" style={{ padding: 10, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <label htmlFor="compare-prior-run" style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+                Compare against:
+              </label>
+              <select
+                id="compare-prior-run"
+                className="input"
+                style={{ fontSize: "0.82rem", padding: "4px 8px" }}
+                value={compareData?.otherRun?.id || priorRuns[0]?.id || ""}
+                onChange={(e) => runCompareAgainst(e.target.value)}
+              >
+                {priorRuns.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.id.slice(0, 8)} — {r.startedAt ? new Date(r.startedAt).toLocaleString() : "—"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <RunCompareView data={compareData} loading={compareLoading} error={compareError} />
+        </>
+      )}
 
       {/* ── Pass rate bar (test runs only) ─────────────────────────────── */}
       {!isCrawl && total > 0 && (

@@ -308,6 +308,7 @@ export const api = {
     req("GET", `/projects/${id}/runs?page=${page}&pageSize=${pageSize}`),
   /** @param {string} runId - Get full run detail with per-test results. */
   getRun:    (runId) => req("GET", `/runs/${runId}`),
+  getRunCompare: (runId, otherRunId) => req("GET", `/runs/${runId}/compare/${otherRunId}`),
   /** @param {string} runId - Abort a running crawl or test run. */
   abortRun:  (runId) => req("POST", `/runs/${runId}/abort`),
 
