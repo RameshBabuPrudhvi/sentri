@@ -571,9 +571,14 @@ app.use("/artifacts", (req, res, next) => {
 //       Standard SPA image/style needs.
 //
 // `Service-Worker-Allowed: /trace-viewer/` is required so the viewer's SW can
-// claim scope above its own script path (the Playwright SW ships at
-// `/trace-viewer/sw.bundle.js` but controls the whole `/trace-viewer/` scope).
+// claim scope above its own script path. The SW ships at `sw.bundle.js` in
+// current Playwright versions, but the filename is not covered by semver —
+// `TRACE_VIEWER_SW_PATTERN` matches any `sw*.js` at the bundle root so a
+// Playwright rename (e.g. `sw.js` or a hashed `sw.<hash>.js`) still gets the
+// `Service-Worker-Allowed` header and no-cache treatment instead of silently
+// falling back to the default 5-min cache.
 const TRACE_VIEWER_DIR = path.join(__dirname, "..", "..", "public", "trace-viewer");
+const TRACE_VIEWER_SW_PATTERN = /(?:^|[\\/])sw[^\\/]*\.js$/;
 
 const _traceViewerConnectSrc = ["'self'", ..._s3ConnectSrc].join(" ");
 const TRACE_VIEWER_CSP = [
@@ -592,10 +597,11 @@ const TRACE_VIEWER_CSP = [
 app.use("/trace-viewer", express.static(TRACE_VIEWER_DIR, {
   fallthrough: true,
   setHeaders(res, filePath) {
-    // Scope the viewer's service worker above its own script path.
-    // Playwright ships the SW at `/trace-viewer/sw.bundle.js` but it needs to
-    // control the whole `/trace-viewer/` directory for routing.
-    if (filePath.endsWith("sw.bundle.js")) {
+    // Scope the viewer's service worker above its own script path. Playwright
+    // ships the SW as `sw.bundle.js` today but the name isn't part of its
+    // public API — match any `sw*.js` at the bundle root (see
+    // TRACE_VIEWER_SW_PATTERN).
+    if (TRACE_VIEWER_SW_PATTERN.test(filePath)) {
       res.setHeader("Service-Worker-Allowed", "/trace-viewer/");
       // Service workers should revalidate on every load to avoid stale-worker
       // bugs. The rest of the bundle gets the 5-min cache below.
