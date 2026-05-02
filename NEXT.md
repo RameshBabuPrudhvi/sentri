@@ -10,7 +10,7 @@
 
 ## 🚨 10-Day Production Readiness Plan
 
-> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer); **`AUTO-019` ✅ shipped in PR #10** (per-test run diffing). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; the combined recorder PR (DIF-015b Gap 3 + DIF-015c Gap 1) is now the current sprint target per `## ▶ Current PR` above.
+> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer); **`AUTO-019` ✅ shipped in PR #10** (per-test run diffing); **combined recorder PR `DIF-015b Gap 3` + `DIF-015c Gap 1` ✅ shipped in PR #11** (iframe `frameLocator` emission, shadow-DOM via Playwright's InjectedScript, paste-as-single-`fill`, opt-in `shortcutCaptureBudget`). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; `UI-REFACTOR-001` is now the current sprint target per `## ▶ Current PR` below.
 
 | Day | Focus | Owner |
 |---|---|---|
@@ -26,41 +26,39 @@
 
 ---
 
-## ▶ Current PR — DIF-015b Gap 3 + DIF-015c Gap 1
+## ▶ Current PR — UI-REFACTOR-001
 
-**Title:** Recorder: iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts
-**Branch:** `feat/recorder-iframe-shadow-paste-shortcuts`
-**Effort:** M | **Priority:** 🟡 High
-**All dependencies:** PR #4 merged (shared `backend/src/runner/recorder.js`)
+**Title:** Extract `ConfigurablePanel` abstraction from `QualityGatesPanel` + `WebVitalsBudgetsPanel`
+**Branch:** `feat/configurable-panel-abstraction`
+**Effort:** S | **Priority:** 🔵 Medium
+**All dependencies:** none (promoted per rotation rule after PR #11 shipped the combined recorder PR)
 
-> AUTO-019 (per-test run diffing) ✅ shipped in PR #10 — see Recently completed below. Promoting the combined recorder PR from the queue per `NEXT.md` rotation rule.
-
-Bundled into a single PR because both items touch `backend/src/runner/recorder.js` and `backend/tests/recorder.test.js`, and both improve replay fidelity of recorded actions — shipping together avoids a second review cycle on the same file and a merge-conflict window between two back-to-back recorder PRs. See queue entry below (now also at position 1 for historical traceability) for the full A/B/C breakdown.
-
-**Files:** `backend/src/runner/recorder.js` · `frontend/src/components/run/RecorderModal.jsx` · `backend/tests/recorder.test.js`
-
-### PR checklist
-
-- [ ] Update the recorder item status in `ROADMAP.md` (DIF-015b Gap 3 + DIF-015c Gap 1 rows) to ✅ once shipped
-- [ ] Update this file: move the recorder PR to "Recently completed", promote `UI-REFACTOR-001` (or the next highest-priority item from `docs/roadmap-gaps-pr8.md`) to Current PR, shift queue items up and add a new item 4
-- [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
-- [ ] Fixture coverage: iframe → `frameLocator(...)`, shadow root → `>> shadowRoot >>` chain (or `InjectedScript` already handles), paste → single `fill`, shortcut toggle on → `Ctrl+A` captured; register any new test files in `backend/tests/run-tests.js`
-
----
-
-## ⏭ Queue (next 3 PRs after current)
-
-### 2 · UI-REFACTOR-001 — Extract `ConfigurablePanel` abstraction
-**Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** none (promoted from slot 3 after AUTO-019 shipped)
+> Combined recorder PR (`DIF-015b Gap 3` + `DIF-015c Gap 1`) ✅ shipped in PR #11 — see Recently completed below. Promoting `UI-REFACTOR-001` from queue slot 2 per `NEXT.md` rotation rule.
 
 DRY up `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) into a shared `ConfigurablePanel` component so the next SLO-style config UIs (SEC-005 SSO config, DIF-008 Jira integration, future SLO panels) can ship as one-file PRs instead of copy-pasting the whole form scaffold. Full spec lives in `docs/roadmap-gaps-pr8.md`.
 
 **Files:** `frontend/src/components/project/ConfigurablePanel.jsx` (new) · `frontend/src/components/project/QualityGatesPanel.jsx` · `frontend/src/components/project/WebVitalsBudgetsPanel.jsx`
 
+### PR checklist
+
+- [ ] Update the `UI-REFACTOR-001` entry in `docs/roadmap-gaps-pr8.md` to ✅ once shipped
+- [ ] Update this file: move `UI-REFACTOR-001` to "Recently completed", promote the next queue item (slot 2 → Current PR), shift queue items up
+- [ ] Add entry to `docs/changelog.md` under `## [Unreleased]`
+- [ ] Verify both existing panels render identically before/after the refactor (visual regression on the `Settings` tab of any project with gates + vitals configured)
+
+---
+
+## ⏭ Queue (next 3 PRs after current)
+
+### 2 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
+**Effort:** — | **Priority:** — | **Dependencies:** —
+
+Slot freed by `UI-REFACTOR-001` promoting to Current PR after the combined recorder PR shipped in PR #11. Next agent: pick the highest-priority unshipped item from `docs/roadmap-gaps-pr8.md` (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) or the next ROADMAP.md item with `Dependencies: none` and no file overlap with slot 1.
+
 ### 3 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
 **Effort:** — | **Priority:** — | **Dependencies:** —
 
-Slot freed by AUTO-019 shipping and UI-REFACTOR-001 being promoted to slot 2. Next agent: pick the highest-priority unshipped item from `docs/roadmap-gaps-pr8.md` (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) or the next ROADMAP.md item with `Dependencies: none` and no file overlap with slots 1–2.
+Slot freed by the PR #11 rotation. Same selection criteria as slot 2 above — pick the highest-priority unshipped item with no file overlap with slots 1–2.
 
 ### 4 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
 
@@ -167,6 +165,7 @@ These can be picked up by a second engineer alongside AUTO-019 without file conf
 
 | ID | Title | PR |
 |----|-------|----|
+| DIF-015b Gap 3 + DIF-015c Gap 1 | Combined recorder PR — iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts. `actionsToPlaywrightCode` emits `base.frameLocator('iframe[src*=<frameUrl>]').first()` for actions with a captured `frameUrl` (replaces the old `ensureFrame(...)` polling helper). Shadow-DOM traversal is covered by Playwright's InjectedScript on the primary `window.__playwrightSelector` delegation path shipped in PR #4 (same algorithm `codegen` uses — walks shadow boundaries via `>> ` piercing selectors). New `paste` listener on `<input>`/`<textarea>` emits a single `safeFill` with the clipboard text (500-char truncated) and cancels any pending input-debounce timer so the fill isn't double-emitted. Opt-in shortcut capture: a `shortcutCaptureBudget` counter gates printable single-char keydowns on editable fields (normally suppressed to avoid double-typing alongside `safeFill`); a new `window.__sentriRecorderSetShortcutBudget(n)` setter clamps to `Math.max(0, floor(n))` and is armed by the frontend's new "Record keyboard shortcut" button in `RecorderModal` via a `shortcutCapture` event on `/record/:sessionId/input` (backend `forwardInput` routes it through `page.evaluate`, default 3 keys). Regression tests in `backend/tests/recorder.test.js` lock down `frameLocator('iframe[src*="checkout-frame"]').first()` output, single-`safeFill` paste emission, `__playwrightSelector` delegation ordering (shadow-DOM coverage contract), `shortcutCaptureBudget` gate+decrement+setter+clamping, and the `forwardInput` shortcutCapture route branch (via fake page + `_testSeedSession`). | #11 |
 | AUTO-019 | Run diffing: per-test comparison across runs — new `GET /api/v1/runs/:runId/compare/:otherRunId` (`backend/src/routes/runs.js`) computes per-test diffs (`flipped`/`added`/`removed`/`unchanged`) under workspace ACL; Run Detail adds a **Compare** action with a prior-run picker that loads `RunCompareView` (`frontend/src/components/run/RunCompareView.jsx`) showing summary chips + per-test status badges. Integration test at `backend/tests/run-compare.test.js` covers happy path, 404, 401 unauth, and cross-workspace ACL. | #10 |
 | DIF-005 | Embedded Playwright trace viewer — install-time `postinstall` copier in `backend/scripts/copy-trace-viewer.js` resolves Playwright's prebuilt viewer (`playwright-core/lib/vite/traceViewer/` or `@playwright/test/lib/trace/viewer/`) and copies it to `backend/public/trace-viewer/`; `backend/src/middleware/appSetup.js` mounts it at `/trace-viewer/` with `Service-Worker-Allowed` for `sw.bundle.js` and a 5-minute cache. Run Detail adds a "🔍 Open Trace" action that opens `/trace-viewer/?trace=<signed-url>` in a new tab; the existing Trace ZIP download is preserved as fallback. Smoke test in `backend/tests/trace-viewer-static.test.js` asserts 200 when the bundle is present and 404 when removed. | #9 |
 | AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | #8 |
