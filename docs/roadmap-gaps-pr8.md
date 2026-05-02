@@ -6,16 +6,21 @@
 
 ## 1. AUTO-017 follow-ups (highest leverage — finishes a half-shipped feature)
 
-### AUTO-017.1 — Inject web-vitals via `addInitScript` (correctness fix)
-**Why it matters:** `captureWebVitals()` in `backend/src/runner/pageCapture.js:219-242`
-runs *after* the test, so LCP/CLS/INP measurements are unreliable or `null`. Budgets
-silently pass on slow pages — the feature can give false confidence.
-**Fix:** Move IIFE injection into `executeTest.js` via
-`context.addInitScript({ content: WEB_VITALS_IIFE + bootstrap })` before navigation,
-have the bootstrap stash callbacks on `window.__sentriVitals`, then read them at
-test end. Replace the 1200ms `setTimeout` with an early-exit when all 4 metrics are
-populated (saves ~1s × N tests on a 100-test suite).
-**Effort:** S · **Files:** `backend/src/runner/executeTest.js`, `backend/src/runner/pageCapture.js`
+### AUTO-017.1 — Inject web-vitals via `addInitScript` (correctness fix) ✅ bundled in PR #8
+**Why it mattered:** The original `captureWebVitals()` ran *after* the test, so
+LCP/CLS measurements were unreliable or `null` and budgets could silently pass
+on slow pages — the feature gave false confidence.
+**Shipped:** New `registerWebVitalsInitScript(context)` helper in
+`backend/src/runner/pageCapture.js` installs the web-vitals IIFE + observer
+bootstrap via `context.addInitScript()` at context creation, so LCP / CLS /
+TTFB observers are active from the first byte of the navigation and accumulate
+on `window.__sentriVitals`. `captureWebVitals(page)` now reads from that
+global with an 800ms cap that early-exits as soon as LCP + TTFB + CLS are
+populated (replacing the unconditional 1200ms wait — saves ~400ms × N tests
+typical, up to 1s × N when metrics arrive quickly). Wired in
+`backend/src/runner/executeTest.js` right after `browser.newContext()`.
+INP continues to stay `null` for non-interactive tests — the evaluator's
+`Number.isFinite()` guard already skips those silently.
 
 ### AUTO-017.2 — Web Vitals budgets configuration UI
 **Why it matters:** CRUD endpoints ship in PR #8 but no React panel — users must

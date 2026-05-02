@@ -10,7 +10,8 @@
  *   captureDomSnapshot(page)
  *   captureScreenshot(page, runId, stepIndex, { failed })
  *   captureBoundingBoxes(page)
- *   captureWebVitals(page)
+ *   registerWebVitalsInitScript(context)  — AUTO-017.1: install vitals observers before navigation
+ *   captureWebVitals(page)                — AUTO-017.1: read accumulated vitals at test end
  */
 
 import path from "path";
@@ -20,16 +21,57 @@ import { SHOTS_DIR } from "./config.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
 
 // AUTO-017: Resolve and cache the locally-installed `web-vitals` IIFE bundle so
-// `captureWebVitals` can inject it via `addScriptTag({ content })` without
-// hitting an external CDN at test time. Falls back to `null` if the package
-// isn't installed (e.g. minimal Docker builds) — `captureWebVitals` then returns
-// the empty-metrics shape rather than crashing the test.
+// we can install it via `context.addInitScript({ content })` without hitting an
+// external CDN at test time. Falls back to `null` if the package isn't installed
+// (e.g. minimal Docker builds) — the init-script registration and capture both
+// no-op in that case, returning the empty-metrics shape rather than crashing.
 let WEB_VITALS_IIFE = null;
 try {
   const req = createRequire(import.meta.url);
   const iifePath = req.resolve("web-vitals/dist/web-vitals.iife.js");
   WEB_VITALS_IIFE = fs.readFileSync(iifePath, "utf8");
-} catch { /* package not installed — captureWebVitals will no-op */ }
+} catch { /* package not installed — web-vitals helpers will no-op */ }
+
+// AUTO-017.1: Bootstrap that runs *after* the IIFE in the same init-script so
+// `window.webVitals` is already defined. Registers observers on every new
+// document (addInitScript fires on every frame navigation) so LCP / CLS / TTFB
+// are captured during the real page lifecycle instead of being injected
+// post-test (when buffered entries are unreliable and the cumulative CLS
+// observer has missed earlier shifts). Results accumulate on
+// `window.__sentriVitals` for `captureWebVitals()` to read at test end.
+const WEB_VITALS_BOOTSTRAP = `
+(function () {
+  try {
+    if (window.__sentriVitalsInstalled) return;
+    window.__sentriVitalsInstalled = true;
+    window.__sentriVitals = { lcp: null, cls: null, inp: null, ttfb: null };
+    if (!window.webVitals) return;
+    window.webVitals.onLCP(function (m) { window.__sentriVitals.lcp = Math.round(m.value); }, { reportAllChanges: true });
+    window.webVitals.onCLS(function (m) { window.__sentriVitals.cls = Number(m.value.toFixed(3)); }, { reportAllChanges: true });
+    window.webVitals.onINP(function (m) { window.__sentriVitals.inp = Math.round(m.value); }, { reportAllChanges: true });
+    window.webVitals.onTTFB(function (m) { window.__sentriVitals.ttfb = Math.round(m.value); }, { reportAllChanges: true });
+  } catch (e) { /* best-effort — never break the page */ }
+})();
+`;
+
+/**
+ * registerWebVitalsInitScript(context) — AUTO-017.1
+ *
+ * Installs the web-vitals IIFE + observer bootstrap on the browser context
+ * via `addInitScript`, so observers are active from the first byte of every
+ * navigation. Must be called once per context immediately after creation and
+ * before the first `page.goto()`.
+ *
+ * No-ops when the web-vitals package isn't installed — callers should still
+ * invoke `captureWebVitals(page)`, which returns the empty-metrics shape in
+ * that case.
+ */
+export async function registerWebVitalsInitScript(context) {
+  if (!WEB_VITALS_IIFE) return;
+  try {
+    await context.addInitScript({ content: WEB_VITALS_IIFE + "\n" + WEB_VITALS_BOOTSTRAP });
+  } catch { /* context may be closing — capture will fall back to nulls */ }
+}
 
 
 /**
@@ -216,26 +258,44 @@ export async function captureBoundingBoxes(page) {
 }
 
 
+/**
+ * captureWebVitals(page) — AUTO-017.1
+ *
+ * Reads the metrics accumulated on `window.__sentriVitals` by the observers
+ * installed via `registerWebVitalsInitScript` at context creation. Because the
+ * observers have been running during the entire page lifecycle, LCP / CLS /
+ * TTFB reflect actual measurements rather than post-hoc buffered replays.
+ *
+ * Waits up to 800ms (early-exiting as soon as LCP + TTFB + CLS are populated)
+ * to let any final `reportAllChanges` callbacks flush. INP is reported only
+ * after a user interaction — it stays `null` for non-interactive tests, which
+ * the evaluator treats as "not measured" rather than a failure.
+ *
+ * Falls back to the empty-metrics shape if the init script was never
+ * registered (e.g. web-vitals not installed, or context is an older run
+ * started before AUTO-017.1 landed).
+ */
 export async function captureWebVitals(page) {
   if (!WEB_VITALS_IIFE) return { lcp: null, cls: null, inp: null, ttfb: null };
   try {
-    await page.addScriptTag({ content: WEB_VITALS_IIFE });
-    await page.waitForTimeout(50);
     const metrics = await page.evaluate(async () => {
       return await new Promise((resolve) => {
-        const out = { lcp: null, cls: null, inp: null, ttfb: null };
-        const done = () => resolve(out);
-        try {
-          if (!window.webVitals) return done();
-          window.webVitals.onLCP((m) => { out.lcp = Math.round(m.value); }, { reportAllChanges: true });
-          window.webVitals.onCLS((m) => { out.cls = Number(m.value.toFixed(3)); }, { reportAllChanges: true });
-          window.webVitals.onINP((m) => { out.inp = Math.round(m.value); }, { reportAllChanges: true });
-          window.webVitals.onTTFB((m) => { out.ttfb = Math.round(m.value); }, { reportAllChanges: true });
-          setTimeout(done, 1200);
-        } catch { done(); }
+        const read = () => window.__sentriVitals || { lcp: null, cls: null, inp: null, ttfb: null };
+        // If the init script never ran (pre-AUTO-017.1 context, or navigation
+        // blocked before onload), bail immediately rather than waiting 800ms
+        // for metrics that will never arrive.
+        if (!window.__sentriVitalsInstalled) return resolve(read());
+        const started = Date.now();
+        const tick = () => {
+          const m = read();
+          const allCore = m.lcp != null && m.ttfb != null && m.cls != null;
+          if (allCore || Date.now() - started >= 800) return resolve(m);
+          setTimeout(tick, 100);
+        };
+        tick();
       });
     });
-    return metrics;
+    return metrics || { lcp: null, cls: null, inp: null, ttfb: null };
   } catch {
     return { lcp: null, cls: null, inp: null, ttfb: null };
   }

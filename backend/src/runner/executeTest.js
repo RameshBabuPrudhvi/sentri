@@ -22,7 +22,7 @@ import { getHealingHistoryForTest } from "../selfHealing.js";
 import { extractTestBody, isApiTest } from "./codeParsing.js";
 import { runGeneratedCode, runApiTestCode, getExpect } from "./codeExecutor.js";
 import { startScreencast } from "./screencast.js";
-import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals } from "./pageCapture.js";
+import { waitForStable, captureDomSnapshot, captureScreenshot, captureBoundingBoxes, captureWebVitals, registerWebVitalsInitScript } from "./pageCapture.js";
 import { persistHealingEvents } from "./healingPersistence.js";
 import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, API_TEST_TIMEOUT, BROWSER_TEST_TIMEOUT, VIDEOS_DIR, SHOTS_DIR, resolveDevice } from "./config.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -252,6 +252,13 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
       throw ctxErr;
     }
   }
+
+  // AUTO-017.1: Install web-vitals observers via addInitScript *before* the
+  // first page is created, so the observers fire from the first byte of the
+  // navigation rather than being injected post-test (which leaves LCP/CLS
+  // unreliable or null). Safe no-op when the web-vitals package isn't
+  // installed — `captureWebVitals` still returns the empty-metrics shape.
+  await registerWebVitalsInitScript(context);
 
   const page = await context.newPage();
 
