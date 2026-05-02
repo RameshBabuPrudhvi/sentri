@@ -10,3 +10,4 @@ export { default as OverlayCanvas } from "./OverlayCanvas.jsx";
 export { default as HealingTimeline } from "./HealingTimeline.jsx";
 export { default as PipelineCard } from "./PipelineCard.jsx";
 export { default as ActivityLogCard } from "./ActivityLogCard.jsx";
+export { default as RecorderModal } from "./RecorderModal.jsx";
