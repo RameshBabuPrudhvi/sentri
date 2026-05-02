@@ -351,6 +351,7 @@ const RECORDER_SCRIPT = `
   // otherwise replay would re-run the click handler twice before the
   // intended double-click and toggle UI state / submit forms early.
   const pendingClickTimers = new Map(); // selector -> timeout id
+  let shortcutCaptureBudget = 0;
   function eventElement(ev) {
     const p = ev.composedPath && ev.composedPath();
     return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
@@ -453,6 +454,21 @@ const RECORDER_SCRIPT = `
     }, ${TIMINGS.FILL_DEBOUNCE_MS}));
   }, true);
 
+  document.addEventListener("paste", (ev) => {
+    const el = eventElement(ev);
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    const sel = selectorGenerator(el);
+    if (!sel) return;
+    const pasted = (ev.clipboardData && typeof ev.clipboardData.getData === "function")
+      ? (ev.clipboardData.getData("text") || "") : "";
+    if (!pasted) return;
+    if (inputTimers.get(sel)) { clearTimeout(inputTimers.get(sel)); inputTimers.delete(sel); }
+    lastEmittedFill.set(sel, pasted.slice(0, 500));
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "fill", selector: sel, label: bestLabel(el), value: pasted.slice(0, 500), ts: Date.now(),
+    });
+  }, true);
+
   document.addEventListener("change", (ev) => {
     const el = eventElement(ev);
     if (!el) return;
@@ -518,8 +534,11 @@ const RECORDER_SCRIPT = `
     // don't conflict with the fill capture.
     const t = ev.target;
     const isEditable = !!(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
-    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;
-    if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
+    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) {
+      if (shortcutCaptureBudget <= 0) return;
+      shortcutCaptureBudget -= 1;
+    }
+    if ((ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey)) {
       window.__sentriRecord && window.__sentriRecord({
         kind: "press", key: ev.key, selector: selectorGenerator(ev.target), label: bestLabel(ev.target), ts: Date.now(),
       });
@@ -531,6 +550,11 @@ const RECORDER_SCRIPT = `
     const el = eventElement(ev);
     dragSource = selectorGenerator(el);
   }, true);
+  window.__sentriRecorderSetShortcutBudget = (n) => {
+    const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
+    shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
+  };
+
   document.addEventListener("drop", (ev) => {
     const target = eventElement(ev);
     const targetSel = selectorGenerator(target);
@@ -832,7 +856,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
     const base = alias === "page" ? "page" : `(await ensurePopup('${alias}'))`;
     const frameUrl = String(action?.frameUrl || "");
     if (!frameUrl) return base;
-    return `(await ensureFrame(${base}, '${escapeJsSingleQuote(frameUrl)}'))`;
+    return `${base}.frameLocator('iframe[src*=${JSON.stringify(frameUrl)}]').first()`;
   };
   lines.push(`const __popupPages = new Map();`);
   lines.push(`context.on('page', (p) => {`);
@@ -846,14 +870,6 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   lines.push(`    await page.waitForTimeout(100);`);
   lines.push(`  }`);
   lines.push(`  throw new Error('Popup not found: ' + alias);`);
-  lines.push(`};`);
-  lines.push(`const ensureFrame = async (p, frameUrl) => {`);
-  lines.push(`  for (let i = 0; i < 50; i++) {`);
-  lines.push(`    const f = p.frames().find((fr) => fr.url().includes(frameUrl));`);
-  lines.push(`    if (f) return f;`);
-  lines.push(`    await p.waitForTimeout(100);`);
-  lines.push(`  }`);
-  lines.push(`  throw new Error('Frame not found for URL: ' + frameUrl);`);
   lines.push(`};`);
   lines.push(`await page.goto('${safeStartUrl}');`);
   // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
@@ -1341,6 +1357,12 @@ export async function forwardInput(sessionId, event) {
         text: event.text ?? "",
         modifiers: event.modifiers ?? 0,
       });
+    } else if (type === "shortcutCapture") {
+      await session.page?.evaluate((budget) => {
+        if (typeof window.__sentriRecorderSetShortcutBudget === "function") {
+          window.__sentriRecorderSetShortcutBudget(budget);
+        }
+      }, event?.count ?? 3);
     }
   } catch (err) {
     // CDP errors (e.g. page navigating mid-click) are transient — don't crash

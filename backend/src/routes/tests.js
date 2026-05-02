@@ -1216,7 +1216,7 @@ router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), asy
     return res.status(404).json({ error: "recording session not found" });
   }
 
-  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll"]);
+  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll", "shortcutCapture"]);
   const { type } = req.body || {};
   if (!type || !VALID_TYPES.has(type)) {
     return res.status(400).json({ error: `Invalid event type. Must be one of: ${[...VALID_TYPES].join(", ")}` });

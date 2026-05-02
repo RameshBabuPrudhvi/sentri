@@ -78,6 +78,22 @@ test("deduplicates consecutive gotos to the same URL", () => {
   assert.equal(dashGotos.length, 1, "consecutive gotos to the same URL collapse to one");
 });
 
+test("uses frameLocator chain when action includes frameUrl", () => {
+  const code = actionsToPlaywrightCode("Iframe click", "https://example.com", [
+    { kind: "click", selector: "text=\"Save\"", frameUrl: "checkout-frame", ts: 1 },
+  ]);
+  assert.match(code, /frameLocator\('iframe\[src\*=\"checkout-frame\"\]'\)\.first\(\)/);
+  assert.match(code, /await safeClick\(/);
+});
+
+test("paste-style fill is emitted as one safeFill step", () => {
+  const code = actionsToPlaywrightCode("Paste", "https://example.com", [
+    { kind: "fill", selector: "#token", value: "a-long-pasted-token", ts: 1 },
+  ]);
+  const fills = code.match(/await safeFill\(page, '#token', 'a-long-pasted-token'\);/g) || [];
+  assert.equal(fills.length, 1);
+});
+
 test("emits a runnable test skeleton even for zero actions", () => {
   const code = actionsToPlaywrightCode("Empty", "https://example.com", []);
   assert.match(code, /import \{ test, expect \} from '@playwright\/test';/);

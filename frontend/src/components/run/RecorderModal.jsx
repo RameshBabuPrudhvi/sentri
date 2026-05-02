@@ -18,6 +18,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [assertLabel, setAssertLabel] = useState("");
   const [error, setError] = useState(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [shortcutArmed, setShortcutArmed] = useState(false);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const pollRef = useRef(null);
   const sessionIdRef = useRef(null);
@@ -122,6 +123,15 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     } catch (e) {
       setError(e.message || "failed to add verification");
     }
+  }
+
+  async function armShortcutCapture() {
+    if (!sessionId) return;
+    try {
+      await api.recordInput(projectId, sessionId, { type: "shortcutCapture", count: 3 });
+      setShortcutArmed(true);
+      window.setTimeout(() => setShortcutArmed(false), 4000);
+    } catch {}
   }
 
   function teardownStreams() {
@@ -254,6 +264,9 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
               <div className="recorder-sidebar__heading">
                 Captured steps ({actions.length})
               </div>
+              <button className="btn btn-ghost" onClick={armShortcutCapture} style={{ marginBottom: 8 }}>
+                {shortcutArmed ? "Shortcut capture armed (next 3 keys)" : "Record keyboard shortcut"}
+              </button>
               <div className="recorder-sidebar__steps-list">
                 {actions.length === 0 ? (
                   <div className="recorder-sidebar__steps-empty">
