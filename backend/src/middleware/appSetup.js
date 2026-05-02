@@ -544,6 +544,85 @@ app.use("/artifacts", (req, res, next) => {
   },
 }));
 
+
+// ─── DIF-005: Embedded Playwright trace viewer ───────────────────────────────
+// Serves the Playwright trace viewer bundle copied at install time (see
+// `backend/scripts/copy-trace-viewer.js`) at `/trace-viewer/`.
+//
+// The viewer is a Vite-built SPA with its own bundled HTML / JS / Service
+// Worker. It was NOT built with Sentri's per-request nonce injection, so the
+// strict app-wide CSP (`scriptSrc: ['self', 'nonce-…']`) blocks its inline
+// bootstrap scripts. We scope a looser CSP to this path only — the rest of the
+// app remains under the nonce-based policy.
+//
+// Specifically the viewer needs:
+//   - `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'`
+//       Inline bootstrap + WebAssembly decoder used in some Playwright
+//       versions for zip / protobuf parsing.
+//   - `worker-src 'self' blob:`
+//       The viewer registers `sw.bundle.js` and may spawn blob: workers.
+//   - `connect-src 'self' <s3-origin>`
+//       Fetches the trace zip via the `?trace=<signed-url>` query param.
+//       Same-origin in local mode; S3 public origin (MNT-006) in s3 mode.
+//   - `frame-ancestors 'self'`
+//       Allows embedding the viewer in a Sentri-hosted iframe if we ever
+//       swap the new-tab flow for an inline modal.
+//   - `img-src 'self' data: blob:` · `style-src 'self' 'unsafe-inline'`
+//       Standard SPA image/style needs.
+//
+// `Service-Worker-Allowed: /trace-viewer/` is required so the viewer's SW can
+// claim scope above its own script path. The SW ships at `sw.bundle.js` in
+// current Playwright versions, but the filename is not covered by semver —
+// `TRACE_VIEWER_SW_PATTERN` matches any `sw*.js` at the bundle root so a
+// Playwright rename (e.g. `sw.js` or a hashed `sw.<hash>.js`) still gets the
+// `Service-Worker-Allowed` header and no-cache treatment instead of silently
+// falling back to the default 5-min cache.
+const TRACE_VIEWER_DIR = path.join(__dirname, "..", "..", "public", "trace-viewer");
+const TRACE_VIEWER_SW_PATTERN = /(?:^|[\\/])sw[^\\/]*\.js$/;
+
+const _traceViewerConnectSrc = ["'self'", ..._s3ConnectSrc].join(" ");
+const TRACE_VIEWER_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src ${_traceViewerConnectSrc}`,
+  "worker-src 'self' blob:",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+].join("; ");
+
+// `fallthrough: false` — when the requested file is missing (e.g. the
+// postinstall copier couldn't resolve Playwright's bundle at install time),
+// `express.static` must emit a real 404 instead of calling next(). Without
+// this, the request falls through to the SPA catch-all in `index.js:348`,
+// which serves the React index.html with a 200 — giving users a broken
+// Sentri page under /trace-viewer/ instead of a clear "not found". See the
+// acceptance criterion in NEXT.md ("backend serves a 404 at /trace-viewer/").
+app.use("/trace-viewer", express.static(TRACE_VIEWER_DIR, {
+  fallthrough: false,
+  setHeaders(res, filePath) {
+    // Scope the viewer's service worker above its own script path. Playwright
+    // ships the SW as `sw.bundle.js` today but the name isn't part of its
+    // public API — match any `sw*.js` at the bundle root (see
+    // TRACE_VIEWER_SW_PATTERN).
+    if (TRACE_VIEWER_SW_PATTERN.test(filePath)) {
+      res.setHeader("Service-Worker-Allowed", "/trace-viewer/");
+      // Service workers should revalidate on every load to avoid stale-worker
+      // bugs. The rest of the bundle gets the 5-min cache below.
+      res.setHeader("Cache-Control", "no-cache");
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=300");
+    }
+    // Replace the global app CSP with the viewer-scoped policy. Helmet set
+    // the strict nonce-based CSP earlier in the chain; overwriting here only
+    // affects responses under `/trace-viewer/*`.
+    res.setHeader("Content-Security-Policy", TRACE_VIEWER_CSP);
+  },
+}));
+
 // ─── SEC-002: Serve index.html with nonce placeholder replaced ───────────────
 // In production the Vite-built SPA is served as static files. The build output
 // contains `nonce="__CSP_NONCE__"` placeholders on all `<script>` tags (injected

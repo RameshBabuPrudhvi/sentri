@@ -25,6 +25,11 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /app
 
 COPY backend/package.json backend/package-lock.json* ./
+# DIF-005: the `postinstall` hook in package.json invokes
+# `node scripts/copy-trace-viewer.js`, so the script has to be present in the
+# image before `npm install` runs. Copy the whole `scripts/` directory (small,
+# stable) here rather than after the install step.
+COPY backend/scripts/ ./scripts/
 RUN npm install --omit=dev
 
 # DIF-002: Cross-browser support. Chromium uses the apt-installed system

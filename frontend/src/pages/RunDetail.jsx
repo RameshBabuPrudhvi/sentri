@@ -332,6 +332,7 @@ export default function RunDetail() {
   const passRate = total > 0 ? Math.round((passed / total) * 100) : null;
 
   const traceUrl = run.tracePath ?? null;
+  const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
   const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
@@ -461,9 +462,14 @@ export default function RunDetail() {
               </button>
             )}
             {traceUrl && (
-              <a href={traceUrl} download className="btn btn-ghost btn-sm">
-                <Download size={12} /> Trace ZIP
-              </a>
+              <>
+                <a href={traceViewerUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+                  🔍 Open Trace
+                </a>
+                <a href={traceUrl} download className="btn btn-ghost btn-sm">
+                  <Download size={12} /> Trace ZIP
+                </a>
+              </>
             )}
             <button className="btn btn-ghost btn-sm" onClick={fetchRun}>
               <RefreshCw size={12} /> Refresh

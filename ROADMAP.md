@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-005` — Embedded Playwright trace viewer · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 28 items (AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
+> **Current sprint:** `AUTO-019` — Run diffing: per-test comparison across runs · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 27 items (DIF-005 ✅ shipped in PR #9 — self-hosted `/trace-viewer/` bundle copied at install + Run Detail "🔍 Open Trace" action; AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
 
 ---
 
@@ -109,6 +109,7 @@ The following items have been verified complete against the codebase and are **n
 | INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | PR #1                                                           |
 | AUTO-012 | SLA / quality gate enforcement — per-project `qualityGates` config, run-time evaluator, `gateResult` on runs + trigger responses, `QualityGatesPanel` under ProjectDetail → Settings, per-run `<GateBadge>` on Runs list / RunDetail header, inline violation panel on RunDetail, GH Actions + GitLab CI consumer examples in `docs/guide/ci-cd-triggers.md` that exit non-zero on `gateResult.passed === false` | PR #2                                                           |
 | AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | PR #8                                                           |
+| DIF-005 | Embedded Playwright trace viewer — install-time `postinstall` copier in `backend/scripts/copy-trace-viewer.js` resolves Playwright's prebuilt viewer (`playwright-core/lib/vite/traceViewer/` or `@playwright/test/lib/trace/viewer/`) and copies it to `backend/public/trace-viewer/`; `backend/src/middleware/appSetup.js` mounts it at `/trace-viewer/` with a viewer-scoped CSP (`script-src 'unsafe-inline' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`, `connect-src 'self' <s3>`), `Service-Worker-Allowed: /trace-viewer/` on the Playwright service worker (matched by `TRACE_VIEWER_SW_PATTERN` to survive filename renames), and `no-cache` for the SW + 5-minute cache for the rest. Run Detail adds a "🔍 Open Trace" action that opens `/trace-viewer/?trace=<signed-url>` in a new tab; the Trace ZIP download is preserved as fallback. Smoke test in `backend/tests/trace-viewer-static.test.js` asserts 200 when the bundle is present and 404 when removed. `backend/Dockerfile` copies `scripts/` before `npm install` so the postinstall hook resolves. | PR #9                                                           |
 
 ---
 
@@ -118,7 +119,7 @@ The following items have been verified complete against the codebase and are **n
 |-------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` ✅ shipped in PR #1 (Render blueprint + ephemeral-storage warning); `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
-| Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/006/007/011/013/014/015/016 ✅); remaining: DIF-005 (trace viewer), DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
+| Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9); remaining: DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016/017 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2; AUTO-017 Web Vitals budgets shipped in PR #8); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-018–019                                | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
@@ -611,7 +612,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-005 — Embedded Playwright trace viewer 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete (PR #9) | **Effort:** M | **Source:** Audit
 
 **Problem:** Playwright traces are linked as `.zip` downloads requiring a local Playwright Trace Viewer installation to open. This is a significant debugging friction point — most users will not bother. Mabl has an inline trace-style view; Sentri should too.
 
@@ -985,7 +986,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
 
-> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-012` (SLA / quality gate enforcement — full backend + UI + CI consumer docs, PR #2), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), and `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1). The remaining ~13 items are scoped here and ready to start; the immediate next sprint item is `DIF-015b Gap 2` (recorder data-testid quality scoring) tracked in `NEXT.md`.
+> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-012` (SLA / quality gate enforcement — full backend + UI + CI consumer docs, PR #2), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1), and `AUTO-017` (Web Vitals performance budgets, PR #8). The remaining items are scoped here and ready to start; the immediate next sprint item is `AUTO-019` (per-test run diffing) tracked in `NEXT.md`.
 
 ---
 
@@ -1604,7 +1605,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone Playwright export (✅ DIF-006). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close next:** AUTO-001 (risk-based test selection) · AUTO-017 (performance budgets) · DIF-005 (embedded Playwright trace viewer) · AUTO-019 (per-test run diffing)
+**Critical gaps to close next:** AUTO-001 (risk-based test selection) · AUTO-019 (per-test run diffing) · DIF-015b Gap 3 + DIF-015c Gap 1 (recorder iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts)
 
 > **Previous priorities ✅ shipped:** DIF-001 (visual regression, PR #94) · DIF-002 (cross-browser, PR #94) · DIF-015 (recorder, PR #94) · DIF-006 (Playwright export, PR #1) · AUTO-005 (test retry, PR #2) · AUTO-016 backend (axe-core scan + persistence, PR #121).
 

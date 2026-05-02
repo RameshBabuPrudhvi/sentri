@@ -299,10 +299,10 @@ Run this single end-to-end journey **as User A (admin)** in a fresh browser. Eve
 
 ### 12. Run results, artifacts & reports
 30. On RunDetail verify: per-test status, per-step screenshots, per-step timing, video, network logs, browser badge, parallelism used.
-31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open.
+31. Download/inspect artifacts (screenshots, video, trace zip) — files exist and open. **🔍 Open Trace** (DIF-005, #9): on a run with a captured trace, click the **Open Trace** action on RunDetail → a new browser tab opens at `/trace-viewer/?trace=<signed-url>` and loads Playwright's embedded trace viewer with the run's trace pre-loaded; verify the viewer's timeline / actions / network panels render. The Trace ZIP download link continues to work alongside as a fallback (served from `backend/public/trace-viewer/` via `backend/src/middleware/appSetup.js`).
 32. Open **`/reports`** page → renders run/test reports for the workspace.
 33. From Dashboard, export the **executive PDF report** → file downloads, opens, contains pass-rate / defect breakdown / trends matching on-screen widgets.
-34. **Out of scope (planned, not shipped):** embedded Playwright trace viewer (`DIF-005`), public/shareable report links. Do not test these. Standalone Playwright project export (`DIF-006`) **is** shipped — it has its own line item under "Export & traceability" below.
+34. **Out of scope (planned, not shipped):** public/shareable report links. Do not test these. Standalone Playwright project export (`DIF-006`) and the embedded Playwright trace viewer (`DIF-005`) **are** shipped — DIF-006 has its own line item under "Export & traceability" below; DIF-005 is verified inline at step 31 above.
 
 ### 13. Notifications
 35. Configure Teams + email + generic webhook for PRJ-Demo. Trigger a failing run → notification arrives on each enabled channel within ~1 min, with project / test / runId / failure reason / link.
@@ -1236,7 +1236,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** embedded Playwright trace viewer (`DIF-005`), MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, and standalone Playwright project export (`DIF-006`) **are** shipped and must be tested.
+> **Out of scope (not yet shipped):** MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, standalone Playwright project export (`DIF-006`), and the embedded Playwright trace viewer (`DIF-005`, verified inline at Golden E2E step 31) **are** shipped and must be tested.
 
 ---
 
