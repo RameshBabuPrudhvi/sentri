@@ -26,12 +26,14 @@
 
 ---
 
-## ▶ Current PR — AUTO-017
+## ▶ Current PR — DIF-005
 
-**Title:** Web Vitals performance budgets
-**Branch:** `feat/AUTO-017-web-vitals-budgets`
-**Effort:** M | **Priority:** 🔵 Medium
+**Title:** Embedded Playwright trace viewer
+**Branch:** `feat/DIF-005-embedded-trace-viewer`
+**Effort:** M | **Priority:** 🟢 Differentiator
 **All dependencies:** None
+
+> AUTO-017 (Web Vitals performance budgets) ✅ shipped in PR #8 — see Recently completed below. Promoting DIF-005 from the queue per `NEXT.md` rotation rule.
 
 ### Why this is the next priority
 
@@ -115,6 +117,7 @@ These can be picked up by a second engineer alongside the current PR without fil
 
 | ID | Title | PR |
 |----|-------|----|
+| AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations), `captureWebVitals(page)` in `pageCapture.js` injects `web-vitals` and records per-page LCP/CLS/INP/TTFB, `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. | #8 |
 | DIF-015b Gap 2 | Recorder `selectorGenerator()` delegates to Playwright's own `InjectedScript`-based selector generator (same algorithm `codegen` uses) for ancestor scoring + machine-generated-testid demotion + shadow-DOM traversal + iframe locator chains. Loads `playwright-core/lib/server/injected/injectedScriptSource.js` best-effort at server start; falls back to a hand-rolled `data-testid → role+name → label → placeholder → CSS` chain (with the originally-scoped `el_`/`comp-`/`t-`+hex / all-numeric / long-unseparated noise-testid heuristic) when the bundle can't be resolved or its API surface drifts. New `backend/src/runner/playwrightSelectorGenerator.js` houses the loader + in-page bootstrap. | #4 |
 | AUTO-012 | SLA / quality gate enforcement — per-project `qualityGates` config, run-time evaluator, `gateResult` on runs + trigger responses, `QualityGatesPanel` under ProjectDetail → Settings, `<GateBadge>` on Runs list / ProjectDetail Runs tab / RunDetail header, inline violation panel on RunDetail, GH Actions + GitLab CI examples in `docs/guide/ci-cd-triggers.md` that exit non-zero on `gateResult.passed === false` | #2 |
 | INF-006 | Persistent storage on hosted deployments (Render disk blueprint + ephemeral-storage warning) | #1 |
