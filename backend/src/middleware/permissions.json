@@ -70,7 +70,6 @@
   "outOfScope": {
     "$comment": "Endpoints / flows present in code but not yet shipped end-to-end. Do NOT manually QA — file enhancement requests instead.",
     "items": [
-      "DIF-005 — embedded Playwright trace viewer",
       "SEC-004 — MFA / 2FA",
       "Public / shareable test report links",
       "Jira integration",
