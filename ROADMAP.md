@@ -121,7 +121,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 1 — Production Hardening | Security, reliability, data integrity | ✅ Complete                                                                                                                                                                            | — |
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | 🔄 In progress — `INF-006` ✅ shipped in PR #1 (Render blueprint + ephemeral-storage warning); `ENH-036` ✅ shipped in PR #127 (project credential edit + auto-login in ENH-036b); `SEC-004` deferred     | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9); remaining: DIF-008–010, DIF-012, DIF-015b/c sub-items | 10–12 weeks |
-| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016/017 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2; AUTO-017 Web Vitals budgets shipped in PR #8); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-018–019                                | 14–18 weeks |
+| Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-005/006/007/012/013/016/017/019 ✅ (AUTO-016b UI shipped in PR #1; AUTO-012 full backend + UI + CI consumer docs shipped in PR #2; AUTO-017 Web Vitals budgets shipped in PR #8; AUTO-019 per-test run diffing shipped in PR #10); remaining: AUTO-001/002/003/004, AUTO-008–011, AUTO-014/015, AUTO-018                                | 14–18 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -987,7 +987,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 *Goal: Advance Sentri beyond triggered QA into a genuinely autonomous system that makes intelligent decisions about what to test, when to test, and what failures mean. Items in this phase are post-Phase 3 and can be prioritised individually based on customer demand.*
 
-> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-012` (SLA / quality gate enforcement — full backend + UI + CI consumer docs, PR #2), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1), and `AUTO-017` (Web Vitals performance budgets, PR #8). The remaining items are scoped here and ready to start; the immediate next sprint item is `AUTO-019` (per-test run diffing) tracked in `NEXT.md`.
+> **Note:** Several Phase 4 items have already shipped opportunistically alongside other work and appear in the Completed Work Summary above — `AUTO-005` (test retry, PR #2), `AUTO-006` (network conditions, PR #3), `AUTO-007` (geolocation/locale/timezone, PR #94), `AUTO-012` (SLA / quality gate enforcement — full backend + UI + CI consumer docs, PR #2), `AUTO-013` (stale test detection, PR #99), `AUTO-016` backend slice (axe-core scan + persistence, PR #121), `AUTO-016b` (frontend `CrawlView` accessibility panel + dashboard "Top Accessibility Offenders" rollup, PR #1), `AUTO-017` (Web Vitals performance budgets, PR #8), and `AUTO-019` (per-test run diffing, PR #10). The remaining items are scoped here and ready to start; the immediate next sprint target is the combined recorder PR (`DIF-015b Gap 3` + `DIF-015c Gap 1`) tracked in `NEXT.md`.
 
 ---
 
@@ -1310,7 +1310,11 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### AUTO-019 — Run diffing: per-test comparison across runs 🔵 Medium
+### AUTO-019 — Run diffing: per-test comparison across runs ✅ 🔵 Medium
+
+> **Status: ✅ Complete (PR #10)** — see Completed Work Summary above for the shipped scope. Detail spec preserved below for historical traceability.
+
+
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
 
