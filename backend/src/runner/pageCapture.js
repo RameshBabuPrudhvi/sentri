@@ -33,11 +33,24 @@ import { writeArtifactBuffer } from "../utils/objectStorage.js";
 // `package.json` (which `exports` always exposes by convention) and derive the
 // IIFE path from the package root. This layout is stable across web-vitals
 // v3 / v4 / v5 — `dist/web-vitals.iife.js` is the canonical IIFE bundle.
+// We resolve the package's *main entry* (which `exports` always exposes as `.`)
+// and walk up to the package root, then derive the IIFE path. Resolving
+// `web-vitals/package.json` directly throws ERR_PACKAGE_PATH_NOT_EXPORTED on
+// Node 20 because `web-vitals@4.x`'s `exports` field only declares `.` and
+// `./attribution`. The IIFE bundle layout (`dist/web-vitals.iife.js`) is
+// stable across v3 / v4 / v5.
 let WEB_VITALS_IIFE = null;
 try {
   const req = createRequire(import.meta.url);
-  const pkgJsonPath = req.resolve("web-vitals/package.json");
-  const iifePath = path.join(path.dirname(pkgJsonPath), "dist", "web-vitals.iife.js");
+  const mainPath = req.resolve("web-vitals");
+  // The main entry lives at `<pkgRoot>/dist/web-vitals.js` (or similar inside
+  // dist/). Walk up until we find the package root (directory containing
+  // `package.json`), then join `dist/web-vitals.iife.js`.
+  let pkgRoot = path.dirname(mainPath);
+  while (pkgRoot !== path.dirname(pkgRoot) && !fs.existsSync(path.join(pkgRoot, "package.json"))) {
+    pkgRoot = path.dirname(pkgRoot);
+  }
+  const iifePath = path.join(pkgRoot, "dist", "web-vitals.iife.js");
   WEB_VITALS_IIFE = fs.readFileSync(iifePath, "utf8");
 } catch { /* package not installed or layout changed — web-vitals helpers will no-op */ }
 
