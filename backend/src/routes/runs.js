@@ -246,6 +246,63 @@ router.get("/projects/:id/runs", (req, res) => {
   res.json(runs.map(signRunArtifacts));
 });
 
+
+router.get("/runs/:runId/compare/:otherRunId", (req, res) => {
+  const baseRun = runRepo.getById(req.params.runId);
+  const otherRun = runRepo.getById(req.params.otherRunId);
+  if (!baseRun || !otherRun) return res.status(404).json({ error: "not found" });
+
+  // ACL-001: both runs must belong to projects in the caller's workspace.
+  const baseProject = projectRepo.getByIdInWorkspace(baseRun.projectId, req.workspaceId);
+  const otherProject = projectRepo.getByIdInWorkspace(otherRun.projectId, req.workspaceId);
+  if (!baseProject || !otherProject) return res.status(404).json({ error: "not found" });
+
+  const baseResults = Array.isArray(baseRun.results) ? baseRun.results : [];
+  const otherResults = Array.isArray(otherRun.results) ? otherRun.results : [];
+
+  const baseById = new Map(baseResults.map((r) => [r.testId, r]));
+  const otherById = new Map(otherResults.map((r) => [r.testId, r]));
+  const allTestIds = new Set([...baseById.keys(), ...otherById.keys()]);
+
+  const diffs = Array.from(allTestIds).map((testId) => {
+    const current = baseById.get(testId) || null;
+    const previous = otherById.get(testId) || null;
+    const currentStatus = current?.status || null;
+    const previousStatus = previous?.status || null;
+
+    let changeType = "unchanged";
+    if (current && !previous) changeType = "added";
+    else if (!current && previous) changeType = "removed";
+    else if (currentStatus !== previousStatus) changeType = "flipped";
+
+    return {
+      testId,
+      testName: current?.testName || previous?.testName || null,
+      currentStatus,
+      previousStatus,
+      changeType,
+      current,
+      previous,
+    };
+  });
+
+  const summary = diffs.reduce((acc, item) => {
+    acc.total += 1;
+    if (item.changeType === "flipped") acc.flipped += 1;
+    if (item.changeType === "added") acc.added += 1;
+    if (item.changeType === "removed") acc.removed += 1;
+    if (item.changeType === "unchanged") acc.unchanged += 1;
+    return acc;
+  }, { total: 0, flipped: 0, added: 0, removed: 0, unchanged: 0 });
+
+  res.json({
+    baseRun: signRunArtifacts(baseRun),
+    otherRun: signRunArtifacts(otherRun),
+    summary,
+    diffs,
+  });
+});
+
 router.get("/runs/:runId", (req, res) => {
   const run = runRepo.getById(req.params.runId);
   if (!run) return res.status(404).json({ error: "not found" });

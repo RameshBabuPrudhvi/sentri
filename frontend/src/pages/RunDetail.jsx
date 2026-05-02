@@ -26,6 +26,7 @@ import { useNotifications } from "../context/NotificationContext.jsx";
 import CrawlView from "../components/crawl/CrawlView";
 import GenerateView from "../components/generate/GenerateView";
 import TestRunView from "../components/run/TestRunView";
+import RunCompareView from "../components/run/RunCompareView.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
@@ -128,6 +129,9 @@ export default function RunDetail() {
   const [llmTokens, setLlmTokens] = useState("");
   const [aborting, setAborting] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [compareData, setCompareData] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState(null);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -158,6 +162,26 @@ export default function RunDetail() {
   );
 
   const fetchRun = useCallback(() => invalidateRunCache(runId), [runId]);
+
+  const handleCompare = useCallback(async () => {
+    if (!run?.projectId) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const runs = await api.getRuns(run.projectId);
+      const previous = (runs || []).find((r) => r.id !== run.id);
+      if (!previous) {
+        setCompareData({ summary: { flipped: 0, added: 0, removed: 0 }, diffs: [] });
+        return;
+      }
+      const diff = await api.getRunCompare(run.id, previous.id);
+      setCompareData(diff);
+    } catch (err) {
+      setCompareError(err);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [run]);
 
   const handleAbort = useCallback(async () => {
     if (aborting) return;
@@ -471,6 +495,9 @@ export default function RunDetail() {
                 </a>
               </>
             )}
+            {!isCrawl && !isGenerate && (
+              <button className="btn btn-ghost btn-sm" onClick={handleCompare}>Compare</button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={fetchRun}>
               <RefreshCw size={12} /> Refresh
             </button>
@@ -508,6 +535,8 @@ export default function RunDetail() {
           )}
         </div>
       </div>
+
+      {!isCrawl && !isGenerate && <RunCompareView data={compareData} loading={compareLoading} error={compareError} />}
 
       {/* ── Pass rate bar (test runs only) ─────────────────────────────── */}
       {!isCrawl && total > 0 && (
