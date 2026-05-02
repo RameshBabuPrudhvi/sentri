@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `DIF-005` — Embedded Playwright trace viewer · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 28 items (AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
+> **Current sprint:** `AUTO-019` — Run diffing: per-test comparison across runs · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 27 items (DIF-005 ✅ shipped in PR #9 — self-hosted `/trace-viewer/` bundle copied at install + Run Detail "🔍 Open Trace" action; AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
 
 ---
 
@@ -611,7 +611,7 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-005 — Embedded Playwright trace viewer 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** M | **Source:** Audit
+**Status:** ✅ Complete (PR #9) | **Effort:** M | **Source:** Audit
 
 **Problem:** Playwright traces are linked as `.zip` downloads requiring a local Playwright Trace Viewer installation to open. This is a significant debugging friction point — most users will not bother. Mabl has an inline trace-style view; Sentri should too.
 
