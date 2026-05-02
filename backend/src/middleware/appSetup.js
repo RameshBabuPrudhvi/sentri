@@ -545,15 +545,68 @@ app.use("/artifacts", (req, res, next) => {
 }));
 
 
+// ─── DIF-005: Embedded Playwright trace viewer ───────────────────────────────
+// Serves the Playwright trace viewer bundle copied at install time (see
+// `backend/scripts/copy-trace-viewer.js`) at `/trace-viewer/`.
+//
+// The viewer is a Vite-built SPA with its own bundled HTML / JS / Service
+// Worker. It was NOT built with Sentri's per-request nonce injection, so the
+// strict app-wide CSP (`scriptSrc: ['self', 'nonce-…']`) blocks its inline
+// bootstrap scripts. We scope a looser CSP to this path only — the rest of the
+// app remains under the nonce-based policy.
+//
+// Specifically the viewer needs:
+//   - `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'`
+//       Inline bootstrap + WebAssembly decoder used in some Playwright
+//       versions for zip / protobuf parsing.
+//   - `worker-src 'self' blob:`
+//       The viewer registers `sw.bundle.js` and may spawn blob: workers.
+//   - `connect-src 'self' <s3-origin>`
+//       Fetches the trace zip via the `?trace=<signed-url>` query param.
+//       Same-origin in local mode; S3 public origin (MNT-006) in s3 mode.
+//   - `frame-ancestors 'self'`
+//       Allows embedding the viewer in a Sentri-hosted iframe if we ever
+//       swap the new-tab flow for an inline modal.
+//   - `img-src 'self' data: blob:` · `style-src 'self' 'unsafe-inline'`
+//       Standard SPA image/style needs.
+//
+// `Service-Worker-Allowed: /trace-viewer/` is required so the viewer's SW can
+// claim scope above its own script path (the Playwright SW ships at
+// `/trace-viewer/sw.bundle.js` but controls the whole `/trace-viewer/` scope).
 const TRACE_VIEWER_DIR = path.join(__dirname, "..", "..", "public", "trace-viewer");
+
+const _traceViewerConnectSrc = ["'self'", ..._s3ConnectSrc].join(" ");
+const TRACE_VIEWER_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  `connect-src ${_traceViewerConnectSrc}`,
+  "worker-src 'self' blob:",
+  "frame-ancestors 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+].join("; ");
 
 app.use("/trace-viewer", express.static(TRACE_VIEWER_DIR, {
   fallthrough: true,
   setHeaders(res, filePath) {
+    // Scope the viewer's service worker above its own script path.
+    // Playwright ships the SW at `/trace-viewer/sw.bundle.js` but it needs to
+    // control the whole `/trace-viewer/` directory for routing.
     if (filePath.endsWith("sw.bundle.js")) {
       res.setHeader("Service-Worker-Allowed", "/trace-viewer/");
+      // Service workers should revalidate on every load to avoid stale-worker
+      // bugs. The rest of the bundle gets the 5-min cache below.
+      res.setHeader("Cache-Control", "no-cache");
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=300");
     }
-    res.setHeader("Cache-Control", "public, max-age=300");
+    // Replace the global app CSP with the viewer-scoped policy. Helmet set
+    // the strict nonce-based CSP earlier in the chain; overwriting here only
+    // affects responses under `/trace-viewer/*`.
+    res.setHeader("Content-Security-Policy", TRACE_VIEWER_CSP);
   },
 }));
 
