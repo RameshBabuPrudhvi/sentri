@@ -447,6 +447,15 @@ const RECORDER_SCRIPT = `
     inputTimers.set(sel, setTimeout(() => {
       inputTimers.delete(sel);
       const value = el.value;
+      // Skip when the paste handler already emitted the exact same value —
+      // browsers always fire \`input\` after \`paste\`, so without this dedup
+      // a pasted token produces two identical \`fill\` actions. Clear the
+      // entry after the check so a subsequent retype of the same value still
+      // re-fires (mirrors the change handler's dedup semantics).
+      if (lastEmittedFill.get(sel) === value) {
+        lastEmittedFill.delete(sel);
+        return;
+      }
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
         kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
@@ -459,14 +468,27 @@ const RECORDER_SCRIPT = `
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
     const sel = selectorGenerator(el);
     if (!sel) return;
-    const pasted = (ev.clipboardData && typeof ev.clipboardData.getData === "function")
-      ? (ev.clipboardData.getData("text") || "") : "";
-    if (!pasted) return;
+    const hasClipboard = ev.clipboardData && typeof ev.clipboardData.getData === "function"
+      && !!(ev.clipboardData.getData("text") || "");
+    if (!hasClipboard) return;
+    // Cancel any pending input-handler debounce — the post-paste \`input\`
+    // event would otherwise queue a second emission for the same change.
     if (inputTimers.get(sel)) { clearTimeout(inputTimers.get(sel)); inputTimers.delete(sel); }
-    lastEmittedFill.set(sel, pasted.slice(0, 500));
-    window.__sentriRecord && window.__sentriRecord({
-      kind: "fill", selector: sel, label: bestLabel(el), value: pasted.slice(0, 500), ts: Date.now(),
-    });
+    // Defer to a microtask so \`el.value\` reflects the post-paste field
+    // contents (paste fires in the capture phase before the browser mutates
+    // value). Using el.value — not just the clipboard snippet — means
+    // pasting into a field with pre-existing text records the full final
+    // value, matching what the input/change handlers would emit.
+    setTimeout(() => {
+      const value = String(el.value || "").slice(0, 500);
+      if (!value) return;
+      // Prime the dedup cache so the subsequent \`input\` event (always
+      // fired after paste) is suppressed by the guard added above.
+      lastEmittedFill.set(sel, value);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
+      });
+    }, 0);
   }, true);
 
   document.addEventListener("change", (ev) => {
@@ -856,7 +878,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
     const base = alias === "page" ? "page" : `(await ensurePopup('${alias}'))`;
     const frameUrl = String(action?.frameUrl || "");
     if (!frameUrl) return base;
-    return `${base}.frameLocator('iframe[src*=${JSON.stringify(frameUrl)}]').first()`;
+    return `${base}.frameLocator('iframe[src*="${escapeJsSingleQuote(frameUrl)}"]').first()`;
   };
   lines.push(`const __popupPages = new Map();`);
   lines.push(`context.on('page', (p) => {`);

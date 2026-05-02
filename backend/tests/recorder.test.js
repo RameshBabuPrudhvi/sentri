@@ -109,7 +109,7 @@ test("paste-style fill is emitted as one safeFill step", () => {
 // delegation wiring so a future refactor can't silently strip shadow-DOM
 // coverage from the primary path.
 
-test("RECORDER_SCRIPT primary path delegates to Playwright for shadow-DOM selector generation", async () => {
+await asyncTest("RECORDER_SCRIPT primary path delegates to Playwright for shadow-DOM selector generation", async () => {
   const fs = await import("node:fs");
   const url = await import("node:url");
   const here = url.fileURLToPath(new URL(".", import.meta.url));
