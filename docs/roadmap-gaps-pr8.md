@@ -32,10 +32,12 @@ via `api.updateWebVitalsBudgets`, clear via `api.deleteWebVitalsBudgets`
 (three new helpers added to `frontend/src/api.js`). Form has four inputs
 (LCP / CLS / INP / TTFB) with inline Google "Good / Needs-Improvement"
 reference values, a dirty-check that disables Save when nothing changed, and
-read-only mode for Viewer roles. Wired into `frontend/src/pages/ProjectDetail.jsx`
-Settings tab below the existing Quality Gates panel. Empty-form save calls
-DELETE so users don't hit the server's "must include at least one of: lcp,
-cls, inp, ttfb" 400.
+read-only mode for Viewer roles. Wired into `frontend/src/components/automation/ProjectAutomationCard.jsx`
+(Automation → \[project\] card) below Quality Gates — colocated with tokens +
+schedules since all four define "how CI runs behave"; the Settings tab on
+ProjectDetail was removed in the same PR so per-project CI config has a single
+discoverable home. Empty-form save calls DELETE so users don't hit the
+server's "must include at least one of: lcp, cls, inp, ttfb" 400.
 
 ### AUTO-017.3 — Web Vitals trend chart + per-page breakdown
 **Why it matters:** Single-run violation cards are tactical; teams need

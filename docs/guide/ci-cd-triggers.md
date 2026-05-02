@@ -246,7 +246,7 @@ You can set gates conservatively (e.g. `minPassRate: 95`, `maxFailures: 0`) for 
 
 ## Web Vitals Budgets
 
-AUTO-017 adds per-project performance budgets enforced from CI alongside `gateResult`. Sentri injects the [`web-vitals`](https://github.com/GoogleChrome/web-vitals) library at capture time and records LCP, CLS, INP, and TTFB on every captured page during a run. Configure budgets under **Project → Settings → Web Vitals Budgets** (or via `PATCH /api/v1/projects/:id/web-vitals-budgets`); the form takes any subset of:
+AUTO-017 adds per-project performance budgets enforced from CI alongside `gateResult`. Sentri injects the [`web-vitals`](https://github.com/GoogleChrome/web-vitals) library at capture time and records LCP, CLS, INP, and TTFB on every captured page during a run. Configure budgets under **Automation → \[your project\] → Web Vitals Budgets** (or via `PATCH /api/v1/projects/:id/web-vitals-budgets`); the form takes any subset of:
 
 | Field | Unit | Meaning |
 |---|---|---|
