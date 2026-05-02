@@ -186,9 +186,18 @@ export default function RunDetail() {
       const runs = await api.getRuns(run.projectId);
       // AUTO-019: populate picker with all other test runs for this project
       // so the user can choose any prior run, not just the most recent one.
-      const others = (runs || []).filter((r) => r.id !== run.id && r.type === "test_run");
+      // `runRepo.getByProjectId` returns runs sorted newest-first
+      // (`ORDER BY startedAt DESC` — see backend/src/database/repositories/runRepo.js:179),
+      // so the chronological predecessor of the current run is the next entry
+      // in the list AFTER the current run's index. Default to that rather than
+      // `others[0]` (which is just the newest other run, and is only the
+      // chronological predecessor when the current run is itself the newest).
+      const sortedRuns = (runs || []).filter((r) => r.type === "test_run");
+      const others = sortedRuns.filter((r) => r.id !== run.id);
       setPriorRuns(others);
-      const previous = others[0];
+      const idx = sortedRuns.findIndex((r) => r.id === run.id);
+      const predecessor = idx >= 0 && idx + 1 < sortedRuns.length ? sortedRuns[idx + 1] : null;
+      const previous = predecessor || others[0] || null;
       if (!previous) {
         setCompareData({ summary: { flipped: 0, added: 0, removed: 0, unchanged: 0 }, diffs: [] });
         return;
