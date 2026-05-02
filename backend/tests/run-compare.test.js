@@ -24,12 +24,14 @@ async function main() {
     assert.equal(out.res.status, 201);
     const projectId = out.json.id;
 
-    runRepo.create({ id: "RUN_NEW", projectId, type: "test_run", status: "completed", results: [
+    const newStartedAt = new Date(Date.now() - 1_000).toISOString();
+    const oldStartedAt = new Date(Date.now() - 60_000).toISOString();
+    runRepo.create({ id: "RUN_NEW", projectId, type: "test_run", status: "completed", startedAt: newStartedAt, results: [
       { testId: "T1", testName: "A", status: "failed" },
       { testId: "T2", testName: "B", status: "passed" },
       { testId: "T3", testName: "C", status: "passed" },
     ] });
-    runRepo.create({ id: "RUN_OLD", projectId, type: "test_run", status: "completed", results: [
+    runRepo.create({ id: "RUN_OLD", projectId, type: "test_run", status: "completed", startedAt: oldStartedAt, results: [
       { testId: "T1", testName: "A", status: "passed" },
       { testId: "T2", testName: "B", status: "passed" },
       { testId: "T4", testName: "D", status: "failed" },
