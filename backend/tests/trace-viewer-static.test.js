@@ -14,6 +14,20 @@ const viewerDir = path.join(__dirname, "..", "public", "trace-viewer");
 const indexHtml = path.join(viewerDir, "index.html");
 const backupHtml = path.join(viewerDir, "index.html.bak-test");
 
+// Mount a stand-in for the SPA catch-all from `backend/src/index.js:348-352`
+// so the 404 assertion below reflects production behaviour. Without this,
+// `express.static` with `fallthrough: true` would previously fall through
+// to Express's default 404 and the test would pass even though the real
+// app serves the React SPA index.html with a 200. The static mount now
+// uses `fallthrough: false` (see `backend/src/middleware/appSetup.js`), but
+// we still register a catch-all here so a regression that re-enables
+// fallthrough fails the test instead of silently passing.
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/") || req.path.startsWith("/artifacts/")) return next();
+  if (req.path.startsWith("/health") || req.path === "/api/docs") return next();
+  res.status(200).setHeader("Content-Type", "text/html").send("<html><body>SPA fallback</body></html>");
+});
+
 async function main() {
   const hadIndex = fs.existsSync(indexHtml);
   if (!hadIndex) {

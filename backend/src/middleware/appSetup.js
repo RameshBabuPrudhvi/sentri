@@ -594,8 +594,15 @@ const TRACE_VIEWER_CSP = [
   "base-uri 'self'",
 ].join("; ");
 
+// `fallthrough: false` — when the requested file is missing (e.g. the
+// postinstall copier couldn't resolve Playwright's bundle at install time),
+// `express.static` must emit a real 404 instead of calling next(). Without
+// this, the request falls through to the SPA catch-all in `index.js:348`,
+// which serves the React index.html with a 200 — giving users a broken
+// Sentri page under /trace-viewer/ instead of a clear "not found". See the
+// acceptance criterion in NEXT.md ("backend serves a 404 at /trace-viewer/").
 app.use("/trace-viewer", express.static(TRACE_VIEWER_DIR, {
-  fallthrough: true,
+  fallthrough: false,
   setHeaders(res, filePath) {
     // Scope the viewer's service worker above its own script path. Playwright
     // ships the SW as `sw.bundle.js` today but the name isn't part of its
