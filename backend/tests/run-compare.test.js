@@ -35,13 +35,28 @@ async function main() {
       { testId: "T4", testName: "D", status: "failed" },
     ] });
 
+    // ── Happy path: flipped / added / removed / unchanged counts ──────────────
     out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token });
     assert.equal(out.res.status, 200);
     assert.equal(out.json.summary.flipped, 1);
     assert.equal(out.json.summary.added, 1);
     assert.equal(out.json.summary.removed, 1);
+    assert.equal(out.json.summary.unchanged, 1);
+    assert.equal(out.json.summary.total, 4);
 
+    // ── 404: unknown run ID ───────────────────────────────────────────────────
     out = await req(base, "/api/runs/RUN_NEW/compare/NOPE", { token });
+    assert.equal(out.res.status, 404);
+
+    // ── 401: unauthenticated caller ───────────────────────────────────────────
+    out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD");
+    assert.equal(out.res.status, 401);
+
+    // ── 404: cross-workspace ACL (second user cannot see another workspace's runs)
+    const { token: otherToken } = await t.registerAndLogin(base, {
+      name: "U2", email: `u2-${Date.now()}@x.local`, password: "Password123!",
+    });
+    out = await req(base, "/api/runs/RUN_NEW/compare/RUN_OLD", { token: otherToken });
     assert.equal(out.res.status, 404);
 
     console.log("✅ run-compare: all checks passed");

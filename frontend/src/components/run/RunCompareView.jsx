@@ -14,8 +14,13 @@ export default function RunCompareView({ data, loading, error }) {
     <div className="card" style={{ padding: 12, marginBottom: 16 }}>
       <h3 style={{ marginTop: 0 }}>Run Comparison</h3>
       <p style={{ color: "var(--text3)", marginTop: 0 }}>
-        Flipped: {data.summary?.flipped || 0} · Added: {data.summary?.added || 0} · Removed: {data.summary?.removed || 0}
+        Flipped: {data.summary?.flipped || 0} · Added: {data.summary?.added || 0} · Removed: {data.summary?.removed || 0} · Unchanged: {data.summary?.unchanged || 0}
       </p>
+      {(!data.diffs || data.diffs.length === 0) && (
+        <div style={{ color: "var(--text3)", fontSize: "0.82rem" }}>
+          No prior run found to compare against.
+        </div>
+      )}
       <div style={{ display: "grid", gap: 8 }}>
         {(data.diffs || []).map((d) => (
           <div key={d.testId} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}>

@@ -132,6 +132,7 @@ export default function RunDetail() {
   const [compareData, setCompareData] = useState(null);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState(null);
+  const [priorRuns, setPriorRuns] = useState([]);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -163,15 +164,33 @@ export default function RunDetail() {
 
   const fetchRun = useCallback(() => invalidateRunCache(runId), [runId]);
 
+  const runCompareAgainst = useCallback(async (otherRunId) => {
+    if (!run?.id || !otherRunId) return;
+    setCompareLoading(true);
+    setCompareError(null);
+    try {
+      const diff = await api.getRunCompare(run.id, otherRunId);
+      setCompareData(diff);
+    } catch (err) {
+      setCompareError(err);
+    } finally {
+      setCompareLoading(false);
+    }
+  }, [run]);
+
   const handleCompare = useCallback(async () => {
     if (!run?.projectId) return;
     setCompareLoading(true);
     setCompareError(null);
     try {
       const runs = await api.getRuns(run.projectId);
-      const previous = (runs || []).find((r) => r.id !== run.id);
+      // AUTO-019: populate picker with all other test runs for this project
+      // so the user can choose any prior run, not just the most recent one.
+      const others = (runs || []).filter((r) => r.id !== run.id && r.type === "test_run");
+      setPriorRuns(others);
+      const previous = others[0];
       if (!previous) {
-        setCompareData({ summary: { flipped: 0, added: 0, removed: 0 }, diffs: [] });
+        setCompareData({ summary: { flipped: 0, added: 0, removed: 0, unchanged: 0 }, diffs: [] });
         return;
       }
       const diff = await api.getRunCompare(run.id, previous.id);
@@ -536,7 +555,31 @@ export default function RunDetail() {
         </div>
       </div>
 
-      {!isCrawl && !isGenerate && <RunCompareView data={compareData} loading={compareLoading} error={compareError} />}
+      {!isCrawl && !isGenerate && (compareData || compareLoading || compareError) && (
+        <>
+          {priorRuns.length > 1 && (
+            <div className="card" style={{ padding: 10, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <label htmlFor="compare-prior-run" style={{ fontSize: "0.82rem", color: "var(--text2)" }}>
+                Compare against:
+              </label>
+              <select
+                id="compare-prior-run"
+                className="input"
+                style={{ fontSize: "0.82rem", padding: "4px 8px" }}
+                value={compareData?.otherRun?.id || priorRuns[0]?.id || ""}
+                onChange={(e) => runCompareAgainst(e.target.value)}
+              >
+                {priorRuns.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.id.slice(0, 8)} — {r.startedAt ? new Date(r.startedAt).toLocaleString() : "—"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <RunCompareView data={compareData} loading={compareLoading} error={compareError} />
+        </>
+      )}
 
       {/* ── Pass rate bar (test runs only) ─────────────────────────────── */}
       {!isCrawl && total > 0 && (
