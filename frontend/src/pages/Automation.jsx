@@ -13,6 +13,9 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Zap, FolderOpen } from "lucide-react";
 import useProjectData from "../hooks/useProjectData.js";
 import usePageTitle from "../hooks/usePageTitle.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { userHasRole } from "../utils/roles.js";
+import { useNotifications } from "../context/NotificationContext.jsx";
 import ProjectAutomationCard from "../components/automation/ProjectAutomationCard.jsx";
 import IntegrationCards from "../components/automation/IntegrationCards.jsx";
 import IntegrationSnippets from "../components/automation/IntegrationSnippets.jsx";
@@ -22,6 +25,18 @@ export default function Automation() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { projects, loading } = useProjectData({ fetchTests: false, fetchRuns: false });
+  const { user: authUser } = useAuth();
+  const canEdit = userHasRole(authUser, "qa_lead");
+  const { addNotification } = useNotifications();
+  // QualityGates / WebVitalsBudgets panels expect `onToast(msg, type)` — bridge
+  // to the existing NotificationContext so save/clear feedback surfaces in the
+  // app's notification stream just like the rest of the Automation page.
+  const onPanelToast = useCallback((msg, type = "info") => {
+    addNotification({
+      type: type === "error" ? "error" : type === "success" ? "success" : "info",
+      title: msg,
+    });
+  }, [addNotification]);
 
   const snippetsRef = useRef(null);
 
@@ -74,6 +89,8 @@ export default function Automation() {
               key={p.id}
               project={p}
               defaultExpanded={focusProjectId ? p.id === focusProjectId : i === 0}
+              canEdit={canEdit}
+              onToast={onPanelToast}
             />
           ))}
 
