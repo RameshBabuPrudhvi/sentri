@@ -14,8 +14,22 @@
  */
 
 import path from "path";
+import fs from "fs";
+import { createRequire } from "module";
 import { SHOTS_DIR } from "./config.js";
 import { writeArtifactBuffer } from "../utils/objectStorage.js";
+
+// AUTO-017: Resolve and cache the locally-installed `web-vitals` IIFE bundle so
+// `captureWebVitals` can inject it via `addScriptTag({ content })` without
+// hitting an external CDN at test time. Falls back to `null` if the package
+// isn't installed (e.g. minimal Docker builds) — `captureWebVitals` then returns
+// the empty-metrics shape rather than crashing the test.
+let WEB_VITALS_IIFE = null;
+try {
+  const req = createRequire(import.meta.url);
+  const iifePath = req.resolve("web-vitals/dist/web-vitals.iife.js");
+  WEB_VITALS_IIFE = fs.readFileSync(iifePath, "utf8");
+} catch { /* package not installed — captureWebVitals will no-op */ }
 
 
 /**
@@ -203,8 +217,9 @@ export async function captureBoundingBoxes(page) {
 
 
 export async function captureWebVitals(page) {
+  if (!WEB_VITALS_IIFE) return { lcp: null, cls: null, inp: null, ttfb: null };
   try {
-    await page.addScriptTag({ url: "https://unpkg.com/web-vitals@4/dist/web-vitals.iife.js" });
+    await page.addScriptTag({ content: WEB_VITALS_IIFE });
     await page.waitForTimeout(50);
     const metrics = await page.evaluate(async () => {
       return await new Promise((resolve) => {

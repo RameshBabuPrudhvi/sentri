@@ -399,6 +399,15 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
       // ~50-200ms per test. Failure screenshots are always captured regardless.
       const skipVisualArtifacts = endsWithNonVisualAction(test.playwrightCode);
 
+      // AUTO-017: Web Vitals capture is independent of visual-artifact gating.
+      // Performance metrics (LCP / CLS / INP / TTFB) must be collected for every
+      // successful test regardless of whether the test ends on an assertion,
+      // otherwise budget evaluation silently skips slow tests that happen to end
+      // on `expect(...)`. Best-effort — failures never flip a passing test.
+      try {
+        result.webVitals = await captureWebVitals(page);
+      } catch { /* best-effort */ }
+
       if (!skipVisualArtifacts) {
         result.domSnapshot = await captureDomSnapshot(page);
 
@@ -434,10 +443,6 @@ export async function executeTest(test, browser, runId, stepIndex, runStart, opt
         try {
           result.boundingBoxes = await captureBoundingBoxes(page);
         } catch { /* bounding-box capture is best-effort */ }
-
-        try {
-          result.webVitals = await captureWebVitals(page);
-        } catch { /* best-effort */ }
       }
     })();
 

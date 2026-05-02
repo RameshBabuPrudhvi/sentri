@@ -278,7 +278,11 @@ export default function StepResultsView({ result, run, onBack }) {
         { id: "dom",          label: "🧩 DOM"       },
       ];
 
-  const webVitalsViolations = Array.isArray(run?.webVitalsResult?.violations) ? run.webVitalsResult.violations : [];
+  // AUTO-017: Filter run-level violations down to the test currently being viewed.
+  // `run.webVitalsResult.violations` aggregates across every test in the run; the
+  // detail view only shows one test at a time, so display only its own offenders.
+  const webVitalsViolations = (Array.isArray(run?.webVitalsResult?.violations) ? run.webVitalsResult.violations : [])
+    .filter((v) => !result?.testId || v.testId === result.testId);
 
   return (
     <div className="srv-root">
