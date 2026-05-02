@@ -22,13 +22,20 @@ typical, up to 1s × N when metrics arrive quickly). Wired in
 INP continues to stay `null` for non-interactive tests — the evaluator's
 `Number.isFinite()` guard already skips those silently.
 
-### AUTO-017.2 — Web Vitals budgets configuration UI
-**Why it matters:** CRUD endpoints ship in PR #8 but no React panel — users must
-`curl PATCH` to configure. Mirrors the AUTO-016 backend-without-UI debt pattern.
-**Fix:** Add `WebVitalsBudgetsPanel.jsx` under Project → Settings, paralleling
-`QualityGatesPanel.jsx`. Inputs for lcp/cls/inp/ttfb with Google's
-Good/Needs-Improvement/Poor reference values inline.
-**Effort:** S · **Files:** `frontend/src/components/project/WebVitalsBudgetsPanel.jsx`, `frontend/src/pages/ProjectDetail.jsx`
+### AUTO-017.2 — Web Vitals budgets configuration UI ✅ bundled in PR #8
+**Why it mattered:** CRUD endpoints shipped without a React panel — users would
+have had to `curl PATCH` to configure. Same backend-without-UI debt pattern as
+AUTO-016 → AUTO-016b.
+**Shipped:** New `frontend/src/components/project/WebVitalsBudgetsPanel.jsx`
+mirrors `QualityGatesPanel` exactly: load via `api.getWebVitalsBudgets`, save
+via `api.updateWebVitalsBudgets`, clear via `api.deleteWebVitalsBudgets`
+(three new helpers added to `frontend/src/api.js`). Form has four inputs
+(LCP / CLS / INP / TTFB) with inline Google "Good / Needs-Improvement"
+reference values, a dirty-check that disables Save when nothing changed, and
+read-only mode for Viewer roles. Wired into `frontend/src/pages/ProjectDetail.jsx`
+Settings tab below the existing Quality Gates panel. Empty-form save calls
+DELETE so users don't hit the server's "must include at least one of: lcp,
+cls, inp, ttfb" 400.
 
 ### AUTO-017.3 — Web Vitals trend chart + per-page breakdown
 **Why it matters:** Single-run violation cards are tactical; teams need

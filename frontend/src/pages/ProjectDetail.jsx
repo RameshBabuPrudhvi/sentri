@@ -26,6 +26,7 @@ import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
 import TraceabilityTab from "../components/project/TraceabilityTab.jsx";
 import QualityGatesPanel from "../components/project/QualityGatesPanel.jsx";
+import WebVitalsBudgetsPanel from "../components/project/WebVitalsBudgetsPanel.jsx";
 
 import ProjectHeader from "../components/project/ProjectHeader.jsx";
 import TablePagination from "../components/shared/TablePagination.jsx";
@@ -600,13 +601,20 @@ export default function ProjectDetail() {
         <TraceabilityTab traceability={traceability} traceLoading={traceLoading} />
       )}
 
-      {/* ── SETTINGS TAB (AUTO-012b: Quality Gates) ── */}
+      {/* ── SETTINGS TAB (AUTO-012b: Quality Gates · AUTO-017.2: Web Vitals Budgets) ── */}
       {tab === "settings" && (
-        <QualityGatesPanel
-          projectId={id}
-          canEdit={canEdit}
-          onToast={(msg, type) => showToast(msg, type)}
-        />
+        <>
+          <QualityGatesPanel
+            projectId={id}
+            canEdit={canEdit}
+            onToast={(msg, type) => showToast(msg, type)}
+          />
+          <WebVitalsBudgetsPanel
+            projectId={id}
+            canEdit={canEdit}
+            onToast={(msg, type) => showToast(msg, type)}
+          />
+        </>
       )}
 
       <RunToast msg={toast.msg} type={toast.type} visible={toast.visible} onViewRun={toast.showLink} runId={toast.runId} />
