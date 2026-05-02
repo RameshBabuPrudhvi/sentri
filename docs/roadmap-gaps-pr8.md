@@ -56,6 +56,28 @@ templates to require: *"if the PR adds an API endpoint, it must add the UI surfa
 that calls it — or explicitly justify the split with a follow-up issue ID."*
 **Effort:** XS (docs only).
 
+### UI-REFACTOR-001 — Extract `ConfigurablePanel` abstraction (DRY config UIs)
+**Pattern observed:** `QualityGatesPanel.jsx` and `WebVitalsBudgetsPanel.jsx`
+shipped in PR #8 are 90% identical — same load/save/clear/dirty/error scaffold,
+same card+form+Field rendering, only the field list, icon, copy strings, API
+methods, and response key differ. The duplication has already drifted (the
+budgets panel has `marginTop: 12` on its card, the gates panel doesn't).
+**Why it matters for the product:** Sentri's roadmap has at least 4 more
+per-project JSON-config surfaces coming (SLO budgets, SEC-005 per-workspace
+SSO config, DIF-008 Jira/Linear credentials, CAP-001 data-fixture profiles,
+per-project retry-strategy config). Each one would otherwise be another
+~240-line panel; with this abstraction each is ~15 lines of config. Also
+materially reduces the risk that drives `PROC-001` (backend ships without UI)
+because writing the UI becomes trivial.
+**Fix:** Add `frontend/src/components/project/ConfigurablePanel.jsx` —
+generic load/save/clear form driven by a `fields` config array (`{ key, label,
+help, min, max, step, placeholder }`), a `responseKey` for the server payload,
+and a `{ get, update, remove }` API descriptor. Reduce both existing panels to
+thin config wrappers (~15 lines each). No API change, no behavior change —
+purely an internal refactor that makes the next config UI a one-file PR.
+**Effort:** S · **Files:** new `frontend/src/components/project/ConfigurablePanel.jsx`,
+shrink `QualityGatesPanel.jsx` + `WebVitalsBudgetsPanel.jsx`. No backend changes.
+
 ### PROC-002 — Automate sprint-tracker hand-off
 **Pattern observed:** Lifeguard repeatedly catches `NEXT.md` / `ROADMAP.md`
 mechanical violations (4 entries in Recently completed, count not decremented,
