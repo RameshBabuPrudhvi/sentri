@@ -50,17 +50,21 @@ DRY up `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) into 
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
-**Effort:** — | **Priority:** — | **Dependencies:** —
+### 2 · CAP-003 — Secret scanner on generated tests
+**Effort:** S | **Priority:** 🟡 High (security) | **Dependencies:** none | **Source:** `docs/roadmap-gaps-pr8.md` § 5 (CAP-003)
 
-Slot freed by `UI-REFACTOR-001` promoting to Current PR after the combined recorder PR shipped in PR #11. Next agent: pick the highest-priority unshipped item from `docs/roadmap-gaps-pr8.md` (AUTO-017.3 trend chart, MET-001 shared time-series infra, PROC-001/002 process automation, CAP-003 secret scanner, etc.) or the next ROADMAP.md item with `Dependencies: none` and no file overlap with slot 1.
+LLM-generated test code can embed credentials harvested during crawl (`Authorization` headers, API keys, session cookies copied from the live target into the test body). Add a `gitleaks`-style scanner in the pipeline `validate` stage that runs on every generated `playwrightCode` blob: reject the test, surface the matched rule + redacted snippet to the reviewer, and flag the run so callers can fail CI on a regression. Real risk given Sentri's AI-generation positioning — `gitleaks` already gates the repo's own CI (`docs/changelog.md:27`), reuse the same ruleset.
 
-### 3 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
-**Effort:** — | **Priority:** — | **Dependencies:** —
+**Files:** new `backend/src/pipeline/secretScanner.js` (rule loader + scan helper) · `backend/src/pipeline/validate.js` (gate generated code through scanner before persistence) · `backend/tests/secret-scanner.test.js` (positive + negative fixtures incl. AWS keys / JWTs / `Bearer` tokens) · register in `backend/tests/run-tests.js`
 
-Slot freed by the PR #11 rotation. Same selection criteria as slot 2 above — pick the highest-priority unshipped item with no file overlap with slots 1–2.
+### 3 · CAP-004 — Self-healing telemetry dashboard
+**Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** none | **Source:** `docs/roadmap-gaps-pr8.md` § 5 (CAP-004)
 
-### 4 · TBD — Promote from `docs/roadmap-gaps-pr8.md`
+Sentri claims self-healing as a differentiator but surfaces no win-rate metrics. Data already lives in the existing `healingRepo` (per-test strategy histogram from PR #100's `test.healing` telemetry pipeline). Add a `/healing` page rendering: per-strategy success rate, top-healed selectors, and a "tests-that-would-have-failed" savings estimate. Closes the loop on data we already collect.
+
+**Files:** new `frontend/src/pages/HealingDashboard.jsx` · new `backend/src/routes/healing.js` (`GET /api/v1/healing/summary` aggregating from `healingRepo`) · `frontend/src/api.js` (`getHealingSummary()` helper) · sidebar nav entry · `backend/tests/healing-summary.test.js`
+
+### 4 · MET-001 — Shared time-series metrics table + `<TrendChart>` component
 
 <!-- Original recorder-combined spec preserved below for historical traceability during this rotation. Remove on the next rotation. -->
 
