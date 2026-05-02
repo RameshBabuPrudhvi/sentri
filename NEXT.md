@@ -8,24 +8,6 @@
 
 ---
 
-## 🚨 10-Day Production Readiness Plan
-
-> **Production target:** ship in 10 days. `INF-006` ✅ shipped in PR #1, clearing the last 🔴 Blocker; `AUTO-012` ✅ (full backend + UI) shipped in PR #2; `DIF-015b Gap 2` ✅ shipped in PR #4 (Playwright `InjectedScript` delegation with hand-rolled fallback); **`AUTO-017` ✅ shipped in PR #8** (Web Vitals budgets); **`DIF-005` ✅ shipped in PR #9** (embedded trace viewer); **`AUTO-019` ✅ shipped in PR #10** (per-test run diffing); **combined recorder PR `DIF-015b Gap 3` + `DIF-015c Gap 1` ✅ shipped in PR #11** (iframe `frameLocator` emission, shadow-DOM via Playwright's InjectedScript, paste-as-single-`fill`, opt-in `shortcutCaptureBudget`). Every 🟡 High item in Phase 2 is also already ✅. Remaining window is Golden E2E + stabilisation; `UI-REFACTOR-001` is now the current sprint target per `## ▶ Current PR` below.
-
-| Day | Focus | Owner |
-|---|---|---|
-| 1–3 | ~~DIF-015b Gap 2 — recorder data-testid scoring~~ ✅ shipped (PR #4) | Backend |
-| 2–3 | Resolve **all open PR review threads** (start with `permissions.json` line numbers off by 5) | All |
-| 3–5 | Run **Golden E2E Happy Path** (`QA.md:240-340`, 51 steps) on Chrome + at least one other browser | QA |
-| 5–6 | **Fix any Blocker / Critical bugs** found during the QA pass | All |
-| 6–8 | ~~AUTO-017 — Web Vitals performance budgets~~ ✅ shipped (PR #8) | Backend |
-| 7–9 | ~~DIF-005 — Embedded Playwright trace viewer~~ ✅ shipped (PR #9) | Backend |
-| 8–10 | Stabilisation window: CI green ≥ 2 days on `main`; cut release tag | All |
-
-**Explicitly deferred (do not ship in this window):** SEC-004 (MFA), SEC-005 (SSO), DIF-008 / DIF-009 / DIF-010 / DIF-012, all Phase 4 items except AUTO-019 (now in-flight as the current sprint target). Track post-launch on customer demand.
-
----
-
 ## ▶ Current PR — UI-REFACTOR-001
 
 **Title:** Extract `ConfigurablePanel` abstraction from `QualityGatesPanel` + `WebVitalsBudgetsPanel`
