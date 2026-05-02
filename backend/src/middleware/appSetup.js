@@ -544,6 +544,19 @@ app.use("/artifacts", (req, res, next) => {
   },
 }));
 
+
+const TRACE_VIEWER_DIR = path.join(__dirname, "..", "..", "public", "trace-viewer");
+
+app.use("/trace-viewer", express.static(TRACE_VIEWER_DIR, {
+  fallthrough: true,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith("sw.bundle.js")) {
+      res.setHeader("Service-Worker-Allowed", "/trace-viewer/");
+    }
+    res.setHeader("Cache-Control", "public, max-age=300");
+  },
+}));
+
 // ─── SEC-002: Serve index.html with nonce placeholder replaced ───────────────
 // In production the Vite-built SPA is served as static files. The build output
 // contains `nonce="__CSP_NONCE__"` placeholders on all `<script>` tags (injected
