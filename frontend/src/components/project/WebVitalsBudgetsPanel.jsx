@@ -1,22 +1,29 @@
 /**
- * @module components/project/QualityGatesPanel
- * @description Quality-gate configuration panel for a project (AUTO-012b).
+ * @module components/project/WebVitalsBudgetsPanel
+ * @description Web Vitals budgets configuration panel for a project (AUTO-017.2).
  *
- * Surfaces the three gate fields backed by `PATCH /api/v1/projects/:id/quality-gates`:
- *   - `minPassRate`  (0–100, %) — fail run when pass rate is below this.
- *   - `maxFlakyPct`  (0–100, %) — fail run when flaky % is above this.
- *   - `maxFailures`  (>= 0, integer) — fail run when failure count is above this.
+ * Mirrors `QualityGatesPanel` but for performance budgets backed by
+ * `PATCH /api/v1/projects/:id/web-vitals-budgets`:
+ *   - `lcp`  (ms)        — Largest Contentful Paint upper bound.
+ *   - `cls`  (unitless)  — Cumulative Layout Shift upper bound (0–1 typical).
+ *   - `inp`  (ms)        — Interaction to Next Paint upper bound.
+ *   - `ttfb` (ms)        — Time To First Byte upper bound.
  *
- * Any single field can be left blank to omit it from the gate config — the
- * server stores only the fields that are present, so partial configs are valid.
+ * Any subset of the four fields is valid — leave a field blank to skip it.
+ * Inline reference values follow Google's official "Good" Web Vitals
+ * thresholds so users have a sane default to type against.
  *
- * Loads via `api.getQualityGates`; saves via `api.updateQualityGates`; clears
- * via `api.deleteQualityGates`. Mutations require `qa_lead`+ on the backend, so
- * the form is rendered read-only when `canEdit === false` (Viewer role).
+ * Loads via `api.getWebVitalsBudgets`; saves via `api.updateWebVitalsBudgets`;
+ * clears via `api.deleteWebVitalsBudgets`. Mutations require `qa_lead`+ on the
+ * backend, so the form is rendered read-only when `canEdit === false`.
+ *
+ * INP can stay `null` for tests that never trigger an interaction — the
+ * evaluator skips `null` metrics, so an INP budget on an assertion-ending
+ * test is silently ignored rather than falsely passing or failing.
  */
 
 import React, { useEffect, useState } from "react";
-import { Save, Trash2, RefreshCw, ShieldCheck } from "lucide-react";
+import { Save, Trash2, RefreshCw, Gauge } from "lucide-react";
 import { api } from "../../api.js";
 
 /** Convert `null|undefined|""` → "" and any other value → its string form for input binding. */
@@ -30,33 +37,34 @@ function toInput(v) {
  * @param {boolean}  props.canEdit  - Viewer renders the form read-only.
  * @param {Function} [props.onToast] - `(message, type) => void` for feedback.
  */
-export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
+export default function WebVitalsBudgetsPanel({ projectId, canEdit, onToast }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [gates, setGates] = useState(null); // server-side state (null when unconfigured)
-  const [form, setForm] = useState({ minPassRate: "", maxFlakyPct: "", maxFailures: "" });
+  const [budgets, setBudgets] = useState(null); // server-side state (null when unconfigured)
+  const [form, setForm] = useState({ lcp: "", cls: "", inp: "", ttfb: "" });
 
   const showToast = (msg, type = "info") => onToast?.(msg, type);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.getQualityGates(projectId)
+    api.getWebVitalsBudgets(projectId)
       .then((res) => {
         if (cancelled) return;
-        const g = res?.qualityGates || null;
-        setGates(g);
+        const b = res?.webVitalsBudgets || null;
+        setBudgets(b);
         setForm({
-          minPassRate: toInput(g?.minPassRate),
-          maxFlakyPct: toInput(g?.maxFlakyPct),
-          maxFailures: toInput(g?.maxFailures),
+          lcp:  toInput(b?.lcp),
+          cls:  toInput(b?.cls),
+          inp:  toInput(b?.inp),
+          ttfb: toInput(b?.ttfb),
         });
         setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err.message || "Failed to load quality gates");
+        setError(err.message || "Failed to load Web Vitals budgets");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -64,13 +72,14 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
 
   // Build the PATCH payload, parsing numbers and dropping blanks. Returns
   // `null` if every field is blank (caller should DELETE rather than PATCH `{}`,
-  // since an empty object is technically valid but stores `qualityGates: {}`
-  // which is not what the user means by "no gates").
+  // since the server rejects an empty object with "must include at least one
+  // of: lcp, cls, inp, ttfb").
   function buildPayload() {
     const payload = {};
-    if (form.minPassRate !== "") payload.minPassRate = Number(form.minPassRate);
-    if (form.maxFlakyPct !== "") payload.maxFlakyPct = Number(form.maxFlakyPct);
-    if (form.maxFailures !== "") payload.maxFailures = Number(form.maxFailures);
+    if (form.lcp  !== "") payload.lcp  = Number(form.lcp);
+    if (form.cls  !== "") payload.cls  = Number(form.cls);
+    if (form.inp  !== "") payload.inp  = Number(form.inp);
+    if (form.ttfb !== "") payload.ttfb = Number(form.ttfb);
     return Object.keys(payload).length === 0 ? null : payload;
   }
 
@@ -82,14 +91,15 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
     try {
       const payload = buildPayload();
       if (payload === null) {
-        // All blank → treat save as a clear (matches user intent).
-        await api.deleteQualityGates(projectId);
-        setGates(null);
-        showToast("Quality gates cleared", "info");
+        // All blank → treat save as a clear (matches user intent and avoids
+        // the server's "must include at least one" 400).
+        await api.deleteWebVitalsBudgets(projectId);
+        setBudgets(null);
+        showToast("Web Vitals budgets cleared", "info");
       } else {
-        const res = await api.updateQualityGates(projectId, payload);
-        setGates(res?.qualityGates || payload);
-        showToast("Quality gates saved", "success");
+        const res = await api.updateWebVitalsBudgets(projectId, payload);
+        setBudgets(res?.webVitalsBudgets || payload);
+        showToast("Web Vitals budgets saved", "success");
       }
     } catch (err) {
       setError(err.message || "Save failed");
@@ -101,14 +111,14 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
 
   async function handleClear() {
     if (!canEdit) return;
-    if (!window.confirm("Clear all quality gates? Future runs will report gateResult: null.")) return;
+    if (!window.confirm("Clear all Web Vitals budgets? Future runs will report webVitalsResult: null.")) return;
     setSaving(true);
     setError(null);
     try {
-      await api.deleteQualityGates(projectId);
-      setGates(null);
-      setForm({ minPassRate: "", maxFlakyPct: "", maxFailures: "" });
-      showToast("Quality gates cleared", "info");
+      await api.deleteWebVitalsBudgets(projectId);
+      setBudgets(null);
+      setForm({ lcp: "", cls: "", inp: "", ttfb: "" });
+      showToast("Web Vitals budgets cleared", "info");
     } catch (err) {
       setError(err.message || "Clear failed");
       showToast(err.message || "Clear failed", "error");
@@ -120,32 +130,34 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
   // Disabled save when nothing changed vs server state — saves a round-trip
   // and avoids spurious "saved" toasts.
   const isDirty =
-    toInput(gates?.minPassRate) !== form.minPassRate ||
-    toInput(gates?.maxFlakyPct) !== form.maxFlakyPct ||
-    toInput(gates?.maxFailures) !== form.maxFailures;
+    toInput(budgets?.lcp)  !== form.lcp  ||
+    toInput(budgets?.cls)  !== form.cls  ||
+    toInput(budgets?.inp)  !== form.inp  ||
+    toInput(budgets?.ttfb) !== form.ttfb;
 
   if (loading) {
     return (
-      <div className="card" style={{ padding: 16 }}>
+      <div className="card" style={{ padding: 16, marginTop: 12 }}>
         <div className="skeleton" style={{ height: 120, borderRadius: 8 }} />
       </div>
     );
   }
 
   return (
-    <div className="card" style={{ padding: 20 }}>
+    <div className="card" style={{ padding: 20, marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <ShieldCheck size={16} color="var(--accent)" />
-        <h3 style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem" }}>Quality Gates</h3>
-        {gates && (
-          <span className="badge badge-green" style={{ fontWeight: 600 }} title="Gates configured — runs include gateResult">
+        <Gauge size={16} color="var(--accent)" />
+        <h3 style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem" }}>Web Vitals Budgets</h3>
+        {budgets && (
+          <span className="badge badge-green" style={{ fontWeight: 600 }} title="Budgets configured — runs include webVitalsResult">
             Active
           </span>
         )}
       </div>
       <p style={{ marginTop: 0, marginBottom: 14, fontSize: "0.78rem", color: "var(--text2)", lineHeight: 1.5 }}>
-        Configure thresholds that future runs must meet. The trigger response includes <code>gateResult</code> so
-        CI pipelines can fail the build on violation. Leave a field blank to skip it.
+        Set per-page performance thresholds. The trigger response includes <code>webVitalsResult</code> so
+        CI pipelines can fail the build on regressions. Leave a field blank to skip it. Reference values follow
+        Google&rsquo;s &ldquo;Good&rdquo; Web Vitals thresholds.
       </p>
 
       {error && (
@@ -161,27 +173,39 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
       <form onSubmit={handleSave}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <Field
-            label="Min pass rate (%)"
-            help="Run fails when pass rate falls below this. 0–100."
-            value={form.minPassRate}
-            onChange={(v) => setForm((f) => ({ ...f, minPassRate: v }))}
-            min={0} max={100} step="0.1"
-            disabled={!canEdit || saving}
-          />
-          <Field
-            label="Max flaky %"
-            help="Run fails when flaky % exceeds this. 0–100."
-            value={form.maxFlakyPct}
-            onChange={(v) => setForm((f) => ({ ...f, maxFlakyPct: v }))}
-            min={0} max={100} step="0.1"
-            disabled={!canEdit || saving}
-          />
-          <Field
-            label="Max failures"
-            help="Run fails when total failures exceed this. Integer ≥ 0."
-            value={form.maxFailures}
-            onChange={(v) => setForm((f) => ({ ...f, maxFailures: v }))}
+            label="LCP (ms)"
+            help="Largest Contentful Paint. Good ≤ 2500 · Needs-Improvement ≤ 4000."
+            value={form.lcp}
+            onChange={(v) => setForm((f) => ({ ...f, lcp: v }))}
             min={0} step="1"
+            placeholder="2500"
+            disabled={!canEdit || saving}
+          />
+          <Field
+            label="CLS"
+            help="Cumulative Layout Shift (unitless). Good ≤ 0.1 · Needs-Improvement ≤ 0.25."
+            value={form.cls}
+            onChange={(v) => setForm((f) => ({ ...f, cls: v }))}
+            min={0} step="0.01"
+            placeholder="0.1"
+            disabled={!canEdit || saving}
+          />
+          <Field
+            label="INP (ms)"
+            help="Interaction to Next Paint. Good ≤ 200 · Needs-Improvement ≤ 500. Null on tests with no interaction."
+            value={form.inp}
+            onChange={(v) => setForm((f) => ({ ...f, inp: v }))}
+            min={0} step="1"
+            placeholder="200"
+            disabled={!canEdit || saving}
+          />
+          <Field
+            label="TTFB (ms)"
+            help="Time To First Byte. Good ≤ 800 · Needs-Improvement ≤ 1800."
+            value={form.ttfb}
+            onChange={(v) => setForm((f) => ({ ...f, ttfb: v }))}
+            min={0} step="1"
+            placeholder="800"
             disabled={!canEdit || saving}
           />
         </div>
@@ -196,7 +220,7 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
             >
               {saving ? <RefreshCw size={12} className="spin" /> : <Save size={12} />} Save
             </button>
-            {gates && (
+            {budgets && (
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -212,7 +236,7 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
 
         {!canEdit && (
           <div style={{ marginTop: 10, fontSize: "0.73rem", color: "var(--text3)", fontStyle: "italic" }}>
-            Read-only — QA Lead or Admin role required to edit gates.
+            Read-only — QA Lead or Admin role required to edit budgets.
           </div>
         )}
       </form>
@@ -220,7 +244,7 @@ export default function QualityGatesPanel({ projectId, canEdit, onToast }) {
   );
 }
 
-function Field({ label, help, value, onChange, min, max, step, disabled }) {
+function Field({ label, help, value, onChange, min, max, step, placeholder, disabled }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text2)" }}>{label}</span>
@@ -234,7 +258,7 @@ function Field({ label, help, value, onChange, min, max, step, disabled }) {
         max={max}
         step={step}
         disabled={disabled}
-        placeholder="—"
+        placeholder={placeholder ?? "—"}
         style={{ height: 32, fontSize: "0.875rem" }}
       />
       <span style={{ fontSize: "0.7rem", color: "var(--text3)", lineHeight: 1.4 }}>{help}</span>
