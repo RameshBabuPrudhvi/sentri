@@ -59,7 +59,7 @@ async function main() {
 
     // ── Evaluator: 90% pass rate vs minPassRate: 95 → violation ─────────
     // Imported lazily so the test doesn't depend on runner boot order.
-    const { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } = await import("../src/testRunner.js").catch(() => ({}));
+    const { __evaluateQualityGatesForTest } = await import("../src/testRunner.js").catch(() => ({}));
     if (typeof __evaluateQualityGatesForTest === "function") {
       const result = __evaluateQualityGatesForTest(
         { minPassRate: 95 },
@@ -125,6 +125,11 @@ async function main() {
       assert.equal(out.res.status, 200);
       assert.equal(out.json.webVitalsBudgets.cls, 0.1);
 
+      assert.equal(
+        typeof __evaluateWebVitalsBudgetsForTest,
+        "function",
+        "__evaluateWebVitalsBudgetsForTest must be exported from testRunner.js",
+      );
       const vitalsResult = __evaluateWebVitalsBudgetsForTest(
         { lcp: 2500, cls: 0.1 },
         { results: [{ testId: "t1", testName: "x", webVitals: { lcp: 3100, cls: 0.05, inp: 120, ttfb: 200 } }] }
