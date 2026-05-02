@@ -249,3 +249,7 @@
   background: var(--accent-bg);
   font-weight: 600;
 }
+.sidebar a,
+.sidebar a:hover,
+.sidebar-rail__logo-btn,
+.sidebar-rail__workspace-btn { text-decoration: none; }
