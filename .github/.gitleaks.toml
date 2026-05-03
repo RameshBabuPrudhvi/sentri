@@ -36,6 +36,7 @@ useDefault = true
     "backend/.env.example",
     "backend/.env.example.test",
     "backend/tests/openrouter-provider.test.js",
+    "backend/tests/secret-scanner.test.js",
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth
