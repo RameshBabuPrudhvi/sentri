@@ -24,10 +24,30 @@ const DEFAULT_RULES = [
 
 let cachedRules = null;
 
+/**
+ * Resolve the repository root from this module's URL. Used to locate the
+ * shared `.github/.gitleaks.toml` config without hard-coding `process.cwd()`
+ * (which would break when the server is launched from a non-repo-root cwd).
+ *
+ * @returns {string} Absolute path to the repo root.
+ * @private
+ */
 function repoRoot() {
   return path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../..");
 }
 
+/**
+ * Naive `[[rules]]` chunker for `.github/.gitleaks.toml`. Not a full TOML
+ * parser — extracts only `id`, `description`, and `regex` fields per rule
+ * via simple line-anchored regexes. Multi-line strings, escapes, and other
+ * TOML features are intentionally unsupported (best-effort reuse). Invalid
+ * regex patterns are silently skipped so a malformed custom rule cannot
+ * break the entire scanner.
+ *
+ * @param {string} tomlText Raw `.gitleaks.toml` file contents.
+ * @returns {Array<{id: string, description: string, regex: RegExp}>}
+ * @private
+ */
 function parseCustomRules(tomlText) {
   const parsed = [];
   const chunks = tomlText.split("[[rules]]").slice(1);

@@ -86,7 +86,20 @@ Every generated test currently requires manual approval (`reviewStatus: 'draft'`
 - With a threshold set, tests above the score are persisted as `approved` and an activity-log entry is written attributing the approval to the auto-approver pseudo-user.
 - The Tests page exposes a "Auto-approved" filter so reviewers can audit the bypass path without trawling activities.
 
-> **Stretch / parallel opportunities** (no queue conflict): pick the next 🔵 Medium or 🟢 Differentiator item from `ROADMAP.md` Phase 4 with `Dependencies: none` once an engineer has cycles — `AUTO-002` (change detection) and `DIF-010` (multi-auth profiles) are both standalone candidates.
+### 4 · AUTO-002 — Change detection / diff-aware crawling
+**Effort:** L | **Priority:** 🟢 Differentiator | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 4 (AUTO-002)
+
+Sentri re-crawls the entire site on every run. An autonomous system should detect what changed since the last crawl (new pages, modified DOM, removed elements) and only regenerate tests for affected pages. `backend/src/pipeline/crawlBrowser.js` has no concept of a previous crawl baseline today — this is the difference between "run everything nightly" and "test only what changed," and it's a hard prerequisite for AUTO-004 (test impact analysis from git diff) and the smarter slice of AUTO-001 (risk-based ordering).
+
+After each crawl, store a `crawl_baseline` snapshot per project (page URL → DOM fingerprint hash). On the next crawl, diff against the baseline to identify changed pages. Only run the generation pipeline for changed pages. Emit a `pages_changed` SSE event so the Test Lab live view can show "3 pages changed since last crawl → regenerating only those" instead of a generic progress bar.
+
+**Files:** new `backend/src/pipeline/crawlDiff.js` (DOM fingerprint diff engine — reuse the existing `stateFingerprint.js` hashing, don't invent a new scheme) · `backend/src/pipeline/crawlBrowser.js` (baseline comparison + early-skip for unchanged pages) · `backend/src/database/migrations/` (new `crawl_baselines` table keyed on `(projectId, pageUrl)`) · new `backend/src/database/repositories/crawlBaselineRepo.js` (no raw SQL in the pipeline module per AGENT.md) · `backend/src/routes/runs.js` (expose `changedPages[]` on the run response + SSE event) · `backend/tests/crawl-diff.test.js` (first-crawl baseline creation, unchanged-page skip, changed-page regen, added/removed-page handling, empty-baseline fallback)
+
+**Acceptance criteria:**
+- First crawl of a new project behaves identically to today (no baseline to diff against → full crawl + generate).
+- Second crawl with no changes emits zero generation calls and completes as `completed_empty` with a `changedPages: []` annotation — no regressed tests, no wasted LLM quota.
+- Second crawl with a modified page regenerates tests only for that URL; untouched pages' approved tests survive unchanged.
+- Pages removed from the site are surfaced in the run response so reviewers can decide whether to soft-delete their tests.
 
 ---
 
