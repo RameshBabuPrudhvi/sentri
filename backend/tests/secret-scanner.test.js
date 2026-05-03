@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { scanForSecrets } from "../src/pipeline/secretScanner.js";
 
+let passed = 0;
+let failed = 0;
+
 function test(name, fn) {
   try {
     fn();
     console.log(`✅ ${name}`);
+    passed++;
   } catch (err) {
     console.error(`❌ ${name}`);
     console.error(err.message);
+    failed++;
     process.exitCode = 1;
   }
 }
@@ -36,6 +41,11 @@ test("clean code has no findings", () => {
   assert.deepEqual(scanForSecrets(code), []);
 });
 
-if (process.exitCode) {
-  process.exit(process.exitCode);
+console.log(`\n${"─".repeat(50)}`);
+console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);
+if (failed > 0) {
+  console.log(`\n⚠️  ${failed} test(s) failed`);
+  process.exit(1);
+} else {
+  console.log(`\n🎉 All secret-scanner tests passed!`);
 }
