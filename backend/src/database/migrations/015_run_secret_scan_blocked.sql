@@ -1,0 +1,12 @@
+-- Migration 015: Run secret-scan blocked flag (CAP-003)
+--
+-- Persists `run.secretScanBlocked` so CI consumers and the reviewer UI can
+-- distinguish "run rejected for malformed code" from "run rejected because
+-- the AI leaked credentials into a generated test" after the run is reloaded
+-- from the database. The orchestrator sets this flag in-memory when the
+-- post-generation secret scanner (`backend/src/pipeline/secretScanner.js`)
+-- produces any findings; without a column it was silently dropped by
+-- `runRepo.save()` (which only writes fields in INSERT_COLS).
+--
+-- Pre-migration runs default to 0 (not blocked).
+ALTER TABLE runs ADD COLUMN secretScanBlocked INTEGER NOT NULL DEFAULT 0;

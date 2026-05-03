@@ -62,6 +62,12 @@ function runToRow(r) {
   // Never serialise the in-memory logs array back to the runs table —
   // log lines are stored in run_logs exclusively.
   delete row.logs;
+  // CAP-003: SQLite has no native boolean; better-sqlite3 rejects JS booleans.
+  // The orchestrator sets `run.secretScanBlocked = true`; coerce to 0/1 here so
+  // both create() and update()/save() paths persist it cleanly.
+  if (typeof row.secretScanBlocked === "boolean") {
+    row.secretScanBlocked = row.secretScanBlocked ? 1 : 0;
+  }
   return row;
 }
 
@@ -77,6 +83,7 @@ const INSERT_COLS = [
   "networkCondition", // AUTO-006: fast | slow3g | offline (migration 012)
   "gateResult", // AUTO-012: quality gate pass/fail summary
   "webVitalsResult", // AUTO-017: web vitals budget pass/fail summary
+  "secretScanBlocked", // CAP-003: set when post-generation secret scanner rejects any test (migration 015)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -351,6 +358,10 @@ export function create(run) {
   // generate runs) that never set retry telemetry.
   if (params.retryCount == null) params.retryCount = 0;
   if (params.failedAfterRetry == null) params.failedAfterRetry = 0;
+  // CAP-003: migration 015 declares secretScanBlocked NOT NULL DEFAULT 0.
+  // Coerce undefined/null to 0 for runs without secret-scan findings
+  // (runToRow already normalised any boolean value to 0/1).
+  if (params.secretScanBlocked == null) params.secretScanBlocked = 0;
   db.prepare(INSERT_SQL).run(params);
 }
 
