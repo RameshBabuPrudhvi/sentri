@@ -53,8 +53,12 @@ The NEXT.md / ROADMAP.md / `docs/changelog.md` update dance after every shipped 
 
 ## ⏭ Queue (next 3 PRs after current)
 
-### 2 · AUTO-017.3 — Web Vitals trend chart
-**Effort:** S | **Priority:** 🔵 Medium | **Dependencies:** MET-001 (shipped in Current PR — `<TrendChart>` available) | **Source:** ROADMAP.md Phase 4
+### 2 · AUTO-017.3 + PROC-001 (bundled)
+**Effort:** S (S + XS) | **Priority:** 🔵 Medium | **Dependencies:** AUTO-017.3 needs MET-001 (shipped in Current PR — `<TrendChart>` available); PROC-001 has none | **Source:** ROADMAP.md Phase 4 + `docs/roadmap-gaps-pr8.md` § PROC-001
+
+> Both items are tiny and unrelated in scope, so bundling them into a single PR is cheaper than two separate hand-offs. They touch disjoint files (frontend chart wiring vs. CI workflow + docs) so the diff stays reviewable.
+
+#### Scope 1 — AUTO-017.3: Web Vitals trend chart
 
 **UI landing surface (post-PR #6 layout — UI-REFACTOR-001):** Quality Gates / Web Vitals Budgets config no longer lives in `ProjectDetail → Settings` — it was moved exclusively to the Automation page (`/automation`) under the **Quality Gates** top-level tab → per-project accordion → `ProjectQualityCard` → **Web Vitals** inner tab. `QualityGatesPanel` and `WebVitalsBudgetsPanel` both share the new `ConfigurablePanel` abstraction. The trend chart belongs next to the Web Vitals budget-config form inside `ProjectQualityCard`'s Web Vitals tab — do **not** add it to `ProjectDetail.jsx` (no budget config there anymore) or to RunDetail (that's per-run, not per-project trend).
 
@@ -64,14 +68,13 @@ With MET-001 landed, add a `<TrendChart metricKey="webVitals.lcp" />` (and one e
 
 **Verify before starting:** the component paths above reflect PR #6's changelog. Run `grep -r "WebVitalsBudgetsPanel\|ProjectQualityCard" frontend/src` against the PR's HEAD to confirm the files exist exactly as named before wiring — PR #6 landed `ConfigurablePanel` but the exact file names should be double-checked.
 
-### 3 · PROC-001 — Require backend PRs to ship UI in the same PR
-**Effort:** XS | **Priority:** 🔵 Medium | **Dependencies:** none | **Source:** `docs/roadmap-gaps-pr8.md` § PROC-001
+#### Scope 2 — PROC-001: Require backend PRs to ship UI in the same PR
 
 Docs-only convention change: every new backend route must have its frontend consumer in the same PR (no API-orphan PRs). Update `REVIEW.md`, `AGENT.md`, and the PR template checklist; add a CI check that fails when a PR adds a route to `backend/src/routes/*.js` without touching `frontend/src/api.js` or any `frontend/src/pages/*.jsx`.
 
 **Files:** `REVIEW.md` (new checklist row) · `AGENT.md` (convention section) · `.github/PULL_REQUEST_TEMPLATE.md` (checkbox) · new `.github/workflows/no-orphan-routes.yml` (or extend an existing workflow) · short doc note in `CONTRIBUTING.md`
 
-### 4 · AUTO-003 — Confidence scoring and auto-approval of low-risk tests
+### 3 · AUTO-003 — Confidence scoring and auto-approval of low-risk tests
 **Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 4 (AUTO-003)
 
 Every generated test currently requires manual approval (`reviewStatus: 'draft'`). For truly autonomous operation, the system should auto-approve tests above a confidence threshold. A quality score already exists in `backend/src/pipeline/deduplicator.js:226-272` but is never used for approval decisions — expose it as `tests.confidenceScore`, add a per-project `autoApproveThreshold` setting (default: disabled / off), and on generation auto-approve tests above the threshold. Log auto-approvals in the activity trail (`userName: "auto-approver"` so the audit history is honest about how the test got approved). Add a "review auto-approved tests" filter in the Tests page so reviewers can spot-check a sample.
