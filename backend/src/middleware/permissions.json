@@ -7,6 +7,7 @@
     "POST /api/v1/projects": { "role": "qa_lead", "source": "backend/src/routes/projects.js:46" },
     "PATCH /api/v1/projects/:id": { "role": "qa_lead", "source": "backend/src/routes/projects.js:96" },
     "DELETE /api/v1/projects/:id": { "role": "admin", "source": "backend/src/routes/projects.js:152" },
+    "GET /api/v1/projects/:id/pages": { "role": "viewer", "source": "backend/src/routes/projects.js" },
     "PATCH /api/v1/projects/:id/quality-gates": { "role": "qa_lead", "source": "backend/src/routes/projects.js" },
     "DELETE /api/v1/projects/:id/quality-gates": { "role": "qa_lead", "source": "backend/src/routes/projects.js" },
     "PATCH /api/v1/projects/:id/web-vitals-budgets": { "role": "qa_lead", "source": "backend/src/routes/projects.js" },

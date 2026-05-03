@@ -33,10 +33,25 @@ import { formatLogLine } from "../utils/logFormatter.js";
  *
  * @param {Object} page - Playwright Page instance.
  * @param {string} runId
+ * @param {Object} [options]
+ * @param {boolean} [options.interactive=false] - When `true`, applies the
+ *   recorder-specific overrides needed to make the in-browser canvas
+ *   responsive: bring the page to front, enable focus emulation, and force
+ *   `document.visibilityState` to "visible" (Chrome aggressively throttles
+ *   rendering / RAF / animations when the headless tab is backgrounded —
+ *   the symptom on non-Google sites was a black screencast). Also bumps
+ *   `everyNthFrame` from 2 → 1 so the recorder's UI feels responsive
+ *   under the user's clicks.
+ *
+ *   Defaults to `false` for `executeTest.js`-driven test runs, which
+ *   should NOT have their `visibilityState` forced (it can mask real
+ *   visibility-related bugs in the application under test) and don't
+ *   need the doubled JPEG encoding cost — they're not user-interactive.
  * @returns {Promise<{stop: function(): Promise<void>, cdpSession: Object}|null>}
  *   `{ stop, cdpSession }` on success, or `null` if CDP is unavailable.
  */
-export async function startScreencast(page, runId) {
+export async function startScreencast(page, runId, options = {}) {
+  const interactive = !!options.interactive;
   // Always start the screencast — SSE clients typically connect *after* the
   // run begins (the user is redirected to /runs/:id after clicking "Run").
   // The previous guard `if (!runListeners.get(runId)?.size) return null`
@@ -48,12 +63,34 @@ export async function startScreencast(page, runId) {
   let cdpSession;
   try {
     cdpSession = await page.context().newCDPSession(page);
+    if (interactive) {
+      // Recorder-only: keep the headless tab "foregrounded" so RAF, CSS
+      // animations, and visibilityState-gated rendering paths run as if a
+      // real user were watching. Without these, many SPAs (anything that
+      // pauses on `visibilitychange`) produce a black screencast canvas
+      // because Chrome throttles offscreen tabs aggressively.
+      await cdpSession.send("Page.bringToFront").catch(() => {});
+      await cdpSession.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
+      await page.evaluate(() => {
+        try {
+          Object.defineProperty(document, "visibilityState", { get: () => "visible", configurable: true });
+          Object.defineProperty(document, "hidden", { get: () => false, configurable: true });
+          document.dispatchEvent(new Event("visibilitychange"));
+          requestAnimationFrame(() => {});
+        } catch (_) { /* best-effort */ }
+      }).catch(() => {});
+    }
     await cdpSession.send("Page.startScreencast", {
       format: "jpeg",
       quality: 50,
       maxWidth: 1280,
       maxHeight: 720,
-      everyNthFrame: 2, // ~15 FPS source → ~7 FPS net
+      // Recorder needs every frame for responsive feel; non-interactive
+      // test runs sample every other frame to halve CDP JPEG encoding
+      // cost (the captured video is only used for failure diagnosis, not
+      // user interaction). The `setImmediate` throttle in the frame
+      // handler below caps SSE delivery rate in both modes.
+      everyNthFrame: interactive ? 1 : 2,
     });
     console.log(formatLogLine("info", null, `[screencast] started for run=${runId}`));
   } catch (cdpErr) {
@@ -99,6 +136,7 @@ export async function startScreencast(page, runId) {
   const stop = async () => {
     await cdpSession.send("Page.stopScreencast").catch(() => {});
     await cdpSession.detach().catch(() => {});
+    console.log(formatLogLine("info", null, `[screencast] stopped for run=${runId} (frames=${frameCount})`));
   };
   return { stop, cdpSession };
 }

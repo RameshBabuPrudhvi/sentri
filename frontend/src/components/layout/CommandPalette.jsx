@@ -19,7 +19,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Search, X, LayoutDashboard, FolderOpen, FlaskConical, BarChart2,
+  Search, X, LayoutDashboard, FolderOpen, Atom, SquareCheckBig, BarChart2,
   Briefcase, Layers, Settings, Sparkles, Plus, Play, ArrowRight,
   Command, ChevronRight, Hash,
 } from "lucide-react";
@@ -45,13 +45,14 @@ function useCommands() {
   return useMemo(() => [
     { id: "nav-dashboard",   group: "Navigation", label: "Go to Dashboard",  icon: LayoutDashboard, keywords: "home overview stats",      action: () => navigate("/dashboard") },
     { id: "nav-projects",    group: "Navigation", label: "Go to Projects",   icon: FolderOpen,      keywords: "applications apps",        action: () => navigate("/projects") },
-    { id: "nav-tests",       group: "Navigation", label: "Go to Tests",      icon: FlaskConical,    keywords: "test cases suite",         action: () => navigate("/tests") },
+    { id: "nav-tests",       group: "Navigation", label: "Go to Tests",      icon: SquareCheckBig,  keywords: "test cases suite",         action: () => navigate("/tests") },
+    { id: "nav-test-lab",    group: "Navigation", label: "Go to Test Lab",   icon: Atom,            keywords: "crawl generate ai lab",    action: () => navigate("/test-lab") },
     { id: "nav-reports",     group: "Navigation", label: "Go to Reports",    icon: BarChart2,       keywords: "analytics charts",         action: () => navigate("/reports") },
     { id: "nav-runs",        group: "Navigation", label: "Go to Runs",       icon: Briefcase,       keywords: "executions history",       action: () => navigate("/runs") },
     { id: "nav-system",      group: "Navigation", label: "Go to System",     icon: Layers,          keywords: "system info",              action: () => navigate("/system") },
     { id: "nav-settings",    group: "Navigation", label: "Go to Settings",   icon: Settings,        keywords: "config api keys provider", action: () => navigate("/settings") },
     { id: "act-new-project", group: "Actions",    label: "Create New Project", icon: Plus, keywords: "add application",    action: () => navigate("/projects/new") },
-    { id: "act-new-test",    group: "Actions",    label: "Generate Test",      icon: Play, keywords: "create ai generate", action: () => navigate("/tests") },
+    { id: "act-new-test",    group: "Actions",    label: "Generate Test",      icon: Play, keywords: "create ai generate", action: () => navigate("/test-lab?tab=requirement") },
   ], [navigate]);
 }
 

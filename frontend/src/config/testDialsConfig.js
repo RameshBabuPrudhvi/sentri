@@ -169,9 +169,10 @@ export const EXPLORE_MODE_OPTIONS = [
 ];
 
 // ─── Explorer intensity presets ─────────────────────────────────────────────
-// Named presets that map to concrete tuning values. Shown as buttons in the
-// ExploreModePicker component. "custom" is a virtual preset — selecting it
-// expands the raw sliders so the user can set their own values.
+// Named presets that map to concrete tuning values. Shown as chips in the
+// `frontend/src/components/test/TestConfig.jsx` discovery section. "custom"
+// is a virtual preset — selecting it expands the raw sliders so the user
+// can set their own values.
 
 export const EXPLORER_INTENSITY_PRESETS = [
   {

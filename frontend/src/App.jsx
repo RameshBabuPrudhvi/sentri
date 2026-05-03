@@ -23,6 +23,7 @@ const Systems = lazy(() => import("./pages/Systems.jsx"));
 const Automation = lazy(() => import("./pages/Automation.jsx"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword.jsx"));
 const ChatHistory = lazy(() => import("./pages/ChatHistory.jsx"));
+const TestLab = lazy(() => import("./pages/TestLab.jsx"));
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -69,6 +70,8 @@ export default function App() {
                 <Route path="/system" element={<Systems />} />
                 <Route path="/automation" element={<Automation />} />
                 <Route path="/chat" element={<ChatHistory />} />
+                <Route path="/test-lab" element={<TestLab />} />
+                <Route path="/projects/:id/test-lab" element={<TestLab />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>

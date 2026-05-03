@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2, XCircle, TrendingUp,
   AlertTriangle, Download, ChevronRight,
-  BarChart2, FlaskConical,
+  BarChart2, FlaskConical, SquareCheckBig,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { fmtShortDate, fmtRelativeDate, passRateColor } from "../utils/formatters";
@@ -238,7 +238,7 @@ export default function Reports() {
                         onClick={() => navigate(`/projects/${p.id}`)}
                       >
                         <div className="icon-box-sm" style={{ background: "var(--accent-bg)" }}>
-                          <FlaskConical size={14} color="var(--accent)" />
+                          <SquareCheckBig size={14} color="var(--accent)" />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 500, fontSize: "0.85rem", marginBottom: 2 }}>{p.name}</div>

@@ -190,6 +190,40 @@ export function getByProjectId(projectId) {
 }
 
 /**
+ * Lean accessor for the recorder's Start-URL dropdown
+ * (`GET /api/v1/projects/:id/pages`). Returns only the URLs persisted on the
+ * most recent crawl or recorder run that has a non-empty `pages` JSON array,
+ * deduplicated and oldest-first within the run.
+ *
+ * Avoids the heavy `SELECT *` + per-row `rowToRun()` JSON parse fan-out of
+ * {@link getByProjectId} — the dropdown is fetched on every recorder modal
+ * open, so loading every run's `results` / `tests` / `promptAudit` /
+ * `qualityAnalytics` blob just to read one column would scale poorly on
+ * projects with long run history. We `LIMIT 1` to the most recent qualifying
+ * run since the previous in-process implementation already only used the
+ * latest match.
+ *
+ * @param {string} projectId
+ * @returns {string[]} URLs from the latest crawl/record run, or `[]` when
+ *   no run has discovered pages yet.
+ */
+export function getLatestDiscoveredPageUrls(projectId) {
+  const db = getDatabase();
+  const row = db.prepare(
+    `SELECT pages FROM runs
+     WHERE projectId = ? AND deletedAt IS NULL
+       AND type IN ('crawl', 'record')
+       AND pages IS NOT NULL AND pages != '[]'
+     ORDER BY startedAt DESC LIMIT 1`
+  ).get(projectId);
+  if (!row?.pages) return [];
+  let parsed;
+  try { parsed = JSON.parse(row.pages); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((p) => p?.url).filter((u) => typeof u === "string" && u);
+}
+
+/**
  * Count non-deleted runs for a set of project IDs.
  * @param {string[]} projectIds
  * @returns {number}

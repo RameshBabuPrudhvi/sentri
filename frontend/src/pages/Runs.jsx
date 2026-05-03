@@ -2,8 +2,8 @@ import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Play, RefreshCw, Ban,
-  Globe, FlaskConical, Search, ArrowRight, Zap, X,
-  CheckCircle2, XCircle,
+  Globe, SquareCheckBig, Search, ArrowRight, Zap, X,
+  CheckCircle2, XCircle, Video,
 } from "lucide-react";
 import useProjectData from "../hooks/useProjectData";
 import { fmtRelativeDate, fmtDuration } from "../utils/formatters";
@@ -24,9 +24,13 @@ const STATUS_FILTERS = [
 ];
 
 const TYPE_FILTERS = [
-  { key: "test_run",  tooltip: "Test Runs", activeColor: "var(--accent)", activeBg: "var(--accent-bg)",      icon: <FlaskConical size={14} /> },
+  { key: "test_run",  tooltip: "Test Runs", activeColor: "var(--accent)", activeBg: "var(--accent-bg)",      icon: <SquareCheckBig size={14} /> },
   { key: "crawl",     tooltip: "Crawls",    activeColor: "#7c3aed",       activeBg: "rgba(124,58,237,0.1)",   icon: <Globe        size={14} /> },
   { key: "generate",  tooltip: "Generate",  activeColor: "#d97706",       activeBg: "rgba(217,119,6,0.1)",    icon: <Zap          size={14} /> },
+  // Recorder sessions — backend persists these with `type: "record"` (see
+  // `backend/src/routes/tests.js:982`). Without an entry here the Runs table
+  // rendered the raw string "record" as plain text via the TypeBadge fallback.
+  { key: "record",    tooltip: "Recorded",  activeColor: "#dc2626",       activeBg: "rgba(220,38,38,0.1)",    icon: <Video        size={14} /> },
 ];
 
 // ── TypeBadge ─────────────────────────────────────────────────────────────────
@@ -34,7 +38,7 @@ const TYPE_FILTERS = [
 function TypeBadge({ type }) {
   if (type === "test_run") return (
     <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "var(--accent)", fontWeight: 500 }}>
-      <FlaskConical size={12} /> Test Run
+      <SquareCheckBig size={12} /> Test Run
     </div>
   );
   if (type === "crawl") return (
@@ -45,6 +49,11 @@ function TypeBadge({ type }) {
   if (type === "generate") return (
     <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "#d97706", fontWeight: 500 }}>
       <Zap size={12} /> Generate
+    </div>
+  );
+  if (type === "record") return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", color: "#dc2626", fontWeight: 500 }}>
+      <Video size={12} /> Recorded
     </div>
   );
   return <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>{type || "—"}</span>;
@@ -94,6 +103,7 @@ export default function Work() {
     test_run: runs.filter(r => r.type === "test_run").length,
     crawl:    runs.filter(r => r.type === "crawl").length,
     generate: runs.filter(r => r.type === "generate").length,
+    record:   runs.filter(r => r.type === "record").length,
   }), [runs]);
 
   const filtered = useMemo(() => runs.filter(r => {

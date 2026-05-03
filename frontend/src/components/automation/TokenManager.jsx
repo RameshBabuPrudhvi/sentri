@@ -13,6 +13,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { api } from "../../api.js";
 import CopyButton from "../shared/CopyButton.jsx";
 import { fmtDateTimeMedium } from "../../utils/formatters.js";
+import { invalidateAutomationStatus } from "../../utils/automationStatus.js";
 
 // ─── Token reveal banner (shown once) ────────────────────────────────────────
 
@@ -67,6 +68,7 @@ export default function TokenManager({ projectId }) {
       setNewToken(res.token);
       setLabel("");
       await loadTokens();
+      invalidateAutomationStatus(projectId, "tokens");
     } catch (err) {
       setError(err.message || "Failed to create token.");
     } finally {
@@ -81,6 +83,7 @@ export default function TokenManager({ projectId }) {
       await api.deleteTriggerToken(projectId, tokenId);
       setTokens((prev) => prev.filter((t) => t.id !== tokenId));
       if (newToken) setNewToken(null);
+      invalidateAutomationStatus(projectId, "tokens");
     } catch {
       setError("Failed to revoke token.");
     } finally {

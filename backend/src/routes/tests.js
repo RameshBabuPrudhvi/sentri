@@ -55,6 +55,46 @@ import { randomUUID } from "crypto";
 
 const router = Router();
 
+/**
+ * Return `desiredName` if it's free within the project, otherwise append
+ * ` (2)`, ` (3)`, … until a non-colliding name is found. Compares
+ * case-insensitively (manual testers expect "Login" and "login" to be
+ * treated as the same name) and ignores soft-deleted tests because
+ * `testRepo.getByProjectId()` already filters them out.
+ *
+ * Used by the recorder stop handler so two recordings saved with the same
+ * name (or two no-name saves whose default ISO-timestamp collides at the
+ * same millisecond) don't produce two indistinguishable rows in the Tests
+ * list. Also covers the recorded-test path's MAX_RECORDING_MS auto-timeout
+ * recovery branch — both routes funnel through `dedupeTestName`.
+ *
+ * Hot-path consideration: `getByProjectId` does one indexed
+ * `SELECT * WHERE projectId = ?`. Recorder stop is a low-frequency event
+ * (one per user save), so the in-process scan is fine — we don't want to
+ * add a `(projectId, name)` UNIQUE index because the AI pipeline already
+ * suffixes its own names and adding a hard constraint would break
+ * legacy rows where duplicates already exist.
+ *
+ * @param {string} projectId
+ * @param {string} desiredName
+ * @returns {string} A name that doesn't collide with any existing test.
+ */
+function dedupeTestName(projectId, desiredName) {
+  const base = String(desiredName || "").trim();
+  if (!base) return base; // caller is responsible for never passing empty
+  const existing = testRepo.getByProjectId(projectId);
+  const taken = new Set(existing.map((t) => String(t.name || "").trim().toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  // Walk suffix counters until we find a free slot. Cap at 999 to avoid an
+  // infinite loop on a pathological project — beyond that, fall through to
+  // the timestamped form which is effectively guaranteed unique.
+  for (let i = 2; i <= 999; i++) {
+    const candidate = `${base} (${i})`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${base} (${new Date().toISOString()})`;
+}
+
 // ─── Test CRUD ────────────────────────────────────────────────────────────────
 
 router.get("/projects/:id/tests", (req, res) => {
@@ -982,6 +1022,14 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       type: "record",
       status: "running",
       startedAt: new Date().toISOString(),
+      // Persist the starting URL so the Recorder modal's start-URL dropdown
+      // (`GET /api/v1/projects/:id/pages`) can surface URLs from past
+      // recordings as suggestions for new recordings on the same project.
+      // The `runs` table has no dedicated `url` column, but `pages` is a
+      // JSON column already used by the crawler to persist discovered URLs
+      // — reuse it here with a single `{url, status: "recorded"}` entry so
+      // the same /pages aggregator works for both crawl + record sources.
+      pages: [{ url: startUrl, title: startUrl, status: "recorded" }],
       workspaceId: project.workspaceId || null,
     });
     await startRecording({ sessionId, projectId: project.id, startUrl });
@@ -1083,10 +1131,18 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
 
   // Close out the stub `runs` row created by POST /record so the SSE channel
   // releases its listener and orphan recovery doesn't pick this up later.
+  // Also update `pages` to the actual landed URL — the stub row created by
+  // POST /record persisted the caller-supplied `startUrl` (pre-redirect),
+  // but `startRecording` resolved it to `stopResult.url` after any
+  // server-side redirects. Without this update, the Recorder Start-URL
+  // dropdown (`GET /api/v1/projects/:id/pages`) would surface the
+  // pre-redirect URL on every subsequent recording launch, causing an
+  // unnecessary redirect each time (http→https, apex→www, OAuth callbacks).
   try {
     runRepo.update(req.params.sessionId, {
       status: "completed",
       finishedAt: new Date().toISOString(),
+      pages: [{ url: stopResult.url, title: stopResult.url, status: "recorded" }],
     });
   } catch { /* row may have been cleaned up already */ }
 
@@ -1136,11 +1192,24 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
   // step-based edit/regeneration that indexes by position).
   const emittableActions = filterEmittableActions(dedupedActions);
 
+  // Dedupe the requested name against existing tests in the same project so
+  // two recordings saved with the same name (or two no-name saves whose
+  // default ISO-timestamp default collides at the same millisecond) don't
+  // produce two indistinguishable rows in the Tests list. If a collision
+  // resolves, the generated `playwrightCode` still carries the *original*
+  // name — regenerate the body with the deduped name so the code's `test(...)`
+  // label and the persisted `name` column stay in sync (test runners surface
+  // the embedded label in failure reports).
+  const uniqueName = dedupeTestName(project.id, name);
+  const playwrightCode = uniqueName !== name
+    ? actionsToPlaywrightCode(uniqueName, stopResult.url, emittableActions)
+    : stopResult.playwrightCode;
+
   const testId = generateTestId();
   const test = {
     id: testId,
     projectId: project.id,
-    name,
+    name: uniqueName,
     description: `Recorded from ${stopResult.url}`,
     // Match the human-readable step convention used by the AI generate/crawl
     // pipeline (`outputSchema.js`) and the manual-test creation path: short
@@ -1150,7 +1219,7 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
     // so visual alignment matters — recorder tests previously stuck out as the
     // only ones showing engineer-shaped output.
     steps: emittableActions.map((a) => recordedActionToStepText(a)),
-    playwrightCode: stopResult.playwrightCode,
+    playwrightCode,
     priority: "medium",
     type: "recorded",
     sourceUrl: stopResult.url,
@@ -1173,8 +1242,8 @@ router.post("/projects/:id/record/:sessionId/stop", requireRole("qa_lead"), asyn
 
   logActivity({ ...actor(req),
     type: "test.record_stop", projectId: project.id, projectName: project.name,
-    testId, testName: name,
-    detail: `Recorder captured ${stopResult.actions.length} actions → Draft test`, status: "success",
+    testId, testName: uniqueName,
+    detail: `Recorder captured ${stopResult.actions.length} actions → Draft test${uniqueName !== name ? ` (renamed to "${uniqueName}" to avoid duplicate)` : ""}`, status: "success",
   });
 
   res.status(201).json({
@@ -1216,7 +1285,7 @@ router.post("/projects/:id/record/:sessionId/input", requireRole("qa_lead"), asy
     return res.status(404).json({ error: "recording session not found" });
   }
 
-  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll"]);
+  const VALID_TYPES = new Set(["mousePressed", "mouseReleased", "mouseMoved", "keyDown", "keyUp", "char", "scroll", "shortcutCapture"]);
   const { type } = req.body || {};
   if (!type || !VALID_TYPES.has(type)) {
     return res.status(400).json({ error: `Invalid event type. Must be one of: ${[...VALID_TYPES].join(", ")}` });

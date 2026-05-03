@@ -54,6 +54,21 @@ export const settingsQueryKeys = {
   ollamaStatus: ["settings", "ollamaStatus"],
 };
 
+export const automationStatusQueryKeys = {
+  root: ["automationStatus"],
+  /**
+   * @param {string} projectId
+   * @returns {Array}
+   */
+  project: (projectId) => ["automationStatus", projectId],
+  /**
+   * @param {string} projectId
+   * @param {"tokens"|"schedule"|"gates"|"budgets"} kind
+   * @returns {Array}
+   */
+  kind: (projectId, kind) => ["automationStatus", projectId, kind],
+};
+
 /** Default cache window for almost every query in the app (30 seconds). */
 export const DEFAULT_STALE_TIME_MS = 30_000;
 

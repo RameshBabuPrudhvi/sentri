@@ -1,5 +1,5 @@
-/** @module components/generate — Test generation flow components. */
+/** @module components/generate — Test generation flow components.
+ *
+ * AI generation flow moved to the Test Lab page (`frontend/src/pages/TestLab.jsx`). */
 export { default as GenerateView } from "./GenerateView.jsx";
-export { default as GenerateTestModal } from "./GenerateTestModal.jsx";
 export { default as GenerationSuccessBanner } from "./GenerationSuccessBanner.jsx";
-export { default as ExploreModePicker } from "./ExploreModePicker.jsx";

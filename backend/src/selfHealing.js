@@ -276,9 +276,19 @@ export function getSelfHealingHelperCode(healingHints) {
       // nobody scrolls to them. Before giving up, scroll to the bottom of the
       // page and retry the full waterfall once. This handles footer links,
       // lazy-loaded sections, and "load more" content on any website.
+      //
+      // Skip the scroll/wait when \`page\` is a FrameLocator (recorder iframe
+      // codegen) — FrameLocator has no \`.evaluate()\` or \`.waitForTimeout()\`,
+      // and the surrounding try/catch already swallows the resulting throw,
+      // but doing the typeof check up-front lets us still re-run the
+      // strategies one more time without the scroll attempt.
       try {
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await page.waitForTimeout(500); // let lazy content render
+        if (typeof page?.evaluate === 'function') {
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        }
+        if (typeof page?.waitForTimeout === 'function') {
+          await page.waitForTimeout(500); // let lazy content render
+        }
         for (let i = 0; i < strategies.length; i++) {
           try {
             const locator = await tryStrategy(strategies[i], page, timeout);

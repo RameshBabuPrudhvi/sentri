@@ -240,6 +240,7 @@ const COMPLETED_TTL_MS = TIMINGS.COMPLETED_TTL_MS;
  */
 const RECORDER_SCRIPT = `
 (() => {
+  try {
   if (window.__sentriRecorderInstalled) return;
   window.__sentriRecorderInstalled = true;
 
@@ -269,11 +270,24 @@ const RECORDER_SCRIPT = `
     return cssSel + " >> nth=" + idx;
   }
 
-  // DIF-015b Gap 2 — interpolated from the Node-side \`isNoisyTestId()\` export
-  // so the heuristic has a single source of truth across the Node boundary.
-  // Unit tests exercise the Node-side function with fixture values; this
-  // line keeps the in-page copy byte-identical without drift risk.
-  ${isNoisyTestId.toString()}
+  // DIF-015b Gap 2 — inlined hand-rolled copy of the Node-side
+  // \`isNoisyTestId()\` (kept in source above). Previously this was injected
+  // via \`\${isNoisyTestId.toString()}\` interpolation, but the interpolation
+  // produced a \"SyntaxError: Unexpected end of input\" at page-init time
+  // (the function body's regex literals contained \\\\d / \\\\s sequences that
+  // collided with the outer template-literal escaping rules), which caused
+  // the entire IIFE to abort before any DOM listeners were attached — the
+  // symptom was the recorder only ever capturing \`goto\` actions while
+  // every click/fill/keypress was silently dropped. Inlining the function
+  // body as static script text avoids the interpolation altogether.
+  function isNoisyTestId(value) {
+    const v = (value || "").trim();
+    if (!v) return true;
+    if (/^[0-9]+$/.test(v)) return true;
+    if (/^(?:el_|comp-|t-)[a-z0-9_-]*[0-9a-f]{4,}$/i.test(v)) return true;
+    if (v.length > 30 && !/[-_:.]/.test(v)) return true;
+    return false;
+  }
 
   function selectorGenerator(el) {
     if (!el || el.nodeType !== 1) return "";
@@ -350,7 +364,22 @@ const RECORDER_SCRIPT = `
   // "dblclick" listener can cancel the queued clicks for the same target;
   // otherwise replay would re-run the click handler twice before the
   // intended double-click and toggle UI state / submit forms early.
-  const pendingClickTimers = new Map(); // selector -> timeout id
+  // Pending clicks: sel -> { timer, emit }. We keep the emit fn alongside
+  // the timer so flushPendingClicks() can fire it synchronously when the
+  // page is about to navigate. Without this, clicking a submit button or
+  // link loses the click action — the 250 ms dblclick-defer timer is
+  // destroyed along with the page before it fires.
+  const pendingClickTimers = new Map();
+  function flushPendingClicks() {
+    for (const sel of Array.from(pendingClickTimers.keys())) {
+      const pending = pendingClickTimers.get(sel);
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      pendingClickTimers.delete(sel);
+      try { pending.emit(); } catch (_) { /* best-effort */ }
+    }
+  }
+  let shortcutCaptureBudget = 0;
   function eventElement(ev) {
     const p = ev.composedPath && ev.composedPath();
     return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
@@ -368,8 +397,9 @@ const RECORDER_SCRIPT = `
     };
     if (!sel) { emit(); return; }
     const prev = pendingClickTimers.get(sel);
-    if (prev) clearTimeout(prev);
-    pendingClickTimers.set(sel, setTimeout(emit, ${TIMINGS.DBLCLICK_DEFER_MS}));
+    if (prev) clearTimeout(prev.timer);
+    const timer = setTimeout(emit, ${TIMINGS.DBLCLICK_DEFER_MS});
+    pendingClickTimers.set(sel, { timer, emit });
   }, true);
   document.addEventListener("dblclick", (ev) => {
     const raw = eventElement(ev);
@@ -379,7 +409,7 @@ const RECORDER_SCRIPT = `
     // the two click events that preceded it.
     if (sel) {
       const pending = pendingClickTimers.get(sel);
-      if (pending) { clearTimeout(pending); pendingClickTimers.delete(sel); }
+      if (pending) { clearTimeout(pending.timer); pendingClickTimers.delete(sel); }
     }
     window.__sentriRecord && window.__sentriRecord({
       kind: "dblclick", selector: sel, label: bestLabel(el), ts: Date.now(),
@@ -402,7 +432,12 @@ const RECORDER_SCRIPT = `
   let lastHoverSelector = "";
   document.addEventListener("mouseover", (ev) => {
     const raw = eventElement(ev);
-    const el = raw.closest ? (raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || raw) : raw;
+    // Only capture hovers on interactive ancestors — do NOT fall back to the
+    // raw element. The \`|| raw\` pattern that was here previously caused every
+    // mouseover on a generic container (div, section, body) to emit a hover
+    // action with a noisy CSS selector, flooding the captured steps list with
+    // drive-by movements across layout elements.
+    const el = raw.closest ? raw.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") : null;
     if (!el) return;
     const sel = selectorGenerator(el);
     if (!sel) return;
@@ -433,8 +468,34 @@ const RECORDER_SCRIPT = `
   // \`fill\` actions and produced two consecutive \`safeFill(sel, 'hello')\`
   // calls in the generated code. The lastEmittedFill entry is purged after
   // the change event so a subsequent retype of the same value re-fires.
+  // Pending fills: sel -> { timer, el, label }. We keep the captured element
+  // ref alongside the timer so flushPendingFill() can emit synchronously
+  // (re-querying via document.querySelector would lose elements inside
+  // shadow roots / iframes). flushPendingFill() is invoked by Enter
+  // keydown, form submit, and pagehide handlers below — without those
+  // flushes, a user who hits Enter to submit (or whose form auto-submits
+  // and navigates) loses the typed value because the 300 ms debounce
+  // timer is destroyed along with the page before it fires.
   const inputTimers = new Map();
   const lastEmittedFill = new Map();
+  function flushPendingFill(sel) {
+    const pending = inputTimers.get(sel);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    inputTimers.delete(sel);
+    const value = pending.el ? pending.el.value : "";
+    if (lastEmittedFill.get(sel) === value) {
+      lastEmittedFill.delete(sel);
+      return;
+    }
+    lastEmittedFill.set(sel, value);
+    window.__sentriRecord && window.__sentriRecord({
+      kind: "fill", selector: sel, label: pending.label, value, ts: Date.now(),
+    });
+  }
+  function flushAllPendingFills() {
+    for (const sel of Array.from(inputTimers.keys())) flushPendingFill(sel);
+  }
   document.addEventListener("input", (ev) => {
     const el = eventElement(ev);
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
@@ -442,15 +503,77 @@ const RECORDER_SCRIPT = `
     const sel = selectorGenerator(el);
     if (!sel) return;
     const prev = inputTimers.get(sel);
-    if (prev) clearTimeout(prev);
-    inputTimers.set(sel, setTimeout(() => {
+    if (prev) clearTimeout(prev.timer);
+    const label = bestLabel(el);
+    const timer = setTimeout(() => {
       inputTimers.delete(sel);
       const value = el.value;
+      // Skip when the paste handler already emitted the exact same value —
+      // browsers always fire \`input\` after \`paste\`, so without this dedup
+      // a pasted token produces two identical \`fill\` actions. Clear the
+      // entry after the check so a subsequent retype of the same value still
+      // re-fires (mirrors the change handler's dedup semantics).
+      if (lastEmittedFill.get(sel) === value) {
+        lastEmittedFill.delete(sel);
+        return;
+      }
+      lastEmittedFill.set(sel, value);
+      window.__sentriRecord && window.__sentriRecord({
+        kind: "fill", selector: sel, label, value, ts: Date.now(),
+      });
+    }, ${TIMINGS.FILL_DEBOUNCE_MS});
+    inputTimers.set(sel, { timer, el, label });
+  }, true);
+
+  // Flush on form submit — Enter-to-submit on Google search and other
+  // forms navigates away before the input debounce can fire. The capture
+  // phase listener runs synchronously inside the same user-gesture task
+  // as the navigation, so __sentriRecord (an exposeBinding) gets the
+  // event queued before the page unloads.
+  document.addEventListener("submit", () => {
+    flushPendingClicks();
+    flushAllPendingFills();
+  }, true);
+
+  // Last-chance flush before navigation. \`pagehide\` is more reliable
+  // than \`beforeunload\` (fires for back/forward cache, programmatic
+  // navigations, and HTTP redirects) — best-effort because exposeBinding
+  // marshalling is async, but works for "type → click submit button"
+  // flows where the click handler runs synchronously before unload.
+  // Order matters: flush clicks first so the recorded sequence is
+  // click → fill → goto rather than fill → click → goto when both are
+  // pending (rare but possible with synthetic events).
+  window.addEventListener("pagehide", () => {
+    flushPendingClicks();
+    flushAllPendingFills();
+  }, true);
+
+  document.addEventListener("paste", (ev) => {
+    const el = eventElement(ev);
+    if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+    const sel = selectorGenerator(el);
+    if (!sel) return;
+    const hasClipboard = ev.clipboardData && typeof ev.clipboardData.getData === "function"
+      && !!(ev.clipboardData.getData("text") || "");
+    if (!hasClipboard) return;
+    // Cancel any pending input-handler debounce — the post-paste \`input\`
+    // event would otherwise queue a second emission for the same change.
+    if (inputTimers.get(sel)) { clearTimeout(inputTimers.get(sel).timer); inputTimers.delete(sel); }
+    // Defer to a microtask so \`el.value\` reflects the post-paste field
+    // contents (paste fires in the capture phase before the browser mutates
+    // value). Using el.value — not just the clipboard snippet — means
+    // pasting into a field with pre-existing text records the full final
+    // value, matching what the input/change handlers would emit.
+    setTimeout(() => {
+      const value = String(el.value || "").slice(0, 500);
+      if (!value) return;
+      // Prime the dedup cache so the subsequent \`input\` event (always
+      // fired after paste) is suppressed by the guard added above.
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
         kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
       });
-    }, ${TIMINGS.FILL_DEBOUNCE_MS}));
+    }, 0);
   }, true);
 
   document.addEventListener("change", (ev) => {
@@ -484,7 +607,7 @@ const RECORDER_SCRIPT = `
       if (!sel) return;
       const pending = inputTimers.get(sel);
       if (pending) {
-        clearTimeout(pending);
+        clearTimeout(pending.timer);
         inputTimers.delete(sel);
         // Fall through to emit below; the input handler hadn't fired yet.
       } else if (lastEmittedFill.get(sel) === el.value) {
@@ -506,6 +629,15 @@ const RECORDER_SCRIPT = `
     // Keep modifier-only events out, but capture regular typing + editing
     // keys so replay preserves keyboard-driven interactions.
     if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") return;
+    // Enter often submits a form and navigates away before the 300 ms
+    // input debounce fires, losing the typed value. Flush all pending
+    // fills synchronously so the recorded order is fill → press Enter →
+    // goto rather than just press Enter → goto. Same rationale for Tab
+    // (commits autocomplete + moves focus, can trigger nav on some sites).
+    if (ev.key === "Enter" || ev.key === "Tab") {
+      flushPendingClicks();
+      flushAllPendingFills();
+    }
     // If a printable single character is being typed into an editable field,
     // the "input" handler above already captures the resulting fill via
     // \`safeFill(sel, '<value>')\`. Emitting an additional per-keystroke
@@ -518,8 +650,11 @@ const RECORDER_SCRIPT = `
     // don't conflict with the fill capture.
     const t = ev.target;
     const isEditable = !!(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
-    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) return;
-    if (ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey) {
+    if (ev.key.length === 1 && isEditable && !ev.ctrlKey && !ev.metaKey) {
+      if (shortcutCaptureBudget <= 0) return;
+      shortcutCaptureBudget -= 1;
+    }
+    if ((ev.key.length === 1 || ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Backspace", "Delete"].includes(ev.key) || ev.ctrlKey || ev.metaKey)) {
       window.__sentriRecord && window.__sentriRecord({
         kind: "press", key: ev.key, selector: selectorGenerator(ev.target), label: bestLabel(ev.target), ts: Date.now(),
       });
@@ -531,6 +666,11 @@ const RECORDER_SCRIPT = `
     const el = eventElement(ev);
     dragSource = selectorGenerator(el);
   }, true);
+  window.__sentriRecorderSetShortcutBudget = (n) => {
+    const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
+    shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
+  };
+
   document.addEventListener("drop", (ev) => {
     const target = eventElement(ev);
     const targetSel = selectorGenerator(target);
@@ -540,6 +680,17 @@ const RECORDER_SCRIPT = `
     });
     dragSource = "";
   }, true);
+  } catch (err) {
+    // Surface init-time failures via console.error — the backend pipes page
+    // console output to its log so this lands in the same stream as the
+    // \`[recorder/page-error]\` warnings. Without this, a thrown listener
+    // setup leaves the recorder in a half-installed state where the binding
+    // exists but no DOM events are wired up — the symptom is "only goto
+    // actions are captured" (which is the only kind that comes from the
+    // Node-side \`framenavigated\` listener, not the in-page script).
+    console.error("[sentri-recorder] init failed:", err && err.stack ? err.stack : err);
+    window.__sentriRecorderInstalled = false;
+  }
 })();
 `;
 
@@ -832,7 +983,23 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
     const base = alias === "page" ? "page" : `(await ensurePopup('${alias}'))`;
     const frameUrl = String(action?.frameUrl || "");
     if (!frameUrl) return base;
-    return `(await ensureFrame(${base}, '${escapeJsSingleQuote(frameUrl)}'))`;
+    // The frameLocator argument is a single-quoted JS string ('...') containing
+    // a CSS attribute selector that is itself double-quoted ([src*="..."]).
+    // `escapeJsSingleQuote` covers the outer JS string layer; we ALSO have to
+    // escape any literal `"` inside frameUrl so the inner attribute selector
+    // doesn't terminate early. Without this, a frame URL containing a `"`
+    // (rare in practice — usually `%22`-encoded — but possible from custom
+    // `src` values that bypass URL normalisation) produces a malformed
+    // selector like `iframe[src*="frame"hijack"]` that throws at runtime.
+    // Escape any literal `"` inside frameUrl so the inner CSS attribute
+    // selector doesn't terminate early. The generated JS source wraps the
+    // selector in a single-quoted string (`'iframe[src*="…"]'`), so we
+    // need `\"` to appear in that source — which means emitting a
+    // backslash + quote pair (`\\"`) here. Using `'\\"'` would only emit
+    // a bare `"` at runtime (the JS parser consumes the backslash),
+    // leaving the inner attribute selector unescaped.
+    const escapedFrameUrl = escapeJsSingleQuote(frameUrl).replace(/"/g, '\\\\"');
+    return `${base}.frameLocator('iframe[src*="${escapedFrameUrl}"]').first()`;
   };
   lines.push(`const __popupPages = new Map();`);
   lines.push(`context.on('page', (p) => {`);
@@ -846,14 +1013,6 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
   lines.push(`    await page.waitForTimeout(100);`);
   lines.push(`  }`);
   lines.push(`  throw new Error('Popup not found: ' + alias);`);
-  lines.push(`};`);
-  lines.push(`const ensureFrame = async (p, frameUrl) => {`);
-  lines.push(`  for (let i = 0; i < 50; i++) {`);
-  lines.push(`    const f = p.frames().find((fr) => fr.url().includes(frameUrl));`);
-  lines.push(`    if (f) return f;`);
-  lines.push(`    await p.waitForTimeout(100);`);
-  lines.push(`  }`);
-  lines.push(`  throw new Error('Frame not found for URL: ' + frameUrl);`);
   lines.push(`};`);
   lines.push(`await page.goto('${safeStartUrl}');`);
   // `startRecording` always pushes an initial `goto` to startUrl as actions[0]
@@ -1044,18 +1203,18 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     });
 
     const pageAliases = new Map();
-    page = await context.newPage();
-    pageAliases.set(page, "page");
-    session.page = page;
-    context.on("page", (p) => {
-      if (pageAliases.has(p)) return;
-      pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
-      p.on("framenavigated", (frame) => {
-        if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
-          session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
-        }
-      });
-    });
+
+    // CRITICAL ORDERING: `exposeBinding` and `addInitScript` only apply to
+    // pages / documents created AFTER they are registered. If we call
+    // `context.newPage()` before these, the resulting page never has
+    // `window.__sentriRecord` installed and `RECORDER_SCRIPT` may not run
+    // on its initial document — the symptom is the recorder only emitting
+    // `goto` actions (from the Node-side `framenavigated` listener) while
+    // every click/fill/keypress is silently dropped because the in-page
+    // emit guard `window.__sentriRecord && …` is falsy.
+    //
+    // Register the binding and init scripts on the context FIRST, then
+    // create the page.
 
     // Expose a binding for the injected script to relay captured events.
     await context.exposeBinding("__sentriRecord", (source, action) => {
@@ -1091,6 +1250,20 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
           }
         }
       }
+      // Strip consecutive hovers — when a new hover arrives and the last
+      // recorded action is ALSO a hover, replace it in-place. A hover chain
+      // produced by the user sweeping the mouse across the page (A → B → C)
+      // is always noise; only the final resting position before a real
+      // interaction is meaningful. Replacing instead of appending keeps the
+      // steps list clean without discarding intentional hovers (tooltip
+      // triggers, dropdown openers) — the last hover before a pause is still
+      // preserved.
+      if (row.kind === "hover") {
+        const last = session.actions[session.actions.length - 1];
+        if (last && last.kind === "hover") {
+          session.actions.pop();
+        }
+      }
       // Drop noisy hover actions that immediately precede a real interaction
       // on the same selector. The in-page `HOVER_DWELL_MS` filter catches
       // drive-by mouseovers, but a user pausing on a button before clicking
@@ -1106,6 +1279,39 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
           session.actions.pop();
         }
       }
+      // Collapse consecutive `fill` actions on the same selector — the
+      // in-page 300 ms debounce emits one fill per typing pause, so
+      // typing "iphone" with a micro-pause after "i" produces two
+      // steps: `fill 'i'` then `fill 'iphone'`. The second supersedes
+      // the first (same field, final value wins), so drop the earlier
+      // row in place instead of appending a new one. Matches the
+      // consecutive-hover dedup pattern above.
+      if (row.kind === "fill" && row.selector) {
+        const last = session.actions[session.actions.length - 1];
+        if (last && last.kind === "fill" && last.selector === row.selector) {
+          session.actions.pop();
+        }
+      }
+      // Tag `click` / `dblclick` / `rightClick` / `hover` rows that arrive
+      // without a friendly label AND without a semantic selector prefix
+      // (role=, text=, data-testid=, label=, placeholder=, alt=, title=).
+      // These come from layout-container clicks with no accessible name,
+      // and rendering them as bare "Click" / "Hover over" entries in the
+      // Steps panel is noise that hurts step-quality. We keep the row in
+      // `session.actions` (so the CSS-fallback selector still drives
+      // `playwrightCode` replay) but mark it with `_noLabel: true` so the
+      // sidebar / persisted `steps[]` formatter can hide it from the
+      // human-readable view. Replay fidelity AND step quality both
+      // preserved — earlier revisions dropped the row entirely, which
+      // silently broke replay for icon-only buttons.
+      const POINTER_KINDS = new Set(["click", "dblclick", "rightClick", "hover"]);
+      if (POINTER_KINDS.has(row.kind) && !row.label) {
+        const sel = row.selector || "";
+        const hasSemanticSelector = /^(?:role=|text=|data-testid=|label=|placeholder=|alt=|title=)/.test(sel);
+        if (!hasSemanticSelector) {
+          row._noLabel = true;
+        }
+      }
       session.actions.push(row);
     });
     // Inject Playwright's own InjectedScript bootstrap before our
@@ -1116,26 +1322,107 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // can't be loaded) is a no-op — addInitScript accepts empty strings
     // without complaint, but skip the call to keep the page-init log
     // clean.
-    const bootstrap = buildInjectedBootstrapScript();
+    // Defence-in-depth: if `buildInjectedBootstrapScript()` throws (e.g.
+    // playwright-core layout drift), swallow the error so the recorder
+    // script below is still registered. Without this guard a thrown
+    // bootstrap would skip `addInitScript(RECORDER_SCRIPT)` entirely and
+    // the page would have no `window.__sentriRecord` binding — the
+    // symptom is the recorder only emitting `goto` actions while every
+    // click/fill/keypress is silently dropped.
+    let bootstrap = "";
+    try { bootstrap = buildInjectedBootstrapScript(); }
+    catch (err) {
+      console.error(formatLogLine("warn", null, `[recorder] buildInjectedBootstrapScript failed — falling back to hand-rolled selectorGenerator: ${err.message}`));
+    }
     if (bootstrap) await context.addInitScript(bootstrap);
+
     await context.addInitScript(RECORDER_SCRIPT);
 
-    // Navigate to the starting URL and record it as the first action.
-    await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
-    session.actions.push({ kind: "goto", pageAlias: "page", url: startUrl, ts: Date.now() });
+    // Now that the binding + init scripts are registered on the context,
+    // create the page. Both will be applied to this page's documents,
+    // including the initial about:blank and the upcoming `page.goto`.
+    page = await context.newPage();
+    pageAliases.set(page, "page");
+    session.page = page;
 
-    // Capture subsequent in-page navigations (form submit, link click that
-    // triggers a full load) so the generated script replays them via goto.
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame() && frame.url() && frame.url() !== "about:blank") {
-        session.actions.push({ kind: "goto", pageAlias: "page", url: frame.url(), ts: Date.now() });
+    // Surface in-page recorder init failures via the backend log. The IIFE
+    // in `RECORDER_SCRIPT` is wrapped in try/catch and emits a
+    // `[sentri-recorder] init failed:` console.error on any thrown listener
+    // setup; piping page console here lets us notice silently broken
+    // recordings (no actions captured) instead of having to attach a
+    // debugger.
+    page.on("pageerror", (err) => {
+      if (err && err.message && err.message.includes("sentri-recorder")) {
+        console.error(formatLogLine("warn", null, `[recorder/page-error] ${err.message}`));
       }
+    });
+    context.on("page", (p) => {
+      if (pageAliases.has(p)) return;
+      pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
+      p.on("framenavigated", (frame) => {
+        if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+          session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
+        }
+      });
+    });
+
+    // Navigate to the starting URL and record it as the first action.
+    // We capture the actual landed URL (after any server-side redirects)
+    // from the page rather than the caller-supplied `startUrl` so the
+    // generated goto reflects the canonical entry point.
+    //
+    // Also promote `session.url` to the landed URL so every downstream
+    // consumer that dedups against the first goto (`actionsToPlaywrightCode`'s
+    // hardcoded `await page.goto(startUrl)` + `lastGotoUrl` seed, and
+    // `routes/tests.js`'s persisted-steps dedup loop) sees the same URL the
+    // recorded `actions[0]` carries. Without this, any redirect at launch
+    // (http→https, apex→www, OAuth callback) leaves the pre-redirect URL
+    // seeded as `lastGotoUrl` while `actions[0].url` is the post-redirect
+    // value — the inequality bypasses dedup and the generated test emits
+    // two consecutive `page.goto(...)` calls for what is one navigation.
+    await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
+    const landedUrl = page.url() || startUrl;
+    session.url = landedUrl;
+    session.actions.push({ kind: "goto", pageAlias: "page", url: landedUrl, ts: Date.now() });
+
+    // Debounced framenavigated handler — fires for EVERY step in a redirect
+    // chain (including intermediate tracking hops like /sorry/index). Without
+    // debouncing, a search-form submit that redirects three times before
+    // settling on the results page produces three consecutive goto steps, all
+    // of which show up in the sidebar as "Navigate to …". We defer the push
+    // by FRAME_NAV_DEBOUNCE_MS so only the URL the browser actually lands on
+    // after the chain has settled is recorded. Each new framenavigated event
+    // during the window resets the timer and promotes the newer URL — the
+    // final flush captures the canonical destination.
+    //
+    // Dedup: if the settled URL matches the last recorded goto (e.g. the
+    // listener fires for the initial page.goto that already pushed an action
+    // above, or a hash-only change on an SPA), the action is silently dropped.
+    const FRAME_NAV_DEBOUNCE_MS = 800;
+    let frameNavTimer = null;
+    let pendingFrameUrl = "";
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      const url = frame.url();
+      if (!url || url === "about:blank") return;
+      pendingFrameUrl = url;
+      if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
+      frameNavTimer = setTimeout(() => {
+        frameNavTimer = null;
+        if (session.status !== "recording") return;
+        // Deduplicate: skip if the settled URL is the same as the last
+        // recorded goto so initial-page echoes and trivial hash changes
+        // don't produce spurious Navigate steps in the sidebar.
+        const last = [...session.actions].reverse().find((a) => a.kind === "goto");
+        if (last && last.url === pendingFrameUrl) return;
+        session.actions.push({ kind: "goto", pageAlias: "page", url: pendingFrameUrl, ts: Date.now() });
+      }, FRAME_NAV_DEBOUNCE_MS);
     });
 
     // Start CDP screencast so the RecorderModal can show the live browser.
     // startScreencast now returns { stop, cdpSession } — store both so the
     // recorder can forward mouse/keyboard events from the canvas overlay.
-    const screencastResult = await startScreencast(page, sessionId);
+    const screencastResult = await startScreencast(page, sessionId, { interactive: true });
     if (screencastResult) {
       session.stopScreencast = screencastResult.stop;
       session.cdpSession = screencastResult.cdpSession;
@@ -1341,6 +1628,12 @@ export async function forwardInput(sessionId, event) {
         text: event.text ?? "",
         modifiers: event.modifiers ?? 0,
       });
+    } else if (type === "shortcutCapture") {
+      await session.page?.evaluate((budget) => {
+        if (typeof window.__sentriRecorderSetShortcutBudget === "function") {
+          window.__sentriRecorderSetShortcutBudget(budget);
+        }
+      }, event?.count ?? 3);
     }
   } catch (err) {
     // CDP errors (e.g. page navigating mid-click) are transient — don't crash

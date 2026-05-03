@@ -132,6 +132,47 @@
 .recorder-step__url      { color: var(--blue); }
 .recorder-step__key      { color: var(--amber); }
 
+/* ── Step human-readable label ─────────────────────────────────────── */
+/* Steps display in two phases:
+ *  1. "raw"      — briefly shows the technical locator (kind → selector).
+ *                  Gives the user immediate feedback that the action was
+ *                  captured while the human-readable label is "resolving".
+ *  2. "resolved" — fades to human-readable prose with a yellow highlight
+ *                  that matches the Reflect-style "step confirmed" feel.
+ */
+.recorder-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 2px;
+  border-radius: 3px;
+  transition: background 0.3s ease;
+}
+
+/* Raw phase: dim italic locator text, brief blue tint */
+.recorder-step--raw .recorder-step__text {
+  color: var(--text3);
+  font-style: italic;
+  font-family: var(--font-mono);
+  font-size: 0.70rem;
+}
+
+/* Resolved phase: standard prose color + yellow highlight flash */
+.recorder-step--resolved .recorder-step__text {
+  color: var(--text);
+  font-family: inherit;
+  font-style: normal;
+  font-size: 0.73rem;
+}
+.recorder-step--flash {
+  animation: recorder-step-flash 1.2s ease forwards;
+}
+@keyframes recorder-step-flash {
+  0%   { background: rgba(234, 179, 8, 0.30); }
+  60%  { background: rgba(234, 179, 8, 0.15); }
+  100% { background: transparent; }
+}
+
 .recorder-sidebar__footer {
   flex-shrink: 0;
   padding: 12px 14px;

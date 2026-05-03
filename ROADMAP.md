@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** combined recorder PR (`DIF-015b Gap 3` + `DIF-015c Gap 1`) — iframe/shadow-DOM traversal + paste + opt-in keyboard shortcuts · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 26 items (AUTO-019 ✅ shipped in PR #10 — per-test run diffing with `GET /api/v1/runs/:runId/compare/:otherRunId` + Run Detail Compare action + prior-run picker; DIF-005 ✅ shipped in PR #9 — self-hosted `/trace-viewer/` bundle copied at install + Run Detail "🔍 Open Trace" action; AUTO-017 ✅ shipped in PR #8 — Web Vitals budgets with CRUD endpoints, evaluator, trigger-payload exposure, per-test-filtered RunDetail panel; DIF-015b Gap 2 ✅ shipped in PR #4 — Playwright `InjectedScript` delegation + hand-rolled fallback with noise-testid scoring; AUTO-012 ✅ shipped in PR #2 — full backend + UI + CI consumer docs; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122; DIF-015b Gap 3 still tracked as a sub-item, not a separate ID)
+> **Current sprint:** `CAP-003` — secret scanner on generated tests (promoted per `NEXT.md` rotation after `UI-REFACTOR-001` shipped in PR #6) · **Blockers:** none remaining (`INF-006` ✅ shipped in PR #1 — hosted-deploy persistence blueprint + ephemeral-storage warning) · **Remaining:** 24 items (UI-REFACTOR-001 ✅ shipped in PR #6 — `ConfigurablePanel` abstraction + Automation page tabs + status-chip cache; combined recorder PR `DIF-015b Gap 3` + `DIF-015c Gap 1` ✅ shipped in PR #11 — iframe `frameLocator` emission, shadow-DOM via Playwright's InjectedScript, paste-as-single-`fill`, opt-in `shortcutCaptureBudget`; AUTO-019 ✅ shipped in PR #10; DIF-005 ✅ shipped in PR #9; AUTO-017 ✅ shipped in PR #8; DIF-015b Gap 2 ✅ shipped in PR #4; AUTO-012 ✅ shipped in PR #2; INF-006 ✅ shipped in PR #1; ENH-036 + ENH-036b ✅ shipped in PR #127; AUTO-016b ✅ shipped in PR #127; DIF-007 ✅ shipped in PR #123; MNT-006 ✅ shipped in PR #122)
 
 ---
 
@@ -99,7 +99,8 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-005 | Automatic test retry with flake isolation | PR #2                                                           |
 | DIF-013 | Anonymous usage telemetry (PostHog + opt-out) | PR #3                                                           |
 | AUTO-006 | Network condition simulation (slow 3G / offline) | PR #3                                                           |
-| DIF-015b (partial) | Recorder selector quality: naming alignment, nth=N disambiguation, Playwright `InjectedScript` delegation with hand-rolled fallback | PR #3, PR #120 (Gaps 1), PR #4 (Gap 2 — Gap 3 still 🔲 Planned) |
+| DIF-015b | Recorder selector quality: naming alignment, nth=N disambiguation, Playwright `InjectedScript` delegation with hand-rolled fallback, iframe `frameLocator` emission, shadow-DOM via InjectedScript delegation | PR #3, PR #120 (Gaps 1), PR #4 (Gap 2), PR #11 (Gap 3 — `frameLocator('iframe[src*=…]').first()` in `actionsToPlaywrightCode`; shadow-DOM covered by Playwright's InjectedScript on the primary path) |
+| DIF-015c (Gap 1) | Recorder: paste action as single `fill` + opt-in keyboard shortcut capture — `paste` listener emits one `safeFill` (500-char truncated), `shortcutCaptureBudget` + `__sentriRecorderSetShortcutBudget` expose an N-keystroke arming window, frontend "Record keyboard shortcut" button in `RecorderModal`, backend accepts `shortcutCapture` in `/record/:sessionId/input` | PR #11 |
 | AUTO-016 (backend) | Accessibility testing — axe-core crawl scan + persistence (frontend `CrawlView` panel tracked as AUTO-016b) | PR #121                                                         |
 | MNT-006 | Object storage abstraction — local-disk default + S3/R2 pre-signed URLs for screenshots, visual-diff baselines, and diffs (dual-write to local disk in s3 mode) | PR #122                                                         |
 | DIF-007 | Conversational test editor connected to /chat (in-app "Edit with AI" panel on TestDetail with diff preview + one-click apply) | PR #123                                                         |
@@ -111,6 +112,7 @@ The following items have been verified complete against the codebase and are **n
 | AUTO-017 | Web Vitals performance budgets — per-project `webVitalsBudgets` config (`{ lcp, cls, inp, ttfb }`), CRUD endpoints under `/api/v1/projects/:id/web-vitals-budgets` (`qa_lead`+ on mutations, registered in `permissions.json`), `captureWebVitals(page)` injects the locally-bundled `web-vitals@4` IIFE (no CDN dependency) and records per-page LCP/CLS/INP/TTFB — runs on the success path independent of the `skipVisualArtifacts` gate so assertion-ending tests still contribute metrics. `evaluateWebVitalsBudgets()` in `testRunner.js` persists `webVitalsResult: { passed, violations }` on the run, surfaced in trigger response + callback payload and as a per-test-filtered violations card on RunDetail. Migration `015_web_vitals_budgets.sql` adds `projects.webVitalsBudgets` + `runs.webVitalsResult`. CI consumer docs in `docs/guide/ci-cd-triggers.md` include updated GH Actions + GitLab snippets and a new "Web Vitals Budgets" section. | PR #8                                                           |
 | DIF-005 | Embedded Playwright trace viewer — install-time `postinstall` copier in `backend/scripts/copy-trace-viewer.js` resolves Playwright's prebuilt viewer (`playwright-core/lib/vite/traceViewer/` or `@playwright/test/lib/trace/viewer/`) and copies it to `backend/public/trace-viewer/`; `backend/src/middleware/appSetup.js` mounts it at `/trace-viewer/` with a viewer-scoped CSP (`script-src 'unsafe-inline' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`, `connect-src 'self' <s3>`), `Service-Worker-Allowed: /trace-viewer/` on the Playwright service worker (matched by `TRACE_VIEWER_SW_PATTERN` to survive filename renames), and `no-cache` for the SW + 5-minute cache for the rest. Run Detail adds a "🔍 Open Trace" action that opens `/trace-viewer/?trace=<signed-url>` in a new tab; the Trace ZIP download is preserved as fallback. Smoke test in `backend/tests/trace-viewer-static.test.js` asserts 200 when the bundle is present and 404 when removed. `backend/Dockerfile` copies `scripts/` before `npm install` so the postinstall hook resolves. | PR #9                                                           |
 | AUTO-019 | Run diffing: per-test comparison across runs — new `GET /api/v1/runs/:runId/compare/:otherRunId` (`backend/src/routes/runs.js`) validates both runs under workspace ACL and returns a summary `{ total, flipped, added, removed, unchanged }` plus per-test diff rows keyed by `testId`. Frontend `api.getRunCompare(runId, otherRunId)` + new `RunCompareView` (`frontend/src/components/run/RunCompareView.jsx`) wired into `RunDetail` via a **Compare** action that loads a prior-run picker over the project's test-run history. Integration test `backend/tests/run-compare.test.js` covers happy path (all four change types), 404 unknown run, 401 unauth, and cross-workspace ACL; registered in `backend/tests/run-tests.js`. | PR #10                                                          |
+| UI-REFACTOR-001 | `ConfigurablePanel` abstraction extracted from `QualityGatesPanel` (AUTO-012) + `WebVitalsBudgetsPanel` (AUTO-017) — ~95% structural overlap eliminated; future SLO-style config UIs (SEC-005 SSO config, DIF-008 Jira integration) ship as one-file PRs. Shipped alongside an Automation page redesign: four top-level WAI-ARIA tabs (**Triggers & Schedules** · **Quality Gates** · **Integrations** · **Snippets**) with arrow-key + Home/End navigation, per-project accordions inside each tab with live status chips (`N tokens` / `Scheduled`, `Gates configured` / `Budgets set`), and a new `frontend/src/utils/automationStatus.js` parser + module-level promise cache + pub/sub invalidation bus pinning the backend response shapes (`data.schedule.enabled`, `data.qualityGates`, `data.webVitalsBudgets`) with regression coverage in `frontend/tests/automation-status.test.js`. The legacy ProjectDetail → Settings tab is removed; Quality Gates / Web Vitals Budgets now live exclusively at `/automation`. Frontend-only — no backend, schema, route, or `permissions.json` changes. | PR #6                                                           |
 
 ---
 
@@ -569,7 +571,7 @@ The following items have been verified complete against the codebase and are **n
 - `backend/src/pipeline/crawlBrowser.js`, `stateExplorer.js` — accept `browser` param, swap CDP calls for cross-engine equivalents
 - `backend/src/runner/recorder.js` — accept `browser`, swap screencast impl
 - `backend/src/runner/screencast.js` — dual-path (CDP for chromium, screenshot poll fallback)
-- `frontend/src/components/run/RecorderModal.jsx`, `frontend/src/components/run/CrawlProjectModal.jsx` — browser selector
+- `frontend/src/components/run/RecorderModal.jsx`, `frontend/src/pages/TestLab.jsx` — browser selector (the legacy `CrawlProjectModal` was migrated into the Test Lab page)
 
 **Dependencies:** DIF-002 ✅, DIF-002b (baselines must be browser-aware before crawler variability amplifies diff noise)
 
@@ -651,9 +653,9 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015b — Recorder selector quality: adopt Playwright's selectorGenerator 🔵 Medium
 
-**Status:** 🔄 In Progress (PR #3 — naming alignment; PR #120 — Gap 1 nth=N disambiguation; PR #4 — Gap 2 Playwright `InjectedScript` delegation + fallback) | **Effort:** S | **Source:** Follow-on from DIF-015
+**Status:** ✅ Complete (PR #3 — naming alignment; PR #120 — Gap 1 nth=N disambiguation; PR #4 — Gap 2 Playwright `InjectedScript` delegation + fallback; PR #11 — Gap 3 iframe `frameLocator` emission + shadow-DOM via InjectedScript delegation) | **Effort:** S | **Source:** Follow-on from DIF-015
 
-> **Progress:** Gaps 1 and 2 are shipped. Gap 3 (iframe + shadow-DOM traversal) remains. Tracked as a separate sub-item below so a follow-up PR can pick it off cleanly without re-litigating scope. Item flips to ✅ Complete when Gap 3 ships.
+> **Progress:** All three gaps shipped. Gap 3 iframe codegen landed in PR #11 via `actionsToPlaywrightCode`'s `frameLocator('iframe[src*=<frameUrl>]').first()` branch; shadow-DOM traversal is handled by Playwright's InjectedScript on the primary selector-generation path shipped in PR #4.
 
 #### ✅ Gap 1 — nth=N disambiguation for duplicate CSS matches (PR #120)
 
@@ -672,16 +674,16 @@ Shipped two layers instead of the originally-scoped pure heuristic:
 
 **Files shipped:** new `backend/src/runner/playwrightSelectorGenerator.js` (loader + bootstrap) · `backend/src/runner/recorder.js` (delegation + fallback in `selectorGenerator`, init-script wiring in `startRecording`) · `backend/tests/recorder.test.js` (fixture tests for `isNoisyTestId`, simulation tests for fallback ordering, contract tests for the loader/bootstrap) · `docs/changelog.md` entry.
 
-#### 🔲 Gap 3 — iframe and shadow-DOM traversal
+#### ✅ Gap 3 — iframe and shadow-DOM traversal (PR #11)
 
-**Status:** 🔲 Planned | **Effort:** M | **Priority:** 🔵 Medium
+**Status:** ✅ Complete (PR #11) | **Effort:** M | **Priority:** 🔵 Medium
 
-Recorded clicks inside an `<iframe>` produce a selector scoped to the main document, which fails at replay because the element doesn't exist in the top-level DOM. Likewise shadow roots: clicking inside a `<my-card>` web component's shadow DOM produces a selector that the page-context `document.querySelector` can't see. Both require structural changes:
+Shipped as two independent layers:
 
-- **iframes:** the `__sentriRecord` binding already records the source frame's URL (`frameUrl` field on the action). Wire `actionsToPlaywrightCode` to materialise a `frameLocator(frameUrl).locator(sel)` chain for actions whose `frameUrl !== mainFrame`. Already partially done at the action layer — the missing piece is the codegen branch.
-- **shadow DOM:** walk up via `getRootNode()` until reaching a shadow host or document, build a chain of `host >> shadowRoot >> el` selectors. Playwright's `>> ` selector pierces shadow boundaries automatically.
+- **iframes — codegen branch.** `actionsToPlaywrightCode` in `backend/src/runner/recorder.js` now emits `base.frameLocator('iframe[src*=<frameUrl>]').first()` whenever a captured action carries a non-empty `frameUrl`. Replaces the old `ensureFrame(...)` polling helper with Playwright's built-in locator chain, so recorded interactions inside an `<iframe>` target the correct frame at replay instead of failing against the top-level DOM. Regression test `uses frameLocator chain when action includes frameUrl` in `backend/tests/recorder.test.js` locks the output shape down.
+- **Shadow DOM — delegation to Playwright's InjectedScript.** Gap 2 (PR #4) already shipped the primary-path `window.__playwrightSelector` delegation, and Playwright's InjectedScript-based generator walks shadow roots natively via the `>> ` piercing selector (same algorithm `codegen` emits). Rather than duplicate this in the hand-rolled fallback, PR #11 adds a source-inspection regression test (`RECORDER_SCRIPT primary path delegates to Playwright for shadow-DOM selector generation`) that asserts the delegation runs before the fallback chain — a future refactor can't silently strip shadow coverage without the test catching it.
 
-**Files:** `backend/src/runner/recorder.js` — `selectorGenerator` shadow-walk + `actionsToPlaywrightCode` frameLocator branch · `backend/tests/recorder.test.js` — fixtures for shadow-DOM Web Component + iframe form.
+**Files:** `backend/src/runner/recorder.js` — `actionsToPlaywrightCode` frameLocator branch (removed the `ensureFrame` polling preamble in the same pass) · `backend/tests/recorder.test.js` — frameLocator + shadow-DOM delegation assertions.
 
 **Problem:** The DIF-015 recorder captures user interactions correctly but the selectors it emits are noticeably lower-quality than what Playwright's own `codegen` tool produces. Three concrete gaps:
 
@@ -737,8 +739,8 @@ Because it's marked internal, import risk is real — the path or signature coul
 | **Right-click** | Context menus | ✅ shipped (PR #118) | `contextmenu` → `locator.click({ button: 'right' })` |
 | **File upload** | `<input type="file">` content | ✅ shipped (PR #118 — placeholder fixture path, captured filename in NOTE comment) | `change` on file input → `safeUpload(sel, [])` + comment with captured names |
 | **Hover with intent** | Hover-only menus, tooltips | ✅ shipped (PR #118 — 600 ms dwell timer) | sustained `mouseover` → `locator.hover()` |
-| **Paste** | Pasted tokens / addresses / JSON | 🔲 Planned | `paste` event clipboard text → `safeFill(sel, '<text>')` truncated to 500 chars (matches `fill`) |
-| **Keyboard shortcuts** | Ctrl+A / Ctrl+C / Cmd+Enter | 🔲 Planned (deferred) | Needs explicit "record this shortcut" UX — printable single-char keys on editable fields are intentionally suppressed (`backend/src/runner/recorder.js:370-372`) to avoid double-typing alongside `fill`, but `ev.ctrlKey || ev.metaKey` chords already flow through to `press` actions today |
+| **Paste** | Pasted tokens / addresses / JSON | ✅ shipped (PR #11) | `paste` event clipboard text → one `safeFill(sel, '<text>')` truncated to 500 chars; cancels any pending input-debounce timer so the fill isn't emitted twice |
+| **Keyboard shortcuts** | Ctrl+A / Ctrl+C / Cmd+Enter | ✅ shipped (PR #11) | Opt-in `shortcutCaptureBudget` — frontend "Record keyboard shortcut" button in `RecorderModal` sends `shortcutCapture` to `/record/:sessionId/input`; backend `forwardInput` arms `window.__sentriRecorderSetShortcutBudget(N)` (default 3) so the next N printable keydowns on editable fields flow through to `press` instead of being suppressed; budget auto-decrements to 0 so modifier noise isn't permanent |
 
 Each remaining kind requires a typedef union member, an `actionsToPlaywrightCode` branch, a `recordedActionToStepText` branch, an `isEmittableAction` branch (`backend/src/runner/recorder.js:634-654` — single source of truth for the "is this action well-formed enough to emit code for?" predicate), and a regression test. Coordinate with DIF-015b (selectorGenerator) to avoid `RECORDER_SCRIPT` merge conflicts.
 
@@ -786,7 +788,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 | Sub-item | Effort | Priority | Status |
 |---|---|---|---|
-| Gap 1 — Expanded action vocabulary | M | 🟡 High | 🔄 Mostly shipped (PR #118) — paste + opt-in keyboard shortcuts remain |
+| Gap 1 — Expanded action vocabulary | M | 🟡 High | ✅ Complete (PR #118 + PR #11 — paste + opt-in keyboard shortcuts) |
 | Gap 2 — Inline assertion authoring | S | 🟢 Differentiator (parity with BearQ) | 🔄 Backend shipped (PR #118); point-and-click UX + `assertCount` / `assertHasClass` remain |
 | Gap 3 — Pause / resume + undo | S | 🔵 Medium | 🔲 Planned |
 | Gap 4 — Auth / storageState integration | M | 🔵 Medium (depends on DIF-010) | 🔲 Planned |
@@ -908,7 +910,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 - `backend/src/routes/projects.js` — profile CRUD endpoints
 - `backend/src/pipeline/stateExplorer.js` — accept `profileId` param
 - `frontend/src/pages/ProjectDetail.jsx` — credential profiles panel
-- `frontend/src/components/shared/TestDials.jsx` — connect `multi_role` dial to profile selector
+- `frontend/src/components/test/TestConfig.jsx` — connect `multi_role` dial to profile selector (the legacy `TestDials.jsx` was migrated into the unified `TestConfig` surface used by the Test Lab page)
 
 **Dependencies:** None
 

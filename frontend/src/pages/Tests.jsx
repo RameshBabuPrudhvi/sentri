@@ -9,8 +9,6 @@ import {
 import { api } from "../api.js";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData.js";
 import { queryClient, projectDataQueryKeys } from "../queryClient.js";
-import GenerateTestModal from "../components/generate/GenerateTestModal.jsx";
-import CrawlProjectModal from "../components/crawl/CrawlProjectModal.jsx";
 import RecorderModal from "../components/run/RecorderModal.jsx";
 import AgentTag from "../components/shared/AgentTag.jsx";
 import RunRegressionModal from "../components/run/RunRegressionModal.jsx";
@@ -230,8 +228,6 @@ export default function Tests() {
   const setCategoryFilter= useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v !== "All" ? n.set("category", v) : n.delete("category"); return n; }, { replace: true }), [setSearchParams]);
   const setStaleFilter   = useCallback((v) => setSearchParams(p => { const n = new URLSearchParams(p); v ? n.set("stale", "true") : n.delete("stale"); return n; }, { replace: true }), [setSearchParams]);
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showCrawlModal, setShowCrawlModal] = useState(false);
   const [showRunModal, setShowRunModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showRecorderModal, setShowRecorderModal] = useState(false);
@@ -543,7 +539,14 @@ export default function Tests() {
       desc: "Discover pages & auto-generate tests",
       color: "var(--blue-bg)",
       iconColor: "var(--blue)",
-      action: () => projects.length === 0 ? navigate("/projects/new") : setShowCrawlModal(true),
+      action: () => projects.length === 0
+        ? navigate("/projects/new")
+        // Migrated out of CrawlProjectModal — the Test Lab page is now the
+        // single home for crawl & AI generation. Use `projects[0]` (not
+        // `filtered[0]?.projectId`) so the target project doesn't depend on
+        // whatever filter happens to be active on the Tests page; users can
+        // switch projects from Test Lab's sidebar.
+        : navigate(`/projects/${projects[0]?.id}/test-lab?tab=crawl`),
     },
     {
       icon: <Sparkles size={16} />,
@@ -551,7 +554,9 @@ export default function Tests() {
       desc: "Create tests from a requirement",
       color: "var(--accent-bg)",
       iconColor: "var(--accent)",
-      action: () => projects.length === 0 ? navigate("/projects/new") : setShowCreateModal(true),
+      action: () => projects.length === 0
+        ? navigate("/projects/new")
+        : navigate(`/projects/${projects[0]?.id}/test-lab?tab=requirement`),
     },
     {
       // DIF-015 — Interactive browser recorder
@@ -876,7 +881,7 @@ export default function Tests() {
             tests={tests}
             search={search}
             reviewFilter={reviewFilter}
-            onCreateTest={() => setShowCreateModal(true)}
+            onCreateTest={() => navigate(`/projects/${projects[0]?.id || ""}/test-lab?tab=requirement`)}
             onClearSearch={() => setSearch("")}
             onClearFilters={() => { setSearch(""); setFilter("All"); setReviewFilter("All Tests"); setCategoryFilter("All"); setStaleFilter(false); }}
             navigate={navigate}
@@ -1050,19 +1055,9 @@ export default function Tests() {
       )}
 
       {/* Modals */}
-      {showCrawlModal && (
-        <CrawlProjectModal
-          projects={projects}
-          onClose={() => setShowCrawlModal(false)}
-          defaultProjectId={filtered[0]?.projectId || projects[0]?.id || ""}
-        />
-      )}
-      {showCreateModal && (
-        <GenerateTestModal
-          projects={projects}
-          onClose={() => setShowCreateModal(false)}
-        />
-      )}
+      {/* CrawlProjectModal and GenerateTestModal have been migrated to the
+          dedicated Test Lab page (/projects/:id/test-lab) — the quick-action
+          cards above now navigate there instead of opening modals. */}
       {showRunModal && (
         <RunRegressionModal projects={projects} onClose={() => setShowRunModal(false)} defaultProjectId={filtered[0]?.projectId || projects[0]?.id || ""} />
       )}
@@ -1074,9 +1069,14 @@ export default function Tests() {
           open={showRecorderModal}
           onClose={() => setShowRecorderModal(false)}
           projectId={recorderProjectId}
+          projects={projects}
           defaultUrl={projects.find(p => p.id === recorderProjectId)?.url || ""}
           onSaved={(t) => {
-            invalidateProjectDataCache(recorderProjectId);
+            // Use the saved test's projectId (not the seed `recorderProjectId`)
+            // because the user may have switched projects in the modal's idle
+            // form before launching — invalidating the wrong project's cache
+            // would leave the newly-recorded test invisible until a refresh.
+            invalidateProjectDataCache(t?.projectId || recorderProjectId);
             navigate(`/tests/${t.id}`);
           }}
         />

@@ -8,7 +8,7 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Plus, Globe, Search, ExternalLink, CheckSquare,
+  Plus, Globe, Search, ExternalLink, SquareCheckBig,
   RefreshCw, ChevronRight, Trash2, Pencil,
 } from "lucide-react";
 import useProjectData, { invalidateProjectDataCache } from "../hooks/useProjectData";
@@ -228,7 +228,7 @@ export default function Projects() {
                     onClick={() => navigate(`/projects/${p.id}`)}
                     title="View project"
                   >
-                    <CheckSquare size={13} /> Tests
+                    <SquareCheckBig size={13} /> Tests
                   </button>
                   {canEdit && (
                   <button

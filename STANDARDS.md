@@ -591,7 +591,8 @@ The frontend follows a clear separation of concerns between pages:
 | Page | Role | Key actions |
 |---|---|---|
 | **Dashboard** | Read-only analytics hub | Pass rate, trends, defects, recent activity |
-| **Tests** (`Tests.jsx`) | **Central command centre** for all test creation | Crawl a project, Generate from story, Run regression, Review drafts |
+| **Tests** (`Tests.jsx`) | Test inventory & review | List/filter tests, Run regression, Review drafts, Record-a-test |
+| **TestLab** (`/test-lab`, `/projects/:id/test-lab`) | **Dedicated workspace for AI test generation** | Crawl & Generate, Generate from Requirement, Queue (live SSE pipeline) |
 | **ProjectDetail** | Project-scoped execution & review | Run regression, review/approve/reject, export |
 | **Automation** (`/automation`) | Cross-project automation hub | CI/CD trigger tokens, scheduled runs, integration snippets |
 | **Projects** | Project list & creation | Create/delete projects |
@@ -599,4 +600,4 @@ The frontend follows a clear separation of concerns between pages:
 | **ChatHistory** (`/chat`) | Full-page AI chat with session history | New/rename/delete sessions, search, export |
 | **Settings** | AI provider & system config | API keys, Ollama, system info, Recycle Bin |
 
-**Important**: Crawl and test generation are **only** triggered from the Tests page. The ProjectDetail page links back to Tests via a "Generate more tests →" button — it does not have its own crawl controls.
+**Important**: Crawl and AI test generation are triggered from the **Test Lab** page (`/test-lab` or the project-scoped `/projects/:id/test-lab`). The Tests page's "Crawl" and "Generate" quick-action cards now navigate to Test Lab — the legacy `CrawlProjectModal` and `GenerateTestModal` have been removed. Recording (`RecorderModal`) remains a modal launched from the Tests page since it is inherently overlay-oriented (live screencast).

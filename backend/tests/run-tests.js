@@ -54,6 +54,7 @@ const files = [
   "tests/stale-detector.test.js",
   "tests/flaky-detector.test.js",
   "tests/recorder.test.js",
+  "tests/projects-pages.test.js",
   "tests/visual-regression.test.js",
   "tests/recorder-baselines-routes.test.js",
   "tests/dns-classification.test.js",

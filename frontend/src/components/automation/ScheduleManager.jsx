@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Clock, Play, Trash2, ToggleLeft, ToggleRight, RefreshCw, ChevronDown } from "lucide-react";
 import { api } from "../../api.js";
 import { fmtFutureRelative, fmtRelativeDate } from "../../utils/formatters.js";
+import { invalidateAutomationStatus } from "../../utils/automationStatus.js";
 
 // ─── Common presets ────────────────────────────────────────────────────────────
 
@@ -128,6 +129,7 @@ export default function ScheduleManager({ projectId }) {
       setSchedule(data.schedule);
       setSuccess("Schedule saved.");
       setShowEditor(false);
+      invalidateAutomationStatus(projectId, "schedule");
     } catch (err) {
       setError(err.message || "Failed to save schedule.");
     } finally {
@@ -149,6 +151,7 @@ export default function ScheduleManager({ projectId }) {
       setSchedule(data.schedule);
       setEnabled(data.schedule.enabled);
       setSuccess(data.schedule.enabled ? "Schedule enabled." : "Schedule paused.");
+      invalidateAutomationStatus(projectId, "schedule");
     } catch (err) {
       setError(err.message || "Failed to update schedule.");
     } finally {
@@ -166,6 +169,7 @@ export default function ScheduleManager({ projectId }) {
       setSchedule(null);
       setShowEditor(false);
       setSuccess("Schedule removed.");
+      invalidateAutomationStatus(projectId, "schedule");
     } catch (err) {
       setError(err.message || "Failed to remove schedule.");
     } finally {

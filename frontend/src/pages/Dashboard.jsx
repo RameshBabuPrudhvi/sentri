@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, CheckCircle2, XCircle, Ban, TrendingUp, AlertTriangle,
-  FlaskConical, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
+  SquareCheckBig, FileText, Wrench, Clock, Plus, Shield, Crosshair, Activity,
   Download, RefreshCw,
 } from "lucide-react";
 import { useDashboardQuery } from "../hooks/queries/useDashboardQuery.js";
@@ -171,7 +171,7 @@ export default function Dashboard() {
               icon={<TrendingUp size={16} />}
             />
             <StatCard label="Failures Today" value={todayFailed} sub={todayTotal > 0 ? `of ${todayTotal} assertions · ${todayRuns.length} run${todayRuns.length !== 1 ? "s" : ""}` : "No runs today"} color={todayFailed > 0 ? "var(--red)" : "var(--green)"} icon={<XCircle size={16} />} />
-            <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<FlaskConical size={16} />} />
+            <StatCard label="Total Tests" value={data?.totalTests ?? 0} sub={`${tbr.approved || 0} approved · ${tbr.draft || 0} draft`} color="var(--blue)" icon={<SquareCheckBig size={16} />} />
             <StatCard label="Total Runs" value={data?.totalRuns ?? 0} sub={`${rbs.completed || 0} passed · ${rbs.failed || 0} failed`} color="var(--purple)" icon={<FileText size={16} />} />
           </div>
 

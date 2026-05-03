@@ -132,6 +132,13 @@ export const api = {
   updateProject: (id, data) => req("PATCH", `/projects/${id}`, data),
   /** @param {string} id - Deletes project and all its tests, runs, and history. */
   deleteProject: (id)   => req("DELETE", `/projects/${id}`),
+  /**
+   * List candidate URLs for the recorder Start-URL dropdown — seed URL plus
+   * any pages discovered on the latest successful crawl.
+   * @param {string} id - Project ID.
+   * @returns {Promise<{urls: string[]}>}
+   */
+  getProjectPages: (id) => req("GET", `/projects/${id}/pages`),
 
   // ── Crawl & Run ─────────────────────────────────────────────────────────────
   /**

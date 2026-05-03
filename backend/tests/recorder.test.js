@@ -78,6 +78,146 @@ test("deduplicates consecutive gotos to the same URL", () => {
   assert.equal(dashGotos.length, 1, "consecutive gotos to the same URL collapse to one");
 });
 
+test("uses frameLocator chain when action includes frameUrl", () => {
+  const code = actionsToPlaywrightCode("Iframe click", "https://example.com", [
+    { kind: "click", selector: "text=\"Save\"", frameUrl: "checkout-frame", ts: 1 },
+  ]);
+  assert.match(code, /frameLocator\('iframe\[src\*=\"checkout-frame\"\]'\)\.first\(\)/);
+  assert.match(code, /await safeClick\(/);
+});
+
+test("paste-style fill is emitted as one safeFill step", () => {
+  const code = actionsToPlaywrightCode("Paste", "https://example.com", [
+    { kind: "fill", selector: "#token", value: "a-long-pasted-token", ts: 1 },
+  ]);
+  const fills = code.match(/await safeFill\(page, '#token', 'a-long-pasted-token'\);/g) || [];
+  assert.equal(fills.length, 1);
+});
+
+// ── DIF-015b Gap 3 coverage — iframe + shadow-DOM traversal ────────────
+// The frameLocator emission above covers the iframe half of Gap 3. Shadow
+// DOM is deliberately NOT re-implemented in the hand-rolled fallback: per
+// NEXT.md § "A. Selector traversal across frame/shadow boundaries":
+//   "Most of this may already be handled by Playwright's InjectedScript on
+//    the primary path shipped in PR #4 — confirm via fixture tests first
+//    and only re-implement in the hand-rolled fallback if the primary path
+//    misses it."
+// Playwright's InjectedScript-based selectorGenerator (shipped in PR #4
+// via `backend/src/runner/playwrightSelectorGenerator.js`) walks shadow
+// boundaries natively using Playwright's own `>> ` piercing selector
+// syntax — the same algorithm `codegen` produces. These tests assert the
+// delegation wiring so a future refactor can't silently strip shadow-DOM
+// coverage from the primary path.
+
+await asyncTest("RECORDER_SCRIPT primary path delegates to Playwright for shadow-DOM selector generation", async () => {
+  const fs = await import("node:fs");
+  const url = await import("node:url");
+  const here = url.fileURLToPath(new URL(".", import.meta.url));
+  const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+  const scriptStart = src.indexOf("const RECORDER_SCRIPT = `");
+  const scriptEnd = src.indexOf("`;", scriptStart);
+  const scriptBody = src.slice(scriptStart, scriptEnd);
+  // Playwright's InjectedScript generator handles shadow-DOM traversal —
+  // `selectorGenerator` must consult it before falling through to the
+  // hand-rolled chain. Without this the recorder produces top-document
+  // selectors for elements inside a shadow root, which fail at replay.
+  assert.match(
+    scriptBody,
+    /window\.__playwrightSelector/,
+    "selectorGenerator must delegate to Playwright's injected script (handles shadow DOM natively)",
+  );
+  // The fallback chain must still run when the bundle can't be loaded,
+  // but the noise-testid heuristic in it is out of scope for shadow DOM —
+  // just assert the delegation is first in the decision chain.
+  const pwIdx = scriptBody.indexOf("window.__playwrightSelector");
+  // Anchor on the fallback's distinctive noise-testid branch rather than the
+  // bare `data-testid` substring — the latter also appears in earlier
+  // event-handler `closest("..., [data-testid], ...")` calls that run before
+  // selectorGenerator, which would make this assertion spuriously fail.
+  const fallbackIdx = scriptBody.indexOf("if (testId && !isNoisyTestId(testId))");
+  assert.ok(pwIdx >= 0 && fallbackIdx > pwIdx, "Playwright delegation must run before the hand-rolled fallback");
+});
+
+// ── DIF-015c Gap 1 (part 2) — opt-in shortcut capture budget ──────────
+// The in-page budget is what lets a user capture a single Ctrl+A / Cmd+V
+// without permanently polluting every subsequent recording with modifier
+// noise. We can't drive DOM keydown events in this test harness (no
+// jsdom), so lock the contract down via source inspection the same way
+// the existing "RECORDER_SCRIPT keydown guard" test does.
+console.log("\n🧪 recorder — shortcut capture budget (DIF-015c Gap 1)");
+
+await (async () => {
+  await asyncTest("RECORDER_SCRIPT shortcutCaptureBudget gates printable keys on editable fields", async () => {
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const here = url.fileURLToPath(new URL(".", import.meta.url));
+    const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+    const scriptStart = src.indexOf("const RECORDER_SCRIPT = `");
+    const scriptEnd = src.indexOf("`;", scriptStart);
+    const scriptBody = src.slice(scriptStart, scriptEnd);
+    // Budget counter must exist at script scope so the setter + the
+    // keydown handler share state.
+    assert.match(
+      scriptBody,
+      /let\s+shortcutCaptureBudget\s*=\s*0/,
+      "RECORDER_SCRIPT must declare shortcutCaptureBudget counter",
+    );
+    // The keydown guard must:
+    //   1. short-circuit (return) when budget <= 0 AND the key is a
+    //      printable char on an editable field (default behaviour — avoids
+    //      double-typing alongside the debounced fill capture).
+    //   2. decrement the budget on each captured printable key so N
+    //      successive keystrokes are recorded, not every keystroke forever.
+    assert.match(
+      scriptBody,
+      /if\s*\(\s*shortcutCaptureBudget\s*<=\s*0\s*\)\s*return\s*;[\s\S]*?shortcutCaptureBudget\s*-=\s*1/,
+      "keydown handler must gate on + decrement shortcutCaptureBudget",
+    );
+    // The setter must be exposed on window so the backend's
+    // `shortcutCapture` forwardInput branch (via page.evaluate) can arm it.
+    assert.match(
+      scriptBody,
+      /window\.__sentriRecorderSetShortcutBudget/,
+      "RECORDER_SCRIPT must expose __sentriRecorderSetShortcutBudget to the page",
+    );
+    // Setter must coerce non-finite / negative inputs to 0 so a malformed
+    // frontend payload can't arm an unbounded capture window.
+    assert.match(
+      scriptBody,
+      /Math\.max\(\s*0\s*,\s*Math\.floor\([^)]+\)\s*\)/,
+      "shortcutCaptureBudget setter must clamp to Math.max(0, floor(n))",
+    );
+  });
+
+  await asyncTest("forwardInput accepts shortcutCapture events and calls page.evaluate with the budget", async () => {
+    // Assert the backend route branch wires `shortcutCapture` through to
+    // `page.evaluate` so the in-page setter is called with the requested
+    // count (defaulting to 3 when the frontend omits it). We use a fake
+    // page rather than a real Chromium — the contract we care about is
+    // "forwardInput calls page.evaluate with the count", not the browser
+    // dispatch path (which is covered by the Mouse / Key tests above).
+    const evalCalls = [];
+    const fakePage = {
+      evaluate: async (_fn, arg) => {
+        evalCalls.push(arg);
+      },
+    };
+    const dispose = _testSeedSession("REC-shortcut", {
+      cdpSession: makeFakeCdp(),
+      page: fakePage,
+    });
+    try {
+      await forwardInput("REC-shortcut", { type: "shortcutCapture", count: 5 });
+      assert.equal(evalCalls.length, 1, "shortcutCapture must call page.evaluate exactly once");
+      assert.equal(evalCalls[0], 5, "count must be forwarded verbatim");
+      // Default when count is omitted → 3 (per NEXT.md § "C. Opt-in
+      // keyboard shortcuts").
+      await forwardInput("REC-shortcut", { type: "shortcutCapture" });
+      assert.equal(evalCalls[1], 3, "omitted count must default to 3");
+    } finally { dispose(); }
+  });
+})();
+
 test("emits a runnable test skeleton even for zero actions", () => {
   const code = actionsToPlaywrightCode("Empty", "https://example.com", []);
   assert.match(code, /import \{ test, expect \} from '@playwright\/test';/);

@@ -472,13 +472,18 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 **Steps & expected:**
 1. Start recorder on any stable site (same target as the Tests crawl step) → recording indicator visible. Recorder uses Playwright CDP screencast; the canvas is **interactive** — pointer / keyboard / wheel events are forwarded to the headless browser via the new `POST /api/v1/projects/:id/record/:sessionId/input` route (see `docs/changelog.md` DIF-015 + PR #115). Persists a Draft test with `safeClick` / `safeFill`.
+1a. **Starting URL suggestions (PR #11)** — the Starting URL field renders a `<datalist>` dropdown populated by `GET /api/v1/projects/:id/pages`: the project's seed URL plus pages discovered on the latest successful crawl (or prior recorder run). Projects with no crawl history show just the seed URL. Verify suggestions appear as you focus the field; pick one → it populates the input.
+1b. **Two-phase step display (PR #11)** — newly captured actions briefly render as a dim italic raw locator (`click → role=button[…]`) for ~600 ms, then flip to human-readable prose (`Click the 'Sign in' button`) with a yellow highlight flash (1.2 s animation). Verify both phases render on the first few actions of a fresh recording.
+1c. **Flush-before-navigate (PR #11)** — type into a search box, hit **Enter** to submit the form. Verify the fill IS captured (Step: "Fill in the 'Search' field with 'iphone'") and ordered BEFORE the resulting `goto`, not swallowed by the navigation. Same check for submit-button click on a form: type → click Submit → the fill step appears in the recorded list, not just the goto.
 2. Perform actions captured by the recorder (PR #115 + #118 expanded scope): **click, double-click, right-click, hover, fill (type), press (keyboard shortcut), select (dropdown), check / uncheck, file upload, drag-and-drop, and navigate**. Mouse moves and scroll are forwarded to the headless browser but not stored as discrete steps. Mouse moves are throttled to ~30 fps client-side.
    - **Hover with intent** — pointer rests on the same interactive element for ≥ 600 ms IS captured as a discrete `hover` step. Drive-by mouseovers are filtered out by the dwell timer (`backend/src/runner/recorder.js:282-309`).
    - **Double-click** — the two preceding `click` events captured for the same selector are dropped within the OS double-click window (`TIMINGS.DBLCLICK_WINDOW_MS` = 500 ms) so the recorded action list reads as a single dblclick, not click-click-dblclick (`backend/src/runner/recorder.js:931-944`).
    - **Right-click** records as `rightClick` and emits `locator.click({ button: 'right' })` so context-menu-driven flows replay correctly.
    - **File upload** captures filenames only (no full paths — would leak tmpdir). The generated code emits a `safeUpload(sel, [])` placeholder + a `// NOTE: recorder captured filenames […]` comment; reviewers must wire up real fixture paths before running outside the recorder.
    - **Drag-and-drop** pairs `dragstart` + `drop` → `locator.dragTo(targetLocator)` in the generated code.
-   - **Printable characters typed into INPUT/TEXTAREA/contenteditable** are intentionally NOT captured as `press` steps — the `input` event handler captures them as a debounced `fill`, so emitting per-keystroke `keyboard.press` would double-type the value at replay (`backend/src/runner/recorder.js:370-372`). Keyboard chords with `Ctrl`/`Cmd` modifiers, plus editing keys (Enter, Tab, Backspace, arrows, Escape), still flow through to `press` actions.
+   - **Printable characters typed into INPUT/TEXTAREA/contenteditable** are intentionally NOT captured as `press` steps by default — the `input` event handler captures them as a debounced `fill`, so emitting per-keystroke `keyboard.press` would double-type the value at replay. Keyboard chords with `Ctrl`/`Cmd` modifiers, plus editing keys (Enter, Tab, Backspace, arrows, Escape), still flow through to `press` actions.
+   - **Paste (DIF-015c Gap 1, PR #11)** — pasting a token / address / JSON block into an `<input>` or `<textarea>` emits a single `safeFill` with the post-paste field value (500-char truncated), NOT a stream of per-keystroke `press` actions. The post-paste `input` event is deduplicated against the paste so exactly one fill is captured. Verify by pasting a long string into a search box — the Steps sidebar must show one "Fill in … with '…'" entry, not N `press` rows.
+   - **Opt-in keyboard shortcut capture (DIF-015c Gap 1, PR #11)** — to record a shortcut like `Ctrl+A` / `Cmd+V` on an editable field, click the **Record keyboard shortcut** button in `RecorderModal` before pressing the chord. The button arms an N-keystroke budget (default 3) via `POST /record/:sessionId/input` with `type: "shortcutCapture"`; the next 3 printable keydowns on editable fields flow through to `press` instead of being suppressed. Budget auto-decrements to 0 so modifier noise is never permanent. Button label flips to "Shortcut capture armed (next 3 keys)" for 4s after arming.
    - **Manual assertions** (PR #118) — while recording, use the "Add assertion" form in `RecorderModal` to insert assertion steps. Four assertion kinds are supported: `assertVisible`, `assertText`, `assertValue`, `assertUrl` (`backend/src/routes/tests.js:1164-1184`, `backend/src/runner/recorder.js:827-855`). Server-side validation rejects assertions missing required fields (selector for visible/text/value, value for text/value/url) with a 400.
    - **Expected:** Each captured action is a discrete step with selector + action type; no empty/null steps. Persisted `steps[]` are short English sentences with **single quotes** (`User clicks the 'Sign in' button`, `User fills in the 'Email' field with 'user@example.com'`, `The 'Toast' is visible`) — **never raw selectors** like `role=button[name="…"]` or `#login`. Generated `playwrightCode` uses `safeClick` / `safeFill` / `safeSelect` / `safeCheck` / `safeUncheck` / `safeUpload` so self-healing engages at run time. The persisted `steps[]` count exactly matches the `// Step N:` comment count in `playwrightCode` — the shared `filterEmittableActions` predicate (`backend/src/runner/recorder.js:634-665`) drops actions missing required fields from both outputs identically (PR #118).
 3. Stop and save → test appears in Tests page with all steps intact after refresh. The Test Detail Steps panel renders the recorded test identically to AI-generated and manually-created tests (no engineer-shaped strings).
@@ -488,7 +493,8 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 **Negative / edge:**
 - ⚠️ Known: empty-steps bug (legacy) — verify every recorded step has a selector and action. PR #118's `filterEmittableActions` drops ill-formed actions from both `steps[]` and `playwrightCode` so the two stay in lock-step.
 - Record on SPA with client-side routing → navigations captured correctly. Consecutive `goto` actions to the **exact same URL** collapse to a single Step (e.g. `framenavigated` echoes); query-string-distinct navigations (`/search?q=iphone` → `/search?q=macbook`, pagination `?page=N`) are preserved as separate Steps so query-driven flows replay correctly (PR #115 + PR #118 fix).
-- Record on iframe / shadow DOM content → recorder captures iframe-scoped actions and emits the correct `frameLocator(…)` chain in generated code (`backend/src/runner/recorder.js:677-707` — `ensureFrame` helper). Selector quality inside iframes still tracked under DIF-015b.
+- Record on iframe content (DIF-015b Gap 3, PR #11) → `actionsToPlaywrightCode` emits `page.frameLocator('iframe[src*="<frameUrl>"]').first()` for any captured action carrying a `frameUrl`, replacing the old `ensureFrame(...)` polling helper with Playwright's built-in locator chain. Verify by recording a click inside an `<iframe>` (e.g. Stripe checkout demo) and confirming the generated Source tab uses `frameLocator(...)`, not `ensureFrame`.
+- Record on shadow DOM content → shadow-root traversal is handled by Playwright's `InjectedScript` on the primary `window.__playwrightSelector` delegation path (PR #4), which walks boundaries via `>> ` piercing selectors natively. Verify replay succeeds against the recorded target.
 - Record across tabs/popups → popups are aliased as `popup1`, `popup2`, etc., and the generated code includes an `ensurePopup(alias)` helper (`backend/src/runner/recorder.js:688-700`). The `pageAlias` field on each captured action routes the replay through the correct page.
 - Close tab mid-recording → partial recording saved or discarded cleanly (no corrupted state). The `MAX_RECORDING_MS` safety-net teardown closes the stub `runs` row so subsequent runs on the project are not blocked (PR #115). Operators who hit "Stop & Save" within `RECORDER_COMPLETED_TTL_MS` (default 2 min) of the auto-teardown still recover their captured actions from the completed-recordings cache (`backend/src/runner/recorder.js:143-162`).
 - Record on site with dynamic IDs → selectors are stable (data-testid / role+name / label / text / placeholder fallback chain), not brittle.
@@ -611,7 +617,14 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 **Preconditions:** Project exists with at least one approved test. Open `/automation` (or use `?project=PRJ-X` deep-link).
 
-**CI/CD trigger tokens** (`docs/changelog.md` ENH-011):
+**Tabbed layout (PR #6):** `/automation` renders four top-level tabs — **Triggers & Schedules**, **Quality Gates**, **Integrations**, **Snippets** — with WAI-ARIA tab semantics (`role="tablist"` / `role="tab"` / `role="tabpanel"`, arrow-key + Home/End navigation, `aria-selected`, `aria-controls`). Only the active tab's content mounts. Per-project accordion cards live inside the relevant tab; collapsed headers render live status chips (`N tokens` / `Scheduled` vs `No schedule` on Triggers & Schedules; `Gates configured` / `Budgets set` vs `No gates` / `No budgets` on Quality Gates) so config state is visible without expanding. Verify before each section below:
+1. All four tabs render and switch on click; arrow-keys / Home / End move focus between tabs and activate the focused tab.
+2. `?project=PRJ-X` auto-expands the matching project card on whichever tab is active.
+3. The empty state ("No projects yet") renders in both **Triggers & Schedules** and **Quality Gates** when no projects exist.
+4. Below 640px: chips wrap under the project name, tab padding tightens, layout stays usable (no horizontal scroll).
+5. Status-chip API response shapes are pinned in `frontend/src/utils/automationStatus.js` with regression coverage in `frontend/tests/automation-status.test.js` — if a backend response renames `data.schedule.enabled` / `data.qualityGates` / `data.webVitalsBudgets`, the chips silently fall back to the unconfigured state.
+
+**CI/CD trigger tokens** (`docs/changelog.md` ENH-011) — under the **Triggers & Schedules** tab, expand a project card → inner tab bar switches between **CI/CD Tokens** and **Schedule**. The "View project" link is pushed to the right of the inner tab bar.
 1. Create a token via `POST /api/projects/:id/trigger-tokens` (UI button) → plaintext token shown **exactly once**; refresh and confirm only the SHA-256 hash is stored (never plaintext again).
 2. List tokens → no hashes leaked to UI.
 3. Trigger a run via `POST /api/projects/:id/trigger` with `Authorization: Bearer <token>` → returns **202 Accepted** with `{ runId, statusUrl }`. Poll `statusUrl`; final state matches RunDetail page.
@@ -667,8 +680,13 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 18. As `qa_lead` and `admin`, all three (GET / PATCH / DELETE) succeed.
 19. Cross-workspace isolation — outsider hitting another workspace's project → 404 (workspace scope enforced upstream by `workspaceScope` middleware).
 
-**UI surfaces (AUTO-012b):**
-20. ProjectDetail → **Settings** tab → "Quality Gates" panel renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
+**UI surfaces (AUTO-012b, updated by PR #6):**
+
+The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automation` page now. The legacy ProjectDetail → Settings tab was removed in this PR (see the comment at `frontend/src/pages/ProjectDetail.jsx:601-603`); do not look for it.
+
+- **`/automation` → Quality Gates tab** (sole surface, PR #6) — per-project accordion (`ProjectQualityCard`) with inner tab bar switching between **Quality Gates** and **Web Vitals**. Collapsed header shows status chips (`Gates configured` / `No gates`, `Budgets set` / `No budgets`).
+
+20. On `/automation` → **Quality Gates** tab, expand a project → inner tab **Quality Gates** active by default → form renders. As `qa_lead`/`admin`, the form is editable; as `viewer`, fields are disabled and a "Read-only" hint shows.
 21. Configure thresholds and click **Save** → toast "Quality gates saved"; reload tab → values persist.
 22. Click **Clear all** → confirmation prompt → on confirm, gates removed; toast "Quality gates cleared"; subsequent runs report `gateResult: null`.
 23. Enter all-blank fields and click Save → server-side `DELETE` is sent (config cleared) instead of saving an empty object — toast reads "Quality gates cleared".
@@ -1011,8 +1029,8 @@ For each modal: open → fill → submit → close behavior.
 
 | Modal | Trigger | Verify |
 |---|---|---|
-| **CrawlProjectModal** | "Crawl" quick action | Default project pre-selected; mode picker (Link Crawl / State Exploration); Test Dials presets; submit kicks off crawl + closes modal. **Output: UI / browser tests** (Draft) — `page.goto` + role selectors + `safeClick` / `safeFill`; same-origin fetch/XHR additionally yields API tests |
-| **GenerateTestModal** | "Generate Test" | **Default output: UI / browser tests** from the crawl context. API-shaped inputs (plain-English endpoint, OpenAPI upload, HAR upload, `METHOD /path` paste) produce API tests only when explicitly used; submit creates Draft tests |
+| **Test Lab — Crawl & Generate tab** | Tests page "Crawl" quick action (now navigates to `/projects/:id/test-lab?tab=crawl`) | Project pre-selected via the route; mode picker (Link Crawl / State Exploration); Coverage / Perspectives / Quality chip groups; Test Count + Profile selects; Start button kicks off the 8-stage SSE pipeline. **Output: UI / browser tests** (Draft) — `page.goto` + role selectors + `safeClick` / `safeFill`; same-origin fetch/XHR additionally yields API tests. Migrated from the legacy `CrawlProjectModal` (now removed). |
+| **Test Lab — Generate from Requirement tab** | Tests page "Generate" quick action (now navigates to `/projects/:id/test-lab?tab=requirement`) | Project pre-selected via the route; large requirement / user-story textarea; example prompts; Coverage + Quality chips. **Default output: UI / browser tests** from the supplied requirement plus crawl context. API-shaped inputs (plain-English endpoint, OpenAPI upload, HAR upload, `METHOD /path` paste) produce API tests only when explicitly used; submit creates Draft tests. Migrated from the legacy `GenerateTestModal` (now removed). |
 | **RunRegressionModal** | "Run Regression" | Project picker, browser selector (Chromium/Firefox/WebKit), device dropdown, locale/timezone/geolocation (AUTO-007), network condition (`fast` / `slow3g` / `offline`, AUTO-006), parallelism 1–10; submit opens RunDetail |
 | **ReviewModal** | "Review" / opening a Draft | Step-by-step approval queue; Approve/Reject/Skip; advances to next test |
 | **RecorderModal** | "Record a test" | Live CDP screencast; record/stop controls; on stop saves Draft |
@@ -1029,7 +1047,7 @@ For each modal: open → fill → submit → close behavior.
 
 > Scope: this section covers **API test** generation paths only. UI / browser tests are generated from crawls and the Recorder — see [Tests Page §3](#-tests-page) and [Recorder](#-recorder).
 
-**Preconditions:** GenerateTestModal open.
+**Preconditions:** Test Lab page open at `/projects/:id/test-lab?tab=requirement` (formerly the `GenerateTestModal`).
 
 **Steps & expected:**
 1. **OpenAPI import** — upload a valid OpenAPI 3.x spec → tests generated cover documented endpoints with status + JSON-shape assertions.
@@ -1230,7 +1248,8 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Runs list (`/runs`)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Project Detail (`/projects/:id`)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Bulk actions + keyboard shortcuts + ⌘K palette** | ⬜ | ⬜ | ⬜ | ⬜ | |
-| **Modals (Crawl / Generate / Run / Review / Recorder / AiFix)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Test Lab page (Crawl / Generate tabs)** | ⬜ | ⬜ | ⬜ | ⬜ | |
+| **Modals (Run / Review / Recorder / AiFix)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Imports (OpenAPI / HAR / API description)** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Onboarding tour** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | **Demo mode + per-user quotas** | ⬜ | ⬜ | ⬜ | ⬜ | |

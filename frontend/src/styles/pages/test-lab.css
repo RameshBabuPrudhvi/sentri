@@ -1,0 +1,1222 @@
+/**
+ * Test Lab — page-specific styles
+ *
+ * Three-pane layout: project sidebar | configuration panel | launch/status panel.
+ * Follows ITCSS Pages layer — all selectors are scoped to .tl-* to avoid
+ * collisions with shared component classes.
+ *
+ * Layer: Pages (ITCSS)
+ */
+
+/* ── Shell & Tab bar ────────────────────────────────────────────────────────── */
+.tl-wrap {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--topbar-height, 56px)); /* full viewport minus top navbar */
+  overflow: hidden;
+}
+
+.tl-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.tl-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 18px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+  margin-bottom: -1px;
+}
+.tl-tab-btn:hover { color: var(--text); }
+.tl-tab-btn--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.tl-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 99px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.tl-tab-badge--amber {
+  background: var(--amber);
+}
+
+/* ── Three-pane grid ─────────────────────────────────────────────────────────── */
+.tl-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Project sidebar (left column) ─────────────────────────────────────────── */
+.tl-projects {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg2);
+}
+
+.tl-col-header {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.tl-proj-list {
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.tl-proj-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.1s;
+}
+.tl-proj-item:hover { background: var(--bg3); }
+.tl-proj-item--active { background: var(--accent-bg); }
+
+.tl-proj-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--purple-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--purple);
+  flex-shrink: 0;
+}
+
+.tl-proj-info { min-width: 0; }
+.tl-proj-name {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tl-proj-item--active .tl-proj-name { color: var(--accent); }
+.tl-proj-url {
+  font-size: 0.7rem;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-proj-meta {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tl-proj-meta-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.tl-proj-meta-value {
+  font-size: 0.78rem;
+  color: var(--text2);
+}
+
+/* ── Config column (middle) ──────────────────────────────────────────────────── */
+.tl-config {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tl-config-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+.tl-section { margin-bottom: 20px; }
+
+.tl-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 9px;
+}
+
+/* ── Discovery mode cards ────────────────────────────────────────────────────── */
+.tl-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.tl-mode-card {
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+  background: var(--surface);
+}
+.tl-mode-card:hover {
+  border-color: var(--border2);
+  box-shadow: var(--shadow-sm);
+}
+.tl-mode-card--selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.tl-mode-icon { font-size: 1rem; margin-bottom: 6px; }
+.tl-mode-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.tl-mode-card--selected .tl-mode-title { color: var(--accent); }
+.tl-mode-desc {
+  font-size: 0.75rem;
+  color: var(--text2);
+  line-height: 1.45;
+}
+
+/* ── Chip selectors ──────────────────────────────────────────────────────────── */
+.tl-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text2);
+  background: var(--surface);
+  transition: border-color 0.1s, background 0.1s, color 0.1s;
+  white-space: nowrap;
+}
+.tl-chip:hover { border-color: var(--accent); color: var(--accent); }
+.tl-chip--on {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Count + Profile row ─────────────────────────────────────────────────────── */
+.tl-controls-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.tl-select-wrap { display: flex; flex-direction: column; gap: 5px; }
+
+.tl-select {
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tl-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(91, 110, 245, 0.1);
+}
+
+/* ── Right panel ─────────────────────────────────────────────────────────────── */
+.tl-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tl-panel-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 18px;
+}
+
+/* ── Launch stats ────────────────────────────────────────────────────────────── */
+.tl-launch-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tl-stat-cell {
+  background: var(--bg2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.tl-stat-val {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.tl-stat-lbl {
+  font-size: 0.72rem;
+  color: var(--text2);
+}
+
+.tl-estimate {
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.tl-estimate strong { color: var(--text); }
+
+.tl-panel-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 18px 0;
+}
+
+.tl-panel-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.tl-active-run-empty {
+  font-size: 0.82rem;
+  color: var(--text3);
+}
+
+/* ── Active run card in right panel ─────────────────────────────────────────── */
+.tl-active-run-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+
+.tl-arc-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.tl-arc-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tl-arc-body { padding: 10px 12px; }
+.tl-arc-step {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+
+/* ── Running view (replaces config panel when run is active) ─────────────────── */
+.tl-run-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Inner tabs for Pipeline / Site graph / Logs */
+.tl-inner-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tl-inner-tab {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text2);
+  font-family: var(--font-sans);
+  transition: background 0.1s, color 0.1s;
+}
+.tl-inner-tab:hover { background: var(--bg3); color: var(--text); }
+.tl-inner-tab--active {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.tl-run-center {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* `.tl-run-center` is a CSS grid cell of `.tl-grid` whose default
+     `min-height` is `auto`, meaning the cell grows to whatever its content
+     wants. Without this `min-height: 0` the inner flex chain (run-label →
+     banners → inner-tabs → pipeline-view) can't bound — the LiveLog inside
+     `.tl-pipeline-view` then escapes the parent height and the whole right
+     panel is shoved off-screen. Same `min-width: 0` reason for horizontal
+     monospace overflow. */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tl-run-label {
+  padding: 10px 16px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* ── Pipeline stage list ─────────────────────────────────────────────────────── */
+.tl-pipeline {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tl-stage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  transition: background 0.1s;
+}
+.tl-stage--done    { background: var(--green-bg); }
+.tl-stage--active  { background: var(--accent-bg); }
+.tl-stage--pending { opacity: 0.45; }
+
+.tl-stage-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tl-stage-dot--done    { background: var(--green); }
+.tl-stage-dot--active  { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.tl-stage-dot--pending { background: var(--border2); }
+
+.tl-stage-name {
+  font-size: 0.82rem;
+  flex: 1;
+  color: var(--text2);
+}
+.tl-stage--done .tl-stage-name   { color: var(--green); }
+.tl-stage--active .tl-stage-name { color: var(--accent); font-weight: 600; }
+
+.tl-stage-stat {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text3);
+}
+
+/* ── Live output log ──────────────────────────────────────────────────────────
+   Used in two layouts:
+     1. Standalone (logs inner-tab) — fills its flex parent.
+     2. Embedded in `.tl-pipeline-log-col` — inherits column height; that
+        rule's `flex: 1; min-height: 0` overrides the `max-height` here.
+   Either way the content never escapes the card: the log clips with its own
+   vertical scrollbar, never with horizontal overflow into siblings. */
+.tl-live-log {
+  /* `position: relative` so the absolute-positioned `.tl-log-copy` button
+     (pinned top-right) anchors to this non-scrolling wrapper rather than to
+     the inner `.tl-live-log-scroll` surface — keeping it visually pinned as
+     the user scrolls through the log. */
+  position: relative;
+  /* Palette mirrors `.log-box` in components.css so Test Lab's live output
+     reads identically to the Run Detail activity log — same dark surface,
+     same default text colour, same ok/error/warn/info accents. */
+  background: #0f1117;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: #8b9cf4;
+  line-height: 1.9;
+  /* Cap height in the standalone case so the log doesn't grow indefinitely
+     when wrapped in flex parents that don't supply their own bound. The
+     `.tl-pipeline-log-col` override sets `height: auto` + `flex: 1` so the
+     embedded variant fills the column instead. */
+  max-height: 220px;
+  min-height: 0;
+  flex: 0 0 auto;
+  /* Wrapper does NOT scroll — the inner `.tl-live-log-scroll` does. If
+     `overflow-y` were on this element, the absolute-positioned copy button
+     would scroll with the log content (absolute children of a scroll
+     container participate in its scroll). */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Inner scroll surface — owns the actual log content + scroll behaviour so
+   the copy button anchored to the outer wrapper stays pinned. Padding lives
+   here (not on the wrapper) so scrolled content doesn't bleed under the
+   pinned button. */
+.tl-live-log-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px;
+  /* Wrap long URLs / stack frames instead of triggering horizontal scroll
+     across the whole card. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* Line-level accents match `.log-ok` / `.log-error` / `.log-warn` / `.log-info`
+   in `frontend/src/styles/components.css` so users see a consistent palette
+   across Test Lab and Run Detail's activity log. `tl-log-dim` was previously
+   `#4a5070` which is unreadable on the `#0f1117` surface; default-styled
+   lines now keep the parent's `#8b9cf4` for full legibility. */
+.tl-log-ok    { color: #4ade80; }
+.tl-log-error { color: #f87171; }
+.tl-log-warn  { color: #fbbf24; }
+.tl-log-info  { color: #60a5fa; }
+.tl-log-dim   { color: inherit; }
+
+/* Floating icon-only copy button on the log surface. Pinned to top-right so
+   it stays in view even when the log scrolls. Default is dim so it doesn't
+   compete with the log content; brightens on hover. The "copied" state turns
+   green for a brief flash to confirm the action without an extra toast. */
+.tl-log-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #8b9cf4;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.12s, background 0.12s, color 0.12s, border-color 0.12s;
+}
+.tl-log-copy:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.tl-log-copy:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+.tl-log-copy--copied,
+.tl-log-copy--copied:hover {
+  opacity: 1;
+  background: rgba(74, 222, 128, 0.15);
+  border-color: rgba(74, 222, 128, 0.4);
+  color: #4ade80;
+}
+
+/* ── Run stats (right panel during run) ──────────────────────────────────────── */
+.tl-run-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tl-run-stat {
+  background: var(--bg2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.tl-run-stat-val {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.tl-run-stat-lbl {
+  font-size: 0.7rem;
+  color: var(--text2);
+}
+.tl-run-stat--green .tl-run-stat-val { color: var(--green); }
+.tl-run-stat--amber .tl-run-stat-val { color: var(--amber); }
+.tl-run-stat--accent .tl-run-stat-val { color: var(--accent); }
+
+/* ── Requirement tab ─────────────────────────────────────────────────────────── */
+.tl-req-area {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-size: 0.875rem;
+  font-family: var(--font-sans);
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+  line-height: 1.6;
+  min-height: 100px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  margin-bottom: 6px;
+}
+.tl-req-area:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(91, 110, 245, 0.1);
+}
+.tl-req-area::placeholder { color: var(--text3); }
+.tl-req-hint {
+  font-size: 0.73rem;
+  color: var(--text3);
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
+
+/* ── Composer (Requirement tab) ──────────────────────────────────────────────
+   Chat-style composer modelled after ChatGPT / Claude / Cursor: attachment
+   chips render inline above the textarea, and the toolbar (📎 attach, Import
+   issue) lives in a footer row attached to the same surface. The visual
+   border lives on `.tl-composer` itself so the textarea + toolbar read as one
+   element instead of two stacked rectangles. */
+.tl-composer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  overflow: hidden;
+}
+.tl-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(91, 110, 245, 0.1);
+}
+
+/* Strip the textarea's own border / focus ring — `.tl-composer` owns those
+   now so the chips, textarea, and toolbar all read as one surface. */
+.tl-composer-area {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  margin-bottom: 0;
+  border-radius: 0;
+  resize: vertical;
+  min-height: 110px;
+}
+.tl-composer-area:focus { box-shadow: none !important; }
+
+/* Inline attachment chips above the textarea — same row as the cursor when
+   only one chip is present, wraps to multiple lines beyond that. */
+.tl-composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+.tl-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 99px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--text2);
+  max-width: 220px;
+}
+.tl-attachment-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.tl-attachment-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tl-attachment-chip-remove:hover {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+/* Toolbar — attach + import-issue actions, plus the keyboard-shortcut hint. */
+.tl-composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.tl-composer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tl-composer-action:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tl-composer-hint {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--text3);
+}
+.tl-composer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text2);
+}
+
+/* Import-issue inline panel — shown above the composer when toggled. */
+.tl-import-issue {
+  margin-bottom: 10px;
+  padding: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Examples panel ──────────────────────────────────────────────────────────── */
+.tl-example {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text2);
+  background: var(--surface);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+  margin-bottom: 7px;
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+.tl-example:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-bg);
+}
+
+/* ── Queue tab ───────────────────────────────────────────────────────────────── */
+.tl-queue-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.tl-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.tl-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  margin-bottom: 8px;
+  transition: box-shadow 0.12s;
+}
+.tl-queue-row:hover { box-shadow: var(--shadow); }
+.tl-queue-row--done { opacity: 0.75; }
+
+.tl-queue-info { flex: 1; min-width: 0; }
+.tl-queue-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+.tl-queue-sub {
+  font-size: 0.75rem;
+  color: var(--text2);
+}
+
+.tl-queue-progress {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+/* ── TestConfig component (frontend/src/components/test/TestConfig.jsx) ──────
+   Embedded inside both the Crawl and Requirement tabs. Sub-tab strip on top,
+   panels reuse Test Lab's `.tl-section` / `.tl-chip` / `.tl-select` /
+   `.tl-mode-card` / `.tl-req-area` primitives so the config surface looks
+   native to the page. */
+
+.tc-wrap {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Discovery header — sits above the sub-tab strip on the Crawl tab so the
+   pick-a-URL vs. explore-state decision is the first thing the operator sees. */
+.tc-discovery {
+  padding: 14px 16px 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.tc-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+
+.tc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+.tc-tab:hover { background: var(--bg3); color: var(--text); }
+.tc-tab--active {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.tc-active-count {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tc-panel {
+  padding: 16px 16px 4px;
+}
+.tc-panel .tl-section:last-child { margin-bottom: 12px; }
+
+/* Disclosure toggle — collapsible "Custom tuning" header in the discovery
+   block. Styled to match `.tl-section-label` so it reads as a section header
+   rather than a button, but stays keyboard-accessible. */
+.tc-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-sans);
+  transition: color 0.12s;
+}
+.tc-disclosure:hover { color: var(--text); }
+
+.tc-disclosure-flag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+
+/* Custom-tuning sliders — used on the Explorer + Advanced sub-tabs. */
+.tc-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tc-slider { width: 100%; }
+
+.tc-slider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.tc-slider-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tc-slider-value {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tc-slider-desc {
+  font-size: 0.68rem;
+  color: var(--text3);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* Options-tab toggle list. */
+.tc-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tc-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.tc-toggle-title {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.tc-toggle-desc {
+  font-size: 0.72rem;
+  color: var(--text3);
+  margin-top: 1px;
+  line-height: 1.45;
+}
+
+.tc-char-count {
+  font-size: 0.7rem;
+  color: var(--text3);
+  margin-top: 2px;
+  text-align: right;
+}
+
+.tc-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+/* ── Responsive: collapse to 2-pane at 1100px ────────────────────────────────── */
+@media (max-width: 1100px) {
+  .tl-grid {
+    grid-template-columns: 200px 1fr 240px;
+  }
+}
+
+@media (max-width: 900px) {
+  .tl-grid {
+    grid-template-columns: 1fr 280px;
+  }
+  .tl-projects {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .tl-grid {
+    grid-template-columns: 1fr;
+  }
+  .tl-panel {
+    display: none;
+  }
+  .tl-tab-btn {
+    padding: 12px 12px;
+    font-size: 0.8rem;
+  }
+}
+
+/* ── Inline pipeline 3-sub-column view ──────────────────────────────────────
+   Shown when a run is active and innerTab === "pipeline".
+   Mirrors the proposal mockup: Pipeline list | Live Output | So Far stats.
+   All three columns share the full height of tl-run-center so the log
+   terminal doesn't clip and the stats column doesn't float. */
+
+.tl-pipeline-view {
+  display: grid;
+  grid-template-columns: 220px 1fr 200px;
+  flex: 1;
+  /* `min-height: 0` is mandatory: without it the grid container claims the
+     height of its tallest content (the log can be hundreds of lines), which
+     overflows `.tl-run-center` and breaks the bounded-height assumption that
+     `overflow: hidden` relies on. Same reasoning for `min-width: 0` — long
+     monospace log lines would otherwise widen the middle column. */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* Top border removed — `.tl-inner-tabs` already supplies a bottom border at
+     this seam; double-bordering produced a 2px line. */
+}
+
+/* Sub-col 1: stage list */
+.tl-pipeline-col {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* Grid items need explicit min sizing so their flex children (`.tl-pipeline`
+     scroll list) can shrink below content height instead of pushing the
+     column wider than its track. */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px 14px;
+}
+
+.tl-pipeline-progress-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text2);
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+
+/* Override .tl-pipeline padding — it's already set in tl-pipeline-col */
+.tl-pipeline-col .tl-pipeline {
+  padding: 0;
+  margin-top: 4px;
+}
+
+/* Sub-col label shared by log + stats columns */
+.tl-pipeline-col-label {
+  padding: 8px 12px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Sub-col 2: live log */
+.tl-pipeline-log-col {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* Same reasoning as `.tl-pipeline-col` — without min-height the LiveLog
+     overflows the column instead of scrolling inside it, and without
+     min-width the longest monospace line widens the column past its grid
+     track and pushes the stats column out of the visible area. */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Make LiveLog fill the remaining height — overrides the 130px fixed height
+   from the standalone `.tl-live-log` rule (which exists for the rare cases
+   the log renders outside the 3-column pipeline view). */
+.tl-pipeline-log-col .tl-live-log {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  border-top: none;
+  /* Allow long monospace tokens (URLs, stack frames) to wrap instead of
+     forcing a horizontal scroll on every line. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Sub-col 3: so far stats */
+.tl-pipeline-stats-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding-bottom: 14px;
+}
+
+.tl-pipeline-stats-col .tl-run-stats {
+  padding: 12px 12px 0;
+  margin-bottom: 0;
+}
+
+.tl-pipeline-stats-col .tl-run-stat {
+  padding: 8px 10px;
+}
+
+.tl-pipeline-stats-col .tl-run-stat-val {
+  font-size: 1.35rem;
+}
+
+.tl-pipeline-stats-col .btn {
+  margin: 8px 12px 0;
+  width: calc(100% - 24px);
+}
+
+/* Responsive: collapse to 2 cols at 1100px (hide log col) */
+@media (max-width: 1100px) {
+  .tl-pipeline-view {
+    grid-template-columns: 200px 1fr;
+  }
+  .tl-pipeline-log-col {
+    display: none;
+  }
+}
+
+/* Responsive: collapse to 1 col at 700px */
+@media (max-width: 700px) {
+  .tl-pipeline-view {
+    grid-template-columns: 1fr;
+  }
+  .tl-pipeline-stats-col {
+    display: none;
+  }
+}

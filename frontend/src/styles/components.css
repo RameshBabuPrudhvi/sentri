@@ -352,17 +352,6 @@
     border-radius: var(--radius);
   }
 
-  /* GenerateTestModal: stack assignee + folder override inputs */
-  .gen-options-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* GenerateTestModal: examples popover — fit inside modal */
-  .gen-examples-popover {
-    width: calc(100vw - 60px) !important;
-    right: -10px !important;
-  }
-
   /* Icon boxes: shrink slightly to save horizontal space */
   .icon-box {
     width: 36px;
