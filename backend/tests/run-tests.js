@@ -22,6 +22,7 @@ const files = [
   "tests/assertion-enhancer.test.js",
   "tests/test-validator.test.js",
   "tests/test-validator-allowlist.test.js",
+  "tests/secret-scanner.test.js",
   "tests/feedback-loop.test.js",
   "tests/pipeline-orchestrator.test.js",
   "tests/chat-window.test.js",

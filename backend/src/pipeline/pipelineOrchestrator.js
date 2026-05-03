@@ -13,6 +13,7 @@ import { throwIfAborted } from "../utils/abortHelper.js";
 import { deduplicateTests, deduplicateAcrossRuns } from "./deduplicator.js";
 import { enhanceTests } from "./assertionEnhancer.js";
 import { validateTest } from "./testValidator.js";
+import { scanForSecrets } from "./secretScanner.js";
 import { applyHealingTransforms } from "../selfHealing.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
@@ -88,6 +89,13 @@ export async function runPostGenerationPipeline(rawTests, project, run, { snapsh
   let rejected = 0;
   for (const t of enhancedTests) {
     const issues = validateTest(t, project.url);
+    const secretFindings = scanForSecrets(t.playwrightCode || "");
+    if (secretFindings.length > 0) {
+      const formatted = secretFindings.map((f) => `${f.ruleId} (${f.match})`);
+      issues.push(`secret scan failed: ${formatted.join(", ")}`);
+      t.secretScan = { blocked: true, findings: secretFindings };
+      run.secretScanBlocked = true;
+    }
     if (issues.length === 0) {
       validatedTests.push(t);
     } else {
