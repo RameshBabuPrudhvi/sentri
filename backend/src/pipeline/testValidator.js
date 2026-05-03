@@ -1,7 +1,10 @@
 /**
  * testValidator.js — Rejects malformed or placeholder tests before they enter the DB
  *
- * Pure function — no external dependencies beyond the shared type enum.
+ * Mostly pure — only side effect is the lazy, memoised `.github/.gitleaks.toml`
+ * read performed by `secretScanner.loadSecretRules()` on first call to
+ * `scanForSecrets()` (the CAP-003 gate). That read happens at most once per
+ * process lifetime; the result is cached for subsequent calls.
  *
  * Exports:
  *   validateTest(test, projectUrl)          → string[]  (empty = valid)
