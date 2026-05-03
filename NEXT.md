@@ -71,7 +71,19 @@ Docs-only convention change: every new backend route must have its frontend cons
 
 **Files:** `REVIEW.md` (new checklist row) · `AGENT.md` (convention section) · `.github/PULL_REQUEST_TEMPLATE.md` (checkbox) · new `.github/workflows/no-orphan-routes.yml` (or extend an existing workflow) · short doc note in `CONTRIBUTING.md`
 
-> **Stretch / parallel opportunities** (no queue conflict): pick the next 🔵 Medium item from `ROADMAP.md` Phase 4 once an engineer has cycles. The bundled CAP-004 + MET-001 + PROC-002 PR clears three slots, so the queue is intentionally light — refill as the bundled PR ships.
+### 4 · AUTO-003 — Confidence scoring and auto-approval of low-risk tests
+**Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 4 (AUTO-003)
+
+Every generated test currently requires manual approval (`reviewStatus: 'draft'`). For truly autonomous operation, the system should auto-approve tests above a confidence threshold. A quality score already exists in `backend/src/pipeline/deduplicator.js:226-272` but is never used for approval decisions — expose it as `tests.confidenceScore`, add a per-project `autoApproveThreshold` setting (default: disabled / off), and on generation auto-approve tests above the threshold. Log auto-approvals in the activity trail (`userName: "auto-approver"` so the audit history is honest about how the test got approved). Add a "review auto-approved tests" filter in the Tests page so reviewers can spot-check a sample.
+
+**Files:** `backend/src/pipeline/deduplicator.js` (expose quality score as `confidenceScore` on the test record) · `backend/src/pipeline/testPersistence.js` (auto-approve logic gated on per-project threshold) · `backend/src/database/migrations/` (new `confidenceScore` column on `tests`; new `autoApproveThreshold` column on `projects`) · `backend/src/routes/projects.js` (PATCH `autoApproveThreshold`, registered in `permissions.json`) · `frontend/src/pages/Tests.jsx` (auto-approved filter pill + badge on the test card) · `backend/tests/auto-approval.test.js` (threshold off / threshold on / score-below / score-above / activity-log entry)
+
+**Acceptance criteria:**
+- With `autoApproveThreshold: null` (default) every test is still created as a draft — zero behaviour change for existing projects.
+- With a threshold set, tests above the score are persisted as `approved` and an activity-log entry is written attributing the approval to the auto-approver pseudo-user.
+- The Tests page exposes a "Auto-approved" filter so reviewers can audit the bypass path without trawling activities.
+
+> **Stretch / parallel opportunities** (no queue conflict): pick the next 🔵 Medium or 🟢 Differentiator item from `ROADMAP.md` Phase 4 with `Dependencies: none` once an engineer has cycles — `AUTO-002` (change detection) and `DIF-010` (multi-auth profiles) are both standalone candidates.
 
 ---
 
