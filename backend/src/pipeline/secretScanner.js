@@ -1,6 +1,6 @@
 /**
  * @module pipeline/secretScanner
- *
+ * @description
  * CAP-003 — `gitleaks`-style secret scanner used by the post-generation
  * validation stage to reject AI-generated Playwright tests that embed
  * credentials harvested during crawl (Authorization headers, API keys,
