@@ -40,6 +40,7 @@ import { requireRole } from "../middleware/requireRole.js";
 import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
+import { orderTestsByRisk, applyBudgetToQueue } from "../pipeline/riskScorer.js";
 
 const router = Router();
 
@@ -153,10 +154,14 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
-  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition } = req.body || {};
+  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
   const canonicalBrowser = resolveBrowser(browser).name;
+  const history = runRepo.getByProjectId(project.id).flatMap((r) => Array.isArray(r.results) ? r.results : []);
+  const riskOrderedTests = orderTestsByRisk(tests, history, { changedPages: [] });
+  const selectedTests = applyBudgetToQueue(riskOrderedTests, budgetMinutes);
+
 
   const runId = generateRunId();
   const run = {
@@ -169,19 +174,19 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     results: [],
     passed: 0,
     failed: 0,
-    total: tests.length,
+    total: selectedTests.length,
     parallelWorkers,
     browser: canonicalBrowser,
     device: device || null,
     networkCondition: networkCondition || "fast",
-    testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
+    testQueue: selectedTests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [], riskScore: t.riskScore })),
     workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
 
   logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
-    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
+    detail: `Test run started — ${selectedTests.length} test${selectedTests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
 
   if (isQueueAvailable()) {
@@ -194,7 +199,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -205,7 +210,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
+      (signal) => runTests(project, selectedTests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

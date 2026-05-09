@@ -32,6 +32,7 @@ import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js"
 import { requireTrigger } from "../middleware/authenticate.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
+import { orderTestsByRisk, applyBudgetToQueue } from "../pipeline/riskScorer.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -188,7 +189,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   // BEFORE the synchronous concurrent-run guard to avoid a TOCTOU race
   // (an await between the guard and runRepo.create would let a second
   // request slip through).
-  const { dialsConfig, callbackUrl } = req.body || {};
+  const { dialsConfig, callbackUrl, budgetMinutes } = req.body || {};
 
   if (callbackUrl && typeof callbackUrl === "string") {
     // Length cap — prevent abuse via extremely long URLs
@@ -241,6 +242,9 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   const previewUrl = typeof req.body?.previewUrl === "string" ? req.body.previewUrl : null;
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
+  const history = runRepo.getByProjectId(project.id).flatMap((r) => Array.isArray(r.results) ? r.results : []);
+  const riskOrderedTests = orderTestsByRisk(tests, history, { changedPages: [] });
+  const selectedTests = applyBudgetToQueue(riskOrderedTests, budgetMinutes);
   if (!triggerCrawl) {
     if (!allTests.length) return res.status(400).json({ error: "No tests found — crawl first." });
     if (!tests.length) return res.status(400).json({ error: "No approved tests — review generated tests before triggering." });
