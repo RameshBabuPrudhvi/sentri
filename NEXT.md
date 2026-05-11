@@ -34,6 +34,7 @@ Sentri runs every approved test on every trigger. An autonomous system should *o
 - `backend/src/routes/trigger.js` + `backend/src/routes/runs.js`: accept `budgetMinutes` param, pass through to runner.
 - `frontend/src/pages/RunDetail.jsx`: per-test `riskScore` chip in the run-detail table; budget-truncated tests marked with a "skipped (over budget)" status.
   **Files:** new `backend/src/pipeline/riskScorer.js` · `backend/src/testRunner.js` · `backend/src/routes/trigger.js` + `backend/src/routes/runs.js` · `frontend/src/pages/RunDetail.jsx` · new `backend/tests/risk-scorer.test.js` · `docs/changelog.md` (`### Added` entry)
+
   **Acceptance criteria:**
 - Tests with a recent failure rank higher than tests that have been green for weeks.
 - `budgetMinutes=10` truncates the queue at the 10-minute mark; pinned smoke tests still run even when truncated.
@@ -58,6 +59,7 @@ Sentri runs every approved test on every trigger. An autonomous system should *o
 **Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** none (uses existing GitHub App connection from CAP-003 / FEA secrets path) | **Source:** `ROADMAP.md` Phase 3 (INT-002)
 When a Sentri run triggered by a GitHub webhook completes, post a check-run comment on the PR summarising pass/fail counts, regressed tests (with diff vs the previous run on `main`), and Web Vitals budget violations. Today the run results live only in the Sentri UI — operators have to context-switch to see them. A native PR check makes Sentri feel like a first-class CI gate and unlocks the "block merge until tests pass" workflow that matters for AUTO-003 trust.
 **Files:** new `backend/src/integrations/githubChecks.js` (Checks API client — create / update / conclude) · `backend/src/routes/webhooks.js` (subscribe `pull_request` + `push` events; map to a Sentri run) · `backend/src/testRunner.js` (post check-run on completion, including regressed-test diff vs the base SHA's last green run) · `backend/src/middleware/permissions.json` · `frontend/src/pages/Settings.jsx` (per-project "Post PR checks" toggle) · `backend/tests/github-checks.test.js` (mock Octokit; assert payload shape, regression-diff logic, failure-mode posting)
+
 **Acceptance criteria:**
 - Opening / pushing to a PR on a Sentri-connected repo creates a `pending` check-run, then transitions to `success` / `failure` / `neutral` on completion.
 - Failure summary includes regressed tests (failing now, green on the base SHA's last run) — not the full failing list, which would be noisy on red branches.
@@ -67,6 +69,7 @@ When a Sentri run triggered by a GitHub webhook completes, post a check-run comm
 **Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** AUTO-002 (shipped in PR #12) — consumes the `changedPages[]` signal and extends it to file-level mapping | **Source:** `ROADMAP.md` Phase 4 (AUTO-004)
 Today Sentri runs every approved test on every CI trigger. With AUTO-002's baseline mechanism in place and AUTO-001's risk scorer consuming `changedPages[]`, the next step is mapping file-level git-diffs to affected tests: when a PR touches `src/checkout/CartPage.tsx`, only the tests whose crawl snapshots include elements from that component should run. This is the "smart subset" that makes Sentri viable on large suites where running the full regression on every push is prohibitive. The mapping is built by cross-referencing each test's `sourceUrl` + captured elements against the file paths extracted from the git diff (via GitHub's PR files API, already available on the webhook path), then unioning the file→URL mapping with AUTO-002's `changedPages[]` signal.
 **Files:** new `backend/src/pipeline/impactAnalysis.js` (git-diff → affected-test mapper, pure function: `{ changedFiles: string[], testsWithSnapshots: Test[] } → Test[]`) · `backend/src/routes/trigger.js` (accept `changedFiles[]` in the webhook payload, pass through to impact analysis, scope the run queue) · `backend/src/testRunner.js` (honour the scoped queue) · `frontend/src/pages/RunDetail.jsx` (new "Impact scope" panel showing which files drove the test selection) · `backend/tests/impact-analysis.test.js` (file→URL mapping correctness, empty-diff fallback, unknown-file graceful degradation)
+
 **Acceptance criteria:**
 - `changedFiles: ["src/checkout/CartPage.tsx"]` in the webhook payload scopes the run to tests whose snapshots touched `/checkout/*` URLs.
 - Empty `changedFiles` (or absent) falls back to current behaviour (full suite) — zero regression.
@@ -76,6 +79,7 @@ Today Sentri runs every approved test on every CI trigger. With AUTO-002's basel
 **Effort:** M | **Priority:** 🟢 Differentiator | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 4 (CAP-001)
 Generated tests are single-shot — one assertion path, one input set. Industry-standard practice (Cypress, Playwright `test.describe.serial` + fixtures, Mabl iterations) is to run the same test against N data rows from a CSV / JSON fixture, with one Run row per iteration so failures are attributable to a specific row. Sentri has no fixture concept today, so testing edge-case data combinations means hand-authoring N near-identical tests. Add per-test fixture upload (CSV / JSON) stored as a `test_fixtures` table row; extend the runner to iterate over fixture rows when present, substituting placeholders in `playwrightCode` (e.g. `{{email}}` → row value).
 **Files:** new migration — `test_fixtures` table keyed on `(testId, version)` with `format` (`"csv"` | `"json"`), `rows` (TEXT JSON), `createdAt` · new `backend/src/database/repositories/testFixtureRepo.js` · `backend/src/runner/executeTest.js` (iterate over fixture rows, emit per-iteration result rows with `iterationIndex`) · `backend/src/routes/tests.js` (`POST /api/v1/tests/:testId/fixtures` upload, `GET …/fixtures` list) · `backend/src/middleware/permissions.json` (qa_lead+ on mutations) · `frontend/src/pages/TestDetail.jsx` (fixture upload + preview) · `frontend/src/components/run/StepResultsView.jsx` (per-iteration sub-table) · `backend/tests/fixture-iteration.test.js`
+
 **Acceptance criteria:**
 - Uploading a 5-row CSV fixture to a test produces 5 iteration results on the next run, each with an `iterationIndex` field.
 - Per-project iteration cap (default 10, max 100) so a 10k-row CSV can't exhaust the worker pool.
