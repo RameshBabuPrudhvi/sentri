@@ -34,6 +34,7 @@ const JSON_FIELDS = [
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
   "qualityAnalytics", "pages", "gateResult", "webVitalsResult",
   "changedPages", "removedPages", // AUTO-002: diff-aware crawl page-change summary
+  "githubCheck", // INT-002: GitHub Check Run metadata
 ];
 
 function rowToRun(row) {
@@ -86,6 +87,8 @@ const INSERT_COLS = [
   "webVitalsResult", // AUTO-017: web vitals budget pass/fail summary
   "secretScanBlocked", // CAP-003: set when post-generation secret scanner rejects any test (migration 015)
   "changedPages", "removedPages", // AUTO-002: diff-aware crawl page-change summary (migration 020)
+  "githubCheck", // INT-002: GitHub Check Run metadata (migration 021)
+  "budgetMinutes", // AUTO-001: wall-clock budget applied to dispatch queue (migration 021)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -196,6 +199,68 @@ export function getByProjectId(projectId) {
   return db.prepare(
     "SELECT * FROM runs WHERE projectId = ? AND deletedAt IS NULL ORDER BY startedAt DESC"
   ).all(projectId).map(rowToRun);
+}
+
+
+/**
+ * Find a non-deleted run that was launched from a specific GitHub webhook
+ * delivery. Used to make duplicate PR webhooks idempotent (INT-002).
+ *
+ * GitHub stamps every webhook delivery with a unique UUID in the
+ * `X-GitHub-Delivery` header and retries the same UUID with exponential
+ * backoff for up to 24h on non-2xx responses. The delivery ID — not the
+ * commit SHA — is the correct idempotency key:
+ *
+ *   - Two deliveries for the same SHA but different delivery IDs are
+ *     **distinct events** (e.g. PR opened, then `check_suite.rerequested`
+ *     after a user clicks "Re-run"). Each deserves a fresh Check Run.
+ *   - Two deliveries for the *same* delivery ID are GitHub retrying the
+ *     same event. We must produce the same `checkRunId` and not launch
+ *     a duplicate run.
+ *
+ * The previous repo+SHA-based lookup conflated these two cases — a
+ * legitimate `rerequested` event for the same commit would silently
+ * reuse the prior check and overwrite its conclusion, which is
+ * surprising behaviour for an industry-standard QA platform.
+ *
+ * Implementation note — cross-dialect lookup via `LIKE`:
+ * The natural query here is `WHERE json_extract(githubCheck, '$.deliveryId') = ?`,
+ * but `json_extract()` is SQLite-specific and the Postgres adapter
+ * (`backend/src/database/adapters/postgres-adapter.js`) has no translation
+ * rule for it — so the query would crash on every webhook retry on Postgres
+ * deployments. We instead use a `LIKE` pre-filter against the serialized
+ * JSON column (matching the established pattern in
+ * `backend/src/database/repositories/activityRepo.js:206`, which also avoids
+ * `json_extract` for the same reason) and verify the parsed `deliveryId`
+ * field in JS. The pre-filter narrows long-lived PRs to a tiny candidate
+ * set; the JS-side check is the source of truth and rejects accidental
+ * substring matches in unrelated JSON fields.
+ *
+ * @param {string} projectId
+ * @param {string} deliveryId — value of the `X-GitHub-Delivery` header.
+ * @returns {Object|undefined}
+ */
+export function findByGithubDeliveryId(projectId, deliveryId) {
+  if (!deliveryId) return undefined;
+  const db = getDatabase();
+  // The delivery ID is embedded as `"deliveryId":"<uuid>"` in the JSON-serialized
+  // githubCheck column. We escape SQL LIKE wildcards in the user-supplied
+  // delivery ID before interpolating into the pattern, so a malicious /
+  // malformed UUID can't broaden the match.
+  const safeDeliveryId = String(deliveryId).replace(/[\\%_]/g, (c) => `\\${c}`);
+  const pattern = `%"deliveryId":"${safeDeliveryId}"%`;
+  const rows = db.prepare(
+    `SELECT * FROM runs
+     WHERE projectId = ? AND deletedAt IS NULL
+       AND githubCheck IS NOT NULL
+       AND githubCheck LIKE ? ESCAPE '\\'
+     ORDER BY startedAt DESC LIMIT 10`
+  ).all(projectId, pattern);
+  for (const row of rows) {
+    const run = rowToRun(row);
+    if (run?.githubCheck?.deliveryId === deliveryId) return run;
+  }
+  return undefined;
 }
 
 /**
@@ -336,6 +401,79 @@ export function getRecentCompletedWithResults(projectId, limit = 20) {
     }
     return row;
   });
+}
+
+/**
+ * INT-002: Lean accessor for recent completed test runs that posted a GitHub
+ * Check Run. Used by `concludeGithubCheck` to find a green base run for
+ * regressed-test diff rendering without loading every project run's heavy
+ * JSON columns (`testQueue`, `promptAudit`, `qualityAnalytics`, …).
+ *
+ * Selects only the columns `findGreenBaseRun` reads
+ * (`backend/src/utils/runResultFormatters.js`):
+ *   - `id`, `type`, `status`, `failed` — eligibility filtering
+ *   - `githubCheck` — repo/sha match
+ *   - `results` — green-test set for the diff
+ *
+ * The lookback is bounded by `limit` (default 25, matching
+ * `BASE_LOOKBACK_RUNS` in the formatter) so a project with thousands of
+ * historical runs doesn't trigger an O(n) deserialize on every check
+ * completion.
+ *
+ * @param {string} projectId
+ * @param {number} [limit=25]
+ * @returns {Object[]} Newest-first, parsed `githubCheck` + `results`.
+ */
+export function getRecentTestRunsForGithubBase(projectId, limit = 25) {
+  const db = getDatabase();
+  const rows = db.prepare(
+    `SELECT id, type, status, failed, githubCheck, results FROM runs
+     WHERE projectId = ? AND deletedAt IS NULL
+       AND type IN ('test_run', 'run') AND status = 'completed'
+       AND githubCheck IS NOT NULL
+     ORDER BY startedAt DESC LIMIT ?`
+  ).all(projectId, limit);
+  return rows.map((row) => {
+    if (row.githubCheck) {
+      try { row.githubCheck = JSON.parse(row.githubCheck); } catch { row.githubCheck = null; }
+    }
+    if (row.results) {
+      try { row.results = JSON.parse(row.results); } catch { row.results = []; }
+    } else {
+      row.results = [];
+    }
+    return row;
+  });
+}
+
+/**
+ * AUTO-001: Lean accessor for the most recent crawl run that produced a
+ * non-empty `changedPages[]` summary. Used by the risk-scoring path in
+ * `routes/runs.js` and `routes/trigger.js` so a project with hundreds of
+ * historical runs doesn't have to deserialize every row's heavy JSON columns
+ * just to read the latest crawl's diff payload. Selects only `id`,
+ * `startedAt`, `changedPages` and bounds the SQL with `LIMIT 1`.
+ *
+ * Returns the parsed `{ id, startedAt, changedPages }` shape or `null` when
+ * no crawl has produced a non-empty changedPages array yet.
+ *
+ * @param {string} projectId
+ * @returns {{ id: string, startedAt: string, changedPages: Array }|null}
+ */
+export function getLatestCrawlWithChangedPages(projectId) {
+  const db = getDatabase();
+  const row = db.prepare(
+    `SELECT id, startedAt, changedPages FROM runs
+     WHERE projectId = ? AND deletedAt IS NULL
+       AND type = 'crawl'
+       AND changedPages IS NOT NULL AND changedPages != '[]'
+     ORDER BY startedAt DESC LIMIT 1`
+  ).get(projectId);
+  if (!row?.changedPages) return null;
+  let parsed;
+  try { parsed = JSON.parse(row.changedPages); } catch { return null; }
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+  return { id: row.id, startedAt: row.startedAt, changedPages: parsed };
 }
 
 // ─── Write operations ─────────────────────────────────────────────────────────

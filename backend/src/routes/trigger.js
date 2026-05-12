@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
+import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 import { generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
@@ -32,6 +33,10 @@ import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js"
 import { requireTrigger } from "../middleware/authenticate.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
+import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
+import { createPending, markInProgress, conclude, buildRunUrl } from "../integrations/githubChecks.js";
+import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -113,17 +118,33 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
 }
 
 /**
- * Build a `type: "test_run"` run object aligned with `routes/runs.js:161-179`.
+ * Build a `type: "test_run"` run object aligned with `routes/runs.js:188-213`.
+ *
+ * AUTO-001: persisted `testQueue` mirrors the approved-test order (audit
+ * fidelity) with per-row `riskScore`; budget-skipped tests are pre-seeded
+ * into `results` as `skipped (over_budget)` so every approved test has an
+ * observable resolution. `total` reflects the approved set, not the
+ * post-budget dispatch slice.
  *
  * @param {object} args
  * @param {string} args.runId
  * @param {object} args.project - must carry `id` and (optionally) `workspaceId`.
- * @param {object[]} args.tests - The approved tests this run will execute.
- *   Each entry must carry `id`, `name`, and optionally `steps` (defaults to []).
+ * @param {object[]} args.tests - The full approved-test set (persisted order).
+ * @param {object[]} [args.budgetSkipped] - Tests truncated by `budgetMinutes`.
+ * @param {Map<string, number>} [args.riskById] - testId → riskScore lookup.
+ * @param {number|null} [args.budgetMinutes] - Normalized budget actually applied.
  * @param {number} args.parallelWorkers
  * @returns {object} the run record ready for `runRepo.create()`.
  */
-function buildTestRun({ runId, project, tests, parallelWorkers }) {
+function buildTestRun({ runId, project, tests, budgetSkipped = [], riskById, budgetMinutes = null, parallelWorkers, githubCheck = null }) {
+  const lookup = riskById || new Map();
+  const initialResults = budgetSkipped.map((t) => ({
+    testId: t.id,
+    testName: t.name,
+    status: "skipped",
+    skipReason: "over_budget",
+    riskScore: t.riskScore,
+  }));
   return {
     id: runId,
     projectId: project.id,
@@ -131,14 +152,150 @@ function buildTestRun({ runId, project, tests, parallelWorkers }) {
     status: "running",
     startedAt: new Date().toISOString(),
     logs: [],
-    results: [],
+    results: initialResults,
     passed: 0,
     failed: 0,
     total: tests.length,
     parallelWorkers,
-    testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
+    testQueue: tests.map((t) => ({
+      id: t.id, name: t.name, steps: t.steps || [],
+      riskScore: lookup.get(t.id) ?? null,
+    })),
+    budgetMinutes,
     workspaceId: project.workspaceId || null,
+    githubCheck,
   };
+}
+
+
+function normalizeGithubPayload(body = {}) {
+  const repo = typeof body.repo === "string" ? body.repo.trim()
+    : body.repository?.full_name ? String(body.repository.full_name).trim() : "";
+  // INT-002: extract `head_sha` from any of the four canonical payload shapes:
+  //   - `pull_request.head.sha`   → `pull_request.{opened,synchronize,…}` events
+  //   - `check_suite.head_sha`    → `check_suite.{requested,rerequested}` events
+  //   - `check_run.head_sha`      → `check_run.rerequested` (user clicks "Re-run this check"
+  //                                  on a single check, distinct from re-running the whole suite)
+  //   - body-level `sha` override → non-GitHub CI callers (Jenkins / GitLab / generic)
+  const sha = typeof body.sha === "string" ? body.sha.trim()
+    : body.check_run?.head_sha ? String(body.check_run.head_sha).trim()
+    : body.check_suite?.head_sha ? String(body.check_suite.head_sha).trim()
+    : body.pull_request?.head?.sha ? String(body.pull_request.head.sha).trim() : "";
+  // Base SHA is only available on `pull_request` events — `check_run` /
+  // `check_suite` payloads don't carry the merge-base, so the regressed-test
+  // diff falls back to "all failing" on those events (correct behaviour:
+  // a re-run request doesn't change the base, so the original PR delivery
+  // already established the green-base reference in `findGreenBaseRun`).
+  const baseSha = typeof body.baseSha === "string" ? body.baseSha.trim()
+    : body.pull_request?.base?.sha ? String(body.pull_request.base.sha).trim() : null;
+  // `check_run.pull_requests[0].number` carries the PR number on check-run
+  // rerequest events when the check belongs to a PR (vs. a branch push).
+  const prNumber = Number.isInteger(body.prNumber) ? body.prNumber
+    : Number.isInteger(body.number) ? body.number
+    : Number.isInteger(body.pull_request?.number) ? body.pull_request.number
+    : Number.isInteger(body.check_run?.pull_requests?.[0]?.number) ? body.check_run.pull_requests[0].number : null;
+  return { repo, sha, baseSha, prNumber };
+}
+
+/**
+ * Prepare a GitHub Check Run for a Sentri run, returning the metadata to
+ * persist on `run.githubCheck` (or `null` when no check should be created).
+ *
+ * **Idempotency contract (INT-002):**
+ * GitHub retries failed webhook deliveries (any non-2xx) with exponential
+ * backoff for up to 24h, always using the same `X-GitHub-Delivery` UUID.
+ * The delivery ID — not the commit SHA — is the correct idempotency key:
+ *   - Same delivery ID → GitHub is retrying. Return existing check, do not
+ *     create a new run, do not transition state on GitHub.
+ *   - New delivery ID for the same SHA → distinct event (e.g. `rerequested`
+ *     after a user clicks "Re-run"). Create a fresh Check Run.
+ *
+ * @param {Object} project
+ * @param {Object} body          — trigger request body (already merged with normalizeGithubPayload).
+ * @param {string} runId
+ * @param {string|null} deliveryId — value of the `X-GitHub-Delivery` header, when present.
+ * @returns {Promise<Object|null>}
+ */
+async function prepareGithubCheck(project, body, runId, deliveryId = null) {
+  const payload = normalizeGithubPayload(body);
+  if (!payload.repo || !payload.sha) return null;
+  const settings = githubCheckSettingsRepo.getByProjectId(project.id);
+  if (!settings?.enabled) return null;
+  if (settings.repo && settings.repo !== payload.repo) return null;
+  if (!settings.installationId) throw new Error("GitHub installationId is not configured for this project");
+
+  // Retry-delivery idempotency: same X-GitHub-Delivery ⇒ same check, no
+  // state transition. The caller (handleTrigger) short-circuits when it
+  // detects `reused: true` so the underlying Sentri run is also skipped.
+  if (deliveryId) {
+    const existing = runRepo.findByGithubDeliveryId(project.id, deliveryId);
+    if (existing?.githubCheck?.checkRunId) {
+      return { ...existing.githubCheck, reused: true, reusedRunId: existing.id };
+    }
+  }
+
+  const checkRun = await createPending(runId, {
+    repo: payload.repo,
+    sha: payload.sha,
+    installationId: settings.installationId,
+  });
+  await markInProgress(checkRun.id, { repo: payload.repo, installationId: settings.installationId });
+  return {
+    checkRunId: checkRun.id,
+    deliveryId: deliveryId || null,
+    repo: payload.repo,
+    sha: payload.sha,
+    baseSha: payload.baseSha,
+    prNumber: payload.prNumber,
+    installationId: settings.installationId,
+    status: "in_progress",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Conclude a GitHub Check Run once the Sentri run reaches a terminal state.
+ *
+ * **Placement rationale (deviates from NEXT.md INT-002 sketch):**
+ * NEXT.md suggests this hook lives in `testRunner.js` `onComplete`. We keep
+ * it here because (a) `testRunner.js` has no internal completion hook —
+ * `runWithAbort.onComplete` *is* the hook, fired from this file already;
+ * (b) only the trigger path carries GitHub repo/sha context, so wiring it
+ * through the runner would require threading `run.githubCheck` plumbing
+ * into a module that has no other reason to know about integrations;
+ * (c) keeping integration side-effects at the route layer matches the
+ * pattern used by `fireNotifications` (FEA-001) just above this call.
+ * Errors are always logged + swallowed so a GitHub outage never fails the
+ * underlying Sentri run (INT-002 anti-pattern guard).
+ *
+ * @param {Object} finishedRun
+ * @param {Object} project
+ */
+async function concludeGithubCheck(finishedRun, project) {
+  const check = finishedRun?.githubCheck;
+  if (!check?.checkRunId || !check.repo || !check.installationId) return;
+  try {
+    // INT-002 perf: use the lean accessor instead of `getByProjectId()` —
+    // the latter loads every historical run with full JSON deserialization
+    // (testQueue, promptAudit, qualityAnalytics, …) which becomes a real
+    // latency cost on projects with hundreds of runs. The base-run lookup
+    // only needs id/type/status/failed/githubCheck/results, bounded to the
+    // 25-run lookback `findGreenBaseRun` already enforces.
+    const projectRuns = runRepo.getRecentTestRunsForGithubBase(project.id);
+    const baseRun = findGreenBaseRun(projectRuns, check.baseSha, check.repo);
+    const summaryMd = renderGithubCheckSummary(finishedRun, { baseRun, runUrl: buildRunUrl(finishedRun.id) || "" });
+    await conclude(check.checkRunId, {
+      repo: check.repo,
+      installationId: check.installationId,
+      conclusion: conclusionForRun(finishedRun),
+      summaryMd,
+    });
+    runRepo.update(finishedRun.id, { githubCheck: { ...check, status: "completed", conclusion: conclusionForRun(finishedRun), completedAt: new Date().toISOString() } });
+  } catch (err) {
+    // INT-002 anti-pattern guard: a GitHub 5xx must never fail the underlying
+    // Sentri run — log and swallow.
+    console.error(formatLogLine("warn", finishedRun.id, `[github-checks] Failed to conclude check: ${err.message}`));
+  }
 }
 
 /**
@@ -180,7 +337,7 @@ function buildTestRun({ runId, project, tests, parallelWorkers }) {
  * @param {Object}  req - Express request
  * @param {Object} res - Express response
  */
-router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (req, res) => {
+async function handleTrigger(req, res) {
   const { triggerToken: tokenRow, triggerProject: project } = req;
 
   // ── 3. Extract and validate optional config (async) ────────────────
@@ -188,7 +345,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   // BEFORE the synchronous concurrent-run guard to avoid a TOCTOU race
   // (an await between the guard and runRepo.create would let a second
   // request slip through).
-  const { dialsConfig, callbackUrl } = req.body || {};
+  const { dialsConfig, callbackUrl, budgetMinutes } = req.body || {};
 
   if (callbackUrl && typeof callbackUrl === "string") {
     // Length cap — prevent abuse via extremely long URLs
@@ -226,6 +383,26 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
     actionTimeout: validatedDials?.exploreActionTimeout ?? 5000,
   };
 
+  // ── 3b. GitHub delivery-retry idempotency (INT-002) ───────────────────
+  // GitHub retries non-2xx webhook deliveries with the same X-GitHub-Delivery
+  // UUID for up to 24h. If we've already started a run for this exact
+  // delivery, ack with the existing runId + checkRunId and DO NOT create a
+  // second Sentri run. This is the only correct "duplicate" — same SHA from
+  // a distinct delivery (e.g. `check_suite.rerequested`) is a fresh event.
+  const githubDeliveryId = req.githubDeliveryId || null;
+  if (githubDeliveryId) {
+    const dup = runRepo.findByGithubDeliveryId(project.id, githubDeliveryId);
+    if (dup?.githubCheck?.checkRunId) {
+      const proto = req.headers["x-forwarded-proto"] || req.protocol;
+      const host  = req.headers["x-forwarded-host"]  || req.get("host");
+      return res.status(202).json({
+        runId: dup.id,
+        statusUrl: `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${dup.id}`,
+        githubCheck: { checkRunId: dup.githubCheck.checkRunId, reused: true },
+      });
+    }
+  }
+
   // ── 4. Guard: no concurrent run ───────────────────────────────────────
   // From here to runRepo.create() the code is fully synchronous, so no
   // other request can interleave and pass the same guard.
@@ -241,6 +418,26 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   const previewUrl = typeof req.body?.previewUrl === "string" ? req.body.previewUrl : null;
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
+  // AUTO-001: risk-ordered + budget-capped dispatch set. `tests` (approved order)
+  // is preserved for the audit-trail `testIds` snapshot below; reorder is for
+  // DISPATCH only.
+  //
+  // History is bounded to the 20 most recent completed test runs via the lean
+  // accessor `getRecentCompletedWithResults` (id/type/status/startedAt/results
+  // only — no testQueue/promptAudit/qualityAnalytics blobs). The scorer caps
+  // its per-test window at the 10 newest results anyway (`riskScorer.js`
+  // `rows.slice(0, 10)` — newest-first), so 20 runs gives ample headroom
+  // while keeping memory bounded on projects with hundreds of historical runs.
+  const RISK_HISTORY_RUN_LIMIT = 20;
+  const recentRuns = runRepo.getRecentCompletedWithResults(project.id, RISK_HISTORY_RUN_LIMIT);
+  const history = recentRuns.flatMap((r) => Array.isArray(r.results) ? r.results : []);
+  // Lean lookup — single-row SQL with `LIMIT 1`, no full-table scan.
+  const latestCrawl = runRepo.getLatestCrawlWithChangedPages(project.id);
+  const changedPages = (latestCrawl?.changedPages || []).map((p) => p?.url || p).filter(Boolean);
+  const safeBudget = normalizeBudgetMinutes(budgetMinutes);
+  const riskOrderedTests = orderTestsByRisk(tests, history, { changedPages });
+  const { kept: selectedTests, skipped: budgetSkipped } = applyBudgetToQueue(riskOrderedTests, safeBudget);
+  const riskById = new Map(riskOrderedTests.map((t) => [t.id, t.riskScore]));
   if (!triggerCrawl) {
     if (!allTests.length) return res.status(400).json({ error: "No tests found — crawl first." });
     if (!tests.length) return res.status(400).json({ error: "No approved tests — review generated tests before triggering." });
@@ -253,8 +450,22 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   const runId = generateRunId();
   const run = triggerCrawl
     ? buildCrawlRun({ runId, project, dialsConfig: validatedDials })
-    : buildTestRun({ runId, project, tests, parallelWorkers });
+    : buildTestRun({ runId, project, tests, budgetSkipped, riskById, budgetMinutes: safeBudget, parallelWorkers });
   runRepo.create(run);
+
+  if (!triggerCrawl) {
+    // INT-002: GitHub Check Run setup is best-effort. A GitHub outage / 5xx
+    // / misconfiguration must never block the underlying Sentri run — the
+    // run itself is the source of truth; the PR check is a notification
+    // surface. Failures here are logged and swallowed, mirroring the
+    // `concludeGithubCheck` contract on the completion side.
+    try {
+      run.githubCheck = await prepareGithubCheck(project, req.body || {}, runId, githubDeliveryId);
+      if (run.githubCheck) runRepo.update(runId, { githubCheck: run.githubCheck });
+    } catch (err) {
+      console.error(formatLogLine("warn", runId, `[github-checks] Failed to create pending check: ${err.message}`));
+    }
+  }
 
   // Record that this token was used (updates lastUsedAt)
   webhookTokenRepo.touch(tokenRow.id);
@@ -271,7 +482,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
     workspaceId: project.workspaceId,
     detail: triggerCrawl
       ? `CI/CD triggered crawl${previewUrl ? ` — ${previewUrl}` : ""}`
-      : `CI/CD triggered test run — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
+      : `CI/CD triggered test run — ${selectedTests.length} of ${tests.length} test${tests.length !== 1 ? "s" : ""}${budgetSkipped.length ? ` (${budgetSkipped.length} skipped over budget)` : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
 
@@ -307,7 +518,10 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
           run,
           { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
         )
-      : runTests(project, tests, run, { parallelWorkers, signal }),
+      // AUTO-001: dispatch the risk-ordered + budget-capped subset, not the
+      // full approved set. The persisted run (buildTestRun) still records the
+      // approved-test order via `tests` for audit fidelity.
+      : runTests(project, selectedTests, run, { parallelWorkers, signal }),
     {
       onSuccess: () => {
         logActivity({
@@ -336,6 +550,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
       onComplete: async (finishedRun) => {
         // FEA-001: Fire failure notifications — best-effort
         try { await fireNotifications(finishedRun, project); } catch { /* best-effort */ }
+        await concludeGithubCheck(finishedRun, project);
 
         if (!callbackUrl || typeof callbackUrl !== "string") return;
         const payload = JSON.stringify({
@@ -361,8 +576,14 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
   // poll without a JWT — they reuse the same Bearer token.
   const statusUrl = `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${runId}`;
 
-  res.status(202).json({ runId, statusUrl });
-});
+  const response = { runId, statusUrl };
+  if (run.githubCheck?.checkRunId) {
+    response.githubCheck = { checkRunId: run.githubCheck.checkRunId, reused: false };
+  }
+  res.status(202).json(response);
+}
+
+router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, handleTrigger);
 
 /**
  * HMAC signature verification for deployment-webhook payloads.
@@ -381,7 +602,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
  * interoperability with the provider's signing scheme. When Vercel upgrades
  * their webhook signatures, bump `algo` for the `"vercel"` branch here.
  *
- * @param {"vercel"|"netlify"} provider
+ * @param {"vercel"|"netlify"|"github"} provider
  * @param {Buffer|undefined} rawBody - captured by the webhook-scoped
  *   express.json `verify` callback in `middleware/appSetup.js`.
  * @param {string|undefined} signatureHeader - the provider's signature header
@@ -389,7 +610,11 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, async (
  * @returns {boolean}
  */
 function verifyWebhookSignature(provider, rawBody, signatureHeader) {
-  const secret = provider === "vercel" ? process.env.VERCEL_WEBHOOK_SECRET : process.env.NETLIFY_WEBHOOK_SECRET;
+  const secret = provider === "vercel"
+    ? process.env.VERCEL_WEBHOOK_SECRET
+    : provider === "github"
+    ? process.env.GITHUB_WEBHOOK_SECRET
+    : process.env.NETLIFY_WEBHOOK_SECRET;
   if (!secret || !signatureHeader || !rawBody) return false;
   const algo = provider === "vercel" ? "sha1" : "sha256";
   const expected = crypto.createHmac(algo, secret).update(rawBody).digest("hex");
@@ -516,6 +741,57 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
  *      project should run — without this, a single global webhook secret
  *      would let any signed payload trigger any project ID in the URL).
  */
+
+// INT-002: GitHub fires webhooks for many event types — `ping` when the
+// hook is first installed, plus `push`, `issues`, `issue_comment`,
+// `workflow_run`, `star`, etc. depending on subscriptions. Without an
+// event-type filter, ANY delivery (including the install-time ping)
+// would launch a Sentri run. Mirror the Vercel/Netlify gate: only
+// PR-lifecycle events relevant to QA proceed; everything else is acked
+// 200 so GitHub stops retrying.
+const TRIGGERING_GITHUB_EVENTS = new Map([
+  ["pull_request", new Set(["opened", "synchronize", "reopened", "ready_for_review"])],
+  ["check_suite", new Set(["requested", "rerequested"])],
+  // `check_run.rerequested` fires when a user clicks "Re-run this check" on a
+  // single check (distinct from `check_suite.rerequested` which re-runs every
+  // check in the suite). Industry-standard QA gates honour both — without this
+  // entry, the per-check "Re-run" button silently no-ops, which is surprising
+  // UX for anyone used to GitHub Actions / CircleCI behaviour.
+  ["check_run", new Set(["rerequested"])],
+]);
+
+// TODO(INT-002b): App-level webhook receiver missing. This route handles
+// PR/check-suite deliveries (project-scoped via `requireTrigger`), but
+// `installation.deleted` and `installation_repositories.removed` events
+// arrive at the GitHub App's *App-wide* webhook URL — not per-project — so
+// they have no project token. Without a separate `POST /integrations/github/
+// app-webhook` handler that disables stale `github_check_settings` rows by
+// `installationId`, an admin uninstalling the App leaves rows with
+// `enabled=1` + stale `installationId` and subsequent PR deliveries silently
+// 401 against `/app/installations/.../access_tokens`. See ROADMAP.md § INT-002b.
+router.post("/projects/:id/trigger/github", expensiveOpLimiter, requireTrigger, async (req, res) => {
+  const sig = req.get("X-Hub-Signature-256");
+  if (!verifyWebhookSignature("github", req.rawBody, sig)) return res.status(401).json({ error: "invalid signature" });
+
+  const event = req.get("X-GitHub-Event") || "";
+  const action = typeof req.body?.action === "string" ? req.body.action : "";
+  const allowedActions = TRIGGERING_GITHUB_EVENTS.get(event);
+  // `check_suite.requested` carries no `action`-bearing PR context on some
+  // forks, but the canonical webhook always supplies one. Reject events
+  // without a matching action — including `ping`, which has no action and
+  // no `pull_request` / `check_suite` payload.
+  if (!allowedActions || !allowedActions.has(action)) {
+    return res.status(200).json({ ok: true, ignored: true, reason: "event not triggering", event, action });
+  }
+
+  // Capture the GitHub delivery UUID so handleTrigger can dedupe retries.
+  // GitHub guarantees this header on every webhook delivery and reuses the
+  // same UUID across all retry attempts of a given delivery.
+  req.githubDeliveryId = req.get("X-GitHub-Delivery") || null;
+  req.body = { ...(req.body || {}), ...normalizeGithubPayload(req.body || {}) };
+  return handleTrigger(req, res);
+});
+
 router.post("/projects/:id/trigger/vercel", expensiveOpLimiter, requireTrigger, async (req, res) => {
   const sig = req.get("X-Vercel-Signature");
   if (!verifyWebhookSignature("vercel", req.rawBody, sig)) return res.status(401).json({ error: "invalid signature" });

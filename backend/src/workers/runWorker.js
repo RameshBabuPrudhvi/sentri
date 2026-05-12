@@ -130,11 +130,19 @@ async function processJob(job) {
       // Use the snapshotted test IDs from enqueue time (options.testIds) so
       // retries execute the same set of tests as the original attempt.
       // Falls back to a fresh DB query for jobs enqueued before this fix.
+      //
+      // AUTO-001: the order of `options.testIds` is the risk-ranked + budget-
+      // capped dispatch sequence assembled by the route layer (see
+      // routes/runs.js:202). The previous `allTests.filter(idSet.has)`
+      // implementation silently re-sorted tests into DB order — defeating
+      // risk-based ordering for every BullMQ-processed run. Re-build the
+      // array in the explicit testIds order; drop any ids that no longer
+      // resolve (test deleted between enqueue and worker pickup).
       let tests;
       if (Array.isArray(options.testIds) && options.testIds.length > 0) {
         const allTests = testRepo.getByProjectId(project.id);
-        const idSet = new Set(options.testIds);
-        tests = allTests.filter(t => idSet.has(t.id));
+        const byId = new Map(allTests.map(t => [t.id, t]));
+        tests = options.testIds.map(id => byId.get(id)).filter(Boolean);
       } else {
         tests = testRepo.getByProjectId(project.id)
           .filter(t => t.reviewStatus === "approved");
@@ -230,7 +238,13 @@ async function processJob(job) {
       run.error = null;
       run.errorCategory = null;
       run.finishedAt = null;
-      run.results = [];
+      // AUTO-001: preserve the route-layer's pre-seeded "skipped (over budget)"
+      // result markers across retries — they represent a final dispatch
+      // decision, not a transient execution state, and dropping them here
+      // would silently re-classify budget-truncated tests on the retry.
+      run.results = (run.results || []).filter(
+        (r) => r.status === "skipped" && r.skipReason === "over_budget",
+      );
       run.passed = 0;
       run.failed = 0;
       run.pagesFound = 0;

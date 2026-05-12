@@ -207,6 +207,14 @@
     "DELETE /api/v1/data/healing": {
       "role": "admin",
       "source": "backend/src/routes/system.js:205"
+    },
+    "GET /api/v1/settings/github-checks": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/github-checks/:projectId": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
     }
   },
   "anyAuthenticatedMember": [

@@ -38,9 +38,18 @@ Content-Type: application/json
 
 {
   "dialsConfig": { "parallelWorkers": 2 },
-  "callbackUrl": "https://ci.example.com/hooks/sentri"
+  "callbackUrl": "https://ci.example.com/hooks/sentri",
+  "budgetMinutes": 10
 }
 ```
+
+**Body fields (all optional):**
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `dialsConfig` | object | — | Generation / run dials (parallel workers, test count, perspectives). |
+| `callbackUrl` | string | — | URL to POST the run summary to on any terminal state. SSRF-validated. |
+| `budgetMinutes` | number | unlimited | **AUTO-001** — wall-clock cap for the dispatched test queue. Tests are pre-ordered by risk score (recent failures, change-affected pages, recently-edited tests, self-heal frequency); when the cumulative estimated duration exceeds `budgetMinutes`, lower-risk tests are persisted as `status: "skipped"` with `skipReason: "over_budget"` rather than executed. Always-run smoke tests (`tags: ["smoke"]` or `smoke` substring in the name) are pinned to the front of the queue regardless of budget. Server-side clamped to `MAX_BUDGET_MINUTES = 240`; malformed values fall back to "no budget". |
 
 **Response `202 Accepted`:**
 

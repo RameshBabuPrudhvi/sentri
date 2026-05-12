@@ -20,6 +20,8 @@ import { requireRole } from "../middleware/requireRole.js";
 import { isDemoEnabled, getDemoQuotaStatus } from "../middleware/demoQuota.js";
 import { validateUrl } from "../utils/ssrfGuard.js";
 import * as apiKeyRepo from "../database/repositories/apiKeyRepo.js";
+import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
 
 const router = Router();
 
@@ -210,6 +212,51 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
   });
 
   res.json({ ok: true });
+});
+
+
+// GET /api/settings/github-checks — per-project PR check settings.
+router.get("/settings/github-checks", requireRole("qa_lead"), (req, res) => {
+  const projects = projectRepo.getAll(req.workspaceId);
+  const byProject = new Map(githubCheckSettingsRepo.listByProjectIds(projects.map((p) => p.id)).map((s) => [s.projectId, s]));
+  res.json({
+    projects: projects.map((p) => {
+      const settings = byProject.get(p.id);
+      return {
+        projectId: p.id,
+        projectName: p.name,
+        repo: settings?.repo || "",
+        installationId: settings?.installationId || "",
+        enabled: !!settings?.enabled,
+      };
+    }),
+  });
+});
+
+// PATCH /api/settings/github-checks/:projectId — opt a project in/out.
+router.patch("/settings/github-checks/:projectId", requireRole("admin"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  const enabled = req.body?.enabled === true;
+  const repo = typeof req.body?.repo === "string" ? req.body.repo.trim() : "";
+  const installationId = typeof req.body?.installationId === "string" || typeof req.body?.installationId === "number"
+    ? String(req.body.installationId).trim() : "";
+  if (enabled && !/^[-_.A-Za-z0-9]+\/[-_.A-Za-z0-9]+$/.test(repo)) {
+    return res.status(400).json({ error: "repo must be in owner/name format" });
+  }
+  if (enabled && !installationId) return res.status(400).json({ error: "installationId is required when enabled" });
+  const existing = githubCheckSettingsRepo.getByProjectId(project.id);
+  const now = new Date().toISOString();
+  const settings = githubCheckSettingsRepo.upsert({
+    projectId: project.id,
+    enabled,
+    repo: repo || null,
+    installationId: installationId || null,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  });
+  logActivity({ ...actor(req), type: "settings.update", detail: `GitHub PR checks ${enabled ? "enabled" : "disabled"} for ${project.name}` });
+  res.json({ ok: true, settings });
 });
 
 // GET /api/ollama/status — check Ollama connectivity + list available models

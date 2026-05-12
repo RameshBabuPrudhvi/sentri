@@ -226,6 +226,56 @@ Only fires when `state === "ready"`. Other states (`new`, `building`, `error`, `
 { "ok": true, "provider": "netlify", "runId": "RUN-42", "previewUrl": "https://deploy-preview-42--my-site.netlify.app" }
 ```
 
+## GitHub PR Check Webhook (INT-002)
+
+```
+POST /api/v1/projects/:id/trigger/github
+```
+
+**Auth:** **Both** required (dual-auth):
+- `Authorization: Bearer <project-trigger-token>` — proves which project should run.
+- `X-Hub-Signature-256: sha256=<hmac-hex>` — HMAC-SHA256 of the raw request body, keyed by `GITHUB_WEBHOOK_SECRET`. Without the secret env var set, the endpoint rejects all requests with 401.
+
+Receives GitHub webhook deliveries (PR opened / synchronized / check_suite requested) and starts a Sentri run against the PR's head SHA. When per-project PR checks are enabled in **Settings → Integrations**, Sentri also creates a native GitHub Check Run (`queued` → `in_progress` → `success` / `failure` / `neutral`) with a Markdown summary that lists **regressed tests only** (failing now, green on the base SHA's last run), quality-gate violations, and Web Vitals budget violations.
+
+Retried webhook deliveries (same `X-GitHub-Delivery` UUID) are idempotent — the existing `checkRunId` is reused and no duplicate Sentri run is created. Distinct deliveries for the same `{ repo, sha }` (e.g. a `check_suite.rerequested` event after a user clicks "Re-run") each create a fresh Check Run.
+
+**Body** (forwarded by GitHub, or a flat shape from custom CI):
+```json
+{
+  "repository": { "full_name": "acme/app" },
+  "pull_request": {
+    "number": 42,
+    "head": { "sha": "abc123…" },
+    "base": { "sha": "def456…" }
+  }
+}
+```
+
+Flat alternative (CI scripts that don't forward the raw GitHub payload):
+```json
+{ "repo": "acme/app", "sha": "abc123…", "baseSha": "def456…", "prNumber": 42 }
+```
+
+**Response `202 Accepted`:**
+```json
+{
+  "runId": "RUN-42",
+  "statusUrl": "https://sentri.example.com/api/v1/projects/PRJ-1/trigger/runs/RUN-42",
+  "githubCheck": { "checkRunId": 123456, "reused": false }
+}
+```
+
+When the delivery is a duplicate for an in-flight run, the response carries `githubCheck.reused: true` and the existing `runId`.
+
+| Error | Reason |
+|---|---|
+| 400 | No approved tests |
+| 401 | Invalid HMAC signature, missing/invalid Bearer token |
+| 403 | Token belongs to a different project |
+| 404 | Project not found |
+| 409 | Another run already in progress (different repo/SHA) |
+
 ## Last Deployment Run
 
 ```

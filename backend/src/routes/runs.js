@@ -40,6 +40,7 @@ import { requireRole } from "../middleware/requireRole.js";
 import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
+import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
 
 const router = Router();
 
@@ -153,12 +154,46 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
-  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition } = req.body || {};
+  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
   const canonicalBrowser = resolveBrowser(browser).name;
 
+  // AUTO-001: risk-based ordering + optional budget truncation. Reorder is for
+  // DISPATCH only — `tests` (approved, original order) is what we persist on
+  // the run record below so the audit trail reflects what the reviewer queued,
+  // not how the runner chose to schedule it.
+  //
+  // History is bounded to the 20 most recent completed test runs via the lean
+  // accessor `getRecentCompletedWithResults` (id/type/status/startedAt/results
+  // only — no testQueue/promptAudit/qualityAnalytics blobs). The scorer caps
+  // its per-test window at the 10 newest results anyway (`riskScorer.js`
+  // `rows.slice(0, 10)` — newest-first), so 20 runs gives ample headroom
+  // while keeping memory bounded on projects with hundreds of historical runs.
+  const RISK_HISTORY_RUN_LIMIT = 20;
+  const recentRuns = runRepo.getRecentCompletedWithResults(project.id, RISK_HISTORY_RUN_LIMIT);
+  const history = recentRuns.flatMap((r) => Array.isArray(r.results) ? r.results : []);
+  // Lean lookup — single-row SQL with `LIMIT 1`, no full-table scan.
+  const latestCrawl = runRepo.getLatestCrawlWithChangedPages(project.id);
+  const changedPages = (latestCrawl?.changedPages || []).map((p) => p?.url || p).filter(Boolean);
+  const safeBudget = normalizeBudgetMinutes(budgetMinutes);
+  const riskOrderedTests = orderTestsByRisk(tests, history, { changedPages });
+  const { kept: selectedTests, skipped: budgetSkipped } = applyBudgetToQueue(riskOrderedTests, safeBudget);
+
   const runId = generateRunId();
+  // Build a riskScore lookup so the persisted testQueue carries the scorer
+  // output even though the queue itself follows the approved-test order.
+  const riskById = new Map(riskOrderedTests.map((t) => [t.id, t.riskScore]));
+  // Pre-seed `results` with "skipped (over budget)" markers — every test must
+  // have a resolution (AGENT.md issue-handling rule); silently dropping
+  // budget-truncated tests would violate observability.
+  const initialResults = budgetSkipped.map((t) => ({
+    testId: t.id,
+    testName: t.name,
+    status: "skipped",
+    skipReason: "over_budget",
+    riskScore: t.riskScore,
+  }));
   const run = {
     id: runId,
     projectId: project.id,
@@ -166,22 +201,30 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     status: "running",
     startedAt: new Date().toISOString(),
     logs: [],
-    results: [],
+    results: initialResults,
     passed: 0,
     failed: 0,
+    // Total reflects the approved-test set — saved run preserves the audit
+    // trail of "what the reviewer queued" even when budget truncated dispatch.
     total: tests.length,
     parallelWorkers,
     browser: canonicalBrowser,
     device: device || null,
     networkCondition: networkCondition || "fast",
-    testQueue: tests.map((t) => ({ id: t.id, name: t.name, steps: t.steps || [] })),
+    // Persisted queue mirrors the approved order; `riskScore` per row lets the
+    // UI sort/display by risk without losing the canonical order.
+    testQueue: tests.map((t) => ({
+      id: t.id, name: t.name, steps: t.steps || [],
+      riskScore: riskById.get(t.id) ?? null,
+    })),
+    budgetMinutes: safeBudget,
     workspaceId: project.workspaceId || null,
   };
   runRepo.create(run);
 
   logActivity({ ...actor(req),
     type: "test_run.start", projectId: project.id, projectName: project.name,
-    detail: `Test run started — ${tests.length} test${tests.length !== 1 ? "s" : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
+    detail: `Test run started — ${selectedTests.length} of ${tests.length} test${tests.length !== 1 ? "s" : ""}${budgetSkipped.length ? ` (${budgetSkipped.length} skipped over budget)` : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`, status: "running",
   });
 
   if (isQueueAvailable()) {
@@ -194,7 +237,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
         runId,
         projectId: project.id,
         type: "test_run",
-        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: tests.map((t) => t.id), actorInfo: actor(req) },
+        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
       }, { jobId: runId });
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
@@ -205,7 +248,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, tests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
+      (signal) => runTests(project, selectedTests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,
@@ -227,7 +270,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     );
   }
 
-  trackTelemetry("run.started", { projectId: project.id, tests: tests.length, browser: canonicalBrowser, networkCondition: networkCondition || "fast", url: project.url });
+  trackTelemetry("run.started", { projectId: project.id, tests: selectedTests.length, browser: canonicalBrowser, networkCondition: networkCondition || "fast", url: project.url });
   res.json({ runId });
 });
 

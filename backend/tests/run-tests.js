@@ -84,6 +84,8 @@ const files = [
   "tests/crawl-baseline-repo.test.js",
   "tests/deployment-triggers.test.js",
   "tests/pr11-fixes.test.js",
+  "tests/risk-scorer.test.js",
+  "tests/github-checks.test.js",
 ];
 
 let passed = 0;

@@ -161,7 +161,11 @@ export const api = {
   /**
    * Execute all approved tests for a project.
    * @param {string} id   - Project ID.
-   * @param {Object} [body] - Optional `{ dialsConfig }` for parallel workers etc.
+   * @param {Object} [body] - Optional `{ dialsConfig, budgetMinutes }`.
+   *   `budgetMinutes` (AUTO-001) caps wall-clock dispatch time — risk-ordered
+   *   tests fill the budget first, low-risk tests are recorded as
+   *   `status: "skipped"` + `skipReason: "over_budget"` on the run. Server
+   *   caps the value at `MAX_BUDGET_MINUTES` (240).
    */
   runTests:      (id, body) => req("POST", `/projects/${id}/run`, body || undefined, TIMEOUT_LONG),
   /** @param {string} testId - Execute a single test. */
@@ -593,6 +597,10 @@ export const api = {
       : req("POST", "/settings", { provider, apiKey }),
   /** @param {string} provider - Remove API key or deactivate Ollama. */
   deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
+  /** @returns {Promise<{projects: Object[]}>} GitHub PR check settings per project. */
+  getGithubCheckSettings: () => req("GET", "/settings/github-checks"),
+  /** @param {string} projectId @param {{enabled: boolean, repo?: string, installationId?: string}} body */
+  updateGithubCheckSettings: (projectId, body) => req("PATCH", `/settings/github-checks/${projectId}`, body),
 
   // ── Ollama ──────────────────────────────────────────────────────────────────
   /** @returns {Promise<{ok: boolean, model?: string, availableModels?: string[], error?: string}>} */
