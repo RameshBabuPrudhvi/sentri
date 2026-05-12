@@ -609,7 +609,7 @@ router.post("/projects/:id/trigger", expensiveOpLimiter, requireTrigger, handleT
  *   value; tolerates both raw hex and `"<algo>=<hex>"` prefix forms.
  * @returns {boolean}
  */
-function verifyWebhookSignature(provider, rawBody, signatureHeader) {
+export function verifyWebhookSignature(provider, rawBody, signatureHeader) {
   const secret = provider === "vercel"
     ? process.env.VERCEL_WEBHOOK_SECRET
     : provider === "github"
@@ -760,15 +760,6 @@ const TRIGGERING_GITHUB_EVENTS = new Map([
   ["check_run", new Set(["rerequested"])],
 ]);
 
-// TODO(INT-002b): App-level webhook receiver missing. This route handles
-// PR/check-suite deliveries (project-scoped via `requireTrigger`), but
-// `installation.deleted` and `installation_repositories.removed` events
-// arrive at the GitHub App's *App-wide* webhook URL — not per-project — so
-// they have no project token. Without a separate `POST /integrations/github/
-// app-webhook` handler that disables stale `github_check_settings` rows by
-// `installationId`, an admin uninstalling the App leaves rows with
-// `enabled=1` + stale `installationId` and subsequent PR deliveries silently
-// 401 against `/app/installations/.../access_tokens`. See ROADMAP.md § INT-002b.
 router.post("/projects/:id/trigger/github", expensiveOpLimiter, requireTrigger, async (req, res) => {
   const sig = req.get("X-Hub-Signature-256");
   if (!verifyWebhookSignature("github", req.rawBody, sig)) return res.status(401).json({ error: "invalid signature" });
@@ -784,11 +775,28 @@ router.post("/projects/:id/trigger/github", expensiveOpLimiter, requireTrigger, 
     return res.status(200).json({ ok: true, ignored: true, reason: "event not triggering", event, action });
   }
 
+  const payload = normalizeGithubPayload(req.body || {});
+  // Only short-circuit when settings exist AND are explicitly disabled, or
+  // when the configured repo doesn't match the incoming payload. Projects
+  // that have never configured `github_check_settings` should still be able
+  // to trigger via this webhook — the GitHub Check Run side of things is
+  // already gated separately inside `prepareGithubCheck` (no settings ⇒
+  // no check-run created, but the Sentri test run still executes). Treating
+  // "no settings row" as "disabled" here would silently break every project
+  // that hasn't opted into PR checks yet — see review on PR #17.
+  const settings = githubCheckSettingsRepo.getByProjectId(req.triggerProject?.id || req.params.id);
+  if (settings && settings.enabled === false) {
+    return res.status(200).json({ ok: true, ignored: true, reason: "github checks disabled" });
+  }
+  if (settings?.repo && payload.repo && settings.repo !== payload.repo) {
+    return res.status(200).json({ ok: true, ignored: true, reason: "repo mismatch" });
+  }
+
   // Capture the GitHub delivery UUID so handleTrigger can dedupe retries.
   // GitHub guarantees this header on every webhook delivery and reuses the
   // same UUID across all retry attempts of a given delivery.
   req.githubDeliveryId = req.get("X-GitHub-Delivery") || null;
-  req.body = { ...(req.body || {}), ...normalizeGithubPayload(req.body || {}) };
+  req.body = { ...(req.body || {}), ...payload };
   return handleTrigger(req, res);
 });
 

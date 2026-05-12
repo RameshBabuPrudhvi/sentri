@@ -1066,6 +1066,8 @@ function IntegrationsTab({ isAdmin }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(null);
+  const [installing, setInstalling] = useState(null);
+  const [status, setStatus] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1082,8 +1084,30 @@ function IntegrationsTab({ isAdmin }) {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "installed") {
+      setStatus({ type: "ok", text: "GitHub App installed. Settings were refreshed with the selected repository." });
+      load();
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [load]);
+
   function updateRow(projectId, patch) {
     setRows(prev => prev.map(row => row.projectId === projectId ? { ...row, ...patch } : row));
+  }
+
+  async function installGithubApp(projectId) {
+    setInstalling(projectId);
+    setError("");
+    setStatus(null);
+    try {
+      const data = await api.getGithubInstallStartUrl(projectId);
+      window.location.assign(data.url);
+    } catch (err) {
+      setError(err.message || "Failed to start GitHub App install.");
+      setInstalling(null);
+    }
   }
 
   async function saveRow(row) {
@@ -1111,17 +1135,15 @@ function IntegrationsTab({ isAdmin }) {
         <div className="text-sm text-muted" style={{ marginBottom: 14 }}>
           Install the Sentri GitHub App, then enable native Check Runs per project. Existing projects stay disabled until toggled on.
         </div>
-        {/* TODO(INT-002b): replace with OAuth-style install callback (`GET /api/v1/integrations/github/install/callback`)
-            that auto-captures `installationId` + `repo` after the user picks the target org. Operators currently
-            have to paste the numeric ID + `owner/repo` string by hand — see ROADMAP.md § INT-002b for the scoped fix. */}
-        <a className="btn btn-ghost btn-sm" href="https://github.com/apps" target="_blank" rel="noreferrer">
-          Install GitHub App <ExternalLink size={12} />
-        </a>
+        <div className="text-xs text-muted">
+          Use the per-project install button below to authorize the GitHub App and auto-fill the selected repository.
+        </div>
       </div>
 
+      {status && <div className={status.type === "ok" ? "st-status-ok" : "st-status-err"}>{status.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {status.text}</div>}
       {error && <div className="st-status-err"><AlertCircle size={12} /> {error}</div>}
       {loading ? <div className="text-sm text-muted">Loading GitHub integration settings…</div> : rows.map(row => (
-        <div key={row.projectId} className="card card-padded" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
+        <div key={row.projectId} className="card card-padded" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr auto auto", gap: 12, alignItems: "end" }}>
           <div>
             <div className="font-bold">{row.projectName}</div>
             <label className="text-xs text-muted" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
@@ -1142,6 +1164,9 @@ function IntegrationsTab({ isAdmin }) {
             <label className="text-xs text-muted">Installation ID</label>
             <input className="input" value={row.installationId || ""} disabled={!isAdmin} placeholder="123456" onChange={e => updateRow(row.projectId, { installationId: e.target.value })} />
           </div>
+          <button className="btn btn-ghost btn-sm" disabled={!isAdmin || installing === row.projectId} onClick={() => installGithubApp(row.projectId)}>
+            {installing === row.projectId ? <RefreshCw size={13} className="spin" /> : <ExternalLink size={13} />} Install App
+          </button>
           <button className="btn btn-primary btn-sm" disabled={!isAdmin || saving === row.projectId} onClick={() => saveRow(row)}>
             {saving === row.projectId ? <RefreshCw size={13} className="spin" /> : <Check size={13} />} Save
           </button>
@@ -1158,8 +1183,17 @@ export default function Settings() {
   const { user } = useAuth();
   const isAdmin = user?.workspaceRole === "admin";
   const visibleTabs = SETTINGS_TABS.filter(t => isAdmin || !t.adminOnly);
-  // Default to first visible tab so non-admins don't land on a locked section.
-  const [tab, setTab]           = useState(visibleTabs[0]?.key || "account");
+  // Honour `?tab=<key>` deep links (e.g. the GitHub App install callback
+  // redirects to `/settings?tab=integrations&github=installed&…` and the
+  // IntegrationsTab success banner only renders when that tab is active).
+  // Fall back to the first visible tab so non-admins don't land on a locked
+  // section. Computed once at mount via lazy init — subsequent navigations
+  // within Settings use the in-component `setTab`.
+  const [tab, setTab]           = useState(() => {
+    const urlTab = new URLSearchParams(window.location.search).get("tab");
+    if (urlTab && visibleTabs.some(t => t.key === urlTab)) return urlTab;
+    return visibleTabs[0]?.key || "account";
+  });
 
   const bundleQuery = useSettingsBundleQuery();
 

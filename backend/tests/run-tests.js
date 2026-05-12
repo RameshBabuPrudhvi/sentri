@@ -86,6 +86,7 @@ const files = [
   "tests/pr11-fixes.test.js",
   "tests/risk-scorer.test.js",
   "tests/github-checks.test.js",
+  "tests/github-install-callback.test.js",
 ];
 
 let passed = 0;

@@ -55,6 +55,7 @@ import testFixRouter from "./routes/testFix.js";
 import recycleBinRouter from "./routes/recycleBin.js";
 import healingRouter from "./routes/healing.js";
 import workspacesRouter from "./routes/workspaces.js";
+import githubIntegrationsRouter from "./routes/integrations/github.js";
 import { spec as openapiSpec } from "./openapi.js";
 
 // Re-export SSE symbols so existing imports from "./index.js" keep working
@@ -197,6 +198,10 @@ app.use(`${API_PREFIX}/auth`, authRouter);
 // CI/CD trigger endpoint uses its own token-based auth — it must be mounted
 // WITHOUT requireAuth so CI pipelines can call it with a project token.
 app.use(API_PREFIX, triggerRouter);
+
+// GitHub App install callbacks mix authenticated browser redirects with an
+// App-level HMAC webhook, so the router applies auth only to the browser flow.
+app.use(`${API_PREFIX}/integrations/github`, githubIntegrationsRouter);
 
 // ─── INF-004: OpenAPI spec + Swagger UI (public, no auth) ────────────────────
 // Mounted BEFORE requireAuth and the legacy /api redirect so they are reachable

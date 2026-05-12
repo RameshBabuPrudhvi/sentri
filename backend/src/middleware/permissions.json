@@ -215,6 +215,19 @@
     "PATCH /api/v1/settings/github-checks/:projectId": {
       "role": "admin",
       "source": "backend/src/routes/settings.js"
+    },
+    "GET /api/v1/integrations/github/install/start/:projectId": {
+      "role": "admin",
+      "source": "backend/src/routes/integrations/github.js"
+    },
+    "GET /api/v1/integrations/github/install/callback": {
+      "role": "admin",
+      "source": "backend/src/routes/integrations/github.js"
+    },
+    "POST /api/v1/integrations/github/app-webhook": {
+      "role": "public (GitHub HMAC)",
+      "source": "backend/src/routes/integrations/github.js",
+      "noUi": "machine-only App webhook [no-ui]"
     }
   },
   "anyAuthenticatedMember": [

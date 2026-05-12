@@ -599,6 +599,8 @@ export const api = {
   deleteApiKey: (provider) => req("DELETE", `/settings/${provider}`),
   /** @returns {Promise<{projects: Object[]}>} GitHub PR check settings per project. */
   getGithubCheckSettings: () => req("GET", "/settings/github-checks"),
+  /** @param {string} projectId @returns {Promise<{url: string}>} GitHub App install redirect URL. */
+  getGithubInstallStartUrl: (projectId) => req("GET", `/integrations/github/install/start/${projectId}`),
   /** @param {string} projectId @param {{enabled: boolean, repo?: string, installationId?: string}} body */
   updateGithubCheckSettings: (projectId, body) => req("PATCH", `/settings/github-checks/${projectId}`, body),
 
