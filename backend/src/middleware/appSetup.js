@@ -161,7 +161,7 @@ export function cookieSameSite() {
 // commits the body) and only retain the buffer for the webhook surface. The
 // regex matches both `/api/v1/projects/:id/trigger/vercel` and the
 // (legacy-prefix) `/api/projects/:id/trigger/vercel` paths.
-const _RAW_BODY_PATH_PATTERN = /\/projects\/[^/]+\/trigger\/(?:vercel|netlify)\/?$/;
+const _RAW_BODY_PATH_PATTERN = /(?:\/projects\/[^/]+\/trigger\/(?:vercel|netlify|github)|\/integrations\/github\/app-webhook)\/?$/;
 app.use(express.json({
   limit: "1mb",
   verify: (req, _res, buf) => {

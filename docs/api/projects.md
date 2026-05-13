@@ -81,6 +81,48 @@ POST /api/v1/projects/:id/run
 
 Executes all approved tests for the project. Returns a run ID.
 
+
+## GitHub App Integration
+
+### Start GitHub App Install
+
+```
+GET /api/v1/integrations/github/install/start/:projectId
+```
+
+**Auth:** admin JWT. Returns a GitHub App installation URL containing a 10-minute, one-shot `state` token bound to the project. The Settings Integrations tab redirects admins to this URL; operators no longer need to paste numeric installation IDs manually.
+
+**Response:**
+```json
+{ "url": "https://github.com/apps/sentri/installations/new?state=..." }
+```
+
+### GitHub App Install Callback
+
+```
+GET /api/v1/integrations/github/install/callback?installation_id=<id>&setup_action=install&state=<jwt>
+```
+
+**Auth:** Signed one-shot `state` JWT (issued by `GET /install/start/:projectId` to authenticated admins). No browser cookie or Bearer token is required — and would not work, because GitHub's cross-site redirect does not carry `SameSite=Strict` cookies. The state token is nonce-tracked (replay-proof), signed with `JWT_SECRET` (unforgeable), and binds a specific project + originating admin captured at `/install/start`. Verifies the state, fetches the repositories selected for the installation, then enables PR checks for the bound project with the first selected `owner/repo` and the returned `installation_id`. Browser requests redirect back to Settings; API clients that send `Accept: application/json` receive the updated settings payload.
+
+### GitHub App Webhook `[no-ui]`
+
+```
+POST /api/v1/integrations/github/app-webhook
+```
+
+**Auth:** GitHub HMAC only — `X-Hub-Signature-256` using `GITHUB_WEBHOOK_SECRET` over the raw request body. This endpoint is machine-only because App-level lifecycle events do not carry a project trigger token.
+
+Handled events:
+
+- `installation.deleted` disables every `github_check_settings` row matching the installation and logs `integration.github.disabled` per affected project.
+- `installation_repositories.removed` disables only rows matching the removed `owner/repo` values for the installation.
+- `installation.created`, `installation.suspend`, and `installation.unsuspend` are logged for existing rows and otherwise leave settings unchanged; admins explicitly re-enable projects from Settings.
+
+### Install-state replay protection
+
+The one-shot `state` JWT minted by `GET /install/start/:projectId` is nonce-tracked to prevent replay attacks. When `REDIS_URL` is configured, nonces live in Redis with a 10-minute TTL and are shared across replicas — the canonical configuration for multi-instance deployments. When Redis is unavailable, Sentri falls back to a process-local `Map`; this is safe for single-replica / dev setups but logs a one-shot warning at boot because an attacker who captures a callback URL could potentially replay it against a different replica. **Provision Redis (`REDIS_URL`) for any multi-instance production deployment.**
+
 ## CI/CD Trigger
 
 ```
@@ -97,12 +139,16 @@ Token-authenticated endpoint for CI/CD pipelines. By default, starts a test run 
   "dialsConfig": { "parallelWorkers": 2 },
   "callbackUrl": "https://ci.example.com/hooks/sentri",
   "triggerCrawl": false,
-  "previewUrl": "https://preview-deploy.example.com"
+  "previewUrl": "https://preview-deploy.example.com",
+  "changedFiles": ["src/checkout/CartPage.tsx"],
+  "routeMap": { "src/components/CheckoutButton.tsx": ["/checkout"] }
 }
 ```
 
 - `triggerCrawl` — When `true`, dispatches a diff-aware crawl (only changed pages flow through generation) instead of a regression run. The run is created with `type: "crawl"` and emits `crawl.start` / `crawl.complete` activity rows. Default: `false`.
 - `previewUrl` — Optional preview-deployment URL to crawl instead of the project's canonical URL. SSRF-validated (loopback / RFC1918 rejected unless `ALLOW_PRIVATE_URLS` is set). When set, the project's production baselines are preserved; only the diff is computed and reported. Ignored when `triggerCrawl` is `false`.
+- `changedFiles` — Optional git diff file list for AUTO-004 impact analysis. When supplied (or when the GitHub webhook can fetch PR files), Sentri maps files to URL routes and runs only impacted approved tests. Empty or absent arrays keep the current full-suite behaviour; unknown docs/config/migration-only diffs mark approved tests as `status: "skipped"` with `skipReason: "skipped_no_impact"` instead of running the full suite.
+- `routeMap` — Optional file-to-route override object for monorepos or shared component folders, e.g. `{ "src/components/CheckoutButton.tsx": ["/checkout"] }`.
 
 **Response `202 Accepted`:**
 ```json
@@ -225,6 +271,58 @@ Only fires when `state === "ready"`. Other states (`new`, `building`, `error`, `
 ```json
 { "ok": true, "provider": "netlify", "runId": "RUN-42", "previewUrl": "https://deploy-preview-42--my-site.netlify.app" }
 ```
+
+## GitHub PR Check Webhook (INT-002)
+
+```
+POST /api/v1/projects/:id/trigger/github
+```
+
+**Auth:** **Both** required (dual-auth):
+- `Authorization: Bearer <project-trigger-token>` — proves which project should run.
+- `X-Hub-Signature-256: sha256=<hmac-hex>` — HMAC-SHA256 of the raw request body, keyed by `GITHUB_WEBHOOK_SECRET`. Without the secret env var set, the endpoint rejects all requests with 401.
+
+Receives GitHub webhook deliveries (PR opened / synchronized / check_suite requested) and starts a Sentri run against the PR's head SHA. When per-project PR checks are enabled in **Settings → Integrations**, Sentri also creates a native GitHub Check Run (`queued` → `in_progress` → `success` / `failure` / `neutral`) with a Markdown summary that lists **regressed tests only** (failing now, green on the base SHA's last run), quality-gate violations, and Web Vitals budget violations.
+
+Retried webhook deliveries (same `X-GitHub-Delivery` UUID) are idempotent — the existing `checkRunId` is reused and no duplicate Sentri run is created. Distinct deliveries for the same `{ repo, sha }` (e.g. a `check_suite.rerequested` event after a user clicks "Re-run") each create a fresh Check Run.
+
+**Body** (forwarded by GitHub, or a flat shape from custom CI):
+```json
+{
+  "repository": { "full_name": "acme/app" },
+  "pull_request": {
+    "number": 42,
+    "head": { "sha": "abc123…" },
+    "base": { "sha": "def456…" }
+  }
+}
+```
+
+Flat alternative (CI scripts that don't forward the raw GitHub payload):
+```json
+{ "repo": "acme/app", "sha": "abc123…", "baseSha": "def456…", "prNumber": 42 }
+```
+
+When `pull_request.number` / `prNumber` is present and the project has a GitHub App `installationId`, Sentri fetches `GET /repos/{owner}/{repo}/pulls/{number}/files` best-effort and persists the normalized file list on `run.changedFiles`. GitHub API failures are logged and fall back to the full suite; they never block a run.
+
+**Response `202 Accepted`:**
+```json
+{
+  "runId": "RUN-42",
+  "statusUrl": "https://sentri.example.com/api/v1/projects/PRJ-1/trigger/runs/RUN-42",
+  "githubCheck": { "checkRunId": 123456, "reused": false }
+}
+```
+
+When the delivery is a duplicate for an in-flight run, the response carries `githubCheck.reused: true` and the existing `runId`.
+
+| Error | Reason |
+|---|---|
+| 400 | No approved tests |
+| 401 | Invalid HMAC signature, missing/invalid Bearer token |
+| 403 | Token belongs to a different project |
+| 404 | Project not found |
+| 409 | Another run already in progress (different repo/SHA) |
 
 ## Last Deployment Run
 

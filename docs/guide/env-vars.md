@@ -140,6 +140,19 @@ Optional HMAC secrets for Vercel and Netlify deployment-event webhooks. When set
 | `VERCEL_WEBHOOK_SECRET` | — | HMAC-SHA1 secret used to verify the `X-Vercel-Signature` header on Vercel deployment-event webhooks. When unset, the `/trigger/vercel` endpoint rejects all requests with 401. |
 | `NETLIFY_WEBHOOK_SECRET` | — | HMAC-SHA256 secret used to verify the `X-Netlify-Token` header on Netlify deployment-event webhooks. When unset, the `/trigger/netlify` endpoint rejects all requests with 401. |
 
+### GitHub PR Check Runs (INT-002)
+
+GitHub App credentials for posting native Check Runs on PRs. The feature is opt-in per project via **Settings → Integrations**; the env vars below carry the App-level secrets Sentri uses to mint installation tokens. See [`backend/src/integrations/githubChecks.js`](https://github.com/RameshBabuPrudhvi/sentri/blob/main/backend/src/integrations/githubChecks.js) for the lifecycle (`createPending` → `markInProgress` → `conclude`) and the bounded-retry policy (3 attempts, ≤4s, honours `Retry-After`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITHUB_APP_ID` | — | Numeric App ID from the GitHub App settings page. Required when any project opts into PR checks. |
+| `GITHUB_APP_PRIVATE_KEY` | — | PEM RSA private key for the GitHub App. For multi-line `.env` values, escape newlines as `\n` — the module unescapes them at runtime. Used to sign RS256 App JWTs that exchange for installation tokens. |
+| `GITHUB_WEBHOOK_SECRET` | — | HMAC-SHA256 secret for `X-Hub-Signature-256` verification on `POST /api/v1/projects/:id/trigger/github` **and** the App-level webhook `POST /api/v1/integrations/github/app-webhook`. When unset, both endpoints reject all requests with 401. |
+| `GITHUB_APP_SLUG` | — | URL-safe slug of the GitHub App (the value at the end of `github.com/apps/<slug>`). Required for the OAuth-style install flow (`GET /api/v1/integrations/github/install/start/:projectId`); without it, `/install/start` returns 503. `GITHUB_APP_NAME` is accepted as a fallback alias. |
+| `GITHUB_CHECK_NAME` | `Sentri QA` | Display name shown on the GitHub PR check. |
+| `GITHUB_API_BASE` | `https://api.github.com` | Override for GitHub Enterprise Server (e.g. `https://github.acme.corp/api/v3`). |
+
 ### Email (Transactional)
 
 | Variable | Default | Description |

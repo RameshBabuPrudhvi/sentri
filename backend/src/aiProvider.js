@@ -159,7 +159,13 @@ function getCompatConfig(provider) {
   // Read through the TTL cache to avoid hitting SQLite (decrypt + JSON.parse)
   // on every AI call.  Cache is write-through invalidated in apiKeyRepo and
   // coherent across processes via Redis pub/sub (utils/compatConfigCache.js).
-  return compatConfigCache.get(provider, () => apiKeyRepo.get(provider));
+  //
+  // Loader uses `getCompatSlot()` (not the generic `apiKeyRepo.get()`) so the
+  // compat-specific type guard runs — protects against a corrupted row
+  // returning a non-object (string / null / number) which would otherwise
+  // poison the cache and make `compat?.apiKey` lookups crash with a
+  // "cannot read properties of string" error far from the actual root cause.
+  return compatConfigCache.get(provider, () => apiKeyRepo.getCompatSlot(provider));
 }
 
 // Auto-detect order for cloud providers
@@ -276,9 +282,17 @@ function buildProviderMeta() {
   // AI-001: synthesize entries for every configured compat slot so
   // getProviderName() / getProviderMeta() don't throw when a compat provider
   // is active (called from crawler.js, testPersistence.js, etc).
+  //
+  // Perf: route through getCompatConfig() so per-slot reads hit the TTL cache
+  // instead of SQLite + AES decryption. buildProviderMeta() is called from
+  // inside callProvider() for built-in providers (e.g. `buildProviderMeta().anthropic.model`
+  // at the Anthropic / OpenAI / Google branches below), so every cloud AI
+  // call would otherwise iterate every compat slot against the DB. The
+  // `listCompatSlots()` SELECT is still one round-trip, but the per-slot
+  // decrypts now hit `compatConfigCache` (60s TTL).
   try {
     for (const provider of apiKeyRepo.listCompatSlots()) {
-      const cfg = apiKeyRepo.get(provider) || {};
+      const cfg = getCompatConfig(provider) || {};
       const slotId = provider.slice("compat:".length);
       meta[provider] = {
         name: cfg.displayName || slotId,
@@ -469,9 +483,14 @@ export function getConfiguredKeys() {
   // the GET /settings endpoint AND crash the demoQuota middleware on every
   // request when demo mode is active (REVIEW.md: error responses must never
   // leak internal details, and this path was leaking DB error messages).
+  //
+  // Perf: route per-slot reads through getCompatConfig() so they hit the TTL
+  // cache (compatConfigCache). demoQuota middleware calls this on every
+  // request when demo mode is active — direct apiKeyRepo.get() per slot
+  // would decrypt every compat config on every request, defeating the cache.
   try {
     result.compatProviders = apiKeyRepo.listCompatSlots()
-      .map((provider) => ({ provider, ...(apiKeyRepo.get(provider) || {}) }))
+      .map((provider) => ({ provider, ...(getCompatConfig(provider) || {}) }))
       .map((p) => ({
         provider: p.provider,
         displayName: p.displayName || p.provider.replace("compat:", ""),

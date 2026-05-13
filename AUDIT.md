@@ -303,4 +303,4 @@ Pause net-new differentiators. Land in order:
 6. SEC-004 MFA before any paid tier
 7. Storybook + design tokens + a11y CI (UX-HIGH-1)
 8. Helm chart + DR playbook (DEVOPS-CRIT-1)
-   Then resume AUTO-001 / AUTO-004 / INT-002 from ROADMAP.md (AUTO-002 + AUTO-015 shipped in PR #12 — diff-aware crawling + Vercel/Netlify deployment webhooks; AUTO-001 and AUTO-004 are now unblocked by AUTO-002's `changedPages[]` signal). 
+   Then resume the remaining ROADMAP.md Phase 4 items (AUTO-008–011, AUTO-014, AUTO-018, AUTO-021) — AUTO-001 + INT-002 shipped in PR #15, AUTO-004 shipped in PR #18 (test impact analysis from git diff / GitHub PR files), AUTO-002 + AUTO-015 shipped in PR #12 (diff-aware crawling + Vercel/Netlify deployment webhooks). Current sprint is CAP-001 (data-driven testing — parameterized iterations); DIF-012, CAP-002, AUTO-010 hold queue slots 1–3. 

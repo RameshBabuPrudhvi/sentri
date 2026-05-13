@@ -31,6 +31,7 @@ import AgentTag from "../components/shared/AgentTag.jsx";
 import BrowserBadge from "../components/shared/BrowserBadge.jsx";
 import GateBadge from "../components/shared/GateBadge.jsx";
 import usePageTitle from "../hooks/usePageTitle.js";
+import { countNonExecutedSkips } from "../utils/skipReasons.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -383,11 +384,27 @@ export default function RunDetail() {
   const results = run.results || [];
   const passed = results.filter((r) => r.status === "passed").length;
   const failed = results.filter((r) => r.status === "failed").length;
+  // AUTO-001: tests dropped by the risk-based budget truncation surface as
+  // `status: "skipped"` + `skipReason: "over_budget"` so they're attributable
+  // (never silently dropped).
+  const skippedOverBudget = results.filter((r) => r.status === "skipped" && r.skipReason === "over_budget").length;
+  const skippedNoImpact = results.filter((r) => r.status === "skipped" && r.skipReason === "skipped_no_impact").length;
+  const changedFiles = Array.isArray(run.changedFiles) ? run.changedFiles : [];
+  const impactAnalysis = run.impactAnalysis && typeof run.impactAnalysis === "object" ? run.impactAnalysis : null;
+  const impactedCount = Array.isArray(impactAnalysis?.impactedTestIds) ? impactAnalysis.impactedTestIds.length : null;
   // Use run.total (set upfront by the backend) so the count is correct from
   // the first SSE snapshot — results.length grows as tests complete and would
   // show "0 test cases" until the first result arrives.
   const total = run.total ?? results.length;
-  const passRate = total > 0 ? Math.round((passed / total) * 100) : null;
+  // AUTO-001 / AUTO-004: non-executed skips (`over_budget`, `skipped_no_impact`)
+  // never ran and shouldn't dilute the pass-rate denominator — they're each
+  // surfaced via their own badge above. Routes through `countNonExecutedSkips`
+  // (frontend/src/utils/skipReasons.js) so the list of excluded skip reasons
+  // stays byte-aligned with `evaluateQualityGates()` in `backend/src/testRunner.js`
+  // (via `backend/src/utils/skipReasons.js`). If the two ever drift the gate
+  // verdict and the rendered pass rate will disagree on the same run.
+  const passRateDenominator = Math.max(0, total - countNonExecutedSkips(results));
+  const passRate = passRateDenominator > 0 ? Math.round((passed / passRateDenominator) * 100) : null;
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
@@ -567,6 +584,29 @@ export default function RunDetail() {
               {passed} passed · {failed} failed · {total} test cases
             </span>
           )}
+          {!isCrawl && skippedOverBudget > 0 && (
+            <span
+              className="badge badge-amber"
+              style={{ fontSize: "0.7rem" }}
+              title="Tests skipped to fit the requested budget — risk-based ordering kept the most likely-to-fail tests in scope."
+            >
+              ⏱ {skippedOverBudget} skipped (over budget)
+            </span>
+          )}
+          {!isCrawl && skippedNoImpact > 0 && (
+            <span
+              className="badge badge-gray"
+              style={{ fontSize: "0.7rem" }}
+              title="Tests skipped because the git diff did not map to their captured routes."
+            >
+              {skippedNoImpact} skipped (no impact)
+            </span>
+          )}
+          {!isCrawl && run.budgetMinutes != null && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text3)" }}>
+              budget: {run.budgetMinutes}m
+            </span>
+          )}
         </div>
       </div>
 
@@ -594,6 +634,39 @@ export default function RunDetail() {
           )}
           <RunCompareView data={compareData} loading={compareLoading} error={compareError} />
         </>
+      )}
+
+
+      {!isCrawl && !isGenerate && (changedFiles.length > 0 || impactAnalysis) && (
+        <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>Impact scope</div>
+            {impactedCount !== null && (
+              <span className="badge badge-blue" style={{ fontSize: "0.7rem" }}>
+                {impactedCount} impacted / {total} approved
+              </span>
+            )}
+          </div>
+          {impactAnalysis?.fallbackReason && (
+            <div style={{ color: "var(--text3)", fontSize: "0.76rem", marginBottom: 8 }}>
+              Fallback: {impactAnalysis.fallbackReason.replace(/_/g, " ")}
+            </div>
+          )}
+          {changedFiles.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {changedFiles.slice(0, 12).map((file) => (
+                <code key={file} style={{ fontSize: "0.72rem", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 6px" }}>
+                  {file}
+                </code>
+              ))}
+              {changedFiles.length > 12 && (
+                <span style={{ color: "var(--text3)", fontSize: "0.76rem" }}>+{changedFiles.length - 12} more</span>
+              )}
+            </div>
+          ) : (
+            <div style={{ color: "var(--text3)", fontSize: "0.76rem" }}>No changed files were supplied; Sentri used the full approved suite.</div>
+          )}
+        </div>
       )}
 
       {/* ── Pass rate bar (test runs only) ─────────────────────────────── */}

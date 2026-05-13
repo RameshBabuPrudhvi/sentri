@@ -100,6 +100,44 @@ export function encryptCredentials(creds) {
 }
 
 /**
+ * Encrypt an arbitrary string with a version-prefixed format so callers can
+ * distinguish encrypted values from legacy plaintext on read.
+ *
+ * Returns `"enc:v1:<iv-hex>:<authTag-hex>:<ciphertext-hex>"`. The `enc:v1:`
+ * prefix is the format marker — {@link decryptString} returns the input
+ * unchanged when the prefix is absent, so callers can transparently migrate
+ * a column from plaintext to encrypted without a one-shot backfill (rows
+ * re-encrypt naturally on next write).
+ *
+ * @param   {string|null|undefined} plaintext
+ * @returns {string|null} Encrypted string, or `null` when input is empty.
+ */
+export function encryptString(plaintext) {
+  if (plaintext === null || plaintext === undefined || plaintext === "") return null;
+  return `enc:v1:${encrypt(String(plaintext))}`;
+}
+
+/**
+ * Decrypt a string produced by {@link encryptString}. Legacy plaintext values
+ * (no `enc:v1:` prefix) are returned unchanged so callers can transparently
+ * migrate a column from plaintext to encrypted storage.
+ *
+ * @param   {string|null|undefined} value
+ * @returns {string|null}
+ */
+export function decryptString(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const str = String(value);
+  if (!str.startsWith("enc:v1:")) return str; // legacy plaintext — return as-is
+  try {
+    return decrypt(str.slice("enc:v1:".length));
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[credentialEncryption] decryptString failed: ${err.message}`));
+    return null;
+  }
+}
+
+/**
  * Decrypt sensitive fields in a credentials object for use by the pipeline.
  * If the credentials are not encrypted (legacy data), returns them as-is.
  *
