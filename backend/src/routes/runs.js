@@ -57,6 +57,15 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     });
   }
 
+  // DIF-012: optional per-run environment override. Validates the env
+  // belongs to this project so callers can't run against a sibling
+  // project's environment by ID guessing.
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   const { dialsConfig } = req.body || {};
   const dialsPrompt = resolveDialsPrompt(dialsConfig);
   const validatedDials = resolveDialsConfig(dialsConfig);
@@ -109,7 +118,15 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
+      // DIF-012: env override applies at execution only — project.url is
+      // preserved as canonicalUrl so the diff-aware baseline guard in
+      // crawler.js can detect this is an env-scoped crawl and skip
+      // replacing the production baselines.
+      (signal) => crawlAndGenerateTests(
+        environment ? { ...project, url: environment.baseUrl, canonicalUrl: project.url } : project,
+        run,
+        { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -156,6 +173,14 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
+  // DIF-012: optional per-run environment override. Validated before
+  // building the run object so `environment?.id` is safe to reference.
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
@@ -251,7 +276,14 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, selectedTests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
+      // DIF-012: env override applies at execution only — project.url is
+      // unchanged in the DB; only this run's testRunner sees the override.
+      (signal) => runTests(
+        environment ? { ...project, url: environment.baseUrl, canonicalUrl: project.url } : project,
+        selectedTests,
+        run,
+        { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

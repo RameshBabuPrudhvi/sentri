@@ -565,6 +565,7 @@ async function handleTrigger(req, res) {
         parallelWorkers,
         changedFiles: changedFiles || [],
         impactAnalysis: impact,
+        environmentId: environment?.id || null,
       });
   runRepo.create(run);
 
@@ -636,7 +637,14 @@ async function handleTrigger(req, res) {
       // AUTO-001: dispatch the risk-ordered + budget-capped subset, not the
       // full approved set. The persisted run (buildTestRun) still records the
       // approved-test order via `tests` for audit fidelity.
-      : runTests(project, selectedTests, run, { parallelWorkers, signal }),
+      // DIF-012: env override applies at execution only — project.url is
+      // preserved in the DB; only this run sees the override.
+      : runTests(
+          environment ? { ...project, url: environment.baseUrl, canonicalUrl: project.url } : project,
+          selectedTests,
+          run,
+          { parallelWorkers, signal }
+        ),
     {
       onSuccess: () => {
         logActivity({
@@ -820,7 +828,7 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
     // Without this, production baselines would be overwritten with
     // preview-URL fingerprints every time a deployment webhook fires.
     (signal) => crawlAndGenerateTests(
-      { ...project, url: previewUrl || environment?.baseUrl || project.url, canonicalUrl: project.url },
+      { ...project, url: previewUrl || project.url, canonicalUrl: project.url },
       run,
       { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
     ),
