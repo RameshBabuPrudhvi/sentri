@@ -373,8 +373,12 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           //    the suppression explicit — otherwise a failed data-driven
           //    test looks identical to a fixture-less retry exhaustion in
           //    the run timeline, masking the design choice from reviewers.
-          if (fixtureRows?.length && lastResult?.status === "failed") {
-            const failedRows = attemptResults.filter((r) => r?.status === "failed").length;
+          // Log the retry-skip when *any* iteration failed, not just the
+          // last one — an intermediate row failure with a passing tail row
+          // would otherwise silently drop the message and break QA
+          // acceptance criterion #18 in `QA.md`.
+          const failedRows = attemptResults.filter((r) => r?.status === "failed").length;
+          if (fixtureRows?.length && failedRows > 0) {
             logWarn(run, `↻ Skipping retry for ${test.name} — ${failedRows}/${attemptResults.length} fixture iteration(s) failed (data-driven tests don't retry)`);
           }
           if (!fixtureRows?.length && lastResult?.status === "failed") {
