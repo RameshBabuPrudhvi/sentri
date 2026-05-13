@@ -30,6 +30,25 @@ function getProviderInfo(config, id) {
 
 const ALL_IDS = ["anthropic", "openai", "google", "openrouter", "local"];
 
+function getCompatIds(settings) {
+  return (settings?.compatProviders || []).map((p) => p.provider);
+}
+
+// Deterministic palette so each `compat:<id>` slot gets a stable, distinct
+// chip color instead of all sharing OpenRouter purple. Palette mirrors the
+// existing PROVIDER_STYLES hues (orange / green / blue / purple / teal / pink)
+// so compat slots blend visually with built-in providers.
+const COMPAT_PALETTE = ["#cd7f32", "#10a37f", "#4285f4", "#6466f1", "#0ea5e9", "#ec4899"];
+function compatStyle(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  const c = COMPAT_PALETTE[h % COMPAT_PALETTE.length];
+  // Provide all five style fields the dropdown reads (bg, border, color, dot,
+  // activeBg) so compat-slot rows render with a visible status dot and active
+  // highlight, matching built-in providers in PROVIDER_STYLES.
+  return { color: c, dot: c, bg: `${c}11`, border: `${c}44`, activeBg: `${c}14` };
+}
+
 // A provider is "saved" if getSettings() returns a non-empty masked key for it,
 // or (for Ollama) if the backend reports it as explicitly configured.
 function getSavedProviders(settings) {
@@ -40,6 +59,7 @@ function getSavedProviders(settings) {
   if (settings.google)     list.push("google");
   if (settings.openrouter) list.push("openrouter");
   if (settings.ollamaConfigured || settings.activeProvider === "local") list.push("local");
+  for (const compatId of getCompatIds(settings)) list.push(compatId);
   return list;
 }
 
@@ -134,9 +154,14 @@ export default function ProviderBadge({ style }) {
     );
   }
 
-  const c      = PROVIDER_STYLES[config.provider] || PROVIDER_STYLES.openai;
+  // Compat slots have no entry in PROVIDER_STYLES — fall back to compatStyle()
+  // so the badge trigger uses the same per-slot palette color as the dropdown
+  // rows (avoids a green/correct-color visual mismatch).
+  const c      = PROVIDER_STYLES[config.provider] || compatStyle(config.provider || "");
   const saved  = getSavedProviders(settings);
-  const unsaved = ALL_IDS.filter(id => !saved.includes(id));
+  const compatIds = getCompatIds(settings);
+  const allSwitchable = [...ALL_IDS, ...compatIds];
+  const unsaved = allSwitchable.filter(id => !saved.includes(id));
 
   return (
     <div ref={ref} style={{ position: "relative", flexShrink: 0, ...style }}>
@@ -194,7 +219,7 @@ export default function ProviderBadge({ style }) {
           {saved.length > 0 && (
             <div style={{ padding: "4px 0" }}>
               {saved.map(id => {
-                const sty      = PROVIDER_STYLES[id];
+                const sty      = PROVIDER_STYLES[id] || compatStyle(id);
                 const info     = getProviderInfo(config, id);
                 const isActive = config.provider === id;
                 const isBusy   = switching === id;
@@ -248,7 +273,7 @@ export default function ProviderBadge({ style }) {
                 Add provider
               </div>
               {unsaved.map(id => {
-                const sty  = PROVIDER_STYLES[id];
+                const sty  = PROVIDER_STYLES[id] || compatStyle(id);
                 const info = getProviderInfo(config, id);
                 return (
                   <button key={id} onClick={() => { setOpen(false); navigate("/settings"); }}

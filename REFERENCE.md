@@ -347,7 +347,8 @@ Not yet implemented; address before production:
 | `SMTP_PASS` | No | — | SMTP password |
 | `EMAIL_FROM` | No | `Sentri <noreply@sentri.dev>` | Sender address for transactional emails |
 | `SKIP_EMAIL_VERIFICATION` | No | `false` | When `"true"`, registration auto-verifies users (dev/CI only) |
-| `ALLOW_PRIVATE_URLS` | No | `false` | When `"true"`, skips SSRF guard for `POST /api/v1/test-connection`. **Never set in production.** |
+| `ALLOW_PRIVATE_URLS` | No | `false` | When `"true"`, skips SSRF guard for `POST /api/v1/test-connection` AND for compat (`compat:<id>`) provider `baseUrl` saves + per-call SSRF-guarded fetch (AI-001 — self-hosted vLLM / LiteLLM / LocalAI / internal proxies). Bypass is **scoped** — trigger callbacks, preview URLs, and notification webhooks remain SSRF-protected via the unrelaxed `validateUrl()` / `safeFetch()`. **Never set in production multi-tenant deployments.** |
+| `COMPAT_CONFIG_CACHE_TTL_MS` | No | `60000` | AI-001: TTL (ms) for the in-memory compat-provider config cache fronting SQLite + AES decryption on every AI call. Cross-instance coherence via Redis pub/sub on `sentri:compat-config:invalidate` when `REDIS_URL` is set. |
 | `MAX_WORKERS` | No | `2` | Global concurrency limit for BullMQ run execution |
 | `APP_URL` | No | `CORS_ORIGIN` fallback | Base URL for deep links in notification emails and webhook payloads |
 | `SPA_INDEX_PATH` | No | auto-detect | Path to the Vite-built `index.html` for CSP nonce injection |

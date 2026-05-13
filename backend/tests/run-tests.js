@@ -49,6 +49,8 @@ const files = [
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",
   "tests/openrouter-provider.test.js",
+  "tests/openai-compat-provider.test.js",
+  "tests/compat-config-cache.test.js",
   "tests/api-versioning.test.js",
   "tests/robots-sitemap.test.js",
   "tests/openapi.test.js",
@@ -82,6 +84,10 @@ const files = [
   "tests/crawl-baseline-repo.test.js",
   "tests/deployment-triggers.test.js",
   "tests/pr11-fixes.test.js",
+  "tests/risk-scorer.test.js",
+  "tests/impact-analysis.test.js",
+  "tests/github-checks.test.js",
+  "tests/github-install-callback.test.js",
 ];
 
 let passed = 0;

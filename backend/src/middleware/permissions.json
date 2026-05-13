@@ -207,6 +207,33 @@
     "DELETE /api/v1/data/healing": {
       "role": "admin",
       "source": "backend/src/routes/system.js:205"
+    },
+    "GET /api/v1/settings/github-checks": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/settings.js"
+    },
+    "PATCH /api/v1/settings/github-checks/:projectId": {
+      "role": "admin",
+      "source": "backend/src/routes/settings.js"
+    },
+    "GET /api/v1/integrations/github/install/start/:projectId": {
+      "role": "admin",
+      "source": "backend/src/routes/integrations/github.js"
+    },
+    "GET /api/v1/integrations/github/install/callback": {
+      "role": "state_jwt (admin-issued)",
+      "source": "backend/src/routes/integrations/github.js",
+      "noUi": "Auth via signed one-shot state JWT, NOT requireAuth — SameSite=Strict cookies are not sent on cross-site redirects from github.com. The state JWT is issued by GET /install/start (admin-gated) so the callback inherits admin authority transitively."
+    },
+    "POST /api/v1/integrations/github/app-webhook": {
+      "role": "public (GitHub HMAC)",
+      "source": "backend/src/routes/integrations/github.js",
+      "noUi": "machine-only App webhook [no-ui]"
+    },
+    "POST /api/v1/projects/:id/trigger/github": {
+      "role": "trigger_token + GitHub HMAC",
+      "source": "backend/src/routes/trigger.js",
+      "noUi": "machine-only GitHub PR webhook [no-ui] — dual-auth (Bearer trigger token via requireTrigger + X-Hub-Signature-256 HMAC keyed by GITHUB_WEBHOOK_SECRET)"
     }
   },
   "anyAuthenticatedMember": [

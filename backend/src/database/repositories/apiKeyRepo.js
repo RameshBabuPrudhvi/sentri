@@ -17,9 +17,11 @@
 import { getDatabase } from "../sqlite.js";
 import { encryptCredentials, decryptCredentials } from "../../utils/credentialEncryption.js";
 import { formatLogLine } from "../../utils/logFormatter.js";
+import * as compatConfigCache from "../../utils/compatConfigCache.js";
 
 // Valid provider identifiers — mirrors CLOUD_KEY_MAP + local in aiProvider.js
 const VALID_PROVIDERS = ["anthropic", "openai", "google", "openrouter", "local"];
+const COMPAT_PREFIX = "compat:";
 
 /**
  * Encrypt a string value using the credential encryption utility.
@@ -66,7 +68,7 @@ function decryptValue(encryptedBlob) {
  * @throws {Error} If provider is not a recognised value.
  */
 export function set(provider, value) {
-  if (!VALID_PROVIDERS.includes(provider)) {
+  if (!VALID_PROVIDERS.includes(provider) && !isCompatProvider(provider)) {
     throw new Error(`[apiKeyRepo] Unknown provider: "${provider}"`);
   }
   const db = getDatabase();
@@ -93,7 +95,7 @@ export function get(provider) {
   if (!row) return null;
   const plaintext = decryptValue(row.value);
   if (!plaintext) return null;
-  if (provider === "local") {
+  if (provider === "local" || isCompatProvider(provider)) {
     try {
       return JSON.parse(plaintext);
     } catch {
@@ -131,4 +133,38 @@ export function getAll() {
     }
   }
   return result;
+}
+
+
+function isCompatProvider(provider) {
+  return typeof provider === "string" && provider.startsWith(COMPAT_PREFIX) && provider.length > COMPAT_PREFIX.length;
+}
+
+export function listCompatSlots() {
+  const db = getDatabase();
+  const rows = db.prepare("SELECT provider FROM api_keys WHERE provider LIKE 'compat:%' ORDER BY provider").all();
+  return rows.map((r) => r.provider);
+}
+
+export function getCompatSlot(slotId) {
+  const provider = slotId.startsWith(COMPAT_PREFIX) ? slotId : `${COMPAT_PREFIX}${slotId}`;
+  const value = get(provider);
+  if (!value || typeof value !== "object") return null;
+  return value;
+}
+
+export function setCompatSlot(slotId, config) {
+  const provider = slotId.startsWith(COMPAT_PREFIX) ? slotId : `${COMPAT_PREFIX}${slotId}`;
+  set(provider, config);
+  // Write-through invalidation: clear the local cache AND publish on Redis
+  // so other instances drop their stale entry for this slot.  Runs AFTER
+  // the DB write so a concurrent reader on another instance that pre-empts
+  // the publish will still see the new row via the DB loader.
+  compatConfigCache.invalidate(provider);
+}
+
+export function deleteCompatSlot(slotId) {
+  const provider = slotId.startsWith(COMPAT_PREFIX) ? slotId : `${COMPAT_PREFIX}${slotId}`;
+  remove(provider);
+  compatConfigCache.invalidate(provider);
 }

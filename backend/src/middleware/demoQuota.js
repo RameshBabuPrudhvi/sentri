@@ -121,6 +121,8 @@ function serverHasConfiguredKey() {
   if (keys.google) return true;
   if (keys.openrouter) return true;
   if (keys.ollamaConfigured) return true;
+  // AI-001: any configured compat:<id> slot counts as admin BYOK.
+  if (Array.isArray(keys.compatProviders) && keys.compatProviders.length > 0) return true;
   return false;
 }
 

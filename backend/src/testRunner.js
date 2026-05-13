@@ -31,6 +31,7 @@
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
+import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
@@ -44,6 +45,7 @@ import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
+import { isNonExecutedSkip } from "./utils/skipReasons.js";
 
 
 function evaluateQualityGates(gates, run) {
@@ -57,7 +59,19 @@ function evaluateQualityGates(gates, run) {
   if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
   if (Object.keys(gates).length === 0) return null;
   const violations = [];
-  const total = Number(run.total || 0);
+  // AUTO-001 / AUTO-004: `run.total` reflects the approved-test set (audit
+  // fidelity), but skipped tests never executed — they shouldn't dilute the
+  // pass-rate denominator. Exclude both `over_budget` (AUTO-001) and
+  // `skipped_no_impact` (AUTO-004) so a `minPassRate: 80%` gate doesn't
+  // falsely fail when budget truncation or impact analysis happens to skip
+  // tests that would otherwise have passed. Must stay in sync with the
+  // frontend denominator at `frontend/src/pages/RunDetail.jsx` —
+  // `passRateDenominator = total - skippedOverBudget - skippedNoImpact`.
+  const rawTotal = Number(run.total || 0);
+  const skippedNonExecuted = Array.isArray(run.results)
+    ? run.results.filter(isNonExecutedSkip).length
+    : 0;
+  const total = Math.max(0, rawTotal - skippedNonExecuted);
   const failed = Number(run.failed || 0);
   const passed = Number(run.passed || 0);
   const passRate = total > 0 ? (passed / total) * 100 : 100;
@@ -70,7 +84,9 @@ function evaluateQualityGates(gates, run) {
   // (`backend/src/routes/projects.js`). Counting flaky *tests* instead matches
   // the user-facing meaning and stays bounded in [0, 100]. Falls back to
   // counting per-result retryCount > 0 when run.results is available; uses 0
-  // when results aren't populated yet (e.g. aborted runs).
+  // when results aren't populated yet (e.g. aborted runs). Denominator uses
+  // the dispatched-count `total` (budget-skipped tests excluded) for the same
+  // reason as `passRate` above.
   const flakyTests = Array.isArray(run.results)
     ? run.results.filter((r) => Number(r?.retryCount || 0) > 0).length
     : 0;
@@ -171,6 +187,20 @@ async function poolMap(items, concurrency, fn, signal) {
 export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal } = {}) {
   const runId = run.id;
   const tracePath = `${TRACES_DIR}/${runId}.zip`;
+
+  // AUTO-001: smoke tests always dispatch first regardless of caller order.
+  // This is a runner-level invariant — any callsite of runTests (route layer,
+  // BullMQ worker, single-test execute, future schedulers) gets the same
+  // pin-smoke-to-front guarantee without duplicating the rule. Risk-based
+  // ordering of the non-smoke tail is established at the route layer (where
+  // run history + changedPages are available); the runner stays history-free
+  // and only enforces the smoke pin to preserve auditability of the saved
+  // run.testQueue order. Stable sort: tests retain their input order within
+  // the smoke / non-smoke partitions.
+  tests = [
+    ...tests.filter((t) => isSmokeTest(t)),
+    ...tests.filter((t) => !isSmokeTest(t)),
+  ];
 
   // Resolve concurrency: per-run override → env default → 1 (sequential)
   const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));

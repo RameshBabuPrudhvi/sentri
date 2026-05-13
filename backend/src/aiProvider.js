@@ -31,6 +31,42 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { throwIfAborted } from "./utils/abortHelper.js";
 import { formatLogLine } from "./utils/logFormatter.js";
 import * as apiKeyRepo from "./database/repositories/apiKeyRepo.js";
+import * as compatConfigCache from "./utils/compatConfigCache.js";
+import { validateUrl } from "./utils/ssrfGuard.js";
+
+/**
+ * Build a `fetch` implementation that re-validates the target URL via the
+ * SSRF guard on every call before delegating to global `fetch`. Used by the
+ * OpenAI SDK for compat (`compat:<id>`) providers so a hostname that
+ * resolved to a public IP at config-save time can't be flipped to a
+ * private/loopback IP via DNS rebinding between save and call.
+ *
+ * Streaming + retry semantics are preserved: we forward `init` (including
+ * `signal`, `body`, `headers`, `method`) untouched and return the raw
+ * `Response` so the SDK still streams chunks and reads `Retry-After`.
+ *
+ * @returns {Function} A fetch-compatible function `(input, init) => Promise<Response>`.
+ */
+function createSsrfGuardedFetch() {
+  return async (input, init) => {
+    const url = typeof input === "string" ? input
+      : input instanceof URL ? input.toString()
+      : input?.url;
+    // AI-001: Honor the ALLOW_PRIVATE_URLS escape hatch for self-hosted /
+    // on-prem OpenAI-compatible endpoints. Scoped to compat-provider fetches
+    // here — the shared validateUrl() does NOT apply this bypass, so trigger
+    // callbacks / preview URLs / webhooks remain protected.
+    if (url && process.env.ALLOW_PRIVATE_URLS !== "true") {
+      const err = await validateUrl(url);
+      if (err) throw new Error(`SSRF guard rejected compat baseUrl: ${err}`);
+    }
+    // SSRF defense-in-depth: block 3xx redirects so an attacker-controlled
+    // compat baseUrl can't redirect to a private/link-local/cloud-metadata
+    // address (which would bypass the initial validateUrl() check). Mirrors
+    // safeFetch() in utils/ssrfGuard.js.
+    return fetch(input, { ...init, redirect: "error" });
+  };
+}
 
 // ── Runtime key store ────────────────────────────────────────────────────────
 // In-memory cache populated at startup from the DB (via loadKeysFromDatabase)
@@ -108,6 +144,30 @@ function getCloudName(provider) {
   return model !== cfg.fallback ? model : cfg.name;
 }
 
+
+
+function isCompatProvider(provider) {
+  // Match apiKeyRepo.isCompatProvider() — require a non-empty slot id after
+  // the "compat:" prefix so a malformed `provider: "compat:"` doesn't
+  // reach the DB layer (which would 500 on the empty key) or get treated
+  // as a usable provider by isProviderUsable() / detectProvider().
+  return typeof provider === "string" && provider.startsWith("compat:") && provider.length > "compat:".length;
+}
+
+function getCompatConfig(provider) {
+  if (!isCompatProvider(provider)) return null;
+  // Read through the TTL cache to avoid hitting SQLite (decrypt + JSON.parse)
+  // on every AI call.  Cache is write-through invalidated in apiKeyRepo and
+  // coherent across processes via Redis pub/sub (utils/compatConfigCache.js).
+  //
+  // Loader uses `getCompatSlot()` (not the generic `apiKeyRepo.get()`) so the
+  // compat-specific type guard runs — protects against a corrupted row
+  // returning a non-object (string / null / number) which would otherwise
+  // poison the cache and make `compat?.apiKey` lookups crash with a
+  // "cannot read properties of string" error far from the actual root cause.
+  return compatConfigCache.get(provider, () => apiKeyRepo.getCompatSlot(provider));
+}
+
 // Auto-detect order for cloud providers
 const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
 
@@ -120,6 +180,18 @@ const CLOUD_DETECT_ORDER = ["anthropic", "openai", "google", "openrouter"];
  * @param {string} key      - The API key string, or `""` to deactivate.
  */
 export function setRuntimeKey(provider, key) {
+  // Compat providers are managed via apiKeyRepo.setCompatSlot() in settings.js
+  // (they need {baseUrl, model, apiKey, displayName}, not just a key string).
+  // Reset their circuit breaker so the new config is retried immediately.
+  if (isCompatProvider(provider)) {
+    if (circuitBreakers[provider]) {
+      circuitBreakers[provider].failures = 0;
+      circuitBreakers[provider].disabledUntil = 0;
+    }
+    _stickyFallbackProvider = null;
+    _stickyFallbackExpiry   = 0;
+    return;
+  }
   const envName = CLOUD_KEY_MAP[provider];
   if (!envName) return;
   runtimeKeys[envName] = key;
@@ -200,13 +272,36 @@ function getOllamaModel() {
 // ── Provider metadata ─────────────────────────────────────────────────────────
 
 function buildProviderMeta() {
-  return {
+  const meta = {
     anthropic:  { name: getCloudName("anthropic"),  model: getCloudModel("anthropic"),  color: "#cd7f32" },
     openai:     { name: getCloudName("openai"),     model: getCloudModel("openai"),     color: "#10a37f" },
     google:     { name: getCloudName("google"),     model: getCloudModel("google"),     color: "#4285f4" },
     openrouter: { name: getCloudName("openrouter"), model: getCloudModel("openrouter"), color: "#6466f1" },
     local:      { name: `Ollama (${getOllamaModel()})`, model: getOllamaModel(), color: "#7c3aed" },
   };
+  // AI-001: synthesize entries for every configured compat slot so
+  // getProviderName() / getProviderMeta() don't throw when a compat provider
+  // is active (called from crawler.js, testPersistence.js, etc).
+  //
+  // Perf: route through getCompatConfig() so per-slot reads hit the TTL cache
+  // instead of SQLite + AES decryption. buildProviderMeta() is called from
+  // inside callProvider() for built-in providers (e.g. `buildProviderMeta().anthropic.model`
+  // at the Anthropic / OpenAI / Google branches below), so every cloud AI
+  // call would otherwise iterate every compat slot against the DB. The
+  // `listCompatSlots()` SELECT is still one round-trip, but the per-slot
+  // decrypts now hit `compatConfigCache` (60s TTL).
+  try {
+    for (const provider of apiKeyRepo.listCompatSlots()) {
+      const cfg = getCompatConfig(provider) || {};
+      const slotId = provider.slice("compat:".length);
+      meta[provider] = {
+        name: cfg.displayName || slotId,
+        model: cfg.model || "",
+        color: "#6466f1",
+      };
+    }
+  } catch { /* DB unavailable — cloud entries still work */ }
+  return meta;
 }
 
 const PROVIDER_DOCS = {
@@ -244,6 +339,20 @@ export function getSupportedProviders() {
 function isProviderUsable(provider) {
   if (provider === "local") {
     return !runtimeOllamaDisabled;
+  }
+  if (isCompatProvider(provider)) {
+    // Wrap the cache loader / DB read so a transient DB failure during a
+    // cache miss (TTL expired) doesn't propagate through detectProvider() →
+    // generateText() / streamText(). Mirrors the try/catch around the
+    // `listCompatSlots()` sweep below — without it, a sticky-fallback or
+    // active-provider pointing at a compat slot would crash hot paths the
+    // moment the cache TTL elapses while the DB is briefly unavailable.
+    try {
+      const compat = getCompatConfig(provider);
+      return !!(compat?.apiKey && compat?.baseUrl && compat?.model);
+    } catch {
+      return false;
+    }
   }
   const envName = CLOUD_KEY_MAP[provider];
   if (!envName) return false;
@@ -297,9 +406,17 @@ function detectProvider() {
     return forced;
   }
 
-  // ── Auto-detect: first cloud provider with a key, then Ollama as fallback ─
+  // ── Auto-detect: first cloud provider with a key, then any configured
+  // compat:<id> slot, then Ollama as final fallback. Without the compat
+  // sweep, a server restart with ONLY compat slots configured would leave
+  // detectProvider() returning null until an admin manually re-selects.
   const detected = CLOUD_DETECT_ORDER.find(id => isProviderUsable(id));
   if (detected) return detected;
+
+  try {
+    const compatSlot = apiKeyRepo.listCompatSlots().find(id => isProviderUsable(id));
+    if (compatSlot) return compatSlot;
+  } catch { /* DB unavailable — fall through to Ollama */ }
 
   if (isProviderUsable("local") && hasOllamaConfig()) return "local";
 
@@ -327,12 +444,17 @@ export function isProviderDegraded() {
 /** @returns {string} Human-readable provider name (e.g. `"Claude Sonnet"`), or `"No provider configured"`. */
 export function getProviderName() {
   const p = getProvider();
-  return p ? buildProviderMeta()[p].name : "No provider configured";
+  if (!p) return "No provider configured";
+  // Defense-in-depth: a compat slot deleted between detectProvider() and
+  // here would otherwise read .name on undefined and crash hot paths
+  // (crawler.js, testPersistence.js).
+  return buildProviderMeta()[p]?.name || p;
 }
 /** @returns {{provider: string, name: string, model: string, color: string}|null} Full provider metadata, or `null`. */
 export function getProviderMeta() {
   const p = getProvider();
-  return p ? { provider: p, ...buildProviderMeta()[p] } : null;
+  if (!p) return null;
+  return { provider: p, ...(buildProviderMeta()[p] || { name: p, model: "", color: "#6466f1" }) };
 }
 
 /**
@@ -356,6 +478,32 @@ export function getConfiguredKeys() {
   // True only when Ollama has explicit config AND is not disabled — prevents
   // the dropdown from showing Ollama as "saved" when it's just the default URL.
   result.ollamaConfigured = !runtimeOllamaDisabled && hasOllamaConfig();
+  // Wrap the DB sweep in try/catch to match buildProviderMeta() / detectProvider()
+  // / getFallbackProviders() — without it, a transient DB failure would 500
+  // the GET /settings endpoint AND crash the demoQuota middleware on every
+  // request when demo mode is active (REVIEW.md: error responses must never
+  // leak internal details, and this path was leaking DB error messages).
+  //
+  // Perf: route per-slot reads through getCompatConfig() so they hit the TTL
+  // cache (compatConfigCache). demoQuota middleware calls this on every
+  // request when demo mode is active — direct apiKeyRepo.get() per slot
+  // would decrypt every compat config on every request, defeating the cache.
+  try {
+    result.compatProviders = apiKeyRepo.listCompatSlots()
+      .map((provider) => ({ provider, ...(getCompatConfig(provider) || {}) }))
+      .map((p) => ({
+        provider: p.provider,
+        displayName: p.displayName || p.provider.replace("compat:", ""),
+        baseUrl: p.baseUrl || "",
+        model: p.model || "",
+        apiKey: maskKey(p.apiKey || ""),
+      }));
+  } catch (err) {
+    // DB unavailable — log server-side and degrade to an empty list so the
+    // Settings UI still renders cloud + Ollama state correctly.
+    console.error(formatLogLine("error", null, `[aiProvider] Failed to list compat providers: ${err.message}`));
+    result.compatProviders = [];
+  }
   return result;
 }
 
@@ -404,6 +552,13 @@ export function loadKeysFromDatabase() {
             runtimeOllamaModel = cfg.model || "";
           }
           runtimeOllamaDisabled = false;
+          loaded += 1;
+        }
+      } else if (isCompatProvider(provider)) {
+        // Compat slots store {apiKey, baseUrl, model, displayName} as JSON;
+        // they are read on demand via apiKeyRepo.get() inside getCompatConfig(),
+        // so no runtime cache restore is required here. Just count it as loaded.
+        if (value && typeof value === "object" && value.apiKey && value.baseUrl && value.model) {
           loaded += 1;
         }
       } else {
@@ -812,8 +967,15 @@ function isCircuitBreakerOpen(provider) {
 function getFallbackProviders(primaryProvider) {
   // Local tier has only one provider (Ollama) — no fallback possible.
   if (primaryProvider === "local") return [];
-  // Cloud tier: try other cloud providers in detection order.
-  return CLOUD_DETECT_ORDER.filter(p =>
+  // Cloud tier: try other cloud providers in detection order, then any
+  // configured `compat:<id>` slots (AI-001) — they share the OpenAI wire
+  // format and participate in the same circuit-breaker accounting per slot.
+  // Wrap the DB read so a transient DB failure doesn't break cloud-only
+  // fallbacks (which have no DB dependency otherwise).
+  let compatSlots = [];
+  try { compatSlots = apiKeyRepo.listCompatSlots(); } catch { /* DB unavailable — cloud fallbacks still work */ }
+  const candidates = [...CLOUD_DETECT_ORDER, ...compatSlots];
+  return candidates.filter(p =>
     p !== primaryProvider &&
     isProviderUsable(p) &&
     !isCircuitBreakerOpen(p),
@@ -849,6 +1011,31 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         return msg.content[0].text;
       } finally { cleanup(); }
     }, "Anthropic");
+  }
+
+
+  if (isCompatProvider(provider)) {
+    // baseUrl is SSRF-validated at config-save time in routes/settings.js
+    // AND re-validated per-call via createSsrfGuardedFetch() below — closes
+    // the DNS-rebinding window (a host that resolved to a public IP at save
+    // time can't be flipped to a private/loopback IP between save and call).
+    const compat = getCompatConfig(provider);
+    const apiKey = compat?.apiKey;
+    const baseURL = compat?.baseUrl;
+    const model = compat?.model;
+    const client = new OpenAI({ apiKey, fetch: createSsrfGuardedFetch(), ...(baseURL ? { baseURL } : {}) });
+    const messages = [];
+    if (system) messages.push({ role: "system", content: system });
+    messages.push({ role: "user", content: user });
+    return await withRetry(async () => {
+      const { signal: composedSignal, cleanup } = composeSignal(signal, CLOUD_TIMEOUT_MS);
+      try {
+        const params = { model, max_tokens: tokens, messages };
+        if (useJson) params.response_format = { type: "json_object" };
+        const res = await client.chat.completions.create(params, { signal: composedSignal });
+        return res.choices?.[0]?.message?.content || "";
+      } finally { cleanup(); }
+    }, `OpenAI-compat (${provider})`);
   }
 
   if (provider === "openai") {
@@ -1122,6 +1309,45 @@ export async function streamText(promptOrMessages, onToken, options = {}) {
     } catch (err) {
       if (err.name === "AbortError" || signal?.aborted) throw err;
       // Only fall back if no tokens were emitted — otherwise the user would see two partial responses.
+      if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
+      throw err;
+    }
+  }
+
+
+  if (isCompatProvider(provider)) {
+    // Stream via the OpenAI SDK against the compat baseURL. On any retryable
+    // error before tokens emit, fall back to non-streaming generateText().
+    let tokensEmitted = 0;
+    try {
+      const compat = getCompatConfig(provider);
+      const apiKey = compat?.apiKey;
+      const baseURL = compat?.baseUrl;
+      const model = compat?.model;
+      // SSRF-validated at config-save time in routes/settings.js AND
+      // re-validated per-call via createSsrfGuardedFetch() (DNS-rebinding
+      // mitigation — see callProvider compat branch for the rationale).
+      const client = new OpenAI({ apiKey, fetch: createSsrfGuardedFetch(), ...(baseURL ? { baseURL } : {}) });
+      const messages = [];
+      if (system) messages.push({ role: "system", content: system });
+      messages.push({ role: "user", content: user });
+      const params = {
+        model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        stream: true,
+        messages,
+      };
+      if (useJson) params.response_format = { type: "json_object" };
+      const stream = await client.chat.completions.create(params, { signal });
+      let full = "";
+      for await (const chunk of stream) {
+        throwIfAborted(signal);
+        const token = chunk.choices[0]?.delta?.content ?? "";
+        if (token) { full += token; onToken(token); tokensEmitted++; }
+      }
+      return full;
+    } catch (err) {
+      if (err.name === "AbortError" || signal?.aborted) throw err;
       if (tokensEmitted === 0 && isRetryableError(err)) return fallbackToNonStreaming(err);
       throw err;
     }

@@ -32,6 +32,7 @@ import { runTests } from "../testRunner.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
+import { isNonExecutedSkip } from "../utils/skipReasons.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -130,11 +131,19 @@ async function processJob(job) {
       // Use the snapshotted test IDs from enqueue time (options.testIds) so
       // retries execute the same set of tests as the original attempt.
       // Falls back to a fresh DB query for jobs enqueued before this fix.
+      //
+      // AUTO-001: the order of `options.testIds` is the risk-ranked + budget-
+      // capped dispatch sequence assembled by the route layer (see
+      // routes/runs.js:202). The previous `allTests.filter(idSet.has)`
+      // implementation silently re-sorted tests into DB order — defeating
+      // risk-based ordering for every BullMQ-processed run. Re-build the
+      // array in the explicit testIds order; drop any ids that no longer
+      // resolve (test deleted between enqueue and worker pickup).
       let tests;
       if (Array.isArray(options.testIds) && options.testIds.length > 0) {
         const allTests = testRepo.getByProjectId(project.id);
-        const idSet = new Set(options.testIds);
-        tests = allTests.filter(t => idSet.has(t.id));
+        const byId = new Map(allTests.map(t => [t.id, t]));
+        tests = options.testIds.map(id => byId.get(id)).filter(Boolean);
       } else {
         tests = testRepo.getByProjectId(project.id)
           .filter(t => t.reviewStatus === "approved");
@@ -230,7 +239,16 @@ async function processJob(job) {
       run.error = null;
       run.errorCategory = null;
       run.finishedAt = null;
-      run.results = [];
+      // AUTO-001 / AUTO-004: preserve the route-layer's pre-seeded skip
+      // markers across retries — `over_budget` AND `skipped_no_impact` both
+      // represent a final dispatch decision, not a transient execution
+      // state. Dropping either would silently re-classify those tests on
+      // the retry (or worse, make them vanish from `run.results` entirely,
+      // breaking the pass-rate denominator and the "every approved test
+      // has a resolution" invariant). Routed through `isNonExecutedSkip`
+      // (`backend/src/utils/skipReasons.js`) so adding a future skip kind
+      // doesn't require a third site edit.
+      run.results = (run.results || []).filter(isNonExecutedSkip);
       run.passed = 0;
       run.failed = 0;
       run.pagesFound = 0;

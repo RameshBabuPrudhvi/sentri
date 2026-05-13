@@ -20,6 +20,8 @@ import { resetOnboarding, emitTourEvent } from "../hooks/useOnboarding.js";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
+const OPENAI_COMPAT_HINTS = ["https://api.deepseek.com/v1", "https://api.groq.com/openai/v1", "https://api.mistral.ai/v1", "https://api.x.ai/v1"];
+
 const PROVIDERS = [
   {
     id: "anthropic",
@@ -537,11 +539,16 @@ function fmtUptime(seconds) {
 }
 
 const SETTINGS_TABS = [
-  { key: "providers",   label: "AI Providers",  icon: <Zap size={14} />,      adminOnly: true },
-  { key: "members",     label: "Members",       icon: <Users size={14} />,    adminOnly: true },
-  { key: "execution",   label: "Execution",     icon: <Cpu size={14} />,      adminOnly: false },
-  { key: "data",        label: "Data",          icon: <Database size={14} />, adminOnly: true },
-  { key: "account",     label: "Account",       icon: <Shield size={14} />,   adminOnly: false },
+  { key: "providers",   label: "AI Providers",  icon: <Zap size={14} />,          adminOnly: true },
+  { key: "members",     label: "Members",       icon: <Users size={14} />,        adminOnly: true },
+  { key: "execution",   label: "Execution",     icon: <Cpu size={14} />,          adminOnly: false },
+  // Integrations is gated by qa_lead on the backend (GET /settings/github-checks).
+  // Keep it after `execution` so viewers (who lack qa_lead) don't land on a tab
+  // whose data fetch immediately 403s — `execution` stays the safe default for
+  // all non-admin roles. See review thread on this file (line 543).
+  { key: "integrations", label: "Integrations", icon: <ExternalLink size={14} />, adminOnly: false },
+  { key: "data",        label: "Data",          icon: <Database size={14} />,     adminOnly: true },
+  { key: "account",     label: "Account",       icon: <Shield size={14} />,       adminOnly: false },
 ];
 
 // Renders in place of an admin-only tab body when a non-admin lands on it
@@ -1053,14 +1060,140 @@ function AccountTab() {
   );
 }
 
+
+function IntegrationsTab({ isAdmin }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(null);
+  const [installing, setInstalling] = useState(null);
+  const [status, setStatus] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api.getGithubCheckSettings();
+      setRows(data.projects || []);
+    } catch (err) {
+      setError(err.message || "Failed to load GitHub settings.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "installed") {
+      setStatus({ type: "ok", text: "GitHub App installed. Settings were refreshed with the selected repository." });
+      load();
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [load]);
+
+  function updateRow(projectId, patch) {
+    setRows(prev => prev.map(row => row.projectId === projectId ? { ...row, ...patch } : row));
+  }
+
+  async function installGithubApp(projectId) {
+    setInstalling(projectId);
+    setError("");
+    setStatus(null);
+    try {
+      const data = await api.getGithubInstallStartUrl(projectId);
+      window.location.assign(data.url);
+    } catch (err) {
+      setError(err.message || "Failed to start GitHub App install.");
+      setInstalling(null);
+    }
+  }
+
+  async function saveRow(row) {
+    setSaving(row.projectId);
+    setError("");
+    try {
+      await api.updateGithubCheckSettings(row.projectId, {
+        enabled: !!row.enabled,
+        repo: row.repo || "",
+        installationId: row.installationId || "",
+      });
+      await load();
+    } catch (err) {
+      setError(err.message || "Failed to save GitHub settings.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div className="flex-col gap-lg">
+      <SectionTitle icon={<ExternalLink size={16} color="var(--accent)" />} title="Integrations" sub="Connect Sentri to developer workflows" />
+      <div className="card card-padded">
+        <div className="font-bold" style={{ marginBottom: 6 }}>GitHub PR checks</div>
+        <div className="text-sm text-muted" style={{ marginBottom: 14 }}>
+          Install the Sentri GitHub App, then enable native Check Runs per project. Existing projects stay disabled until toggled on.
+        </div>
+        <div className="text-xs text-muted">
+          Use the per-project install button below to authorize the GitHub App and auto-fill the selected repository.
+        </div>
+      </div>
+
+      {status && <div className={status.type === "ok" ? "st-status-ok" : "st-status-err"}>{status.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {status.text}</div>}
+      {error && <div className="st-status-err"><AlertCircle size={12} /> {error}</div>}
+      {loading ? <div className="text-sm text-muted">Loading GitHub integration settings…</div> : rows.map(row => (
+        <div key={row.projectId} className="card card-padded" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr auto auto", gap: 12, alignItems: "end" }}>
+          <div>
+            <div className="font-bold">{row.projectName}</div>
+            <label className="text-xs text-muted" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={!!row.enabled}
+                disabled={!isAdmin}
+                onChange={e => updateRow(row.projectId, { enabled: e.target.checked })}
+              />
+              Post PR checks
+            </label>
+          </div>
+          <div>
+            <label className="text-xs text-muted">Repository</label>
+            <input className="input" value={row.repo || ""} disabled={!isAdmin} placeholder="owner/repo" onChange={e => updateRow(row.projectId, { repo: e.target.value })} />
+          </div>
+          <div>
+            <label className="text-xs text-muted">Installation ID</label>
+            <input className="input" value={row.installationId || ""} disabled={!isAdmin} placeholder="123456" onChange={e => updateRow(row.projectId, { installationId: e.target.value })} />
+          </div>
+          <button className="btn btn-ghost btn-sm" disabled={!isAdmin || installing === row.projectId} onClick={() => installGithubApp(row.projectId)}>
+            {installing === row.projectId ? <RefreshCw size={13} className="spin" /> : <ExternalLink size={13} />} Install App
+          </button>
+          <button className="btn btn-primary btn-sm" disabled={!isAdmin || saving === row.projectId} onClick={() => saveRow(row)}>
+            {saving === row.projectId ? <RefreshCw size={13} className="spin" /> : <Check size={13} />} Save
+          </button>
+        </div>
+      ))}
+      {!isAdmin && <div className="hint">QA leads can view integration status. Admin access is required to change GitHub App settings.</div>}
+    </div>
+  );
+}
+
 export default function Settings() {
   usePageTitle("Settings");
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.workspaceRole === "admin";
   const visibleTabs = SETTINGS_TABS.filter(t => isAdmin || !t.adminOnly);
-  // Default to first visible tab so non-admins don't land on a locked section.
-  const [tab, setTab]           = useState(visibleTabs[0]?.key || "account");
+  // Honour `?tab=<key>` deep links (e.g. the GitHub App install callback
+  // redirects to `/settings?tab=integrations&github=installed&…` and the
+  // IntegrationsTab success banner only renders when that tab is active).
+  // Fall back to the first visible tab so non-admins don't land on a locked
+  // section. Computed once at mount via lazy init — subsequent navigations
+  // within Settings use the in-component `setTab`.
+  const [tab, setTab]           = useState(() => {
+    const urlTab = new URLSearchParams(window.location.search).get("tab");
+    if (urlTab && visibleTabs.some(t => t.key === urlTab)) return urlTab;
+    return visibleTabs[0]?.key || "account";
+  });
 
   const bundleQuery = useSettingsBundleQuery();
 
@@ -1085,6 +1218,33 @@ export default function Settings() {
     await api.deleteApiKey(provider);
     invalidateConfigCache();
     await reload();
+  }
+
+  const [compatForm, setCompatForm] = useState({ slotId: "", displayName: "", baseUrl: "", model: "", apiKey: "" });
+  const [compatSaving, setCompatSaving] = useState(false);
+  const [compatError, setCompatError] = useState("");
+
+  async function handleCompatSave(e) {
+    e.preventDefault();
+    setCompatError("");
+    const slot = compatForm.slotId.trim().toLowerCase();
+    if (!slot || !/^[a-z0-9_-]+$/.test(slot)) return setCompatError("Slot ID is required (letters, numbers, _ or -).");
+    if (!compatForm.baseUrl.trim() || !compatForm.model.trim() || !compatForm.apiKey.trim()) return setCompatError("baseUrl, model, and apiKey are required.");
+    setCompatSaving(true);
+    try {
+      await api.saveApiKey(`compat:${slot}`, compatForm.apiKey.trim(), {
+        baseUrl: compatForm.baseUrl.trim(),
+        model: compatForm.model.trim(),
+        displayName: compatForm.displayName.trim() || slot,
+      });
+      invalidateConfigCache();
+      await reload();
+      setCompatForm({ slotId: "", displayName: "", baseUrl: "", model: "", apiKey: "" });
+    } catch (err) {
+      setCompatError(err.message || "Failed to save provider.");
+    } finally {
+      setCompatSaving(false);
+    }
   }
 
   return (
@@ -1185,10 +1345,43 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <div className="card-padded" style={{ marginTop: 16 }}>
+        <h3 style={{ marginBottom: 10 }}>OpenAI-compatible providers</h3>
+        <form onSubmit={handleCompatSave} style={{ display: "grid", gap: 8 }}>
+          <input className="input" placeholder="Slot id (e.g. deepseek)" value={compatForm.slotId} onChange={(e) => setCompatForm((s) => ({ ...s, slotId: e.target.value }))} />
+          <input className="input" placeholder="Display name" value={compatForm.displayName} onChange={(e) => setCompatForm((s) => ({ ...s, displayName: e.target.value }))} />
+          <input className="input" placeholder="Base URL" list="compat-baseurl-hints" value={compatForm.baseUrl} onChange={(e) => setCompatForm((s) => ({ ...s, baseUrl: e.target.value }))} />
+          <datalist id="compat-baseurl-hints">
+            {OPENAI_COMPAT_HINTS.map((url) => <option key={url} value={url} />)}
+          </datalist>
+          <input className="input" placeholder="Model" value={compatForm.model} onChange={(e) => setCompatForm((s) => ({ ...s, model: e.target.value }))} />
+          <input className="input" type="password" autoComplete="off" placeholder="API key" value={compatForm.apiKey} onChange={(e) => setCompatForm((s) => ({ ...s, apiKey: e.target.value }))} />
+          {compatError && <div className="text-sm" style={{ color: "var(--red)" }}>{compatError}</div>}
+          <button className="btn btn-primary btn-sm" disabled={compatSaving}>{compatSaving ? "Saving..." : "Save compat provider"}</button>
+        </form>
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {(settings?.compatProviders || []).map((p) => (
+            <div key={p.provider} className="card-padded-sm" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div className="font-semi">{p.displayName} <span className="text-mono text-sub">({p.provider})</span></div>
+                <div className="text-xs text-sub">{p.baseUrl} · {p.model} · {p.apiKey}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-ghost btn-xs" onClick={() => setCompatForm({ slotId: p.provider.replace("compat:", ""), displayName: p.displayName || "", baseUrl: p.baseUrl || "", model: p.model || "", apiKey: "" })}>Edit</button>
+                <button className="btn btn-danger btn-xs" onClick={() => handleDelete(p.provider)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
       </>}
 
       {/* ── Tab: Members ── */}
       {tab === "members" && isAdmin && <MembersTab />}
+
+      {/* ── Tab: Integrations ── */}
+      {tab === "integrations" && <IntegrationsTab isAdmin={isAdmin} />}
 
       {/* ── Tab: Execution (runtime defaults + system info) ── */}
       {tab === "execution" && <>
