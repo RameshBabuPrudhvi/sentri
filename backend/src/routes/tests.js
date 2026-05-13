@@ -66,7 +66,6 @@ import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
-import { encryptCredentials } from "../utils/credentialEncryption.js";
 
 /**
  * DIF-012: Resolve and validate an optional `environmentId` against the
@@ -101,6 +100,11 @@ function resolveEnvOrThrow(environmentId, project) {
  * `routes/trigger.js` (`buildEnvScopedProject`) — see those for the full
  * contract. Kept inline here to avoid a cross-route import.
  *
+ * `environment.credentials` is already in the same encrypted shape as
+ * `project.credentials` (the env repo only JSON-parses on read, no
+ * decryption — see `environmentRepo.rowToEnv`), so it's assigned verbatim
+ * here. Re-encrypting would double-encrypt and silently break login.
+ *
  * @param {Object} project
  * @param {Object|null} environment
  * @returns {Object}
@@ -109,7 +113,7 @@ function envScopedProject(project, environment) {
   if (!environment) return project;
   let credentials = project.credentials;
   if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = encryptCredentials(environment.credentials);
+    credentials = environment.credentials;
   }
   return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
 }

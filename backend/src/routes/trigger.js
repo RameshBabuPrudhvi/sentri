@@ -39,7 +39,6 @@ import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
 import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
-import { encryptCredentials } from "../utils/credentialEncryption.js";
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -232,12 +231,16 @@ function buildTestRun({
  */
 function buildEnvScopedProject(project, { previewUrl = null, environment = null } = {}) {
   const url = previewUrl || environment?.baseUrl || project.url;
-  // Re-encrypt the env credentials so the consumer (crawlBrowser /
-  // stateExplorer) decrypts the same shape as project.credentials. The
-  // env repo returns already-decrypted plaintext (see rowToEnv).
+  // `environment.credentials` is already in the same encrypted shape as
+  // `project.credentials` — `routes/projects.js` encrypts on POST/PATCH
+  // and the env repo only `JSON.parse`s on read (see `rowToEnv` in
+  // `environmentRepo.js`, no decryption). Assign verbatim so the consumer
+  // (crawlBrowser / stateExplorer) peels exactly one layer with
+  // `decryptCredentials()`. Re-encrypting here would double-encrypt and
+  // silently break login.
   let credentials = project.credentials;
   if (environment?.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = encryptCredentials(environment.credentials);
+    credentials = environment.credentials;
   }
   return { ...project, url, credentials, canonicalUrl: project.url };
 }

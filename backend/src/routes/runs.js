@@ -21,7 +21,6 @@ import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
-import { encryptCredentials } from "../utils/credentialEncryption.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -52,10 +51,14 @@ const router = Router();
  * Identical contract to the helper in `routes/trigger.js` — kept inline
  * here to avoid a cross-route import (both call sites are local).
  *
- * - `environment.credentials` is plaintext (env repo decrypts on read).
- *   Re-encrypt before stamping onto the scoped project so the downstream
+ * - `environment.credentials` is stored encrypted via `encryptCredentials`
+ *   in `routes/projects.js` (POST/PATCH `/environments`), and the env repo
+ *   only `JSON.parse`s on read (no decryption — see `rowToEnv` in
+ *   `environmentRepo.js`). So it lands here in the same encrypted shape
+ *   as `project.credentials` and can be assigned verbatim — the downstream
  *   `decryptCredentials()` calls in `crawlBrowser.js:103` and
- *   `stateExplorer.js:325` see the same shape as `project.credentials`.
+ *   `stateExplorer.js:325` will peel a single layer correctly.
+ *   (Re-encrypting here would double-encrypt and silently break login.)
  * - `project.credentials` falls back when the env has no credentials of
  *   its own — env-scoped runs against a public preview URL still inherit
  *   the project's auth.
@@ -72,7 +75,7 @@ function envScopedProject(project, environment) {
   if (!environment) return project;
   let credentials = project.credentials;
   if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = encryptCredentials(environment.credentials);
+    credentials = environment.credentials;
   }
   return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
 }
