@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Data-driven test fixtures: upload CSV/JSON fixture rows per test version and execute per-row iterations with `iterationIndex` + row snapshot on run results.
+
 ## [1.7.1] — 2026-05-13
 
 ### Security

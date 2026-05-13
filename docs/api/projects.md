@@ -404,3 +404,10 @@ Removes the cron schedule and cancels the running cron task.
 | Error | Reason |
 |---|---|
 | 404 | Project not found, or no schedule exists |
+
+
+### POST /api/v1/tests/:testId/fixtures
+Upload fixture data for a test version. Body: `{ format: "csv"|"json", csvText?: string, rows?: object[], iterationCap?: number }`.
+
+### GET /api/v1/tests/:testId/fixtures
+Returns fixture history for the test, newest version first.

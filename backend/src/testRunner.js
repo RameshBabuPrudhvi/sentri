@@ -41,6 +41,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
@@ -341,7 +342,25 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
-          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
+          const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
+          const fixtureRows = Array.isArray(fixture?.rows) && fixture.rows.length ? fixture.rows : [null];
+          let attemptResult = null;
+          for (let iterationIndex = 0; iterationIndex < fixtureRows.length; iterationIndex++) {
+            const fixtureRow = fixtureRows[iterationIndex];
+            const iterTest = fixtureRow ? { ...test, playwrightCode: Object.entries(fixtureRow).reduce((code, [k,v]) => String(code || "").replaceAll(`{{${k}}}`, String(v ?? "")), test.playwrightCode || "") } : test;
+            const iterResult = await executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
+            iterResult.iterationIndex = fixtureRow ? iterationIndex : undefined;
+            if (fixtureRow) iterResult.fixtureRow = fixtureRow;
+            processResult(test, iterResult);
+            attemptResult = iterResult;
+            if (iterResult.status === "failed") break;
+          }
+          if (attemptResult?.status === "failed") {
+            const retryErr = new Error(attemptResult.error || "Test failed");
+            retryErr.result = attemptResult;
+            throw retryErr;
+          }
+          return attemptResult;
           if (attemptResult.status === "failed") {
             const retryErr = new Error(attemptResult.error || "Test failed");
             retryErr.result = attemptResult;
@@ -352,7 +371,6 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         result.retryCount = retryCount;
         result.failedAfterRetry = false;
         structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
-        processResult(test, result);
       } catch (err) {
         // Build a synthetic result and route through processResult so SSE
         // `result` and `snapshot` events are emitted — otherwise the

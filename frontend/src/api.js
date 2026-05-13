@@ -256,6 +256,10 @@ export const api = {
   getTest:      (testId)            => req("GET",    `/tests/${testId}`),
   /** @param {string} testId @param {Object} data - Fields to update. */
   updateTest:   (testId, data)      => req("PATCH",  `/tests/${testId}`, data),
+
+  uploadTestFixture: (testId, payload) => req("POST", `/tests/${testId}/fixtures`, payload),
+  getTestFixtures: (testId) => req("GET", `/tests/${testId}/fixtures`),
+
   /** @param {string} projectId @param {Object} data - `{ name, steps }`. Saved as Draft. */
   createTest:   (projectId, data)   => req("POST",   `/projects/${projectId}/tests`, data),
   /**

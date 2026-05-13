@@ -58,6 +58,7 @@ import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
+import * as testFixtureRepo from "../database/repositories/testFixtureRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
@@ -108,6 +109,26 @@ const parseTags = (raw) => {
  * @param {string} desiredName
  * @returns {string} A name that doesn't collide with any existing test.
  */
+
+
+function parseCsvRows(text) {
+  const lines = String(text || "").trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cols = line.split(",");
+    const row = {};
+    headers.forEach((h, i) => { row[h] = (cols[i] || "").trim(); });
+    return row;
+  });
+}
+
+function clampIterationCap(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 10;
+  return Math.max(1, Math.min(100, Math.floor(n)));
+}
+
 function dedupeTestName(projectId, desiredName) {
   const base = String(desiredName || "").trim();
   if (!base) return base; // caller is responsible for never passing empty
@@ -210,6 +231,32 @@ router.get("/tests/:testId", (req, res) => {
 });
 
 // PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
+
+router.get("/tests/:testId/fixtures", (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  res.json(testFixtureRepo.listFixtures(test.id));
+});
+
+router.post("/tests/:testId/fixtures", requireRole("qa_lead"), (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const { format, rows, csvText, iterationCap } = req.body || {};
+  const cap = clampIterationCap(iterationCap ?? project.iterationCap);
+  let parsedRows = [];
+  if (format === "json") parsedRows = Array.isArray(rows) ? rows : [];
+  if (format === "csv") parsedRows = parseCsvRows(csvText);
+  if (!Array.isArray(parsedRows) || parsedRows.length === 0) return res.status(400).json({ error: "fixture rows required" });
+  const clampedRows = parsedRows.slice(0, cap);
+  const version = Number(test.codeVersion || 1);
+  const fixture = testFixtureRepo.upsertFixture({ testId: test.id, version, format, rows: clampedRows });
+  res.status(201).json({ ...fixture, capApplied: cap, truncated: parsedRows.length > clampedRows.length });
+});
+
 router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const validationErr = validateTestUpdate(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
