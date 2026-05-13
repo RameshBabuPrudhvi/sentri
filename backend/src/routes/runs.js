@@ -21,6 +21,7 @@ import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { encryptCredentials } from "../utils/credentialEncryption.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -44,6 +45,37 @@ import { fireNotifications } from "../utils/notifications.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
 
 const router = Router();
+
+/**
+ * DIF-012: Build an execution-only scoped project that overrides
+ * `project.url` and `project.credentials` with the selected environment.
+ * Identical contract to the helper in `routes/trigger.js` — kept inline
+ * here to avoid a cross-route import (both call sites are local).
+ *
+ * - `environment.credentials` is plaintext (env repo decrypts on read).
+ *   Re-encrypt before stamping onto the scoped project so the downstream
+ *   `decryptCredentials()` calls in `crawlBrowser.js:103` and
+ *   `stateExplorer.js:325` see the same shape as `project.credentials`.
+ * - `project.credentials` falls back when the env has no credentials of
+ *   its own — env-scoped runs against a public preview URL still inherit
+ *   the project's auth.
+ * - `canonicalUrl` preserves the original production URL so the
+ *   AUTO-015 baseline guard treats this as a preview-style crawl and
+ *   doesn't overwrite production fingerprints.
+ * - The project row in the DB is NEVER mutated.
+ *
+ * @param {Object} project
+ * @param {Object|null} environment
+ * @returns {Object}
+ */
+function envScopedProject(project, environment) {
+  if (!environment) return project;
+  let credentials = project.credentials;
+  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
+    credentials = encryptCredentials(environment.credentials);
+  }
+  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
+}
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
@@ -118,12 +150,13 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      // DIF-012: env override applies at execution only — project.url is
-      // preserved as canonicalUrl so the diff-aware baseline guard in
-      // crawler.js can detect this is an env-scoped crawl and skip
-      // replacing the production baselines.
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are preserved in the DB; only this run sees the
+      // override. envScopedProject also stamps `canonicalUrl` so the
+      // AUTO-015 diff-aware baseline guard treats this as a preview-style
+      // crawl and doesn't replace production baselines.
       (signal) => crawlAndGenerateTests(
-        environment ? { ...project, url: environment.baseUrl, canonicalUrl: project.url } : project,
+        envScopedProject(project, environment),
         run,
         { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
       ),
@@ -276,10 +309,11 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      // DIF-012: env override applies at execution only — project.url is
-      // unchanged in the DB; only this run's testRunner sees the override.
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are unchanged in the DB; only this run's
+      // testRunner sees the override.
       (signal) => runTests(
-        environment ? { ...project, url: environment.baseUrl, canonicalUrl: project.url } : project,
+        envScopedProject(project, environment),
         selectedTests,
         run,
         { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }
