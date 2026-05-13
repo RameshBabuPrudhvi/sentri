@@ -338,7 +338,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const { result, retryCount } = await executeWithRetries(async (attempt) => {
+        // The retry callback returns the *array* of iteration results (not a
+        // single result) so processResult fires exactly once per iteration of
+        // the final attempt — calling processResult inside the callback would
+        // double-count `run.passed` / `run.failed` on every retry and push
+        // `run.results.length` past `run.total`, corrupting quality-gate
+        // evaluation, the SSE progress bar, and the `run.retryCount` /
+        // `run.failedAfterRetry` aggregations below.
+        const { result: iterResults, retryCount } = await executeWithRetries(async (attempt) => {
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
@@ -349,36 +356,41 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           // indexed SELECT per attempt (1-3 max).
           const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
           const fixtureRows = fixture?.rows;
-          const iterResults = await executeTestIterations(
+          const attemptResults = await executeTestIterations(
             test,
             fixtureRows,
             (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
           );
-          // Surface every iteration to the run aggregator so failed rows are
-          // attributable in the UI and counted in `run.passed` / `run.failed`.
-          let lastResult = null;
-          for (const iterResult of iterResults) {
-            processResult(test, iterResult);
-            lastResult = iterResult;
-          }
+          const lastResult = attemptResults[attemptResults.length - 1] || null;
           // Retry semantics:
           //  - Fixture-less tests (single iteration): preserve the original
           //    contract — throw on failure so executeWithRetries reruns the
-          //    test up to MAX_TEST_RETRIES times.
+          //    test up to MAX_TEST_RETRIES times. Earlier attempts are
+          //    discarded; only the final attempt's results are surfaced.
           //  - Data-driven tests (≥1 fixture row): never retry. Retrying
           //    would re-execute every row (including the passes) on every
-          //    failure, multiplying browser work and double-counting results
-          //    in `run.passed`/`run.failed` via processResult above.
+          //    failure, multiplying browser work.
           if (!fixtureRows?.length && lastResult?.status === "failed") {
             const retryErr = new Error(lastResult.error || "Test failed");
             retryErr.result = lastResult;
+            // Stash the attempt's results so the catch block can surface
+            // them once after retries are exhausted (avoids double-emit).
+            retryErr.attemptResults = attemptResults;
             throw retryErr;
           }
-          return lastResult;
+          return attemptResults;
         }, MAX_TEST_RETRIES);
-        result.retryCount = retryCount;
-        result.failedAfterRetry = false;
-        structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
+        // Surface every iteration from the final attempt to the run
+        // aggregator — exactly once, after retries have fully resolved.
+        for (const iterResult of iterResults) {
+          iterResult.retryCount = retryCount;
+          iterResult.failedAfterRetry = false;
+          processResult(test, iterResult);
+        }
+        const finalResult = iterResults[iterResults.length - 1];
+        if (finalResult) {
+          structuredLog("test.result", { runId, testId: test.id, status: finalResult.status, durationMs: finalResult.durationMs });
+        }
       } catch (err) {
         // Build a synthetic result and route through processResult so SSE
         // `result` and `snapshot` events are emitted — otherwise the
@@ -396,6 +408,8 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           ? err.retryCount
           : MAX_TEST_RETRIES;
         errorResult.failedAfterRetry = true;
+        // processResult fires exactly once on exhaustion — earlier attempts
+        // were discarded inside the retry loop so we never double-count.
         processResult(test, errorResult);
       }
     }, signal);
