@@ -298,8 +298,9 @@ const _COL_MAP = buildColumnMap([
   "aiFixAppliedAt", "codeVersion",
   // tests — auto-approval provenance (migration 017, AUTO-003b)
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
-  // projects — auto-approval threshold (migration 017) + web-vitals budgets (migration 015)
-  "autoApproveThreshold", "webVitalsBudgets",
+  // projects — auto-approval threshold (migration 017) + web-vitals budgets
+  // (migration 015) + per-project fixture iteration cap (migration 023, CAP-001)
+  "autoApproveThreshold", "webVitalsBudgets", "iterationCap",
   // runs
   "startedAt", "finishedAt", "errorCategory", "pagesFound", "parallelWorkers",
   "tracePath", "videoPath", "videoSegments", "testQueue", "generateInput",

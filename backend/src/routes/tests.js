@@ -111,18 +111,79 @@ const parseTags = (raw) => {
  */
 
 
+/**
+ * CAP-001: parse RFC 4180-flavoured CSV into row objects keyed by the first
+ * line's headers. Supports double-quoted fields with embedded commas, CRLF
+ * newlines inside quoted fields, and `""` as an escaped double-quote.
+ *
+ * Intentionally not a full RFC 4180 implementation — we drop trailing blank
+ * lines and unquoted whitespace around delimiters because fixture CSVs are
+ * typically hand-edited or exported from spreadsheets where those quirks are
+ * the norm. Pulling in a CSV dependency would be overkill for this scope
+ * (see AGENT.md "Do not add large dependencies").
+ *
+ * @param {string} text
+ * @returns {Array<Object>} Rows; empty array when text has fewer than 2
+ *   non-empty logical lines (header + at least one data row).
+ */
 function parseCsvRows(text) {
-  const lines = String(text || "").trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const cols = line.split(",");
-    const row = {};
-    headers.forEach((h, i) => { row[h] = (cols[i] || "").trim(); });
-    return row;
+  const src = String(text || "");
+  if (!src.trim()) return [];
+
+  // Tokenise into fields/rows respecting quoted segments.
+  const rows = [];
+  let field = "";
+  let row = [];
+  let inQuotes = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') { inQuotes = true; continue; }
+    if (ch === ",") { row.push(field); field = ""; continue; }
+    if (ch === "\n" || ch === "\r") {
+      // Swallow paired \r\n as a single record separator
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = []; field = "";
+      continue;
+    }
+    field += ch;
+  }
+  // Flush the trailing record if the file didn't end with a newline.
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  // Drop fully-empty rows (blank trailing lines, double newlines).
+  const cleaned = rows.filter((r) => r.some((c) => String(c).trim() !== ""));
+  if (cleaned.length < 2) return [];
+
+  const headers = cleaned[0].map((h) => String(h).trim());
+  return cleaned.slice(1).map((cols) => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      const raw = cols[idx];
+      obj[h] = raw === undefined ? "" : String(raw).trim();
+    });
+    return obj;
   });
 }
 
+/**
+ * CAP-001: clamp the fixture iteration cap to the [1, 100] range. Default of
+ * 10 mirrors the per-project default documented in NEXT.md so a project
+ * without an explicit `iterationCap` row still gets bounded dispatch.
+ */
 function clampIterationCap(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 10;
@@ -246,16 +307,39 @@ router.post("/tests/:testId/fixtures", requireRole("qa_lead"), (req, res) => {
   const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const { format, rows, csvText, iterationCap } = req.body || {};
+  // Format must be in the same allowlist as the migration's CHECK constraint
+  // so a malformed write can't desync the persisted shape from the validator.
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "format must be 'csv' or 'json'" });
+  }
+  // Cap resolution order: per-request override → per-project setting → default
+  // 10. `clampIterationCap` enforces the [1, 100] hard ceiling regardless of
+  // source so a malformed row in `projects.iterationCap` can't exhaust the
+  // worker pool.
   const cap = clampIterationCap(iterationCap ?? project.iterationCap);
   let parsedRows = [];
   if (format === "json") parsedRows = Array.isArray(rows) ? rows : [];
   if (format === "csv") parsedRows = parseCsvRows(csvText);
-  if (!Array.isArray(parsedRows) || parsedRows.length === 0) return res.status(400).json({ error: "fixture rows required" });
+  if (!Array.isArray(parsedRows) || parsedRows.length === 0) {
+    return res.status(400).json({ error: "fixture rows required" });
+  }
   const clampedRows = parsedRows.slice(0, cap);
+  // Keep fixture versions aligned with `test.codeVersion` so an AI fix that
+  // bumps the test body invalidates stale fixtures (the runner reads the
+  // fixture for the new version, finds nothing, and falls back to single
+  // iteration — zero regression for fixture-less tests).
   const version = Number(test.codeVersion || 1);
   const fixture = testFixtureRepo.upsertFixture({ testId: test.id, version, format, rows: clampedRows });
-  res.status(201).json({ ...fixture, capApplied: cap, truncated: parsedRows.length > clampedRows.length });
+  res.status(201).json({
+    ...fixture,
+    capApplied: cap,
+    truncated: parsedRows.length > clampedRows.length,
+  });
 });
+
+// Exported for backend/tests/fixture-iteration.test.js so the CSV parser and
+// cap clamp can be exercised without spinning up an HTTP server.
+export const __testables = { parseCsvRows, clampIterationCap };
 
 router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const validationErr = validateTestUpdate(req.body);

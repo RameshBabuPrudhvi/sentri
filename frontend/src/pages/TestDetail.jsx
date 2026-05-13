@@ -24,6 +24,7 @@ import InlineCodeEditor from "../components/test/InlineCodeEditor.jsx";
 import CodePreviewPanel from "../components/test/CodePreviewPanel.jsx";
 import AiTestEditor from "../components/test/AiTestEditor.jsx";
 import TablePagination, { PAGE_SIZE } from "../components/shared/TablePagination.jsx";
+import TestFixturePanel from "../components/test/TestFixturePanel.jsx";
 
 function RunIcon({ status }) {
   if (status === "passed" || status === "completed")
@@ -661,6 +662,9 @@ export default function TestDetail() {
               />
             </Suspense>
           )}
+
+          {/* Fixture upload + history (CAP-001) */}
+          <TestFixturePanel testId={testId} codeVersion={Number(test.codeVersion || 1)} />
 
           {/* Recent Test Runs card */}
           <div className="card card-padded td-runs-table">

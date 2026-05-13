@@ -342,29 +342,39 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
+          // CAP-001: pull the fixture row-set keyed to this test's current
+          // codeVersion. Falsy → fixture-less single-iteration path (zero
+          // regression). On retries we re-resolve the fixture so a freshly
+          // uploaded fixture between attempts is picked up; the cost is one
+          // indexed SELECT per attempt (1-3 max).
           const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
+          const fixtureRows = fixture?.rows;
           const iterResults = await executeTestIterations(
             test,
-            fixture?.rows,
+            fixtureRows,
             (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
           );
-          let attemptResult = null;
+          // Surface every iteration to the run aggregator so failed rows are
+          // attributable in the UI and counted in `run.passed` / `run.failed`.
+          let lastResult = null;
           for (const iterResult of iterResults) {
             processResult(test, iterResult);
-            attemptResult = iterResult;
+            lastResult = iterResult;
           }
-          if (attemptResult?.status === "failed") {
-            const retryErr = new Error(attemptResult.error || "Test failed");
-            retryErr.result = attemptResult;
+          // Retry semantics:
+          //  - Fixture-less tests (single iteration): preserve the original
+          //    contract — throw on failure so executeWithRetries reruns the
+          //    test up to MAX_TEST_RETRIES times.
+          //  - Data-driven tests (≥1 fixture row): never retry. Retrying
+          //    would re-execute every row (including the passes) on every
+          //    failure, multiplying browser work and double-counting results
+          //    in `run.passed`/`run.failed` via processResult above.
+          if (!fixtureRows?.length && lastResult?.status === "failed") {
+            const retryErr = new Error(lastResult.error || "Test failed");
+            retryErr.result = lastResult;
             throw retryErr;
           }
-          return attemptResult;
-          if (attemptResult.status === "failed") {
-            const retryErr = new Error(attemptResult.error || "Test failed");
-            retryErr.result = attemptResult;
-            throw retryErr;
-          }
-          return attemptResult;
+          return lastResult;
         }, MAX_TEST_RETRIES);
         result.retryCount = retryCount;
         result.failedAfterRetry = false;
