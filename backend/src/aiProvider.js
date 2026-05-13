@@ -159,7 +159,13 @@ function getCompatConfig(provider) {
   // Read through the TTL cache to avoid hitting SQLite (decrypt + JSON.parse)
   // on every AI call.  Cache is write-through invalidated in apiKeyRepo and
   // coherent across processes via Redis pub/sub (utils/compatConfigCache.js).
-  return compatConfigCache.get(provider, () => apiKeyRepo.get(provider));
+  //
+  // Loader uses `getCompatSlot()` (not the generic `apiKeyRepo.get()`) so the
+  // compat-specific type guard runs — protects against a corrupted row
+  // returning a non-object (string / null / number) which would otherwise
+  // poison the cache and make `compat?.apiKey` lookups crash with a
+  // "cannot read properties of string" error far from the actual root cause.
+  return compatConfigCache.get(provider, () => apiKeyRepo.getCompatSlot(provider));
 }
 
 // Auto-detect order for cloud providers
