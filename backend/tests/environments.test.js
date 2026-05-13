@@ -36,7 +36,9 @@ async function main() {
 
     const rows = t.getDatabase().prepare("SELECT credentials FROM environments WHERE id = ?").get(environmentId);
     assert.ok(rows.credentials);
-    assert.equal(decryptCredentials(rows.credentials).username, "u");
+    // `credentials` is stored as a JSON string (see environmentRepo.envToRow);
+    // parse before handing to decryptCredentials, which expects an object.
+    assert.equal(decryptCredentials(JSON.parse(rows.credentials)).username, "u");
 
     out = await t.req(base, `/api/v1/projects/${projectId}/environments`, { token: qa.token });
     assert.equal(out.res.status, 200);
