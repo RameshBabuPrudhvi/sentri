@@ -411,3 +411,30 @@ Upload fixture data for a test version. Body: `{ format: "csv"|"json", csvText?:
 
 ### GET /api/v1/tests/:testId/fixtures
 Returns fixture history for the test, newest version first.
+
+## Environment management (DIF-012)
+
+### `GET /api/v1/projects/:id/environments`
+Returns environments for a project (`qa_lead+`).
+
+### `POST /api/v1/projects/:id/environments`
+Creates environment (`admin`):
+
+```json
+{ "name": "staging", "baseUrl": "https://staging.example.com", "credentials": { "username": "qa", "password": "secret" } }
+```
+
+### `PATCH /api/v1/projects/:id/environments/:environmentId`
+Updates `name`, `baseUrl`, or `credentials` (`admin`).
+
+### `DELETE /api/v1/projects/:id/environments/:environmentId`
+Deletes an environment (`admin`).
+
+### Run payload
+`POST /api/v1/projects/:id/run` and trigger routes accept optional:
+
+```json
+{ "environmentId": "ENV-..." }
+```
+
+When provided, the run executes against the selected environment `baseUrl` only for that run; `project.url` remains unchanged.

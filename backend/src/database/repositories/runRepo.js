@@ -92,6 +92,7 @@ const INSERT_COLS = [
   "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary (migration 022)
   "githubCheck", // INT-002: GitHub Check Run metadata (migration 021)
   "budgetMinutes", // AUTO-001: wall-clock budget applied to dispatch queue (migration 021)
+  "environmentId", // DIF-012: optional project environment scope (migration 024)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -107,6 +108,7 @@ const LEAN_COLS = [
   "networkCondition", // AUTO-006 — surfaces network-condition badge on runs list without a second query
   "gateResult", // AUTO-012 — surfaces gate badge on runs list without a second query
   "webVitalsResult", // AUTO-017 — surfaces vitals status without second query
+  "environmentId", // DIF-012 — environment badge on runs list
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;

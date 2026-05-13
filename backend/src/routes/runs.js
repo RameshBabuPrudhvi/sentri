@@ -20,6 +20,7 @@
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -81,6 +82,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     pagesFound: 0,
     generateInput: validatedDials ? { dialsConfig: validatedDials } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 
@@ -219,6 +221,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     })),
     budgetMinutes: safeBudget,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 

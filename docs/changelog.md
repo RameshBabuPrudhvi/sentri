@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **DIF-012 (partial)**: Added backend environment model foundation: new `environments` table + `runs.environmentId` migration (`024_environments.sql`), project-scoped environment CRUD endpoints, RBAC entries, run/trigger `environmentId` acceptance, and run URL override-at-execution (without mutating `project.url`). Added backend integration coverage in `backend/tests/environments.test.js`.
 ### Added
 - **CAP-001 — Data-driven test fixtures**: Upload CSV / JSON fixture rows per test version and execute per-row iterations. Each iteration result carries `iterationIndex` + a `fixtureRow` snapshot so failures are attributable to a specific row (acceptance criterion: a 5-row CSV always produces 5 iteration results — failures no longer short-circuit subsequent rows).
   - **Schema**: new `test_fixtures(testId, version, format, rows, createdAt)` table keyed on `(testId, version)` (migration `023_test_fixtures.sql`); `format` constrained to `'csv' | 'json'` via a single-quoted CHECK literal so the migration parses on both SQLite and Postgres. Per-project iteration cap added as `projects.iterationCap INTEGER` in the same migration (default 10, hard server ceiling 100 — `clampIterationCap` enforces the [1, 100] range regardless of source so a malformed write can't exhaust the worker pool).

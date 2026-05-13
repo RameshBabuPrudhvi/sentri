@@ -559,7 +559,13 @@ export const api = {
    */
   deleteSchedule: (projectId) => req("DELETE", `/projects/${projectId}/schedule`),
 
-  // ── Dashboard ───────────────────────────────────────────────────────────────
+  
+  // ── Environments (DIF-012) ───────────────────────────────────────────────
+  getProjectEnvironments: (projectId) => req("GET", `/projects/${projectId}/environments`),
+  createProjectEnvironment: (projectId, payload) => req("POST", `/projects/${projectId}/environments`, payload),
+  updateProjectEnvironment: (projectId, environmentId, payload) => req("PATCH", `/projects/${projectId}/environments/${environmentId}`, payload),
+  deleteProjectEnvironment: (projectId, environmentId) => req("DELETE", `/projects/${projectId}/environments/${environmentId}`),
+// ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
 

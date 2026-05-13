@@ -19,6 +19,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
@@ -152,6 +153,7 @@ function buildTestRun({
   githubCheck = null,
   changedFiles = [],
   impactAnalysis = null,
+  environmentId = null,
 }) {
   const lookup = riskById || new Map();
   const initialResults = [
@@ -196,6 +198,7 @@ function buildTestRun({
     githubCheck,
     changedFiles,
     impactAnalysis,
+    environmentId,
   };
 }
 
@@ -400,6 +403,12 @@ async function resolveChangedFiles(project, body, runId) {
  */
 async function handleTrigger(req, res) {
   const { triggerToken: tokenRow, triggerProject: project } = req;
+
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
 
   // ── 3. Extract and validate optional config (async) ────────────────
   // callbackUrl validation includes DNS resolution, so it must happen
@@ -620,7 +629,7 @@ async function handleTrigger(req, res) {
       // check sees preview === preview (both sides equal because project.url
       // was already overridden) and silently destroys the real fingerprints.
       ? crawlAndGenerateTests(
-          { ...project, url: previewUrl || project.url, canonicalUrl: project.url },
+          { ...project, url: previewUrl || environment?.baseUrl || project.url, canonicalUrl: project.url },
           run,
           { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
         )
@@ -811,7 +820,7 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
     // Without this, production baselines would be overwritten with
     // preview-URL fingerprints every time a deployment webhook fires.
     (signal) => crawlAndGenerateTests(
-      { ...project, url: previewUrl, canonicalUrl: project.url },
+      { ...project, url: previewUrl || environment?.baseUrl || project.url, canonicalUrl: project.url },
       run,
       { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
     ),
