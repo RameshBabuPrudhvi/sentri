@@ -29,7 +29,7 @@
  */
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
-import { executeTest } from "./runner/executeTest.js";
+import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
@@ -343,17 +343,15 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
           const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
-          const fixtureRows = Array.isArray(fixture?.rows) && fixture.rows.length ? fixture.rows : [null];
+          const iterResults = await executeTestIterations(
+            test,
+            fixture?.rows,
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
+          );
           let attemptResult = null;
-          for (let iterationIndex = 0; iterationIndex < fixtureRows.length; iterationIndex++) {
-            const fixtureRow = fixtureRows[iterationIndex];
-            const iterTest = fixtureRow ? { ...test, playwrightCode: Object.entries(fixtureRow).reduce((code, [k,v]) => String(code || "").replaceAll(`{{${k}}}`, String(v ?? "")), test.playwrightCode || "") } : test;
-            const iterResult = await executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
-            iterResult.iterationIndex = fixtureRow ? iterationIndex : undefined;
-            if (fixtureRow) iterResult.fixtureRow = fixtureRow;
+          for (const iterResult of iterResults) {
             processResult(test, iterResult);
             attemptResult = iterResult;
-            if (iterResult.status === "failed") break;
           }
           if (attemptResult?.status === "failed") {
             const retryErr = new Error(attemptResult.error || "Test failed");

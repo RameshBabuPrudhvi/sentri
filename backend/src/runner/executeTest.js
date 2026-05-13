@@ -623,3 +623,21 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
 
   return result;
 }
+
+
+export async function executeTestIterations(test, fixtureRows, runSingle) {
+  const rows = Array.isArray(fixtureRows) && fixtureRows.length ? fixtureRows : [null];
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const iterTest = row
+      ? { ...test, playwrightCode: Object.entries(row).reduce((code, [k, v]) => String(code || "").replaceAll(`{{${k}}}`, String(v ?? "")), test.playwrightCode || "") }
+      : test;
+    const iterResult = await runSingle(iterTest);
+    iterResult.iterationIndex = row ? i : undefined;
+    if (row) iterResult.fixtureRow = row;
+    out.push(iterResult);
+    if (iterResult.status === "failed") break;
+  }
+  return out;
+}
