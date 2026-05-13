@@ -3,6 +3,8 @@
  * @description Markdown renderers and regression diff helpers for run results.
  */
 
+import { isNonExecutedSkip } from "./skipReasons.js";
+
 const GREEN_STATUSES = new Set(["passed", "warning"]);
 const FAIL_STATUSES = new Set(["failed", "error"]);
 export const BASE_LOOKBACK_RUNS = 25;
@@ -134,8 +136,25 @@ export function renderGithubCheckSummary(run, { baseRun = null, runUrl = "" } = 
   const { tests: regressed, fallback } = getRegressedFailures(run, baseRun);
   const gateViolations = collectGateViolations(run);
   const vitalsViolations = collectVitalsViolations(run);
+  // AUTO-001 / AUTO-004: the GitHub Check summary must report the *executed*
+  // total, not the approved-test total — otherwise a run with 10 approved /
+  // 5 impact-skipped / 5 passed shows "5 passed, 0 failed, 10 total" on the
+  // PR check (half the tests look like they vanished). Mirror the
+  // `evaluateQualityGates()` denominator in `backend/src/testRunner.js` and
+  // the `passRateDenominator` in `frontend/src/pages/RunDetail.jsx` so the
+  // three surfaces (UI badge, gate verdict, PR check summary) agree on the
+  // same run. Surface the skipped count separately when present so the
+  // approved-test slice is still auditable from the PR check.
+  const rawTotal = Number(run?.total || 0);
+  const skippedNonExecuted = Array.isArray(run?.results)
+    ? run.results.filter(isNonExecutedSkip).length
+    : 0;
+  const executedTotal = Math.max(0, rawTotal - skippedNonExecuted);
+  const headerSkippedSuffix = skippedNonExecuted > 0
+    ? `, **${skippedNonExecuted} skipped** (of ${rawTotal} approved)`
+    : "";
   const lines = [
-    `**Sentri QA** completed with **${run?.passed || 0} passed**, **${run?.failed || 0} failed**, **${run?.total || 0} total**.`,
+    `**Sentri QA** completed with **${run?.passed || 0} passed**, **${run?.failed || 0} failed**, **${executedTotal} total**${headerSkippedSuffix}.`,
   ];
   if (runUrl) lines.push(``, `[Open Run Detail](${runUrl})`);
   lines.push("", "### Regressed tests");

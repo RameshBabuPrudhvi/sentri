@@ -3,7 +3,8 @@
  * @description Run CRUD backed by SQLite.
  *
  * JSON columns: tests, results, testQueue, generateInput, promptAudit,
- * pipelineStats, feedbackLoop, videoSegments, qualityAnalytics.
+ * pipelineStats, feedbackLoop, videoSegments, qualityAnalytics,
+ * changedPages, removedPages, changedFiles, impactAnalysis, githubCheck.
  *
  * Log lines are stored in the `run_logs` table (ENH-008) — not in a
  * `logs` JSON column.  {@link getById} hydrates `run.logs` from
@@ -34,6 +35,7 @@ const JSON_FIELDS = [
   "promptAudit", "pipelineStats", "feedbackLoop", "videoSegments",
   "qualityAnalytics", "pages", "gateResult", "webVitalsResult",
   "changedPages", "removedPages", // AUTO-002: diff-aware crawl page-change summary
+  "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary
   "githubCheck", // INT-002: GitHub Check Run metadata
 ];
 
@@ -87,6 +89,7 @@ const INSERT_COLS = [
   "webVitalsResult", // AUTO-017: web vitals budget pass/fail summary
   "secretScanBlocked", // CAP-003: set when post-generation secret scanner rejects any test (migration 015)
   "changedPages", "removedPages", // AUTO-002: diff-aware crawl page-change summary (migration 020)
+  "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary (migration 022)
   "githubCheck", // INT-002: GitHub Check Run metadata (migration 021)
   "budgetMinutes", // AUTO-001: wall-clock budget applied to dispatch queue (migration 021)
 ];

@@ -293,6 +293,38 @@ export async function getInstallationRepos(installationId, options = {}) {
 }
 
 /**
+ * List file paths changed by a pull request using the GitHub PR Files API.
+ *
+ * @param {Object} args
+ * @param {string} args.repo
+ * @param {number|string} args.prNumber
+ * @param {string|number} args.installationId
+ * @param {Object} [options]
+ * @param {Function} [options.fetchImpl]
+ * @returns {Promise<string[]>}
+ */
+export async function getChangedFilesForPr({ repo, prNumber, installationId }, options = {}) {
+  const { owner, name } = parseRepo(repo);
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0) throw new Error("GitHub prNumber must be a positive integer");
+  const token = await getInstallationToken(installationId, options);
+  const fetchImpl = options.fetchImpl || fetch;
+  const files = [];
+  let page = 1;
+  while (page <= 10) {
+    const data = await githubFetch(`/repos/${owner}/${name}/pulls/${n}/files?per_page=100&page=${page}`, {
+      token,
+      fetchImpl,
+    });
+    const batch = Array.isArray(data) ? data : [];
+    files.push(...batch.map((f) => f?.filename).filter(Boolean));
+    if (batch.length < 100) break;
+    page++;
+  }
+  return [...new Set(files)];
+}
+
+/**
  * Create a queued GitHub Check Run.
  *
  * @param {string} runId

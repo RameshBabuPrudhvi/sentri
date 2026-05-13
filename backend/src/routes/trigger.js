@@ -34,7 +34,8 @@ import { requireTrigger } from "../middleware/authenticate.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { validateUrl, safeFetch } from "../utils/ssrfGuard.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
-import { createPending, markInProgress, conclude, buildRunUrl } from "../integrations/githubChecks.js";
+import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
+import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 
@@ -131,20 +132,49 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
  * @param {object} args.project - must carry `id` and (optionally) `workspaceId`.
  * @param {object[]} args.tests - The full approved-test set (persisted order).
  * @param {object[]} [args.budgetSkipped] - Tests truncated by `budgetMinutes`.
+ * @param {object[]} [args.impactSkipped] - Tests skipped by impact analysis.
  * @param {Map<string, number>} [args.riskById] - testId → riskScore lookup.
  * @param {number|null} [args.budgetMinutes] - Normalized budget actually applied.
+ * @param {string[]} [args.changedFiles] - Git diff files used for impact analysis.
+ * @param {Object|null} [args.impactAnalysis] - Resolved impact-analysis summary.
  * @param {number} args.parallelWorkers
  * @returns {object} the run record ready for `runRepo.create()`.
  */
-function buildTestRun({ runId, project, tests, budgetSkipped = [], riskById, budgetMinutes = null, parallelWorkers, githubCheck = null }) {
+function buildTestRun({
+  runId,
+  project,
+  tests,
+  budgetSkipped = [],
+  impactSkipped = [],
+  riskById,
+  budgetMinutes = null,
+  parallelWorkers,
+  githubCheck = null,
+  changedFiles = [],
+  impactAnalysis = null,
+}) {
   const lookup = riskById || new Map();
-  const initialResults = budgetSkipped.map((t) => ({
-    testId: t.id,
-    testName: t.name,
-    status: "skipped",
-    skipReason: "over_budget",
-    riskScore: t.riskScore,
-  }));
+  const initialResults = [
+    ...impactSkipped.map((t) => ({
+      testId: t.id,
+      testName: t.name,
+      status: "skipped",
+      skipReason: "skipped_no_impact",
+      // AUTO-004: `impactSkipped` is sourced from the raw approved-tests
+      // array (no `riskScore` attached). Look up the score from the
+      // risk-ordered queue when available so persisted skip rows mirror
+      // the budget-skipped shape; fall back to `null` to keep the column
+      // present rather than `undefined` (which JSON-drops the field).
+      riskScore: lookup.get(t.id) ?? null,
+    })),
+    ...budgetSkipped.map((t) => ({
+      testId: t.id,
+      testName: t.name,
+      status: "skipped",
+      skipReason: "over_budget",
+      riskScore: t.riskScore,
+    })),
+  ];
   return {
     id: runId,
     projectId: project.id,
@@ -164,6 +194,8 @@ function buildTestRun({ runId, project, tests, budgetSkipped = [], riskById, bud
     budgetMinutes,
     workspaceId: project.workspaceId || null,
     githubCheck,
+    changedFiles,
+    impactAnalysis,
   };
 }
 
@@ -298,6 +330,35 @@ async function concludeGithubCheck(finishedRun, project) {
   }
 }
 
+function normalizeChangedFiles(values) {
+  if (!Array.isArray(values)) return null;
+  return [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))];
+}
+
+async function resolveChangedFiles(project, body, runId) {
+  const override = normalizeChangedFiles(body?.changedFiles);
+  if (override) return { changedFiles: override, fallbackReason: null };
+
+  const payload = normalizeGithubPayload(body || {});
+  if (!payload.repo || !payload.prNumber) return { changedFiles: null, fallbackReason: "no_changed_files" };
+  const settings = githubCheckSettingsRepo.getByProjectId(project.id);
+  if (!settings?.installationId) return { changedFiles: null, fallbackReason: "no_changed_files" };
+
+  try {
+    return {
+      changedFiles: await getChangedFilesForPr({
+        repo: payload.repo,
+        prNumber: payload.prNumber,
+        installationId: settings.installationId,
+      }),
+      fallbackReason: null,
+    };
+  } catch (err) {
+    console.error(formatLogLine("warn", runId, `[impact-analysis] Failed to fetch GitHub PR files: ${err.message}`));
+    return { changedFiles: null, fallbackReason: "github_fetch_failed" };
+  }
+}
+
 /**
  * POST /api/projects/:id/trigger
  * Token-authenticated endpoint for CI/CD pipelines (ENH-011).
@@ -403,6 +464,20 @@ async function handleTrigger(req, res) {
     }
   }
 
+  // ── 3c. Resolve git-diff changed files (async) ───────────────────────
+  // AUTO-004: `resolveChangedFiles` may hit the GitHub PR Files API, which
+  // is an async network call. It MUST happen BEFORE the synchronous
+  // concurrent-run guard below — same TOCTOU rationale as the callbackUrl
+  // / previewUrl validation above. An await between the guard and
+  // `runRepo.create()` would yield the event loop and let a second
+  // concurrent request slip past the guard, creating duplicate runs.
+  const triggerCrawl = req.body?.triggerCrawl === true;
+  const previewUrl = typeof req.body?.previewUrl === "string" ? req.body.previewUrl : null;
+  const runId = generateRunId();
+  const { changedFiles, fallbackReason: changedFilesFallback } = triggerCrawl
+    ? { changedFiles: null, fallbackReason: "crawl_run" }
+    : await resolveChangedFiles(project, req.body || {}, runId);
+
   // ── 4. Guard: no concurrent run ───────────────────────────────────────
   // From here to runRepo.create() the code is fully synchronous, so no
   // other request can interleave and pass the same guard.
@@ -414,8 +489,6 @@ async function handleTrigger(req, res) {
     });
   }
 
-  const triggerCrawl = req.body?.triggerCrawl === true;
-  const previewUrl = typeof req.body?.previewUrl === "string" ? req.body.previewUrl : null;
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
   // AUTO-001: risk-ordered + budget-capped dispatch set. `tests` (approved order)
@@ -435,9 +508,32 @@ async function handleTrigger(req, res) {
   const latestCrawl = runRepo.getLatestCrawlWithChangedPages(project.id);
   const changedPages = (latestCrawl?.changedPages || []).map((p) => p?.url || p).filter(Boolean);
   const safeBudget = normalizeBudgetMinutes(budgetMinutes);
-  const riskOrderedTests = orderTestsByRisk(tests, history, { changedPages });
+  const routeMap = req.body?.routeMap && typeof req.body.routeMap === "object" && !Array.isArray(req.body.routeMap)
+    ? req.body.routeMap
+    : {};
+  const impact = computeImpactedTests({ tests, changedFiles, changedPages, routeMap });
+  if (changedFilesFallback === "github_fetch_failed") impact.fallbackReason = "github_fetch_failed";
+  const impactedIdSet = new Set(impact.impactedTestIds);
+  const impactScopedTests = impact.fallbackReason === "no_changed_files" || impact.fallbackReason === "github_fetch_failed"
+    ? tests
+    : tests.filter((t) => impactedIdSet.has(t.id));
+  const riskOrderedTests = orderTestsByRisk(impactScopedTests, history, { changedPages, changedFiles: changedFiles || [], routeMap });
   const { kept: selectedTests, skipped: budgetSkipped } = applyBudgetToQueue(riskOrderedTests, safeBudget);
   const riskById = new Map(riskOrderedTests.map((t) => [t.id, t.riskScore]));
+  // AUTO-004: seed `skipped_no_impact` markers for every approved test that
+  // wasn't dispatched. This covers BOTH the full no-impact case
+  // (`fallbackReason === "no_impact"` — zero matches) AND the partial-match
+  // case (`fallbackReason === null` — some matches, some not). Without the
+  // partial-match branch, non-impacted tests would be silently dropped from
+  // the run (filtered out at `impactScopedTests` above but never recorded
+  // as a resolution), violating the AGENT.md "every approved test gets a
+  // resolution" rule and breaking the pass-rate denominator. Skipped only
+  // when the run is full-suite (`no_changed_files` / `github_fetch_failed`
+  // / `crawl_run`) where every test is dispatched.
+  const impactSkipped = !triggerCrawl
+    && (impact.fallbackReason === "no_impact" || impact.fallbackReason === null)
+    ? tests.filter((t) => !impactedIdSet.has(t.id))
+    : [];
   if (!triggerCrawl) {
     if (!allTests.length) return res.status(400).json({ error: "No tests found — crawl first." });
     if (!tests.length) return res.status(400).json({ error: "No approved tests — review generated tests before triggering." });
@@ -447,10 +543,20 @@ async function handleTrigger(req, res) {
   // One canonical builder per run type. Both shapes match the equivalents
   // in `routes/runs.js` so test_run / crawl runs created via this endpoint
   // are byte-identical to the ones POST /run and POST /crawl produce.
-  const runId = generateRunId();
   const run = triggerCrawl
     ? buildCrawlRun({ runId, project, dialsConfig: validatedDials })
-    : buildTestRun({ runId, project, tests, budgetSkipped, riskById, budgetMinutes: safeBudget, parallelWorkers });
+    : buildTestRun({
+        runId,
+        project,
+        tests,
+        budgetSkipped,
+        impactSkipped,
+        riskById,
+        budgetMinutes: safeBudget,
+        parallelWorkers,
+        changedFiles: changedFiles || [],
+        impactAnalysis: impact,
+      });
   runRepo.create(run);
 
   if (!triggerCrawl) {
@@ -482,7 +588,7 @@ async function handleTrigger(req, res) {
     workspaceId: project.workspaceId,
     detail: triggerCrawl
       ? `CI/CD triggered crawl${previewUrl ? ` — ${previewUrl}` : ""}`
-      : `CI/CD triggered test run — ${selectedTests.length} of ${tests.length} test${tests.length !== 1 ? "s" : ""}${budgetSkipped.length ? ` (${budgetSkipped.length} skipped over budget)` : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
+      : `CI/CD triggered test run — ${selectedTests.length} of ${tests.length} test${tests.length !== 1 ? "s" : ""}${impactSkipped.length ? ` (${impactSkipped.length} skipped no impact)` : ""}${budgetSkipped.length ? ` (${budgetSkipped.length} skipped over budget)` : ""}${parallelWorkers > 1 ? ` (${parallelWorkers}x parallel)` : ""}`,
     status: "running",
   });
 

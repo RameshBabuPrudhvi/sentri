@@ -45,6 +45,7 @@ import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
+import { isNonExecutedSkip } from "./utils/skipReasons.js";
 
 
 function evaluateQualityGates(gates, run) {
@@ -58,18 +59,19 @@ function evaluateQualityGates(gates, run) {
   if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
   if (Object.keys(gates).length === 0) return null;
   const violations = [];
-  // AUTO-001: `run.total` reflects the approved-test set (audit fidelity),
-  // but budget-skipped tests never executed — they shouldn't dilute the
-  // pass-rate denominator. Exclude them so a `minPassRate: 80%` gate doesn't
-  // falsely fail when budget truncation happens to skip tests that would
-  // otherwise have passed. Mirrors the dispatched-count semantics that
-  // `trackTelemetry("run.started", { tests: selectedTests.length, ... })`
-  // and the activity-log detail string already use.
+  // AUTO-001 / AUTO-004: `run.total` reflects the approved-test set (audit
+  // fidelity), but skipped tests never executed — they shouldn't dilute the
+  // pass-rate denominator. Exclude both `over_budget` (AUTO-001) and
+  // `skipped_no_impact` (AUTO-004) so a `minPassRate: 80%` gate doesn't
+  // falsely fail when budget truncation or impact analysis happens to skip
+  // tests that would otherwise have passed. Must stay in sync with the
+  // frontend denominator at `frontend/src/pages/RunDetail.jsx` —
+  // `passRateDenominator = total - skippedOverBudget - skippedNoImpact`.
   const rawTotal = Number(run.total || 0);
-  const budgetSkipped = Array.isArray(run.results)
-    ? run.results.filter((r) => r?.status === "skipped" && r?.skipReason === "over_budget").length
+  const skippedNonExecuted = Array.isArray(run.results)
+    ? run.results.filter(isNonExecutedSkip).length
     : 0;
-  const total = Math.max(0, rawTotal - budgetSkipped);
+  const total = Math.max(0, rawTotal - skippedNonExecuted);
   const failed = Number(run.failed || 0);
   const passed = Number(run.passed || 0);
   const passRate = total > 0 ? (passed / total) * 100 : 100;

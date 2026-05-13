@@ -1,13 +1,16 @@
 /**
  * @module pipeline/riskScorer
  * @description Pure functions for AUTO-001 risk-based ordering and budget truncation.
- * No DB access — callers pass in `runHistory`, `changedPages`, etc.
+ * No DB access — callers pass in `runHistory`, `changedPages`, `changedFiles`, etc.
  *
  * Returned arrays preserve the *input* test objects untouched; only a `riskScore`
  * (and `skipReason` from `applyBudgetToQueue`) is added. Callers that need the
  * original approved-test order for audit/persistence should keep their input
  * array around — these helpers do not mutate it.
  */
+
+import { routePrefixesForChangedFiles } from "./impactAnalysis.js";
+import { isNonExecutedSkip } from "../utils/skipReasons.js";
 
 /** Server-side cap on the `budgetMinutes` request param to bound worker pool exposure. */
 export const MAX_BUDGET_MINUTES = 240;
@@ -46,14 +49,21 @@ export function isSmokeTest(test) {
  * at the callers (or sorting inside the scorer) would work too but costs an
  * O(n) per test; honouring the source order here is free.
  */
-export function scoreTestRisk(test, runHistory = [], { now = Date.now(), changedPages = [] } = {}) {
+export function scoreTestRisk(test, runHistory = [], { now = Date.now(), changedPages = [], changedFiles = [], routeMap = {} } = {}) {
   let score = 0;
-  // Exclude budget-skipped rows from the history: they reflect a dispatch
-  // decision (the test never ran), not an execution outcome. Counting them
-  // as failures would give a previously budget-skipped test a near-maximum
-  // risk score on the next run and corrupt the ranking across runs.
+  // Exclude dispatch-time skipped rows from the history: a skip reflects a
+  // dispatch decision (the test never ran), not an execution outcome.
+  // Counting any non-executed skip kind — `over_budget` (AUTO-001) or
+  // `skipped_no_impact` (AUTO-004) — as a failure would give a previously
+  // skipped test a near-maximum risk score on the next run and corrupt the
+  // ranking across runs. Routed through `isNonExecutedSkip`
+  // (`backend/src/utils/skipReasons.js`) — the same predicate used by
+  // `testRunner.js`, `runResultFormatters.js`, and `runWorker.js` — so a
+  // future skip kind that DOES represent an execution outcome (e.g. a
+  // planned `dependency_failed` reason) automatically counts here without a
+  // fourth site edit.
   const rows = runHistory.filter(
-    (r) => r?.testId === test.id && !(r.status === "skipped" && r.skipReason === "over_budget"),
+    (r) => r?.testId === test.id && !isNonExecutedSkip(r),
   );
   // Newest-first window: take the head, not the tail. The previous
   // `slice(-10)` + `at(-1)` shape silently inverted the bonus — a test that
@@ -76,6 +86,11 @@ export function scoreTestRisk(test, runHistory = [], { now = Date.now(), changed
 
   const sourceUrl = String(test?.sourceUrl || "");
   if (sourceUrl && changedPages.some((p) => sourceUrl.startsWith(String(p)))) score += 15;
+  const filePrefixes = routePrefixesForChangedFiles(changedFiles, routeMap);
+  if (sourceUrl && filePrefixes.some((p) => {
+    const path = (() => { try { return new URL(sourceUrl).pathname; } catch { return sourceUrl; } })();
+    return path === p || path.startsWith(p.endsWith("/") ? p : `${p}/`);
+  })) score += 10;
 
   return Number(score.toFixed(2));
 }

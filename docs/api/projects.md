@@ -139,12 +139,16 @@ Token-authenticated endpoint for CI/CD pipelines. By default, starts a test run 
   "dialsConfig": { "parallelWorkers": 2 },
   "callbackUrl": "https://ci.example.com/hooks/sentri",
   "triggerCrawl": false,
-  "previewUrl": "https://preview-deploy.example.com"
+  "previewUrl": "https://preview-deploy.example.com",
+  "changedFiles": ["src/checkout/CartPage.tsx"],
+  "routeMap": { "src/components/CheckoutButton.tsx": ["/checkout"] }
 }
 ```
 
 - `triggerCrawl` — When `true`, dispatches a diff-aware crawl (only changed pages flow through generation) instead of a regression run. The run is created with `type: "crawl"` and emits `crawl.start` / `crawl.complete` activity rows. Default: `false`.
 - `previewUrl` — Optional preview-deployment URL to crawl instead of the project's canonical URL. SSRF-validated (loopback / RFC1918 rejected unless `ALLOW_PRIVATE_URLS` is set). When set, the project's production baselines are preserved; only the diff is computed and reported. Ignored when `triggerCrawl` is `false`.
+- `changedFiles` — Optional git diff file list for AUTO-004 impact analysis. When supplied (or when the GitHub webhook can fetch PR files), Sentri maps files to URL routes and runs only impacted approved tests. Empty or absent arrays keep the current full-suite behaviour; unknown docs/config/migration-only diffs mark approved tests as `status: "skipped"` with `skipReason: "skipped_no_impact"` instead of running the full suite.
+- `routeMap` — Optional file-to-route override object for monorepos or shared component folders, e.g. `{ "src/components/CheckoutButton.tsx": ["/checkout"] }`.
 
 **Response `202 Accepted`:**
 ```json
@@ -298,6 +302,8 @@ Flat alternative (CI scripts that don't forward the raw GitHub payload):
 ```json
 { "repo": "acme/app", "sha": "abc123…", "baseSha": "def456…", "prNumber": 42 }
 ```
+
+When `pull_request.number` / `prNumber` is present and the project has a GitHub App `installationId`, Sentri fetches `GET /repos/{owner}/{repo}/pulls/{number}/files` best-effort and persists the normalized file list on `run.changedFiles`. GitHub API failures are logged and fall back to the full suite; they never block a run.
 
 **Response `202 Accepted`:**
 ```json
