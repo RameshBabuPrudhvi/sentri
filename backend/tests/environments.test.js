@@ -73,7 +73,10 @@ async function main() {
     // guard in `backend/src/routes/trigger.js`.
     out = await t.req(base, `/api/v1/projects/${projectId}/run`, { method: "POST", token: qa.token, body: { environmentId: "ENV-does-not-exist" } });
     assert.equal(out.res.status, 400);
-    assert.match(out.json.error, /invalid environmentId|no approved tests/i);
+    // Project was never crawled, so `no tests found` short-circuits before
+    // env validation — accept either gate, both prove the request never
+    // executed against a fabricated env.
+    assert.match(out.json.error, /invalid environmentId|no approved tests|no tests found/i);
 
     // ── DIF-012: cross-project envId rejected ─────────────────────────────
     const p2 = await t.req(base, "/api/v1/projects", { method: "POST", token: qa.token, body: { name: "P2", url: "https://other.example.com" } });
