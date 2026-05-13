@@ -29,7 +29,7 @@
  */
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
-import { executeTest } from "./runner/executeTest.js";
+import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
@@ -41,6 +41,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
@@ -337,22 +338,86 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const { result, retryCount } = await executeWithRetries(async (attempt) => {
+        // The retry callback returns the *array* of iteration results (not a
+        // single result) so processResult fires exactly once per iteration of
+        // the final attempt — calling processResult inside the callback would
+        // double-count `run.passed` / `run.failed` on every retry and push
+        // `run.results.length` past `run.total`, corrupting quality-gate
+        // evaluation, the SSE progress bar, and the `run.retryCount` /
+        // `run.failedAfterRetry` aggregations below.
+        const { result: iterResults, retryCount } = await executeWithRetries(async (attempt) => {
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
-          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
-          if (attemptResult.status === "failed") {
-            const retryErr = new Error(attemptResult.error || "Test failed");
-            retryErr.result = attemptResult;
+          // CAP-001: pull the fixture row-set keyed to this test's current
+          // codeVersion. Falsy → fixture-less single-iteration path (zero
+          // regression). On retries we re-resolve the fixture so a freshly
+          // uploaded fixture between attempts is picked up; the cost is one
+          // indexed SELECT per attempt (1-3 max).
+          const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
+          const fixtureRows = fixture?.rows;
+          const attemptResults = await executeTestIterations(
+            test,
+            fixtureRows,
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
+          );
+          const lastResult = attemptResults[attemptResults.length - 1] || null;
+          // Retry semantics:
+          //  - Fixture-less tests (single iteration): preserve the original
+          //    contract — throw on failure so executeWithRetries reruns the
+          //    test up to MAX_TEST_RETRIES times. Earlier attempts are
+          //    discarded; only the final attempt's results are surfaced.
+          //  - Data-driven tests (≥1 fixture row): never retry. Retrying
+          //    would re-execute every row (including the passes) on every
+          //    failure, multiplying browser work. A visible log line keeps
+          //    the suppression explicit — otherwise a failed data-driven
+          //    test looks identical to a fixture-less retry exhaustion in
+          //    the run timeline, masking the design choice from reviewers.
+          // Log the retry-skip when *any* iteration failed, not just the
+          // last one — an intermediate row failure with a passing tail row
+          // would otherwise silently drop the message and break QA
+          // acceptance criterion #18 in `QA.md`.
+          const failedRows = attemptResults.filter((r) => r?.status === "failed").length;
+          if (fixtureRows?.length && failedRows > 0) {
+            logWarn(run, `↻ Skipping retry for ${test.name} — ${failedRows}/${attemptResults.length} fixture iteration(s) failed (data-driven tests don't retry)`);
+          }
+          if (!fixtureRows?.length && lastResult?.status === "failed") {
+            const retryErr = new Error(lastResult.error || "Test failed");
+            retryErr.result = lastResult;
+            // Stash the attempt's results so the catch block can surface
+            // them once after retries are exhausted (avoids double-emit).
+            retryErr.attemptResults = attemptResults;
             throw retryErr;
           }
-          return attemptResult;
+          return attemptResults;
         }, MAX_TEST_RETRIES);
-        result.retryCount = retryCount;
-        result.failedAfterRetry = false;
-        structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
-        processResult(test, result);
+        // CAP-001: `run.total` is initialised at the route layer to
+        // `tests.length` (`backend/src/routes/runs.js:209`) — i.e. one slot
+        // per *test*. Data-driven tests fan out into N iteration results
+        // and each iteration increments `run.passed` / `run.failed` via
+        // `processResult` below, so without adjusting `run.total` here the
+        // pass-rate denominator in `evaluateQualityGates` (and the matching
+        // `flakyPct` denominator) underflows, producing pass rates >100%
+        // and making `minPassRate` / `maxFailures` gates unreachable. The
+        // RunDetail progress bar would also render "5 / 1 test cases
+        // executed". Bump the total by (N - 1) so the dispatched-iteration
+        // count and the run aggregator stay in lock-step. Fixture-less
+        // tests yield exactly one iteration → no adjustment, zero
+        // regression.
+        if (iterResults.length > 1) {
+          run.total += iterResults.length - 1;
+        }
+        // Surface every iteration from the final attempt to the run
+        // aggregator — exactly once, after retries have fully resolved.
+        for (const iterResult of iterResults) {
+          iterResult.retryCount = retryCount;
+          iterResult.failedAfterRetry = false;
+          processResult(test, iterResult);
+        }
+        const finalResult = iterResults[iterResults.length - 1];
+        if (finalResult) {
+          structuredLog("test.result", { runId, testId: test.id, status: finalResult.status, durationMs: finalResult.durationMs });
+        }
       } catch (err) {
         // Build a synthetic result and route through processResult so SSE
         // `result` and `snapshot` events are emitted — otherwise the
@@ -370,6 +435,8 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           ? err.retryCount
           : MAX_TEST_RETRIES;
         errorResult.failedAfterRetry = true;
+        // processResult fires exactly once on exhaustion — earlier attempts
+        // were discarded inside the retry loop so we never double-count.
         processResult(test, errorResult);
       }
     }, signal);

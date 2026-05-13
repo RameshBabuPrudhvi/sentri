@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Globe, ShieldCheck, Gauge, Bot } from "lucide-react";
+import { ChevronDown, Globe, ShieldCheck, Gauge, Bot, Database } from "lucide-react";
 import QualityGatesPanel from "../project/QualityGatesPanel.jsx";
 import WebVitalsBudgetsPanel from "../project/WebVitalsBudgetsPanel.jsx";
 import TrendChart from "../shared/TrendChart.jsx";
@@ -46,10 +46,78 @@ function WebVitalTrend({ projectId, metricKey, title, threshold }) {
 }
 
 const INNER_TABS = [
-  { id: "gates",     label: "Quality Gates",   icon: ShieldCheck },
-  { id: "webvitals", label: "Web Vitals",       icon: Gauge       },
+  { id: "gates",       label: "Quality Gates", icon: ShieldCheck },
+  { id: "webvitals",   label: "Web Vitals",    icon: Gauge       },
   { id: "autoapprove", label: "Auto-Approval", icon: Bot         },
+  { id: "iterations",  label: "Iterations",    icon: Database    },
 ];
+
+/**
+ * CAP-001: configures `project.iterationCap` — the per-project ceiling on
+ * fixture rows dispatched per data-driven test. Empty input clears the
+ * column so the server-side default (10) re-applies; integers in [1, 100]
+ * are validated by the backend and the runtime clamp.
+ */
+function IterationCapPanel({ project, canEdit, onToast }) {
+  const [value, setValue] = useState(
+    project.iterationCap == null ? "" : String(project.iterationCap),
+  );
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    const cap = trimmed === "" ? null : Number(trimmed);
+    if (cap !== null && (!Number.isInteger(cap) || cap < 1 || cap > 100)) {
+      onToast?.({ type: "error", message: "Iteration cap must be empty or an integer between 1 and 100." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateProject(project.id, { iterationCap: cap });
+      onToast?.({
+        type: "success",
+        message: cap === null
+          ? "Iteration cap cleared — using default (10)."
+          : `Iteration cap set to ${cap}.`,
+      });
+    } catch (err) {
+      onToast?.({ type: "error", message: err?.message || "Failed to save iteration cap." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="aap-panel">
+      <div>
+        <label className="aap-field-label">
+          Iteration cap (1–100) — leave empty to use the default (10)
+        </label>
+        <div className="aap-field-row">
+          <input
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={!canEdit || saving}
+            placeholder="e.g. 25"
+            className="aap-input"
+          />
+          <button className="btn btn-primary btn-sm" onClick={save} disabled={!canEdit || saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="aap-stats">
+        Limits how many fixture rows a single data-driven test will run per
+        execution. A per-upload override on the test fixture panel can lower
+        this further; the server clamps both sources to [1, 100] regardless.
+      </div>
+    </div>
+  );
+}
 
 /**
  * AUTO-003b: configures `project.autoApproveThreshold` and renders the
@@ -327,6 +395,13 @@ export default function ProjectQualityCard({
             )}
             {innerTab === "autoapprove" && (
               <AutoApprovalPanel
+                project={project}
+                canEdit={canEdit}
+                onToast={onToast}
+              />
+            )}
+            {innerTab === "iterations" && (
+              <IterationCapPanel
                 project={project}
                 canEdit={canEdit}
                 onToast={onToast}

@@ -88,6 +88,8 @@ const files = [
   "tests/impact-analysis.test.js",
   "tests/github-checks.test.js",
   "tests/github-install-callback.test.js",
+  "tests/fixture-iteration.test.js",
+  "tests/test-fixtures-routes.test.js",
 ];
 
 let passed = 0;

@@ -150,8 +150,15 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   // attempted `status` or `workspaceId` injection) force the request
   // back through `validateProjectPayload` and the field whitelist below.
   const bodyKeys = req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-  const isThresholdOnly = bodyKeys.length === 1 && bodyKeys[0] === "autoApproveThreshold";
-  if (!isThresholdOnly) {
+  // Single-field PATCH bypass — `autoApproveThreshold` (AUTO-003b) and
+  // `iterationCap` (CAP-001) are configured from dedicated panels in
+  // `ProjectQualityCard.jsx` that send only their own field. Each bypass
+  // is gated on the body containing *exactly* its field name so an
+  // attempted `status` / `workspaceId` injection still falls through to
+  // the full `validateProjectPayload` + field-whitelist path below.
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap"]);
+  const isSingleFieldPatch = bodyKeys.length === 1 && SINGLE_FIELD_BYPASS.has(bodyKeys[0]);
+  if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
     if (validationErr) return res.status(400).json({ error: validationErr });
   }
@@ -169,6 +176,19 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
       return res.status(400).json({ error: "autoApproveThreshold must be null or a number greater than 0 and at most 1." });
     }
     fields.autoApproveThreshold = threshold;
+  }
+
+  // CAP-001: per-project fixture iteration cap. `null` clears the column so
+  // the server-side default (10) re-applies. Otherwise must be an integer
+  // in [1, 100] — the runtime `clampIterationCap` also enforces this range,
+  // but rejecting bad input at the API surface gives the user a clear error
+  // instead of silently clamping a typo.
+  if (Object.hasOwn(req.body, "iterationCap")) {
+    const cap = req.body.iterationCap;
+    if (cap !== null && (!Number.isInteger(cap) || cap < 1 || cap > 100)) {
+      return res.status(400).json({ error: "iterationCap must be null or an integer between 1 and 100." });
+    }
+    fields.iterationCap = cap;
   }
 
   if (req.body.credentials === null) {

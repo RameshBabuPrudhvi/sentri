@@ -33,6 +33,7 @@ If the user asks for… read only this section:
 | "Auto-approve tests / revoke / calibration" | [Auto-Approval](#-auto-approval-auto-003b) | 582–647 |
 | "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 676–724 |
 | "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 727–758 |
+| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 846–890 |
 | "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
 | "Verify security / authorization" | [Security](#-security) | 997–1025 |
@@ -55,6 +56,7 @@ ai-fix:              { lines: 650-673 }
 test-code-editing:   { lines: 676-724 }
 automation:          { lines: 727-758 }
 quality-gates:       { lines: 761-815 }     # NEW (AUTO-012)
+data-driven-fixtures:{ lines: 846-890 }     # NEW (CAP-001)
 visual-testing:      { lines: 818-835 }
 dashboard:           { lines: 838-856 }
 ai-chat:             { lines: 860-889 }
@@ -841,6 +843,51 @@ The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automa
 - Persisted JSON survives backend restart (column is `TEXT` JSON in migration `014_quality_gates.sql`).
 - Pre-existing runs created before AUTO-012 shipped still load and render correctly with `gateResult: null` (no badge / no panel).
 - Crawl and generate runs never carry `gateResult` even when configured (gates apply to test runs only) — verify badge / panel are suppressed in those views.
+
+---
+
+### 📊 Data-driven test fixtures (CAP-001)
+
+_(automated: see `tests/e2e/specs/test-fixtures-ui.spec.mjs` for TestFixturePanel CSV upload round-trip, RunDetail iteration badges via `page.route()` mock, and Automation → Iterations panel save. Backend HTTP coverage in `backend/tests/test-fixtures-routes.test.js`; repo + runner unit coverage in `backend/tests/fixture-iteration.test.js`. Coverage tracked in `tests/e2e/COVERAGE.md`.)_
+
+**Preconditions:** Project exists with `qa_lead` or `admin` access. A test exists with `playwrightCode` containing `{{column}}` placeholders. Endpoints documented in `backend/src/routes/tests.js` (fixtures CRUD), `backend/src/routes/projects.js` (`iterationCap` PATCH bypass), and `backend/src/middleware/permissions.json`.
+
+**Fixture upload (TestDetail → Data-driven fixtures panel, `frontend/src/components/test/TestFixturePanel.jsx`):**
+1. Open `/tests/:testId` → scroll to the **Data-driven fixtures** card → version badge reads `v<test.codeVersion>` (e.g. `v1` for a freshly created test).
+2. Default format is **CSV**. Paste a 3-row CSV (`email,role\na@…,admin\nb@…,viewer\nc@…,viewer`) → click **Save fixture** → toast `Saved 3 row(s) at version 1`; history table renders one row with format `CSV`, count `3`, and an **active** badge (matches current `codeVersion`).
+3. Switch the format select to **JSON array** → paste `[{"email":"a@…","role":"admin"}]` → save → second history row appears for the same version (replaces — fixtures are keyed on `(testId, version)`; verify by re-opening and confirming only one row per version).
+4. **Same-version overwrite warning** — re-upload at the same `codeVersion` → `window.confirm` prompt appears (`A fixture already exists for version N (M row(s)). Saving will replace it. Continue?`). Cancel → no change; confirm → upserts.
+5. **Different-version upload** — bump `codeVersion` (via an edit that triggers regeneration) → upload again → no confirm prompt fires (different version, not a replace).
+6. **Iteration cap override** — fill the `iteration cap` input with `5` and upload a 15-row CSV → toast reads `Saved 5 row(s) at version N (truncated to cap 5)`; the response carries `capApplied: 5, truncated: true`.
+7. **JSON validation** — paste invalid JSON → inline error `JSON is not valid — expected an array of row objects.` (form-level guard before request fires).
+8. **Empty rows** — paste a CSV with only a header row → server returns 400 `fixture rows required`; the panel surfaces the error inline.
+
+**Per-project iteration cap (`/automation` → Quality Gates → expand a project → **Iterations** inner tab, `IterationCapPanel`):**
+9. Default state: `iterationCap` is `null` → server-side `clampIterationCap` falls through to the default **10** rows per data-driven test.
+10. Fill the input with `25` → click **Save** → toast `Iteration cap set to 25`. Reload tab → value persists.
+11. Clear the input → save → toast `Iteration cap cleared — using default (10).`; underlying PATCH sets `iterationCap: null`.
+12. **Validation** — enter `0` / `101` / `1.5` → frontend error `Iteration cap must be empty or an integer between 1 and 100.` (server also returns 400 with the same range message at `backend/src/routes/projects.js`).
+13. **Single-field PATCH bypass** — body `{ iterationCap: 25 }` with no `name`/`url` succeeds (mirrors the existing `autoApproveThreshold` bypass). A body that mixes `iterationCap` with another field (e.g. `status`) falls through to the full validator (verified by the `SINGLE_FIELD_BYPASS` set in `backend/src/routes/projects.js`).
+
+**Run-time iteration (`backend/src/runner/executeTest.js` `executeTestIterations`, `backend/src/testRunner.js`):**
+14. With a 3-row fixture saved at `v1` and a test whose `playwrightCode` references `{{email}}` → trigger a run → **3 iteration results land in `run.results`**, one per row. Each carries `iterationIndex` (0/1/2) + `fixtureRow` (the source row snapshot).
+15. RunDetail → expand the test → each result row renders an `iteration #1` / `#2` / `#3` badge alongside the status pill. Hover the badge → the substituted row JSON is the tooltip (`title` attr).
+16. **5-row CSV → 5 iteration results** acceptance criterion: upload 5 rows → run → all 5 must execute even if intermediate rows fail; verify by inducing a row 2 failure and confirming rows 3-5 still appear in `run.results` (the `executeTestIterations` for-loop never short-circuits).
+17. **Fixture-less zero-regression** — a test with no fixture row uploaded at its current `codeVersion` runs **exactly once**; the result carries neither `iterationIndex` nor `fixtureRow`. Re-confirm by uploading a fixture at `v1`, bumping the test to `v2` via an AI fix, and running — the runner reads `(testId, v2)`, finds nothing, and falls back to the single-iteration path.
+18. **Retry suppression for data-driven tests** — induce a row-level failure → the run log carries `↻ Skipping retry for <test> — N/M fixture iteration(s) failed (data-driven tests don't retry)`; fixture-less failures still go through the standard `MAX_TEST_RETRIES` flow.
+19. **Cap clamp at runtime** — even if `projects.iterationCap` is set to `9999` via direct DB write, the runner's `clampIterationCap` enforces `[1, 100]` on every dispatch — verify by inspecting the dispatched batch size.
+
+**Permissions:**
+20. `viewer` calling `POST /api/v1/tests/:testId/fixtures` → 403. `qa_lead` and `admin` succeed.
+21. `GET /api/v1/tests/:testId/fixtures` is `anyAuthenticatedMember` — viewer can read fixture history but not upload.
+22. Cross-workspace ACL — outsider hitting `/api/v1/tests/:testId/fixtures` for a test in another workspace → 404 (workspace scope enforced via the test's parent project).
+
+**Negative / edge:**
+- Format allowlist — POST with `format: "xml"` → 400 `format must be 'csv' or 'json'` (matches the migration's CHECK constraint).
+- CSV parser is RFC 4180-flavoured: handles quoted fields with embedded commas, CRLF line endings, and `""`-escaped quotes; trailing blank lines are dropped. A header-only file returns 400 (no data rows). Verified at `backend/tests/fixture-iteration.test.js`.
+- Fixtures are scoped to `(testId, codeVersion)` — after an AI fix bumps `codeVersion`, old fixtures stay around for run-history replay but the new version starts fresh (zero rows → single iteration). Verify by inspecting the history table: old version rows lose their **active** badge once `codeVersion` increases.
+- The fixture history table never grows unbounded for a single version: re-uploading at the same `(testId, version)` is an upsert, not an append (`backend/src/database/repositories/testFixtureRepo.js`).
+- `iterationCap` in [1, 100] is enforced at three layers: frontend input validation, route-level PATCH validation, and `clampIterationCap` at runtime — verify each by attempting a `9999` write via each path.
 
 ---
 

@@ -295,6 +295,15 @@ export default function StepResultsView({ result, run, onBack }) {
         <span className="srv-breadcrumb-sep">›</span>
         <span className="srv-breadcrumb-current">
           {cleanTestName(result?.testName || result?.name) || "Test Case"}
+          {/* CAP-001: data-driven iteration attribution. `iterationIndex` is
+              set per-row by `executeTestIterations`; surfacing the index +
+              row snapshot inline keeps "which row failed?" answerable without
+              digging into the raw result JSON. */}
+          {Number.isInteger(result?.iterationIndex) && (
+            <span className="badge badge-gray" style={{ marginLeft: 8 }} title={result?.fixtureRow ? JSON.stringify(result.fixtureRow) : undefined}>
+              iteration #{result.iterationIndex + 1}
+            </span>
+          )}
         </span>
         {testId && (
           <>
