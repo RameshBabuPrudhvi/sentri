@@ -8,6 +8,7 @@ import * as projectRepo from '../src/database/repositories/projectRepo.js';
 import * as workspaceRepo from '../src/database/repositories/workspaceRepo.js';
 import * as githubCheckSettingsRepo from '../src/database/repositories/githubCheckSettingsRepo.js';
 import * as activityRepo from '../src/database/repositories/activityRepo.js';
+import { encryptString, decryptString } from '../src/utils/credentialEncryption.js';
 import { signJwt, getJwtSecret } from '../src/middleware/authenticate.js';
 import {
   signInstallState,
@@ -164,4 +165,116 @@ test('App webhook disables installation rows, narrows repository removals, and r
   } finally {
     await new Promise((resolve) => sentri.server.close(resolve));
   }
+});
+
+// ─── INT-002b override: installationId encryption at rest ────────────────────
+// These tests lock in the four invariants of the compliance-driven encryption
+// override (see docs/changelog.md § Security and ROADMAP.md § INT-002b
+// "Reversal of prior WONTFIX"). If any of them regresses, either the
+// encryption is silently disabled (compliance regression) or legacy plaintext
+// rows stop being readable (operational regression). Both are unacceptable.
+
+test('encryptString / decryptString round-trip preserves the value', () => {
+  const plaintext = '1234567890';
+  const encrypted = encryptString(plaintext);
+  assert.ok(encrypted?.startsWith('enc:v1:'), 'encryptString must emit version-prefixed ciphertext');
+  assert.notEqual(encrypted, plaintext, 'ciphertext must not equal plaintext');
+  assert.equal(decryptString(encrypted), plaintext);
+  // Random IV means the same plaintext must produce different ciphertext each
+  // call — this is the property that breaks SQL WHERE equality lookups and
+  // forces the load-and-filter pattern in githubCheckSettingsRepo.
+  assert.notEqual(encryptString(plaintext), encrypted, 'AES-GCM must use a fresh IV per encryption');
+});
+
+test('decryptString returns legacy plaintext unchanged (no enc:v1: prefix)', () => {
+  // This is the transparent-migration contract: pre-override rows written
+  // before encryption shipped must keep decrypting cleanly until they're
+  // overwritten by the next upsert(). Without this branch the App-webhook
+  // disables would silently no-op against legacy rows.
+  assert.equal(decryptString('77'), '77');
+  assert.equal(decryptString('legacy-installation-id'), 'legacy-installation-id');
+  // Null / undefined / empty all return null (matches encryptString's contract).
+  assert.equal(decryptString(null), null);
+  assert.equal(decryptString(undefined), null);
+  assert.equal(decryptString(''), null);
+});
+
+test('githubCheckSettingsRepo encrypts installationId on write and decrypts on read', () => {
+  resetDb();
+  seedProject();
+  const now = new Date().toISOString();
+  githubCheckSettingsRepo.upsert({
+    projectId: 'PRJ-GH', enabled: true, installationId: '99', repo: 'acme/app',
+    createdAt: now, updatedAt: now,
+  });
+
+  // Read via the repo — must come back decrypted.
+  const settings = githubCheckSettingsRepo.getByProjectId('PRJ-GH');
+  assert.equal(settings.installationId, '99', 'repo read must return plaintext via decryptString');
+
+  // Read the raw column directly — must be ciphertext, never plaintext at rest.
+  // This is the audit-checkbox we're paying for; if this assertion ever fails,
+  // the encryption layer was silently bypassed somewhere.
+  const db = getDatabase();
+  const row = db.prepare('SELECT installationId FROM github_check_settings WHERE projectId = ?').get('PRJ-GH');
+  assert.ok(row.installationId.startsWith('enc:v1:'), 'raw column must be encrypted at rest');
+  assert.notEqual(row.installationId, '99', 'plaintext must not leak into the column');
+});
+
+test('installation-keyed lookups resolve after SQL-equality optimisation was traded away', () => {
+  // Two projects on the same installation, plus a third on a different one.
+  // getByInstallationId / disableByRepo / disableByInstallationId can no longer
+  // use `WHERE installationId = ?` against the non-deterministic ciphertext —
+  // they load and decrypt every row, then JS-filter. Lock in that the
+  // load-and-filter still finds the right rows.
+  resetDb();
+  seedProject();
+  projectRepo.create({ id: 'PRJ-GH-A', name: 'A', url: 'https://a.test', createdAt: new Date().toISOString(), status: 'idle' });
+  projectRepo.create({ id: 'PRJ-GH-B', name: 'B', url: 'https://b.test', createdAt: new Date().toISOString(), status: 'idle' });
+  projectRepo.create({ id: 'PRJ-GH-C', name: 'C', url: 'https://c.test', createdAt: new Date().toISOString(), status: 'idle' });
+  const now = new Date().toISOString();
+  githubCheckSettingsRepo.upsert({ projectId: 'PRJ-GH-A', enabled: true, installationId: '500', repo: 'acme/a', createdAt: now, updatedAt: now });
+  githubCheckSettingsRepo.upsert({ projectId: 'PRJ-GH-B', enabled: true, installationId: '500', repo: 'acme/b', createdAt: now, updatedAt: now });
+  githubCheckSettingsRepo.upsert({ projectId: 'PRJ-GH-C', enabled: true, installationId: '600', repo: 'acme/c', createdAt: now, updatedAt: now });
+
+  const matches = githubCheckSettingsRepo.getByInstallationId('500');
+  assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map((r) => r.projectId).sort(), ['PRJ-GH-A', 'PRJ-GH-B']);
+
+  const narrowed = githubCheckSettingsRepo.disableByRepo('500', 'acme/a');
+  assert.deepEqual(narrowed, ['PRJ-GH-A']);
+  assert.equal(githubCheckSettingsRepo.getByProjectId('PRJ-GH-A').enabled, false);
+  assert.equal(githubCheckSettingsRepo.getByProjectId('PRJ-GH-B').enabled, true, 'sibling project on same installation must remain enabled');
+
+  const disabled = githubCheckSettingsRepo.disableByInstallationId('500');
+  assert.deepEqual(disabled, ['PRJ-GH-B']);
+  assert.equal(githubCheckSettingsRepo.getByProjectId('PRJ-GH-B').enabled, false);
+  assert.equal(githubCheckSettingsRepo.getByProjectId('PRJ-GH-C').enabled, true, 'unrelated installation must not be disabled');
+});
+
+test('legacy plaintext rows continue to read correctly and re-encrypt on next write', () => {
+  // Simulate a pre-override row by writing the plaintext column directly,
+  // bypassing the repo's upsert(). The next read via the repo must still
+  // surface the right installationId — this protects existing deployments
+  // from a hard cutover on upgrade.
+  resetDb();
+  seedProject();
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO github_check_settings (projectId, enabled, installationId, repo, createdAt, updatedAt)
+    VALUES (?, 1, ?, ?, ?, ?)`).run('PRJ-GH', 'legacy-77', 'acme/legacy', now, now);
+
+  const settings = githubCheckSettingsRepo.getByProjectId('PRJ-GH');
+  assert.equal(settings.installationId, 'legacy-77', 'legacy plaintext must pass through decryptString untouched');
+  assert.equal(settings.enabled, true);
+
+  // Re-upsert — repo must now encrypt it, locking in the "rows re-encrypt
+  // naturally on next write" contract from the module doc.
+  githubCheckSettingsRepo.upsert({
+    projectId: 'PRJ-GH', enabled: true, installationId: 'legacy-77', repo: 'acme/legacy',
+    createdAt: now, updatedAt: new Date().toISOString(),
+  });
+  const raw = db.prepare('SELECT installationId FROM github_check_settings WHERE projectId = ?').get('PRJ-GH');
+  assert.ok(raw.installationId.startsWith('enc:v1:'), 'upsert must re-encrypt previously-plaintext rows');
+  assert.equal(githubCheckSettingsRepo.getByProjectId('PRJ-GH').installationId, 'legacy-77');
 });
