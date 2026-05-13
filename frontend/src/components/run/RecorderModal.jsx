@@ -6,7 +6,7 @@ import { useSseStream } from "../../hooks/useSseStream.js";
 import { actionToStepText, actionRawLocator } from "../../utils/actionToStepText.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
 
-export default function RecorderModal({ open, onClose, onSaved, projectId, defaultUrl = "", projects = null }) {
+export default function RecorderModal({ open, onClose, onSaved, projectId, defaultUrl = "", projects = null, defaultEnvironmentId = "" }) {
   const [phase, setPhase] = useState("idle");
   // Selected project — initialised from the `projectId` prop but mutable in the
   // idle form so the user can route the recording to any project they belong
@@ -39,6 +39,11 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   // crawl. Fetched lazily when the modal opens so projects without a crawl
   // simply see the seed URL and an empty suggestion list.
   const [urlOptions, setUrlOptions] = useState([]);
+  // DIF-012: per-project environments — populated lazily on project change.
+  // `environmentId === ""` means "default — use project.url"; the recordStart
+  // body omits the field entirely in that case.
+  const [environments, setEnvironments] = useState([]);
+  const [environmentId, setEnvironmentId] = useState(defaultEnvironmentId);
   const pollRef = useRef(null);
   const sessionIdRef = useRef(null);
   const projectIdRef = useRef(projectId);
@@ -88,6 +93,34 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     return () => { cancelled = true; };
   }, [open, selectedProjectId]);
 
+  // DIF-012: load environments whenever the modal is open and the project
+  // changes. Viewers get a 403 on the env-list endpoint — swallow that so
+  // the modal still works for users below qa_lead (the dropdown just stays
+  // hidden because the list is empty).
+  useEffect(() => {
+    if (!open || !selectedProjectId) { setEnvironments([]); setEnvironmentId(""); return; }
+    let cancelled = false;
+    // Reset to the caller-supplied default whenever the project changes so a
+    // stale envId from a previous project never leaks into the recordStart
+    // payload (backend would 400 on cross-project envId anyway).
+    setEnvironmentId(defaultEnvironmentId || "");
+    api.getProjectEnvironments(selectedProjectId)
+      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setEnvironments([]); });
+    return () => { cancelled = true; };
+  }, [open, selectedProjectId, defaultEnvironmentId]);
+
+  // DIF-012: auto-fill Starting URL with the selected environment's baseUrl
+  // (only while idle, only when an env is picked). Mirrors the existing
+  // project.url auto-fill above — the env baseUrl takes precedence so the
+  // operator lands on the right environment from the first frame.
+  useEffect(() => {
+    if (phase !== "idle" && phase !== "error") return;
+    if (!environmentId) return;
+    const env = environments.find((e) => e.id === environmentId);
+    if (env?.baseUrl) setStartUrl(env.baseUrl);
+  }, [environmentId, environments, phase]);
+
   const sseUrl = sessionId ? `${API_PATH}/runs/${sessionId}/events` : null;
   useSseStream(sseUrl, useCallback((event) => {
     if (event?.type === "frame" && event.data) setFrames([event.data]);
@@ -130,7 +163,11 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     teardownStreams();
     setPhase("starting");
     try {
-      const { sessionId: sid, viewport: vp } = await api.recordStart(selectedProjectId, { startUrl });
+      // DIF-012: only forward environmentId when set — sending "" makes the
+      // backend run an extra lookup before falling back to project.url.
+      const startBody = { startUrl };
+      if (environmentId) startBody.environmentId = environmentId;
+      const { sessionId: sid, viewport: vp } = await api.recordStart(selectedProjectId, startBody);
       setSessionId(sid);
       if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
@@ -317,6 +354,26 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   >
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {/* DIF-012: env picker — only renders when the project has at
+                  least one configured environment. Selecting one swaps
+                  Starting URL to the env's baseUrl via the auto-fill effect
+                  above, and `recordStart` forwards `environmentId` to the
+                  backend so the run record + audit trail capture the choice. */}
+              {environments.length > 0 && (
+                <div>
+                  <label className="recorder-idle__label">Environment</label>
+                  <select
+                    className="input recorder-idle__input"
+                    value={environmentId}
+                    onChange={(e) => setEnvironmentId(e.target.value)}
+                  >
+                    <option value="">Default (project URL)</option>
+                    {environments.map((env) => (
+                      <option key={env.id} value={env.id}>{env.name} — {env.baseUrl}</option>
                     ))}
                   </select>
                 </div>

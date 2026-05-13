@@ -865,6 +865,16 @@ _(automated: see `tests/e2e/specs/environments-ui.spec.mjs` for the Environments
 6. Click the trash-can on a row → confirmation prompt → confirm → toast `Environment deleted`; row gone; reload to verify persistence.
 7. As `qa_lead` (not `admin`) → tab renders, table is visible, but the add/edit form is hidden and per-row Edit / Delete buttons are disabled (admin-only mutations enforced by `requireRole("admin")` server-side; UI gates via the `canEdit` prop derived from `useAuth`).
 
+**UI surface — Test Lab (crawl + generate)** (`frontend/src/pages/TestLab.jsx`):
+8a. Open `/test-lab` (or `/projects/:id/test-lab`) → select a project with ≥ 1 environment → the right-rail launch panel renders an **Environment** dropdown below the Examples list (Requirement tab) or below the Estimate (Crawl tab). Selecting a non-default env causes the next **Start Crawl & Generate** / **Generate Tests** click to send `environmentId` in the POST body — verify by network-inspecting `/api/v1/projects/:id/crawl` or `/api/v1/projects/:id/tests/generate`.
+8b. Switch projects in the left sidebar → env list reloads against the new project, selection resets to "Default" (no stale envId leak). Switch to a project with zero envs → dropdown disappears entirely.
+8c. The recorder launched from Test Lab inherits the page-level env selection via the `defaultEnvironmentId` prop — clicking **Record a test** while a non-default env is selected pre-fills the recorder's Environment dropdown to match.
+
+**UI surface — RecorderModal environment selector** (`frontend/src/components/run/RecorderModal.jsx`):
+8d. Open the recorder on a project with ≥ 1 environment → idle form shows an **Environment** dropdown below the Project picker. Selecting an env auto-fills the **Starting URL** field with `environment.baseUrl` (operator lands on the right env from the first frame).
+8e. Clicking **Launch recorder** sends `environmentId` in the `POST /record` body so the run record's `environmentId` column is set — verify by inspecting the `runs` row (`SELECT environmentId FROM runs WHERE id = '<sessionId>'`).
+8f. The recorder is interactive (operator-driven) — `environment.credentials` are NOT auto-applied to login forms inside the recorder. Operators who need to log in to a non-default env will manually fill the form. Auto-login from env credentials applies to crawl/generate/run paths only (where it runs unattended).
+
 **UI surface — RunRegressionModal environment selector** (`frontend/src/components/run/RunRegressionModal.jsx`):
 8. From `/runs` click **Run Tests** → modal opens. With a project that has zero environments selected, the **Environment** dropdown does NOT render (clutter-free for env-less projects).
 9. Switch the project selector to a project with ≥ 1 environment → the **Environment** dropdown appears with `Default (project URL)` as the first option, followed by each env as `<name> — <baseUrl>`.

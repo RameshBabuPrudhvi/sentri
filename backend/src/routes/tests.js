@@ -65,6 +65,54 @@ import path from "path";
 import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { encryptCredentials } from "../utils/credentialEncryption.js";
+
+/**
+ * DIF-012: Resolve and validate an optional `environmentId` against the
+ * given project, returning the env row when valid. Returns `null` when no
+ * envId was supplied; throws an `Error` with `httpStatus` and `message`
+ * fields when the envId is invalid (unknown or belongs to a different
+ * project) so callers can `return res.status(httpStatus).json({error})`.
+ *
+ * Mirrors the validation contract in `routes/runs.js` and
+ * `routes/trigger.js` so all four entry points (crawl, run, generate,
+ * record) share one source of truth.
+ *
+ * @param {string|null|undefined} environmentId
+ * @param {Object} project — already-resolved, workspace-scoped project row.
+ * @returns {Object|null}
+ */
+function resolveEnvOrThrow(environmentId, project) {
+  if (!environmentId) return null;
+  const env = environmentRepo.getById(environmentId);
+  if (!env || env.projectId !== project.id) {
+    const err = new Error("invalid environmentId");
+    err.httpStatus = 400;
+    throw err;
+  }
+  return env;
+}
+
+/**
+ * DIF-012: Build an execution-only scoped project that overrides
+ * `project.url` and `project.credentials` with the selected environment.
+ * Mirrors the helpers in `routes/runs.js` (`envScopedProject`) and
+ * `routes/trigger.js` (`buildEnvScopedProject`) — see those for the full
+ * contract. Kept inline here to avoid a cross-route import.
+ *
+ * @param {Object} project
+ * @param {Object|null} environment
+ * @returns {Object}
+ */
+function envScopedProject(project, environment) {
+  if (!environment) return project;
+  let credentials = project.credentials;
+  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
+    credentials = encryptCredentials(environment.credentials);
+  }
+  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
+}
 
 const router = Router();
 
@@ -633,6 +681,17 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
   const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
+  // DIF-012: optional per-run environment override. Validated up-front so a
+  // bad envId fails fast before any AI calls or audit-row creation. The
+  // override flows into `generateFromUserDescription` via the scoped
+  // project (matches runs.js + trigger.js — same contract everywhere).
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
+  }
+
   // Sanitise name: strip prompt-injection markers (same regex as description/customInstructions)
   const cleanName = name.trim()
     .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
@@ -699,6 +758,9 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
       requestedAt: new Date().toISOString(),
     },
     workspaceId: project.workspaceId || null,
+    // DIF-012: persist on the run record so the audit trail records which
+    // environment this generation targeted (consistent with crawl/run paths).
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
   logActivity({ ...actor(req),
@@ -709,7 +771,11 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
-    (signal) => generateFromUserDescription(project, run, {
+    // DIF-012: scope the project (url + credentials) to the selected env
+    // for this generation run only — `project.url` is preserved as
+    // `canonicalUrl` so the AUTO-015 baseline guard treats the run as
+    // preview-style.
+    (signal) => generateFromUserDescription(envScopedProject(project, environment), run, {
       name: cleanName,
       description: cleanDescription,
       dialsPrompt,
@@ -1285,7 +1351,19 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const startUrl = String(req.body?.startUrl || project.url || "").trim();
+  // DIF-012: optional per-session environment override. The recorder is
+  // driven interactively by the operator (no auto-login), so the env only
+  // affects the default `startUrl` — if the caller didn't supply one, fall
+  // back to `environment.baseUrl` instead of `project.url` so the operator
+  // lands on the right environment from the first frame.
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
+  }
+
+  const startUrl = String(req.body?.startUrl || environment?.baseUrl || project.url || "").trim();
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
     return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
   }
@@ -1348,6 +1426,9 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       // the same /pages aggregator works for both crawl + record sources.
       pages: [{ url: startUrl, title: startUrl, status: "recorded" }],
       workspaceId: project.workspaceId || null,
+      // DIF-012: record which environment (if any) the operator picked at
+      // session start, for audit consistency with crawl/run/generate paths.
+      environmentId: environment?.id || null,
     });
     await startRecording({ sessionId, projectId: project.id, startUrl });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));

@@ -448,6 +448,22 @@ export default function TestLab() {
   // bounce back to the Tests page to start a recording session.
   const [showRecorder, setShowRecorder] = useState(false);
 
+  // ── DIF-012: per-project environments (crawl + generate + recorder) ──
+  // Fetched lazily on project change; viewer roles get a 403 which we swallow
+  // (the picker hides itself when the list is empty). `environmentId === ""`
+  // means "default — use project.url"; the API call omits the field entirely.
+  const [environments, setEnvironments] = useState([]);
+  const [environmentId, setEnvironmentId] = useState("");
+  useEffect(() => {
+    if (!selectedId) { setEnvironments([]); setEnvironmentId(""); return; }
+    let cancelled = false;
+    setEnvironmentId("");
+    api.getProjectEnvironments(selectedId)
+      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setEnvironments([]); }); // 403 for viewers — clutter-free
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
   // ── Seed selected project from route / project list ──
   // `useProjectData` owns the actual fetch; this effect just syncs the
   // currently-selected project id to whatever the route / loaded project list
@@ -779,7 +795,12 @@ export default function TestLab() {
     setRunData(null);
     clearPersistedRun();
     try {
-      const { runId } = await api.crawl(selectedId, { dialsConfig });
+      // DIF-012: only send environmentId when the user picked a non-default
+      // option — sending "" would force the backend's validator to run an
+      // extra lookup. Mirrors the RunRegressionModal payload shape.
+      const body = { dialsConfig };
+      if (environmentId) body.environmentId = environmentId;
+      const { runId } = await api.crawl(selectedId, body);
       setActiveRun({ runId, projectId: selectedId, type: "crawl" });
       setInnerTab("pipeline");
     } catch (err) {
@@ -818,11 +839,14 @@ export default function TestLab() {
           .join("\n\n");
         fullDescription = fullDescription ? `${fullDescription}\n\n${block}` : block;
       }
-      const { runId } = await api.generateTest(selectedId, {
+      const genBody = {
         name: finalName,
         description: fullDescription,
         dialsConfig,
-      });
+      };
+      // DIF-012: mirror the crawl path — only send when non-default.
+      if (environmentId) genBody.environmentId = environmentId;
+      const { runId } = await api.generateTest(selectedId, genBody);
       // Use backend's canonical type name (`"generate"`) so
       // `activeRun.type` matches `run.type` on re-attach and any future
       // strict equality checks don't silently fork.
@@ -1112,6 +1136,11 @@ export default function TestLab() {
           projectId={selectedProject.id}
           projects={projects}
           defaultUrl={selectedProject.url || ""}
+          // DIF-012: forward the page-level env selection so the recorder
+          // opens on the selected environment without the operator having
+          // to re-pick. The modal re-loads its own env list internally so
+          // switching projects inside the modal stays correct.
+          defaultEnvironmentId={environmentId || ""}
           onSaved={(t) => {
             // Use the saved test's projectId — the user may have switched
             // projects inside the modal before launching the recording.
@@ -1723,6 +1752,27 @@ export default function TestLab() {
                       ))}
                       <hr className="tl-panel-divider" />
                     </>
+                  )}
+
+                  {/* DIF-012: environment selector — only renders when the
+                      selected project has ≥ 1 environment. Same shape as the
+                      RunRegressionModal dropdown so the run/crawl/generate
+                      UX stays uniform. */}
+                  {environments.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="tl-panel-section-label">Environment</div>
+                      <select
+                        className="tl-select"
+                        value={environmentId}
+                        onChange={(e) => setEnvironmentId(e.target.value)}
+                        style={{ width: "100%", height: 36 }}
+                      >
+                        <option value="">Default (project URL)</option>
+                        {environments.map((env) => (
+                          <option key={env.id} value={env.id}>{env.name} — {env.baseUrl}</option>
+                        ))}
+                      </select>
+                    </div>
                   )}
 
                   {/* CTA */}
