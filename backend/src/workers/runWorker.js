@@ -27,6 +27,7 @@ import { emitRunEvent } from "../routes/sse.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import { runTests } from "../testRunner.js";
 import { crawlAndGenerateTests } from "../crawler.js";
@@ -62,6 +63,36 @@ export const workerAbortControllers = new Map();
 const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
 
 /**
+ * DIF-012: Build an execution-only scoped project that overrides
+ * `project.url` and `project.credentials` with the selected environment.
+ * Mirrors the helpers in `routes/runs.js` (`envScopedProject`),
+ * `routes/tests.js` (`envScopedProject`), and `routes/trigger.js`
+ * (`buildEnvScopedProject`) — see those for the full contract.
+ *
+ * Without this in the BullMQ worker path, `run.environmentId` would be
+ * persisted on the row but the actual execution would silently target
+ * `project.url` (production) instead of `environment.baseUrl` — a user
+ * selecting "staging" would get their tests run against prod.
+ *
+ * `environment.credentials` is already in the same encrypted shape as
+ * `project.credentials` (the env repo only JSON-parses on read, no
+ * decryption — see `environmentRepo.rowToEnv`), so it's assigned verbatim.
+ * Re-encrypting would double-encrypt and silently break login.
+ *
+ * @param {Object} project
+ * @param {Object|null} environment
+ * @returns {Object}
+ */
+function envScopedProject(project, environment) {
+  if (!environment) return project;
+  let credentials = project.credentials;
+  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
+    credentials = environment.credentials;
+  }
+  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
+}
+
+/**
  * Process a single run job from the queue.
  *
  * @param {Object} job — BullMQ Job instance.
@@ -94,6 +125,16 @@ async function processJob(job) {
     return;
   }
 
+  // DIF-012: resolve the per-run environment override (if any) from the
+  // persisted run record. The route handler validated the envId at enqueue
+  // time, so we only need to look it up here. A row that was deleted
+  // between enqueue and worker pickup yields `environment === undefined`,
+  // which `envScopedProject` treats as "no override" — the run falls back
+  // to project.url, matching the behaviour the caller would have got
+  // before DIF-012.
+  const environment = run.environmentId ? environmentRepo.getById(run.environmentId) : null;
+  const scopedProject = envScopedProject(project, environment);
+
   // Create an AbortController so the abort endpoint can cancel this job.
   // Capture the active provider at job-start time so the chat busy guard
   // can accurately filter to runs using Ollama (prevents false-positive
@@ -105,7 +146,7 @@ async function processJob(job) {
 
   try {
     if (type === "crawl") {
-      await crawlAndGenerateTests(project, run, {
+      await crawlAndGenerateTests(scopedProject, run, {
         dialsPrompt: options.dialsPrompt,
         testCount: options.testCount,
         explorerMode: options.explorerMode,
@@ -149,7 +190,7 @@ async function processJob(job) {
           .filter(t => t.reviewStatus === "approved");
       }
 
-      await runTests(project, tests, run, {
+      await runTests(scopedProject, tests, run, {
         parallelWorkers: options.parallelWorkers || 1,
         browser: options.browser || null,         // DIF-002: resolved to chromium inside runTests when null
         device: options.device || null,
