@@ -320,19 +320,18 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### INT-002 — GitHub PR check comments 🟢 Differentiator
+### INT-002 / INT-002b — GitHub PR checks + integration polish
 
-**Status:** ✅ Complete (PR #15) — full implementation summary in the Completed Work Summary table above. The remaining polish items live under `INT-002b` below.
+**Status:** ✅ Complete (PR #15 / PR #17) — see Completed Work Summary above for the full implementation details.
 
----
+<!-- Full historical scope (problem statement, fix, files, acceptance criteria,
+     anti-patterns, threat-model analysis, encryption reversal note) collapsed
+     here — the canonical record lives in the Completed Work Summary rows for
+     INT-002 (PR #15) and INT-002b (PR #17). Restore from git history if you
+     need the original narrative. -->
 
-### INT-002b — GitHub integration polish (installation UX + App-level webhooks) 🔵 Medium
-
-**Status:** ✅ Complete (PR #17) — full implementation summary in the Completed Work Summary table above. WONTFIX item #3 (encrypt `installationId`) preserved below for the compliance tripwire — re-open as `INT-002c` when SOC 2 / ISO 27001 / HIPAA pursuit lands a "encrypt all third-party identifiers at rest" acceptance criterion.
-
-**Original scope (shipped):** PR #15 review findings — gaps surfaced after the INT-002 happy path landed. Each item below was identified during INT-002 implementation; documented here per AGENT.md "Issue-handling rule" (every finding produces an outcome — fix or ROADMAP entry, never a silent gap).
-
-**Problem:** INT-002 shipped the core PR check-run lifecycle (queued → in_progress → success/failure/neutral) but three follow-on gaps remain:
+<!-- BEGIN COLLAPSED INT-002b ORIGINAL BODY — preserved as HTML comment so the
+     ledger trail isn't lost but the rendered page stays clean.
 
 1. **Installation UX is hand-rolled.** `Settings.jsx` requires admins to manually paste a numeric `installationId` and `owner/repo` string. The "Install GitHub App" button is a generic deep-link to `https://github.com/apps` — there is no OAuth-style callback that auto-captures the installation ID after the user picks the target org/repos. Operators reading docs alone will struggle.
 2. **No App-level webhook handlers.** When an admin uninstalls the Sentri App on GitHub, the per-project rows in `github_check_settings` keep `enabled=1` and `installationId=<stale>`. Subsequent PR deliveries silently 401 against `/app/installations/.../access_tokens` and get swallowed by `concludeGithubCheck`'s log-and-swallow contract — observable in logs but not in the UI. `installation.deleted` and `installation_repositories.{added,removed}` are the canonical events to handle this.
@@ -380,6 +379,8 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 **Anti-patterns to reject in review:** wiring the App-webhook through `requireTrigger` (it's not project-scoped — would require manufacturing a synthetic project token); silently re-enabling projects on `installation.unsuspend` (suspend ≠ uninstall, but the admin chose to disable; re-enabling without an explicit UI action would surprise them); coupling the callback to OAuth (the GitHub *App* install flow is distinct from OAuth user-auth — don't introduce a second OAuth state machine); ~~encrypting `installationId`~~ — encryption was added in this PR override per compliance pre-emption (see Fix #3); future reviewers must not roll back the encryption thinking the WONTFIX still applies. Rolling-back-encryption guard: `rowToSettings` must always pass `installationId` through `decryptString` so legacy plaintext rows continue to work even if a future PR removes the encryption layer above it.
 
 **Dependencies:** INT-002 ✅ (PR #15) — reuses `verifyWebhookSignature`, `getInstallationToken`, `githubCheckSettingsRepo`. Pairs naturally with DIF-008 (Jira/Linear sync would benefit from the same OAuth-callback pattern in the same Integrations tab).
+
+END COLLAPSED INT-002b ORIGINAL BODY -->
 
 ---
 
@@ -449,12 +450,6 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-### CAP-001 — Data-driven testing (parameterized iterations) 🟢 Differentiator
-
-**Status:** ✅ Complete (PR #1) — full implementation summary in the Completed Work Summary table above. Key spec extensions over the original scope (now reflected in the summary): (1) the helper landed as `executeTestIterations` in `backend/src/runner/executeTest.js` rather than inlined into `executeTest` itself, so retry semantics could be reasoned about at the `testRunner.js` level; (2) per-project iteration cap shipped as a `projects.iterationCap` column rather than a global setting (more flexible, mirrors `autoApproveThreshold`'s shape with the same single-field PATCH bypass); (3) format allowlist enforced at three layers (migration CHECK constraint, route validator, `clampIterationCap` runtime) so drift between them is impossible. Adjacent bug fixed in this PR: surfacing iteration results inside the retry callback would have corrupted `run.passed`/`run.failed` — refactored so `processResult` fires exactly once per iteration after retries fully resolve.
-
----
-
 ### CAP-002 — Distributed test sharding across runners 🟢 Differentiator
 
 **Status:** 🔲 Planned | **Effort:** L | **Source:** PR #8 review (migrated from `docs/roadmap-gaps-pr8.md` before its deletion) · Competitive (Cypress Cloud / Playwright shard mode)
@@ -473,13 +468,6 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 - `frontend/src/pages/RunDetail.jsx` — show "shard 2/4 in progress" status
 
 **Dependencies:** INF-002 ✅ (Redis pub/sub for coordinator → shard cancel signal), INF-003 ✅ (BullMQ worker pool primitive). Bounded by available worker slots — sharding 1 run across 4 workers means a co-running shard-less run waits longer for its single slot.
-
----
-
-
-### AUTO-004 — Test impact analysis from git diff / deployment webhook 🟢 Differentiator
-
-**Status:** ✅ Complete (PR #18) — full implementation summary in the Completed Work Summary table above. Two deliberate spec extensions over the original scope (now reflected in the summary): (1) migration `022_run_changed_files.sql` adds **two** columns (`runs.changedFiles` + `runs.impactAnalysis` JSON) rather than the single `changedFiles` column listed below — the second column persists the resolved `{ impactedTestIds, fallbackReason, routePrefixes }` summary so RunDetail's Impact scope panel can render the audit trail without a re-derivation round-trip; (2) the helper module landed as `backend/src/pipeline/impactAnalysis.js` (not `backend/src/utils/impactAnalyzer.js` as scoped below) because it co-locates with the existing `riskScorer.js` + `crawlDiff.js` pipeline helpers and follows the same "pure function, no DB access" pattern. Adjacent change: `scoreTestRisk()`'s history filter broadened from `over_budget`-only to all `status === "skipped"` rows so the new `skipped_no_impact` skip kind gets the same "not an execution outcome" treatment.
 
 ---
 
@@ -584,12 +572,6 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 **Dependencies:** All Phase 3 items (plugin system should wrap stable APIs, not moving targets)
 
-
----
-
-### ~~AUTO-020~~ — Deployment platform integrations (Vercel, Netlify)
-
-**Status:** ✅ Superseded by AUTO-015 + AUTO-015b (PR #12). The original scope — Vercel (`X-Vercel-Signature`) + Netlify (`X-Netlify-Token`) webhook handlers, preview URL extraction, "Last deployment run" badge, and `.env.example` documentation for both secrets — landed verbatim under AUTO-015 because AUTO-015's `triggerCrawl: true` contract naturally absorbed the deployment-webhook surface. See the Completed Work Summary row for `AUTO-015 + AUTO-015b` for the full scope delivered.
 
 ---
 
