@@ -1250,7 +1250,7 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
       items themselves are gone from the ledger, not just unshipped).
     - Net Totals impact: Total 83 → 81, Done 55 → 53, Pending unchanged at 28.
 -->
-**Total tracked items:** 99 across 9 categories — **57 complete** (58%), **0 in current PR**, **42 remaining**
+**Total tracked items:** 99 across 9 categories — **58 complete** (59%), **0 in current PR**, **41 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
