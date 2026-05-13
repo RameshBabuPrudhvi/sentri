@@ -28,9 +28,11 @@ import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js"
 import * as scheduleRepo from "../database/repositories/scheduleRepo.js";
 import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId, generateScheduleId } from "../utils/idGenerator.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials, decryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
+import { randomUUID } from "node:crypto";
 import { actor } from "../utils/actor.js";
 import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
 import { reloadSchedule, stopSchedule, getNextRunAt } from "../scheduler.js";
@@ -85,6 +87,53 @@ function validateWebVitalsBudgets(payload) {
 
 
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
+
+
+router.get("/:id/environments", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const rows = environmentRepo.listByProject(project.id).map((row) => ({
+    ...row,
+    credentials: decryptCredentials(row.credentials),
+  }));
+  res.json(rows);
+});
+
+router.post("/:id/environments", requireRole("admin"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const name = sanitise(req.body?.name, 120);
+  const baseUrl = req.body?.baseUrl?.trim();
+  if (!name || !baseUrl) return res.status(400).json({ error: "name and baseUrl are required" });
+  const id = `ENV-${randomUUID()}`;
+  const row = { id, projectId: project.id, name, baseUrl, credentials: encryptCredentials(req.body?.credentials) || null, createdAt: new Date().toISOString(), workspaceId: project.workspaceId || null };
+  environmentRepo.create(row);
+  res.status(201).json({ ...row, credentials: decryptCredentials(row.credentials) });
+});
+
+router.patch("/:id/environments/:environmentId", requireRole("admin"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const existing = environmentRepo.getById(req.params.environmentId);
+  if (!existing || existing.projectId !== project.id) return res.status(404).json({ error: "not found" });
+  const fields = {};
+  if (req.body?.name !== undefined) fields.name = sanitise(req.body.name, 120);
+  if (req.body?.baseUrl !== undefined) fields.baseUrl = req.body.baseUrl?.trim() || "";
+  if (Object.hasOwn(req.body || {}, 'credentials')) fields.credentials = req.body.credentials ? encryptCredentials(req.body.credentials) : null;
+  environmentRepo.update(existing.id, fields);
+  const updated = environmentRepo.getById(existing.id);
+  res.json({ ...updated, credentials: decryptCredentials(updated.credentials) });
+});
+
+router.delete("/:id/environments/:environmentId", requireRole("admin"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const existing = environmentRepo.getById(req.params.environmentId);
+  if (!existing || existing.projectId !== project.id) return res.status(404).json({ error: "not found" });
+  environmentRepo.remove(existing.id);
+  res.json({ ok: true });
+});
+
 
 router.post("/", requireRole("qa_lead"), (req, res) => {
   const validationErr = validateProjectPayload(req.body);
