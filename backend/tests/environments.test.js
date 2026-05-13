@@ -57,8 +57,11 @@ async function main() {
     assert.equal(out.json.length, 1);
 
     out = await t.req(base, `/api/v1/projects/${projectId}/run`, { method: "POST", token: qa.token, body: { environmentId } });
-    assert.equal(out.res.status, 400); // no approved tests, but env accepted before this gate
-    assert.match(out.json.error, /no approved tests/i);
+    assert.equal(out.res.status, 400); // env accepted before the no-tests / no-approved-tests gate
+    // Project was just created (never crawled), so runs.js:149 returns
+    // "no tests found, crawl first" before the approved-tests check at :150.
+    // Either error proves the env validation passed.
+    assert.match(out.json.error, /no approved tests|no tests found/i);
 
     // ── DIF-012: project.url must NEVER mutate when an env is used ─────────
     const proj = projectRepo.getById(projectId);
@@ -82,7 +85,7 @@ async function main() {
     // remains the source of truth for env-less projects.
     out = await t.req(base, `/api/v1/projects/${projectId}/run`, { method: "POST", token: qa.token, body: {} });
     assert.equal(out.res.status, 400);
-    assert.match(out.json.error, /no approved tests/i);
+    assert.match(out.json.error, /no approved tests|no tests found/i);
 
     // ── DIF-012: PATCH updates name + baseUrl + credentials round-trip ────
     out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { name: "staging-2", baseUrl: "https://staging-2.example.com", credentials: { username: "u2", password: "p2" } } });
