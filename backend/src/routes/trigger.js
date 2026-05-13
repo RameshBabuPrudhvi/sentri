@@ -97,9 +97,13 @@ const router = Router();
  *   as `generateInput: { dialsConfig }` so the RunDetail page can show
  *   which dials drove the crawl and the MNT-010 re-run feature can
  *   replicate the same configuration. Mirrors `runs.js:81`.
+ * @param {string|null} [args.environmentId] - DIF-012: persisted on the run
+ *   record so trigger-initiated crawl runs surface in the dashboard's
+ *   per-environment aggregation alongside their UI-initiated counterparts.
+ *   Mirrors `runs.js:126` on the canonical POST /crawl path.
  * @returns {object} the run record ready for `runRepo.create()`.
  */
-function buildCrawlRun({ runId, project, dialsConfig }) {
+function buildCrawlRun({ runId, project, dialsConfig, environmentId = null }) {
   return {
     id: runId,
     projectId: project.id,
@@ -116,6 +120,7 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
     // the column entirely on no-dials calls — matches the canonical path.
     generateInput: dialsConfig ? { dialsConfig } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId,
   };
 }
 
@@ -595,7 +600,7 @@ async function handleTrigger(req, res) {
   // in `routes/runs.js` so test_run / crawl runs created via this endpoint
   // are byte-identical to the ones POST /run and POST /crawl produce.
   const run = triggerCrawl
-    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials })
+    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials, environmentId: environment?.id || null })
     : buildTestRun({
         runId,
         project,
