@@ -607,8 +607,15 @@ export default function ProjectDetail() {
       )}
 
       {/* ── ENVIRONMENTS TAB (DIF-012) ── */}
+      {/* Backend gates POST/PATCH/DELETE on `requireRole("admin")`
+          (backend/src/routes/projects.js:102,114,128), so the page-level
+          `canEdit` (qa_lead+) is too permissive here — passing it would let
+          qa_lead users open the form only to hit a 403 toast on submit.
+          Compute an admin-only flag locally so the add/edit form and
+          per-row Edit/Delete buttons are hidden/disabled for qa_lead.
+          QA.md § Environments step 7 documents this exact expectation. */}
       {tab === "environments" && (
-        <EnvironmentsTab projectId={id} canEdit={canEdit} onToast={showToast} />
+        <EnvironmentsTab projectId={id} canEdit={userHasRole(authUser, "admin")} onToast={showToast} />
       )}
 
       {/* ── TRACEABILITY TAB ── */}
