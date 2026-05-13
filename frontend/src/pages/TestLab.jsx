@@ -1757,15 +1757,15 @@ export default function TestLab() {
                   {/* DIF-012: environment selector — only renders when the
                       selected project has ≥ 1 environment. Same shape as the
                       RunRegressionModal dropdown so the run/crawl/generate
-                      UX stays uniform. */}
+                      UX stays uniform. Styles live in `pages/test-lab.css`
+                      under `.tl-env-*` to keep this JSX inline-style free. */}
                   {environments.length > 0 && (
-                    <div style={{ marginBottom: 12 }}>
+                    <div className="tl-env-section">
                       <div className="tl-panel-section-label">Environment</div>
                       <select
-                        className="tl-select"
+                        className="tl-select tl-env-select"
                         value={environmentId}
                         onChange={(e) => setEnvironmentId(e.target.value)}
-                        style={{ width: "100%", height: 36 }}
                       >
                         <option value="">Default (project URL)</option>
                         {environments.map((env) => (

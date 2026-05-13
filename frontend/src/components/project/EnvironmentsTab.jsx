@@ -104,7 +104,7 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
   if (loading) {
     return (
       <div className="card pd-empty">
-        <RefreshCw size={20} className="spin" style={{ opacity: 0.3, marginBottom: 12 }} />
+        <RefreshCw size={20} className="spin pd-env-loading-icon" />
         <div>Loading environments…</div>
       </div>
     );
