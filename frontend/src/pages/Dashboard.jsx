@@ -278,8 +278,8 @@ export default function Dashboard() {
           {/* ── DIF-012: Per-environment pass rate + last green run ── */}
           {(data?.environmentPassRates?.length ?? 0) > 0 && (
             <div className="card card-padded mb-md">
-              <div className="flex-between" style={{ marginBottom: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="flex-between mb-md">
+                <div className="flex-center gap-sm">
                   <Activity size={14} color="var(--accent)" />
                   <span className="section-title" style={{ marginBottom: 0 }}>Environments</span>
                 </div>
@@ -300,38 +300,37 @@ export default function Dashboard() {
                   {data.environmentPassRates.map((row) => {
                     const key = `${row.projectId}::${row.environmentId || "default"}`;
                     const pct = row.passRate;
-                    const color = pct == null ? "var(--text3)" : pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)";
+                    const rateClass = pct == null ? "dash-env-rate--none"
+                      : pct >= 80 ? "dash-env-rate--good"
+                      : pct >= 50 ? "dash-env-rate--warn"
+                      : "dash-env-rate--bad";
                     return (
                       <tr key={key}>
-                        <td style={{ cursor: "pointer", fontWeight: 500, fontSize: "0.82rem" }} onClick={() => navigate(`/projects/${row.projectId}`)}>
+                        <td className="dash-env-project" onClick={() => navigate(`/projects/${row.projectId}`)}>
                           {row.projectName}
                         </td>
-                        <td style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                        <td className="dash-env-name">
                           {row.environmentName}
-                          {row.baseUrl && (
-                            <span style={{ fontSize: "0.7rem", color: "var(--text3)", display: "block" }}>
-                              {row.baseUrl}
-                            </span>
-                          )}
+                          {row.baseUrl && <span className="dash-env-base">{row.baseUrl}</span>}
                         </td>
                         <td>
-                          <span style={{ color, fontWeight: 700, fontSize: "0.82rem" }}>
+                          <span className={`dash-env-rate ${rateClass}`}>
                             {pct == null ? "—" : `${pct}%`}
                           </span>
-                          <span style={{ fontSize: "0.7rem", color: "var(--text3)", marginLeft: 6 }}>
+                          <span className="dash-env-count">
                             ({row.passed}/{row.total})
                           </span>
                         </td>
                         <td>
                           {row.lastGreenRunAt ? (
                             <span
-                              style={{ fontSize: "0.78rem", color: "var(--green)", cursor: "pointer" }}
+                              className="dash-env-green-link"
                               onClick={() => row.lastGreenRunId && navigate(`/runs/${row.lastGreenRunId}`)}
                             >
                               {new Date(row.lastGreenRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                             </span>
                           ) : (
-                            <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Never</span>
+                            <span className="dash-env-never">Never</span>
                           )}
                         </td>
                       </tr>

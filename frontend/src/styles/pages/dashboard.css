@@ -27,6 +27,21 @@
   border-radius: 50%; display: inline-block;
 }
 
+/* Environments panel (DIF-012) — only env-specific cell styles live here.
+   The wrapping card, header row, and table reuse .card-padded / .flex-between /
+   .section-title / .table from components.css + utilities.css. */
+.dash-env-project       { font-weight: 500; font-size: 0.82rem; cursor: pointer; }
+.dash-env-name          { font-size: 0.78rem; color: var(--text2); }
+.dash-env-base          { font-size: 0.7rem; color: var(--text3); display: block; }
+.dash-env-rate          { font-weight: 700; font-size: 0.82rem; }
+.dash-env-rate--good    { color: var(--green); }
+.dash-env-rate--warn    { color: var(--amber); }
+.dash-env-rate--bad     { color: var(--red); }
+.dash-env-rate--none    { color: var(--text3); }
+.dash-env-count         { font-size: 0.7rem; color: var(--text3); margin-left: 6px; }
+.dash-env-green-link    { font-size: 0.78rem; color: var(--green); cursor: pointer; }
+.dash-env-never         { font-size: 0.78rem; color: var(--text3); }
+
 /* Export PDF button override */
 .dash-export-btn {
   background: var(--surface);

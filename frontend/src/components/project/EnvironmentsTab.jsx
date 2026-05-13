@@ -103,7 +103,7 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
 
   if (loading) {
     return (
-      <div className="card" style={{ padding: "60px 24px", textAlign: "center", color: "var(--text2)" }}>
+      <div className="card pd-empty">
         <RefreshCw size={20} className="spin" style={{ opacity: 0.3, marginBottom: 12 }} />
         <div>Loading environments…</div>
       </div>
@@ -112,20 +112,18 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
 
   return (
     <div>
-      {error && <div className="alert-error" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && <div className="alert-error mb-md">{error}</div>}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="card mb-md">
+        <div className="pd-env-header">
           <Globe size={15} color="var(--accent)" />
-          <h3 style={{ fontWeight: 700, fontSize: "0.95rem", margin: 0 }}>
-            Environments ({rows.length})
-          </h3>
-          <span style={{ fontSize: "0.73rem", color: "var(--text3)", marginLeft: 8 }}>
+          <h3 className="pd-env-heading">Environments ({rows.length})</h3>
+          <span className="pd-env-hint">
             Per-run base URL override — selecting one in the Run modal never mutates the project URL.
           </span>
         </div>
         {rows.length === 0 ? (
-          <div style={{ padding: "20px", fontSize: "0.82rem", color: "var(--text3)" }}>
+          <div className="pd-env-empty">
             No environments defined. Runs will target the project's default URL.
           </div>
         ) : (
@@ -135,25 +133,25 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
                 <th>Name</th>
                 <th>Base URL</th>
                 <th>Credentials</th>
-                <th style={{ width: 160 }}>Actions</th>
+                <th className="pd-env-actions-col">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
-                  <td style={{ fontWeight: 600, fontSize: "0.82rem" }}>{row.name}</td>
-                  <td style={{ fontSize: "0.78rem", color: "var(--text2)" }}>{row.baseUrl}</td>
+                  <td className="pd-env-row-name">{row.name}</td>
+                  <td className="pd-env-row-url">{row.baseUrl}</td>
                   <td>
                     {row.credentials?.username ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.73rem", color: "var(--text2)" }}>
+                      <span className="pd-env-row-cred">
                         <Lock size={11} /> {row.credentials.username}
                       </span>
                     ) : (
-                      <span style={{ fontSize: "0.73rem", color: "var(--text3)" }}>—</span>
+                      <span className="text-xs text-muted">—</span>
                     )}
                   </td>
                   <td>
-                    <div style={{ display: "flex", gap: 4 }}>
+                    <div className="pd-env-row-actions">
                       <button
                         className="btn btn-ghost btn-xs"
                         onClick={() => startEdit(row)}
@@ -175,54 +173,50 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
       </div>
 
       {canEdit && (
-        <div className="card" style={{ padding: "18px 20px" }}>
-          <h3 style={{ fontWeight: 700, fontSize: "0.95rem", margin: "0 0 12px" }}>
+        <div className="card pd-env-form">
+          <h3 className="pd-env-form-title">
             {editingId ? "Edit environment" : "Add environment"}
           </h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div className="pd-env-form-grid">
             <div>
-              <label style={{ fontSize: "0.78rem", color: "var(--text2)" }}>Name</label>
+              <label className="pd-env-form-label">Name</label>
               <input
-                className="input"
+                className="input pd-env-form-input"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="staging"
-                style={{ height: 38 }}
               />
             </div>
             <div>
-              <label style={{ fontSize: "0.78rem", color: "var(--text2)" }}>Base URL</label>
+              <label className="pd-env-form-label">Base URL</label>
               <input
-                className="input"
+                className="input pd-env-form-input"
                 value={form.baseUrl}
                 onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
                 placeholder="https://staging.example.com"
-                style={{ height: 38 }}
               />
             </div>
             <div>
-              <label style={{ fontSize: "0.78rem", color: "var(--text2)" }}>Username (optional)</label>
+              <label className="pd-env-form-label">Username (optional)</label>
               <input
-                className="input"
+                className="input pd-env-form-input"
                 value={form.username}
                 onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                style={{ height: 38 }}
                 autoComplete="off"
               />
             </div>
             <div>
-              <label style={{ fontSize: "0.78rem", color: "var(--text2)" }}>Password (optional)</label>
+              <label className="pd-env-form-label">Password (optional)</label>
               <input
                 type="password"
-                className="input"
+                className="input pd-env-form-input"
                 value={form.password}
                 onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                style={{ height: 38 }}
                 autoComplete="new-password"
               />
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <div className="pd-env-form-actions">
             {editingId && (
               <button className="btn btn-ghost btn-sm" onClick={resetForm} disabled={busy}>Cancel</button>
             )}
