@@ -387,6 +387,22 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           }
           return attemptResults;
         }, MAX_TEST_RETRIES);
+        // CAP-001: `run.total` is initialised at the route layer to
+        // `tests.length` (`backend/src/routes/runs.js:209`) — i.e. one slot
+        // per *test*. Data-driven tests fan out into N iteration results
+        // and each iteration increments `run.passed` / `run.failed` via
+        // `processResult` below, so without adjusting `run.total` here the
+        // pass-rate denominator in `evaluateQualityGates` (and the matching
+        // `flakyPct` denominator) underflows, producing pass rates >100%
+        // and making `minPassRate` / `maxFailures` gates unreachable. The
+        // RunDetail progress bar would also render "5 / 1 test cases
+        // executed". Bump the total by (N - 1) so the dispatched-iteration
+        // count and the run aggregator stay in lock-step. Fixture-less
+        // tests yield exactly one iteration → no adjustment, zero
+        // regression.
+        if (iterResults.length > 1) {
+          run.total += iterResults.length - 1;
+        }
         // Surface every iteration from the final attempt to the run
         // aggregator — exactly once, after retries have fully resolved.
         for (const iterResult of iterResults) {
