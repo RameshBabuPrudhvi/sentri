@@ -96,13 +96,37 @@ async function main() {
     assert.equal(out.json.name, "staging-2");
     assert.equal(out.json.baseUrl, "https://staging-2.example.com");
     assert.equal(out.json.credentials.username, "u2");
+    // REVIEW.md security checklist: password MUST be stripped from API
+    // responses. `sanitiseEnvCredentialsForClient` returns
+    // `{ username, _hasAuth: true }` — never the password.
+    assert.equal(out.json.credentials.password, undefined, "API response must never carry the plaintext password");
+    assert.equal(out.json.credentials._hasAuth, true);
+
+    // ── DIF-012: GET also strips the password ─────────────────────────────
+    out = await t.req(base, `/api/v1/projects/${projectId}/environments`, { token: qa.token });
+    assert.equal(out.res.status, 200);
+    assert.equal(out.json[0].credentials.password, undefined, "GET response must never carry the plaintext password");
+    assert.equal(out.json[0].credentials.username, "u2");
+
+    // ── DIF-012: PATCH with blank password merges with stored value ───────
+    // Frontend doesn't echo the password (REVIEW.md), so an edit that
+    // touches name/username/baseUrl alone sends `password: ""`. The route
+    // must merge that with the stored value rather than wiping the secret.
+    out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { credentials: { username: "u2", password: "" } } });
+    assert.equal(out.res.status, 200);
+    let storedAfterBlankPwd = t.getDatabase().prepare("SELECT credentials FROM environments WHERE id = ?").get(environmentId);
+    assert.ok(storedAfterBlankPwd.credentials, "blank password in PATCH must merge with stored value, not wipe it");
+    // `credentials` is stored as a JSON string (see environmentRepo.envToRow);
+    // parse before handing to decryptCredentials, which expects an object.
+    assert.equal(decryptCredentials(JSON.parse(storedAfterBlankPwd.credentials)).password, "p2");
 
     // ── DIF-012: PATCH without credentials key preserves stored secret ────
     out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { name: "staging-3" } });
     assert.equal(out.res.status, 200);
     const stored = t.getDatabase().prepare("SELECT credentials FROM environments WHERE id = ?").get(environmentId);
     assert.ok(stored.credentials, "credentials should not be wiped when key is omitted from PATCH");
-    assert.equal(decryptCredentials(stored.credentials).username, "u2");
+    // `credentials` is stored as a JSON string — parse before decrypting.
+    assert.equal(decryptCredentials(JSON.parse(stored.credentials)).username, "u2");
 
     // ── DIF-012: explicit `credentials: null` clears the secret ───────────
     out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { credentials: null } });

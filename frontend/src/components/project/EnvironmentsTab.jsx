@@ -47,12 +47,19 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
   }
 
   function startEdit(row) {
+    // Server response only carries `{ username, _hasAuth: true }` (the
+    // password is stripped via `sanitiseEnvCredentialsForClient` —
+    // REVIEW.md forbids returning plaintext passwords). Username pre-fills
+    // for "which account is this env using" continuity; password stays
+    // blank by design. The PATCH route merges blank password with the
+    // stored value, so leaving it empty preserves the existing secret —
+    // the user only needs to type a new password when actually rotating.
     setEditingId(row.id);
     setForm({
       name: row.name || "",
       baseUrl: row.baseUrl || "",
       username: row.credentials?.username || "",
-      password: row.credentials?.password || "",
+      password: "",
     });
   }
 
