@@ -12,8 +12,15 @@ let mounted = false;
 function mount() {
   if (mounted) return;
   app.use("/api/auth", authRouter);
+  // Mirror backend/src/index.js: projectsRouter is mounted at `/api/v1/projects`
+  // (its routes are project-scoped — `router.post("/")`, `router.get("/:id")`,
+  // `router.get("/:id/environments")`), while runsRouter is mounted at the
+  // root `/api/v1` because its routes carry the `/projects/:id/...` prefix
+  // inline (`router.post("/projects/:id/run")`). Mounting runsRouter under
+  // `/api/v1/projects` doubled the prefix and produced 404s on every
+  // `/projects/:id/run` request.
   app.use("/api/v1/projects", requireAuth, workspaceScope, projectsRouter);
-  app.use("/api/v1/projects", requireAuth, workspaceScope, runsRouter);
+  app.use("/api/v1", requireAuth, workspaceScope, runsRouter);
   mounted = true;
 }
 
