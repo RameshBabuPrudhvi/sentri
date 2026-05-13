@@ -275,6 +275,73 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* ── DIF-012: Per-environment pass rate + last green run ── */}
+          {(data?.environmentPassRates?.length ?? 0) > 0 && (
+            <div className="card card-padded mb-md">
+              <div className="flex-between" style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Activity size={14} color="var(--accent)" />
+                  <span className="section-title" style={{ marginBottom: 0 }}>Environments</span>
+                </div>
+                <span className="text-xs text-muted">
+                  {data.environmentPassRates.length} environment{data.environmentPassRates.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Environment</th>
+                    <th>Pass rate</th>
+                    <th>Last green run</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.environmentPassRates.map((row) => {
+                    const key = `${row.projectId}::${row.environmentId || "default"}`;
+                    const pct = row.passRate;
+                    const color = pct == null ? "var(--text3)" : pct >= 80 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)";
+                    return (
+                      <tr key={key}>
+                        <td style={{ cursor: "pointer", fontWeight: 500, fontSize: "0.82rem" }} onClick={() => navigate(`/projects/${row.projectId}`)}>
+                          {row.projectName}
+                        </td>
+                        <td style={{ fontSize: "0.78rem", color: "var(--text2)" }}>
+                          {row.environmentName}
+                          {row.baseUrl && (
+                            <span style={{ fontSize: "0.7rem", color: "var(--text3)", display: "block" }}>
+                              {row.baseUrl}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span style={{ color, fontWeight: 700, fontSize: "0.82rem" }}>
+                            {pct == null ? "—" : `${pct}%`}
+                          </span>
+                          <span style={{ fontSize: "0.7rem", color: "var(--text3)", marginLeft: 6 }}>
+                            ({row.passed}/{row.total})
+                          </span>
+                        </td>
+                        <td>
+                          {row.lastGreenRunAt ? (
+                            <span
+                              style={{ fontSize: "0.78rem", color: "var(--green)", cursor: "pointer" }}
+                              onClick={() => row.lastGreenRunId && navigate(`/runs/${row.lastGreenRunId}`)}
+                            >
+                              {new Date(row.lastGreenRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "0.78rem", color: "var(--text3)" }}>Never</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {(data?.topAccessibilityOffenders?.length ?? 0) > 0 && (
             <div className="card card-padded mb-md">
               <div className="flex-between" style={{ marginBottom: 14 }}>

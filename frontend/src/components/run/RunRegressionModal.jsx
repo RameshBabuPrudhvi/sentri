@@ -83,6 +83,11 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   const [locale, setLocale] = useState("");
   const [timezoneId, setTimezoneId] = useState("");
   const [networkCondition, setNetworkCondition] = useState("fast");
+  // DIF-012: per-project environments. Empty string means "use project.url".
+  // Fetched lazily on projectId change; viewer roles get a 403 which we
+  // swallow so the modal still functions for users below qa_lead.
+  const [environments, setEnvironments] = useState([]);
+  const [environmentId, setEnvironmentId] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -91,6 +96,20 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   useEffect(() => {
     if (defaultProjectId) setProjectId(defaultProjectId);
   }, [defaultProjectId]);
+
+  // DIF-012: load environments whenever the selected project changes. Reset
+  // the selection so a stale envId from a previous project never leaks into
+  // the run payload (the backend would 400 on cross-project envId anyway,
+  // but failing fast in the UI is friendlier).
+  useEffect(() => {
+    if (!projectId) { setEnvironments([]); setEnvironmentId(""); return; }
+    let cancelled = false;
+    setEnvironmentId("");
+    api.getProjectEnvironments(projectId)
+      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setEnvironments([]); }); // 403 for viewers is fine
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   async function handleRun() {
     if (!projectId) { setError("Please select a project."); return; }
@@ -106,6 +125,10 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
       if (device) body.device = device;
       if (locale) body.locale = locale;
       if (timezoneId) body.timezoneId = timezoneId;
+      // DIF-012: only send environmentId when the user picked a non-default
+      // option — sending "" would force the backend's `invalid environmentId`
+      // validator to run an extra lookup.
+      if (environmentId) body.environmentId = environmentId;
       // Always send networkCondition — backend defaults to "fast" if omitted,
       // but always sending it keeps the run record explicit and avoids the
       // dead-import / undefined-vs-"fast" inconsistency in the runner path.
@@ -152,6 +175,29 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* DIF-012: Environment selector — only shown when the project has
+            at least one configured environment; otherwise the run targets
+            the project's default URL and we don't clutter the modal. */}
+        {environments.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <Globe size={13} />
+              Environment
+            </label>
+            <select
+              className="input"
+              value={environmentId}
+              onChange={(e) => setEnvironmentId(e.target.value)}
+              style={{ height: 38 }}
+            >
+              <option value="">Default (project URL)</option>
+              {environments.map((env) => (
+                <option key={env.id} value={env.id}>{env.name} — {env.baseUrl}</option>
               ))}
             </select>
           </div>

@@ -26,6 +26,7 @@ import ActiveRunBanner from "../components/project/ActiveRunBanner.jsx";
 import RunToast from "../components/project/RunToast.jsx";
 import RunsTab from "../components/project/RunsTab.jsx";
 import TraceabilityTab from "../components/project/TraceabilityTab.jsx";
+import EnvironmentsTab from "../components/project/EnvironmentsTab.jsx";
 
 import ProjectHeader from "../components/project/ProjectHeader.jsx";
 import TablePagination from "../components/shared/TablePagination.jsx";
@@ -365,6 +366,7 @@ export default function ProjectDetail() {
         {[
           ["review", `Tests (${testCounts.total})`],
           ["runs",   `Runs (${runsMeta.total})`],
+          ["environments", "Environments"],
           ["traceability", "Traceability"],
         ].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`pd-tab${tab === key ? " pd-tab--active" : ""}`}>
@@ -602,6 +604,11 @@ export default function ProjectDetail() {
           page={runsPage}
           onPageChange={setRunsPage}
         />
+      )}
+
+      {/* ── ENVIRONMENTS TAB (DIF-012) ── */}
+      {tab === "environments" && (
+        <EnvironmentsTab projectId={id} canEdit={canEdit} onToast={showToast} />
       )}
 
       {/* ── TRACEABILITY TAB ── */}

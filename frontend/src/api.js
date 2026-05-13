@@ -559,13 +559,20 @@ export const api = {
    */
   deleteSchedule: (projectId) => req("DELETE", `/projects/${projectId}/schedule`),
 
-  
+
   // ── Environments (DIF-012) ───────────────────────────────────────────────
-  getProjectEnvironments: (projectId) => req("GET", `/projects/${projectId}/environments`),
-  createProjectEnvironment: (projectId, payload) => req("POST", `/projects/${projectId}/environments`, payload),
-  updateProjectEnvironment: (projectId, environmentId, payload) => req("PATCH", `/projects/${projectId}/environments/${environmentId}`, payload),
-  deleteProjectEnvironment: (projectId, environmentId) => req("DELETE", `/projects/${projectId}/environments/${environmentId}`),
-// ── Dashboard ───────────────────────────────────────────────────────────────
+  /** @param {string} projectId */
+  getProjectEnvironments:    (projectId)               => req("GET",    `/projects/${projectId}/environments`),
+  /** @param {string} projectId @param {{name: string, baseUrl: string, credentials?: Object}} payload */
+  createProjectEnvironment:  (projectId, payload)      => req("POST",   `/projects/${projectId}/environments`, payload),
+  /** @param {string} projectId @param {string} environmentId @param {Object} payload */
+  updateProjectEnvironment:  (projectId, environmentId, payload) =>
+    req("PATCH", `/projects/${projectId}/environments/${environmentId}`, payload),
+  /** @param {string} projectId @param {string} environmentId */
+  deleteProjectEnvironment:  (projectId, environmentId) =>
+    req("DELETE", `/projects/${projectId}/environments/${environmentId}`),
+
+  // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */
   getDashboard: () => req("GET", "/dashboard"),
 
