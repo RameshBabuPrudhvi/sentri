@@ -433,6 +433,36 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🌐 Environments (DIF-012, partial — API only)
+
+**Preconditions:** Project exists; `admin` user logged in. No UI is shipped yet — exercise via API client (curl / Postman). Endpoints documented in `docs/api/projects.md` § Environment management; permissions in `backend/src/middleware/permissions.json`.
+
+**Happy path:**
+1. `POST /api/v1/projects/:id/environments` with `{ "name": "staging", "baseUrl": "https://staging.example.com" }` (`admin`) → **201** with the created env (`id` is `ENV-<uuid>`).
+2. Repeat with `{ "name": "preprod", "baseUrl": "https://preprod.example.com", "credentials": { "username": "qa", "password": "secret" } }` → **201**; response includes `credentials` in decrypted form.
+3. `GET /api/v1/projects/:id/environments` (`qa_lead+`) → returns both environments, ordered by `createdAt ASC`.
+4. Trigger a regression run with `{ "environmentId": "<staging-id>" }` → run launches against `https://staging.example.com`; `GET /api/v1/projects/:id` still returns the original `url` (project row unchanged).
+5. Inspect the run record → `environmentId` is persisted.
+6. `PATCH /api/v1/projects/:id/environments/:environmentId` updates `name` / `baseUrl` / `credentials`. Omitting `credentials` preserves the stored value; passing `credentials: null` clears it.
+7. `DELETE /api/v1/projects/:id/environments/:environmentId` → `200 { ok: true }`.
+
+**Negative / edge:**
+- `POST` with missing `name` or `baseUrl` → **400 "name and baseUrl are required"**.
+- Duplicate `name` for the same project → SQLite UNIQUE constraint violation (surfaces as 500; acceptable until a friendlier check is added).
+- `POST /run` / `POST /trigger` with an `environmentId` belonging to a different project → **400 "invalid environmentId"**.
+- `POST /run` / `POST /trigger` with an unknown `environmentId` → **400 "invalid environmentId"**.
+- `qa_lead` calling `POST` / `PATCH` / `DELETE` env endpoints → **403** (mutations are admin-only).
+- `viewer` calling `GET` env endpoint → **403** (read is `qa_lead+`).
+- Outsider (no membership) calling any env endpoint on someone else's project → **404** (workspace scope enforced via `getByIdInWorkspace`).
+- `credentials.username` / `credentials.password` are AES-GCM encrypted at rest — verify by inspecting the SQLite `environments.credentials` column directly: the stored JSON has `_encrypted: true` and the username/password fields are ciphertext (`<iv>:<tag>:<ciphertext>`).
+
+**Known gaps (do not test, tracked as remaining DIF-012 work):**
+- No frontend UI — Project Detail does not show an Environments tab; RunRegressionModal does not surface an env dropdown.
+- Environment `credentials` are stored but **not** applied during crawl/run login — the project's own credentials are still used. Setting env credentials today is a no-op for the auth flow.
+- No dashboard per-environment pass-rate panel.
+
+---
+
 ### 🧪 Tests Page
 
 **Preconditions:** Project exists.
