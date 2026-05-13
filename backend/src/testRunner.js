@@ -369,7 +369,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           //    discarded; only the final attempt's results are surfaced.
           //  - Data-driven tests (≥1 fixture row): never retry. Retrying
           //    would re-execute every row (including the passes) on every
-          //    failure, multiplying browser work.
+          //    failure, multiplying browser work. A visible log line keeps
+          //    the suppression explicit — otherwise a failed data-driven
+          //    test looks identical to a fixture-less retry exhaustion in
+          //    the run timeline, masking the design choice from reviewers.
+          if (fixtureRows?.length && lastResult?.status === "failed") {
+            const failedRows = attemptResults.filter((r) => r?.status === "failed").length;
+            logWarn(run, `↻ Skipping retry for ${test.name} — ${failedRows}/${attemptResults.length} fixture iteration(s) failed (data-driven tests don't retry)`);
+          }
           if (!fixtureRows?.length && lastResult?.status === "failed") {
             const retryErr = new Error(lastResult.error || "Test failed");
             retryErr.result = lastResult;

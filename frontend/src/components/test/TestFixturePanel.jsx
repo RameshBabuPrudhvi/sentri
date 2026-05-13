@@ -61,6 +61,23 @@ export default function TestFixturePanel({ testId, codeVersion }) {
     const capNum = Number(iterationCap);
     if (iterationCap !== "" && Number.isFinite(capNum)) payload.iterationCap = capNum;
 
+    // CAP-001: re-uploading at the same code version replaces the prior
+    // fixture in place (`testFixtureRepo.upsertFixture` is keyed on
+    // `(testId, version)`). The server log comment documents this, but
+    // users hitting the panel directly can lose 10s of rows of fixture
+    // data with no warning — surface a one-time confirm before the
+    // destructive write. Different-version uploads (after an AI fix
+    // bumps codeVersion) don't overwrite anything, so they skip the
+    // prompt.
+    const existingActive = fixtures.find((f) => f.version === codeVersion);
+    if (existingActive && typeof window !== "undefined" && typeof window.confirm === "function") {
+      const ok = window.confirm(
+        `A fixture already exists for version ${codeVersion} (${existingActive.rows?.length ?? 0} row(s)). ` +
+        "Saving will replace it. Continue?",
+      );
+      if (!ok) return;
+    }
+
     setLoading(true);
     try {
       const res = await api.uploadTestFixture(testId, payload);
