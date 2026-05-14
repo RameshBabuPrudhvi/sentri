@@ -415,9 +415,20 @@ export default function RunDetail() {
   // Render a dropdown when there are ≥2 shard traces; otherwise the
   // existing single-link UI below covers both `shardCount === 1` and
   // legacy pre-Phase-2 runs.
+  //
+  // `tracePaths` is intentionally a *sparse* array indexed by shardIndex —
+  // a shard that crashed before writing its trace leaves a `null` slot
+  // (see `backend/src/middleware/appSetup.js` `signRunArtifacts` which
+  // preserves sparse entries as `null` so the index → shard mapping is
+  // not lost). We must therefore retain the original index when filtering
+  // out the empty slots; using the filtered array's index for the label
+  // would mislabel "Shard 3" as "Shard 2" when shard 1 is missing.
   const shardTracePaths = Array.isArray(run.tracePaths)
-    ? run.tracePaths.filter((p) => typeof p === "string" && p.length > 0)
+    ? run.tracePaths
+        .map((p, i) => (typeof p === "string" && p.length > 0 ? { path: p, shardIndex: i } : null))
+        .filter(Boolean)
     : [];
+  const totalShardCount = Array.isArray(run.tracePaths) ? run.tracePaths.length : 0;
   const hasShardTraces = shardTracePaths.length > 1;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
@@ -570,8 +581,10 @@ export default function RunDetail() {
                 style={{ fontSize: "0.78rem", padding: "4px 8px" }}
               >
                 <option value="" disabled>🔍 Open Trace…</option>
-                {shardTracePaths.map((p, i) => (
-                  <option key={i} value={p}>Shard {i + 1}/{shardTracePaths.length}</option>
+                {shardTracePaths.map(({ path, shardIndex }) => (
+                  <option key={shardIndex} value={path}>
+                    Shard {shardIndex + 1}/{totalShardCount || shardTracePaths.length}
+                  </option>
                 ))}
               </select>
             ) : traceUrl && (

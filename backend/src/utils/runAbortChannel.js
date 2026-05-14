@@ -66,6 +66,13 @@ export const RUN_ABORT_CHANNEL = "sentri:run-abort";
 export const RUN_ABORT_ORIGIN = `inst_${crypto.randomBytes(16).toString("hex")}`;
 
 let _subscribed = false;
+// Track the EventEmitter `message` listener registration independently from
+// the SUBSCRIBE state. A SUBSCRIBE retry (after `_subscribed` was reset to
+// `false` in the catch handler below) must NOT re-register the listener, or
+// every incoming abort would be dispatched twice (then 3×, 4×, …) producing
+// spurious warning logs and wasted cycles. The listener iterates the shared
+// `_onAbortHandlers` set so a single registration covers all callers.
+let _messageHandlerRegistered = false;
 const _onAbortHandlers = new Set();
 
 /**
@@ -118,6 +125,34 @@ export function subscribeToRunAborts({ onAbort }) {
 
   _onAbortHandlers.add(onAbort);
 
+  // Register the EventEmitter `message` listener exactly once per process,
+  // independently of the SUBSCRIBE state. A retry path (subscribe rejected →
+  // `_subscribed` reset to `false` → caller invokes again) must not stack a
+  // second listener on top of the first, or every incoming abort would
+  // dispatch twice. The listener is registered before the SUBSCRIBE call so
+  // a fast-arriving message in the race window between subscribe-accept and
+  // listener-attach can't be missed.
+  if (!_messageHandlerRegistered) {
+    _messageHandlerRegistered = true;
+    redisSub.on("message", (channel, message) => {
+      if (channel !== RUN_ABORT_CHANNEL) return;
+      let parsed;
+      try { parsed = JSON.parse(message); } catch { return; }
+      if (!parsed || typeof parsed.runId !== "string") return;
+      // Self-echo suppression: the local abort route already cancelled the
+      // controller before publishing, so re-firing here would be a no-op at
+      // best and a confused-state bug at worst.
+      if (parsed.origin === RUN_ABORT_ORIGIN) return;
+      for (const handler of _onAbortHandlers) {
+        try { handler(parsed.runId); }
+        catch (err) {
+          console.warn(formatLogLine("warn", null,
+            `[run-abort-channel] handler threw for ${parsed.runId}: ${err.message}`));
+        }
+      }
+    });
+  }
+
   // Idempotent SUBSCRIBE — the underlying ioredis client multiplexes the
   // single channel across all callers in this process.
   if (_subscribed) return true;
@@ -126,28 +161,12 @@ export function subscribeToRunAborts({ onAbort }) {
   redisSub.subscribe(RUN_ABORT_CHANNEL).catch((err) => {
     // Subscribe failure → revert state so a later retry (e.g. after a
     // Redis reconnect) can try again. The caller logs the warning; we
-    // surface it here for operator visibility.
+    // surface it here for operator visibility. The `message` listener
+    // above stays registered — re-registering it on retry would cause
+    // duplicate dispatches.
     _subscribed = false;
     console.warn(formatLogLine("warn", null,
       `[run-abort-channel] subscribe failed: ${err.message}`));
-  });
-
-  redisSub.on("message", (channel, message) => {
-    if (channel !== RUN_ABORT_CHANNEL) return;
-    let parsed;
-    try { parsed = JSON.parse(message); } catch { return; }
-    if (!parsed || typeof parsed.runId !== "string") return;
-    // Self-echo suppression: the local abort route already cancelled the
-    // controller before publishing, so re-firing here would be a no-op at
-    // best and a confused-state bug at worst.
-    if (parsed.origin === RUN_ABORT_ORIGIN) return;
-    for (const handler of _onAbortHandlers) {
-      try { handler(parsed.runId); }
-      catch (err) {
-        console.warn(formatLogLine("warn", null,
-          `[run-abort-channel] handler threw for ${parsed.runId}: ${err.message}`));
-      }
-    }
   });
 
   console.log(formatLogLine("info", null,

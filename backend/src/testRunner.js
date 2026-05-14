@@ -294,6 +294,18 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // miscount under concurrent dispatch.
   const shardRemaining = [...shardSizes];
   if (run.shardsCompleted == null) run.shardsCompleted = 0;
+  // CAP-002 — empty shards (size 0, possible when shardCount > tests.length)
+  // have no tests to drain via `recordTestShardComplete`, so the counter
+  // would never advance for them. Without pre-crediting, the badge would
+  // surface "Shards M/N" with M < N during execution and only reconcile at
+  // the very end of `finalizeRunIfNotAborted` — and if the run is aborted
+  // before finalization, the badge would be permanently stuck at the
+  // partial value. SSE snapshots fire on every result, so the badge needs
+  // to reflect "no work to do here" the moment the partition is computed.
+  const emptyShards = shardSizes.filter((s) => s === 0).length;
+  if (emptyShards > 0) {
+    run.shardsCompleted = Math.min(shardCount, run.shardsCompleted + emptyShards);
+  }
 
   // Classify each test once upfront and cache the result on the test object.
   // This avoids re-parsing the code body via isApiTest() multiple times per
