@@ -635,7 +635,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   // the abort response shouldn't block on a sibling-replica round-trip.
   publishRunAbort(req.params.runId).catch(() => { /* best-effort */ });
 
-  res.json({ ok: true });
+  res.json({ ok: true, shardsAborted: workerAborted });
 });
 
 // ─── CI/CD Trigger token management ──────────────────────────────────────────

@@ -592,9 +592,20 @@ async function processJob(job) {
 async function finalizeShardedRun(project, run, jobOptions = {}) {
   const actorInfo = jobOptions.actorInfo || {};
   const callbackUrl = jobOptions.callbackUrl || null;
-  // Defensive: if the run was aborted between this shard's increment and
-  // this call, the abort route owns terminal-state writes — do nothing.
-  if (run.status === "aborted") return;
+  // Defensive: if the run already reached a terminal state between this
+  // shard's increment and this call, skip finalization entirely. Two cases:
+  //   - `"aborted"` — the abort route owns terminal-state writes.
+  //   - `"failed"` — a sibling shard crashed on its final attempt and
+  //     `markRunFailedFirstWriterWins` already transitioned the row.
+  //     Without this guard the finalizer would wastefully run the AI
+  //     feedback loop (regenerating tests for a browser-crash failure,
+  //     not a real test-logic issue), persist partial gate results onto
+  //     a terminal row, and modify test `reviewStatus` via the feedback
+  //     loop — all side effects on a run the user already sees as failed.
+  //     `markRunCompletedFirstWriterWins` at the end would correctly
+  //     reject the status flip (DB is `"failed"`, not `"running"`), but
+  //     the intermediate AI calls + DB writes are real waste.
+  if (run.status === "aborted" || run.status === "failed") return;
 
   const runId = run.id;
   const results = Array.isArray(run.results) ? run.results : [];
