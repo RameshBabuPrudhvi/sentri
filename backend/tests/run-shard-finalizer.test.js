@@ -162,10 +162,8 @@ async function main() {
         Promise.resolve().then(() => {
           // Simulate the worker's exact sequence: stats first, then increment.
           runRepo.incrementRunStats(run.id, { passedDelta: 10, failedDelta: 0 });
-          const advanced = runRepo.incrementShardsCompleted(run.id);
-          if (advanced === 1) {
-            const fresh = runRepo.getById(run.id);
-            if (fresh.shardsCompleted >= run.shardCount) {
+          const { advanced, newValue } = runRepo.incrementShardsCompleted(run.id);
+          if (advanced === 1 && newValue >= run.shardCount) {
               finalizerCount++;
               finalizerShardIndex = shardIndex;
             }
@@ -191,11 +189,8 @@ async function main() {
     const observations = await Promise.all(
       Array.from({ length: 6 }, () =>
         Promise.resolve().then(() => {
-          const advanced = runRepo.incrementShardsCompleted(run.id);
-          if (advanced === 1) {
-            const fresh = runRepo.getById(run.id);
-            if (fresh.shardsCompleted >= run.shardCount) finalizerCount++;
-          }
+          const { advanced, newValue } = runRepo.incrementShardsCompleted(run.id);
+          if (advanced === 1 && newValue >= run.shardCount) finalizerCount++;
           return { advanced };
         }),
       ),
@@ -219,7 +214,8 @@ async function main() {
       Array.from({ length: 10 }, (_, shardIndex) =>
         Promise.resolve().then(() => {
           runRepo.incrementRunStats(run.id, { passedDelta: 3, failedDelta: 1, totalDelta: 0 });
-          runRepo.incrementShardsCompleted(run.id);
+          const { advanced } = runRepo.incrementShardsCompleted(run.id);
+          void advanced; // consume to avoid lint warning
         }),
       ),
     );

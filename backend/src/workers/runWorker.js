@@ -334,17 +334,17 @@ async function processJob(job) {
       }
 
       // CAP-002 Phase 2 — finalization handoff. `incrementShardsCompleted`
-      // returns 1 only for the boundary-crossing UPDATE; re-read the row to
-      // check whether THIS shard's increment landed the counter at
-      // `shardCount`. The SQL predicate (Prerequisite #1) guarantees exactly
-      // one shard observes `shardsCompleted === shardCount` after its own
-      // increment, so the feedback loop + finalize + `done` event fire
-      // exactly once per run.
-      const advanced = runRepo.incrementShardsCompleted(runId);
+      // now returns `{ advanced, newValue }` from a single transaction
+      // (UPDATE + SELECT under the same row lock) so the boundary check
+      // is atomic — no interleaving window where a sibling shard on
+      // another Postgres process could read the same post-increment value
+      // and fire a duplicate finalizer. The caller checks
+      // `newValue === totalShards` directly; no separate `getById` needed.
+      const { advanced, newValue } = runRepo.incrementShardsCompleted(runId);
       const totalShards = jobShardCount || 1;
-      if (advanced === 1) {
+      if (advanced === 1 && newValue >= totalShards) {
         const fresh = runRepo.getById(runId);
-        if (fresh && (fresh.shardsCompleted ?? 0) >= totalShards) {
+        if (fresh) {
           // Pass the full `options` payload so the finalizer can access the
           // CI/CD callback URL (and any future shard-shared knobs) without
           // a second job-data round-trip. Every shard carries the same
@@ -506,12 +506,22 @@ async function processJob(job) {
       // isation (SQLite), so concurrent sibling appends are honoured.
       const isShardMode = shardIndex != null;
       if (isShardMode) {
-        const aggregates = runRepo.purgeShardResults(runId, shardIndex, isNonExecutedSkip);
-        run.passed = aggregates.passed;
-        run.failed = aggregates.failed;
+        runRepo.purgeShardResults(runId, shardIndex, isNonExecutedSkip);
+        // DO NOT overwrite `passed` / `failed` columns here. Those columns
+        // are composed atomically by each shard's `incrementRunStats` call
+        // after `runTests` returns. If a sibling shard is still executing,
+        // its partial results are already in the `results` JSON column (via
+        // `appendRunResults`) but its `incrementRunStats` hasn't fired yet.
+        // Re-deriving passed/failed from the JSON and writing them as
+        // absolute values would inflate the columns — then the sibling's
+        // `incrementRunStats(passedDelta)` would add its delta on top,
+        // double-counting. Leaving the columns untouched means the retrying
+        // shard's own `incrementRunStats` call (after re-execution) adds
+        // only its fresh delta, which is correct by construction.
+        //
         // run.results in-memory is now stale (the live DB column is
-        // canonical). Don't write it back via save() below — instead
-        // persist only the run-level non-results fields the retry needs.
+        // canonical). Don't write it back via save() — instead persist
+        // only the run-level non-results, non-stats fields the retry needs.
         run.pagesFound = 0;
         run.logs = [];
         runLogRepo.deleteByRunId(runId);
@@ -520,8 +530,6 @@ async function processJob(job) {
           error: null,
           errorCategory: null,
           finishedAt: null,
-          passed: run.passed,
-          failed: run.failed,
           pagesFound: 0,
         });
       } else {

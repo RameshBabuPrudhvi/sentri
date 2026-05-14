@@ -613,20 +613,38 @@ export function appendRunResults(runId, newResults) {
  */
 export function incrementShardsCompleted(runId) {
   const db = getDatabase();
-  // Push the cap check into the WHERE predicate so an at-cap row does NOT
-  // match the UPDATE and `info.changes` accurately reflects whether the
-  // counter actually advanced. The previous CASE-only form set the column
-  // to its existing value when at cap, which SQLite/Postgres both count as
-  // a matched-row UPDATE (info.changes === 1) — making the return value
-  // useless for cap detection and inconsistent with the documented `0`
-  // semantics for "already at the cap".
-  const info = db.prepare(
-    `UPDATE runs
-        SET shardsCompleted = COALESCE(shardsCompleted, 0) + 1
-      WHERE id = ?
-        AND COALESCE(shardsCompleted, 0) < COALESCE(shardCount, 1)`
-  ).run(runId);
-  return info.changes || 0;
+  // Atomic increment + boundary detection in a single transaction so a
+  // concurrent sibling shard on another Postgres process can never read
+  // the same post-increment value and fire a duplicate finalizer.
+  //
+  // The transaction wraps UPDATE + SELECT so on SQLite (BEGIN IMMEDIATE
+  // serialises writers) and Postgres (the UPDATE's row lock holds until
+  // COMMIT) the returned `newValue` is the authoritative post-increment
+  // counter — no interleaving window between the write and the read.
+  //
+  // Returns `{ advanced: 0|1, newValue: number }`.
+  //   - `advanced === 0` → row not found OR already at cap (no-op).
+  //   - `advanced === 1` → counter incremented; `newValue` is the new
+  //     `shardsCompleted`. The caller checks `newValue === shardCount`
+  //     to decide whether to finalize — no separate `getById` needed.
+  let advanced = 0;
+  let newValue = 0;
+  db.transaction(() => {
+    const info = db.prepare(
+      `UPDATE runs
+          SET shardsCompleted = COALESCE(shardsCompleted, 0) + 1
+        WHERE id = ?
+          AND COALESCE(shardsCompleted, 0) < COALESCE(shardCount, 1)`
+    ).run(runId);
+    advanced = info.changes || 0;
+    if (advanced === 1) {
+      const row = db.prepare(
+        "SELECT shardsCompleted FROM runs WHERE id = ?"
+      ).get(runId);
+      newValue = row?.shardsCompleted ?? 0;
+    }
+  })();
+  return { advanced, newValue };
 }
 
 /**

@@ -179,11 +179,12 @@ async function main() {
   });
 
   // ── incrementShardsCompleted — single increment ─────────────────────
-  await test("incrementShardsCompleted: advances 0 \u2192 1", () => {
+  await test("incrementShardsCompleted: advances 0 \u2192 1 and returns newValue", () => {
     const run = makeRun(project.id, { shardCount: 4, shardsCompleted: 0 });
     runRepo.create(run);
-    const changed = runRepo.incrementShardsCompleted(run.id);
-    assert.equal(changed, 1);
+    const { advanced, newValue } = runRepo.incrementShardsCompleted(run.id);
+    assert.equal(advanced, 1);
+    assert.equal(newValue, 1, "newValue must reflect the post-increment counter");
     const fetched = runRepo.getById(run.id);
     assert.equal(fetched.shardsCompleted, 1);
     runRepo.hardDeleteById(run.id);
