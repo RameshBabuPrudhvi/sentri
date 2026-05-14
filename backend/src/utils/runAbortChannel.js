@@ -106,7 +106,7 @@ export async function publishRunAbort(runId) {
  * controller — exactly the same code path the in-process abort route uses.
  *
  * @param {Object}   opts
- * @param {(runId: string) => void} opts.onAbort - Local abort handler.
+ * @param {Function} opts.onAbort - Local abort handler `(runId) => void`.
  * @returns {boolean} `true` if subscribed (or already was), `false` when
  *   Redis is unavailable (caller should keep using the local-only path).
  */
