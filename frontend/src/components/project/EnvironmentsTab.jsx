@@ -54,12 +54,21 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
     // blank by design. The PATCH route merges blank password with the
     // stored value, so leaving it empty preserves the existing secret —
     // the user only needs to type a new password when actually rotating.
+    //
+    // `_hadAuthAtEdit` snapshots whether the row had credentials at edit
+    // start so `handleSave` can distinguish "user cleared both fields to
+    // wipe stored credentials" (→ send `credentials: null`) from "user
+    // opened a credential-less row and didn't add any" (→ omit the
+    // `credentials` key entirely). Without this, clearing both fields
+    // was indistinguishable from "leave the form alone" and silently
+    // preserved the stored secret — see QA.md § Environments step 5.
     setEditingId(row.id);
     setForm({
       name: row.name || "",
       baseUrl: row.baseUrl || "",
       username: row.credentials?.username || "",
       password: "",
+      _hadAuthAtEdit: !!row.credentials?._hasAuth,
     });
   }
 
@@ -70,13 +79,27 @@ export default function EnvironmentsTab({ projectId, canEdit, onToast }) {
     }
     setBusy(true);
     try {
-      // Only forward credentials when at least one field is non-empty so an
-      // edit that touches name/baseUrl alone doesn't wipe the stored secret.
-      const credentials = (form.username || form.password)
-        ? { username: form.username, password: form.password }
-        : undefined;
+      // Three-way credentials decision (matches the PATCH route's three-case
+      // contract in `backend/src/routes/projects.js`):
+      //   1. At least one field non-empty → send object. Server's
+      //      blank-password merge fills missing fields from the stored
+      //      value, so changing only the username keeps the password.
+      //   2. Both fields blank AND the row had credentials at edit start
+      //      → explicit `credentials: null` to wipe the stored secret.
+      //      This is the "Edit → clear both → save" flow QA.md § step 5
+      //      requires; without it, blank fields were indistinguishable
+      //      from "didn't touch credentials" and the secret silently
+      //      persisted.
+      //   3. Both fields blank AND no credentials existed → omit the key.
+      //      Avoids a no-op PATCH that would re-encrypt nothing.
+      const hasInput = !!(form.username || form.password);
+      const wantsClear = !hasInput && editingId && form._hadAuthAtEdit;
       const payload = { name: form.name.trim(), baseUrl: form.baseUrl.trim() };
-      if (credentials !== undefined) payload.credentials = credentials;
+      if (hasInput) {
+        payload.credentials = { username: form.username, password: form.password };
+      } else if (wantsClear) {
+        payload.credentials = null;
+      }
       if (editingId) {
         await api.updateProjectEnvironment(projectId, editingId, payload);
         onToast?.("Environment updated", "success");
