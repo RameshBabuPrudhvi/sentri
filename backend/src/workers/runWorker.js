@@ -487,22 +487,52 @@ async function processJob(job) {
       // to the pre-CAP-002 code path. Re-derive `passed`/`failed` from
       // the surviving rows instead of resetting to 0 so sibling-shard
       // pass/fail counts are preserved through the retry.
-      const survivors = (run.results || []).filter((r) => {
-        if (isNonExecutedSkip(r)) return true;
-        if (shardIndex == null) return false; // legacy: wipe all execution rows
-        return r?._shardIndex != null && r._shardIndex !== shardIndex;
-      });
-      run.results = survivors;
-      run.passed = survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length;
-      run.failed = survivors.filter((r) => r?.status === "failed").length;
-      run.pagesFound = 0;
-      run.logs = [];
-      // Delete run_logs table rows from the failed attempt so the retry
-      // doesn't start with stale log entries.  runRepo.getById() hydrates
-      // run.logs from run_logs, so without this the retry would see the
-      // old logs concatenated with new ones.
-      runLogRepo.deleteByRunId(runId);
-      runRepo.save(run);
+      //
+      // Critical lost-write fix: in shard mode we use the atomic
+      // `purgeShardResults` primitive instead of an in-memory filter +
+      // `runRepo.save(run)`. The previous approach read `run.results`
+      // from the job-start DB snapshot (line ~189), filtered in JS,
+      // then `save(run)` overwrote the live column — silently
+      // truncating any sibling-shard rows that landed via
+      // `appendRunResults` between snapshot and save. The primitive
+      // performs a transactional read-modify-write on the live column
+      // under a `FOR UPDATE` lock (Postgres) / BEGIN IMMEDIATE serial-
+      // isation (SQLite), so concurrent sibling appends are honoured.
+      const isShardMode = shardIndex != null;
+      if (isShardMode) {
+        const aggregates = runRepo.purgeShardResults(runId, shardIndex, isNonExecutedSkip);
+        run.passed = aggregates.passed;
+        run.failed = aggregates.failed;
+        // run.results in-memory is now stale (the live DB column is
+        // canonical). Don't write it back via save() below — instead
+        // persist only the run-level non-results fields the retry needs.
+        run.pagesFound = 0;
+        run.logs = [];
+        runLogRepo.deleteByRunId(runId);
+        runRepo.update(runId, {
+          status: "running",
+          error: null,
+          errorCategory: null,
+          finishedAt: null,
+          passed: run.passed,
+          failed: run.failed,
+          pagesFound: 0,
+        });
+      } else {
+        // Legacy single-shard / non-shard path — bit-for-bit unchanged.
+        const survivors = (run.results || []).filter((r) => isNonExecutedSkip(r));
+        run.results = survivors;
+        run.passed = 0;
+        run.failed = 0;
+        run.pagesFound = 0;
+        run.logs = [];
+        // Delete run_logs table rows from the failed attempt so the retry
+        // doesn't start with stale log entries.  runRepo.getById() hydrates
+        // run.logs from run_logs, so without this the retry would see the
+        // old logs concatenated with new ones.
+        runLogRepo.deleteByRunId(runId);
+        runRepo.save(run);
+      }
     }
 
     throw err; // Let BullMQ handle retry logic

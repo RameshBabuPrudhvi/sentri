@@ -19,7 +19,7 @@
  * `{ data: Run[], meta: { total, page, pageSize, hasMore } }`.
  */
 
-import { getDatabase } from "../sqlite.js";
+import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
 
@@ -729,8 +729,17 @@ export function incrementRunStats(runId, { passedDelta = 0, failedDelta = 0, tot
 export function setShardTracePath(runId, shardIndex, path) {
   if (!runId || shardIndex == null || typeof path !== "string") return;
   const db = getDatabase();
+  // Dialect-conditional row lock on the SELECT: SQLite's `transaction()` uses
+  // BEGIN IMMEDIATE which already serialises write transactions, so a bare
+  // SELECT is sufficient. Postgres defaults to READ COMMITTED — without
+  // `FOR UPDATE`, two concurrent shards can both read the same stale row,
+  // modify different array slots in JS, then the second UPDATE silently
+  // overwrites the first (classic lost-update). `FOR UPDATE` takes a row
+  // exclusive lock so the second SELECT blocks until the first transaction
+  // commits, then sees the post-write value.
+  const lockClause = getDatabaseDialect() === "postgres" ? " FOR UPDATE" : "";
   db.transaction(() => {
-    const row = db.prepare("SELECT tracePaths FROM runs WHERE id = ?").get(runId);
+    const row = db.prepare(`SELECT tracePaths FROM runs WHERE id = ?${lockClause}`).get(runId);
     if (!row) return;
     let arr = [];
     if (row.tracePaths) {
@@ -740,6 +749,67 @@ export function setShardTracePath(runId, shardIndex, path) {
     arr[shardIndex] = path;
     db.prepare("UPDATE runs SET tracePaths = ? WHERE id = ?").run(JSON.stringify(arr), runId);
   })();
+}
+
+/**
+ * CAP-002 Phase 2 — Atomic shard-scoped results purge for the BullMQ retry
+ * path. Reads the live `results` column under a dialect-appropriate lock,
+ * filters out rows belonging to `shardIndex` (keeping non-executed skips
+ * and sibling-shard rows verbatim), and writes the filtered array back —
+ * all inside a single transaction so concurrent sibling-shard
+ * `appendRunResults` calls cannot lose writes through this path.
+ *
+ * Why this exists: the worker's non-final-attempt retry block previously
+ * called `runRepo.save(run)` after filtering the in-memory results, which
+ * was a full-column overwrite. Sibling shards atomically appending to the
+ * same column between this shard's job-start snapshot and the save would
+ * be silently truncated. This primitive replaces the read-modify-write on
+ * a stale snapshot with a transactional read-modify-write on the live
+ * column — guaranteed not to lose sibling-shard rows.
+ *
+ * Shape contract — survivors are kept when ANY of:
+ *   - `isNonExecutedSkip(r)` returns true (over_budget / skipped_no_impact)
+ *   - `r._shardIndex != null && r._shardIndex !== shardIndex` (sibling row)
+ *
+ * Returns the recomputed `{ passed, failed }` aggregate from survivors so
+ * the caller can update its in-memory mirror and persist via the same
+ * transactional write. Single-shard / legacy callers (`shardIndex == null`)
+ * must NOT call this — they keep using `runRepo.save(run)` which is
+ * bit-for-bit unchanged.
+ *
+ * @param {string}   runId
+ * @param {number}   shardIndex     - 0-based shard index whose rows to purge.
+ * @param {Function} isNonExecutedSkip - Predicate from `utils/skipReasons.js`
+ *   passed in to avoid a runtime import cycle (this module is loaded very
+ *   early; `skipReasons.js` is a tiny utility but importing it here would
+ *   pull every result-processing helper through the dependency graph).
+ * @returns {{ passed: number, failed: number }} re-derived from survivors.
+ */
+export function purgeShardResults(runId, shardIndex, isNonExecutedSkip) {
+  if (!runId || shardIndex == null || typeof isNonExecutedSkip !== "function") {
+    return { passed: 0, failed: 0 };
+  }
+  const db = getDatabase();
+  const lockClause = getDatabaseDialect() === "postgres" ? " FOR UPDATE" : "";
+  let survivors = [];
+  db.transaction(() => {
+    const row = db.prepare(`SELECT results FROM runs WHERE id = ?${lockClause}`).get(runId);
+    if (!row) return;
+    let arr = [];
+    if (row.results) {
+      try { arr = JSON.parse(row.results) || []; } catch { arr = []; }
+    }
+    if (!Array.isArray(arr)) arr = [];
+    survivors = arr.filter((r) => {
+      if (isNonExecutedSkip(r)) return true;
+      return r?._shardIndex != null && r._shardIndex !== shardIndex;
+    });
+    db.prepare("UPDATE runs SET results = ? WHERE id = ?").run(JSON.stringify(survivors), runId);
+  })();
+  return {
+    passed: survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length,
+    failed: survivors.filter((r) => r?.status === "failed").length,
+  };
 }
 
 /**
