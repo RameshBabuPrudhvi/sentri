@@ -33,9 +33,9 @@ If the user asks for… read only this section:
 | "Auto-approve tests / revoke / calibration" | [Auto-Approval](#-auto-approval-auto-003b) | 582–647 |
 | "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 676–724 |
 | "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 727–758 |
-| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 846–890 |
-| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | _(after quality-gates, before data-driven-fixtures)_ |
-| "Distributed sharding / shards: N / cross-process test split" | [Distributed Sharding](#-distributed-sharding-cap-002) | _(after environments, before data-driven-fixtures)_ |
+| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | 851–912 |
+| "Distributed sharding / shards: N / cross-process test split" | [Distributed Sharding](#-distributed-sharding-cap-002) | 915–980 |
+| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 982–1020 |
 | "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
 | "Verify security / authorization" | [Security](#-security) | 997–1025 |
@@ -57,9 +57,10 @@ auto-approval:       { lines: 582-647 }     # NEW (AUTO-003b)
 ai-fix:              { lines: 650-673 }
 test-code-editing:   { lines: 676-724 }
 automation:          { lines: 727-758 }
-quality-gates:       { lines: 761-815 }     # NEW (AUTO-012)
-data-driven-fixtures:{ lines: 846-890 }     # NEW (CAP-001)
-environments:        { lines: 876-925 }     # NEW (DIF-012)
+quality-gates:       { lines: 795-849 }     # NEW (AUTO-012)
+environments:        { lines: 851-912 }     # NEW (DIF-012)
+distributed-sharding:{ lines: 915-980 }     # NEW (CAP-002)
+data-driven-fixtures:{ lines: 982-1020 }    # NEW (CAP-001)
 visual-testing:      { lines: 818-835 }
 dashboard:           { lines: 838-856 }
 ai-chat:             { lines: 860-889 }
