@@ -278,6 +278,19 @@ export default function RunDetail() {
     setPriorRuns([]);
   }, [runId]);
 
+  // AUTO-010 — Auto-expand the Root Cause Summary panel on first load when
+  // the run has ≥2 clusters (multiple clusters is the high-signal case worth
+  // surfacing immediately). Keyed on `runId` ONLY — re-keying on
+  // `rootCauses.length` would re-run during live SSE updates and override any
+  // collapse/expand the user toggled manually. The initial expand decision is
+  // made on the SSE `done` snapshot via the run-detail query refetch.
+  const rootCausesCount = Array.isArray(run?.rootCauses) ? run.rootCauses.length : 0;
+  useEffect(() => {
+    setRootCauseExpanded(rootCausesCount >= 2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only
+    // re-evaluate on run navigation, not on cluster-count flips during live updates.
+  }, [runId]);
+
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
   // for already-completed/failed runs (avoids spurious "Run complete" notifications).
@@ -407,10 +420,10 @@ export default function RunDetail() {
   const passRateDenominator = Math.max(0, total - countNonExecutedSkips(results));
   const passRate = passRateDenominator > 0 ? Math.round((passed / passRateDenominator) * 100) : null;
 
+  // AUTO-010 — `useEffect` for the initial-expand decision lives at the top
+  // of the component (before the early returns) so the React hooks-rules
+  // contract holds. This local is just the array reference for rendering.
   const rootCauses = Array.isArray(run.rootCauses) ? run.rootCauses : [];
-  useEffect(() => {
-    setRootCauseExpanded(rootCauses.length >= 2);
-  }, [rootCauses.length, runId]);
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
@@ -912,12 +925,21 @@ export default function RunDetail() {
           <button className="btn btn-ghost btn-sm" onClick={() => setRootCauseExpanded((v) => !v)}>{rootCauseExpanded ? "▼" : "▶"} Root Cause Summary ({rootCauses.length})</button>
           {rootCauseExpanded && (
             <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-              {rootCauses.map((cluster) => (
-                <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
-                  <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
-                  <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{cluster.size} affected test(s)</div>
-                </div>
-              ))}
+              {rootCauses.map((cluster) => {
+                // AUTO-010 — surface the deduplicated test-id count so data-
+                // driven tests with N failing iterations don't inflate the
+                // "N affected test(s)" copy. `cluster.size` still reflects
+                // total failed-result rows for analytics consumers.
+                const affectedCount = Array.isArray(cluster.affectedTestIds)
+                  ? cluster.affectedTestIds.length
+                  : cluster.size;
+                return (
+                  <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
+                    <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{affectedCount} affected test(s)</div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

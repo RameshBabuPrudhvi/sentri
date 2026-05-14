@@ -45,12 +45,17 @@ const JSON_FIELDS = [
 function rowToRun(row) {
   if (!row) return undefined;
   const obj = { ...row };
+  // Fields whose canonical empty shape is an array, not null. Keeping
+  // them as `[]` on legacy / pre-migration rows avoids null-guard
+  // boilerplate at every consumer (e.g. external API callers reading
+  // `run.rootCauses.length` should never blow up on a pre-AUTO-010 run).
+  const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses"]);
   for (const f of JSON_FIELDS) {
     if (obj[f]) {
       try { obj[f] = JSON.parse(obj[f]); }
-      catch { obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null; }
+      catch { obj[f] = ARRAY_DEFAULT_FIELDS.has(f) ? [] : null; }
     } else {
-      obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null;
+      obj[f] = ARRAY_DEFAULT_FIELDS.has(f) ? [] : null;
     }
   }
   // Always initialise logs as an empty array; callers that need the full
