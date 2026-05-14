@@ -232,19 +232,30 @@ router.get("/dashboard", (req, res) => {
   }));
 
   // ── DIF-012: per-environment pass rate + last green run ──────────────────
-  // Walk every project's environments once and aggregate completed test runs
-  // bucketed by `runs.environmentId`. Runs without an environmentId fall into
-  // a synthetic "default" bucket so projects that have never picked a non-
-  // default target still surface alongside multi-env ones. We only compute
-  // this when at least one environment exists in the workspace — keeps the
-  // payload identical for users who haven't adopted the feature.
+  // Aggregate completed test runs bucketed by `runs.environmentId`. Runs
+  // without an environmentId fall into a synthetic "default" bucket so
+  // projects that have never picked a non-default target still surface
+  // alongside multi-env ones. We only compute this when at least one
+  // environment exists in the workspace — keeps the payload identical for
+  // users who haven't adopted the feature.
+  //
+  // Batched in one SQL round-trip via `listByProjectIds` (replaces the prior
+  // per-project N+1 loop) and bucketed locally below.
+  const allEnvironments = environmentRepo.listByProjectIds(projectIds);
   const environmentsByProject = {};
-  let workspaceHasEnvironments = false;
-  for (const projectId of projectIds) {
-    const envs = environmentRepo.listByProject(projectId);
-    if (envs.length > 0) workspaceHasEnvironments = true;
-    environmentsByProject[projectId] = envs;
+  for (const env of allEnvironments) {
+    (environmentsByProject[env.projectId] ??= []).push(env);
   }
+  const workspaceHasEnvironments = allEnvironments.length > 0;
+
+  // 90-day window for the per-env pass-rate aggregation. Other dashboard
+  // metrics use a last-N-runs window (passRate at line 42-55: 10 runs),
+  // but per-env buckets are sparser — a quiet env might only see a handful
+  // of runs a month, so a time window matches user intuition better than
+  // a run-count window. 90 days balances "recent enough to be relevant"
+  // against "enough data points for the green-rate signal to be stable".
+  const ENV_AGGREGATION_WINDOW_DAYS = 90;
+  const envWindowCutoff = Date.now() - ENV_AGGREGATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   let environmentPassRates = null;
   if (workspaceHasEnvironments) {
@@ -285,6 +296,13 @@ router.get("/dashboard", (req, res) => {
     for (const r of runs) {
       if (r.type !== "test_run" && r.type !== "run") continue;
       if (r.status !== "completed") continue;
+      // Time-window the pass-rate denominator so a project's noisy first
+      // year doesn't permanently anchor the displayed rate. `lastGreenRunAt`
+      // can still surface a run older than the window because that's a
+      // "most recent green" lookup, not an aggregate — but we still gate
+      // it on the window so users aren't shown a 2-year-old green run as
+      // current state.
+      if (!r.startedAt || new Date(r.startedAt).getTime() < envWindowCutoff) continue;
       const key = `${r.projectId}::${r.environmentId || "default"}`;
       const b = buckets.get(key);
       if (!b) continue; // run targeted a now-deleted env — skip silently
@@ -310,6 +328,7 @@ router.get("/dashboard", (req, res) => {
       .map((b) => ({
         ...b,
         passRate: b.total > 0 ? Math.round((b.passed / b.total) * 100) : null,
+        windowDays: ENV_AGGREGATION_WINDOW_DAYS,
       }));
   }
 

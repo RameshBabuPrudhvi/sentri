@@ -66,6 +66,7 @@ import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 /**
  * DIF-012: Resolve and validate an optional `environmentId` against the
@@ -91,31 +92,6 @@ function resolveEnvOrThrow(environmentId, project) {
     throw err;
   }
   return env;
-}
-
-/**
- * DIF-012: Build an execution-only scoped project that overrides
- * `project.url` and `project.credentials` with the selected environment.
- * Mirrors the helpers in `routes/runs.js` (`envScopedProject`) and
- * `routes/trigger.js` (`buildEnvScopedProject`) — see those for the full
- * contract. Kept inline here to avoid a cross-route import.
- *
- * `environment.credentials` is already in the same encrypted shape as
- * `project.credentials` (the env repo only JSON-parses on read, no
- * decryption — see `environmentRepo.rowToEnv`), so it's assigned verbatim
- * here. Re-encrypting would double-encrypt and silently break login.
- *
- * @param {Object} project
- * @param {Object|null} environment
- * @returns {Object}
- */
-function envScopedProject(project, environment) {
-  if (!environment) return project;
-  let credentials = project.credentials;
-  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = environment.credentials;
-  }
-  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
 }
 
 const router = Router();

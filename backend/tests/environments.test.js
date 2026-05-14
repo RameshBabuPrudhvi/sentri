@@ -41,7 +41,13 @@ async function main() {
     assert.equal(p.res.status, 201);
     const projectId = p.json.id;
 
-    let out = await t.req(base, `/api/v1/projects/${projectId}/environments`, { method: "POST", token: qa.token, body: { name: "staging", baseUrl: "https://staging.example.com", credentials: { username: "u", password: "p" } } });
+    // Test URLs use IANA-reserved demo domains that resolve in public DNS
+    // (example.com/example.org/example.net all have A records). The
+    // environment POST/PATCH SSRF guard does live DNS resolution — picking
+    // a host that resolves to a private IP would (correctly) be rejected,
+    // and a host with no A record would also fail. example.com is the
+    // canonical "safe public placeholder" for that reason.
+    let out = await t.req(base, `/api/v1/projects/${projectId}/environments`, { method: "POST", token: qa.token, body: { name: "staging", baseUrl: "https://example.com", credentials: { username: "u", password: "p" } } });
     assert.equal(out.res.status, 201);
     assert.equal(out.json.name, "staging");
     const environmentId = out.json.id;
@@ -79,7 +85,7 @@ async function main() {
     assert.match(out.json.error, /invalid environmentId/i);
 
     // ── DIF-012: cross-project envId rejected ─────────────────────────────
-    const p2 = await t.req(base, "/api/v1/projects", { method: "POST", token: qa.token, body: { name: "P2", url: "https://other.example.com" } });
+    const p2 = await t.req(base, "/api/v1/projects", { method: "POST", token: qa.token, body: { name: "P2", url: "https://example.org" } });
     out = await t.req(base, `/api/v1/projects/${p2.json.id}/run`, { method: "POST", token: qa.token, body: { environmentId } });
     assert.equal(out.res.status, 400);
     assert.match(out.json.error, /invalid environmentId/i);
@@ -92,10 +98,10 @@ async function main() {
     assert.match(out.json.error, /no approved tests|no tests found/i);
 
     // ── DIF-012: PATCH updates name + baseUrl + credentials round-trip ────
-    out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { name: "staging-2", baseUrl: "https://staging-2.example.com", credentials: { username: "u2", password: "p2" } } });
+    out = await t.req(base, `/api/v1/projects/${projectId}/environments/${environmentId}`, { method: "PATCH", token: qa.token, body: { name: "staging-2", baseUrl: "https://www.example.com", credentials: { username: "u2", password: "p2" } } });
     assert.equal(out.res.status, 200);
     assert.equal(out.json.name, "staging-2");
-    assert.equal(out.json.baseUrl, "https://staging-2.example.com");
+    assert.equal(out.json.baseUrl, "https://www.example.com");
     assert.equal(out.json.credentials.username, "u2");
     // REVIEW.md security checklist: password MUST be stripped from API
     // responses. `sanitiseEnvCredentialsForClient` returns

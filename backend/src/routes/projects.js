@@ -102,12 +102,21 @@ router.get("/:id/environments", requireRole("qa_lead"), (req, res) => {
   res.json(rows);
 });
 
-router.post("/:id/environments", requireRole("admin"), (req, res) => {
+router.post("/:id/environments", requireRole("admin"), async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const name = sanitise(req.body?.name, 120);
   const baseUrl = req.body?.baseUrl?.trim();
   if (!name || !baseUrl) return res.status(400).json({ error: "name and baseUrl are required" });
+  // SSRF-safe URL validation — `environment.baseUrl` is used as the crawl
+  // target on any run that picks this env (`envScopedProject` in
+  // `utils/envScope.js`), so an admin who pastes `http://169.254.169.254`
+  // or `http://localhost:6379` here could point the Playwright crawler at
+  // cloud-metadata / RFC1918 / loopback hosts. Same two-layer guard used
+  // for `previewUrl` on the webhook path (`routes/trigger.js`) and the
+  // notification webhooks below.
+  const urlErr = await validateUrl(baseUrl);
+  if (urlErr) return res.status(400).json({ error: `baseUrl: ${urlErr}` });
   const id = `ENV-${randomUUID()}`;
   const row = { id, projectId: project.id, name, baseUrl, credentials: encryptCredentials(req.body?.credentials) || null, createdAt: new Date().toISOString(), workspaceId: project.workspaceId || null };
   environmentRepo.create(row);
@@ -117,14 +126,25 @@ router.post("/:id/environments", requireRole("admin"), (req, res) => {
   res.status(201).json({ ...row, credentials: sanitiseEnvCredentialsForClient(decryptCredentials(row.credentials)) });
 });
 
-router.patch("/:id/environments/:environmentId", requireRole("admin"), (req, res) => {
+router.patch("/:id/environments/:environmentId", requireRole("admin"), async (req, res) => {
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "not found" });
   const existing = environmentRepo.getById(req.params.environmentId);
   if (!existing || existing.projectId !== project.id) return res.status(404).json({ error: "not found" });
   const fields = {};
   if (req.body?.name !== undefined) fields.name = sanitise(req.body.name, 120);
-  if (req.body?.baseUrl !== undefined) fields.baseUrl = req.body.baseUrl?.trim() || "";
+  if (req.body?.baseUrl !== undefined) {
+    const trimmed = req.body.baseUrl?.trim() || "";
+    // SSRF-safe URL validation on PATCH too — see POST handler above for
+    // the full rationale. Empty string short-circuits past the validator
+    // because `validateUrl("")` would reject before reaching SQLite, but
+    // an empty baseUrl is functionally broken regardless: the next run
+    // using this env would fall back to undefined behaviour. We let the
+    // validator reject empties so the admin sees a clear error.
+    const urlErr = await validateUrl(trimmed);
+    if (urlErr) return res.status(400).json({ error: `baseUrl: ${urlErr}` });
+    fields.baseUrl = trimmed;
+  }
   // Credentials handling — three cases:
   //   1. Key absent      → don't touch the stored value (existing behaviour).
   //   2. `credentials: null` → explicit clear.

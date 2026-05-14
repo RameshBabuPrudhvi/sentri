@@ -34,6 +34,7 @@ import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 const _require = createRequire(import.meta.url);
 
@@ -61,36 +62,6 @@ let _worker = null;
 export const workerAbortControllers = new Map();
 
 const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
-
-/**
- * DIF-012: Build an execution-only scoped project that overrides
- * `project.url` and `project.credentials` with the selected environment.
- * Mirrors the helpers in `routes/runs.js` (`envScopedProject`),
- * `routes/tests.js` (`envScopedProject`), and `routes/trigger.js`
- * (`buildEnvScopedProject`) — see those for the full contract.
- *
- * Without this in the BullMQ worker path, `run.environmentId` would be
- * persisted on the row but the actual execution would silently target
- * `project.url` (production) instead of `environment.baseUrl` — a user
- * selecting "staging" would get their tests run against prod.
- *
- * `environment.credentials` is already in the same encrypted shape as
- * `project.credentials` (the env repo only JSON-parses on read, no
- * decryption — see `environmentRepo.rowToEnv`), so it's assigned verbatim.
- * Re-encrypting would double-encrypt and silently break login.
- *
- * @param {Object} project
- * @param {Object|null} environment
- * @returns {Object}
- */
-function envScopedProject(project, environment) {
-  if (!environment) return project;
-  let credentials = project.credentials;
-  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = environment.credentials;
-  }
-  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
-}
 
 /**
  * Process a single run job from the queue.

@@ -39,6 +39,7 @@ import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
 import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -207,48 +208,6 @@ function buildTestRun({
   };
 }
 
-
-/**
- * DIF-012: Build an execution-only "scoped project" that overrides
- * `project.url` and `project.credentials` for the duration of one run.
- *
- * - `previewUrl` (Vercel/Netlify webhook path) takes precedence over the
- *   env baseUrl, matching the existing AUTO-015 deploy-preview behaviour.
- * - `environment.credentials` is already AES-encrypted in the same shape
- *   that `decryptCredentials()` produces (see `backend/src/utils/credentialEncryption.js`
- *   + the `routes/projects.js` POST/PATCH paths). It can be assigned to
- *   `project.credentials` verbatim — `crawlBrowser.js:103` and
- *   `stateExplorer.js:325` will call `decryptCredentials()` on it
- *   identically to the project-level credentials.
- * - `canonicalUrl` preserves the original production URL so crawler.js's
- *   sameOrigin baseline guard (AUTO-015) doesn't replace prod baselines
- *   with preview/env fingerprints.
- * - `project.url` / `project.credentials` rows in the DB are NEVER mutated;
- *   this returns a shallow-cloned scoped copy used only for this run.
- *
- * @param {Object} project - Persisted project row (credentials already
- *   encrypted).
- * @param {Object} [opts]
- * @param {string} [opts.previewUrl] - Optional deploy-preview override.
- * @param {Object|null} [opts.environment] - Optional env row (already
- *   decrypted to a plain object on read — see `environmentRepo.getById`).
- * @returns {Object} the scoped project.
- */
-function buildEnvScopedProject(project, { previewUrl = null, environment = null } = {}) {
-  const url = previewUrl || environment?.baseUrl || project.url;
-  // `environment.credentials` is already in the same encrypted shape as
-  // `project.credentials` — `routes/projects.js` encrypts on POST/PATCH
-  // and the env repo only `JSON.parse`s on read (see `rowToEnv` in
-  // `environmentRepo.js`, no decryption). Assign verbatim so the consumer
-  // (crawlBrowser / stateExplorer) peels exactly one layer with
-  // `decryptCredentials()`. Re-encrypting here would double-encrypt and
-  // silently break login.
-  let credentials = project.credentials;
-  if (environment?.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = environment.credentials;
-  }
-  return { ...project, url, credentials, canonicalUrl: project.url };
-}
 
 function normalizeGithubPayload(body = {}) {
   const repo = typeof body.repo === "string" ? body.repo.trim()
@@ -677,7 +636,9 @@ async function handleTrigger(req, res) {
       // check sees preview === preview (both sides equal because project.url
       // was already overridden) and silently destroys the real fingerprints.
       ? crawlAndGenerateTests(
-          buildEnvScopedProject(project, { previewUrl, environment }),
+          // Shared helper's signature is `(project, environment, { previewUrl })`
+          // — `previewUrl` always wins over `environment.baseUrl`.
+          buildEnvScopedProject(project, environment, { previewUrl }),
           run,
           { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
         )
@@ -688,7 +649,7 @@ async function handleTrigger(req, res) {
       // project.credentials are preserved in the DB; only this run sees the
       // env baseUrl + credentials.
       : runTests(
-          buildEnvScopedProject(project, { environment }),
+          buildEnvScopedProject(project, environment),
           selectedTests,
           run,
           { parallelWorkers, signal }
@@ -876,7 +837,9 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
     // Without this, production baselines would be overwritten with
     // preview-URL fingerprints every time a deployment webhook fires.
     (signal) => crawlAndGenerateTests(
-      buildEnvScopedProject(project, { previewUrl }),
+      // launchPreviewCrawl is the Vercel/Netlify webhook path — no env
+      // override here, only the deploy-preview URL.
+      buildEnvScopedProject(project, null, { previewUrl }),
       run,
       { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
     ),

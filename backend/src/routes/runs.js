@@ -42,43 +42,9 @@ import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 const router = Router();
-
-/**
- * DIF-012: Build an execution-only scoped project that overrides
- * `project.url` and `project.credentials` with the selected environment.
- * Identical contract to the helper in `routes/trigger.js` — kept inline
- * here to avoid a cross-route import (both call sites are local).
- *
- * - `environment.credentials` is stored encrypted via `encryptCredentials`
- *   in `routes/projects.js` (POST/PATCH `/environments`), and the env repo
- *   only `JSON.parse`s on read (no decryption — see `rowToEnv` in
- *   `environmentRepo.js`). So it lands here in the same encrypted shape
- *   as `project.credentials` and can be assigned verbatim — the downstream
- *   `decryptCredentials()` calls in `crawlBrowser.js:103` and
- *   `stateExplorer.js:325` will peel a single layer correctly.
- *   (Re-encrypting here would double-encrypt and silently break login.)
- * - `project.credentials` falls back when the env has no credentials of
- *   its own — env-scoped runs against a public preview URL still inherit
- *   the project's auth.
- * - `canonicalUrl` preserves the original production URL so the
- *   AUTO-015 baseline guard treats this as a preview-style crawl and
- *   doesn't overwrite production fingerprints.
- * - The project row in the DB is NEVER mutated.
- *
- * @param {Object} project
- * @param {Object|null} environment
- * @returns {Object}
- */
-function envScopedProject(project, environment) {
-  if (!environment) return project;
-  let credentials = project.credentials;
-  if (environment.credentials && (environment.credentials.username || environment.credentials.password)) {
-    credentials = environment.credentials;
-  }
-  return { ...project, url: environment.baseUrl, credentials, canonicalUrl: project.url };
-}
 
 // ─── Crawl & Generate Tests ───────────────────────────────────────────────────
 
