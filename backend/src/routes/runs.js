@@ -28,6 +28,7 @@ import { generateRunId, generateWebhookTokenId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
 import { workerAbortControllers } from "../workers/runWorker.js";
+import { publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-replica abort fan-out.
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
@@ -574,6 +575,15 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     total: countsSource.total ?? undefined,
     testsGenerated: countsSource.testsGenerated ?? undefined,
   });
+
+  // CAP-002 Phase 2 (Prerequisite #5) — fan the abort out to every replica's
+  // worker via Redis pub/sub. The local-fast-path above already cancelled
+  // any controller in *this* process; this publish reaches sibling replicas
+  // whose `workerAbortControllers` map may hold the same runId for shard
+  // jobs we don't see. Origin-stamp suppression prevents self-echo. Fire
+  // and forget — `publishRunAbort` already swallows publish errors, and
+  // the abort response shouldn't block on a sibling-replica round-trip.
+  publishRunAbort(req.params.runId).catch(() => { /* best-effort */ });
 
   res.json({ ok: true });
 });

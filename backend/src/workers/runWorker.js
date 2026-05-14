@@ -35,6 +35,7 @@ import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
+import { subscribeToRunAborts } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
 
 const _require = createRequire(import.meta.url);
 
@@ -336,6 +337,22 @@ export function startWorker() {
 
     console.log(formatLogLine("info", null,
       `[worker] BullMQ worker started (concurrency: ${MAX_WORKERS})`));
+
+    // CAP-002 Phase 2 (Prerequisite #5) — subscribe to the cross-process
+    // run-abort channel so an abort triggered on another replica reaches
+    // this worker's in-flight controllers. Same-replica aborts still go
+    // through `workerAbortControllers` directly via the abort route's
+    // local-fast-path (origin stamp suppresses self-echo on this side).
+    // No-op when Redis is unavailable — `subscribeToRunAborts` returns
+    // false and the worker continues with local-only abort behaviour.
+    subscribeToRunAborts({
+      onAbort: (runId) => {
+        const entry = workerAbortControllers.get(runId);
+        if (!entry) return; // not running on this replica — nothing to do
+        try { entry.controller.abort(); } catch { /* already aborted */ }
+        workerAbortControllers.delete(runId);
+      },
+    });
   } catch (err) {
     console.warn(formatLogLine("warn", null,
       `[worker] Failed to start BullMQ worker: ${err.message}`));
