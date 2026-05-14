@@ -51,17 +51,8 @@ When 15 tests fail in a run, they often share a single root cause (login endpoin
 - [ ] `tests/e2e/specs/run-detail-root-cause-ui.spec.mjs` (Tier-3, `page.route()` mock) asserts the panel renders with synthetic `rootCauses` payload
 
 ---
-
-<!-- BEGIN COLLAPSED CAP-002 CURRENT-PR BLOCK — preserved for git-history continuity; the canonical record of what shipped lives in the "Recently completed" table below and the `ROADMAP.md` § CAP-002 row.
-## ▶ Current PR — CAP-002 — Distributed test sharding across runners
-**Effort:** XL (originally L — re-graded after mid-flight investigation of PR #3 `distributed-tests` surfaced four storage-layer prerequisites that the original brief did not call out — see "Prerequisites discovered mid-flight" below) | **Priority:** 🟢 Differentiator | **Dependencies:** INF-002 ✅ (Redis pub/sub for coordinator→shard cancel signal), INF-003 ✅ (BullMQ worker pool primitive) | **Source:** `ROADMAP.md` Phase 4 (CAP-002) — promoted per `NEXT.md` rotation after DIF-012 shipped in PR #2
-Single-host parallelism caps suite size at the local worker count (~4–8 on a Render box). Industry tools split a single run across N runners (Cypress Cloud `--record --parallel`, Playwright `--shard=1/4`). Sentri's BullMQ infra already gives us the worker pool primitive, but `runTests()` allocates the entire test list to a single worker, so adding nodes doesn't reduce wall-clock time on large suites. Split `runTests()` into coordinator + N shard workers; coordinator partitions the approved-test list across `runConfig.shards` BullMQ jobs scoped to `(runId, shardIndex, shardCount)`; workers pick their slice, execute, write per-test results back to the shared `runs` row keyed on `runId`; run completes when all shards report, fails if any shard's worker crashes. Re-uses INF-003's abort path — aborting the parent job propagates a cancel signal to all shard jobs via a Redis pub/sub channel.
-
-### Phase 1 — In-process plumbing (PR #3 `distributed-tests`, **open — do not merge until Phase 2 lands on the same branch**)
-Per the AGENT.md "no partial PRs" rule, **PR #3 is held open and Phase 2 lands on top of the same branch** before merge — `docs/changelog.md` then reads as one CAP-002 entry, not two. PR #3 already carries:
-- `runs.shardCount` + `runs.shardsCompleted` (migration `025_run_shards.sql`) on `INSERT_COLS` + `LEAN_COLS`.
-- `shards` request plumbing on `/run` + `/trigger`, server-clamped to `[1, MAX_WORKERS]`, decoupled from `dialsConfig.parallelWorkers` (BUG-0001 — `shardCount > 1` only when the caller explicitly passed `shards`).
-- `partitionTestsIntoShards(tests, shardCount)` exported from `backend/src/testRunner.js` — pure Playwright `--shard=N/M` algorithm (first `total % N` shards get +1), tags each test with `_shardIndex`, returns `sizes[]`. **This is the single source of truth Phase 2's coordinator reuses for the split — do not re-implement it in the queue layer.**
+## ⏭ Queue (next 3 PRs after current)
+### 1 · DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion — pure Playwright `--shard=N/M` algorithm (first `total % N` shards get +1), tags each test with `_shardIndex`, returns `sizes[]`. **This is the single source of truth Phase 2's coordinator reuses for the split — do not re-implement it in the queue layer.**
 - `processResult` advances `run.shardsCompleted` per-shard as each shard's last test reports — the UI badge progresses 0 → N, not 0 → N at completion.
 - `RunRegressionModal` `Shards` input (a11y-labelled, integer-coerced) + `RunDetail` blue `Shards M/N` badge.
 - `backend/tests/run-sharding.test.js` covering partition contract + route clamp + BUG-0001 + non-numeric fallback.
