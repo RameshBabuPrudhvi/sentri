@@ -677,14 +677,22 @@ export function incrementShardsCompleted(runId) {
 export function markRunFailedFirstWriterWins(runId, { error, errorCategory } = {}) {
   if (!runId) return false;
   const db = getDatabase();
+  // Use a JS-side ISO 8601 timestamp (`new Date().toISOString()`) rather than
+  // SQL `datetime('now')` so the `finishedAt` column format stays consistent
+  // across dialects. On Postgres, the adapter translates `datetime('now')`
+  // to `NOW()` which renders as `2025-01-15 10:30:00.123456+00` — a different
+  // shape from the `2025-01-15T10:30:00.123Z` ISO 8601 string every other
+  // code path uses. Mixing formats in one column breaks downstream
+  // `new Date(finishedAt)` parsing on Postgres deployments.
+  const now = new Date().toISOString();
   const info = db.prepare(
     `UPDATE runs
        SET status = 'failed',
            error = COALESCE(error, ?),
            errorCategory = COALESCE(errorCategory, ?),
-           finishedAt = COALESCE(finishedAt, datetime('now'))
+           finishedAt = COALESCE(finishedAt, ?)
      WHERE id = ? AND status = 'running'`
-  ).run(error || "Shard failed", errorCategory || "unknown", runId);
+  ).run(error || "Shard failed", errorCategory || "unknown", now, runId);
   return (info.changes || 0) > 0;
 }
 
@@ -729,14 +737,18 @@ export function markRunCompletedFirstWriterWins(runId, { finishedAt, duration, q
   const qa = qualityAnalytics && typeof qualityAnalytics === "object"
     ? JSON.stringify(qualityAnalytics)
     : null;
+  // ISO 8601 fallback for `finishedAt` — see rationale in
+  // `markRunFailedFirstWriterWins`. Most callers pass `finishedAt` explicitly,
+  // so this only matters when the caller relied on the SQL default.
+  const fallbackFinishedAt = finishedAt || new Date().toISOString();
   const info = db.prepare(
     `UPDATE runs
        SET status = 'completed',
-           finishedAt = COALESCE(?, finishedAt, datetime('now')),
+           finishedAt = COALESCE(?, finishedAt, ?),
            duration = COALESCE(?, duration),
            qualityAnalytics = COALESCE(?, qualityAnalytics)
      WHERE id = ? AND status = 'running'`
-  ).run(finishedAt || null, duration ?? null, qa, runId);
+  ).run(finishedAt || null, fallbackFinishedAt, duration ?? null, qa, runId);
   return (info.changes || 0) > 0;
 }
 
