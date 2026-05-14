@@ -205,7 +205,7 @@ async function main() {
     // Exactly shardCount of the 6 calls should advance; the other 2 are no-ops.
     const advancedCount = observations.filter((o) => o.advanced === 1).length;
     assert.equal(advancedCount, 4, "only shardCount=4 increments should advance; 2 must be no-ops");
-    runRepo.hardDeleteById(run.id
+    runRepo.hardDeleteById(run.id);
   });
   // ── Atomicity under stats + increment interleaving ──────────────────
   // The worker calls incrementRunStats THEN incrementShardsCompleted as
