@@ -45,7 +45,11 @@ function editDistance(a, b) {
   return dp[aa.length][bb.length];
 }
 
-/** @param {{results?: Object[]}} input */
+/**
+ * @param {Object} input
+ * @param {Array} [input.results] - Test result rows; only entries with `status === "failed"` cluster.
+ * @returns {Array} Clusters sorted by descending size.
+ */
 export function clusterFailures({ results }) {
   const rows = Array.isArray(results) ? results.filter((r) => r?.status === "failed") : [];
   if (rows.length === 0) return [];
