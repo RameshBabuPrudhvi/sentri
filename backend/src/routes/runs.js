@@ -27,7 +27,7 @@ import * as activityRepo from "../database/repositories/activityRepo.js";
 import { generateRunId, generateWebhookTokenId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
-import { workerAbortControllers } from "../workers/runWorker.js";
+import { workerAbortControllers, abortAllShardsForRun } from "../workers/runWorker.js";
 import { publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-replica abort fan-out.
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
@@ -492,7 +492,18 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   }
 
   const entry = runAbortControllers.get(req.params.runId);
-  const workerEntry = workerAbortControllers.get(req.params.runId);
+  // CAP-002 Phase 2 (Prerequisite #4) — `workerAbortControllers` is keyed by
+  // BullMQ jobId (bare `runId` for legacy single-shard runs, `${runId}:s${i}`
+  // for each shard). Use the parent-keyed iterator to detect whether *any*
+  // shard of this run is in flight on this replica, instead of a single
+  // `.get(runId)` lookup that would miss shard-keyed entries entirely.
+  let workerAborted = 0;
+  const hasWorkerEntries = (() => {
+    for (const e of workerAbortControllers.values()) {
+      if (e?.runId === req.params.runId) return true;
+    }
+    return false;
+  })();
   if (entry) {
     // Mutate the in-memory run object that the pipeline holds so that
     // finalizeRunIfNotAborted() and runRepo.save(run) see "aborted" and
@@ -505,7 +516,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
 
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
-  } else if (workerEntry) {
+  } else if (hasWorkerEntries) {
     // BullMQ-processed run: write abort status to DB BEFORE signaling the
     // worker to prevent a race where the worker's completion write overwrites
     // the abort status between signal and the worker's catch block.
@@ -515,8 +526,11 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
       duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
       error: "Aborted by user",
     });
-    workerEntry.controller.abort();
-    workerAbortControllers.delete(req.params.runId);
+    // CAP-002 Phase 2 (Prerequisite #4) — fan out to every shard
+    // controller for this run on this replica, then `publishRunAbort`
+    // below reaches sibling replicas. `abortAllShardsForRun` handles
+    // both legacy single-key entries and shard-keyed entries.
+    workerAborted = abortAllShardsForRun(req.params.runId);
   }
 
   // Mark queued tests that never executed as "skipped" so pass/fail/total
@@ -525,7 +539,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   // For BullMQ runs (workerEntry path), re-read from DB after signalling
   // abort — testRunner flushes results to SQLite after each test, so the fresh
   // snapshot captures results completed between the initial read and the abort.
-  const liveRun = entry?.run || (workerEntry ? (runRepo.getById(req.params.runId) || run) : run);
+  const liveRun = entry?.run || (hasWorkerEntries ? (runRepo.getById(req.params.runId) || run) : run);
   if (Array.isArray(liveRun.results) && Array.isArray(liveRun.testQueue)) {
     const executedIds = new Set(liveRun.results.map(r => r.testId));
     for (const queued of liveRun.testQueue) {
@@ -540,10 +554,10 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  // For BullMQ runs (workerEntry path), the DB was already updated
-  // above before signaling the worker. For all other paths (in-process or
-  // stale runs with no live controller), write the abort status now.
-  if (!workerEntry) {
+  // For BullMQ runs, the DB was already updated above before signaling
+  // the worker. For all other paths (in-process or stale runs with no
+  // live controller), write the abort status now.
+  if (!hasWorkerEntries) {
     runRepo.update(req.params.runId, {
       status: "aborted",
       finishedAt: new Date().toISOString(),

@@ -58,9 +58,90 @@ let _worker = null;
  * activity (prevents false-positive 503s when a cloud run is active and the
  * user switches to Ollama).
  *
- * @type {Map<string, {controller: AbortController, provider: string|null}>}
+ * ### Key scheme (CAP-002 Phase 2 — Prerequisite #4)
+ *
+ * The map is keyed by the BullMQ jobId, NOT the bare runId, so multiple
+ * shards of the same run executing on the same replica don't collide on a
+ * single map slot. The jobId scheme is:
+ *
+ *   - **Legacy / single-shard runs**: `jobId === runId`. Key is just the
+ *     runId — bit-for-bit identical to the pre-Phase-2 behaviour.
+ *   - **Shard-mode runs** (coordinator PR): `jobId === ${runId}:s${shardIndex}`.
+ *     Each shard gets its own map entry; entries store `runId` + `shardIndex`
+ *     so reverse lookups (e.g. the cross-process abort handler) can fan out
+ *     to every shard of a given parent run.
+ *
+ * Use {@link workerAbortKey} when registering and deleting; use
+ * {@link abortAllShardsForRun} to fan out an abort to every shard of a parent
+ * run (the abort route's local-fast-path + the run-abort pub/sub subscriber
+ * both go through this helper).
+ *
+ * @type {Map<string, {controller: AbortController, provider: string|null, runId: string, shardIndex: number|null}>}
  */
 export const workerAbortControllers = new Map();
+
+/**
+ * Compute the registry key for a (runId, shardIndex) pair. Mirrors the
+ * BullMQ `jobId` shape so the map key, the queue jobId, and the trace
+ * artifact path (Prerequisite #2) all derive from the same identifier.
+ *
+ * @param {string}      runId
+ * @param {number|null} shardIndex - 0-based, or `null` for legacy single-shard runs.
+ * @returns {string}
+ */
+export function workerAbortKey(runId, shardIndex) {
+  if (shardIndex == null) return runId;
+  return `${runId}:s${shardIndex}`;
+}
+
+/**
+ * Iterate every registry entry belonging to a parent run, regardless of
+ * shard. Used by:
+ *
+ *   - The abort route's local-fast-path so a user-driven abort cancels
+ *     every shard's controller on this replica before publishing to the
+ *     cross-replica pub/sub channel.
+ *   - The run-abort pub/sub subscriber so a cross-replica abort signal
+ *     reaches every matching local shard.
+ *
+ * Visits both shard-keyed entries (`${runId}:s${i}`) and the legacy bare-
+ * runId entry. Safe to call concurrently with `processJob` — iteration
+ * uses a snapshot so handlers can mutate the map (delete) without
+ * affecting the loop.
+ *
+ * @param {string}   runId
+ * @param {Function} fn - Callback `(entry, key) => void`.
+ * @returns {number} Number of entries visited.
+ */
+export function forEachShardEntry(runId, fn) {
+  let visited = 0;
+  // Snapshot to allow mutation during iteration (the typical use is
+  // `entry.controller.abort()` followed by `workerAbortControllers.delete(key)`).
+  const snapshot = [];
+  for (const [key, entry] of workerAbortControllers) {
+    if (entry?.runId === runId) snapshot.push([key, entry]);
+  }
+  for (const [key, entry] of snapshot) {
+    try { fn(entry, key); visited++; } catch { /* fail-open per-entry */ }
+  }
+  return visited;
+}
+
+/**
+ * Abort every shard controller for a parent run. Convenience wrapper around
+ * {@link forEachShardEntry} that captures the canonical "cancel + delete"
+ * sequence used by both the user-driven abort route and the cross-replica
+ * pub/sub subscriber.
+ *
+ * @param {string} runId
+ * @returns {number} Number of shard controllers aborted.
+ */
+export function abortAllShardsForRun(runId) {
+  return forEachShardEntry(runId, (entry, key) => {
+    try { entry.controller.abort(); } catch { /* already aborted */ }
+    workerAbortControllers.delete(key);
+  });
+}
 
 const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
 
@@ -120,7 +201,19 @@ async function processJob(job) {
   // "AI is busy" 503s when a cloud run is active and the user switches
   // to Ollama).
   const abortController = new AbortController();
-  workerAbortControllers.set(runId, { controller: abortController, provider: captureProvider() });
+  // CAP-002 Phase 2 (Prerequisite #4) — key the registry by jobId so
+  // multiple shards of the same run on the same replica don't collide.
+  // Legacy single-shard runs (`shardIndex == null`) key by bare runId,
+  // preserving the prior shape bit-for-bit. The entry stores `runId` so
+  // the parent-keyed fan-out helpers (`forEachShardEntry`,
+  // `abortAllShardsForRun`) can reverse-look-up by parent run.
+  const abortKey = workerAbortKey(runId, shardIndex);
+  workerAbortControllers.set(abortKey, {
+    controller: abortController,
+    provider: captureProvider(),
+    runId,
+    shardIndex,
+  });
   const signal = abortController.signal;
 
   try {
@@ -208,7 +301,9 @@ async function processJob(job) {
       status: run.status, passed: run.passed, failed: run.failed,
     });
   } catch (err) {
-    workerAbortControllers.delete(runId);
+    // Use the shard-aware key so we delete *this* shard's entry, not the
+    // bare-runId entry that might belong to a sibling shard's controller.
+    workerAbortControllers.delete(abortKey);
 
     if (err.name === "AbortError" || signal.aborted || run.status === "aborted") {
       // The abort endpoint (runs.js) is the single owner of abort state:
@@ -347,7 +442,7 @@ async function processJob(job) {
 
     throw err; // Let BullMQ handle retry logic
   } finally {
-    workerAbortControllers.delete(runId);
+    workerAbortControllers.delete(abortKey);
     runLogRepo.evictCache(runId);
   }
 }
@@ -391,12 +486,11 @@ export function startWorker() {
     // No-op when Redis is unavailable — `subscribeToRunAborts` returns
     // false and the worker continues with local-only abort behaviour.
     subscribeToRunAborts({
-      onAbort: (runId) => {
-        const entry = workerAbortControllers.get(runId);
-        if (!entry) return; // not running on this replica — nothing to do
-        try { entry.controller.abort(); } catch { /* already aborted */ }
-        workerAbortControllers.delete(runId);
-      },
+      // CAP-002 Phase 2 (Prerequisite #4) — fan out the cross-replica
+      // abort signal to *every* shard controller for the parent run.
+      // `abortAllShardsForRun` handles both the legacy single-runId-keyed
+      // entry and the new `${runId}:s${i}` shard-keyed entries.
+      onAbort: (runId) => { abortAllShardsForRun(runId); },
     });
   } catch (err) {
     console.warn(formatLogLine("warn", null,
@@ -411,10 +505,11 @@ export function startWorker() {
  * @returns {Promise<void>}
  */
 export async function stopWorker() {
-  // Abort all in-flight jobs
-  for (const [runId, entry] of workerAbortControllers) {
+  // Abort all in-flight jobs. Iterate by key so we hit every shard entry
+  // (`${runId}:s${i}` for shard-mode runs, bare `runId` for legacy runs).
+  for (const [key, entry] of workerAbortControllers) {
     entry.controller.abort();
-    workerAbortControllers.delete(runId);
+    workerAbortControllers.delete(key);
   }
 
   if (_worker) {
