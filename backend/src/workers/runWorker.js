@@ -40,6 +40,7 @@ import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 P
 import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
 import { trackTelemetry } from "../utils/telemetry.js";
+import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
 
 const _require = createRequire(import.meta.url);
 
@@ -344,7 +345,12 @@ async function processJob(job) {
       if (advanced === 1) {
         const fresh = runRepo.getById(runId);
         if (fresh && (fresh.shardsCompleted ?? 0) >= totalShards) {
-          await finalizeShardedRun(scopedProject, fresh, options.actorInfo || {});
+          // Pass the full `options` payload so the finalizer can access the
+          // CI/CD callback URL (and any future shard-shared knobs) without
+          // a second job-data round-trip. Every shard carries the same
+          // `callbackUrl`; the finalizer is the single firer thanks to the
+          // exclusivity guarantee on `incrementShardsCompleted`.
+          await finalizeShardedRun(scopedProject, fresh, options || {});
         }
       }
 
@@ -566,12 +572,18 @@ async function processJob(job) {
  *   - one `run.complete` telemetry event
  *   - best-effort notifications + GitHub-check completion
  *
- * @param {Object} project   - DIF-012 env-scoped project (carries `qualityGates`, `webVitalsBudgets`).
- * @param {Object} run       - Fresh `runs` row, hydrated via `runRepo.getById`.
- * @param {Object} actorInfo - `{ userId, userName }` from the triggering request.
+ * @param {Object} project       - DIF-012 env-scoped project (carries `qualityGates`, `webVitalsBudgets`).
+ * @param {Object} run           - Fresh `runs` row, hydrated via `runRepo.getById`.
+ * @param {Object} jobOptions    - The shard job's `options` payload. Carries:
+ *   - `actorInfo`   — `{ userId, userName }` from the triggering request.
+ *   - `callbackUrl` — CI/CD POST target (trigger path only). SSRF-validated
+ *                     at the route layer; finalizer fires exactly once,
+ *                     gated by `incrementShardsCompleted` exclusivity.
  * @returns {Promise<void>}
  */
-async function finalizeShardedRun(project, run, actorInfo = {}) {
+async function finalizeShardedRun(project, run, jobOptions = {}) {
+  const actorInfo = jobOptions.actorInfo || {};
+  const callbackUrl = jobOptions.callbackUrl || null;
   // Defensive: if the run was aborted between this shard's increment and
   // this call, the abort route owns terminal-state writes — do nothing.
   if (run.status === "aborted") return;
@@ -676,6 +688,38 @@ async function finalizeShardedRun(project, run, actorInfo = {}) {
     try {
       const { concludeGithubCheck } = await import("../routes/trigger.js");
       await concludeGithubCheck(run, project);
+    } catch { /* best-effort */ }
+  }
+
+  // CAP-002 Phase 2 — Fire the CI/CD `callbackUrl` POST. Same payload
+  // shape as the single-shard trigger path (`routes/trigger.js:780-789`)
+  // so CI consumers can use one handler for both sharded and non-sharded
+  // runs. SSRF-safe: `safeFetch` re-resolves DNS to mitigate rebinding
+  // and blocks redirects to prevent open-redirect bypasses. The URL was
+  // validated at the route layer before enqueue. Fires exactly once per
+  // run because only the boundary-crossing shard reaches this function
+  // (gated by `incrementShardsCompleted`'s exclusivity predicate).
+  // Best-effort — a callback failure must never re-throw out of the
+  // finalizer, mirroring the `safeFetchCallback(...).catch(() => {})`
+  // contract on the single-shard path.
+  if (callbackUrl && typeof callbackUrl === "string") {
+    try {
+      const payload = JSON.stringify({
+        runId,
+        status: run.status,
+        passed: run.passed,
+        failed: run.failed,
+        total: run.total,
+        error: run.error || null,
+        gateResult: run.gateResult || null,
+        webVitalsResult: run.webVitalsResult || null,
+      });
+      await safeFetch(callbackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        signal: AbortSignal.timeout(10_000),
+      });
     } catch { /* best-effort */ }
   }
 }

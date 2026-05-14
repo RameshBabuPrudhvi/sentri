@@ -657,17 +657,27 @@ async function handleTrigger(req, res) {
   //
   // The single-shard / no-Redis path keeps the existing `runWithAbort`
   // flow so `onComplete` → `concludeGithubCheck` + `safeFetchCallback`
-  // fires for legacy callers. The callbackUrl is intentionally NOT
-  // honoured on the BullMQ-sharded path in this PR — wiring it would
-  // require threading the (already-validated) URL through job data and
-  // adding a callbackUrl branch to `finalizeShardedRun`; doing that on
-  // the same branch as the fan-out itself bloats the change. Logged as
-  // a known limitation in the changelog.
+  // fires for legacy callers. On the sharded BullMQ path, `callbackUrl`
+  // rides in every shard's job data and `finalizeShardedRun` POSTs it
+  // exactly once (only the boundary-crossing shard reaches the
+  // finalizer — guaranteed by the SQL row-lock predicate on
+  // `incrementShardsCompleted`).
   if (!triggerCrawl && shardCount > 1 && isQueueAvailable()) {
     try {
       const dispatchedIds = selectedTests.map((t) => t.id);
       const slices = partitionTestIdsForShards(dispatchedIds, shardCount);
       const scopedProject = buildEnvScopedProject(project, environment);
+      // CAP-002 Phase 2 — `callbackUrl` is included on EVERY shard job's
+      // options for durability (any shard could be the boundary-crossing
+      // finalizer), but `finalizeShardedRun` only fires it for the single
+      // shard whose `incrementShardsCompleted` UPDATE crosses the cap.
+      // The SQL row-lock predicate guarantees exactly one finalizer, so
+      // the callback POSTs exactly once even though N shards carry the
+      // URL in job data. Validated upstream — see callbackUrl checks at
+      // `backend/src/routes/trigger.js:435-442`.
+      const normalizedCallbackUrl = typeof callbackUrl === "string" && callbackUrl.length > 0
+        ? callbackUrl
+        : null;
       await Promise.all(slices.map((testIds, shardIndex) =>
         runQueue.add("test_run_shard", {
           runId,
@@ -689,6 +699,7 @@ async function handleTrigger(req, res) {
             networkCondition: "fast",
             testIds,
             actorInfo: actor(req),
+            callbackUrl: normalizedCallbackUrl,
           },
         }, { jobId: `${runId}:s${shardIndex}` })
       ));
