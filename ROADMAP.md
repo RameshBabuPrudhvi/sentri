@@ -1266,27 +1266,12 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
 | Autonomous Intelligence | 29 | 18 | 0 | 11 | AUTO-008–011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
-| Capabilities | 4 | 3 | 0 | 1 | CAP-002 (test sharding) |
+| Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **58** | **0** | **41** | |
+| **Totals** | **99** | **59** | **0** | **40** | |
 
-<!--
-  PR #12 ledger reconciliation (AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b ship + AUTO-020 supersede):
-    - AUTO-002 + AUTO-015 ship: Autonomous Intelligence Done +2 / Pending −2.
-      (AUTO-002b and AUTO-015b are sub-scopes born during implementation, not
-      separate ledger items — they're counted under AUTO-002 and AUTO-015.)
-    - AUTO-020 superseded (Vercel/Netlify webhook scope was absorbed verbatim
-      by AUTO-015): Autonomous Intelligence Total −1 / Pending −1.
-    - Net Totals impact from PR #12: Total 81 → 80, Done 53 → 55, Pending 28 → 25.
-    - Narrative line: matches the Totals row exactly.
 
-  PR #10 ledger reconciliation (AUTO-003 + AUTO-003b ship + PROC-002/003 revert):
-    - AUTO-003 + AUTO-003b ship: Autonomous Intelligence Done +2 / Pending −2.
-    - PROC-002 + PROC-003 revert: Process automation Total −2 / Done −2 (the
-      items themselves are gone from the ledger, not just unshipped).
-    - Net Totals impact: Total 83 → 81, Done 55 → 53, Pending unchanged at 28.
--->
 **Total tracked items:** 99 across 9 categories — **58 complete** (59%), **0 in current PR**, **41 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
