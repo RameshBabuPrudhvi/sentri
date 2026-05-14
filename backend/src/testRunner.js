@@ -32,6 +32,7 @@ import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
 import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
+import { clusterFailures } from "./pipeline/failureClusterer.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
@@ -771,6 +772,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   run.gateResult = evaluateQualityGates(project.qualityGates, run);
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
+  run.rootCauses = clusterFailures({ results: run.results });
 
   // AUTO-017.3: persist per-run Web Vitals samples for MET-001 trend charts.
   // Best-effort only — telemetry failures must never fail the run.

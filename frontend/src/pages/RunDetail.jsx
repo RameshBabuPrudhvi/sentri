@@ -134,6 +134,7 @@ export default function RunDetail() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState(null);
   const [priorRuns, setPriorRuns] = useState([]);
+  const [rootCauseExpanded, setRootCauseExpanded] = useState(false);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -405,6 +406,11 @@ export default function RunDetail() {
   // verdict and the rendered pass rate will disagree on the same run.
   const passRateDenominator = Math.max(0, total - countNonExecutedSkips(results));
   const passRate = passRateDenominator > 0 ? Math.round((passed / passRateDenominator) * 100) : null;
+
+  const rootCauses = Array.isArray(run.rootCauses) ? run.rootCauses : [];
+  useEffect(() => {
+    setRootCauseExpanded(rootCauses.length >= 2);
+  }, [rootCauses.length, runId]);
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
@@ -883,6 +889,23 @@ export default function RunDetail() {
               CI pipelines polling the trigger endpoint receive <code>gateResult.passed: false</code> and should exit non-zero.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Root cause summary (AUTO-010) ───────────────────────────────── */}
+      {run.type === "test_run" && rootCauses.length >= 1 && (
+        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setRootCauseExpanded((v) => !v)}>{rootCauseExpanded ? "▼" : "▶"} Root Cause Summary ({rootCauses.length})</button>
+          {rootCauseExpanded && (
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {rootCauses.map((cluster) => (
+                <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
+                  <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
+                  <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{cluster.size} affected test(s)</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

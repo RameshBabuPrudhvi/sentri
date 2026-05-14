@@ -38,6 +38,7 @@ const JSON_FIELDS = [
   "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary
   "githubCheck", // INT-002: GitHub Check Run metadata
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
+  "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
 ];
 
 function rowToRun(row) {
@@ -96,6 +97,7 @@ const INSERT_COLS = [
   "environmentId", // DIF-012: optional project environment scope (migration 024)
   "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
+  "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

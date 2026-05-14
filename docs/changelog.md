@@ -534,3 +534,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added healing dashboard, metric samples primitives, and sprint promotion script scaffolding.
 
 <!-- promoted by script for PR #999; next=AUTO-017.3 -->
+
+- Added root-cause failure clustering summary on Run Detail and persisted `runs.rootCauses` for completed test runs.
