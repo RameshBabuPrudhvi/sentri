@@ -95,7 +95,9 @@ bug-template:            { lines: 1232-1263 }
 coverage-checklist:      { lines: 1267-1313 }
 ```
 
-> **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
+> **Read-only boundary:** line ranges are approximate and can drift after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
+
+> ⚠️ **Index staleness notice (CAP-001 / DIF-012 / CAP-002, PR #5):** The Environments / Distributed Sharding / Data-driven fixtures sections were inserted at lines 853–1020, shifting **every section below them by ~+170 lines**. The numeric line ranges for entries below `data-driven-fixtures` in the YAML index — including `visual-testing`, `dashboard`, `ai-chat`, `settings`, `account-gdpr`, `email-verification`, `recycle-bin`, `audit-log`, `notifications`, `security`, `reports-pdf`, `system-diagnostics`, `new-project`, `runs-list`, `project-detail`, `bulk-actions`, `modals`, `api-test-imports`, `onboarding`, `demo-mode`, `settings-data-tab`, `workspace-switcher`, `cross-cutting-checks`, `known-issues`, `bug-template`, `coverage-checklist` — and the matching rows in the intent-map table above are **out of date**. Until they're recomputed, **navigate by heading anchor** (`grep -n '^### ' QA.md`) instead of by line number for those sections. The CAP-001 / DIF-012 / CAP-002 entries themselves and everything at or above `quality-gates` remain accurate.
 
 > ⚠️ **Agents generating Playwright tests for Sentri: read this.**
 > Sentri's primary output is **UI / browser tests** that drive a real browser via `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and `expect(page....)` assertions on rendered DOM.

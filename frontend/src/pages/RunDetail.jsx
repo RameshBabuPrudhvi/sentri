@@ -434,7 +434,21 @@ export default function RunDetail() {
         .map((p, i) => (typeof p === "string" && p.length > 0 ? { path: p, shardIndex: i } : null))
         .filter(Boolean)
     : [];
-  const totalShardCount = Array.isArray(run.tracePaths) ? run.tracePaths.length : 0;
+  // CAP-002 Phase 2 — denominator for the per-shard option label MUST match
+  // the header badge (`Shards M/N` at line 524, which uses `run.shardCount`).
+  // `tracePaths` is populated incrementally as each shard flushes its zip
+  // (`runRepo.setShardTracePath`), so `tracePaths.length` can be less than
+  // `shardCount` either:
+  //   - mid-run (sibling shards haven't flushed yet), or
+  //   - on a completed run where a shard crashed before writing its trace
+  //     (sparse `null` slot survives but the array length still trails).
+  // Using `tracePaths.length` would show "Shard 1/2" alongside a "Shards 2/4"
+  // header — a confusing inconsistency. Anchor to `run.shardCount` and only
+  // fall back to the array length for legacy / pre-migration-025 runs that
+  // never persisted `shardCount`.
+  const totalShardCount = Number(run.shardCount) > 0
+    ? Number(run.shardCount)
+    : (Array.isArray(run.tracePaths) ? run.tracePaths.length : 0);
   const hasShardTraces = shardTracePaths.length > 1;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states

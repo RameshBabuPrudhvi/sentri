@@ -22,6 +22,7 @@
 import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
+import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
 
 export { parsePagination };
 
@@ -678,14 +679,22 @@ export function incrementShardsCompleted(runId) {
 export function markRunFailedFirstWriterWins(runId, { error, errorCategory } = {}) {
   if (!runId) return false;
   const db = getDatabase();
+  // Use a JS-side ISO 8601 timestamp (`new Date().toISOString()`) rather than
+  // SQL `datetime('now')` so the `finishedAt` column format stays consistent
+  // across dialects. On Postgres, the adapter translates `datetime('now')`
+  // to `NOW()` which renders as `2025-01-15 10:30:00.123456+00` — a different
+  // shape from the `2025-01-15T10:30:00.123Z` ISO 8601 string every other
+  // code path uses. Mixing formats in one column breaks downstream
+  // `new Date(finishedAt)` parsing on Postgres deployments.
+  const now = new Date().toISOString();
   const info = db.prepare(
     `UPDATE runs
        SET status = 'failed',
            error = COALESCE(error, ?),
            errorCategory = COALESCE(errorCategory, ?),
-           finishedAt = COALESCE(finishedAt, datetime('now'))
+           finishedAt = COALESCE(finishedAt, ?)
      WHERE id = ? AND status = 'running'`
-  ).run(error || "Shard failed", errorCategory || "unknown", runId);
+  ).run(error || "Shard failed", errorCategory || "unknown", now, runId);
   return (info.changes || 0) > 0;
 }
 
@@ -730,14 +739,18 @@ export function markRunCompletedFirstWriterWins(runId, { finishedAt, duration, q
   const qa = qualityAnalytics && typeof qualityAnalytics === "object"
     ? JSON.stringify(qualityAnalytics)
     : null;
+  // ISO 8601 fallback for `finishedAt` — see rationale in
+  // `markRunFailedFirstWriterWins`. Most callers pass `finishedAt` explicitly,
+  // so this only matters when the caller relied on the SQL default.
+  const fallbackFinishedAt = finishedAt || new Date().toISOString();
   const info = db.prepare(
     `UPDATE runs
        SET status = 'completed',
-           finishedAt = COALESCE(?, finishedAt, datetime('now')),
+           finishedAt = COALESCE(?, finishedAt, ?),
            duration = COALESCE(?, duration),
            qualityAnalytics = COALESCE(?, qualityAnalytics)
      WHERE id = ? AND status = 'running'`
-  ).run(finishedAt || null, duration ?? null, qa, runId);
+  ).run(finishedAt || null, fallbackFinishedAt, duration ?? null, qa, runId);
   return (info.changes || 0) > 0;
 }
 
@@ -872,16 +885,60 @@ export function purgeShardResults(runId, shardIndex, isNonExecutedSkip) {
       try { arr = JSON.parse(row.results) || []; } catch { arr = []; }
     }
     if (!Array.isArray(arr)) arr = [];
-    survivors = arr.filter((r) => {
-      if (isNonExecutedSkip(r)) return true;
-      return r?._shardIndex != null && r._shardIndex !== shardIndex;
-    });
+    // Shared survivor filter — single source of truth, mirrored by
+    // `runWorker.js`'s legacy single-shard catch block and the test fixture.
+    survivors = filterShardRetrySurvivors(arr, shardIndex, isNonExecutedSkip);
     db.prepare("UPDATE runs SET results = ? WHERE id = ?").run(JSON.stringify(survivors), runId);
   })();
-  return {
-    passed: survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length,
-    failed: survivors.filter((r) => r?.status === "failed").length,
-  };
+  return countShardRetrySurvivors(survivors);
+}
+
+/**
+ * CAP-002 Phase 2 — Reset run-level transient fields for a BullMQ retry,
+ * guarded by `status = 'running'` so a sibling shard that already
+ * transitioned the row to a terminal state (`failed` via
+ * {@link markRunFailedFirstWriterWins}, `aborted` via the abort route,
+ * or `completed` via {@link markRunCompletedFirstWriterWins}) is not
+ * silently un-terminalised by the retry path.
+ *
+ * Sibling of {@link markRunFailedFirstWriterWins} /
+ * {@link markRunCompletedFirstWriterWins} — same single-statement-UPDATE
+ * row-lock concurrency contract and same `WHERE status = 'running'`
+ * predicate so a TOCTOU race between check-and-write is impossible.
+ *
+ * Returns the same boolean shape as the other first-writer-wins primitives
+ * so callers can use it as a gate: when it returns `false`, the run is
+ * already terminal and the caller MUST skip any further destructive
+ * cleanup (e.g. `purgeShardResults`, `runLogRepo.deleteByRunId`) — those
+ * would wipe rows belonging to a sibling shard's successful completion
+ * or to the audit trail of a user-initiated abort.
+ *
+ * Note: `status = 'running'` is the *expected* current value (the retry
+ * keeps the row running while a fresh attempt executes), so this is an
+ * identity update on the status column. The other fields (`error`,
+ * `errorCategory`, `finishedAt`, `pagesFound`) are reset so the retry
+ * starts clean. `results` is NOT touched here — shard-mode callers handle
+ * that via {@link purgeShardResults} after this primitive returns `true`.
+ *
+ * @param {string} runId
+ * @returns {boolean} `true` when the row was still running and was reset;
+ *   `false` when the row had already transitioned terminal (caller must
+ *   abort the retry-prep sequence — see `runWorker.js` non-final-attempt
+ *   block for the canonical use site).
+ */
+export function resetRunForRetryIfStillRunning(runId) {
+  if (!runId) return false;
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE runs
+       SET status = 'running',
+           error = NULL,
+           errorCategory = NULL,
+           finishedAt = NULL,
+           pagesFound = 0
+     WHERE id = ? AND status = 'running'`
+  ).run(runId);
+  return (info.changes || 0) > 0;
 }
 
 /**
