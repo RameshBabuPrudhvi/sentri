@@ -341,15 +341,17 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   const runStart = Date.now();
   const allVideoSegments = [];
 
-  // ── Process a single test result — shared by the pool worker callback ────
-  function processResult(test, result) {
-    run.results.push(result);
-
-    // CAP-002 — attribute the result to its shard and advance
-    // `run.shardsCompleted` exactly once when a shard drains. `_shardIndex`
-    // is stamped by `partitionTestsIntoShards` above; defensive `?? 0`
-    // covers crash-synth results that bypass the partition (the test still
-    // belongs to shard 0 in a single-shard run — same effective behaviour).
+  // CAP-002 — advance shard progress once per *test* (not per iteration
+  // result). Data-driven tests call processResult N times for a single
+  // test, so decrementing inside processResult would drain the shard
+  // counter mid-test and surface a premature "Shards M/N" badge. The
+  // poolMap callback below calls this helper exactly once after a test
+  // fully resolves (success or crash), so each shard's counter reaches
+  // zero precisely when its last test reports back. `_shardIndex` is
+  // stamped by `partitionTestsIntoShards`; defensive `?? 0` covers
+  // tests that bypass the partition (single-shard runs still attribute
+  // to shard 0 — same effective behaviour).
+  function recordTestShardComplete(test) {
     const shardIdx = test?._shardIndex ?? 0;
     if (shardRemaining[shardIdx] != null) {
       shardRemaining[shardIdx] -= 1;
@@ -357,6 +359,11 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         run.shardsCompleted = Math.min(shardCount, (run.shardsCompleted || 0) + 1);
       }
     }
+  }
+
+  // ── Process a single test result — shared by the pool worker callback ────
+  function processResult(test, result) {
+    run.results.push(result);
 
     if (result.videoPath) allVideoSegments.push(result.videoPath);
 
@@ -489,6 +496,9 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           iterResult.failedAfterRetry = false;
           processResult(test, iterResult);
         }
+        // CAP-002 — drain the shard counter once per test, after every
+        // iteration result has been recorded. See `recordTestShardComplete`.
+        recordTestShardComplete(test);
         const finalResult = iterResults[iterResults.length - 1];
         if (finalResult) {
           structuredLog("test.result", { runId, testId: test.id, status: finalResult.status, durationMs: finalResult.durationMs });
@@ -513,6 +523,9 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // processResult fires exactly once on exhaustion — earlier attempts
         // were discarded inside the retry loop so we never double-count.
         processResult(test, errorResult);
+        // CAP-002 — crash path also resolves the test exactly once, so
+        // drain the shard counter here too (matches the success path).
+        recordTestShardComplete(test);
       }
     }, signal);
   } finally {
