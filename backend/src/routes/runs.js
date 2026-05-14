@@ -32,7 +32,7 @@ import { publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
-import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
+import { runTests, partitionTestIdsForShards } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { resolveBrowser } from "../runner/config.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
@@ -283,13 +283,49 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     // Snapshot approved test IDs at enqueue time so retries use the same
     // set — prevents mismatch between run.total/testQueue and the actual
     // tests executed if approvals change between attempts.
+    //
+    // CAP-002 Phase 2 — when the caller requested `shards: N > 1`, fan out
+    // to N BullMQ jobs sharing the parent `runId`. Each job carries its
+    // pre-computed test-ID slice; the worker never re-derives the split.
+    // `jobId: ${runId}:s${i}` keeps each shard job unique while sharing
+    // the parent `runs` row (Prerequisite #4 contract — one row per run).
+    // The last shard to finish — detected via the boundary-crossing
+    // `incrementShardsCompleted` UPDATE — owns finalization (feedback loop
+    // + status transition + `done` event). See `workers/runWorker.js`
+    // `test_run_shard` branch.
     try {
-      await runQueue.add("test_run", {
-        runId,
-        projectId: project.id,
-        type: "test_run",
-        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
-      }, { jobId: runId });
+      if (shardCount > 1) {
+        const dispatchedIds = selectedTests.map((t) => t.id);
+        const slices = partitionTestIdsForShards(dispatchedIds, shardCount);
+        // Enqueue all shards in parallel so a partial failure of the
+        // Promise.all surfaces immediately and we can mark the run failed
+        // before any shard starts executing. Each shard job uses the same
+        // `attempts: 2` retry budget as the single-shard path (inherited
+        // from `queue.js` `defaultJobOptions`).
+        await Promise.all(slices.map((testIds, shardIndex) =>
+          runQueue.add("test_run_shard", {
+            runId,
+            projectId: project.id,
+            type: "test_run_shard",
+            shardIndex,
+            shardCount,
+            options: {
+              parallelWorkers, browser: canonicalBrowser,
+              device: device || null, locale: locale || null,
+              timezoneId: timezoneId || null, geolocation: geolocation || null,
+              networkCondition: networkCondition || "fast",
+              testIds, actorInfo: actor(req),
+            },
+          }, { jobId: `${runId}:s${shardIndex}` })
+        ));
+      } else {
+        await runQueue.add("test_run", {
+          runId,
+          projectId: project.id,
+          type: "test_run",
+          options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
+        }, { jobId: runId });
+      }
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
       // doesn't block the project with a perpetual "running" status.

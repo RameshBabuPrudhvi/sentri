@@ -670,6 +670,79 @@ export function markRunFailedFirstWriterWins(runId, { error, errorCategory } = {
 }
 
 /**
+ * CAP-002 Phase 2 — Atomic accumulator for per-shard stats deltas. Composes
+ * sibling-shard contributions onto the same parent `runs` row without the
+ * read-modify-write race that `runRepo.save(run)` would lose under N
+ * concurrent workers. Sibling of {@link appendRunResults} /
+ * {@link incrementShardsCompleted}; same single-statement-UPDATE
+ * concurrency contract (better-sqlite3 journal lock on SQLite, row-level
+ * lock on Postgres).
+ *
+ * Cross-dialect: `COALESCE(x, 0) + ?` is spelled identically on SQLite and
+ * Postgres — no adapter translation required. `total` is mutable because
+ * data-driven tests expand N input rows into K iterations at execution
+ * time; each shard's totalDelta = (executedIterations - originalSliceSize)
+ * so the parent run's total reflects what actually dispatched rather than
+ * what was originally queued.
+ *
+ * @param {string} runId
+ * @param {Object} deltas
+ * @param {number} [deltas.passedDelta=0]
+ * @param {number} [deltas.failedDelta=0]
+ * @param {number} [deltas.totalDelta=0]
+ * @returns {number} `1` if a row was updated, `0` otherwise.
+ */
+export function incrementRunStats(runId, { passedDelta = 0, failedDelta = 0, totalDelta = 0 } = {}) {
+  if (!runId) return 0;
+  if (!passedDelta && !failedDelta && !totalDelta) return 0;
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE runs
+        SET passed = COALESCE(passed, 0) + ?,
+            failed = COALESCE(failed, 0) + ?,
+            total  = COALESCE(total,  0) + ?
+      WHERE id = ?`
+  ).run(passedDelta, failedDelta, totalDelta, runId);
+  return info.changes || 0;
+}
+
+/**
+ * CAP-002 Phase 2 — Atomically write a per-shard trace path into the
+ * sparse `tracePaths` JSON array. Each shard writes its own slot exactly
+ * once at trace-flush time, so contention is bounded to N writes total
+ * per run (vs the O(tests) contention of result writes). The transaction
+ * wrapper covers the read+write so a concurrent sibling shard's update
+ * to a different slot can't be lost.
+ *
+ * Cross-dialect note: SQLite's `json_set` and Postgres' `jsonb_set` have
+ * incompatible signatures and the postgres-adapter doesn't bridge either,
+ * so we use a portable SELECT+UPDATE inside `db.transaction(...)`. SQLite
+ * `transaction()` uses BEGIN IMMEDIATE which serializes against other
+ * write transactions; Postgres uses row-level locks via the implicit
+ * row lock on UPDATE within the transaction. Either way, two shards
+ * writing different indices on the same row are linearized.
+ *
+ * @param {string} runId
+ * @param {number} shardIndex - 0-based shard index.
+ * @param {string} path       - Public artifact URL for this shard's trace.
+ */
+export function setShardTracePath(runId, shardIndex, path) {
+  if (!runId || shardIndex == null || typeof path !== "string") return;
+  const db = getDatabase();
+  db.transaction(() => {
+    const row = db.prepare("SELECT tracePaths FROM runs WHERE id = ?").get(runId);
+    if (!row) return;
+    let arr = [];
+    if (row.tracePaths) {
+      try { arr = JSON.parse(row.tracePaths) || []; } catch { arr = []; }
+    }
+    if (!Array.isArray(arr)) arr = [];
+    arr[shardIndex] = path;
+    db.prepare("UPDATE runs SET tracePaths = ? WHERE id = ?").run(JSON.stringify(arr), runId);
+  })();
+}
+
+/**
  * Save the entire run object (upsert-style update of all known columns).
  * Used by pipeline code that mutates the run in-memory and then flushes.
  *

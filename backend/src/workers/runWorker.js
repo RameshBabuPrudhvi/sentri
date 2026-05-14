@@ -36,6 +36,10 @@ import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 import { subscribeToRunAborts, publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
+import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 Phase 2 — last-shard finalizer runs the AI feedback loop exactly once.
+import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
+import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
+import { trackTelemetry } from "../utils/telemetry.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -152,14 +156,18 @@ const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
  * @returns {Promise<void>}
  */
 async function processJob(job) {
-  // CAP-002 Phase 2 (Prerequisite #4 stub — full wiring in the coordinator
-  // PR) — `shardIndex` is `null` for legacy single-process runs and for
-  // every job that doesn't go through the BullMQ shard fan-out. The retry-
-  // reset below uses it to scope the results-array wipe to *this* shard so
-  // a sibling shard's already-completed results aren't erased on retry.
-  // When `shardIndex` is null the old wipe-all behaviour is preserved
+  // CAP-002 Phase 2 — `shardIndex` is `null` for legacy single-process runs
+  // and for every job that doesn't go through the BullMQ shard fan-out. The
+  // retry-reset below uses it to scope the results-array wipe to *this*
+  // shard so a sibling shard's already-completed results aren't erased on
+  // retry. When `shardIndex` is null the old wipe-all behaviour is preserved
   // verbatim — zero regression for `shardCount === 1`.
-  const { runId, projectId, type, options, shardIndex = null } = job.data;
+  //
+  // `shardCount` is the parent run's total shard count, used at the
+  // finalization handoff: the boundary-crossing shard (whose
+  // `incrementShardsCompleted` UPDATE returns 1 AND lands the counter at
+  // `shardCount`) owns the post-run feedback loop + `done` event.
+  const { runId, projectId, type, options, shardIndex = null, shardCount: jobShardCount = null } = job.data;
 
   structuredLog("worker.job_start", { runId, projectId, type, jobId: job.id });
 
@@ -285,6 +293,63 @@ async function processJob(job) {
 
       // Fire failure notifications (FEA-001) — best-effort
       try { await fireNotifications(run, project); } catch { /* best-effort */ }
+    } else if (type === "test_run_shard") {
+      // CAP-002 Phase 2 — execute one shard of a sharded run. The coordinator
+      // (routes/runs.js) pre-partitioned testIds at enqueue time; we never
+      // re-derive the split. `runTests` returns this shard's stats delta;
+      // we compose them onto the parent `runs` row atomically and hand off
+      // to the boundary-crossing shard for finalization.
+      const allTests = testRepo.getByProjectId(project.id);
+      const byId = new Map(allTests.map(t => [t.id, t]));
+      const sliceTests = (options.testIds || []).map((id) => byId.get(id)).filter(Boolean);
+
+      const shardStats = await runTests(scopedProject, sliceTests, run, {
+        parallelWorkers: options.parallelWorkers || 1,
+        browser: options.browser || null,
+        device: options.device || null,
+        locale: options.locale || null,
+        timezoneId: options.timezoneId || null,
+        geolocation: options.geolocation || null,
+        networkCondition: options.networkCondition || "fast",
+        signal,
+        shardIndex,
+      });
+
+      if (signal.aborted || run.status === "aborted") {
+        // Abort owns terminal-state writes; don't touch stats or counter.
+        workerAbortControllers.delete(abortKey);
+        return;
+      }
+
+      // Compose this shard's deltas onto the parent run atomically. Sibling
+      // shards may be running this same UPDATE concurrently — the SQL row
+      // lock is the linearization point.
+      if (shardStats && (shardStats.passed || shardStats.failed || shardStats.totalDelta)) {
+        runRepo.incrementRunStats(runId, {
+          passedDelta: shardStats.passed || 0,
+          failedDelta: shardStats.failed || 0,
+          totalDelta: shardStats.totalDelta || 0,
+        });
+      }
+
+      // CAP-002 Phase 2 — finalization handoff. `incrementShardsCompleted`
+      // returns 1 only for the boundary-crossing UPDATE; re-read the row to
+      // check whether THIS shard's increment landed the counter at
+      // `shardCount`. The SQL predicate (Prerequisite #1) guarantees exactly
+      // one shard observes `shardsCompleted === shardCount` after its own
+      // increment, so the feedback loop + finalize + `done` event fire
+      // exactly once per run.
+      const advanced = runRepo.incrementShardsCompleted(runId);
+      const totalShards = jobShardCount || 1;
+      if (advanced === 1) {
+        const fresh = runRepo.getById(runId);
+        if (fresh && (fresh.shardsCompleted ?? 0) >= totalShards) {
+          await finalizeShardedRun(scopedProject, fresh, options.actorInfo || {});
+        }
+      }
+
+      workerAbortControllers.delete(abortKey);
+      return;  // bypass the tail `runRepo.save(run)` — shard mode owns its writes
     }
 
     // Check abort signal one final time before persisting.  If the abort
@@ -445,6 +510,129 @@ async function processJob(job) {
     workerAbortControllers.delete(abortKey);
     runLogRepo.evictCache(runId);
   }
+}
+
+/**
+ * CAP-002 Phase 2 — Finalize a sharded run after every shard's results
+ * have landed. Called exactly once per run: the shard whose
+ * `incrementShardsCompleted` UPDATE crossed the boundary at `shardCount`
+ * is the finalizer; all other shards return without invoking this.
+ *
+ * The "exactly once" guarantee comes from the SQL predicate on
+ * `incrementShardsCompleted` (Prerequisite #1) — it returns `1` only for
+ * the single UPDATE that landed the counter at the cap. No JS-side mutex
+ * needed.
+ *
+ * Owns (mirrors the single-shard tail of `runTests`):
+ *   - gateResult / webVitalsResult evaluation against the full results set
+ *     (every shard has flushed via `appendRunResults` — DB is the source
+ *     of truth, the local `run` here is the fresh row this worker re-read)
+ *   - retryCount / failedAfterRetry aggregation
+ *   - one `runFeedbackLoop` invocation (single AI-call pass per run)
+ *   - `finalizeRunIfNotAborted` → status = "completed"
+ *   - duration computation (now - startedAt)
+ *   - one `done` SSE event
+ *   - one `test_run.complete` activity log
+ *   - one `run.complete` telemetry event
+ *   - best-effort notifications + GitHub-check completion
+ *
+ * @param {Object} project   - DIF-012 env-scoped project (carries `qualityGates`, `webVitalsBudgets`).
+ * @param {Object} run       - Fresh `runs` row, hydrated via `runRepo.getById`.
+ * @param {Object} actorInfo - `{ userId, userName }` from the triggering request.
+ * @returns {Promise<void>}
+ */
+async function finalizeShardedRun(project, run, actorInfo = {}) {
+  // Defensive: if the run was aborted between this shard's increment and
+  // this call, the abort route owns terminal-state writes — do nothing.
+  if (run.status === "aborted") return;
+
+  const runId = run.id;
+  const results = Array.isArray(run.results) ? run.results : [];
+  run.retryCount = results.reduce((sum, r) => sum + (r.retryCount || 0), 0);
+  run.failedAfterRetry = results.filter((r) => r.failedAfterRetry).length;
+
+  // Quality gates + web vitals — same evaluators as the single-shard path.
+  // The exported `__evaluateQualityGatesForTest` / `__evaluateWebVitalsBudgetsForTest`
+  // aliases are the public test-friendly names; we deliberately reuse them
+  // here rather than duplicate the logic (it's a moderately large pure
+  // function with subtle data-driven-skip handling — see testRunner.js).
+  run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run);
+  run.webVitalsResult = __evaluateWebVitalsBudgetsForTest(project.webVitalsBudgets, run);
+
+  // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
+  // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
+  // would otherwise see a `null` gateResult on a failed-feedback run).
+  runRepo.update(runId, {
+    retryCount: run.retryCount,
+    failedAfterRetry: run.failedAfterRetry,
+    gateResult: run.gateResult,
+    webVitalsResult: run.webVitalsResult,
+  });
+
+  // Feedback loop — runs exactly once per run. Load the FULL approved test
+  // set (every shard's slice combined) so the AI regeneration sees the
+  // same tests the original dispatch did. Aborts mid-feedback are swallowed
+  // by the loop itself; we additionally swallow any unexpected throw so a
+  // feedback-loop crash can never block run finalization (CI must still
+  // see a terminal status — `completed` or `failed`).
+  const tests = testRepo.getByProjectId(project.id).filter((t) => t.reviewStatus === "approved");
+  try {
+    await runFeedbackLoop(run, tests, null);
+  } catch (err) {
+    structuredLog("run.feedback_loop_failed", { runId, error: err.message });
+  }
+
+  // Status transition + duration + telemetry. `startedAt` is the parent
+  // run's column (set when the route created the row); duration is the
+  // wall-clock from run start to finalizer arrival — captures the actual
+  // parallel speedup vs. a single-shard run on the same suite.
+  finalizeRunIfNotAborted(run, () => {
+    run.finishedAt = new Date().toISOString();
+    run.duration = run.startedAt
+      ? Date.now() - new Date(run.startedAt).getTime()
+      : null;
+    structuredLog("run.complete", {
+      runId, projectId: project.id,
+      passed: run.passed, failed: run.failed, total: run.total,
+      durationMs: run.duration, shardCount: run.shardCount,
+    });
+    trackTelemetry("run.complete", {
+      projectId: project.id,
+      browser: run.browser,
+      total: run.total, passed: run.passed, failed: run.failed,
+      retryCount: run.retryCount || 0,
+      failedAfterRetry: run.failedAfterRetry || 0,
+      shardCount: run.shardCount || 1,
+      parallelWorkers: run.parallelWorkers || 1,
+      durationMs: run.duration,
+      url: project.url,
+    });
+  });
+
+  // Persist terminal state (status, finishedAt, duration, qualityAnalytics
+  // from the feedback loop).
+  runRepo.update(runId, {
+    status: run.status,
+    finishedAt: run.finishedAt,
+    duration: run.duration,
+    qualityAnalytics: run.qualityAnalytics || null,
+  });
+
+  // Activity log + `done` SSE — fire exactly once per logical run.
+  logActivity({
+    ...actorInfo,
+    type: "test_run.complete",
+    projectId: project.id,
+    projectName: project.name,
+    detail: `Test run completed — ${run.passed || 0} passed, ${run.failed || 0} failed (${run.shardCount}× shards)`,
+  });
+  emitRunEvent(runId, "done", {
+    status: run.status,
+    passed: run.passed, failed: run.failed, total: run.total,
+  });
+
+  // Best-effort side effects — never block finalization on these.
+  try { await fireNotifications(run, project); } catch { /* best-effort */ }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
