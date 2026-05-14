@@ -70,7 +70,14 @@ const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
  * @returns {Promise<void>}
  */
 async function processJob(job) {
-  const { runId, projectId, type, options } = job.data;
+  // CAP-002 Phase 2 (Prerequisite #4 stub — full wiring in the coordinator
+  // PR) — `shardIndex` is `null` for legacy single-process runs and for
+  // every job that doesn't go through the BullMQ shard fan-out. The retry-
+  // reset below uses it to scope the results-array wipe to *this* shard so
+  // a sibling shard's already-completed results aren't erased on retry.
+  // When `shardIndex` is null the old wipe-all behaviour is preserved
+  // verbatim — zero regression for `shardCount === 1`.
+  const { runId, projectId, type, options, shardIndex = null } = job.data;
 
   structuredLog("worker.job_start", { runId, projectId, type, jobId: job.id });
 
@@ -260,9 +267,28 @@ async function processJob(job) {
       // has a resolution" invariant). Routed through `isNonExecutedSkip`
       // (`backend/src/utils/skipReasons.js`) so adding a future skip kind
       // doesn't require a third site edit.
-      run.results = (run.results || []).filter(isNonExecutedSkip);
-      run.passed = 0;
-      run.failed = 0;
+      //
+      // CAP-002 Phase 2 (Prerequisite #3): when this job is one shard of
+      // a multi-shard run, only wipe results belonging to *this* shard.
+      // Sibling shards that already finished have their results stamped
+      // with `_shardIndex !== thisShardIndex` (see `testRunner.js`
+      // `processResult` — every persisted result row carries its shard
+      // index) and must survive the retry — otherwise a single shard's
+      // BullMQ retry would erase three other shards' worth of completed
+      // work. For legacy single-process runs (`shardIndex == null`) the
+      // filter degrades to the prior wipe-all behaviour: keep only the
+      // non-executed skips, drop everything else — bit-for-bit identical
+      // to the pre-CAP-002 code path. Re-derive `passed`/`failed` from
+      // the surviving rows instead of resetting to 0 so sibling-shard
+      // pass/fail counts are preserved through the retry.
+      const survivors = (run.results || []).filter((r) => {
+        if (isNonExecutedSkip(r)) return true;
+        if (shardIndex == null) return false; // legacy: wipe all execution rows
+        return r?._shardIndex != null && r._shardIndex !== shardIndex;
+      });
+      run.results = survivors;
+      run.passed = survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length;
+      run.failed = survivors.filter((r) => r?.status === "failed").length;
       run.pagesFound = 0;
       run.logs = [];
       // Delete run_logs table rows from the failed attempt so the retry

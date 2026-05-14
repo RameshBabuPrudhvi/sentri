@@ -363,6 +363,15 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   // ── Process a single test result — shared by the pool worker callback ────
   function processResult(test, result) {
+    // CAP-002 Phase 2 (Prerequisite #3) — stamp the result with its parent
+    // test's shard index so the retry-reset path in `runWorker.js` can
+    // identify which results to wipe (this shard's) vs. which to preserve
+    // (sibling shards that already completed). Single-shard runs stamp
+    // `_shardIndex: 0` uniformly — the retry filter is a no-op in that case.
+    // `?? 0` covers the pre-partition path (crash-synth before
+    // partitionTestsIntoShards stamps the test); shard 0 is the right
+    // default for a single-shard run.
+    result._shardIndex = test?._shardIndex ?? 0;
     run.results.push(result);
 
     if (result.videoPath) allVideoSegments.push(result.videoPath);
