@@ -97,6 +97,7 @@ const files = [
   "tests/run-abort-pubsub.test.js",
   "tests/run-shard-crash.test.js",
   "tests/run-shard-registry.test.js",
+  "tests/run-shard-finalizer.test.js",
 ];
 
 let passed = 0;
