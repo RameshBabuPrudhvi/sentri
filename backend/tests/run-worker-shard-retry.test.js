@@ -27,24 +27,20 @@
 
 import assert from "node:assert/strict";
 import { isNonExecutedSkip } from "../src/utils/skipReasons.js";
+import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../src/utils/shardRetryFilter.js";
 
 /**
- * Mirror of the production retry-reset filter at
- * `backend/src/workers/runWorker.js` (Prerequisite #3 block). Keep this
- * in lockstep with the production code — if the filter logic changes,
- * change it here too and the assertions will catch any drift.
+ * Thin wrapper around the production shared filter at
+ * `backend/src/utils/shardRetryFilter.js`. Previously this test mirrored
+ * the filter logic inline — that was a maintenance trap (every change to
+ * the production filter had to be replicated here). Now the production
+ * helper is the single source of truth; this wrapper just shapes the
+ * result into the `{ results, passed, failed }` form the assertions read.
  */
 function shardScopedRetryReset(results, shardIndex) {
-  const survivors = (results || []).filter((r) => {
-    if (isNonExecutedSkip(r)) return true;
-    if (shardIndex == null) return false;
-    return r?._shardIndex != null && r._shardIndex !== shardIndex;
-  });
-  return {
-    results: survivors,
-    passed: survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length,
-    failed: survivors.filter((r) => r?.status === "failed").length,
-  };
+  const survivors = filterShardRetrySurvivors(results, shardIndex, isNonExecutedSkip);
+  const { passed, failed } = countShardRetrySurvivors(survivors);
+  return { results: survivors, passed, failed };
 }
 
 let passed = 0;

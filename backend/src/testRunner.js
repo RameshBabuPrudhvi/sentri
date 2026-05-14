@@ -145,32 +145,46 @@ export { evaluateQualityGates as __evaluateQualityGatesForTest, evaluateWebVital
 // in the original item order.
 
 /**
- * CAP-002 — Partition tests into `shardCount` contiguous slices using the
- * same algorithm Playwright applies for `--shard=N/M`: the first
- * `total % shardCount` shards receive one extra test, so shard sizes
- * differ by at most one. Pure function — no DB or side effects — so the
- * partition contract can be exercised in isolation by
- * `backend/tests/run-sharding.test.js`.
+ * CAP-002 — Compute per-shard sizes using Playwright's `--shard=N/M`
+ * algorithm: the first `total % shardCount` shards receive one extra item,
+ * so shard sizes differ by at most one. Pure function — no I/O, no
+ * mutation, no allocations beyond the returned array. The single source
+ * of truth for the partition shape; both `partitionTestsIntoShards`
+ * (stamps `_shardIndex` on test objects) and `partitionTestIdsForShards`
+ * (slices plain-string arrays) derive their output from this.
  *
- * The function tags each test with `_shardIndex` in place (callers rely on
- * this to attribute results to the correct shard at completion time) and
- * also returns a `sizes[]` array so the runner can detect "last test in
- * shard S has finished" without re-deriving the partition.
+ * @param {number} total       - Total item count.
+ * @param {number} shardCount  - 1..MAX_WORKERS (caller is responsible for clamp).
+ * @returns {number[]} `sizes[shardIndex]` — per-shard item count. Empty
+ *   trailing shards (possible when `shardCount > total`) yield 0.
+ */
+export function computeShardSizes(total, shardCount) {
+  const count = Math.max(1, Number(shardCount) || 1);
+  const safeTotal = Math.max(0, Number(total) || 0);
+  const baseSize = Math.floor(safeTotal / count);
+  const remainder = safeTotal % count;
+  return new Array(count).fill(0).map((_, s) => baseSize + (s < remainder ? 1 : 0));
+}
+
+/**
+ * CAP-002 — Partition tests into `shardCount` contiguous slices using the
+ * shared {@link computeShardSizes} algorithm. Tags each test with
+ * `_shardIndex` in place (callers rely on this to attribute results to the
+ * correct shard at completion time) and returns the `sizes[]` array so the
+ * runner can detect "last test in shard S has finished" without re-deriving
+ * the partition. Pure function — no DB or side effects — so the partition
+ * contract can be exercised in isolation by `backend/tests/run-sharding.test.js`.
  *
  * @param {Object[]} tests       - Tests in dispatch order (post-smoke-pin).
  * @param {number}   shardCount  - 1..MAX_WORKERS (caller is responsible for clamp).
  * @returns {{ sizes: number[] }} per-shard test counts.
  */
 export function partitionTestsIntoShards(tests, shardCount) {
-  const count = Math.max(1, Number(shardCount) || 1);
-  const total = tests.length;
-  const baseSize = Math.floor(total / count);
-  const remainder = total % count;
-  const sizes = new Array(count).fill(0).map((_, s) => baseSize + (s < remainder ? 1 : 0));
+  const sizes = computeShardSizes(tests.length, shardCount);
   let cursor = 0;
   let shard = 0;
-  for (let i = 0; i < total; i++) {
-    while (shard < count - 1 && i >= cursor + sizes[shard]) {
+  for (let i = 0; i < tests.length; i++) {
+    while (shard < sizes.length - 1 && i >= cursor + sizes[shard]) {
       cursor += sizes[shard];
       shard++;
     }
@@ -181,12 +195,17 @@ export function partitionTestsIntoShards(tests, shardCount) {
 
 /**
  * CAP-002 Phase 2 — Partition test IDs into `shardCount` contiguous slices
- * using the same Playwright `--shard=N/M` algorithm as
- * {@link partitionTestsIntoShards}. The route layer calls this at enqueue
- * time to pre-compute each BullMQ shard job's `testIds` payload — the
- * coordinator is the single source of truth for the split; workers never
- * re-derive the partition (avoids drift if a future test sort changes the
- * approved-test order between enqueue and worker pickup).
+ * using the shared {@link computeShardSizes} algorithm. The route layer
+ * calls this at enqueue time to pre-compute each BullMQ shard job's
+ * `testIds` payload — the coordinator is the single source of truth for
+ * the split; workers never re-derive the partition (avoids drift if a
+ * future test sort changes the approved-test order between enqueue and
+ * worker pickup).
+ *
+ * Implementation note: slices the input array directly rather than allocating
+ * a tagged-copy. `computeShardSizes` is the single source of truth shared
+ * with `partitionTestsIntoShards`, so the algorithm cannot drift between
+ * the two callers.
  *
  * @param {string[]} testIds    - Approved test IDs in dispatch order.
  * @param {number}   shardCount - 1..MAX_WORKERS (caller is responsible for clamp).
@@ -195,14 +214,12 @@ export function partitionTestsIntoShards(tests, shardCount) {
  *   yield `[]` at their slot.
  */
 export function partitionTestIdsForShards(testIds, shardCount) {
-  // Re-use the partition algorithm by tagging a tagged-copy. We can't mutate
-  // `testIds` directly because callers pass plain strings, not objects.
-  const tagged = (testIds || []).map((id) => ({ id }));
-  const { sizes } = partitionTestsIntoShards(tagged, shardCount);
+  const ids = Array.isArray(testIds) ? testIds : [];
+  const sizes = computeShardSizes(ids.length, shardCount);
   const slices = [];
   let cursor = 0;
   for (const size of sizes) {
-    slices.push(tagged.slice(cursor, cursor + size).map((t) => t.id));
+    slices.push(ids.slice(cursor, cursor + size));
     cursor += size;
   }
   return slices;

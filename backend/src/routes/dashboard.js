@@ -296,22 +296,25 @@ router.get("/dashboard", (req, res) => {
     for (const r of runs) {
       if (r.type !== "test_run" && r.type !== "run") continue;
       if (r.status !== "completed") continue;
-      // Time-window the pass-rate denominator so a project's noisy first
-      // year doesn't permanently anchor the displayed rate. `lastGreenRunAt`
-      // can still surface a run older than the window because that's a
-      // "most recent green" lookup, not an aggregate — but we still gate
-      // it on the window so users aren't shown a 2-year-old green run as
-      // current state.
-      if (!r.startedAt || new Date(r.startedAt).getTime() < envWindowCutoff) continue;
+      if (!r.startedAt) continue;
       const key = `${r.projectId}::${r.environmentId || "default"}`;
       const b = buckets.get(key);
       if (!b) continue; // run targeted a now-deleted env — skip silently
-      b.total += r.total || 0;
-      b.passed += r.passed || 0;
-      b.failed += r.failed || 0;
+      const inWindow = new Date(r.startedAt).getTime() >= envWindowCutoff;
+      // Time-window the pass-rate denominator so a project's noisy first
+      // year doesn't permanently anchor the displayed rate.
+      if (inWindow) {
+        b.total += r.total || 0;
+        b.passed += r.passed || 0;
+        b.failed += r.failed || 0;
+      }
       // "Last green run" = most recent completed test run where every test
       // passed (failed === 0) and at least one test ran. Mirrors how
       // `passRate === 100%` is conventionally interpreted in the UI.
+      // Unbounded by the window: a "most recent green" lookup is meaningful
+      // even when the last green run is older than 90 days (low-cadence
+      // envs like DR / quarterly-release projects). The UI shows the
+      // timestamp so users can judge staleness themselves.
       const isGreen = (r.failed || 0) === 0 && (r.passed || 0) > 0;
       if (isGreen) {
         const ts = r.startedAt;

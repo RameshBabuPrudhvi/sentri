@@ -34,6 +34,7 @@ import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
+import { filterShardRetrySurvivors } from "../utils/shardRetryFilter.js"; // CAP-002 Phase 2 — shared survivor filter, mirrors runRepo.purgeShardResults.
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 import { subscribeToRunAborts, publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
 import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 Phase 2 — last-shard finalizer runs the AI feedback loop exactly once.
@@ -506,6 +507,44 @@ async function processJob(job) {
       // isation (SQLite), so concurrent sibling appends are honoured.
       const isShardMode = shardIndex != null;
       if (isShardMode) {
+        // CAP-002 Phase 2 — Gate the entire retry-prep sequence on the run
+        // still being in `running` state. A sibling shard may have already
+        // transitioned the row to a terminal state (`failed` via
+        // `markRunFailedFirstWriterWins`, `aborted` via the abort route,
+        // or — extremely unlikely but defended against — `completed` via
+        // a late finalizer). If we proceeded blindly, the chain below
+        // would:
+        //   - `purgeShardResults` would wipe this shard's already-recorded
+        //     results from a terminal run (harmless data loss, but pointless).
+        //   - `runLogRepo.deleteByRunId` would erase the audit trail for
+        //     a user-initiated abort (the abort route may have logged the
+        //     abort reason before the worker reached this catch block).
+        //   - The old `runRepo.update(... status: "running", error: null,
+        //     finishedAt: null)` would un-terminalise the row, silently
+        //     overwriting the sibling shard's classified failure reason
+        //     OR the user's abort with a fresh `running` status — the
+        //     run would then "resurrect" and execute against a parent
+        //     record that the rest of the system already considers
+        //     terminal (notifications fired, SSE `done` emitted, GitHub
+        //     Check concluded).
+        // The first-writer-wins primitive uses `WHERE status = 'running'`
+        // so it's atomic — no TOCTOU race between this check and the write.
+        // When it returns false, BullMQ still gets the `throw err` below
+        // and will retry the job, but the next attempt's `runRepo.getById`
+        // at job-start will see the terminal status and either:
+        //   (a) skip execution if we add a terminal-status guard there
+        //       (out of scope for this fix), or
+        //   (b) the next retry's catch block hits this same guard and
+        //       no-ops again — eventually exhausting attempts and the
+        //       BullMQ "failed" event fires.
+        const gated = runRepo.resetRunForRetryIfStillRunning(runId);
+        if (!gated) {
+          structuredLog("run.retry_skipped_terminal", {
+            runId, shardIndex,
+            reason: "sibling shard transitioned run to terminal state",
+          });
+          throw err; // Surface to BullMQ — it will retry, next attempt no-ops at job-start.
+        }
         runRepo.purgeShardResults(runId, shardIndex, isNonExecutedSkip);
         // DO NOT overwrite `passed` / `failed` columns here. Those columns
         // are composed atomically by each shard's `incrementRunStats` call
@@ -524,18 +563,24 @@ async function processJob(job) {
         // only the run-level non-results, non-stats fields the retry needs.
         run.pagesFound = 0;
         run.logs = [];
-        runLogRepo.deleteByRunId(runId);
-        runRepo.update(runId, {
-          status: "running",
-          error: null,
-          errorCategory: null,
-          finishedAt: null,
-          pagesFound: 0,
-        });
+        // CAP-002 Phase 2 — DO NOT call runLogRepo.deleteByRunId in shard
+        // mode. The `run_logs` table is parent-keyed (`WHERE runId = ?`
+        // — see `backend/src/database/repositories/runLogRepo.js`) with
+        // no `shardIndex` column, so a parent-scoped DELETE would wipe
+        // every sibling shard's logs alongside this shard's pre-failure
+        // entries — including sibling shards that have already completed
+        // successfully OR are still actively writing log lines via
+        // `appendLog`. Trading a duplicated log-prefix from the retried
+        // shard (minor UI oddity) for preserving sibling-shard audit
+        // trails (real data integrity) is the correct call. Legacy
+        // single-shard runs (`else` branch below) keep the delete because
+        // there are no siblings to protect — bit-for-bit unchanged.
       } else {
         // Legacy single-shard / non-shard path — bit-for-bit unchanged.
-        const survivors = (run.results || []).filter((r) => isNonExecutedSkip(r));
-        run.results = survivors;
+        // `shardIndex == null` → filter degrades to "keep only non-executed
+        // skips", matching the pre-CAP-002 wipe-all behaviour. Shared with
+        // `runRepo.purgeShardResults` so the survivor contract is in one place.
+        run.results = filterShardRetrySurvivors(run.results, null, isNonExecutedSkip);
         run.passed = 0;
         run.failed = 0;
         run.pagesFound = 0;
