@@ -79,7 +79,7 @@ The PR #3 investigation surfaced that the original `NEXT.md` brief assumed a sto
 - [x] `tests/e2e/specs/run-sharding-ui.spec.mjs` covers the modal input + the RunDetail badge presence/absence
 
 **Phase 2 (Codex to implement on the same branch — must land before merge):**
-- [ ] **Prerequisite #1** — `runRepo.appendRunResults(runId, newResults[])` + `runRepo.incrementShardsCompleted(runId)` atomic primitives, dual-dialect SQL for SQLite + Postgres; `backend/tests/run-storage-concurrency.test.js` proves no lost writes under N concurrent calls on both adapters
+- [x] **Prerequisite #1** — `runRepo.appendRunResults(runId, newResults[])` + `runRepo.incrementShardsCompleted(runId)` atomic primitives, dual-dialect SQL for SQLite + Postgres (cross-dialect via raw-JSON-TEXT `substr`/`||` splice — avoids SQLite-only `json_patch` and Postgres-only `jsonb_set` since `postgres-adapter.js` doesn't bridge either); `backend/tests/run-storage-concurrency.test.js` proves no lost writes under 8× concurrent `appendRunResults` and `incrementShardsCompleted` calls on whichever dialect `DATABASE_URL` selects
 - [ ] **Prerequisite #2** — per-shard trace paths `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`; `RunDetail.jsx` trace dropdown when `shardCount > 1`; trace-count assertion in `run-sharding.test.js`
 - [ ] **Prerequisite #3** — shard-scoped retry reset in `backend/src/workers/runWorker.js:263` (filter results by `_shardIndex` instead of wiping all); retry-preserves-siblings regression test
 - [ ] **Prerequisite #4** — parent-vs-shard model: one `runs` row per parent, BullMQ `jobId: ${runId}:s${shardIndex}`; abort route signals all N shards via pub/sub (#5 below)

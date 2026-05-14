@@ -537,6 +537,92 @@ export function update(id, fields) {
 }
 
 /**
+ * CAP-002 Phase 2 — Atomic append of one or more result objects to a run's
+ * `results` JSON column in a single SQL statement.
+ *
+ * Why this exists: `save(run)` writes every column from an in-memory JS
+ * snapshot, so N concurrent shard workers calling `save(run)` would silently
+ * lose results to last-write-wins. This primitive performs a single-statement
+ * `UPDATE` that splices new elements into the serialized JSON in place — no
+ * read, no JS-side modify, no write-back. The SQL engine serializes
+ * concurrent UPDATEs against the same row (better-sqlite3 journal lock on
+ * SQLite, row-level lock on Postgres), so each statement is the
+ * linearization point — verified by `backend/tests/run-storage-concurrency.test.js`.
+ *
+ * Cross-dialect strategy: rather than reach for SQLite's `json_patch()` or
+ * Postgres' `jsonb_set` (which the adapter's `translateSql` does *not*
+ * bridge — see `backend/src/database/adapters/postgres-adapter.js`), we
+ * operate on the column as raw JSON TEXT. `substr` (1-indexed, length-based)
+ * and `||` (string concat) are spelled identically in both dialects, so the
+ * statement runs unmodified through the adapter's translation layer. The
+ * column is only ever written by `JSON.stringify(...)` via `runToRow`, so
+ * the canonical format guarantees the closing `]` is the final character
+ * — no whitespace stripping required.
+ *
+ * Strategy: build the new chunk client-side as `JSON.stringify(newResults)`
+ * (always shaped `[...]`), then in SQL:
+ *   - if `results` is NULL or `'[]'` → overwrite with the new chunk
+ *   - otherwise → `substr(results, 1, length(results) - 1) || ',' || substr(newChunk, 2)`
+ *     i.e. drop the existing trailing `]`, append `,`, then append the new
+ *     chunk's interior `…]`.
+ *
+ * No-ops cleanly when `newResults` is empty or not an array.
+ *
+ * @param {string}   runId
+ * @param {Object[]} newResults — Result objects to append. Each element must
+ *   be JSON-serialisable (no functions, no cycles). Empty array → no-op.
+ * @returns {number} Number of elements actually appended.
+ */
+export function appendRunResults(runId, newResults) {
+  if (!Array.isArray(newResults) || newResults.length === 0) return 0;
+  const db = getDatabase();
+  const newChunk = JSON.stringify(newResults); // e.g. `[{...},{...}]`
+  // CASE handles three states without a read-modify-write:
+  //   1. NULL              → overwrite with newChunk
+  //   2. '[]' (empty)      → overwrite with newChunk
+  //   3. existing [...]    → splice: drop trailing `]`, append `,<interior>]`
+  // The interior of newChunk is `substr(newChunk, 2)` — skips the leading `[`.
+  // SQLite `length()` returns characters; Postgres `length()` on TEXT returns
+  // characters too (vs `octet_length()` for bytes) so the indexes match.
+  db.prepare(
+    `UPDATE runs SET results = CASE
+       WHEN results IS NULL OR results = '[]' THEN ?
+       ELSE substr(results, 1, length(results) - 1) || ',' || substr(?, 2)
+     END
+     WHERE id = ?`
+  ).run(newChunk, newChunk, runId);
+  return newResults.length;
+}
+
+/**
+ * CAP-002 Phase 2 — Atomic increment of `shardsCompleted`, capped at
+ * `shardCount` so a buggy double-fire (e.g. coordinator + worker both
+ * marking a shard done) can't push the counter past the total. Sibling of
+ * {@link appendRunResults}; same row-lock-per-UPDATE concurrency contract.
+ *
+ * Cross-dialect: `CASE WHEN … THEN x + 1 ELSE x END` works identically on
+ * SQLite and Postgres. Avoids `MIN()` (aggregate-only on Postgres) and
+ * `LEAST()` (not in SQLite). `COALESCE` handles pre-migration rows where
+ * `shardsCompleted` may be NULL.
+ *
+ * @param {string} runId
+ * @returns {number} `1` if a row was updated, `0` otherwise (run not found
+ *   or already at the cap).
+ */
+export function incrementShardsCompleted(runId) {
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE runs SET shardsCompleted = CASE
+       WHEN COALESCE(shardsCompleted, 0) < COALESCE(shardCount, 1)
+         THEN COALESCE(shardsCompleted, 0) + 1
+       ELSE shardsCompleted
+     END
+     WHERE id = ?`
+  ).run(runId);
+  return info.changes || 0;
+}
+
+/**
  * Save the entire run object (upsert-style update of all known columns).
  * Used by pipeline code that mutates the run in-memory and then flushes.
  *
