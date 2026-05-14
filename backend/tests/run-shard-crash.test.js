@@ -206,6 +206,86 @@ async function main() {
     assert.equal(runRepo.markRunFailedFirstWriterWins("RUN-DOES-NOT-EXIST-XYZ", { error: "x" }), false);
   });
 
+  // ── markRunCompletedFirstWriterWins — late-abort race safety ─────────
+  // The finalizer's `getById` → `runRepo.update(status: "completed")`
+  // sequence is non-atomic. If a user clicks Abort between those calls,
+  // the in-memory snapshot still shows `status: "running"` and the naive
+  // update would overwrite the abort. The first-writer-wins primitive
+  // catches this at the DB layer.
+
+  await test("markRunCompletedFirstWriterWins: first call on running row writes completed + returns true", () => {
+    const run = makeRun(project.id, { status: "running", shardsCompleted: 4 });
+    runRepo.create(run);
+    const writer = runRepo.markRunCompletedFirstWriterWins(run.id, {
+      finishedAt: "2025-01-01T00:00:00.000Z",
+      duration: 12345,
+    });
+    assert.equal(writer, true, "first writer must return true");
+    const fetched = runRepo.getById(run.id);
+    assert.equal(fetched.status, "completed");
+    assert.equal(fetched.finishedAt, "2025-01-01T00:00:00.000Z");
+    assert.equal(fetched.duration, 12345);
+    runRepo.hardDeleteById(run.id);
+  });
+
+  await test("markRunCompletedFirstWriterWins: aborted row is NOT flipped to completed (late-abort race)", () => {
+    // Simulate the exact race: row was running, user aborted, finalizer
+    // arrives late with completed write — must be no-op.
+    const run = makeRun(project.id, {
+      status: "aborted",
+      finishedAt: new Date().toISOString(),
+      error: "Aborted by user",
+    });
+    runRepo.create(run);
+    const writer = runRepo.markRunCompletedFirstWriterWins(run.id, {
+      finishedAt: new Date().toISOString(),
+      duration: 99999,
+    });
+    assert.equal(writer, false, "late finalizer must NOT overwrite aborted row");
+    const fetched = runRepo.getById(run.id);
+    assert.equal(fetched.status, "aborted", "status must stay aborted");
+    assert.equal(fetched.error, "Aborted by user", "abort reason must survive");
+    runRepo.hardDeleteById(run.id);
+  });
+
+  await test("markRunCompletedFirstWriterWins: already-failed row stays failed (no flip on late finalizer)", () => {
+    const run = makeRun(project.id, {
+      status: "failed",
+      finishedAt: new Date().toISOString(),
+      error: "shard-2 crashed",
+    });
+    runRepo.create(run);
+    const writer = runRepo.markRunCompletedFirstWriterWins(run.id, {
+      finishedAt: new Date().toISOString(),
+      duration: 50000,
+    });
+    assert.equal(writer, false, "completed must NOT flip a failed terminal row");
+    const fetched = runRepo.getById(run.id);
+    assert.equal(fetched.status, "failed");
+    assert.equal(fetched.error, "shard-2 crashed");
+    runRepo.hardDeleteById(run.id);
+  });
+
+  await test("markRunCompletedFirstWriterWins: qualityAnalytics is JSON-serialised on persist", () => {
+    const run = makeRun(project.id, { status: "running", shardsCompleted: 4 });
+    runRepo.create(run);
+    runRepo.markRunCompletedFirstWriterWins(run.id, {
+      finishedAt: new Date().toISOString(),
+      duration: 1000,
+      qualityAnalytics: { totalFailures: 3, byCategory: { ASSERTION_FAIL: 3 } },
+    });
+    const fetched = runRepo.getById(run.id);
+    assert.equal(fetched.status, "completed");
+    assert.deepEqual(fetched.qualityAnalytics, { totalFailures: 3, byCategory: { ASSERTION_FAIL: 3 } });
+    runRepo.hardDeleteById(run.id);
+  });
+
+  await test("markRunCompletedFirstWriterWins: missing runId / unknown row returns false without throwing", () => {
+    assert.equal(runRepo.markRunCompletedFirstWriterWins("", {}), false);
+    assert.equal(runRepo.markRunCompletedFirstWriterWins(null, {}), false);
+    assert.equal(runRepo.markRunCompletedFirstWriterWins("RUN-DOES-NOT-EXIST-XYZ", {}), false);
+  });
+
   resetDb();
   console.log(`\n  ${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exit(1);

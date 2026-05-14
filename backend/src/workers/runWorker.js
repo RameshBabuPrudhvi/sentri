@@ -651,14 +651,26 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     });
   });
 
-  // Persist terminal state (status, finishedAt, duration, qualityAnalytics
-  // from the feedback loop).
-  runRepo.update(runId, {
-    status: run.status,
+  // Persist terminal state atomically with first-writer-wins semantics.
+  // Catches the late-abort race where the user clicked Abort between
+  // `getById` and here — the predicate `WHERE status = 'running'` makes
+  // the UPDATE a no-op when the row is already terminal, so the user's
+  // abort isn't silently overwritten with `completed`. When the primitive
+  // returns false, treat the run as aborted (the abort route owns the
+  // SSE `done` event and activity log for that case) and skip the
+  // post-finalize side effects below.
+  const persistedTerminal = runRepo.markRunCompletedFirstWriterWins(runId, {
     finishedAt: run.finishedAt,
     duration: run.duration,
     qualityAnalytics: run.qualityAnalytics || null,
   });
+  if (!persistedTerminal) {
+    structuredLog("run.finalize_skipped_terminal", {
+      runId,
+      reason: "row already terminal (abort beat finalizer)",
+    });
+    return;
+  }
 
   // Activity log + `done` SSE — fire exactly once per logical run.
   logActivity({

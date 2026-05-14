@@ -670,6 +670,58 @@ export function markRunFailedFirstWriterWins(runId, { error, errorCategory } = {
 }
 
 /**
+ * CAP-002 Phase 2 — Mark a run `completed` with first-writer-wins semantics.
+ * The sibling primitive of {@link markRunFailedFirstWriterWins}: the
+ * `WHERE id = ? AND status = 'running'` predicate makes any caller
+ * arriving after the run has already transitioned terminal (e.g. the
+ * user clicked Abort between the finalizer's `getById` snapshot and its
+ * status-transition UPDATE) a clean no-op. Without this, the late
+ * finalizer would overwrite an `aborted` status with `completed`,
+ * silently masking the user's cancellation.
+ *
+ * The race is real but tiny: shard N's `incrementShardsCompleted`
+ * returns 1 → `getById` reads `status: "running"` → user aborts (route
+ * writes `status: "aborted"`) → finalizer continues, calls
+ * `finalizeRunIfNotAborted` which only looks at the in-memory `run`
+ * object (not the live DB) and proceeds to write `status: "completed"`.
+ * The atomic predicate here is the DB-side enforcement that catches the
+ * mid-flight abort even when the in-memory snapshot is stale.
+ *
+ * Sibling-shard concurrency contract: same single-statement-UPDATE
+ * row-lock guarantee as the rest of the CAP-002 primitives. Sets
+ * `finishedAt` and `duration` atomically with the status flip so a
+ * consumer reading the row never sees `status: "completed"` with a
+ * `finishedAt: NULL` interim state.
+ *
+ * @param {string} runId
+ * @param {Object} fields
+ * @param {string} [fields.finishedAt]       - ISO timestamp; defaults to `datetime('now')` in SQL.
+ * @param {number} [fields.duration]         - Wall-clock duration in ms.
+ * @param {Object} [fields.qualityAnalytics] - Feedback-loop output (JSON-stringified before persist).
+ * @returns {boolean} `true` when this caller actually performed the update
+ *   (i.e. it was the first writer); `false` when the row was already
+ *   terminal (an abort beat the finalizer, or a sibling already
+ *   finalized — defence-in-depth even though `incrementShardsCompleted`
+ *   guarantees exactly one finalizer).
+ */
+export function markRunCompletedFirstWriterWins(runId, { finishedAt, duration, qualityAnalytics } = {}) {
+  if (!runId) return false;
+  const db = getDatabase();
+  const qa = qualityAnalytics && typeof qualityAnalytics === "object"
+    ? JSON.stringify(qualityAnalytics)
+    : null;
+  const info = db.prepare(
+    `UPDATE runs
+       SET status = 'completed',
+           finishedAt = COALESCE(?, finishedAt, datetime('now')),
+           duration = COALESCE(?, duration),
+           qualityAnalytics = COALESCE(?, qualityAnalytics)
+     WHERE id = ? AND status = 'running'`
+  ).run(finishedAt || null, duration ?? null, qa, runId);
+  return (info.changes || 0) > 0;
+}
+
+/**
  * CAP-002 Phase 2 — Atomic accumulator for per-shard stats deltas. Composes
  * sibling-shard contributions onto the same parent `runs` row without the
  * read-modify-write race that `runRepo.save(run)` would lose under N
