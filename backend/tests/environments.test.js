@@ -70,18 +70,19 @@ async function main() {
     // ── DIF-012: invalid environmentId rejected with 400 (not silently
     // falling through to a full-suite run against project.url). Mirrors the
     // explicit `if (environmentId && (!environment || environment.projectId !== project.id))`
-    // guard in `backend/src/routes/trigger.js`.
+    // guard in `backend/src/routes/trigger.js`. Env validation runs BEFORE
+    // the no-tests / no-approved-tests check (QA.md line 903), so the
+    // specific `invalid environmentId` error is asserted rather than the
+    // permissive "either gate" regex previously used.
     out = await t.req(base, `/api/v1/projects/${projectId}/run`, { method: "POST", token: qa.token, body: { environmentId: "ENV-does-not-exist" } });
     assert.equal(out.res.status, 400);
-    // Project was never crawled, so `no tests found` short-circuits before
-    // env validation — accept either gate, both prove the request never
-    // executed against a fabricated env.
-    assert.match(out.json.error, /invalid environmentId|no approved tests|no tests found/i);
+    assert.match(out.json.error, /invalid environmentId/i);
 
     // ── DIF-012: cross-project envId rejected ─────────────────────────────
     const p2 = await t.req(base, "/api/v1/projects", { method: "POST", token: qa.token, body: { name: "P2", url: "https://other.example.com" } });
     out = await t.req(base, `/api/v1/projects/${p2.json.id}/run`, { method: "POST", token: qa.token, body: { environmentId } });
     assert.equal(out.res.status, 400);
+    assert.match(out.json.error, /invalid environmentId/i);
 
     // ── DIF-012: zero-regression — a run with NO environmentId still works
     // (gate fails on no-approved-tests, never on env validation). project.url

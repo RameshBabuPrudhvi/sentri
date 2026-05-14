@@ -199,6 +199,18 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     });
   }
 
+  // DIF-012: optional per-run environment override. Validated up-front
+  // (before the no-tests / no-approved-tests checks) so a bad envId fails
+  // fast with `invalid environmentId` rather than masking behind a
+  // misleading "no tests found" error. Matches the ordering used by the
+  // crawl path (runs.js:98-102) and the trigger path (trigger.js:454-458),
+  // and the contract documented in QA.md (line 903).
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
@@ -209,14 +221,6 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
-  // DIF-012: optional per-run environment override. Validated before
-  // building the run object so `environment?.id` is safe to reference.
-  const environmentId = req.body?.environmentId || null;
-  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
-  if (environmentId && (!environment || environment.projectId !== project.id)) {
-    return res.status(400).json({ error: "invalid environmentId" });
-  }
-
   const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
   const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
