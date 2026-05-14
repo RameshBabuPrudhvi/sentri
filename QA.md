@@ -33,8 +33,9 @@ If the user asks for… read only this section:
 | "Auto-approve tests / revoke / calibration" | [Auto-Approval](#-auto-approval-auto-003b) | 582–647 |
 | "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 676–724 |
 | "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 727–758 |
-| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 846–890 |
-| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | _(after quality-gates, before data-driven-fixtures)_ |
+| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | 851–912 |
+| "Distributed sharding / shards: N / cross-process test split" | [Distributed Sharding](#-distributed-sharding-cap-002) | 915–980 |
+| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 982–1020 |
 | "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
 | "Verify security / authorization" | [Security](#-security) | 997–1025 |
@@ -56,9 +57,10 @@ auto-approval:       { lines: 582-647 }     # NEW (AUTO-003b)
 ai-fix:              { lines: 650-673 }
 test-code-editing:   { lines: 676-724 }
 automation:          { lines: 727-758 }
-quality-gates:       { lines: 761-815 }     # NEW (AUTO-012)
-data-driven-fixtures:{ lines: 846-890 }     # NEW (CAP-001)
-environments:        { lines: 876-925 }     # NEW (DIF-012)
+quality-gates:       { lines: 795-849 }     # NEW (AUTO-012)
+environments:        { lines: 851-912 }     # NEW (DIF-012)
+distributed-sharding:{ lines: 915-980 }     # NEW (CAP-002)
+data-driven-fixtures:{ lines: 982-1020 }    # NEW (CAP-001)
 visual-testing:      { lines: 818-835 }
 dashboard:           { lines: 838-856 }
 ai-chat:             { lines: 860-889 }
@@ -908,6 +910,72 @@ _(automated: see `tests/e2e/specs/environments-ui.spec.mjs` for the Environments
 - Cross-workspace ACL — outsider hitting `/api/v1/projects/:id/environments` for a project in another workspace → **404** (workspace scope enforced upstream by `workspaceScope` middleware), and outsider PATCH on a known env id → **404** (not 403, to avoid leaking existence).
 - Delete an environment that has existing runs → DELETE succeeds; the historical runs keep their `environmentId` value, but the env row is gone (dashboard buckets for that env stop appearing the next time the aggregation runs).
 - `credentials` payload must be a plain object — passing a string or array currently round-trips as-is through `encryptCredentials` (verify; file as enhancement if hardening is desired).
+
+---
+
+### 🔀 Distributed Sharding (CAP-002)
+
+_(automated: backend coverage in `backend/tests/run-sharding.test.js` (partition algorithm + route clamp + BUG-0001 decoupling), `backend/tests/run-storage-concurrency.test.js` (atomic `appendRunResults` + `incrementShardsCompleted` under 8× concurrent writers), `backend/tests/run-shard-finalizer.test.js` (race-safety: stats composition + exactly-one-finalizer + over-firing + interleave), `backend/tests/run-shard-crash.test.js` (first-writer-wins + late-abort race for `markRunFailedFirstWriterWins` / `markRunCompletedFirstWriterWins`), `backend/tests/run-shard-registry.test.js` (parent/shard `workerAbortControllers` registry), `backend/tests/run-worker-shard-retry.test.js` (shard-scoped retry reset), `backend/tests/run-abort-pubsub.test.js` (Redis pub/sub cross-replica abort, gated on `REDIS_URL`). UI coverage in `tests/e2e/specs/run-sharding-ui.spec.mjs` for the modal input + RunDetail badge.)_
+
+**Preconditions:** Project with ≥ 5 approved tests; Redis running (`REDIS_URL` set) for the cross-process fan-out path; `qa_lead` or `admin` logged in. Without Redis, sharding falls back to in-process sequential partition (the badge still progresses but there is no wall-clock speedup — this is intentional and documented).
+
+**Request shape** (`POST /api/v1/projects/:id/run` + `POST /api/v1/projects/:id/trigger`): body `{ "shards": 4 }`. Server-clamped to `[1, MAX_WORKERS]` (default `MAX_WORKERS=2`); default `1` (legacy zero-regression). `shards` is **decoupled from** `dialsConfig.parallelWorkers` — `shardCount` only persists `> 1` when the caller explicitly requested sharding (BUG-0001). A project using only `dialsConfig.parallelWorkers: 4` does NOT surface a misleading "Shards M/N" badge.
+
+**RunRegressionModal `Shards` input:**
+
+1. Open `/runs` → **Run Tests** → **Shards** numeric input renders below device + browser selectors; default `1`. Non-integer (`"3.7"`) coerces to `3`; negative or blank coerces to `1`. Values above `MAX_WORKERS` are server-clamped and the persisted `run.shardCount` reflects the clamp.
+2. With `shards: 1`, the request body must NOT include the `shards` key (verify via DevTools Network). With `shards: 4`, the body includes `"shards": 4`.
+
+**RunDetail "Shards M/N" badge:**
+
+3. Submit `shards: 4` → header renders a blue **Shards 0/4** badge that ticks `0/4 → 4/4` as each shard's last test finishes (once per shard, NOT per test — data-driven tests do not drain the counter prematurely).
+4. **Single-shard / pre-CAP-002** runs (or migrations < `025_run_shards.sql`) → no badge renders; header is bit-for-bit identical to legacy.
+5. **`shards > tests.length`** — empty shards are pre-credited as complete the moment the partition computes; e.g. `shards: 4` on a 2-test suite shows `2/4` immediately, then `4/4` after the two non-empty shards finish.
+6. **Hard browser-launch failure** — runner flushes `shardsCompleted` to `shardCount` so the badge reads `N/N` on the failed run (not stuck at `0/N`).
+
+**Per-shard trace dropdown:**
+
+7. Completed sharded run with ≥ 2 captured traces → "Open Trace" action becomes a `<select>` listing one option per non-empty `tracePaths[]` slot (`Shard 1/4`, `Shard 2/4`, …). Single-shard runs keep the single-link button.
+8. **Sparse `tracePaths`** — when one shard crashed before flushing its trace, its slot is `null`; the dropdown skips it but preserves the original shard index in the label (no silent re-numbering).
+
+**Coordinator fan-out (Redis available):**
+
+9. Submit `shards: 4` → route partitions `selectedTests` into 4 contiguous slices via `partitionTestIdsForShards()` (Playwright `--shard=N/M`) and enqueues 4 BullMQ jobs of type `test_run_shard` sharing the parent `runId`. Each `jobId` is `${runId}:s${i}` (verify via BullMQ Redis keys).
+10. Each shard worker pulls its pre-partitioned `testIds` slice from `job.data.options.testIds` — workers **never re-derive the split**. Verify via `worker.job_start` log entries with `type: "test_run_shard"`.
+11. **No-Redis fallback** — unset `REDIS_URL` and re-run with `shards: 4` → in-process `runWithAbort` executes all 4 shards sequentially in one process; badge still progresses; run completes normally; no regression.
+12. **Trigger path** — same fan-out for `POST /api/v1/projects/:id/trigger` with `shards: 4`. Response 202 shape unchanged from single-shard triggers.
+
+**Finalization handoff:**
+
+13. Exactly **one** shard per run finalizes — whichever shard's `incrementShardsCompleted` UPDATE both returns 1 AND lands the counter at `shardCount`. SQL row-lock predicate guarantees exactly-one even under heavy concurrency (covered by `run-shard-finalizer.test.js`).
+14. The finalizer runs the AI feedback loop exactly once, transitions `status: "completed"` via `markRunCompletedFirstWriterWins`, emits one `done` SSE event, logs one `test_run.complete` activity row, fires notifications, completes the GitHub Check (if `run.githubCheck.checkRunId` is set), and POSTs the optional `callbackUrl` (trigger path only).
+15. Aggregate `passed`/`failed`/`total` on the parent `runs` row reflect the sum across all shards. Data-driven tests' iteration overflow (`totalDelta`) composes correctly.
+
+**Race-safety scenarios:**
+
+16. **Concurrent shard finish** — 40 tests × `shards: 4` such that all shards complete near-simultaneously → exactly one `test_run.complete` activity row, one `done` SSE event, one notification fire. No duplicates.
+17. **Mid-run abort** — long-running sharded run → click **Abort** halfway → abort route fans out to every shard's `workerAbortControllers` entry on this replica via `abortAllShardsForRun(runId)` AND publishes to `sentri:run-abort` so sibling replicas drain. Final status = `aborted`; `done` SSE event reports `status: "aborted"`.
+18. **Late-abort race** — click Abort just as the last shard's `incrementShardsCompleted` lands → the finalizer's `markRunCompletedFirstWriterWins` UPDATE becomes a clean no-op (predicate `WHERE status = 'running'` evaluates false). Finalizer logs `run.finalize_skipped_terminal` and bails out before activity / done / notifications / callback. Final status = `aborted` (NOT overwritten to `completed`).
+19. **Shard crash → run failed** — one shard's slice deterministically fails → first crasher writes the failure reason atomically via `markRunFailedFirstWriterWins`; subsequent crashing shards become no-ops (predicate evaluates false), preserving the first crasher's classified error. Worker publishes to `sentri:run-abort` so sibling shards drain. Final status = `failed`; `shardsCompleted < shardCount` preserved on the badge (truthful partial completion, NOT flushed to N/N).
+20. **Cross-replica abort** (multi-replica deployments) — abort from replica A → replica B's workers receive the signal via `sentri:run-abort` within one Redis round-trip and cancel their in-flight controllers.
+
+**CI/CD `callbackUrl` on sharded trigger runs:**
+
+21. `POST /api/v1/projects/:id/trigger` with `{ "shards": 4, "callbackUrl": "https://ci.example.com/hooks/sentri" }` + Bearer token → 202 immediately. After the run completes, the callback URL receives exactly **one** POST with the same payload shape as single-shard trigger runs (`runId`, `status`, `passed`, `failed`, `total`, `error`, `gateResult`, `webVitalsResult`). SSRF-safe via `safeFetch` (re-resolves DNS, blocks redirects).
+22. CI consumers can use one handler for both sharded and non-sharded runs — payload shape is identical.
+
+**Permissions:**
+
+23. `viewer` calling `POST /run` or `POST /trigger` with `shards: N` → 403 (same gate as single-shard).
+24. Cross-workspace ACL — outsider hitting `/api/v1/runs/:runId` for a sharded run in another workspace → 404 (workspace scope enforced upstream).
+
+**Negative / edge:**
+
+- `shards: 0` or `shards: -5` → coerces to `1` (no error, no behaviour change from absent `shards`).
+- `shards: "abc"` → coerces to `1` (non-numeric fallback).
+- `shards: 100` with `MAX_WORKERS=2` → server clamps to `2`; persisted `run.shardCount: 2`.
+- A test deleted between enqueue and worker pickup → that shard's `byId.get(id)` returns `undefined`, filtered out by `.filter(Boolean)`; the shard runs the remaining tests in its slice without crashing.
+- A shard's BullMQ retry → wipes ONLY that shard's results via `purgeShardResults` (atomic, dialect-aware row lock); sibling shards' already-completed results survive the retry.
 
 ---
 

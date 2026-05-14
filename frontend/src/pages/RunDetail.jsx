@@ -408,6 +408,28 @@ export default function RunDetail() {
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
+  // CAP-002 Phase 2 (Prerequisite #2) — shard-mode runs produce one trace
+  // zip per shard at `/artifacts/traces/${runId}/shard-${i}.zip`. The
+  // backend populates `run.tracePaths[]` (JSON array, migration 026)
+  // alongside the single-link `run.tracePath` for backwards compat.
+  // Render a dropdown when there are ≥2 shard traces; otherwise the
+  // existing single-link UI below covers both `shardCount === 1` and
+  // legacy pre-Phase-2 runs.
+  //
+  // `tracePaths` is intentionally a *sparse* array indexed by shardIndex —
+  // a shard that crashed before writing its trace leaves a `null` slot
+  // (see `backend/src/middleware/appSetup.js` `signRunArtifacts` which
+  // preserves sparse entries as `null` so the index → shard mapping is
+  // not lost). We must therefore retain the original index when filtering
+  // out the empty slots; using the filtered array's index for the label
+  // would mislabel "Shard 3" as "Shard 2" when shard 1 is missing.
+  const shardTracePaths = Array.isArray(run.tracePaths)
+    ? run.tracePaths
+        .map((p, i) => (typeof p === "string" && p.length > 0 ? { path: p, shardIndex: i } : null))
+        .filter(Boolean)
+    : [];
+  const totalShardCount = Array.isArray(run.tracePaths) ? run.tracePaths.length : 0;
+  const hasShardTraces = shardTracePaths.length > 1;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
   const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
@@ -496,6 +518,12 @@ export default function RunDetail() {
 
           {/* Browser engine (DIF-002b) — only meaningful for test runs.
               Crawl and generate runs are pinned to chromium. */}
+
+          {!isCrawl && !isGenerate && Number(run.shardCount || 1) > 1 && (
+            <span className="badge badge-blue">
+              Shards {Math.max(0, Number(run.shardsCompleted || 0))}/{Number(run.shardCount)}
+            </span>
+          )}
           {!isCrawl && !isGenerate && run.browser && (
             <BrowserBadge browser={run.browser} />
           )}
@@ -536,7 +564,30 @@ export default function RunDetail() {
                 {rerunning ? "Starting…" : "Re-run"}
               </button>
             )}
-            {traceUrl && (
+            {/* CAP-002 Phase 2 — per-shard trace dropdown when shardCount > 1
+                and the run actually emitted per-shard zips. Falls back to the
+                single-link UI for `shardCount === 1` and legacy runs. */}
+            {hasShardTraces ? (
+              <select
+                className="input btn-sm"
+                aria-label="Open trace for shard"
+                defaultValue=""
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (!path) return;
+                  window.open(`/trace-viewer/?trace=${encodeURIComponent(path)}`, "_blank", "noreferrer");
+                  e.target.value = ""; // reset so re-selecting the same shard re-opens
+                }}
+                style={{ fontSize: "0.78rem", padding: "4px 8px" }}
+              >
+                <option value="" disabled>🔍 Open Trace…</option>
+                {shardTracePaths.map(({ path, shardIndex }) => (
+                  <option key={shardIndex} value={path}>
+                    Shard {shardIndex + 1}/{totalShardCount || shardTracePaths.length}
+                  </option>
+                ))}
+              </select>
+            ) : traceUrl && (
               <>
                 <a href={traceViewerUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
                   🔍 Open Trace
