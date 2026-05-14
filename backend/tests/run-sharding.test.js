@@ -21,7 +21,7 @@ import { workspaceScope } from "../src/middleware/workspaceScope.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import runsRouter from "../src/routes/runs.js";
-import { partitionTestsIntoShards, shardTraceArtifactPath } from "../src/testRunner.js";
+import { partitionTestsIntoShards, partitionTestIdsForShards, shardTraceArtifactPath } from "../src/testRunner.js";
 import { getDatabase } from "../src/database/sqlite.js";
 
 let mounted = false;
@@ -117,6 +117,66 @@ async function main() {
       const { sizes } = partitionTestsIntoShards(tests, 4);
       assert.deepEqual(sizes, [1, 1, 0, 0]);
       assert.deepEqual(tests.map(t => t._shardIndex), [0, 1]);
+    });
+
+    // ── partitionTestIdsForShards (coordinator fan-out) ─────────────────
+    // The route layer calls this at enqueue time to compute the BullMQ
+    // job payload's `testIds` slice for each shard. Coverage locks down:
+    //   1. Slice sizes match the partition algorithm.
+    //   2. Slices are disjoint (no test enqueued twice).
+    //   3. The union of slices equals the original input set, in order.
+    //   4. shardCount = 1 yields a single full slice (legacy zero-regression).
+    //   5. shardCount > testIds.length yields trailing empty slices.
+    console.log("\n\u2500\u2500 partitionTestIdsForShards (coordinator) \u2500\u2500\u2500\u2500\u2500\u2500");
+
+    await test("partitionTestIdsForShards: 10 IDs / 4 shards yields 3+3+2+2 contiguous slices", () => {
+      const ids = Array.from({ length: 10 }, (_, i) => `T${i}`);
+      const slices = partitionTestIdsForShards(ids, 4);
+      assert.equal(slices.length, 4);
+      assert.deepEqual(slices.map(s => s.length), [3, 3, 2, 2]);
+      // Slices are disjoint and cover the full input set in order.
+      const union = slices.flat();
+      assert.deepEqual(union, ids, "union of slices must equal input in original order");
+      const set = new Set(union);
+      assert.equal(set.size, ids.length, "no test id may appear in two shards");
+    });
+
+    await test("partitionTestIdsForShards: shardCount = 1 yields a single full slice (zero regression)", () => {
+      const ids = ["A", "B", "C"];
+      const slices = partitionTestIdsForShards(ids, 1);
+      assert.equal(slices.length, 1);
+      assert.deepEqual(slices[0], ids);
+    });
+
+    await test("partitionTestIdsForShards: shardCount > ids.length yields trailing empty slices", () => {
+      const ids = ["A", "B"];
+      const slices = partitionTestIdsForShards(ids, 4);
+      assert.deepEqual(slices.map(s => s.length), [1, 1, 0, 0]);
+      // The empty trailing slices are still arrays (workers tolerate empty
+      // testIds — the worker increments shardsCompleted on entry and the
+      // boundary-crossing shard fires the finalizer).
+      assert.deepEqual(slices, [["A"], ["B"], [], []]);
+    });
+
+    await test("partitionTestIdsForShards: empty / non-array input returns shardCount empty slices", () => {
+      // Defensive — the route layer should never pass empty, but we don't
+      // want a TypeError here either.
+      assert.deepEqual(partitionTestIdsForShards([], 3), [[], [], []]);
+      assert.deepEqual(partitionTestIdsForShards(null, 2), [[], []]);
+    });
+
+    await test("partitionTestIdsForShards: 40 IDs / 4 shards each get exactly 10 (acceptance criterion)", () => {
+      // NEXT.md acceptance: "shards: 4 on a 40-test suite splits into 4
+      // BullMQ jobs of ~10 tests each". Verify the partition shape is
+      // exactly even when total % shardCount === 0.
+      const ids = Array.from({ length: 40 }, (_, i) => `T${i}`);
+      const slices = partitionTestIdsForShards(ids, 4);
+      assert.deepEqual(slices.map(s => s.length), [10, 10, 10, 10]);
+      // First slice is T0..T9, second T10..T19, etc. — contiguous.
+      assert.equal(slices[0][0], "T0");
+      assert.equal(slices[0][9], "T9");
+      assert.equal(slices[1][0], "T10");
+      assert.equal(slices[3][9], "T39");
     });
 
     // ── Per-shard trace path contract (Prerequisite #2) ──────────────────
