@@ -24,45 +24,22 @@
 
 ---
 
-## ▶ Current PR — AUTO-010 — Root cause analysis and failure clustering
-**Effort:** L | **Priority:** 🟢 Differentiator | **Dependencies:** none (composes naturally with AUTO-004 ✅ PR #18 — impact-scoped runs that still fail are the most useful input to clustering, since the noise floor is already lower) | **Source:** `ROADMAP.md` Phase 4 (AUTO-010) — promoted per `NEXT.md` rotation after CAP-002 shipped in PR #3
+## ▶ Current PR — DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion
+**Effort:** M (bundled 4×S) | **Priority:** 🟢 Differentiator (parity with BearQ / Mabl / Testim) | **Dependencies:** DIF-015 ✅, DIF-015b ✅, DIF-015c Gap 1 ✅ PR #11, DIF-015c Gap 2 backend ✅ PR #118 | **Source:** `ROADMAP.md` Phase 3 (DIF-015c sub-items) — promoted per `NEXT.md` rotation after AUTO-010 shipped in PR #6
 
-When 15 tests fail in a run, they often share a single root cause (login endpoint down, auth-service degraded, shared API 5xx). Sentri reports each failure independently — `defectBreakdown` in `Dashboard.jsx` buckets by error-type category but never clusters by **shared cause**. An autonomous QA system should group failures by shared error-message fingerprint, common `sourceUrl`, and common failing step selector, then report "1 root cause → 15 affected tests" so triage stops chasing 15 tickets for one outage. Pairs naturally with AUTO-004's impact-scoped runs (lower noise floor → cleaner clusters) and AUTO-001's risk scorer (high-risk tests are the cluster anchors).
-
-**Files:** new `backend/src/pipeline/failureClusterer.js` (pure function — error-fingerprint hashing + URL-prefix grouping + selector-similarity edit distance, no DB access) · `backend/src/testRunner.js` (call clusterer on run completion, attach `rootCauses` to run record) · `backend/src/database/repositories/runRepo.js` (`rootCauses` JSON field + INSERT_COL) · new migration `027_run_root_causes.sql` · `frontend/src/pages/RunDetail.jsx` (Root Cause Summary panel above the test list) · `frontend/src/api.js` (no new endpoint — `rootCauses` rides on `GET /runs/:runId`) · new `backend/tests/failure-clusterer.test.js`
-
-**Acceptance criteria:**
-- A run with 10 failures sharing the same `Error: ECONNREFUSED https://api.example.com/auth` message clusters into a single "likely root cause: auth service unreachable" row with 10 affected tests.
-- Failures with truly distinct causes (different URLs, different errors) produce N separate clusters of size 1 each — no false grouping.
-- Clustering runs in <100ms for a 100-test run; no LLM calls (deterministic fingerprint hashing only, AI-generated explanations are AUTO-021's scope).
-- Runs with zero failures persist `rootCauses: []` and render unchanged (zero regression).
-- The panel collapses by default when there's only one cluster, expands automatically when ≥2 clusters surface.
-
-### PR checklist (AUTO-010)
-
-- [ ] New migration `027_run_root_causes.sql` adds `rootCauses` JSON column to `runs`; registered in `runRepo.JSON_FIELDS` + `INSERT_COLS`
-- [ ] New pure helper `backend/src/pipeline/failureClusterer.js` exports `clusterFailures({ results })` returning `[{ fingerprint, affectedTestIds[], sharedUrl, sharedSelector, errorPattern, size }]` — no DB access, no LLM calls
-- [ ] `backend/src/testRunner.js` calls `clusterFailures` on run completion and persists `run.rootCauses` via `runRepo.update`
-- [ ] `frontend/src/pages/RunDetail.jsx` Root Cause Summary panel renders above the test list when `run.rootCauses.length >= 1`; collapses by default for single-cluster, auto-expands for ≥2 clusters
-- [ ] `backend/tests/failure-clusterer.test.js` (registered in `run-tests.js`) covers: same-message → single cluster, distinct messages → N singleton clusters, URL-prefix grouping, selector-similarity threshold, zero-failures path, 100ms perf budget on a 100-test fixture
-- [ ] `docs/api/projects.md` documents `run.rootCauses[]` shape on `GET /api/v1/runs/:runId`
-- [ ] `docs/changelog.md` updated under `## [Unreleased]`
-- [ ] `QA.md` § Run Detail extended with root-cause-clustering manual checks (when a panel renders, when it collapses, multi-cluster expansion)
-- [ ] `tests/e2e/specs/run-detail-root-cause-ui.spec.mjs` (Tier-3, `page.route()` mock) asserts the panel renders with synthetic `rootCauses` payload
+Promoted from queue slot 1 after AUTO-010 moved to Recently Completed. Original scope unchanged — see `ROADMAP.md` § DIF-015c sub-section for the full Gap 2 (inline assertion authoring point-and-click UX + `assertCount` / `assertHasClass`), Gap 3 (pause / resume / undo + edit mid-recording), Gap 5 (mobile / device profile during recording), and Gap 6 (stealth launch profile for sites that detect headless) breakdown. Bundled because all four touch the same `recorder.js` + `RecorderModal.jsx` surface within a single reviewable boundary; doing them separately means re-opening the same files four times with merge-conflict risk on `RECORDER_SCRIPT`.
 
 ---
 
 ## ⏭ Queue (next 3 PRs after current)
-### 1 · DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion
-**Effort:** M (bundled 4×S) | **Priority:** 🟢 Differentiator (parity with BearQ / Mabl / Testim) | **Dependencies:** DIF-015 ✅, DIF-015b ✅, DIF-015c Gap 1 ✅ PR #11, DIF-015c Gap 2 backend ✅ PR #118 | **Source:** `ROADMAP.md` Phase 3 (DIF-015c sub-items)
-
-_(promoted from queue slot 2 to slot 1 after AUTO-010 moved to Current PR. Original scope unchanged — see prior NEXT.md revisions for the full Gap 2/3/5/6 breakdown, or the `ROADMAP.md` § DIF-015c sub-section.)_
-
-### 2 · AUTO-008 — Distributed runner across multiple machines
+### 1 · AUTO-008 — Distributed runner across multiple machines
 **Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** INF-003 ✅, INF-002 ✅, CAP-002 ✅ (PR #3) | **Source:** `ROADMAP.md` Phase 4 (AUTO-008)
 
-### 3 · SEC-004 — MFA (TOTP / passkey) support
+### 2 · SEC-004 — MFA (TOTP / passkey) support
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
+
+### 3 · SEC-006 — PII firewall
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-006)
 
 > **Phase 5 audit-hardening blockers** (`SEC-004` MFA — slot 3 above; `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5.
 
@@ -72,9 +49,9 @@ _(promoted from queue slot 2 to slot 1 after AUTO-010 moved to Current PR. Origi
 
 | ID | Title | PR |
 |----|-------|----|
+| AUTO-010 | Root-cause failure clustering. Deterministic clusterer (`failureClusterer.js`) groups failed results by normalised error fingerprint, URL origin prefix, and selector edit-distance — no DB, no LLM. `runs.rootCauses` persisted via migration 027; called from both the single-process tail in `testRunner.js` AND `finalizeShardedRun` in `runWorker.js` (CAP-002 parity). Run Detail renders a collapsible "Root Cause Summary" panel that auto-expands when ≥2 clusters surface. | #6 |
 | CAP-002 | Distributed test sharding across runners. End-to-end cross-process sharding for `POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger`. `shards: N > 1` fans out across N BullMQ shard workers; boundary-crossing shard finalizes exactly once via atomic `incrementShardsCompleted` + `markRunCompletedFirstWriterWins`. 7 dedicated backend test files, 24-step QA manual plan, per-shard trace dropdown, CI/CD callback + GitHub Check completion on sharded runs. Deferred to CAP-002b: 10 SaaS-readiness follow-ups. | #3 |
 | DIF-012 | Multi-environment support (staging vs. production). | #2 |
-| CAP-001 | Data-driven test fixtures. | #1 |
 
 *Full completed list → ROADMAP.md § Completed Work*
 
