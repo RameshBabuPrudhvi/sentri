@@ -51,21 +51,38 @@ When 15 tests fail in a run, they often share a single root cause (login endpoin
 - [ ] `tests/e2e/specs/run-detail-root-cause-ui.spec.mjs` (Tier-3, `page.route()` mock) asserts the panel renders with synthetic `rootCauses` payload
 
 ---
+
 ## ⏭ Queue (next 3 PRs after current)
-### 1 · DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion — pure Playwright `--shard=N/M` algorithm (first `total % N` shards get +1), tags each test with `_shardIndex`, returns `sizes[]`. **This is the single source of truth Phase 2's coordinator reuses for the split — do not re-implement it in the queue layer.**
-- `processResult` advances `run.shardsCompleted` per-shard as each shard's last test reports — the UI badge progresses 0 → N, not 0 → N at completion.
-- `RunRegressionModal` `Shards` input (a11y-labelled, integer-coerced) + `RunDetail` blue `Shards M/N` badge.
-- `backend/tests/run-sharding.test.js` covering partition contract + route clamp + BUG-0001 + non-numeric fallback.
-- `tests/e2e/specs/run-sharding-ui.spec.mjs` covering the modal input + the RunDetail badge presence/absence.
+### 1 · DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion
+**Effort:** M (bundled 4×S) | **Priority:** 🟢 Differentiator (parity with BearQ / Mabl / Testim) | **Dependencies:** DIF-015 ✅, DIF-015b ✅, DIF-015c Gap 1 ✅ PR #11, DIF-015c Gap 2 backend ✅ PR #118 | **Source:** `ROADMAP.md` Phase 3 (DIF-015c sub-items)
 
-**Files:** `backend/src/testRunner.js` (coordinator splits the test queue into shards, enqueues N BullMQ jobs) · `backend/src/workers/runWorker.js` (accept `shardIndex` / `shardCount`, run only the assigned slice) · `backend/src/routes/runs.js` (accept optional `shards: number` default 1, max bounded by `MAX_WORKERS`) · new migration — add `shardCount`, `shardsCompleted` columns to `runs` (registered in `runRepo.INSERT_COLS`) · `backend/src/utils/redisClient.js` (pub/sub channel for shard coordination + abort propagation) · `frontend/src/components/run/RunRegressionModal.jsx` (shards selector 1-N) · `frontend/src/pages/RunDetail.jsx` (per-shard progress chip) · new `backend/tests/run-sharding.test.js`
+_(promoted from queue slot 2 to slot 1 after AUTO-010 moved to Current PR. Original scope unchanged — see prior NEXT.md revisions for the full Gap 2/3/5/6 breakdown, or the `ROADMAP.md` § DIF-015c sub-section.)_
 
-### Phase 2 — Cross-process coordinator + storage primitives (**this is what's missing — Codex to implement on the same branch**)
+### 2 · AUTO-008 — Distributed runner across multiple machines
+**Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** INF-003 ✅, INF-002 ✅, CAP-002 ✅ (PR #3) | **Source:** `ROADMAP.md` Phase 4 (AUTO-008)
 
-The PR #3 investigation surfaced that the original `NEXT.md` brief assumed a storage layer that doesn't yet support concurrent writers. Phase 2 must land the six prerequisites below **before** wiring the BullMQ fan-out, otherwise concurrent shard workers will silently corrupt run state (last-write-wins on `runRepo.save(run)`, trace zip collision, sibling-shard results wiped on retry).
+### 3 · SEC-004 — MFA (TOTP / passkey) support
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
 
-#### Prerequisites discovered mid-flight (must land in Phase 2 — no skipping, no partial coverage)
+> **Phase 5 audit-hardening blockers** (`SEC-004` MFA — slot 3 above; `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5.
 
+---
+
+## ✅ Recently completed
+
+| ID | Title | PR |
+|----|-------|----|
+| CAP-002 | Distributed test sharding across runners. End-to-end cross-process sharding for `POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger`. `shards: N > 1` fans out across N BullMQ shard workers; boundary-crossing shard finalizes exactly once via atomic `incrementShardsCompleted` + `markRunCompletedFirstWriterWins`. 7 dedicated backend test files, 24-step QA manual plan, per-shard trace dropdown, CI/CD callback + GitHub Check completion on sharded runs. Deferred to CAP-002b: 10 SaaS-readiness follow-ups. | #3 |
+| DIF-012 | Multi-environment support (staging vs. production). | #2 |
+| CAP-001 | Data-driven test fixtures. | #1 |
+| AUTO-004 | Test impact analysis (git diff / GitHub PR files). | #18 |
+| INT-002b | GitHub integration polish — installation UX + App-level webhooks. | #17 |
+
+*Full completed list → ROADMAP.md § Completed Work*
+
+_END OF FILE — everything below was removed during the CAP-002 → AUTO-010 sprint rotation._
+
+<!-- DEAD CONTENT BELOW — left by failed comment-block removal. Safe to delete on sight. -->
 **1. Atomic results-append primitive.** `backend/src/database/repositories/runRepo.js:549` `save(run)` writes every column at once from a JS snapshot. N concurrent shard workers calling `save(run)` lose results to last-write-wins. Add `appendRunResults(runId, newResults[])` + `incrementShardsCompleted(runId)` repo methods that append/increment in a single SQL statement (no read-modify-write). Must work on **both SQLite and Postgres** — the Postgres adapter at `backend/src/database/adapters/postgres-adapter.js` does not currently translate `json_extract` / `json_patch`, so the new SQL needs a portable approach (candidate: SQLite `json(? || substr(results, 2))` + parallel Postgres `jsonb_set` / `||`). Existing single-process `runRepo.save(run)` callsites in `testRunner.js` migrate to the new primitive on shard-mode runs only — `shardCount === 1` keeps using `save(run)` for zero-regression. **Required test coverage:** `backend/tests/run-storage-concurrency.test.js` spawning N parallel `appendRunResults` calls and asserting the final array length equals the sum of inputs (no lost writes), on **both** SQLite and Postgres (gate Postgres assertions behind `POSTGRES_URL` like `backend/tests/postgres-adapter.test.js`).
 
 **2. Per-shard trace artifact layout.** `backend/src/testRunner.js:190` writes traces to `${TRACES_DIR}/${runId}.zip` — a single path. N shard workers writing the same path produces a corrupt zip (or the last writer wins, silently dropping the other shards' traces). Switch to `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip` in shard mode; `RunDetail.jsx`'s "Open Trace" action grows a per-shard dropdown when `shardCount > 1` (single-shard runs render the existing single-link UI unchanged). `writeArtifactBuffer` + `signArtifactUrl` continue to work per-shard — no merger required. **Required test coverage:** assertion in `run-sharding.test.js` that a `shardCount: 4` completed run has exactly 4 trace artifact paths persisted; `RunDetail` E2E asserts the per-shard dropdown renders.
