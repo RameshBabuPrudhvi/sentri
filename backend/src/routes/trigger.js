@@ -195,6 +195,8 @@ function buildTestRun({
     failed: 0,
     total: tests.length,
     parallelWorkers,
+    shardCount: parallelWorkers,
+    shardsCompleted: 0,
     testQueue: tests.map((t) => ({
       id: t.id, name: t.name, steps: t.steps || [],
       riskScore: lookup.get(t.id) ?? null,

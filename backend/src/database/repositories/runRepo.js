@@ -93,6 +93,7 @@ const INSERT_COLS = [
   "githubCheck", // INT-002: GitHub Check Run metadata (migration 021)
   "budgetMinutes", // AUTO-001: wall-clock budget applied to dispatch queue (migration 021)
   "environmentId", // DIF-012: optional project environment scope (migration 024)
+  "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
@@ -109,6 +110,7 @@ const LEAN_COLS = [
   "gateResult", // AUTO-012 — surfaces gate badge on runs list without a second query
   "webVitalsResult", // AUTO-017 — surfaces vitals status without second query
   "environmentId", // DIF-012 — environment badge on runs list
+  "shardCount", "shardsCompleted", // CAP-002 — shard progress on run list/detail
 ].join(", ");
 
 const LEAN_WITH_FEEDBACK_COLS = `${LEAN_COLS}, feedbackLoop, pipelineStats`;

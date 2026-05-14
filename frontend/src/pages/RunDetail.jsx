@@ -496,6 +496,12 @@ export default function RunDetail() {
 
           {/* Browser engine (DIF-002b) — only meaningful for test runs.
               Crawl and generate runs are pinned to chromium. */}
+
+          {!isCrawl && !isGenerate && Number(run.shardCount || 1) > 1 && (
+            <span className="badge badge-blue">
+              Shards {Math.max(0, Number(run.shardsCompleted || 0))}/{Number(run.shardCount)}
+            </span>
+          )}
           {!isCrawl && !isGenerate && run.browser && (
             <BrowserBadge browser={run.browser} />
           )}

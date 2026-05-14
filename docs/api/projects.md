@@ -455,3 +455,7 @@ Deletes an environment (`admin`).
 ```
 
 When provided, the run executes against the selected environment `baseUrl` only for that run; `project.url` remains unchanged in the DB. Cross-project or unknown `environmentId` values return `400 invalid environmentId`.
+
+
+### Run sharding (CAP-002)
+`POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger` accept optional `shards` (integer). The server clamps to `[1, MAX_WORKERS]`; default is `1`.

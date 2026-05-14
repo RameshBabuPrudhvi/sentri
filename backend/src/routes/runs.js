@@ -245,6 +245,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     // trail of "what the reviewer queued" even when budget truncated dispatch.
     total: tests.length,
     parallelWorkers,
+    shardCount: parallelWorkers,
+    shardsCompleted: 0,
     browser: canonicalBrowser,
     device: device || null,
     networkCondition: networkCondition || "fast",

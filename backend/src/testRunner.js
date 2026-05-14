@@ -240,6 +240,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
+    run.shardsCompleted = run.shardCount || 1;
       logError(run, classified.message);
       structuredLog("browser.launch_failed", { runId, error: classified.message });
       throw launchErr;
@@ -260,6 +261,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
+    run.shardsCompleted = run.shardCount || 1;
       logError(run, classified.message);
       throw ctxErr;
     }
@@ -543,6 +545,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // append to run.logs but the SSE broadcast would be silently lost.
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
+    run.shardsCompleted = run.shardCount || 1;
     run.duration = Date.now() - runStart;
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {
