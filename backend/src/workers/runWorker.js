@@ -663,6 +663,21 @@ async function finalizeShardedRun(project, run, actorInfo = {}) {
 
   // Best-effort side effects — never block finalization on these.
   try { await fireNotifications(run, project); } catch { /* best-effort */ }
+
+  // CAP-002 Phase 2 — GitHub Check Run completion. The trigger-path
+  // `runWithAbort.onComplete` callback handles this for single-shard runs
+  // (`backend/src/routes/trigger.js:685`); the sharded BullMQ path
+  // bypasses `runWithAbort` entirely, so without this call a sharded run
+  // triggered from a GitHub PR would leave the Check Run stuck
+  // "in_progress" forever. Dynamic import avoids a circular dependency at
+  // module load (trigger.js → testRunner.js → workers/runWorker.js).
+  // Best-effort — a GitHub outage must never block run finalization.
+  if (run.githubCheck?.checkRunId) {
+    try {
+      const { concludeGithubCheck } = await import("../routes/trigger.js");
+      await concludeGithubCheck(run, project);
+    } catch { /* best-effort */ }
+  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

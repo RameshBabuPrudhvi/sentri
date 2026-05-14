@@ -27,7 +27,9 @@ import { generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
 import { resolveDialsConfig, resolveDialsPrompt } from "../testDials.js";
-import { runTests } from "../testRunner.js";
+import { runTests, partitionTestIdsForShards } from "../testRunner.js";
+import { runQueue, isQueueAvailable } from "../queue.js"; // CAP-002 Phase 2 — BullMQ fan-out for sharded CI/CD runs.
+import { actor } from "../utils/actor.js"; // CAP-002 Phase 2 — actor info threaded into shard job data for activity logs.
 import { crawlAndGenerateTests } from "../crawler.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
@@ -319,7 +321,7 @@ async function prepareGithubCheck(project, body, runId, deliveryId = null) {
  * @param {Object} finishedRun
  * @param {Object} project
  */
-async function concludeGithubCheck(finishedRun, project) {
+export async function concludeGithubCheck(finishedRun, project) {
   const check = finishedRun?.githubCheck;
   if (!check?.checkRunId || !check.repo || !check.installationId) return;
   try {
@@ -639,6 +641,81 @@ async function handleTrigger(req, res) {
       status: "running",
       meta: { provider: "ci", previewUrl, runId },
     });
+  }
+
+  // CAP-002 Phase 2 — Sharded test-run fan-out for CI/CD.
+  // When the caller requested `shards: N > 1` AND a BullMQ queue is
+  // available, enqueue N shard jobs sharing the parent `runId` (same
+  // pattern as `routes/runs.js:281-330`). Each shard worker calls
+  // `runTests({ shardIndex })` against its pre-partitioned slice; the
+  // boundary-crossing shard (whose `incrementShardsCompleted` UPDATE
+  // returns 1 AND lands the counter at `shardCount`) runs
+  // `finalizeShardedRun` which fires the feedback loop, status
+  // transition, `done` SSE, activity log, telemetry, notifications,
+  // AND `concludeGithubCheck` — so the GitHub PR Check still completes
+  // even though we bypassed the `runWithAbort.onComplete` hook above.
+  //
+  // The single-shard / no-Redis path keeps the existing `runWithAbort`
+  // flow so `onComplete` → `concludeGithubCheck` + `safeFetchCallback`
+  // fires for legacy callers. The callbackUrl is intentionally NOT
+  // honoured on the BullMQ-sharded path in this PR — wiring it would
+  // require threading the (already-validated) URL through job data and
+  // adding a callbackUrl branch to `finalizeShardedRun`; doing that on
+  // the same branch as the fan-out itself bloats the change. Logged as
+  // a known limitation in the changelog.
+  if (!triggerCrawl && shardCount > 1 && isQueueAvailable()) {
+    try {
+      const dispatchedIds = selectedTests.map((t) => t.id);
+      const slices = partitionTestIdsForShards(dispatchedIds, shardCount);
+      const scopedProject = buildEnvScopedProject(project, environment);
+      await Promise.all(slices.map((testIds, shardIndex) =>
+        runQueue.add("test_run_shard", {
+          runId,
+          projectId: scopedProject.id,
+          type: "test_run_shard",
+          shardIndex,
+          shardCount,
+          options: {
+            parallelWorkers,
+            // DIF-002: trigger path doesn't yet expose `browser` in its
+            // request body; leave null and let `runTests` resolve to
+            // chromium. When the trigger body grows a `browser` field
+            // (mirroring runs.js), thread it through here.
+            browser: null,
+            device: null,
+            locale: null,
+            timezoneId: null,
+            geolocation: null,
+            networkCondition: "fast",
+            testIds,
+            actorInfo: actor(req),
+          },
+        }, { jobId: `${runId}:s${shardIndex}` })
+      ));
+      // Respond 202 immediately — same shape as the runWithAbort path
+      // produces. CI consumers polling `statusUrl` see the run
+      // transition through `running` → terminal state driven by the
+      // BullMQ workers + finalizer.
+      const proto = req.headers["x-forwarded-proto"] || req.protocol;
+      const host  = req.headers["x-forwarded-host"]  || req.get("host");
+      const statusUrl = `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${runId}`;
+      const response = { runId, statusUrl };
+      if (run.githubCheck?.checkRunId) {
+        response.githubCheck = { checkRunId: run.githubCheck.checkRunId, reused: false };
+      }
+      return res.status(202).json(response);
+    } catch (enqueueErr) {
+      // Redis went away between `isQueueAvailable()` and the enqueue
+      // round-trip. Mark the run failed (the GitHub Check stays
+      // in_progress; an operator can re-trigger) and surface 503 so the
+      // CI pipeline knows to retry. Mirrors `routes/runs.js`.
+      runRepo.update(runId, {
+        status: "failed",
+        error: "Failed to enqueue shards",
+        finishedAt: new Date().toISOString(),
+      });
+      return res.status(503).json({ error: "Job queue unavailable. Please try again." });
+    }
   }
 
   runWithAbort(runId, run,
