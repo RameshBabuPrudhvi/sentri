@@ -25,28 +25,72 @@
 ---
 
 ## ▶ Current PR — CAP-002 — Distributed test sharding across runners
-**Effort:** L | **Priority:** 🟢 Differentiator | **Dependencies:** INF-002 ✅ (Redis pub/sub for coordinator→shard cancel signal), INF-003 ✅ (BullMQ worker pool primitive) | **Source:** `ROADMAP.md` Phase 4 (CAP-002) — promoted per `NEXT.md` rotation after DIF-012 shipped in PR #2
+**Effort:** XL (originally L — re-graded after mid-flight investigation of PR #3 `distributed-tests` surfaced four storage-layer prerequisites that the original brief did not call out — see "Prerequisites discovered mid-flight" below) | **Priority:** 🟢 Differentiator | **Dependencies:** INF-002 ✅ (Redis pub/sub for coordinator→shard cancel signal), INF-003 ✅ (BullMQ worker pool primitive) | **Source:** `ROADMAP.md` Phase 4 (CAP-002) — promoted per `NEXT.md` rotation after DIF-012 shipped in PR #2
 Single-host parallelism caps suite size at the local worker count (~4–8 on a Render box). Industry tools split a single run across N runners (Cypress Cloud `--record --parallel`, Playwright `--shard=1/4`). Sentri's BullMQ infra already gives us the worker pool primitive, but `runTests()` allocates the entire test list to a single worker, so adding nodes doesn't reduce wall-clock time on large suites. Split `runTests()` into coordinator + N shard workers; coordinator partitions the approved-test list across `runConfig.shards` BullMQ jobs scoped to `(runId, shardIndex, shardCount)`; workers pick their slice, execute, write per-test results back to the shared `runs` row keyed on `runId`; run completes when all shards report, fails if any shard's worker crashes. Re-uses INF-003's abort path — aborting the parent job propagates a cancel signal to all shard jobs via a Redis pub/sub channel.
+
+### Phase 1 — In-process plumbing (PR #3 `distributed-tests`, **open — do not merge until Phase 2 lands on the same branch**)
+Per the AGENT.md "no partial PRs" rule, **PR #3 is held open and Phase 2 lands on top of the same branch** before merge — `docs/changelog.md` then reads as one CAP-002 entry, not two. PR #3 already carries:
+- `runs.shardCount` + `runs.shardsCompleted` (migration `025_run_shards.sql`) on `INSERT_COLS` + `LEAN_COLS`.
+- `shards` request plumbing on `/run` + `/trigger`, server-clamped to `[1, MAX_WORKERS]`, decoupled from `dialsConfig.parallelWorkers` (BUG-0001 — `shardCount > 1` only when the caller explicitly passed `shards`).
+- `partitionTestsIntoShards(tests, shardCount)` exported from `backend/src/testRunner.js` — pure Playwright `--shard=N/M` algorithm (first `total % N` shards get +1), tags each test with `_shardIndex`, returns `sizes[]`. **This is the single source of truth Phase 2's coordinator reuses for the split — do not re-implement it in the queue layer.**
+- `processResult` advances `run.shardsCompleted` per-shard as each shard's last test reports — the UI badge progresses 0 → N, not 0 → N at completion.
+- `RunRegressionModal` `Shards` input (a11y-labelled, integer-coerced) + `RunDetail` blue `Shards M/N` badge.
+- `backend/tests/run-sharding.test.js` covering partition contract + route clamp + BUG-0001 + non-numeric fallback.
+- `tests/e2e/specs/run-sharding-ui.spec.mjs` covering the modal input + the RunDetail badge presence/absence.
+
 **Files:** `backend/src/testRunner.js` (coordinator splits the test queue into shards, enqueues N BullMQ jobs) · `backend/src/workers/runWorker.js` (accept `shardIndex` / `shardCount`, run only the assigned slice) · `backend/src/routes/runs.js` (accept optional `shards: number` default 1, max bounded by `MAX_WORKERS`) · new migration — add `shardCount`, `shardsCompleted` columns to `runs` (registered in `runRepo.INSERT_COLS`) · `backend/src/utils/redisClient.js` (pub/sub channel for shard coordination + abort propagation) · `frontend/src/components/run/RunRegressionModal.jsx` (shards selector 1-N) · `frontend/src/pages/RunDetail.jsx` (per-shard progress chip) · new `backend/tests/run-sharding.test.js`
 
-**Acceptance criteria:**
-- `runs: 4` on a 40-test suite splits into 4 BullMQ jobs of ~10 tests each, completing in ~1/4 the wall-clock time of a single-shard run.
-- `shards: 1` (default) behaves identically to today — zero regression for the existing JWT + trigger-token paths.
-- Aborting the parent run via `DELETE /runs/:runId` propagates to all shard workers via Redis pub/sub; orphaned shard jobs are not possible.
-- A shard worker crashing mid-execution marks the run `failed` with `shardsCompleted < shardCount` surfaced in the response, not silently completes.
-- `MAX_WORKERS` clamp prevents `shards: 100` from exhausting the worker pool; clamped server-side, never client-trusted.
+### Phase 2 — Cross-process coordinator + storage primitives (**this is what's missing — Codex to implement on the same branch**)
 
-### PR checklist (CAP-002)
-- [ ] New migration adds `shardCount` + `shardsCompleted` columns to `runs` (registered in `runRepo.INSERT_COLS` + `LEAN_COLS`)
-- [ ] `backend/src/testRunner.js` coordinator partitions the approved-test list into N BullMQ jobs scoped to `(runId, shardIndex, shardCount)`
-- [ ] `backend/src/workers/runWorker.js` accepts `shardIndex` / `shardCount`, runs only the assigned slice
-- [ ] `backend/src/routes/runs.js` + `backend/src/routes/trigger.js` accept optional `shards: number` (default 1, server-clamped to `MAX_WORKERS`)
-- [ ] Redis pub/sub channel for coordinator→shard cancel signal piggy-backs INF-002's existing client; abort propagation covered by a regression test
-- [ ] Shard crash → run `failed` with `shardsCompleted` surfaced; orphan shard jobs not possible (verified by integration test killing a worker mid-flight)
-- [ ] `frontend/src/components/run/RunRegressionModal.jsx` `shards` selector (1-N); `frontend/src/pages/RunDetail.jsx` shows per-shard progress chip
-- [ ] `backend/tests/run-sharding.test.js` (registered in `run-tests.js`) covers: 4-shard split correctness, `shards:1` zero-regression, abort propagation, shard crash → failed, `MAX_WORKERS` clamp
-- [ ] `docs/api/projects.md` documents the `shards` run-request shape; `docs/changelog.md` updated under `## [Unreleased]`
-- [ ] `tests/e2e/specs/run-sharding-ui.spec.mjs` covers the shards selector + per-shard progress chip (Tier-2 fixture pattern from `tests/e2e/COVERAGE.md`)
+The PR #3 investigation surfaced that the original `NEXT.md` brief assumed a storage layer that doesn't yet support concurrent writers. Phase 2 must land the six prerequisites below **before** wiring the BullMQ fan-out, otherwise concurrent shard workers will silently corrupt run state (last-write-wins on `runRepo.save(run)`, trace zip collision, sibling-shard results wiped on retry).
+
+#### Prerequisites discovered mid-flight (must land in Phase 2 — no skipping, no partial coverage)
+
+**1. Atomic results-append primitive.** `backend/src/database/repositories/runRepo.js:549` `save(run)` writes every column at once from a JS snapshot. N concurrent shard workers calling `save(run)` lose results to last-write-wins. Add `appendRunResults(runId, newResults[])` + `incrementShardsCompleted(runId)` repo methods that append/increment in a single SQL statement (no read-modify-write). Must work on **both SQLite and Postgres** — the Postgres adapter at `backend/src/database/adapters/postgres-adapter.js` does not currently translate `json_extract` / `json_patch`, so the new SQL needs a portable approach (candidate: SQLite `json(? || substr(results, 2))` + parallel Postgres `jsonb_set` / `||`). Existing single-process `runRepo.save(run)` callsites in `testRunner.js` migrate to the new primitive on shard-mode runs only — `shardCount === 1` keeps using `save(run)` for zero-regression. **Required test coverage:** `backend/tests/run-storage-concurrency.test.js` spawning N parallel `appendRunResults` calls and asserting the final array length equals the sum of inputs (no lost writes), on **both** SQLite and Postgres (gate Postgres assertions behind `POSTGRES_URL` like `backend/tests/postgres-adapter.test.js`).
+
+**2. Per-shard trace artifact layout.** `backend/src/testRunner.js:190` writes traces to `${TRACES_DIR}/${runId}.zip` — a single path. N shard workers writing the same path produces a corrupt zip (or the last writer wins, silently dropping the other shards' traces). Switch to `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip` in shard mode; `RunDetail.jsx`'s "Open Trace" action grows a per-shard dropdown when `shardCount > 1` (single-shard runs render the existing single-link UI unchanged). `writeArtifactBuffer` + `signArtifactUrl` continue to work per-shard — no merger required. **Required test coverage:** assertion in `run-sharding.test.js` that a `shardCount: 4` completed run has exactly 4 trace artifact paths persisted; `RunDetail` E2E asserts the per-shard dropdown renders.
+
+**3. Shard-aware retry semantics.** `backend/src/workers/runWorker.js:263` `run.results = (run.results || []).filter(isNonExecutedSkip)` wipes the entire results array on non-final retry. With shards, a single shard's BullMQ retry would erase results from sibling shards that already finished. Change the reset to be shard-scoped: filter out results where `_shardIndex === thisShardIndex` (plus the existing non-executed-skip preservation), and reset `passed`/`failed` from `run.results.length` after the filter rather than to `0`. Pre-shard runs (no `_shardIndex` stamp) keep the existing behaviour. **Required test coverage:** `backend/tests/abort-worker.test.js` extended (or new sibling test) — enqueue 4 shards, simulate shard-2 failure + retry, assert shards 0/1/3's results survive the retry.
+
+**4. Parent-vs-shard run model + concurrent-run guard.** `backend/src/database/repositories/runRepo.js:564` `findActiveByProjectId` returns the existing `runs` row with `status: 'running'`. When the coordinator enqueues N shard jobs sharing the parent `runId`, the guard correctly blocks a second concurrent run — but `POST /runs/:runId/abort` (`backend/src/routes/runs.js:473`) only signals **one** in-memory `workerAbortControllers` entry. Define the contract explicitly: **one `runs` row per parent run**; shards never get their own `runs` row; BullMQ jobs use `jobId: ${runId}:s${shardIndex}` to stay unique while sharing the parent state. The abort route publishes to the new Redis pub/sub channel (prerequisite #5) so every shard worker in every replica receives the cancel signal — `workerAbortControllers` stays as the local fast-path for same-process aborts.
+
+**5. Redis pub/sub abort channel** (the original brief's "shard coordination" channel, now scoped explicitly). New `sentri:run-abort` channel in `backend/src/utils/redisClient.js`. Every shard worker subscribes once at boot via `redisSub.subscribe('sentri:run-abort')` and maintains a `Map<runId, AbortController>` keyed by the runs the worker is currently processing. The abort route publishes `{ runId }` and calls the existing in-memory `workerAbortControllers.abort()` for fast-path same-process aborts; cross-process workers learn via the channel within one Redis round-trip. **Self-echo suppression:** publisher stamps an `origin` id (uuid generated at worker boot, same pattern as `routes/sse.js`'s SSE pub/sub) and subscribers drop messages whose origin matches their own. Degrades cleanly to local-only abort when `REDIS_URL` is unset (existing in-process path is the fallback). **Required test coverage:** new `backend/tests/run-abort-pubsub.test.js` — spawn two subscribers + one publisher against a real Redis (gate behind `REDIS_URL` like `compat-config-cache.test.js`), assert both subscribers receive the message and the publisher self-suppresses.
+
+**6. Shard-crash → run failed.** Extend `runWorker.js` `worker.on('failed', ...)` so a non-recoverable shard-job failure marks the parent `runs` row `status: 'failed'` with `shardsCompleted < shardCount` surfaced (first-writer-wins via an `UPDATE … WHERE status = 'running'` predicate so a second crashed shard doesn't overwrite the first failure reason), then publishes to `sentri:run-abort` so sibling shards drain and exit cleanly. **Required test coverage:** integration test that kills a shard mid-execution (BullMQ `job.moveToFailed()`) and asserts (a) the run row reaches `status: 'failed'`, (b) `shardsCompleted < shardCount`, (c) sibling shards abort within 2s, (d) no orphan BullMQ jobs remain `active` for the dead runId.
+
+**Acceptance criteria (Phase 1 + Phase 2 together — the original brief's criteria, now verifiable end-to-end):**
+- `shards: 4` on a 40-test suite splits into 4 BullMQ jobs of ~10 tests each, completing in **~1/4 the wall-clock time** of a single-shard run. Verified by a new `tests/e2e/specs/run-sharding-wallclock.spec.mjs` Tier-1 spec that times both runs against a real Playwright harness (gate behind `RUN_E2E_REAL_PLAYWRIGHT=true` so CI matrix can opt in once the harness exists; otherwise asserts shard count + completion only).
+- `shards: 1` (default) behaves identically to today — zero regression for the existing JWT + trigger-token paths. Verified by the existing `backend/tests/run-tests.js` suite passing unchanged under `shardCount === 1`.
+- Aborting the parent run via `POST /api/v1/runs/:runId/abort` propagates to all shard workers via Redis pub/sub; orphaned shard jobs are not possible. Verified by prerequisite #5's test.
+- A shard worker crashing mid-execution marks the run `failed` with `shardsCompleted < shardCount` surfaced in the response, not silently completes. Verified by prerequisite #6's test.
+- `MAX_WORKERS` clamp prevents `shards: 100` from exhausting the worker pool; clamped server-side, never client-trusted. Verified by `run-sharding.test.js` (already in PR #3).
+- Concurrent shard writes to the same run row never lose results — verified by prerequisite #1's concurrency test on both SQLite and Postgres.
+- Per-shard trace zips render in the `RunDetail` trace dropdown for `shardCount > 1` runs and continue rendering as a single link for `shardCount === 1` runs.
+
+### PR checklist (CAP-002 — Phases 1 + 2 combined, single merge)
+
+**Phase 1 (PR #3, already on the branch — do not redo):**
+- [x] Migration `025_run_shards.sql` adds `shardCount` + `shardsCompleted` to `runs` (registered in `runRepo.INSERT_COLS` + `LEAN_COLS`)
+- [x] `backend/src/routes/runs.js` + `backend/src/routes/trigger.js` accept optional `shards: number` (default 1, server-clamped to `MAX_WORKERS`); decoupled from `dialsConfig.parallelWorkers` (BUG-0001)
+- [x] `partitionTestsIntoShards()` exported from `backend/src/testRunner.js` — pure Playwright `--shard=N/M` algorithm; tags each test with `_shardIndex`; returns `sizes[]`
+- [x] `processResult` advances `run.shardsCompleted` per-shard as each shard's last test reports
+- [x] `frontend/src/components/run/RunRegressionModal.jsx` `Shards` input (a11y-labelled, integer-coerced); `frontend/src/pages/RunDetail.jsx` blue `Shards M/N` badge when `shardCount > 1`
+- [x] `backend/tests/run-sharding.test.js` (registered in `run-tests.js`) covers partition contract + route clamp + BUG-0001 + non-numeric fallback
+- [x] `tests/e2e/specs/run-sharding-ui.spec.mjs` covers the modal input + the RunDetail badge presence/absence
+
+**Phase 2 (Codex to implement on the same branch — must land before merge):**
+- [ ] **Prerequisite #1** — `runRepo.appendRunResults(runId, newResults[])` + `runRepo.incrementShardsCompleted(runId)` atomic primitives, dual-dialect SQL for SQLite + Postgres; `backend/tests/run-storage-concurrency.test.js` proves no lost writes under N concurrent calls on both adapters
+- [ ] **Prerequisite #2** — per-shard trace paths `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`; `RunDetail.jsx` trace dropdown when `shardCount > 1`; trace-count assertion in `run-sharding.test.js`
+- [ ] **Prerequisite #3** — shard-scoped retry reset in `backend/src/workers/runWorker.js:263` (filter results by `_shardIndex` instead of wiping all); retry-preserves-siblings regression test
+- [ ] **Prerequisite #4** — parent-vs-shard model: one `runs` row per parent, BullMQ `jobId: ${runId}:s${shardIndex}`; abort route signals all N shards via pub/sub (#5 below)
+- [ ] **Prerequisite #5** — `sentri:run-abort` Redis pub/sub channel in `backend/src/utils/redisClient.js`; workers subscribe at boot; origin-stamped self-echo suppression; `backend/tests/run-abort-pubsub.test.js` (gated on `REDIS_URL`)
+- [ ] **Prerequisite #6** — `runWorker.js` `worker.on('failed', ...)` marks parent `failed` with `shardsCompleted < shardCount` surfaced (first-writer-wins predicate); publishes to `sentri:run-abort`; integration test killing a shard mid-execution asserts (a) parent `failed`, (b) `shardsCompleted < shardCount`, (c) sibling shards abort within 2s, (d) no orphan BullMQ jobs
+- [ ] `backend/src/testRunner.js` coordinator partitions the approved-test list into N BullMQ jobs scoped to `(runId, shardIndex, shardCount)` — reuses `partitionTestsIntoShards` from Phase 1 (do not re-implement)
+- [ ] `backend/src/workers/runWorker.js` accepts `shardIndex` / `shardCount` from job data, runs only the assigned slice; writes via the atomic primitives from #1 (not `runRepo.save(run)`)
+- [ ] `tests/e2e/specs/run-sharding-wallclock.spec.mjs` Tier-1 spec proves `shards: 4` completes a 40-test suite in ~1/4 the single-shard wall-clock time (gate behind `RUN_E2E_REAL_PLAYWRIGHT=true`)
+- [ ] `docs/api/projects.md` documents the `shards` run-request shape and per-shard trace artifact layout
+- [ ] `docs/changelog.md` updated under `## [Unreleased]` as a single CAP-002 entry covering Phases 1 + 2 (replace the existing partial-scope `CAP-002 (partial)` paragraph)
+- [ ] `QA.md` § Distributed Sharding (CAP-002) added with manual test plan covering shards selector, per-shard badge progression, per-shard trace dropdown, abort-propagation smoke test, shard-crash recovery
 
 ---
 
