@@ -27,12 +27,14 @@ import { emitRunEvent } from "../routes/sse.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as runLogRepo from "../database/repositories/runLogRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import { runTests } from "../testRunner.js";
 import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 const _require = createRequire(import.meta.url);
 
@@ -94,6 +96,16 @@ async function processJob(job) {
     return;
   }
 
+  // DIF-012: resolve the per-run environment override (if any) from the
+  // persisted run record. The route handler validated the envId at enqueue
+  // time, so we only need to look it up here. A row that was deleted
+  // between enqueue and worker pickup yields `environment === undefined`,
+  // which `envScopedProject` treats as "no override" — the run falls back
+  // to project.url, matching the behaviour the caller would have got
+  // before DIF-012.
+  const environment = run.environmentId ? environmentRepo.getById(run.environmentId) : null;
+  const scopedProject = envScopedProject(project, environment);
+
   // Create an AbortController so the abort endpoint can cancel this job.
   // Capture the active provider at job-start time so the chat busy guard
   // can accurately filter to runs using Ollama (prevents false-positive
@@ -105,7 +117,7 @@ async function processJob(job) {
 
   try {
     if (type === "crawl") {
-      await crawlAndGenerateTests(project, run, {
+      await crawlAndGenerateTests(scopedProject, run, {
         dialsPrompt: options.dialsPrompt,
         testCount: options.testCount,
         explorerMode: options.explorerMode,
@@ -149,7 +161,7 @@ async function processJob(job) {
           .filter(t => t.reviewStatus === "approved");
       }
 
-      await runTests(project, tests, run, {
+      await runTests(scopedProject, tests, run, {
         parallelWorkers: options.parallelWorkers || 1,
         browser: options.browser || null,         // DIF-002: resolved to chromium inside runTests when null
         device: options.device || null,

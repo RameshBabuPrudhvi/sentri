@@ -83,6 +83,11 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   const [locale, setLocale] = useState("");
   const [timezoneId, setTimezoneId] = useState("");
   const [networkCondition, setNetworkCondition] = useState("fast");
+  // DIF-012: per-project environments. Empty string means "use project.url".
+  // Fetched lazily on projectId change; viewer roles get a 403 which we
+  // swallow so the modal still functions for users below qa_lead.
+  const [environments, setEnvironments] = useState([]);
+  const [environmentId, setEnvironmentId] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -91,6 +96,20 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   useEffect(() => {
     if (defaultProjectId) setProjectId(defaultProjectId);
   }, [defaultProjectId]);
+
+  // DIF-012: load environments whenever the selected project changes. Reset
+  // the selection so a stale envId from a previous project never leaks into
+  // the run payload (the backend would 400 on cross-project envId anyway,
+  // but failing fast in the UI is friendlier).
+  useEffect(() => {
+    if (!projectId) { setEnvironments([]); setEnvironmentId(""); return; }
+    let cancelled = false;
+    setEnvironmentId("");
+    api.getProjectEnvironments(projectId)
+      .then((rows) => { if (!cancelled) setEnvironments(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setEnvironments([]); }); // 403 for viewers is fine
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   async function handleRun() {
     if (!projectId) { setError("Please select a project."); return; }
@@ -106,6 +125,10 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
       if (device) body.device = device;
       if (locale) body.locale = locale;
       if (timezoneId) body.timezoneId = timezoneId;
+      // DIF-012: only send environmentId when the user picked a non-default
+      // option — sending "" would force the backend's `invalid environmentId`
+      // validator to run an extra lookup.
+      if (environmentId) body.environmentId = environmentId;
       // Always send networkCondition — backend defaults to "fast" if omitted,
       // but always sending it keeps the run record explicit and avoids the
       // dead-import / undefined-vs-"fast" inconsistency in the runner path.
@@ -121,34 +144,25 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
 
   return (
     <ModalShell onClose={onClose} width="min(420px, 95vw)">
-      <div style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "18px 22px 16px", borderBottom: "1px solid var(--border)",
-      }}>
-        <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, flex: 1 }}>
-          Run Regression Tests
-        </h2>
+      <div className="modal-form-header">
+        <h2 className="modal-form-title">Run Regression Tests</h2>
         <button className="modal-close" onClick={onClose}>
           <X size={18} />
         </button>
       </div>
 
-      <div style={{ padding: "20px 22px 24px" }}>
-        <p style={{
-          fontSize: "0.82rem", color: "var(--text2)",
-          marginTop: 0, marginBottom: 20, lineHeight: 1.6,
-        }}>
+      <div className="modal-form-body">
+        <p className="modal-form-intro">
           Select a project to run all approved tests in its regression suite.
         </p>
 
         {projects.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
+          <div className="modal-form-row">
             <label>Project</label>
             <select
-              className="input"
+              className="input modal-form-input"
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-              style={{ height: 38 }}
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -157,17 +171,38 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           </div>
         )}
 
+        {/* DIF-012: Environment selector — only shown when the project has
+            at least one configured environment; otherwise the run targets
+            the project's default URL and we don't clutter the modal. */}
+        {environments.length > 0 && (
+          <div className="modal-form-row">
+            <label className="modal-form-label">
+              <Globe size={13} />
+              Environment
+            </label>
+            <select
+              className="input modal-form-input"
+              value={environmentId}
+              onChange={(e) => setEnvironmentId(e.target.value)}
+            >
+              <option value="">Default (project URL)</option>
+              {environments.map((env) => (
+                <option key={env.id} value={env.id}>{env.name} — {env.baseUrl}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* DIF-002: Browser engine selector */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <div className="modal-form-row">
+          <label className="modal-form-label">
             <Monitor size={13} />
             Browser
           </label>
           <select
-            className="input"
+            className="input modal-form-input"
             value={browser}
             onChange={(e) => setBrowser(e.target.value)}
-            style={{ height: 38 }}
           >
             {BROWSER_PRESETS.map((b) => (
               <option key={b.value} value={b.value}>{b.label}</option>
@@ -176,16 +211,15 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
         </div>
 
         {/* DIF-003: Device emulation selector */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <div className="modal-form-row">
+          <label className="modal-form-label">
             <Smartphone size={13} />
             Device
           </label>
           <select
-            className="input"
+            className="input modal-form-input"
             value={device}
             onChange={(e) => setDevice(e.target.value)}
-            style={{ height: 38 }}
           >
             {DEVICE_PRESETS.map((d) => (
               <option key={d.value} value={d.value}>{d.label}</option>
@@ -194,33 +228,31 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
         </div>
 
         {/* AUTO-007/AUTO-006: Locale, timezone, network selectors */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <div className="modal-form-row--inline">
+          <div>
+            <label className="modal-form-label">
               <Globe size={13} />
               Locale
             </label>
             <select
-              className="input"
+              className="input modal-form-input"
               value={locale}
               onChange={(e) => setLocale(e.target.value)}
-              style={{ height: 38 }}
             >
               {LOCALE_PRESETS.map((l) => (
                 <option key={l.value} value={l.value}>{l.label}</option>
               ))}
             </select>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div>
+            <label className="modal-form-label">
               <Globe size={13} />
               Timezone
             </label>
             <select
-              className="input"
+              className="input modal-form-input"
               value={timezoneId}
               onChange={(e) => setTimezoneId(e.target.value)}
-              style={{ height: 38 }}
             >
               {TIMEZONE_PRESETS.map((tz) => (
                 <option key={tz.value} value={tz.value}>{tz.label}</option>
@@ -229,20 +261,24 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           </div>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
+        <div className="modal-form-row">
           <label>Network condition</label>
-          <select className="input" value={networkCondition} onChange={(e) => setNetworkCondition(e.target.value)} style={{ height: 38 }}>
+          <select
+            className="input modal-form-input"
+            value={networkCondition}
+            onChange={(e) => setNetworkCondition(e.target.value)}
+          >
             {NETWORK_PRESETS.map((n) => (<option key={n.value} value={n.value}>{n.label}</option>))}
           </select>
         </div>
 
         {error && (
-          <div className="alert-error" style={{ marginBottom: 16 }}>
+          <div className="alert-error mb-md">
             {error}
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div className="modal-form-actions">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
           <button
             className="btn btn-primary btn-sm"

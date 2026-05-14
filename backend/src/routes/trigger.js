@@ -19,6 +19,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
@@ -38,6 +39,7 @@ import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
 import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -96,9 +98,13 @@ const router = Router();
  *   as `generateInput: { dialsConfig }` so the RunDetail page can show
  *   which dials drove the crawl and the MNT-010 re-run feature can
  *   replicate the same configuration. Mirrors `runs.js:81`.
+ * @param {string|null} [args.environmentId] - DIF-012: persisted on the run
+ *   record so trigger-initiated crawl runs surface in the dashboard's
+ *   per-environment aggregation alongside their UI-initiated counterparts.
+ *   Mirrors `runs.js:126` on the canonical POST /crawl path.
  * @returns {object} the run record ready for `runRepo.create()`.
  */
-function buildCrawlRun({ runId, project, dialsConfig }) {
+function buildCrawlRun({ runId, project, dialsConfig, environmentId = null }) {
   return {
     id: runId,
     projectId: project.id,
@@ -115,6 +121,7 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
     // the column entirely on no-dials calls — matches the canonical path.
     generateInput: dialsConfig ? { dialsConfig } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId,
   };
 }
 
@@ -152,6 +159,7 @@ function buildTestRun({
   githubCheck = null,
   changedFiles = [],
   impactAnalysis = null,
+  environmentId = null,
 }) {
   const lookup = riskById || new Map();
   const initialResults = [
@@ -196,6 +204,7 @@ function buildTestRun({
     githubCheck,
     changedFiles,
     impactAnalysis,
+    environmentId,
   };
 }
 
@@ -401,6 +410,12 @@ async function resolveChangedFiles(project, body, runId) {
 async function handleTrigger(req, res) {
   const { triggerToken: tokenRow, triggerProject: project } = req;
 
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   // ── 3. Extract and validate optional config (async) ────────────────
   // callbackUrl validation includes DNS resolution, so it must happen
   // BEFORE the synchronous concurrent-run guard to avoid a TOCTOU race
@@ -544,7 +559,7 @@ async function handleTrigger(req, res) {
   // in `routes/runs.js` so test_run / crawl runs created via this endpoint
   // are byte-identical to the ones POST /run and POST /crawl produce.
   const run = triggerCrawl
-    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials })
+    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials, environmentId: environment?.id || null })
     : buildTestRun({
         runId,
         project,
@@ -556,6 +571,7 @@ async function handleTrigger(req, res) {
         parallelWorkers,
         changedFiles: changedFiles || [],
         impactAnalysis: impact,
+        environmentId: environment?.id || null,
       });
   runRepo.create(run);
 
@@ -620,14 +636,24 @@ async function handleTrigger(req, res) {
       // check sees preview === preview (both sides equal because project.url
       // was already overridden) and silently destroys the real fingerprints.
       ? crawlAndGenerateTests(
-          { ...project, url: previewUrl || project.url, canonicalUrl: project.url },
+          // Shared helper's signature is `(project, environment, { previewUrl })`
+          // — `previewUrl` always wins over `environment.baseUrl`.
+          buildEnvScopedProject(project, environment, { previewUrl }),
           run,
           { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
         )
       // AUTO-001: dispatch the risk-ordered + budget-capped subset, not the
       // full approved set. The persisted run (buildTestRun) still records the
       // approved-test order via `tests` for audit fidelity.
-      : runTests(project, selectedTests, run, { parallelWorkers, signal }),
+      // DIF-012: env override applies at execution only — project.url and
+      // project.credentials are preserved in the DB; only this run sees the
+      // env baseUrl + credentials.
+      : runTests(
+          buildEnvScopedProject(project, environment),
+          selectedTests,
+          run,
+          { parallelWorkers, signal }
+        ),
     {
       onSuccess: () => {
         logActivity({
@@ -811,7 +837,9 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
     // Without this, production baselines would be overwritten with
     // preview-URL fingerprints every time a deployment webhook fires.
     (signal) => crawlAndGenerateTests(
-      { ...project, url: previewUrl, canonicalUrl: project.url },
+      // launchPreviewCrawl is the Vercel/Netlify webhook path — no env
+      // override here, only the deploy-preview URL.
+      buildEnvScopedProject(project, null, { previewUrl }),
       run,
       { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
     ),

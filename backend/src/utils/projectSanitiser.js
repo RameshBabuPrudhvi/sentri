@@ -24,3 +24,28 @@ export function sanitiseProjectForClient(project) {
     } : null,
   };
 }
+
+/**
+ * DIF-012: Strip the password from an environment row before sending to the
+ * client. Environments only carry `{ username, password }` (no selectors —
+ * the crawler auto-detects login fields), so the safe shape mirrors
+ * `sanitiseProjectForClient` minus the selector echo.
+ *
+ * The router calls `decryptCredentials()` on the stored row first; this
+ * helper takes the decrypted result and returns `{ username, _hasAuth: true }`
+ * so the EnvironmentsTab can render the username (for at-a-glance "which
+ * account is this env using") without ever shipping the secret over the
+ * wire. REVIEW.md security checklist explicitly forbids returning plaintext
+ * passwords in API responses.
+ *
+ * @param {Object|null} decryptedCreds - Result of `decryptCredentials(row.credentials)`.
+ * @returns {Object|null}
+ */
+export function sanitiseEnvCredentialsForClient(decryptedCreds) {
+  if (!decryptedCreds) return null;
+  if (!decryptedCreds.username && !decryptedCreds.password) return null;
+  return {
+    username: decryptedCreds.username || "",
+    _hasAuth: true,
+  };
+}

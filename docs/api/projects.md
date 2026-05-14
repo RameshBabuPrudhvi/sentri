@@ -411,3 +411,47 @@ Upload fixture data for a test version. Body: `{ format: "csv"|"json", csvText?:
 
 ### GET /api/v1/tests/:testId/fixtures
 Returns fixture history for the test, newest version first.
+
+## Environment management (DIF-012, partial)
+
+### Overview — one project, many URLs
+
+A project carries a canonical `url` (typically production). To target the same approved test suite against additional URLs (staging, preprod, dev, per-developer preview), create an **environment** under the project rather than a second project. Each environment carries:
+
+- `name` — unique within the project (DB-enforced via `UNIQUE(projectId, name)` in migration `024_environments.sql`).
+- `baseUrl` — overrides `project.url` at run time only.
+- `credentials` *(optional)* — `{ username, password, ...selectors }`. `username` / `password` are AES-GCM encrypted at rest; selector fields are stored as plaintext. **Note:** env credentials are persisted but **not yet consumed by the crawler/runner auth flow** — for now the project's own credentials are still used for login. Wiring env creds into auth is tracked as remaining DIF-012 work.
+
+`project.url` is never mutated by an env-scoped run. The runner receives a per-run shallow copy `{ ...project, url: environment.baseUrl, canonicalUrl: project.url }`, so the diff-aware baseline guard in `crawler.js` correctly skips replacing production baselines when running against a non-canonical URL.
+
+Runs persist their resolved `environmentId` (column added by migration `024`), so run history shows which environment each run targeted.
+
+### When to use environments vs. separate projects
+
+- **Same app, different URL / credentials** → environments. Shared approved tests, shared run history filtered by env.
+- **Different app entirely** → separate project. Tests are project-scoped.
+
+### `GET /api/v1/projects/:id/environments`
+Returns environments for a project (`qa_lead+`).
+
+### `POST /api/v1/projects/:id/environments`
+Creates environment (`admin`):
+
+```json
+{ "name": "staging", "baseUrl": "https://staging.example.com", "credentials": { "username": "qa", "password": "secret" } }
+```
+
+### `PATCH /api/v1/projects/:id/environments/:environmentId`
+Updates `name`, `baseUrl`, or `credentials` (`admin`).
+
+### `DELETE /api/v1/projects/:id/environments/:environmentId`
+Deletes an environment (`admin`).
+
+### Run payload
+`POST /api/v1/projects/:id/run`, `POST /api/v1/projects/:id/crawl`, and `POST /api/v1/projects/:id/trigger` accept optional:
+
+```json
+{ "environmentId": "ENV-..." }
+```
+
+When provided, the run executes against the selected environment `baseUrl` only for that run; `project.url` remains unchanged in the DB. Cross-project or unknown `environmentId` values return `400 invalid environmentId`.

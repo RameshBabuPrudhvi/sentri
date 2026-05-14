@@ -34,6 +34,7 @@ If the user asks for… read only this section:
 | "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 676–724 |
 | "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 727–758 |
 | "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 846–890 |
+| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | _(after quality-gates, before data-driven-fixtures)_ |
 | "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
 | "Verify security / authorization" | [Security](#-security) | 997–1025 |
@@ -57,6 +58,7 @@ test-code-editing:   { lines: 676-724 }
 automation:          { lines: 727-758 }
 quality-gates:       { lines: 761-815 }     # NEW (AUTO-012)
 data-driven-fixtures:{ lines: 846-890 }     # NEW (CAP-001)
+environments:        { lines: 876-925 }     # NEW (DIF-012)
 visual-testing:      { lines: 818-835 }
 dashboard:           { lines: 838-856 }
 ai-chat:             { lines: 860-889 }
@@ -843,6 +845,69 @@ The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automa
 - Persisted JSON survives backend restart (column is `TEXT` JSON in migration `014_quality_gates.sql`).
 - Pre-existing runs created before AUTO-012 shipped still load and render correctly with `gateResult: null` (no badge / no panel).
 - Crawl and generate runs never carry `gateResult` even when configured (gates apply to test runs only) — verify badge / panel are suppressed in those views.
+
+---
+
+### 🌐 Environments (DIF-012)
+
+_(automated: see `tests/e2e/specs/environments-ui.spec.mjs` for the Environments tab CRUD round-trip + RunRegressionModal dropdown via `page.route()` mock; backend integration coverage in `backend/tests/environments.test.js`. Coverage tracked in `tests/e2e/COVERAGE.md`.)_
+
+**Preconditions:** Project exists; `admin` user logged in for mutations, `qa_lead`+ for reads. Endpoints documented in `docs/api/projects.md` § Environment management; permissions in `backend/src/middleware/permissions.json`.
+
+**Run-scoped credential override** (DIF-012): when an environment carries `credentials`, both `environment.baseUrl` AND `environment.credentials` override their `project.*` counterparts for the duration of one run only. The project row is never mutated; the override happens via `envScopedProject()` in `backend/src/routes/runs.js` (UI-triggered runs) and `buildEnvScopedProject()` in `backend/src/routes/trigger.js` (CI/webhook-triggered runs). The shared scope contract: `canonicalUrl` is preserved so the AUTO-015 baseline guard treats env-scoped crawls as preview-style and doesn't overwrite production baselines. Envs **without** their own `credentials` inherit the project's auth — same shape as before.
+
+**UI surface — ProjectDetail → Environments tab** (`frontend/src/components/project/EnvironmentsTab.jsx`):
+1. Open `/projects/:id` → click the **Environments** tab (between Runs and Traceability) → empty-state copy reads "No environments defined. Runs will target the project's default URL."
+2. Fill the add-environment form with `name: staging`, `baseUrl: https://staging.example.com` → click **Add environment** → toast `Environment created`; row appears in the table above with the `staging` name + `staging.example.com` URL.
+3. Add a second env (`preprod`) with `username: qa` + `password: secret` filled in → row renders with a 🔒 lock icon + `qa` username (the password never echoes back — server response carries decrypted credentials; the table only renders the username).
+4. Click **Edit** on the `preprod` row → form pre-fills with name + baseUrl (and `username: qa` — password field stays blank by design, never echoed). Change the `name` to `preprod-2` and save WITHOUT typing a new password → toast `Environment updated`; verify via DB inspection that the stored credentials still decrypt to `{ username: "qa", password: "secret" }` — the secret was NOT wiped.
+5. Click **Edit** on the same row → clear both username and password fields → save → server stores `credentials: null`; reload tab → 🔒 column reads `—`.
+6. Click the trash-can on a row → confirmation prompt → confirm → toast `Environment deleted`; row gone; reload to verify persistence.
+7. As `qa_lead` (not `admin`) → tab renders, table is visible, but the add/edit form is hidden and per-row Edit / Delete buttons are disabled (admin-only mutations enforced by `requireRole("admin")` server-side; UI gates via the `canEdit` prop derived from `useAuth`).
+
+**UI surface — Test Lab (crawl + generate)** (`frontend/src/pages/TestLab.jsx`):
+8a. Open `/test-lab` (or `/projects/:id/test-lab`) → select a project with ≥ 1 environment → the right-rail launch panel renders an **Environment** dropdown below the Examples list (Requirement tab) or below the Estimate (Crawl tab). Selecting a non-default env causes the next **Start Crawl & Generate** / **Generate Tests** click to send `environmentId` in the POST body — verify by network-inspecting `/api/v1/projects/:id/crawl` or `/api/v1/projects/:id/tests/generate`.
+8b. Switch projects in the left sidebar → env list reloads against the new project, selection resets to "Default" (no stale envId leak). Switch to a project with zero envs → dropdown disappears entirely.
+8c. The recorder launched from Test Lab inherits the page-level env selection via the `defaultEnvironmentId` prop — clicking **Record a test** while a non-default env is selected pre-fills the recorder's Environment dropdown to match.
+
+**UI surface — RecorderModal environment selector** (`frontend/src/components/run/RecorderModal.jsx`):
+8d. Open the recorder on a project with ≥ 1 environment → idle form shows an **Environment** dropdown below the Project picker. Selecting an env auto-fills the **Starting URL** field with `environment.baseUrl` (operator lands on the right env from the first frame).
+8e. Clicking **Launch recorder** sends `environmentId` in the `POST /record` body so the run record's `environmentId` column is set — verify by inspecting the `runs` row (`SELECT environmentId FROM runs WHERE id = '<sessionId>'`).
+8f. The recorder is interactive (operator-driven) — `environment.credentials` are NOT auto-applied to login forms inside the recorder. Operators who need to log in to a non-default env will manually fill the form. Auto-login from env credentials applies to crawl/generate/run paths only (where it runs unattended).
+
+**UI surface — RunRegressionModal environment selector** (`frontend/src/components/run/RunRegressionModal.jsx`):
+8. From `/runs` click **Run Tests** → modal opens. With a project that has zero environments selected, the **Environment** dropdown does NOT render (clutter-free for env-less projects).
+9. Switch the project selector to a project with ≥ 1 environment → the **Environment** dropdown appears with `Default (project URL)` as the first option, followed by each env as `<name> — <baseUrl>`.
+10. Switch back to the env-less project → dropdown disappears AND any envId selected against the previous project is cleared (stale selection never leaks into the next run payload).
+11. Select a non-default environment + click **Run Tests** → POST body to `/api/v1/projects/:id/run` includes `environmentId: "ENV-<uuid>"`. Leave on `Default` → body omits the field entirely.
+
+**UI surface — Dashboard "Environments" panel** (`frontend/src/pages/Dashboard.jsx`):
+12. Open `/dashboard` in a workspace where no project has any environments → the **Environments** panel does NOT render (zero-regression for workspaces that haven't adopted the feature).
+13. Add an environment to any project + run regression at least once against each of "default" and the new env → reload dashboard → **Environments** panel renders with one row per `(project, environment)` bucket that has executed ≥ 1 completed test run.
+14. Each row shows project name (click → `/projects/:id`), environment name + baseUrl, pass-rate cell (green ≥ 80%, amber 50–79%, red < 50%) with `(passed/total)` counts, and a **Last green run** cell that's clickable → navigates to that run's RunDetail. Buckets with zero green runs show "Never" in grey.
+15. Switch workspace → panel resets and recomputes against the new workspace's projects.
+
+**API flow — happy path** (admin token unless noted):
+16. `POST /api/v1/projects/:id/environments` with `{ "name": "staging", "baseUrl": "https://staging.example.com" }` → **201** with the created env (`id` is `ENV-<uuid>`, `credentials: null`, `createdAt` ISO timestamp).
+17. `POST /api/v1/projects/:id/environments` with `{ "name": "preprod", "baseUrl": "https://preprod.example.com", "credentials": { "username": "qa", "password": "secret" } }` → **201**; response includes `credentials` in decrypted form. Verify via direct DB read that the stored column is AES-encrypted (`backend/src/utils/credentialEncryption.js`).
+18. `GET /api/v1/projects/:id/environments` (`qa_lead+`) → returns both environments, ordered by `createdAt ASC`.
+19. Trigger a regression run with `{ "environmentId": "<staging-id>" }` → run dispatches; `GET /api/v1/projects/:id` still returns the original `url` (project row never mutates — verified at `backend/tests/environments.test.js`).
+20. Inspect the run record via `GET /runs/:runId` → `environmentId` is persisted in the lean run columns (`backend/src/database/repositories/runRepo.js` `INSERT_COLS`).
+21. `PATCH /api/v1/projects/:id/environments/:environmentId` with `{ "name": "staging-2", "baseUrl": "https://staging-2.example.com", "credentials": { "username": "u2", "password": "p2" } }` → **200**, response carries decrypted updated credentials.
+22. PATCH the same env with only `{ "name": "staging-3" }` (no `credentials` key) → stored credentials decrypt to `u2`/`p2` unchanged (PATCH-without-key preserves stored secret).
+23. PATCH with `{ "credentials": null }` → secret cleared in DB.
+24. `DELETE /api/v1/projects/:id/environments/:environmentId` → **200** `{ ok: true }`; subsequent GET returns the remaining environments without this row.
+
+**Negative / edge — all must hold:**
+- `POST` with missing `name` or `baseUrl` → **400** `name and baseUrl are required`.
+- Run with `environmentId: "ENV-does-not-exist"` → **400** `invalid environmentId` BEFORE the no-approved-tests check; trigger token path raises the same error.
+- Run on project A with `environmentId` belonging to project B → **400** `invalid environmentId` (cross-project leak rejected — see `backend/src/routes/trigger.js`).
+- Run on a project with NO environments AND NO `environmentId` in payload → behaves identically to pre-DIF-012 (zero regression — gate fails on no-approved-tests, not on env validation).
+- `viewer` calling `GET /api/v1/projects/:id/environments` → **403** (`qa_lead+` gate).
+- `qa_lead` calling `POST` / `PATCH` / `DELETE` on environments → **403** (admin-only mutations).
+- Cross-workspace ACL — outsider hitting `/api/v1/projects/:id/environments` for a project in another workspace → **404** (workspace scope enforced upstream by `workspaceScope` middleware), and outsider PATCH on a known env id → **404** (not 403, to avoid leaking existence).
+- Delete an environment that has existing runs → DELETE succeeds; the historical runs keep their `environmentId` value, but the env row is gone (dashboard buckets for that env stop appearing the next time the aggregation runs).
+- `credentials` payload must be a plain object — passing a string or array currently round-trips as-is through `encryptCredentials` (verify; file as enhancement if hardening is desired).
 
 ---
 

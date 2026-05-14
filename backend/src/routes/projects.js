@@ -28,11 +28,13 @@ import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js"
 import * as scheduleRepo from "../database/repositories/scheduleRepo.js";
 import { getDatabase } from "../database/sqlite.js";
 import { generateProjectId, generateScheduleId } from "../utils/idGenerator.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { encryptCredentials, decryptCredentials } from "../utils/credentialEncryption.js";
 import { validateProjectPayload, sanitise } from "../utils/validate.js";
+import { randomUUID } from "node:crypto";
 import { actor } from "../utils/actor.js";
-import { sanitiseProjectForClient } from "../utils/projectSanitiser.js";
+import { sanitiseProjectForClient, sanitiseEnvCredentialsForClient } from "../utils/projectSanitiser.js";
 import { reloadSchedule, stopSchedule, getNextRunAt } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
@@ -85,6 +87,100 @@ function validateWebVitalsBudgets(payload) {
 
 
 // ─── Project CRUD ─────────────────────────────────────────────────────────────
+
+
+router.get("/:id/environments", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  // REVIEW.md security checklist: never ship plaintext passwords over the
+  // wire. Decrypt to read username for display, then funnel through
+  // sanitiseEnvCredentialsForClient → { username, _hasAuth: true } only.
+  const rows = environmentRepo.listByProject(project.id).map((row) => ({
+    ...row,
+    credentials: sanitiseEnvCredentialsForClient(decryptCredentials(row.credentials)),
+  }));
+  res.json(rows);
+});
+
+router.post("/:id/environments", requireRole("admin"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const name = sanitise(req.body?.name, 120);
+  const baseUrl = req.body?.baseUrl?.trim();
+  if (!name || !baseUrl) return res.status(400).json({ error: "name and baseUrl are required" });
+  // SSRF-safe URL validation — `environment.baseUrl` is used as the crawl
+  // target on any run that picks this env (`envScopedProject` in
+  // `utils/envScope.js`), so an admin who pastes `http://169.254.169.254`
+  // or `http://localhost:6379` here could point the Playwright crawler at
+  // cloud-metadata / RFC1918 / loopback hosts. Same two-layer guard used
+  // for `previewUrl` on the webhook path (`routes/trigger.js`) and the
+  // notification webhooks below.
+  const urlErr = await validateUrl(baseUrl);
+  if (urlErr) return res.status(400).json({ error: `baseUrl: ${urlErr}` });
+  const id = `ENV-${randomUUID()}`;
+  const row = { id, projectId: project.id, name, baseUrl, credentials: encryptCredentials(req.body?.credentials) || null, createdAt: new Date().toISOString(), workspaceId: project.workspaceId || null };
+  environmentRepo.create(row);
+  // Sanitise on the way out — even on POST, the response must NOT echo the
+  // password the caller just sent (REVIEW.md: any password round-trip is a
+  // logging/proxy/replay leak surface).
+  res.status(201).json({ ...row, credentials: sanitiseEnvCredentialsForClient(decryptCredentials(row.credentials)) });
+});
+
+router.patch("/:id/environments/:environmentId", requireRole("admin"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const existing = environmentRepo.getById(req.params.environmentId);
+  if (!existing || existing.projectId !== project.id) return res.status(404).json({ error: "not found" });
+  const fields = {};
+  if (req.body?.name !== undefined) fields.name = sanitise(req.body.name, 120);
+  if (req.body?.baseUrl !== undefined) {
+    const trimmed = req.body.baseUrl?.trim() || "";
+    // SSRF-safe URL validation on PATCH too — see POST handler above for
+    // the full rationale. Empty string short-circuits past the validator
+    // because `validateUrl("")` would reject before reaching SQLite, but
+    // an empty baseUrl is functionally broken regardless: the next run
+    // using this env would fall back to undefined behaviour. We let the
+    // validator reject empties so the admin sees a clear error.
+    const urlErr = await validateUrl(trimmed);
+    if (urlErr) return res.status(400).json({ error: `baseUrl: ${urlErr}` });
+    fields.baseUrl = trimmed;
+  }
+  // Credentials handling — three cases:
+  //   1. Key absent      → don't touch the stored value (existing behaviour).
+  //   2. `credentials: null` → explicit clear.
+  //   3. Object payload  → merge: blank `username` / `password` fall back to
+  //      the existing stored value. Required because the frontend no longer
+  //      echoes the password (it was a REVIEW.md security violation); without
+  //      the merge, editing a row to rename it would also wipe the stored
+  //      secret because `password: ""` would re-encrypt as empty. Mirrors the
+  //      project PATCH path's merge logic at routes/projects.js:243-273.
+  if (Object.hasOwn(req.body || {}, 'credentials')) {
+    if (req.body.credentials === null) {
+      fields.credentials = null;
+    } else if (req.body.credentials && typeof req.body.credentials === "object") {
+      const incoming = req.body.credentials;
+      const existingDecrypted = decryptCredentials(existing.credentials) || {};
+      const merged = {
+        username: incoming.username || existingDecrypted.username || "",
+        password: incoming.password || existingDecrypted.password || "",
+      };
+      fields.credentials = (merged.username || merged.password) ? encryptCredentials(merged) : null;
+    }
+  }
+  environmentRepo.update(existing.id, fields);
+  const updated = environmentRepo.getById(existing.id);
+  res.json({ ...updated, credentials: sanitiseEnvCredentialsForClient(decryptCredentials(updated.credentials)) });
+});
+
+router.delete("/:id/environments/:environmentId", requireRole("admin"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const existing = environmentRepo.getById(req.params.environmentId);
+  if (!existing || existing.projectId !== project.id) return res.status(404).json({ error: "not found" });
+  environmentRepo.remove(existing.id);
+  res.json({ ok: true });
+});
+
 
 router.post("/", requireRole("qa_lead"), (req, res) => {
   const validationErr = validateProjectPayload(req.body);

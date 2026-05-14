@@ -20,6 +20,7 @@
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
@@ -41,6 +42,7 @@ import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 
 const router = Router();
 
@@ -54,6 +56,15 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     return res.status(409).json({
       error: `A run is already in progress (${existingRun.id}). Please wait for it to finish or abort it first.`,
     });
+  }
+
+  // DIF-012: optional per-run environment override. Validates the env
+  // belongs to this project so callers can't run against a sibling
+  // project's environment by ID guessing.
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
   }
 
   const { dialsConfig } = req.body || {};
@@ -81,6 +92,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     pagesFound: 0,
     generateInput: validatedDials ? { dialsConfig: validatedDials } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 
@@ -107,7 +119,16 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are preserved in the DB; only this run sees the
+      // override. envScopedProject also stamps `canonicalUrl` so the
+      // AUTO-015 diff-aware baseline guard treats this as a preview-style
+      // crawl and doesn't replace production baselines.
+      (signal) => crawlAndGenerateTests(
+        envScopedProject(project, environment),
+        run,
+        { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -142,6 +163,18 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     return res.status(409).json({
       error: `A run is already in progress (${existingRun.id}). Please wait for it to finish or abort it first.`,
     });
+  }
+
+  // DIF-012: optional per-run environment override. Validated up-front
+  // (before the no-tests / no-approved-tests checks) so a bad envId fails
+  // fast with `invalid environmentId` rather than masking behind a
+  // misleading "no tests found" error. Matches the ordering used by the
+  // crawl path (runs.js:98-102) and the trigger path (trigger.js:454-458),
+  // and the contract documented in QA.md (line 903).
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
   }
 
   const allTests = testRepo.getByProjectId(project.id);
@@ -219,6 +252,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     })),
     budgetMinutes: safeBudget,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 
@@ -248,7 +282,15 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, selectedTests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are unchanged in the DB; only this run's
+      // testRunner sees the override.
+      (signal) => runTests(
+        envScopedProject(project, environment),
+        selectedTests,
+        run,
+        { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,

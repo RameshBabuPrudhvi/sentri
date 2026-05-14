@@ -238,6 +238,22 @@
     "POST /api/v1/tests/:testId/fixtures": {
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js"
+    },
+    "GET /api/v1/projects/:id/environments": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/projects.js"
+    },
+    "POST /api/v1/projects/:id/environments": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
+    },
+    "PATCH /api/v1/projects/:id/environments/:environmentId": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
+    },
+    "DELETE /api/v1/projects/:id/environments/:environmentId": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
     }
   },
   "anyAuthenticatedMember": [

@@ -267,6 +267,12 @@
   margin-top: 20px;
 }
 
+/* DIF-012: Environment selector inside the launch panel (right rail).
+   Scoped `.tl-env-*` to match the `.tl-*` prefix used by every other
+   element in the file — keeps the inline-style cleanup local to env code. */
+.tl-env-section { margin-bottom: 12px; }
+.tl-env-select  { width: 100%; height: 36px; }
+
 .tl-select-wrap { display: flex; flex-direction: column; gap: 5px; }
 
 .tl-select {
