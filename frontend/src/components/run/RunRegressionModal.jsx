@@ -83,6 +83,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
   const [locale, setLocale] = useState("");
   const [timezoneId, setTimezoneId] = useState("");
   const [networkCondition, setNetworkCondition] = useState("fast");
+  const [shards, setShards] = useState(1);
   // DIF-012: per-project environments. Empty string means "use project.url".
   // Fetched lazily on projectId change; viewer roles get a 403 which we
   // swallow so the modal still functions for users below qa_lead.
@@ -125,6 +126,7 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
       if (device) body.device = device;
       if (locale) body.locale = locale;
       if (timezoneId) body.timezoneId = timezoneId;
+      if (Number.isFinite(Number(shards)) && Number(shards) > 1) body.shards = Math.trunc(Number(shards));
       // DIF-012: only send environmentId when the user picked a non-default
       // option — sending "" would force the backend's `invalid environmentId`
       // validator to run an extra lookup.
@@ -225,6 +227,19 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
               <option key={d.value} value={d.value}>{d.label}</option>
             ))}
           </select>
+        </div>
+
+        {/* CAP-002: Optional shard count (maps to backend parallel workers clamp). */}
+        <div className="modal-form-row">
+          <label>Shards</label>
+          <input
+            className="input modal-form-input"
+            type="number"
+            min="1"
+            step="1"
+            value={shards}
+            onChange={(e) => setShards(e.target.value)}
+          />
         </div>
 
         {/* AUTO-007/AUTO-006: Locale, timezone, network selectors */}

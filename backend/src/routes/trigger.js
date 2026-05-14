@@ -444,7 +444,11 @@ async function handleTrigger(req, res) {
   }
 
   const validatedDials = resolveDialsConfig(dialsConfig);
-  const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
+  const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
+  const normalizedShards = Number.isFinite(Number(req.body?.shards))
+    ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(req.body.shards))))
+    : null;
+  const parallelWorkers = normalizedShards ?? validatedDials?.parallelWorkers ?? 1;
   // AUTO-002 / AUTO-015: honour dialsConfig on the crawl path too — `runs.js`
   // already derives these from the same `validatedDials` and forwards them to
   // crawlAndGenerateTests at runs.js:108. Without this the trigger path

@@ -187,9 +187,13 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
-  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
+  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes, shards } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
-  const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
+  const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
+  const normalizedShards = Number.isFinite(Number(shards))
+    ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(shards))))
+    : null;
+  const parallelWorkers = normalizedShards ?? validatedRunDials?.parallelWorkers ?? 1;
   const canonicalBrowser = resolveBrowser(browser).name;
 
   // AUTO-001: risk-based ordering + optional budget truncation. Reorder is for
