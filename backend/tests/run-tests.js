@@ -91,6 +91,7 @@ const files = [
   "tests/fixture-iteration.test.js",
   "tests/test-fixtures-routes.test.js",
   "tests/environments.test.js",
+  "tests/run-sharding.test.js",
 ];
 
 let passed = 0;

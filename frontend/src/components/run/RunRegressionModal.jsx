@@ -229,16 +229,27 @@ export default function RunRegressionModal({ projects, onClose, defaultProjectId
           </select>
         </div>
 
-        {/* CAP-002: Optional shard count (maps to backend parallel workers clamp). */}
+        {/* CAP-002: Optional shard count. Server clamps to [1, MAX_WORKERS]
+            and only persists a >1 shardCount when the user explicitly
+            requested sharding — see backend/src/routes/runs.js (BUG-0001
+            decoupling rationale). Coerce to integer on change so a blank
+            input doesn't poison `Number(shards)` downstream. */}
         <div className="modal-form-row">
-          <label>Shards</label>
+          <label htmlFor="run-shards-input">Shards</label>
           <input
+            id="run-shards-input"
             className="input modal-form-input"
             type="number"
             min="1"
             step="1"
             value={shards}
-            onChange={(e) => setShards(e.target.value)}
+            aria-label="Shard count — split this run across N parallel partitions"
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") { setShards(1); return; }
+              const n = Math.max(1, Math.trunc(Number(raw)) || 1);
+              setShards(n);
+            }}
           />
         </div>
 

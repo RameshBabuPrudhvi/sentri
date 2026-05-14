@@ -145,6 +145,10 @@ function buildCrawlRun({ runId, project, dialsConfig, environmentId = null }) {
  * @param {string[]} [args.changedFiles] - Git diff files used for impact analysis.
  * @param {Object|null} [args.impactAnalysis] - Resolved impact-analysis summary.
  * @param {number} args.parallelWorkers
+ * @param {number} [args.shardCount=1] - CAP-002: explicit shard request from
+ *   the caller (`req.body.shards`). Defaults to 1 so legacy callers that
+ *   never pass `shards` don't surface a misleading shard badge — see
+ *   `routes/runs.js` (BUG-0001 rationale).
  * @returns {object} the run record ready for `runRepo.create()`.
  */
 function buildTestRun({
@@ -156,6 +160,7 @@ function buildTestRun({
   riskById,
   budgetMinutes = null,
   parallelWorkers,
+  shardCount = 1,
   githubCheck = null,
   changedFiles = [],
   impactAnalysis = null,
@@ -195,7 +200,7 @@ function buildTestRun({
     failed: 0,
     total: tests.length,
     parallelWorkers,
-    shardCount: parallelWorkers,
+    shardCount,
     shardsCompleted: 0,
     testQueue: tests.map((t) => ({
       id: t.id, name: t.name, steps: t.steps || [],
@@ -446,11 +451,14 @@ async function handleTrigger(req, res) {
   }
 
   const validatedDials = resolveDialsConfig(dialsConfig);
+  // CAP-002: shardCount and parallelWorkers are independent — see
+  // `backend/src/routes/runs.js` for the full rationale (BUG-0001).
   const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
   const normalizedShards = Number.isFinite(Number(req.body?.shards))
     ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(req.body.shards))))
     : null;
-  const parallelWorkers = normalizedShards ?? validatedDials?.parallelWorkers ?? 1;
+  const shardCount = normalizedShards ?? 1;
+  const parallelWorkers = Math.max(shardCount, validatedDials?.parallelWorkers ?? 1);
   // AUTO-002 / AUTO-015: honour dialsConfig on the crawl path too — `runs.js`
   // already derives these from the same `validatedDials` and forwards them to
   // crawlAndGenerateTests at runs.js:108. Without this the trigger path
@@ -575,6 +583,7 @@ async function handleTrigger(req, res) {
         riskById,
         budgetMinutes: safeBudget,
         parallelWorkers,
+        shardCount,
         changedFiles: changedFiles || [],
         impactAnalysis: impact,
         environmentId: environment?.id || null,

@@ -144,6 +144,41 @@ export { evaluateQualityGates as __evaluateQualityGatesForTest, evaluateWebVital
 // in `items` with at most `concurrency` in-flight at once. Results are returned
 // in the original item order.
 
+/**
+ * CAP-002 — Partition tests into `shardCount` contiguous slices using the
+ * same algorithm Playwright applies for `--shard=N/M`: the first
+ * `total % shardCount` shards receive one extra test, so shard sizes
+ * differ by at most one. Pure function — no DB or side effects — so the
+ * partition contract can be exercised in isolation by
+ * `backend/tests/run-sharding.test.js`.
+ *
+ * The function tags each test with `_shardIndex` in place (callers rely on
+ * this to attribute results to the correct shard at completion time) and
+ * also returns a `sizes[]` array so the runner can detect "last test in
+ * shard S has finished" without re-deriving the partition.
+ *
+ * @param {Object[]} tests       - Tests in dispatch order (post-smoke-pin).
+ * @param {number}   shardCount  - 1..MAX_WORKERS (caller is responsible for clamp).
+ * @returns {{ sizes: number[] }} per-shard test counts.
+ */
+export function partitionTestsIntoShards(tests, shardCount) {
+  const count = Math.max(1, Number(shardCount) || 1);
+  const total = tests.length;
+  const baseSize = Math.floor(total / count);
+  const remainder = total % count;
+  const sizes = new Array(count).fill(0).map((_, s) => baseSize + (s < remainder ? 1 : 0));
+  let cursor = 0;
+  let shard = 0;
+  for (let i = 0; i < total; i++) {
+    while (shard < count - 1 && i >= cursor + sizes[shard]) {
+      cursor += sizes[shard];
+      shard++;
+    }
+    tests[i]._shardIndex = shard;
+  }
+  return { sizes };
+}
+
 async function poolMap(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -206,6 +241,26 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // Resolve concurrency: per-run override → env default → 1 (sequential)
   const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
 
+  // CAP-002 — partition the dispatch queue into `run.shardCount` contiguous
+  // slices and tag each test with its shard index. Today the partition runs
+  // in-process via `poolMap`; the follow-up cross-process PR (see
+  // ROADMAP CAP-002 — coordinator + BullMQ shard jobs + Redis pub/sub
+  // abort) will lift this same partition algorithm into the queue layer
+  // so `partitionTestsIntoShards` is the single source of truth for the
+  // split. `run.shardCount` defaults to 1 (the route layer only writes >1
+  // when the caller explicitly passed `shards: N`), so fixture-less runs
+  // and runs that only set `dialsConfig.parallelWorkers` go through the
+  // single-shard zero-regression path.
+  const shardCount = Math.max(1, Number(run.shardCount) || 1);
+  const { sizes: shardSizes } = partitionTestsIntoShards(tests, shardCount);
+  // Track shard completion via a remaining-tests counter so we increment
+  // `run.shardsCompleted` exactly when a shard's *last* test reports back —
+  // poolMap may interleave shards (workers > shardCount, or shards of
+  // different sizes), so a naive "increment per shard at boundary" would
+  // miscount under concurrent dispatch.
+  const shardRemaining = [...shardSizes];
+  if (run.shardsCompleted == null) run.shardsCompleted = 0;
+
   // Classify each test once upfront and cache the result on the test object.
   // This avoids re-parsing the code body via isApiTest() multiple times per
   // test (previously called 4× each: allApiOnly, apiCount, logging, executeTest).
@@ -240,7 +295,10 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-    run.shardsCompleted = run.shardCount || 1;
+      // CAP-002 — no tests will execute on this run, so no shard will drain
+      // naturally via processResult. Mark every shard as "completed" so the
+      // UI badge reads `N/N` rather than `0/N` after a hard launch failure.
+      run.shardsCompleted = shardCount;
       logError(run, classified.message);
       structuredLog("browser.launch_failed", { runId, error: classified.message });
       throw launchErr;
@@ -261,7 +319,9 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
-    run.shardsCompleted = run.shardCount || 1;
+      // CAP-002 — same rationale as the browser.launch_failed branch above:
+      // no tests run, so flush shardsCompleted to shardCount for UI clarity.
+      run.shardsCompleted = shardCount;
       logError(run, classified.message);
       throw ctxErr;
     }
@@ -284,6 +344,19 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // ── Process a single test result — shared by the pool worker callback ────
   function processResult(test, result) {
     run.results.push(result);
+
+    // CAP-002 — attribute the result to its shard and advance
+    // `run.shardsCompleted` exactly once when a shard drains. `_shardIndex`
+    // is stamped by `partitionTestsIntoShards` above; defensive `?? 0`
+    // covers crash-synth results that bypass the partition (the test still
+    // belongs to shard 0 in a single-shard run — same effective behaviour).
+    const shardIdx = test?._shardIndex ?? 0;
+    if (shardRemaining[shardIdx] != null) {
+      shardRemaining[shardIdx] -= 1;
+      if (shardRemaining[shardIdx] === 0) {
+        run.shardsCompleted = Math.min(shardCount, (run.shardsCompleted || 0) + 1);
+      }
+    }
 
     if (result.videoPath) allVideoSegments.push(result.videoPath);
 
@@ -545,7 +618,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // append to run.logs but the SSE broadcast would be silently lost.
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
-    run.shardsCompleted = run.shardCount || 1;
+    // CAP-002 — `run.shardsCompleted` is incremented per-shard in
+    // processResult as each shard's last test reports. A normal completion
+    // should already have shardsCompleted === shardCount; this final
+    // reconciliation only matters if a shard had zero tests (possible when
+    // `shards > tests.length` clamps to per-shard size 0), which would
+    // otherwise leave shardsCompleted < shardCount and surface a stuck
+    // "Shards N-1/N" badge on the completed run.
+    if ((run.shardsCompleted || 0) < shardCount) run.shardsCompleted = shardCount;
     run.duration = Date.now() - runStart;
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {

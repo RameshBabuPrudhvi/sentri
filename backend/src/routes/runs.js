@@ -189,11 +189,21 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // record for display on the Run Detail page.
   const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes, shards } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
+  // CAP-002: `shardCount` and `parallelWorkers` are *separate* concepts and
+  // must not be conflated (see review on PR #3, BUG-0001).
+  //  - shardCount: only > 1 when the user explicitly passed `shards: N`.
+  //    Drives the per-shard progress badge on RunDetail and (in the
+  //    follow-up cross-process PR) the BullMQ job partitioning.
+  //  - parallelWorkers: concurrency inside this process. `shards: N`
+  //    implies "execute N partitions concurrently", so concurrency is the
+  //    max of (dials request, shardCount). A pure `dialsConfig.parallelWorkers`
+  //    request leaves shardCount=1 and no shard badge is shown.
   const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
   const normalizedShards = Number.isFinite(Number(shards))
     ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(shards))))
     : null;
-  const parallelWorkers = normalizedShards ?? validatedRunDials?.parallelWorkers ?? 1;
+  const shardCount = normalizedShards ?? 1;
+  const parallelWorkers = Math.max(shardCount, validatedRunDials?.parallelWorkers ?? 1);
   const canonicalBrowser = resolveBrowser(browser).name;
 
   // AUTO-001: risk-based ordering + optional budget truncation. Reorder is for
@@ -245,7 +255,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     // trail of "what the reviewer queued" even when budget truncated dispatch.
     total: tests.length,
     parallelWorkers,
-    shardCount: parallelWorkers,
+    shardCount,
     shardsCompleted: 0,
     browser: canonicalBrowser,
     device: device || null,
