@@ -34,6 +34,7 @@ import { crawlAndGenerateTests } from "../crawler.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
+import { filterShardRetrySurvivors } from "../utils/shardRetryFilter.js"; // CAP-002 Phase 2 — shared survivor filter, mirrors runRepo.purgeShardResults.
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
 import { subscribeToRunAborts, publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
 import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 Phase 2 — last-shard finalizer runs the AI feedback loop exactly once.
@@ -576,8 +577,10 @@ async function processJob(job) {
         // there are no siblings to protect — bit-for-bit unchanged.
       } else {
         // Legacy single-shard / non-shard path — bit-for-bit unchanged.
-        const survivors = (run.results || []).filter((r) => isNonExecutedSkip(r));
-        run.results = survivors;
+        // `shardIndex == null` → filter degrades to "keep only non-executed
+        // skips", matching the pre-CAP-002 wipe-all behaviour. Shared with
+        // `runRepo.purgeShardResults` so the survivor contract is in one place.
+        run.results = filterShardRetrySurvivors(run.results, null, isNonExecutedSkip);
         run.passed = 0;
         run.failed = 0;
         run.pagesFound = 0;

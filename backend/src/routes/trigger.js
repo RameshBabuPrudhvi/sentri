@@ -42,6 +42,7 @@ import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesFo
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
+import { normalizeShardConfig } from "../utils/shardConfig.js"; // CAP-002 — shared shards + parallelWorkers clamp.
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -454,13 +455,9 @@ async function handleTrigger(req, res) {
 
   const validatedDials = resolveDialsConfig(dialsConfig);
   // CAP-002: shardCount and parallelWorkers are independent — see
-  // `backend/src/routes/runs.js` for the full rationale (BUG-0001).
-  const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
-  const normalizedShards = Number.isFinite(Number(req.body?.shards))
-    ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(req.body.shards))))
-    : null;
-  const shardCount = normalizedShards ?? 1;
-  const parallelWorkers = Math.max(shardCount, validatedDials?.parallelWorkers ?? 1);
+  // `utils/shardConfig.js` for the full BUG-0001 rationale. Shared with
+  // `routes/runs.js` so both entry points apply identical semantics.
+  const { shardCount, parallelWorkers } = normalizeShardConfig(req.body?.shards, validatedDials?.parallelWorkers);
   // AUTO-002 / AUTO-015: honour dialsConfig on the crawl path too — `runs.js`
   // already derives these from the same `validatedDials` and forwards them to
   // crawlAndGenerateTests at runs.js:108. Without this the trigger path

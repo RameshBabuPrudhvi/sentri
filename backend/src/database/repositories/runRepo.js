@@ -22,6 +22,7 @@
 import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
+import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
 
 export { parsePagination };
 
@@ -870,16 +871,12 @@ export function purgeShardResults(runId, shardIndex, isNonExecutedSkip) {
       try { arr = JSON.parse(row.results) || []; } catch { arr = []; }
     }
     if (!Array.isArray(arr)) arr = [];
-    survivors = arr.filter((r) => {
-      if (isNonExecutedSkip(r)) return true;
-      return r?._shardIndex != null && r._shardIndex !== shardIndex;
-    });
+    // Shared survivor filter — single source of truth, mirrored by
+    // `runWorker.js`'s legacy single-shard catch block and the test fixture.
+    survivors = filterShardRetrySurvivors(arr, shardIndex, isNonExecutedSkip);
     db.prepare("UPDATE runs SET results = ? WHERE id = ?").run(JSON.stringify(survivors), runId);
   })();
-  return {
-    passed: survivors.filter((r) => r?.status === "passed" || r?.status === "warning").length,
-    failed: survivors.filter((r) => r?.status === "failed").length,
-  };
+  return countShardRetrySurvivors(survivors);
 }
 
 /**
