@@ -458,4 +458,24 @@ When provided, the run executes against the selected environment `baseUrl` only 
 
 
 ### Run sharding (CAP-002)
+
 `POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger` accept optional `shards` (integer). The server clamps to `[1, MAX_WORKERS]`; default is `1`.
+
+**Body excerpt:**
+```json
+{ "shards": 4 }
+```
+
+`shards: N > 1` fans the run out across `N` BullMQ workers when Redis is available — each shard executes a contiguous slice of the dispatched test queue using the same Playwright `--shard=N/M` algorithm (first `total % N` shards receive +1 test). When Redis is not available, the run falls back to the in-process partition with the same slice math but executes sequentially within one worker.
+
+`shards` is decoupled from `dialsConfig.parallelWorkers`: `shardCount` reflects the number of cross-process partitions and only persists `> 1` when the caller explicitly requested sharding, while `parallelWorkers` controls in-process concurrency inside each shard. A run with `shards: 4` and no `dialsConfig` runs 4 shards × 1 worker each. A run with `shards: 4, dialsConfig.parallelWorkers: 2` runs 4 shards × 2 workers each.
+
+**Response shape** is unchanged. Sharded runs surface progress via the `shardCount` and `shardsCompleted` fields on `GET /api/v1/runs/:runId`; the UI renders a "Shards M/N" badge that progresses as each shard finishes. Aggregate `passed` / `failed` / `total` columns compose atomically across shards.
+
+**Per-shard trace artifacts:** sharded runs emit one Playwright trace zip per shard at `/artifacts/traces/${runId}/shard-${shardIndex}.zip`. The full URL list is persisted as a sparse JSON array on `run.tracePaths[]` (each slot is the shard's artifact URL or `null` when a shard never produced a trace). `RunDetail` renders a per-shard dropdown when `tracePaths.length > 1`; single-shard runs continue to use the legacy flat layout `/artifacts/traces/${runId}.zip` and the `run.tracePath` column for bit-for-bit zero regression.
+
+**Abort behaviour:** `POST /api/v1/runs/:runId/abort` cancels every shard worker on the local replica via the in-process registry, then publishes to the `sentri:run-abort` Redis channel so sibling replicas drain their workers within one Redis round-trip. The first shard to crash mid-execution writes the failure reason atomically (predicate `WHERE status = 'running'`) — second-place shards become clean no-ops and the audit trail keeps the first crasher's classified error.
+
+**Finalization handoff:** the BullMQ shard whose `incrementShardsCompleted` UPDATE crosses the `shardCount` boundary is the single finalizer per run. It evaluates quality gates + Web Vitals against the full results array, runs the AI feedback loop exactly once, transitions status to `completed` via a first-writer-wins UPDATE that catches the late-abort race, emits the single `done` SSE event, and POSTs the optional `callbackUrl` for trigger-path runs. SQL row-locking is the linearization point — no JS-side mutex required.
+
+**CI/CD callbackUrl on sharded runs:** when `shards: N > 1` is combined with `callbackUrl` on a trigger run, the callback POSTs exactly once with the same payload shape as single-shard runs (`runId`, `status`, `passed`, `failed`, `total`, `error`, `gateResult`, `webVitalsResult`).
