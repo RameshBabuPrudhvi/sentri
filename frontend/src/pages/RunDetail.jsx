@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -265,6 +265,13 @@ export default function RunDetail() {
     }
   }, [run, rerunning, navigate, addNotification]);
 
+  // AUTO-010 — Track whether the initial auto-expand decision has been made
+  // for the current run. Reset on `runId` change so navigating to a different
+  // run re-arms the decision; once flipped to `true` for a given run, later
+  // SSE updates that mutate `rootCauses.length` won't override the user's
+  // manual collapse/expand toggle.
+  const hasSetInitialExpand = useRef(false);
+
   // Reset live-stream state when navigating to a different run
   useEffect(() => {
     setFrames([]);
@@ -276,20 +283,27 @@ export default function RunDetail() {
     setCompareLoading(false);
     setCompareError(null);
     setPriorRuns([]);
+    // AUTO-010 — re-arm the initial-expand decision for the new run.
+    hasSetInitialExpand.current = false;
+    setRootCauseExpanded(false);
   }, [runId]);
 
-  // AUTO-010 — Auto-expand the Root Cause Summary panel on first load when
-  // the run has ≥2 clusters (multiple clusters is the high-signal case worth
-  // surfacing immediately). Keyed on `runId` ONLY — re-keying on
-  // `rootCauses.length` would re-run during live SSE updates and override any
-  // collapse/expand the user toggled manually. The initial expand decision is
-  // made on the SSE `done` snapshot via the run-detail query refetch.
+  // AUTO-010 — Auto-expand the Root Cause Summary panel the first time
+  // `rootCauses` actually loads with ≥2 clusters (multiple clusters is the
+  // high-signal case worth surfacing immediately). At mount the TanStack
+  // Query data is still loading so `run` is `null` and `rootCausesCount === 0`
+  // — gating on `hasSetInitialExpand.current` ensures the effect fires once
+  // when the data arrives and never again, so subsequent SSE snapshots can
+  // mutate `rootCauses` without clobbering a user-toggled collapse/expand.
+  // The mount-time reset (in the runId-keyed effect above) re-arms the ref
+  // when navigating to a different run.
   const rootCausesCount = Array.isArray(run?.rootCauses) ? run.rootCauses.length : 0;
   useEffect(() => {
+    if (hasSetInitialExpand.current) return;
+    if (rootCausesCount === 0) return;
+    hasSetInitialExpand.current = true;
     setRootCauseExpanded(rootCausesCount >= 2);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only
-    // re-evaluate on run navigation, not on cluster-count flips during live updates.
-  }, [runId]);
+  }, [rootCausesCount]);
 
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
