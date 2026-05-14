@@ -883,6 +883,54 @@ export function purgeShardResults(runId, shardIndex, isNonExecutedSkip) {
 }
 
 /**
+ * CAP-002 Phase 2 — Reset run-level transient fields for a BullMQ retry,
+ * guarded by `status = 'running'` so a sibling shard that already
+ * transitioned the row to a terminal state (`failed` via
+ * {@link markRunFailedFirstWriterWins}, `aborted` via the abort route,
+ * or `completed` via {@link markRunCompletedFirstWriterWins}) is not
+ * silently un-terminalised by the retry path.
+ *
+ * Sibling of {@link markRunFailedFirstWriterWins} /
+ * {@link markRunCompletedFirstWriterWins} — same single-statement-UPDATE
+ * row-lock concurrency contract and same `WHERE status = 'running'`
+ * predicate so a TOCTOU race between check-and-write is impossible.
+ *
+ * Returns the same boolean shape as the other first-writer-wins primitives
+ * so callers can use it as a gate: when it returns `false`, the run is
+ * already terminal and the caller MUST skip any further destructive
+ * cleanup (e.g. `purgeShardResults`, `runLogRepo.deleteByRunId`) — those
+ * would wipe rows belonging to a sibling shard's successful completion
+ * or to the audit trail of a user-initiated abort.
+ *
+ * Note: `status = 'running'` is the *expected* current value (the retry
+ * keeps the row running while a fresh attempt executes), so this is an
+ * identity update on the status column. The other fields (`error`,
+ * `errorCategory`, `finishedAt`, `pagesFound`) are reset so the retry
+ * starts clean. `results` is NOT touched here — shard-mode callers handle
+ * that via {@link purgeShardResults} after this primitive returns `true`.
+ *
+ * @param {string} runId
+ * @returns {boolean} `true` when the row was still running and was reset;
+ *   `false` when the row had already transitioned terminal (caller must
+ *   abort the retry-prep sequence — see `runWorker.js` non-final-attempt
+ *   block for the canonical use site).
+ */
+export function resetRunForRetryIfStillRunning(runId) {
+  if (!runId) return false;
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE runs
+       SET status = 'running',
+           error = NULL,
+           errorCategory = NULL,
+           finishedAt = NULL,
+           pagesFound = 0
+     WHERE id = ? AND status = 'running'`
+  ).run(runId);
+  return (info.changes || 0) > 0;
+}
+
+/**
  * Save the entire run object (upsert-style update of all known columns).
  * Used by pipeline code that mutates the run in-memory and then flushes.
  *
