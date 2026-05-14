@@ -446,7 +446,7 @@ END COLLAPSED INT-002b ORIGINAL BODY -->
 
 ### CAP-002 — Distributed test sharding across runners 🟢 Differentiator
 
-**Status:** 🔲 Planned | **Effort:** L | **Source:** PR #8 review (migrated from `docs/roadmap-gaps-pr8.md` before its deletion) · Competitive (Cypress Cloud / Playwright shard mode)
+**Status:** ✅ Complete (PR #3) — see Completed Work Summary above for the full implementation details. Per-shard wall-clock E2E + chaos integration tracked separately as `CAP-002b` below.
 
 **Problem:** Single-host parallelism caps suite size at the local worker count (typically 1–10 contexts on a developer machine, 4–8 on a Render box). Industry tools split a single run across N runners — Cypress Cloud's `--record --parallel`, Playwright's `--shard=1/4`. Sentri's BullMQ infrastructure (INF-003 ✅) already gives us the worker pool primitive, but `runTests()` allocates the entire test list to a single worker, so adding nodes doesn't reduce wall-clock time on a large suite.
 
@@ -465,6 +465,81 @@ END COLLAPSED INT-002b ORIGINAL BODY -->
 
 ---
 
+
+### CAP-002b — Sharding production hardening (chaos / load / SaaS-readiness) 🔵 Medium
+
+**Status:** 🔲 Planned | **Effort:** L (split into sub-items below) | **Source:** PR #3 industry-standard audit — items NOT shipped in CAP-002's main scope but explicitly called out in the audit reply, recorded here per AGENT.md "every finding produces an outcome (fix or ROADMAP entry), never a silent gap".
+
+**Context:** CAP-002 (PR #3) shipped the cross-process sharding primitives end-to-end and is industry-standard for **self-hosted** deployments (7/10 against the self-hosted bar per the post-merge audit). This follow-up tracks the gaps that move us toward the **managed multi-tenant SaaS** bar (Cypress Cloud / BrowserStack / Sauce Labs / LambdaTest tier — currently scored 4/10). None of these are regressions from PR #3; they're scoped here so future reviewers don't re-discover them.
+
+#### Gap 1 — End-to-end wall-clock proof (Tier-1 E2E)
+
+The headline acceptance criterion ("`shards: 4` on a 40-test suite completes in ~1/4 the wall-clock time of `shards: 1`") needs a Tier-1 E2E spec running against a real BullMQ + Playwright harness. PR #3 ships the spec scaffolded at `tests/e2e/specs/run-sharding-wallclock.spec.mjs` gated behind `RUN_E2E_REAL_PLAYWRIGHT=true` so it skips by default; the harness itself (Redis + 4× worker containers + a deterministic test target) is the real work. Without this, we cannot point to a CI green build that proves the speedup empirically.
+
+#### Gap 2 — BullMQ-kill chaos integration test
+
+PR #3 verifies the storage-layer first-writer-wins primitive in isolation (`backend/tests/run-shard-crash.test.js`) but not the end-to-end "kill a BullMQ shard job mid-execution and observe sibling-shard drain" path. A real chaos harness would: enqueue 4 shard jobs, let them start, kill one worker process, assert (a) parent run reaches `failed`, (b) `shardsCompleted < shardCount` is preserved, (c) sibling shards drain within 2s of the `sentri:run-abort` publish, (d) no orphan `active` BullMQ jobs remain for the dead runId. Same harness reusable for: workers killed during finalization, Redis flap mid-run, network partition between coordinator and worker.
+
+#### Gap 3 — BullMQ fan-out unit test (`run-sharding-coordinator.test.js`)
+
+PR #3 ships `backend/tests/run-sharding.test.js` extended with `partitionTestIdsForShards` coverage (5 cases including the 40-IDs-÷-4-shards acceptance shape). What's missing is a route-level test that mocks `runQueue.add` and asserts the actual fan-out call shape: `POST /run` with `shards: 4` produces exactly 4 `runQueue.add("test_run_shard", ...)` invocations with `jobId: ${runId}:s0..s3`, each carrying a contiguous `testIds` slice. Equivalent shape coverage exists today via the helper unit tests but not as a route-integration test.
+
+#### Gap 4 — Auto-scaling shard workers
+
+`MAX_WORKERS` is a static env var. Industry SaaS platforms (Cypress Cloud, BrowserStack) auto-scale runner pools based on queue depth + per-customer quota. Sentri would need: a queue-depth metric exposed via OTel (depends on INF-007), a worker-pool autoscaler (Kubernetes HPA targeting the metric, or a homegrown controller for non-K8s deployments), and per-tenant fair scheduling so one customer's burst doesn't starve another (see Gap 6).
+
+#### Gap 5 — Deadletter queue + replay UI
+
+BullMQ's `attempts: 2` exhaustion drops the job. Industry standard is a deadletter queue with a manual replay UI for operators. A failed shard with all retries exhausted should land in a DLQ with the full job payload + error chain; the run row stays `failed` (don't retroactively flip terminal state) but operators can "replay this shard" from the UI to re-execute against a fresh worker.
+
+#### Gap 6 — Per-tenant fair scheduling + finalization SLA
+
+Today the queue is global FIFO. Two customers running 1000-test suites simultaneously share the worker pool with no fairness; whoever enqueued first finishes first. Per-tenant fairness needs: a per-`workspaceId` queue prefix (`sentri:runs:WS-<id>`), a round-robin or weighted-fair-queue dispatcher across workspace queues, and a documented SLA on finalization latency ("p99 within 60s of last shard completing"). This pairs with `FEA-004` (per-tenant resource quotas + token-cost dashboard) which is already in ROADMAP.md.
+
+#### Gap 7 — Smart shard balancing (duration-aware)
+
+Sentri uses Playwright's `--shard=N/M` even-partition algorithm. Cypress Cloud balances by historical test duration so each shard finishes at roughly the same wall-clock time — critical when test durations vary by 100×. Implementation: persist median per-test duration as a column on `tests` (or a sidecar `test_durations` table), and replace `partitionTestIdsForShards`'s even-split with a greedy bin-packing algorithm. Falls back to even-split when historical durations aren't yet available.
+
+#### Gap 8 — Cross-region shard distribution
+
+Single-region only. Industry SaaS platforms run shards in geographically distributed runner pools (Sauce Labs has runners in 5+ regions; BrowserStack in 30+). Out of scope for self-hosted but a real differentiator gap vs. SaaS competitors.
+
+#### Gap 9 — Container-per-shard isolation
+
+All shards on a replica share the same Node process pool. Industry isolation patterns spawn each shard in its own container/VM so a shard that mis-uses memory or holds a Playwright browser leaked-handle can't affect siblings. Out of scope for the typical self-hosted Render/Fly deployment but a SaaS-tier requirement.
+
+#### Gap 10 — Redis HA enforcement
+
+CAP-002's Redis dependency is a single point of failure. Production SaaS deployments require Redis Sentinel or Redis Cluster. Currently documented in `docs/api/projects.md` § Run sharding ("Redis running for the cross-process fan-out path") but NOT enforced — operators can deploy a single-node Redis and silently lose all sharded runs on a Redis flap. Hardening: detect non-HA Redis at boot and emit a one-shot WARN, document the requirement in `docs/guide/getting-started.md`, add a `/health/redis` endpoint that exposes the topology so monitoring can alert.
+
+**Suggested split into PRs:**
+
+| Sub-item | Effort | Priority | Dependency |
+|---|---|---|---|
+| Gap 1 — Wall-clock E2E harness | M | 🟡 High | Spec scaffolded in PR #3; harness wiring is the work |
+| Gap 2 — BullMQ-kill chaos test | M | 🟡 High | Same harness as Gap 1 |
+| Gap 3 — Coordinator route-mock test | S | 🔵 Medium | None — pure unit test |
+| Gap 4 — Auto-scaling shard workers | XL | 🟢 Strategic | INF-007 (OTel metrics) |
+| Gap 5 — Deadletter queue + replay UI | L | 🔵 Medium | None — pure BullMQ feature |
+| Gap 6 — Per-tenant fair scheduling | XL | 🟢 Strategic | FEA-004 (per-tenant quotas) |
+| Gap 7 — Duration-aware shard balancing | M | 🔵 Medium | None — historical data already on results rows |
+| Gap 8 — Cross-region distribution | XL | 🟢 Strategic | INF-007 (multi-region observability) |
+| Gap 9 — Container-per-shard isolation | XL | 🟢 Strategic | Helm/K8s deployment story (Phase 5) |
+| Gap 10 — Redis HA enforcement | S | 🔵 Medium | None — boot-time check + docs |
+
+**Dependencies:** CAP-002 ✅ (PR #3) — all sub-items build on the shipped sharding architecture. Gaps 4 + 6 + 8 also depend on Phase 5 items (INF-007 OTel, FEA-004 quotas, Helm/K8s deployment).
+
+**Acceptance criteria (when each sub-item ships):**
+- Gap 1: CI matrix includes a `wallclock` lane that passes against `RUN_E2E_REAL_PLAYWRIGHT=true` with the `shards: 4 ≤ 50% of shards: 1` assertion green.
+- Gap 2: CI matrix includes a `chaos-shard-kill` lane that kills a BullMQ shard mid-execution and asserts (a)–(d) above.
+- Gap 3: `backend/tests/run-sharding-coordinator.test.js` registered in `run-tests.js`; mocks `runQueue.add` and locks down the fan-out call shape.
+- Gap 5: New `/runs/:runId/replay-shard/:shardIndex` endpoint (admin-only) re-enqueues a single shard against the same parent run; UI surfaces the replay button on the RunDetail header for failed runs with `shardsCompleted < shardCount`.
+- Gap 7: `partitionTestIdsForShards` accepts an optional duration map; new `partitionTestIdsByDuration(testIds, durations, shardCount)` helper performs bin-packing; fallback to even-split when durations are missing.
+- Gap 10: Boot-time `/health/redis` returns `{ topology: "single-node" | "sentinel" | "cluster" }`; one-shot WARN at boot when topology is `single-node`.
+
+**Anti-patterns to reject in review:** retroactively flipping a `failed` run to `running` on DLQ replay (terminal state must stay terminal — replay creates a fresh shard that contributes to the same run row but doesn't transition the parent status); auto-retry sharded runs on Redis flap (would compound load on a degraded cluster); cross-tenant data exposure in fair scheduling (a per-workspace queue prefix is a security boundary, not just a perf knob); skipping the boot-time WARN on single-node Redis (operators rely on this signal).
+
+---
 
 ### AUTO-008 — Distributed runner across multiple machines 🟢 Differentiator
 
