@@ -164,9 +164,8 @@ async function main() {
           runRepo.incrementRunStats(run.id, { passedDelta: 10, failedDelta: 0 });
           const { advanced, newValue } = runRepo.incrementShardsCompleted(run.id);
           if (advanced === 1 && newValue >= run.shardCount) {
-              finalizerCount++;
-              finalizerShardIndex = shardIndex;
-            }
+            finalizerCount++;
+            finalizerShardIndex = shardIndex;
           }
           return { shardIndex, advanced };
         }),
