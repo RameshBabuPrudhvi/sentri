@@ -625,6 +625,46 @@ export function incrementShardsCompleted(runId) {
 }
 
 /**
+ * CAP-002 Phase 2 (Prerequisite #6) — Mark a run `failed` with first-writer-
+ * wins semantics. When N shard jobs crash near-simultaneously, only the
+ * first one to land its UPDATE actually writes the failure reason; the
+ * predicate `WHERE id = ? AND status = 'running'` makes every subsequent
+ * caller a no-op. Without this, a later shard's classified error would
+ * overwrite the first (and arguably most-informative) failure message,
+ * and the audit trail would lose track of which shard actually caused the
+ * cascade.
+ *
+ * Sibling of {@link appendRunResults} / {@link incrementShardsCompleted}
+ * — same single-statement-UPDATE concurrency contract (better-sqlite3
+ * journal lock on SQLite, row-level lock on Postgres). `shardsCompleted`
+ * is deliberately NOT touched here: a partial completion (`< shardCount`)
+ * is the correct surface for the failure badge, and any successful shards
+ * that landed before the crash have already bumped the counter via
+ * {@link incrementShardsCompleted}.
+ *
+ * @param {string} runId
+ * @param {Object} fields
+ * @param {string} fields.error         - Classified error message.
+ * @param {string} [fields.errorCategory] - Error category from `errorClassifier.js`.
+ * @returns {boolean} `true` when this caller actually performed the update
+ *   (i.e. it was the first writer); `false` when the row was already
+ *   terminal (a sibling shard beat us to it, or the run was aborted).
+ */
+export function markRunFailedFirstWriterWins(runId, { error, errorCategory } = {}) {
+  if (!runId) return false;
+  const db = getDatabase();
+  const info = db.prepare(
+    `UPDATE runs
+       SET status = 'failed',
+           error = COALESCE(error, ?),
+           errorCategory = COALESCE(errorCategory, ?),
+           finishedAt = COALESCE(finishedAt, datetime('now'))
+     WHERE id = ? AND status = 'running'`
+  ).run(error || "Shard failed", errorCategory || "unknown", runId);
+  return (info.changes || 0) > 0;
+}
+
+/**
  * Save the entire run object (upsert-style update of all known columns).
  * Used by pipeline code that mutates the run in-memory and then flushes.
  *

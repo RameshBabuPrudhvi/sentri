@@ -35,7 +35,7 @@ import { fireNotifications } from "../utils/notifications.js";
 import { captureProvider } from "../utils/activeRuns.js";
 import { isNonExecutedSkip } from "../utils/skipReasons.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
-import { subscribeToRunAborts } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
+import { subscribeToRunAborts, publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-process abort pub/sub.
 
 const _require = createRequire(import.meta.url);
 
@@ -232,22 +232,67 @@ async function processJob(job) {
       // retries from re-executing an already-failed run (the DB row
       // would have status="failed" and finishedAt set, causing duplicate
       // activity logs, duplicate SSE events, and status overwrites).
-      run.status = "failed";
-      run.error = classified.message;
-      run.errorCategory = classified.category;
-      run.finishedAt = new Date().toISOString();
+      //
+      // CAP-002 Phase 2 (Prerequisite #6): for shard-mode runs, use the
+      // atomic first-writer-wins UPDATE so the first crashing shard owns
+      // the failure reason. A full `runRepo.save(run)` here would
+      // overwrite a sibling shard's earlier classified message with this
+      // shard's (potentially less-informative) one — confusing the audit
+      // trail and the SSE `done` event. The first-writer-wins predicate
+      // (`WHERE id = ? AND status = 'running'`) makes the second-place
+      // shard a clean no-op. After persisting the terminal state we
+      // publish to `sentri:run-abort` so sibling shards in *other*
+      // replicas receive the cancel signal and drain — same channel the
+      // user-driven abort route uses (Prerequisite #5). For legacy
+      // single-shard runs (`shardIndex == null`) the prior `save(run)`
+      // path is preserved bit-for-bit so the failure-status semantics
+      // don't shift for non-shard callers.
+      const isShardMode = shardIndex != null;
+      let firstWriter = true;
+      if (isShardMode) {
+        firstWriter = runRepo.markRunFailedFirstWriterWins(runId, {
+          error: classified.message,
+          errorCategory: classified.category,
+        });
+        // Re-hydrate the in-memory run from whatever the DB now holds so
+        // the rest of this block (and any downstream `runRepo.save(run)`
+        // we might call later) doesn't overwrite the first writer's
+        // values with stale snapshot data.
+        run.status = "failed";
+        run.error = classified.message;
+        run.errorCategory = classified.category;
+        run.finishedAt = new Date().toISOString();
+      } else {
+        run.status = "failed";
+        run.error = classified.message;
+        run.errorCategory = classified.category;
+        run.finishedAt = new Date().toISOString();
+        runRepo.save(run);
+      }
 
-      logActivity({
-        ...options.actorInfo,
-        type: `${runType === "crawl" ? "crawl" : "test_run"}.fail`,
-        projectId: project.id,
-        projectName: project.name,
-        detail: `${runType === "crawl" ? "Crawl" : "Test run"} failed: ${classified.message}`,
-        status: "failed",
-      });
+      // Activity log + SSE `done` event fire only when this caller was
+      // the first writer (shard mode) or the sole writer (legacy mode).
+      // Second-place shards skip emitting so we don't surface duplicate
+      // notifications for the same logical failure.
+      if (firstWriter) {
+        logActivity({
+          ...options.actorInfo,
+          type: `${runType === "crawl" ? "crawl" : "test_run"}.fail`,
+          projectId: project.id,
+          projectName: project.name,
+          detail: `${runType === "crawl" ? "Crawl" : "Test run"} failed: ${classified.message}`,
+          status: "failed",
+        });
+        emitRunEvent(runId, "done", { status: "failed" });
+      }
 
-      emitRunEvent(runId, "done", { status: "failed" });
-      runRepo.save(run);
+      // Whether or not this shard was the first writer, publish the abort
+      // signal so sibling shards in other replicas stop wasting compute.
+      // Same channel as the user-driven abort. `publishRunAbort` is
+      // best-effort and a no-op when Redis is unavailable.
+      if (isShardMode) {
+        publishRunAbort(runId).catch(() => { /* best-effort */ });
+      }
     } else {
       // Non-final attempt: reset ALL accumulated run state so the retry
       // starts completely clean.  Without this, the retry would reload the
