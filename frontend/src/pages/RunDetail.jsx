@@ -408,6 +408,17 @@ export default function RunDetail() {
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
+  // CAP-002 Phase 2 (Prerequisite #2) — shard-mode runs produce one trace
+  // zip per shard at `/artifacts/traces/${runId}/shard-${i}.zip`. The
+  // backend populates `run.tracePaths[]` (JSON array, migration 026)
+  // alongside the single-link `run.tracePath` for backwards compat.
+  // Render a dropdown when there are ≥2 shard traces; otherwise the
+  // existing single-link UI below covers both `shardCount === 1` and
+  // legacy pre-Phase-2 runs.
+  const shardTracePaths = Array.isArray(run.tracePaths)
+    ? run.tracePaths.filter((p) => typeof p === "string" && p.length > 0)
+    : [];
+  const hasShardTraces = shardTracePaths.length > 1;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
   const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
@@ -542,7 +553,28 @@ export default function RunDetail() {
                 {rerunning ? "Starting…" : "Re-run"}
               </button>
             )}
-            {traceUrl && (
+            {/* CAP-002 Phase 2 — per-shard trace dropdown when shardCount > 1
+                and the run actually emitted per-shard zips. Falls back to the
+                single-link UI for `shardCount === 1` and legacy runs. */}
+            {hasShardTraces ? (
+              <select
+                className="input btn-sm"
+                aria-label="Open trace for shard"
+                defaultValue=""
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (!path) return;
+                  window.open(`/trace-viewer/?trace=${encodeURIComponent(path)}`, "_blank", "noreferrer");
+                  e.target.value = ""; // reset so re-selecting the same shard re-opens
+                }}
+                style={{ fontSize: "0.78rem", padding: "4px 8px" }}
+              >
+                <option value="" disabled>🔍 Open Trace…</option>
+                {shardTracePaths.map((p, i) => (
+                  <option key={i} value={p}>Shard {i + 1}/{shardTracePaths.length}</option>
+                ))}
+              </select>
+            ) : traceUrl && (
               <>
                 <a href={traceViewerUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
                   🔍 Open Trace

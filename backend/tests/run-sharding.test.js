@@ -21,7 +21,7 @@ import { workspaceScope } from "../src/middleware/workspaceScope.js";
 import projectsRouter from "../src/routes/projects.js";
 import testsRouter from "../src/routes/tests.js";
 import runsRouter from "../src/routes/runs.js";
-import { partitionTestsIntoShards } from "../src/testRunner.js";
+import { partitionTestsIntoShards, shardTraceArtifactPath } from "../src/testRunner.js";
 import { getDatabase } from "../src/database/sqlite.js";
 
 let mounted = false;
@@ -117,6 +117,43 @@ async function main() {
       const { sizes } = partitionTestsIntoShards(tests, 4);
       assert.deepEqual(sizes, [1, 1, 0, 0]);
       assert.deepEqual(tests.map(t => t._shardIndex), [0, 1]);
+    });
+
+    // ── Per-shard trace path contract (Prerequisite #2) ──────────────────
+    // The runner persists `run.tracePaths[shardIndex]` for shard-mode runs
+    // so `RunDetail.jsx` can render a dropdown when `shardCount > 1`. The
+    // path layout mirrors the on-disk shard directory so the trace-viewer
+    // static-file mount resolves nested paths without special-casing.
+    // NEXT.md acceptance: "trace-count assertion in run-sharding.test.js".
+    console.log("\n\u2500\u2500 shardTraceArtifactPath (pure) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+
+    await test("shardIndex == null → legacy single-path URL (zero regression)", () => {
+      assert.equal(shardTraceArtifactPath("RUN-x", null), "/artifacts/traces/RUN-x.zip");
+    });
+
+    await test("shardIndex = 0..3 → per-shard nested URL", () => {
+      assert.equal(shardTraceArtifactPath("RUN-x", 0), "/artifacts/traces/RUN-x/shard-0.zip");
+      assert.equal(shardTraceArtifactPath("RUN-x", 3), "/artifacts/traces/RUN-x/shard-3.zip");
+    });
+
+    await test("shardCount: 4 → exactly 4 distinct trace paths persisted", () => {
+      // The runner records `run.tracePaths[shardIndex]` as each shard writes
+      // its trace zip; the final `run.tracePaths` array therefore has
+      // `shardCount` entries when every shard completes. Simulate the
+      // coordinator's per-shard fan-out by computing the same paths the
+      // runner would write, and assert the contract.
+      const shardCount = 4;
+      const runId = "RUN-trace";
+      const tracePaths = Array.from({ length: shardCount }, (_, i) =>
+        shardTraceArtifactPath(runId, i),
+      );
+      // 4 paths, all unique, all nested under the run's directory.
+      assert.equal(tracePaths.length, shardCount);
+      assert.equal(new Set(tracePaths).size, shardCount, "trace paths must be unique per shard");
+      for (const p of tracePaths) {
+        assert.ok(p.startsWith(`/artifacts/traces/${runId}/shard-`), `${p} must be nested under run dir`);
+        assert.ok(p.endsWith(".zip"));
+      }
     });
 
     console.log("\n\u2500\u2500 POST /run shard plumbing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");

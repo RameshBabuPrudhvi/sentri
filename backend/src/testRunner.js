@@ -179,6 +179,24 @@ export function partitionTestsIntoShards(tests, shardCount) {
   return { sizes };
 }
 
+/**
+ * CAP-002 Phase 2 (Prerequisite #2) — Compute the public artifact URL for a
+ * shard's trace zip. The path mirrors the on-disk layout in `TRACES_DIR` so
+ * `signArtifactUrl` and the trace-viewer static-file mount can resolve nested
+ * paths without special-casing. `shardIndex == null` (legacy / single-shard
+ * runs) returns the flat `${runId}.zip` URL — zero regression for every
+ * existing consumer of `run.tracePath`. Pure: no I/O, no DB, exported so
+ * `backend/tests/run-sharding.test.js` can assert the contract directly.
+ *
+ * @param {string}       runId
+ * @param {number|null}  shardIndex - 0-based shard index, or null for legacy single-path runs.
+ * @returns {string} `/artifacts/traces/<runId>.zip` or `/artifacts/traces/<runId>/shard-<idx>.zip`
+ */
+export function shardTraceArtifactPath(runId, shardIndex) {
+  if (shardIndex == null) return `/artifacts/traces/${runId}.zip`;
+  return `/artifacts/traces/${runId}/shard-${shardIndex}.zip`;
+}
+
 async function poolMap(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -218,11 +236,27 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {string}      [options.timezoneId]       - IANA timezone (AUTO-007).
  * @param {Object}      [options.geolocation]      - `{ latitude, longitude }` (AUTO-007).
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
+ * @param {number|null} [options.shardIndex]       - CAP-002 Phase 2: when set,
+ *   the cross-process shard worker passes its 0-based shard index so trace
+ *   artifacts land at `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`
+ *   instead of the single-path layout. `null` (default) preserves the
+ *   pre-shard zero-regression path — same filename, same `run.tracePath`,
+ *   no `tracePaths[]` JSON column populated. See migration 026.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal, shardIndex = null } = {}) {
   const runId = run.id;
-  const tracePath = `${TRACES_DIR}/${runId}.zip`;
+  // CAP-002 Phase 2 (Prerequisite #2) — shard-mode trace artifacts live in a
+  // per-run subdirectory keyed by shard index so N concurrent shard workers
+  // can write side-by-side without colliding on a single `${runId}.zip`.
+  // Single-shard runs (`shardIndex == null`) preserve the legacy single-path
+  // layout for bit-for-bit zero regression. The route-relative artifact path
+  // mirrors the on-disk shape — `signArtifactUrl` and the trace-viewer
+  // static-file route already handle nested paths via `req.params[0]`.
+  const isShardMode = shardIndex != null;
+  const tracePath = isShardMode
+    ? `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`
+    : `${TRACES_DIR}/${runId}.zip`;
 
   // AUTO-001: smoke tests always dispatch first regardless of caller order.
   // This is a runner-level invariant — any callsite of runTests (route layer,
@@ -546,8 +580,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // Route through the storage adapter so S3-mode deployments upload
         // the trace zip; in local mode this is effectively a no-op rewrite
         // of the same file Playwright just produced.
+        // CAP-002 Phase 2 (Prerequisite #2) — single source of truth for the
+        // trace artifact URL. Mirrors the on-disk shard layout so the
+        // trace-viewer route resolves nested paths verbatim. Single-shard
+        // runs keep the legacy `/artifacts/traces/${runId}.zip` URL for
+        // bit-for-bit zero regression with `run.tracePath` consumers
+        // (RunDetail link, GitHub Check summary, signed-URL middleware).
+        const traceArtifactPath = shardTraceArtifactPath(runId, isShardMode ? shardIndex : null);
         try {
-          const traceArtifactPath = `/artifacts/traces/${runId}.zip`;
           await writeArtifactBuffer({
             artifactPath: traceArtifactPath,
             absolutePath: tracePath,
@@ -555,9 +595,19 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
             contentType: "application/zip",
           });
           run.tracePath = traceArtifactPath;
+          // In shard mode also record the per-shard URL in the new
+          // `tracePaths` JSON column (migration 026) so `RunDetail.jsx`
+          // renders a dropdown when `shardCount > 1`. Sparse array
+          // indexed by shard so concurrent shard workers writing
+          // different slots don't collide — the coordinator's atomic
+          // save() is the linearization point (Prerequisite #1 contract).
+          if (isShardMode) {
+            if (!Array.isArray(run.tracePaths)) run.tracePaths = [];
+            run.tracePaths[shardIndex] = traceArtifactPath;
+          }
         } catch (uploadErr) {
           logWarn(run, `Trace upload failed: ${uploadErr.message}`);
-          run.tracePath = `/artifacts/traces/${runId}.zip`;
+          run.tracePath = traceArtifactPath;
         }
         log(run, `📊 Trace saved`);
       } catch (e) {

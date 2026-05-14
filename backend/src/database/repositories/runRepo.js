@@ -37,6 +37,7 @@ const JSON_FIELDS = [
   "changedPages", "removedPages", // AUTO-002: diff-aware crawl page-change summary
   "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary
   "githubCheck", // INT-002: GitHub Check Run metadata
+  "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
 ];
 
 function rowToRun(row) {
@@ -94,6 +95,7 @@ const INSERT_COLS = [
   "budgetMinutes", // AUTO-001: wall-clock budget applied to dispatch queue (migration 021)
   "environmentId", // DIF-012: optional project environment scope (migration 024)
   "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
+  "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})
