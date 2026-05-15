@@ -57,6 +57,14 @@ jobs:
       - name: Syntax check all source files
         run: find src -name '*.js' -exec node --check {} +
 
+      # TypeScript typecheck — currently only validates `.ts` files under
+      # `src/` (e.g. `src/types/*.ts`) because `checkJs: false` in tsconfig.
+      # When `checkJs` flips to `true` in a later PR, this step also validates
+      # JSDoc types on `.js` files. Kept as a separate step (not bundled into
+      # tests) so a type error fails CI with a clear, isolated red mark.
+      - name: TypeScript typecheck (tsc --noEmit)
+        run: npm run typecheck
+
       - name: Run unit & integration tests
         run: npm test
 
@@ -249,6 +257,14 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      # TypeScript typecheck — same rationale as the backend job. Vite already
+      # handles `.ts`/`.tsx` at build time, but `vite build` only typechecks
+      # files it actually compiles; running `tsc --noEmit` separately catches
+      # type errors in files that aren't reachable from the entry point yet
+      # (e.g. new components landing in a PR that aren't imported anywhere).
+      - name: TypeScript typecheck (tsc --noEmit)
+        run: npm run typecheck
 
       - name: Run unit tests
         run: npm test

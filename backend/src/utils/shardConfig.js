@@ -41,7 +41,7 @@
  *
  * @param {unknown}     shardsInput  - Raw `req.body.shards` (any type).
  * @param {number|null} [dialsParallelWorkers] - Validated dials request, may be undefined.
- * @returns {{ shardCount: number, parallelWorkers: number, maxWorkers: number }}
+ * @returns {import('../types/run').ShardConfig}
  */
 export function normalizeShardConfig(shardsInput, dialsParallelWorkers) {
   const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
