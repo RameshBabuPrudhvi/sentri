@@ -26,55 +26,32 @@
 
 ## ▶ Current PR — AUTO-008 — Distributed runner across multiple machines
 **Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** INF-003 ✅, INF-002 ✅, CAP-002 ✅ (PR #3) | **Source:** `ROADMAP.md` Phase 4 (AUTO-008) — promoted per `NEXT.md` rotation after DIF-015c Gaps 2/3/5/6 shipped in PR #8
-PR #115 made the recorder canvas interactive and aligned recorded steps with the AI-generated / manual format, but four gaps remain that surface during real use against e-commerce, kanban, and admin-dashboard targets. Bundled because all four touch the same `backend/src/runner/recorder.js` + `frontend/src/components/run/RecorderModal.jsx` surface within a single reviewable boundary; doing them separately means re-opening the same files four times with merge-conflict risk on `RECORDER_SCRIPT`.
-### Gap 2 — Inline assertion authoring (point-and-click UX, parity with BearQ)
-PR #118 already shipped the backend: `POST /api/v1/projects/:id/record/:sessionId/assertion` (`backend/src/routes/tests.js:1164-1184`) and server-side `addAssertionAction()` (`backend/src/runner/recorder.js:827-855`) support `assertVisible`, `assertText`, `assertValue`, and `assertUrl`. The `RecorderModal` already exposes an "Add assertion" form. **Remaining:** point-and-click UX — when the assert toggle is active, suppress `forwardInput` on the canvas, highlight the hovered element via CDP `Overlay.highlightNode`, and open the assertion picker pre-filled with that element's `bestSelector()` output. Add an `assertMode` prop on `frontend/src/components/run/LiveBrowserView.jsx` that suppresses input forwarding and surfaces hover targets back to the modal. `assertCount` and `assertHasClass` need a new action kind on the backend (typedef + `actionsToPlaywrightCode` branch + `recordedActionToStepText` branch + `isEmittableAction` branch + regression test); the other four are already wired.
-### Gap 3 — Pause / resume + undo last action
-Once recording starts, every action is captured through to Stop. Add `POST /record/:sessionId/{pause,resume,pop-last}` routes + session-state guards in `forwardInput` (short-circuit when `session.paused === true`). The server-side change is small; the UX work in `RecorderModal` (pause/resume control + undo affordance + optional mid-recording edit of the last action's fill value) is the larger lift. Justifies: recorder captures password keystrokes when pause was unavailable (currently truncated to 40 chars in step prose but the full value lives in `playwrightCode`) → pause closes that exfiltration window; mis-clicks today force a full session discard → undo restores the prior investment.
-#### Gap 4 — Authentication / pre-logged-in state handling
-
-The recorder starts at `startUrl` with a fresh browser context — no cookies, no localStorage, no logged-in state. Three flows have no good answer today:
-
-1. **Recording a test against an authenticated app** — user must record the login flow as part of every test, even though the resulting test will execute under a different fixture in CI. Workaround is to record the full login each time.
-2. **Recording behind SSO / OAuth** — login redirects through a third-party IdP (Google / Okta / Azure AD); the recorder captures the IdP form fields but those selectors are useless at replay (the IdP UI changes; tests cannot be rerun against a different env).
-3. **MFA-protected logins** — every recording requires re-doing MFA, which is not deterministic.
-
-Possible fix: integrate with project credential profiles (DIF-010) so the recorder browser context is seeded with `storageState` from a captured login, skipping login entirely. Pair with environment-aware credential profiles per `MNT-004` / `DIF-012`.
-### Gap 5 — Mobile / touch / device profile during recording
-The recorder runs at desktop viewport only — no device dropdown in `RecorderModal`. Thread a `device` param through `POST /api/v1/projects/:id/record` → `backend/src/runner/recorder.js`, and set `browser.newContext({ ...devices[device] })` the same way `executeTest.js` already does for runs (DIF-003). UX is a device dropdown in `RecorderModal` mirroring the one in `RunRegressionModal.jsx`.
-### Gap 6 — Stealth launch profile for sites that detect headless
-Some target apps detect headless Chromium (via `navigator.webdriver`, missing chrome plugins, viewport inconsistencies) and refuse to render. Today's workaround is `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). Add a "stealth" launch profile to `launchBrowser()` that hides automation markers — `playwright-extra` + `puppeteer-extra-plugin-stealth` is the conventional choice. Gate behind an opt-in `stealth: true` session param so default recordings stay deterministic.
+Current parallelism is 1–10 workers within a single Chromium process on one machine (`testRunner.js:48-67`). For large suites (500+ tests), execution must distribute across multiple machines. BullMQ (INF-003) and the in-process sharding primitives (CAP-002) provide the foundation; this item extracts the browser worker into a standalone, stateless container image so any number of worker replicas can pull jobs from the shared queue.
 
 **Files to change:**
-- `backend/src/runner/recorder.js` — `RECORDER_SCRIPT` extensions for Gap 2 action kinds; typedef + `actionsToPlaywrightCode` + `recordedActionToStepText` + `isEmittableAction` branches; pause/resume/pop-last session-state guards in `forwardInput`; `device` + `stealth` params threaded through session creation
-- `backend/src/routes/tests.js` — `POST /record` param surface (`device`, `stealth`); new `POST /record/:sessionId/{pause,resume,pop-last}` endpoints
-- `backend/src/middleware/permissions.json` — register the three new recorder mutation routes (qa_lead+)
-- `frontend/src/components/run/RecorderModal.jsx` — assert toggle (Gap 2) with hover-to-pick; pause/resume controls (Gap 3); device dropdown (Gap 5); stealth toggle (Gap 6)
-- `frontend/src/components/run/LiveBrowserView.jsx` — `assertMode` prop suppresses `forwardInput`; hover-target callback surfaces selector back to the modal
-- `frontend/src/api.js` — `pauseRecorder`, `resumeRecorder`, `popLastRecorderAction`, `addRecorderAssertion` (point-and-click variant) consumers
-- `backend/tests/recorder.test.js` — per-Gap coverage (registered in `backend/tests/run-tests.js`); default-mode snapshot proves bit-for-bit unchanged
-- `tests/e2e/specs/recorder-gaps-ui.spec.mjs` (new, Tier-3 `page.route()` mocks) — assert popover renders, pause toggle visually distinct, device dropdown switches viewport on resume
-- `QA.md` § Recorder — captured / not-captured lists per gap; manual checks for `assertCount`/`assertHasClass`, pause-then-resume continuity, device profile mid-recording, stealth-flag headless detection
-- `docs/changelog.md` `## [Unreleased]` § Added — one entry per shipped sub-item
-- `docs/api/projects.md` — document the three new recorder routes alongside the existing assertion endpoint
+- `backend/src/workers/runWorker.js` — make fully stateless and containerisable; accept per-worker `WORKER_CONCURRENCY` env var
+- `docker-compose.yml` — add scalable `worker` service alongside the existing `web` service
+- `frontend/src/pages/Dashboard.jsx` — worker pool status panel (queue depth, active workers, idle workers)
+- `backend/src/routes/dashboard.js` — expose BullMQ queue metrics (`waiting`, `active`, `completed`, `failed`) when Redis is available
+- `docs/guide/getting-started.md` — document the multi-machine deployment pattern
+- `docs/changelog.md` `## [Unreleased]` § Added
+
 **Acceptance criteria:**
-- Gap 2: Operator clicks "Assert" in `RecorderModal`, hovers a button on the live canvas → button highlights → click opens popover with `assertVisible / assertText / assertCount / assertHasClass / assertUrl`. Selecting one writes the assertion via the existing route. No manual selector paste required.
-- Gap 3: Pause → subsequent clicks / keystrokes do **not** append to `session.actions`. Resume → capture continues from a clean state (no buffered events replay). Pop-last → most recent action is removed from `session.actions` and disappears from the step preview; idempotent on empty `actions[]`.
-- Gap 5: Device dropdown shows the same options as `RunRegressionModal`. Switching mid-session resizes the canvas to match; selectors regenerated at the new viewport's pixel scale.
-- Gap 6: Stealth toggle on a fresh session disables `navigator.webdriver` and the headless-detection bypass works on a known guard-script fixture (regression test in `recorder.test.js`).
-- Zero regression: default-mode recordings (no assert toggle, no pause, no device override, no stealth) emit byte-identical `playwrightCode` to PR #11 baseline; covered by snapshot test.
-### PR checklist (DIF-015c)
-- [ ] Gap 2 — point-and-click assert UX: `LiveBrowserView.assertMode` prop suppresses `forwardInput`; CDP `Overlay.highlightNode` wired on hover; popover writes via existing `POST /record/:sessionId/assertion`; `assertCount` + `assertHasClass` action kinds added with regression coverage in `backend/tests/recorder.test.js`
-- [ ] Gap 3 — pause / resume / undo: `POST /record/:sessionId/{pause,resume,pop-last}` registered in `permissions.json` (qa_lead+); `forwardInput` short-circuits when `session.paused === true`; pop-last idempotent on empty `actions[]`; UI affordances with visible state indicator
-- [ ] Gap 4
-- [ ] Gap 5 — device profile: `device` param threaded `POST /record → recorder.js`; `browser.newContext({ ...devices[device] })` applied; dropdown in `RecorderModal` mirrors `RunRegressionModal`; mid-session device switch verified
-- [ ] Gap 6 — stealth profile: opt-in `stealth: true` session param; `launchBrowser()` accepts and applies the stealth-plugin stack; default-mode bit-for-bit unchanged; headless-detection bypass verified against guard-script fixture
-- [ ] `backend/tests/recorder.test.js` covers all four gaps and is registered in `backend/tests/run-tests.js`
-- [ ] `tests/e2e/specs/recorder-gaps-ui.spec.mjs` (Tier-3) covers the new UI affordances via `page.route()` mocks
-- [ ] PROC-001 satisfied: every new `router.<method>(…)` has a matching frontend consumer in `frontend/src/api.js` + `RecorderModal.jsx`
-- [ ] `permissions.json` updated for the three new recorder mutation routes
-- [ ] `docs/api/projects.md` documents the new routes; `docs/changelog.md` `## [Unreleased]` updated per shipped sub-item
-- [ ] `QA.md` § Recorder updated with the four-gap manual test plan
+- `docker-compose up --scale worker=4` launches 4 independent worker containers that each pull jobs from the shared BullMQ queue
+- A 40-test suite with `shards: 4` completes in ~1/4 the wall-clock time of `shards: 1` (same acceptance criterion as CAP-002b Gap 1)
+- Worker crash mid-test → BullMQ retry picks up the job on a surviving worker; no orphan `running` runs
+- Dashboard shows live worker count + queue depth when Redis is configured; gracefully degrades to "single-process mode" when Redis is absent
+- Zero regression: single-process deployments (no Redis, no `worker` service) behave identically to today
+
+### PR checklist (AUTO-008)
+- [ ] `backend/src/workers/runWorker.js` is stateless — no local-filesystem state survives a container restart
+- [ ] `docker-compose.yml` `worker` service uses the same image as `web` with a different entrypoint
+- [ ] Dashboard worker-pool panel renders queue metrics from BullMQ
+- [ ] `backend/tests/` covers worker-crash recovery + multi-worker job distribution
+- [ ] `docs/guide/getting-started.md` documents the `--scale worker=N` deployment pattern
+- [ ] `docs/changelog.md` `## [Unreleased]` updated
+- [ ] `QA.md` § Distributed Runner updated with manual test plan
+- [ ] PROC-001 satisfied: any new backend route has a matching frontend consumer
 
 ---
 
