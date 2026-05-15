@@ -368,15 +368,9 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 
 ---
 
-
 ### DIF-012 — Multi-environment support (staging vs. production)
 
 **Status:** ✅ Complete (PR #2) — see Completed Work Summary above for the full implementation details.
-
-<!-- Full original scope (problem statement, fix, files, dependencies) collapsed
-     here — the canonical record lives in the Completed Work Summary row for
-     DIF-012 (PR #2). Restore from git history if you need the original
-     narrative. -->
 
 ---
 
@@ -552,7 +546,6 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 - `backend/.env.example` — document `PLUGINS_DIR`
 
 **Dependencies:** All Phase 3 items (plugin system should wrap stable APIs, not moving targets)
-
 
 ---
 
@@ -1198,7 +1191,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | **Totals** | **99** | **59** | **0** | **40** | |
 
 
-**Total tracked items:** 99 across 9 categories — **58 complete** (59%), **0 in current PR**, **41 remaining**
+**Total tracked items:** 99 across 9 categories — **59 complete** (59%), **0 in current PR**, **40 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
