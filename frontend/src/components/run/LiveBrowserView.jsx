@@ -158,7 +158,7 @@ export default function LiveBrowserView({
       evt.button = (e.buttons & 2) ? 2 : (e.buttons & 4) ? 1 : 0;
     }
     onInput(evt);
-  }, [onInput, scaleCoords, modifiers]);
+  }, [onInput, scaleCoords, modifiers, assertMode, onProbe]);
 
   // Wheel events are forwarded via a non-passive native listener (see effect
   // below). React 18 registers `onWheel` as passive by default, so calling

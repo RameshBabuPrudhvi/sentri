@@ -339,8 +339,18 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   async function handleUndoLast() {
     if (!sessionId) return;
     try {
-      await api.recordPopLast(selectedProjectId, sessionId);
-      setActions((prev) => (prev.length ? prev.slice(0, -1) : prev));
+      const result = await api.recordPopLast(selectedProjectId, sessionId);
+      // Use the server-authoritative `actionCount` for an absolute trim
+      // rather than a relative `prev.slice(0, -1)`. If the 1200ms poll
+      // already reflected the post-pop server state during the await
+      // window, the relative slice would remove one extra action; the
+      // absolute trim is a no-op in that case (length already matches).
+      const target = Number.isFinite(result?.actionCount) ? result.actionCount : null;
+      if (target !== null) {
+        setActions((prev) => (prev.length > target ? prev.slice(0, target) : prev));
+      } else {
+        setActions((prev) => (prev.length ? prev.slice(0, -1) : prev));
+      }
     } catch (e) {
       setError(e.message || "failed to undo last step");
     }

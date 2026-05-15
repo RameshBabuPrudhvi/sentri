@@ -1356,6 +1356,26 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
   }
 
+  // DIF-015c Gap 5: validate the optional device profile UP-FRONT, before
+  // `runRepo.create()` inserts the stub `running` row below. A 400 return
+  // after the row was created would orphan it — the partial unique index
+  // `idx_runs_one_active_per_project` would then block every subsequent
+  // run (crawl, test_run, generate, record) on this project until the next
+  // recorder-launch orphan sweep. Hoist the check alongside `startUrl`
+  // validation so all input rejection happens before any DB side effects.
+  const rawDevice = req.body?.device;
+  const device = rawDevice == null ? "" : String(rawDevice);
+  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
+    return res.status(400).json({ error: `Invalid device: ${device}` });
+  }
+  // DIF-015c Gap 6: optional stealth profile. Coerce to a strict
+  // boolean so a stringy `"true"` payload from a misconfigured client
+  // doesn't accidentally enable stealth (or vice versa). Only the
+  // literal JSON `true` opts in — every other value (false, null,
+  // omitted, "true", 1) leaves stealth off so default-mode runs are
+  // bit-for-bit unchanged.
+  const stealth = req.body?.stealth === true;
+
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
   // Visible breadcrumb so the operator can see the recorder reaching the
   // backend even when everything is working — useful for debugging the
@@ -1418,22 +1438,8 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       // session start, for audit consistency with crawl/run/generate paths.
       environmentId: environment?.id || null,
     });
-    // DIF-015c Gap 5: optional device profile (`"iPhone 14"` etc). Empty
-    // string / undefined → desktop default. Validate against the curated
-    // allowlist BEFORE calling startRecording so a typo doesn't leak past
-    // the recorder boundary as an opaque Playwright error.
-    const rawDevice = req.body?.device;
-    const device = rawDevice == null ? "" : String(rawDevice);
-    if (device && !RECORDER_DEVICE_VALUES.has(device)) {
-      return res.status(400).json({ error: `Invalid device: ${device}` });
-    }
-    // DIF-015c Gap 6: optional stealth profile. Coerce to a strict
-    // boolean so a stringy `"true"` payload from a misconfigured client
-    // doesn't accidentally enable stealth (or vice versa). Only the
-    // literal JSON `true` opts in — every other value (false, null,
-    // omitted, "true", 1) leaves stealth off so default-mode runs are
-    // bit-for-bit unchanged.
-    const stealth = req.body?.stealth === true;
+    // `device` + `stealth` were validated/coerced BEFORE `runRepo.create()`
+    // above so an invalid payload doesn't orphan a stub `running` row.
     await startRecording({ sessionId, projectId: project.id, startUrl, device, stealth });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
