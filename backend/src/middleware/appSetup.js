@@ -471,6 +471,16 @@ export function signRunArtifacts(run) {
   const signed = { ...run };
 
   if (signed.tracePath) signed.tracePath = signArtifactUrl(signed.tracePath);
+  // CAP-002 Phase 2 (Prerequisite #2) — per-shard trace zips ride in the
+  // new `tracePaths[]` JSON column. Sign every entry so the RunDetail
+  // dropdown can open each shard's trace viewer without 401s. Sparse
+  // entries (e.g. a shard that never emitted a trace yet) are preserved
+  // as `null` so the index → shard mapping stays intact.
+  if (Array.isArray(signed.tracePaths)) {
+    signed.tracePaths = signed.tracePaths.map((p) =>
+      typeof p === "string" && p.length > 0 ? signArtifactUrl(p) : p,
+    );
+  }
   if (signed.videoPath) signed.videoPath = signArtifactUrl(signed.videoPath);
   if (Array.isArray(signed.videoSegments)) {
     signed.videoSegments = signed.videoSegments.map(s => signArtifactUrl(s));

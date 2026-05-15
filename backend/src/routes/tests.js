@@ -58,12 +58,41 @@ import { demoQuota } from "../middleware/demoQuota.js";
 import { actor } from "../utils/actor.js";
 import { requireRole } from "../middleware/requireRole.js";
 import * as baselineRepo from "../database/repositories/baselineRepo.js";
+import * as testFixtureRepo from "../database/repositories/testFixtureRepo.js";
 import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
 import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
+
+/**
+ * DIF-012: Resolve and validate an optional `environmentId` against the
+ * given project, returning the env row when valid. Returns `null` when no
+ * envId was supplied; throws an `Error` with `httpStatus` and `message`
+ * fields when the envId is invalid (unknown or belongs to a different
+ * project) so callers can `return res.status(httpStatus).json({error})`.
+ *
+ * Mirrors the validation contract in `routes/runs.js` and
+ * `routes/trigger.js` so all four entry points (crawl, run, generate,
+ * record) share one source of truth.
+ *
+ * @param {string|null|undefined} environmentId
+ * @param {Object} project — already-resolved, workspace-scoped project row.
+ * @returns {Object|null}
+ */
+function resolveEnvOrThrow(environmentId, project) {
+  if (!environmentId) return null;
+  const env = environmentRepo.getById(environmentId);
+  if (!env || env.projectId !== project.id) {
+    const err = new Error("invalid environmentId");
+    err.httpStatus = 400;
+    throw err;
+  }
+  return env;
+}
 
 const router = Router();
 
@@ -108,6 +137,87 @@ const parseTags = (raw) => {
  * @param {string} desiredName
  * @returns {string} A name that doesn't collide with any existing test.
  */
+
+
+/**
+ * CAP-001: parse RFC 4180-flavoured CSV into row objects keyed by the first
+ * line's headers. Supports double-quoted fields with embedded commas, CRLF
+ * newlines inside quoted fields, and `""` as an escaped double-quote.
+ *
+ * Intentionally not a full RFC 4180 implementation — we drop trailing blank
+ * lines and unquoted whitespace around delimiters because fixture CSVs are
+ * typically hand-edited or exported from spreadsheets where those quirks are
+ * the norm. Pulling in a CSV dependency would be overkill for this scope
+ * (see AGENT.md "Do not add large dependencies").
+ *
+ * @param {string} text
+ * @returns {Array<Object>} Rows; empty array when text has fewer than 2
+ *   non-empty logical lines (header + at least one data row).
+ */
+function parseCsvRows(text) {
+  const src = String(text || "");
+  if (!src.trim()) return [];
+
+  // Tokenise into fields/rows respecting quoted segments.
+  const rows = [];
+  let field = "";
+  let row = [];
+  let inQuotes = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') { inQuotes = true; continue; }
+    if (ch === ",") { row.push(field); field = ""; continue; }
+    if (ch === "\n" || ch === "\r") {
+      // Swallow paired \r\n as a single record separator
+      if (ch === "\r" && src[i + 1] === "\n") i++;
+      row.push(field);
+      rows.push(row);
+      row = []; field = "";
+      continue;
+    }
+    field += ch;
+  }
+  // Flush the trailing record if the file didn't end with a newline.
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  // Drop fully-empty rows (blank trailing lines, double newlines).
+  const cleaned = rows.filter((r) => r.some((c) => String(c).trim() !== ""));
+  if (cleaned.length < 2) return [];
+
+  const headers = cleaned[0].map((h) => String(h).trim());
+  return cleaned.slice(1).map((cols) => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      const raw = cols[idx];
+      obj[h] = raw === undefined ? "" : String(raw).trim();
+    });
+    return obj;
+  });
+}
+
+/**
+ * CAP-001: clamp the fixture iteration cap to the [1, 100] range. Default of
+ * 10 mirrors the per-project default documented in NEXT.md so a project
+ * without an explicit `iterationCap` row still gets bounded dispatch.
+ */
+function clampIterationCap(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 10;
+  return Math.max(1, Math.min(100, Math.floor(n)));
+}
+
 function dedupeTestName(projectId, desiredName) {
   const base = String(desiredName || "").trim();
   if (!base) return base; // caller is responsible for never passing empty
@@ -210,6 +320,55 @@ router.get("/tests/:testId", (req, res) => {
 });
 
 // PATCH /api/tests/:testId — persist user-edited steps (and optionally other fields)
+
+router.get("/tests/:testId/fixtures", (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  res.json(testFixtureRepo.listFixtures(test.id));
+});
+
+router.post("/tests/:testId/fixtures", requireRole("qa_lead"), (req, res) => {
+  const test = testRepo.getById(req.params.testId);
+  if (!test) return res.status(404).json({ error: "not found" });
+  const project = projectRepo.getByIdInWorkspace(test.projectId, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "not found" });
+  const { format, rows, csvText, iterationCap } = req.body || {};
+  // Format must be in the same allowlist as the migration's CHECK constraint
+  // so a malformed write can't desync the persisted shape from the validator.
+  if (format !== "csv" && format !== "json") {
+    return res.status(400).json({ error: "format must be 'csv' or 'json'" });
+  }
+  // Cap resolution order: per-request override → per-project setting → default
+  // 10. `clampIterationCap` enforces the [1, 100] hard ceiling regardless of
+  // source so a malformed row in `projects.iterationCap` can't exhaust the
+  // worker pool.
+  const cap = clampIterationCap(iterationCap ?? project.iterationCap);
+  let parsedRows = [];
+  if (format === "json") parsedRows = Array.isArray(rows) ? rows : [];
+  if (format === "csv") parsedRows = parseCsvRows(csvText);
+  if (!Array.isArray(parsedRows) || parsedRows.length === 0) {
+    return res.status(400).json({ error: "fixture rows required" });
+  }
+  const clampedRows = parsedRows.slice(0, cap);
+  // Keep fixture versions aligned with `test.codeVersion` so an AI fix that
+  // bumps the test body invalidates stale fixtures (the runner reads the
+  // fixture for the new version, finds nothing, and falls back to single
+  // iteration — zero regression for fixture-less tests).
+  const version = Number(test.codeVersion || 1);
+  const fixture = testFixtureRepo.upsertFixture({ testId: test.id, version, format, rows: clampedRows });
+  res.status(201).json({
+    ...fixture,
+    capApplied: cap,
+    truncated: parsedRows.length > clampedRows.length,
+  });
+});
+
+// Exported for backend/tests/fixture-iteration.test.js so the CSV parser and
+// cap clamp can be exercised without spinning up an HTTP server.
+export const __testables = { parseCsvRows, clampIterationCap };
+
 router.patch("/tests/:testId", requireRole("qa_lead"), async (req, res) => {
   const validationErr = validateTestUpdate(req.body);
   if (validationErr) return res.status(400).json({ error: validationErr });
@@ -502,6 +661,17 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
   const { name, description, dialsConfig } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "name is required" });
 
+  // DIF-012: optional per-run environment override. Validated up-front so a
+  // bad envId fails fast before any AI calls or audit-row creation. The
+  // override flows into `generateFromUserDescription` via the scoped
+  // project (matches runs.js + trigger.js — same contract everywhere).
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
+  }
+
   // Sanitise name: strip prompt-injection markers (same regex as description/customInstructions)
   const cleanName = name.trim()
     .replace(/^(SYSTEM|ASSISTANT|USER|HUMAN|AI)\s*:/gim, "")
@@ -568,6 +738,9 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
       requestedAt: new Date().toISOString(),
     },
     workspaceId: project.workspaceId || null,
+    // DIF-012: persist on the run record so the audit trail records which
+    // environment this generation targeted (consistent with crawl/run paths).
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
   logActivity({ ...actor(req),
@@ -578,7 +751,11 @@ router.post("/projects/:id/tests/generate", requireRole("qa_lead"), demoQuota("g
   res.status(202).json({ runId });
 
   runWithAbort(runId, run,
-    (signal) => generateFromUserDescription(project, run, {
+    // DIF-012: scope the project (url + credentials) to the selected env
+    // for this generation run only — `project.url` is preserved as
+    // `canonicalUrl` so the AUTO-015 baseline guard treats the run as
+    // preview-style.
+    (signal) => generateFromUserDescription(envScopedProject(project, environment), run, {
       name: cleanName,
       description: cleanDescription,
       dialsPrompt,
@@ -1154,7 +1331,19 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
   const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
   if (!project) return res.status(404).json({ error: "project not found" });
 
-  const startUrl = String(req.body?.startUrl || project.url || "").trim();
+  // DIF-012: optional per-session environment override. The recorder is
+  // driven interactively by the operator (no auto-login), so the env only
+  // affects the default `startUrl` — if the caller didn't supply one, fall
+  // back to `environment.baseUrl` instead of `project.url` so the operator
+  // lands on the right environment from the first frame.
+  let environment;
+  try {
+    environment = resolveEnvOrThrow(req.body?.environmentId, project);
+  } catch (err) {
+    return res.status(err.httpStatus || 400).json({ error: err.message });
+  }
+
+  const startUrl = String(req.body?.startUrl || environment?.baseUrl || project.url || "").trim();
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
     return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
   }
@@ -1217,6 +1406,9 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       // the same /pages aggregator works for both crawl + record sources.
       pages: [{ url: startUrl, title: startUrl, status: "recorded" }],
       workspaceId: project.workspaceId || null,
+      // DIF-012: record which environment (if any) the operator picked at
+      // session start, for audit consistency with crawl/run/generate paths.
+      environmentId: environment?.id || null,
     });
     await startRecording({ sessionId, projectId: project.id, startUrl });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));

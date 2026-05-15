@@ -298,8 +298,9 @@ const _COL_MAP = buildColumnMap([
   "aiFixAppliedAt", "codeVersion",
   // tests — auto-approval provenance (migration 017, AUTO-003b)
   "confidenceScore", "approvalSource", "approvalThreshold", "approvedAt", "approvedBy",
-  // projects — auto-approval threshold (migration 017) + web-vitals budgets (migration 015)
-  "autoApproveThreshold", "webVitalsBudgets",
+  // projects — auto-approval threshold (migration 017) + web-vitals budgets
+  // (migration 015) + per-project fixture iteration cap (migration 023, CAP-001)
+  "autoApproveThreshold", "webVitalsBudgets", "iterationCap",
   // runs
   "startedAt", "finishedAt", "errorCategory", "pagesFound", "parallelWorkers",
   "tracePath", "videoPath", "videoSegments", "testQueue", "generateInput",
@@ -307,6 +308,14 @@ const _COL_MAP = buildColumnMap([
   "qualityAnalytics",
   // runs — web-vitals result (migration 015) + secret-scan flag (migration 015, CAP-003)
   "webVitalsResult", "secretScanBlocked",
+  // runs — DIF-012 environment scope (migration 024) + CAP-002 shard telemetry
+  // (migration 025) + CAP-002 Phase 2 per-shard trace paths (migration 026).
+  // PostgreSQL folds unquoted identifiers to lowercase, so without these
+  // entries `run.environmentId` / `run.shardCount` / `run.shardsCompleted` /
+  // `run.tracePaths` would all be `undefined` on Postgres — silently breaking
+  // the worker env override, the shard badge, the shard partition, and the
+  // per-shard trace dropdown.
+  "environmentId", "shardCount", "shardsCompleted", "tracePaths",
   // metric_samples (migration 016, MET-001)
   "metricKey",
   // activities

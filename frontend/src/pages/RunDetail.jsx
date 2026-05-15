@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -134,6 +134,7 @@ export default function RunDetail() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState(null);
   const [priorRuns, setPriorRuns] = useState([]);
+  const [rootCauseExpanded, setRootCauseExpanded] = useState(false);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -264,6 +265,13 @@ export default function RunDetail() {
     }
   }, [run, rerunning, navigate, addNotification]);
 
+  // AUTO-010 — Track whether the initial auto-expand decision has been made
+  // for the current run. Reset on `runId` change so navigating to a different
+  // run re-arms the decision; once flipped to `true` for a given run, later
+  // SSE updates that mutate `rootCauses.length` won't override the user's
+  // manual collapse/expand toggle.
+  const hasSetInitialExpand = useRef(false);
+
   // Reset live-stream state when navigating to a different run
   useEffect(() => {
     setFrames([]);
@@ -275,7 +283,33 @@ export default function RunDetail() {
     setCompareLoading(false);
     setCompareError(null);
     setPriorRuns([]);
+    // AUTO-010 — re-arm the initial-expand decision for the new run.
+    hasSetInitialExpand.current = false;
+    setRootCauseExpanded(false);
   }, [runId]);
+
+  // AUTO-010 — Auto-expand the Root Cause Summary panel the first time
+  // `rootCauses` actually loads with ≥2 clusters (multiple clusters is the
+  // high-signal case worth surfacing immediately). At mount the TanStack
+  // Query data is still loading so `run` is `null` and `rootCausesCount === 0`
+  // — gating on `hasSetInitialExpand.current` ensures the effect fires once
+  // when the data arrives and never again, so subsequent SSE snapshots can
+  // mutate `rootCauses` without clobbering a user-toggled collapse/expand.
+  // The mount-time reset (in the runId-keyed effect above) re-arms the ref
+  // when navigating to a different run.
+  //
+  // `runId` is included in the dep array so navigating between two cached
+  // runs that happen to have the same `rootCausesCount` still re-fires the
+  // effect — without it, the `runId`-keyed reset would flip the ref back to
+  // `false` but `rootCausesCount` (unchanged) wouldn't trigger the effect,
+  // leaving the new run's panel collapsed.
+  const rootCausesCount = Array.isArray(run?.rootCauses) ? run.rootCauses.length : 0;
+  useEffect(() => {
+    if (hasSetInitialExpand.current) return;
+    if (rootCausesCount === 0) return;
+    hasSetInitialExpand.current = true;
+    setRootCauseExpanded(rootCausesCount >= 2);
+  }, [rootCausesCount, runId]);
 
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
@@ -406,8 +440,49 @@ export default function RunDetail() {
   const passRateDenominator = Math.max(0, total - countNonExecutedSkips(results));
   const passRate = passRateDenominator > 0 ? Math.round((passed / passRateDenominator) * 100) : null;
 
+  // AUTO-010 — `useEffect` for the initial-expand decision lives at the top
+  // of the component (before the early returns) so the React hooks-rules
+  // contract holds. This local is just the array reference for rendering.
+  const rootCauses = Array.isArray(run.rootCauses) ? run.rootCauses : [];
+
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
+  // CAP-002 Phase 2 (Prerequisite #2) — shard-mode runs produce one trace
+  // zip per shard at `/artifacts/traces/${runId}/shard-${i}.zip`. The
+  // backend populates `run.tracePaths[]` (JSON array, migration 026)
+  // alongside the single-link `run.tracePath` for backwards compat.
+  // Render a dropdown when there are ≥2 shard traces; otherwise the
+  // existing single-link UI below covers both `shardCount === 1` and
+  // legacy pre-Phase-2 runs.
+  //
+  // `tracePaths` is intentionally a *sparse* array indexed by shardIndex —
+  // a shard that crashed before writing its trace leaves a `null` slot
+  // (see `backend/src/middleware/appSetup.js` `signRunArtifacts` which
+  // preserves sparse entries as `null` so the index → shard mapping is
+  // not lost). We must therefore retain the original index when filtering
+  // out the empty slots; using the filtered array's index for the label
+  // would mislabel "Shard 3" as "Shard 2" when shard 1 is missing.
+  const shardTracePaths = Array.isArray(run.tracePaths)
+    ? run.tracePaths
+        .map((p, i) => (typeof p === "string" && p.length > 0 ? { path: p, shardIndex: i } : null))
+        .filter(Boolean)
+    : [];
+  // CAP-002 Phase 2 — denominator for the per-shard option label MUST match
+  // the header badge (`Shards M/N` at line 524, which uses `run.shardCount`).
+  // `tracePaths` is populated incrementally as each shard flushes its zip
+  // (`runRepo.setShardTracePath`), so `tracePaths.length` can be less than
+  // `shardCount` either:
+  //   - mid-run (sibling shards haven't flushed yet), or
+  //   - on a completed run where a shard crashed before writing its trace
+  //     (sparse `null` slot survives but the array length still trails).
+  // Using `tracePaths.length` would show "Shard 1/2" alongside a "Shards 2/4"
+  // header — a confusing inconsistency. Anchor to `run.shardCount` and only
+  // fall back to the array length for legacy / pre-migration-025 runs that
+  // never persisted `shardCount`.
+  const totalShardCount = Number(run.shardCount) > 0
+    ? Number(run.shardCount)
+    : (Array.isArray(run.tracePaths) ? run.tracePaths.length : 0);
+  const hasShardTraces = shardTracePaths.length > 1;
 
   // MNT-010: Show re-run button for crawl/generate runs in terminal states
   const TERMINAL_STATUSES = new Set(["completed", "completed_empty", "failed", "interrupted", "aborted"]);
@@ -496,6 +571,12 @@ export default function RunDetail() {
 
           {/* Browser engine (DIF-002b) — only meaningful for test runs.
               Crawl and generate runs are pinned to chromium. */}
+
+          {!isCrawl && !isGenerate && Number(run.shardCount || 1) > 1 && (
+            <span className="badge badge-blue">
+              Shards {Math.max(0, Number(run.shardsCompleted || 0))}/{Number(run.shardCount)}
+            </span>
+          )}
           {!isCrawl && !isGenerate && run.browser && (
             <BrowserBadge browser={run.browser} />
           )}
@@ -536,7 +617,30 @@ export default function RunDetail() {
                 {rerunning ? "Starting…" : "Re-run"}
               </button>
             )}
-            {traceUrl && (
+            {/* CAP-002 Phase 2 — per-shard trace dropdown when shardCount > 1
+                and the run actually emitted per-shard zips. Falls back to the
+                single-link UI for `shardCount === 1` and legacy runs. */}
+            {hasShardTraces ? (
+              <select
+                className="input btn-sm"
+                aria-label="Open trace for shard"
+                defaultValue=""
+                onChange={(e) => {
+                  const path = e.target.value;
+                  if (!path) return;
+                  window.open(`/trace-viewer/?trace=${encodeURIComponent(path)}`, "_blank", "noreferrer");
+                  e.target.value = ""; // reset so re-selecting the same shard re-opens
+                }}
+                style={{ fontSize: "0.78rem", padding: "4px 8px" }}
+              >
+                <option value="" disabled>🔍 Open Trace…</option>
+                {shardTracePaths.map(({ path, shardIndex }) => (
+                  <option key={shardIndex} value={path}>
+                    Shard {shardIndex + 1}/{totalShardCount || shardTracePaths.length}
+                  </option>
+                ))}
+              </select>
+            ) : traceUrl && (
               <>
                 <a href={traceViewerUrl} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
                   🔍 Open Trace
@@ -832,6 +936,32 @@ export default function RunDetail() {
               CI pipelines polling the trigger endpoint receive <code>gateResult.passed: false</code> and should exit non-zero.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Root cause summary (AUTO-010) ───────────────────────────────── */}
+      {run.type === "test_run" && rootCauses.length >= 1 && (
+        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setRootCauseExpanded((v) => !v)}>{rootCauseExpanded ? "▼" : "▶"} Root Cause Summary ({rootCauses.length})</button>
+          {rootCauseExpanded && (
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {rootCauses.map((cluster) => {
+                // AUTO-010 — surface the deduplicated test-id count so data-
+                // driven tests with N failing iterations don't inflate the
+                // "N affected test(s)" copy. `cluster.size` still reflects
+                // total failed-result rows for analytics consumers.
+                const affectedCount = Array.isArray(cluster.affectedTestIds)
+                  ? cluster.affectedTestIds.length
+                  : cluster.size;
+                return (
+                  <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
+                    <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{affectedCount} affected test(s)</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

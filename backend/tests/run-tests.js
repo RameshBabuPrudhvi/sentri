@@ -88,6 +88,18 @@ const files = [
   "tests/impact-analysis.test.js",
   "tests/github-checks.test.js",
   "tests/github-install-callback.test.js",
+  "tests/fixture-iteration.test.js",
+  "tests/test-fixtures-routes.test.js",
+  "tests/environments.test.js",
+  "tests/shard-config.test.js",
+  "tests/run-sharding.test.js",
+  "tests/run-storage-concurrency.test.js",
+  "tests/run-worker-shard-retry.test.js",
+  "tests/run-abort-pubsub.test.js",
+  "tests/run-shard-crash.test.js",
+  "tests/run-shard-registry.test.js",
+  "tests/run-shard-finalizer.test.js",
+  "tests/failure-clusterer.test.js",
 ];
 
 let passed = 0;

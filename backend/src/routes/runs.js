@@ -20,17 +20,19 @@
 import { Router } from "express";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import { generateRunId, generateWebhookTokenId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort, runAbortControllers } from "../utils/runWithAbort.js";
-import { workerAbortControllers } from "../workers/runWorker.js";
+import { workerAbortControllers, abortAllShardsForRun } from "../workers/runWorker.js";
+import { publishRunAbort } from "../utils/runAbortChannel.js"; // CAP-002 Phase 2 — cross-replica abort fan-out.
 import { emitRunEvent } from "./sse.js";
 import { resolveDialsPrompt, resolveDialsConfig } from "../testDials.js";
 import { crawlAndGenerateTests } from "../crawler.js";
-import { runTests } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
+import { runTests, partitionTestIdsForShards } from "../testRunner.js"; // thin orchestrator — delegates to runner/ modules
 import { resolveBrowser } from "../runner/config.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
@@ -41,6 +43,8 @@ import { trackTelemetry } from "../utils/telemetry.js";
 import { runQueue, isQueueAvailable } from "../queue.js";
 import { fireNotifications } from "../utils/notifications.js";
 import { orderTestsByRisk, applyBudgetToQueue, normalizeBudgetMinutes } from "../pipeline/riskScorer.js";
+import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
+import { normalizeShardConfig } from "../utils/shardConfig.js"; // CAP-002 — shared shards + parallelWorkers clamp.
 
 const router = Router();
 
@@ -54,6 +58,15 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     return res.status(409).json({
       error: `A run is already in progress (${existingRun.id}). Please wait for it to finish or abort it first.`,
     });
+  }
+
+  // DIF-012: optional per-run environment override. Validates the env
+  // belongs to this project so callers can't run against a sibling
+  // project's environment by ID guessing.
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
   }
 
   const { dialsConfig } = req.body || {};
@@ -81,6 +94,7 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
     pagesFound: 0,
     generateInput: validatedDials ? { dialsConfig: validatedDials } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 
@@ -107,7 +121,16 @@ router.post("/projects/:id/crawl", requireRole("qa_lead"), demoQuota("crawl"), e
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => crawlAndGenerateTests(project, run, { dialsPrompt, testCount, explorerMode, explorerTuning, signal }),
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are preserved in the DB; only this run sees the
+      // override. envScopedProject also stamps `canonicalUrl` so the
+      // AUTO-015 diff-aware baseline guard treats this as a preview-style
+      // crawl and doesn't replace production baselines.
+      (signal) => crawlAndGenerateTests(
+        envScopedProject(project, environment),
+        run,
+        { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "crawl.complete", projectId: project.id, projectName: project.name,
@@ -144,6 +167,18 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     });
   }
 
+  // DIF-012: optional per-run environment override. Validated up-front
+  // (before the no-tests / no-approved-tests checks) so a bad envId fails
+  // fast with `invalid environmentId` rather than masking behind a
+  // misleading "no tests found" error. Matches the ordering used by the
+  // crawl path (runs.js:98-102) and the trigger path (trigger.js:454-458),
+  // and the contract documented in QA.md (line 903).
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   const allTests = testRepo.getByProjectId(project.id);
   const tests = allTests.filter((t) => t.reviewStatus === "approved");
   if (!allTests.length) return res.status(400).json({ error: "no tests found, crawl first" });
@@ -154,9 +189,12 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   // against the known engines by `resolveBrowser()` inside `runTests`; we only
   // pass it through here and stamp the sanitised canonical name onto the run
   // record for display on the Run Detail page.
-  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes } = req.body || {};
+  const { dialsConfig, browser, device, locale, timezoneId, geolocation, networkCondition, budgetMinutes, shards } = req.body || {};
   const validatedRunDials = resolveDialsConfig(dialsConfig);
-  const parallelWorkers = validatedRunDials?.parallelWorkers ?? 1;
+  // CAP-002: `shardCount` and `parallelWorkers` are *separate* concepts —
+  // see `utils/shardConfig.js` for the full BUG-0001 rationale. Shared with
+  // `routes/trigger.js` so both entry points apply identical semantics.
+  const { shardCount, parallelWorkers } = normalizeShardConfig(shards, validatedRunDials?.parallelWorkers);
   const canonicalBrowser = resolveBrowser(browser).name;
 
   // AUTO-001: risk-based ordering + optional budget truncation. Reorder is for
@@ -208,6 +246,8 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     // trail of "what the reviewer queued" even when budget truncated dispatch.
     total: tests.length,
     parallelWorkers,
+    shardCount,
+    shardsCompleted: 0,
     browser: canonicalBrowser,
     device: device || null,
     networkCondition: networkCondition || "fast",
@@ -219,6 +259,7 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     })),
     budgetMinutes: safeBudget,
     workspaceId: project.workspaceId || null,
+    environmentId: environment?.id || null,
   };
   runRepo.create(run);
 
@@ -232,13 +273,49 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
     // Snapshot approved test IDs at enqueue time so retries use the same
     // set — prevents mismatch between run.total/testQueue and the actual
     // tests executed if approvals change between attempts.
+    //
+    // CAP-002 Phase 2 — when the caller requested `shards: N > 1`, fan out
+    // to N BullMQ jobs sharing the parent `runId`. Each job carries its
+    // pre-computed test-ID slice; the worker never re-derives the split.
+    // `jobId: ${runId}:s${i}` keeps each shard job unique while sharing
+    // the parent `runs` row (Prerequisite #4 contract — one row per run).
+    // The last shard to finish — detected via the boundary-crossing
+    // `incrementShardsCompleted` UPDATE — owns finalization (feedback loop
+    // + status transition + `done` event). See `workers/runWorker.js`
+    // `test_run_shard` branch.
     try {
-      await runQueue.add("test_run", {
-        runId,
-        projectId: project.id,
-        type: "test_run",
-        options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
-      }, { jobId: runId });
+      if (shardCount > 1) {
+        const dispatchedIds = selectedTests.map((t) => t.id);
+        const slices = partitionTestIdsForShards(dispatchedIds, shardCount);
+        // Enqueue all shards in parallel so a partial failure of the
+        // Promise.all surfaces immediately and we can mark the run failed
+        // before any shard starts executing. Each shard job uses the same
+        // `attempts: 2` retry budget as the single-shard path (inherited
+        // from `queue.js` `defaultJobOptions`).
+        await Promise.all(slices.map((testIds, shardIndex) =>
+          runQueue.add("test_run_shard", {
+            runId,
+            projectId: project.id,
+            type: "test_run_shard",
+            shardIndex,
+            shardCount,
+            options: {
+              parallelWorkers, browser: canonicalBrowser,
+              device: device || null, locale: locale || null,
+              timezoneId: timezoneId || null, geolocation: geolocation || null,
+              networkCondition: networkCondition || "fast",
+              testIds, actorInfo: actor(req),
+            },
+          }, { jobId: `${runId}:s${shardIndex}` })
+        ));
+      } else {
+        await runQueue.add("test_run", {
+          runId,
+          projectId: project.id,
+          type: "test_run",
+          options: { parallelWorkers, browser: canonicalBrowser, device: device || null, locale: locale || null, timezoneId: timezoneId || null, geolocation: geolocation || null, networkCondition: networkCondition || "fast", testIds: selectedTests.map((t) => t.id), actorInfo: actor(req) },
+        }, { jobId: runId });
+      }
     } catch (enqueueErr) {
       // Redis connection dropped after startup — mark the run as failed so it
       // doesn't block the project with a perpetual "running" status.
@@ -248,7 +325,15 @@ router.post("/projects/:id/run", requireRole("qa_lead"), demoQuota("run"), expen
   } else {
     // Fallback: in-process execution (no Redis)
     runWithAbort(runId, run,
-      (signal) => runTests(project, selectedTests, run, { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }),
+      // DIF-012: env override applies at execution only — project.url +
+      // project.credentials are unchanged in the DB; only this run's
+      // testRunner sees the override.
+      (signal) => runTests(
+        envScopedProject(project, environment),
+        selectedTests,
+        run,
+        { parallelWorkers, browser: canonicalBrowser, device, locale, timezoneId, geolocation, networkCondition, signal }
+      ),
       {
         onSuccess: () => logActivity({ ...actor(req),
           type: "test_run.complete", projectId: project.id, projectName: project.name,
@@ -433,7 +518,18 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   }
 
   const entry = runAbortControllers.get(req.params.runId);
-  const workerEntry = workerAbortControllers.get(req.params.runId);
+  // CAP-002 Phase 2 (Prerequisite #4) — `workerAbortControllers` is keyed by
+  // BullMQ jobId (bare `runId` for legacy single-shard runs, `${runId}:s${i}`
+  // for each shard). Use the parent-keyed iterator to detect whether *any*
+  // shard of this run is in flight on this replica, instead of a single
+  // `.get(runId)` lookup that would miss shard-keyed entries entirely.
+  let workerAborted = 0;
+  const hasWorkerEntries = (() => {
+    for (const e of workerAbortControllers.values()) {
+      if (e?.runId === req.params.runId) return true;
+    }
+    return false;
+  })();
   if (entry) {
     // Mutate the in-memory run object that the pipeline holds so that
     // finalizeRunIfNotAborted() and runRepo.save(run) see "aborted" and
@@ -446,7 +542,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
 
     entry.controller.abort();
     runAbortControllers.delete(req.params.runId);
-  } else if (workerEntry) {
+  } else if (hasWorkerEntries) {
     // BullMQ-processed run: write abort status to DB BEFORE signaling the
     // worker to prevent a race where the worker's completion write overwrites
     // the abort status between signal and the worker's catch block.
@@ -456,8 +552,11 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
       duration: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : null,
       error: "Aborted by user",
     });
-    workerEntry.controller.abort();
-    workerAbortControllers.delete(req.params.runId);
+    // CAP-002 Phase 2 (Prerequisite #4) — fan out to every shard
+    // controller for this run on this replica, then `publishRunAbort`
+    // below reaches sibling replicas. `abortAllShardsForRun` handles
+    // both legacy single-key entries and shard-keyed entries.
+    workerAborted = abortAllShardsForRun(req.params.runId);
   }
 
   // Mark queued tests that never executed as "skipped" so pass/fail/total
@@ -466,7 +565,7 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
   // For BullMQ runs (workerEntry path), re-read from DB after signalling
   // abort — testRunner flushes results to SQLite after each test, so the fresh
   // snapshot captures results completed between the initial read and the abort.
-  const liveRun = entry?.run || (workerEntry ? (runRepo.getById(req.params.runId) || run) : run);
+  const liveRun = entry?.run || (hasWorkerEntries ? (runRepo.getById(req.params.runId) || run) : run);
   if (Array.isArray(liveRun.results) && Array.isArray(liveRun.testQueue)) {
     const executedIds = new Set(liveRun.results.map(r => r.testId));
     for (const queued of liveRun.testQueue) {
@@ -481,10 +580,10 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     }
   }
 
-  // For BullMQ runs (workerEntry path), the DB was already updated
-  // above before signaling the worker. For all other paths (in-process or
-  // stale runs with no live controller), write the abort status now.
-  if (!workerEntry) {
+  // For BullMQ runs, the DB was already updated above before signaling
+  // the worker. For all other paths (in-process or stale runs with no
+  // live controller), write the abort status now.
+  if (!hasWorkerEntries) {
     runRepo.update(req.params.runId, {
       status: "aborted",
       finishedAt: new Date().toISOString(),
@@ -517,7 +616,16 @@ router.post("/runs/:runId/abort", requireRole("qa_lead"), (req, res) => {
     testsGenerated: countsSource.testsGenerated ?? undefined,
   });
 
-  res.json({ ok: true });
+  // CAP-002 Phase 2 (Prerequisite #5) — fan the abort out to every replica's
+  // worker via Redis pub/sub. The local-fast-path above already cancelled
+  // any controller in *this* process; this publish reaches sibling replicas
+  // whose `workerAbortControllers` map may hold the same runId for shard
+  // jobs we don't see. Origin-stamp suppression prevents self-echo. Fire
+  // and forget — `publishRunAbort` already swallows publish errors, and
+  // the abort response shouldn't block on a sibling-replica round-trip.
+  publishRunAbort(req.params.runId).catch(() => { /* best-effort */ });
+
+  res.json({ ok: true, shardsAborted: workerAborted });
 });
 
 // ─── CI/CD Trigger token management ──────────────────────────────────────────

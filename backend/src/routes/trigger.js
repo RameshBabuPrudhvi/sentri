@@ -19,6 +19,7 @@
 import { Router } from "express";
 import crypto from "node:crypto";
 import * as runRepo from "../database/repositories/runRepo.js";
+import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as webhookTokenRepo from "../database/repositories/webhookTokenRepo.js";
 import * as githubCheckSettingsRepo from "../database/repositories/githubCheckSettingsRepo.js";
@@ -26,7 +27,9 @@ import { generateRunId } from "../utils/idGenerator.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { runWithAbort } from "../utils/runWithAbort.js";
 import { resolveDialsConfig, resolveDialsPrompt } from "../testDials.js";
-import { runTests } from "../testRunner.js";
+import { runTests, partitionTestIdsForShards } from "../testRunner.js";
+import { runQueue, isQueueAvailable } from "../queue.js"; // CAP-002 Phase 2 — BullMQ fan-out for sharded CI/CD runs.
+import { actor } from "../utils/actor.js"; // CAP-002 Phase 2 — actor info threaded into shard job data for activity logs.
 import { crawlAndGenerateTests } from "../crawler.js";
 import { classifyError } from "../utils/errorClassifier.js";
 import { expensiveOpLimiter, signRunArtifacts } from "../middleware/appSetup.js";
@@ -38,6 +41,8 @@ import { computeImpactedTests } from "../pipeline/impactAnalysis.js";
 import { createPending, markInProgress, conclude, buildRunUrl, getChangedFilesForPr } from "../integrations/githubChecks.js";
 import { findGreenBaseRun, renderGithubCheckSummary, conclusionForRun } from "../utils/runResultFormatters.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { envScopedProject as buildEnvScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
+import { normalizeShardConfig } from "../utils/shardConfig.js"; // CAP-002 — shared shards + parallelWorkers clamp.
 
 // ─── SSRF protection for callbackUrl ──────────────────────────────────────────
 // Two-layer defence provided by utils/ssrfGuard.js:
@@ -96,9 +101,13 @@ const router = Router();
  *   as `generateInput: { dialsConfig }` so the RunDetail page can show
  *   which dials drove the crawl and the MNT-010 re-run feature can
  *   replicate the same configuration. Mirrors `runs.js:81`.
+ * @param {string|null} [args.environmentId] - DIF-012: persisted on the run
+ *   record so trigger-initiated crawl runs surface in the dashboard's
+ *   per-environment aggregation alongside their UI-initiated counterparts.
+ *   Mirrors `runs.js:126` on the canonical POST /crawl path.
  * @returns {object} the run record ready for `runRepo.create()`.
  */
-function buildCrawlRun({ runId, project, dialsConfig }) {
+function buildCrawlRun({ runId, project, dialsConfig, environmentId = null }) {
   return {
     id: runId,
     projectId: project.id,
@@ -115,6 +124,7 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
     // the column entirely on no-dials calls — matches the canonical path.
     generateInput: dialsConfig ? { dialsConfig } : undefined,
     workspaceId: project.workspaceId || null,
+    environmentId,
   };
 }
 
@@ -138,6 +148,10 @@ function buildCrawlRun({ runId, project, dialsConfig }) {
  * @param {string[]} [args.changedFiles] - Git diff files used for impact analysis.
  * @param {Object|null} [args.impactAnalysis] - Resolved impact-analysis summary.
  * @param {number} args.parallelWorkers
+ * @param {number} [args.shardCount=1] - CAP-002: explicit shard request from
+ *   the caller (`req.body.shards`). Defaults to 1 so legacy callers that
+ *   never pass `shards` don't surface a misleading shard badge — see
+ *   `routes/runs.js` (BUG-0001 rationale).
  * @returns {object} the run record ready for `runRepo.create()`.
  */
 function buildTestRun({
@@ -149,9 +163,11 @@ function buildTestRun({
   riskById,
   budgetMinutes = null,
   parallelWorkers,
+  shardCount = 1,
   githubCheck = null,
   changedFiles = [],
   impactAnalysis = null,
+  environmentId = null,
 }) {
   const lookup = riskById || new Map();
   const initialResults = [
@@ -187,6 +203,8 @@ function buildTestRun({
     failed: 0,
     total: tests.length,
     parallelWorkers,
+    shardCount,
+    shardsCompleted: 0,
     testQueue: tests.map((t) => ({
       id: t.id, name: t.name, steps: t.steps || [],
       riskScore: lookup.get(t.id) ?? null,
@@ -196,6 +214,7 @@ function buildTestRun({
     githubCheck,
     changedFiles,
     impactAnalysis,
+    environmentId,
   };
 }
 
@@ -303,7 +322,7 @@ async function prepareGithubCheck(project, body, runId, deliveryId = null) {
  * @param {Object} finishedRun
  * @param {Object} project
  */
-async function concludeGithubCheck(finishedRun, project) {
+export async function concludeGithubCheck(finishedRun, project) {
   const check = finishedRun?.githubCheck;
   if (!check?.checkRunId || !check.repo || !check.installationId) return;
   try {
@@ -401,6 +420,12 @@ async function resolveChangedFiles(project, body, runId) {
 async function handleTrigger(req, res) {
   const { triggerToken: tokenRow, triggerProject: project } = req;
 
+  const environmentId = req.body?.environmentId || null;
+  const environment = environmentId ? environmentRepo.getById(environmentId) : null;
+  if (environmentId && (!environment || environment.projectId !== project.id)) {
+    return res.status(400).json({ error: "invalid environmentId" });
+  }
+
   // ── 3. Extract and validate optional config (async) ────────────────
   // callbackUrl validation includes DNS resolution, so it must happen
   // BEFORE the synchronous concurrent-run guard to avoid a TOCTOU race
@@ -429,7 +454,10 @@ async function handleTrigger(req, res) {
   }
 
   const validatedDials = resolveDialsConfig(dialsConfig);
-  const parallelWorkers = validatedDials?.parallelWorkers ?? 1;
+  // CAP-002: shardCount and parallelWorkers are independent — see
+  // `utils/shardConfig.js` for the full BUG-0001 rationale. Shared with
+  // `routes/runs.js` so both entry points apply identical semantics.
+  const { shardCount, parallelWorkers } = normalizeShardConfig(req.body?.shards, validatedDials?.parallelWorkers);
   // AUTO-002 / AUTO-015: honour dialsConfig on the crawl path too — `runs.js`
   // already derives these from the same `validatedDials` and forwards them to
   // crawlAndGenerateTests at runs.js:108. Without this the trigger path
@@ -544,7 +572,7 @@ async function handleTrigger(req, res) {
   // in `routes/runs.js` so test_run / crawl runs created via this endpoint
   // are byte-identical to the ones POST /run and POST /crawl produce.
   const run = triggerCrawl
-    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials })
+    ? buildCrawlRun({ runId, project, dialsConfig: validatedDials, environmentId: environment?.id || null })
     : buildTestRun({
         runId,
         project,
@@ -554,8 +582,10 @@ async function handleTrigger(req, res) {
         riskById,
         budgetMinutes: safeBudget,
         parallelWorkers,
+        shardCount,
         changedFiles: changedFiles || [],
         impactAnalysis: impact,
+        environmentId: environment?.id || null,
       });
   runRepo.create(run);
 
@@ -610,6 +640,92 @@ async function handleTrigger(req, res) {
     });
   }
 
+  // CAP-002 Phase 2 — Sharded test-run fan-out for CI/CD.
+  // When the caller requested `shards: N > 1` AND a BullMQ queue is
+  // available, enqueue N shard jobs sharing the parent `runId` (same
+  // pattern as `routes/runs.js:281-330`). Each shard worker calls
+  // `runTests({ shardIndex })` against its pre-partitioned slice; the
+  // boundary-crossing shard (whose `incrementShardsCompleted` UPDATE
+  // returns 1 AND lands the counter at `shardCount`) runs
+  // `finalizeShardedRun` which fires the feedback loop, status
+  // transition, `done` SSE, activity log, telemetry, notifications,
+  // AND `concludeGithubCheck` — so the GitHub PR Check still completes
+  // even though we bypassed the `runWithAbort.onComplete` hook above.
+  //
+  // The single-shard / no-Redis path keeps the existing `runWithAbort`
+  // flow so `onComplete` → `concludeGithubCheck` + `safeFetchCallback`
+  // fires for legacy callers. On the sharded BullMQ path, `callbackUrl`
+  // rides in every shard's job data and `finalizeShardedRun` POSTs it
+  // exactly once (only the boundary-crossing shard reaches the
+  // finalizer — guaranteed by the SQL row-lock predicate on
+  // `incrementShardsCompleted`).
+  if (!triggerCrawl && shardCount > 1 && isQueueAvailable()) {
+    try {
+      const dispatchedIds = selectedTests.map((t) => t.id);
+      const slices = partitionTestIdsForShards(dispatchedIds, shardCount);
+      const scopedProject = buildEnvScopedProject(project, environment);
+      // CAP-002 Phase 2 — `callbackUrl` is included on EVERY shard job's
+      // options for durability (any shard could be the boundary-crossing
+      // finalizer), but `finalizeShardedRun` only fires it for the single
+      // shard whose `incrementShardsCompleted` UPDATE crosses the cap.
+      // The SQL row-lock predicate guarantees exactly one finalizer, so
+      // the callback POSTs exactly once even though N shards carry the
+      // URL in job data. Validated upstream — see callbackUrl checks at
+      // `backend/src/routes/trigger.js:435-442`.
+      const normalizedCallbackUrl = typeof callbackUrl === "string" && callbackUrl.length > 0
+        ? callbackUrl
+        : null;
+      await Promise.all(slices.map((testIds, shardIndex) =>
+        runQueue.add("test_run_shard", {
+          runId,
+          projectId: scopedProject.id,
+          type: "test_run_shard",
+          shardIndex,
+          shardCount,
+          options: {
+            parallelWorkers,
+            // DIF-002: trigger path doesn't yet expose `browser` in its
+            // request body; leave null and let `runTests` resolve to
+            // chromium. When the trigger body grows a `browser` field
+            // (mirroring runs.js), thread it through here.
+            browser: null,
+            device: null,
+            locale: null,
+            timezoneId: null,
+            geolocation: null,
+            networkCondition: "fast",
+            testIds,
+            actorInfo: actor(req),
+            callbackUrl: normalizedCallbackUrl,
+          },
+        }, { jobId: `${runId}:s${shardIndex}` })
+      ));
+      // Respond 202 immediately — same shape as the runWithAbort path
+      // produces. CI consumers polling `statusUrl` see the run
+      // transition through `running` → terminal state driven by the
+      // BullMQ workers + finalizer.
+      const proto = req.headers["x-forwarded-proto"] || req.protocol;
+      const host  = req.headers["x-forwarded-host"]  || req.get("host");
+      const statusUrl = `${proto}://${host}/api/v1/projects/${project.id}/trigger/runs/${runId}`;
+      const response = { runId, statusUrl };
+      if (run.githubCheck?.checkRunId) {
+        response.githubCheck = { checkRunId: run.githubCheck.checkRunId, reused: false };
+      }
+      return res.status(202).json(response);
+    } catch (enqueueErr) {
+      // Redis went away between `isQueueAvailable()` and the enqueue
+      // round-trip. Mark the run failed (the GitHub Check stays
+      // in_progress; an operator can re-trigger) and surface 503 so the
+      // CI pipeline knows to retry. Mirrors `routes/runs.js`.
+      runRepo.update(runId, {
+        status: "failed",
+        error: "Failed to enqueue shards",
+        finishedAt: new Date().toISOString(),
+      });
+      return res.status(503).json({ error: "Job queue unavailable. Please try again." });
+    }
+  }
+
   runWithAbort(runId, run,
     (signal) => triggerCrawl
       // AUTO-002 / AUTO-015: when crawling a preview URL we overwrite
@@ -620,14 +736,24 @@ async function handleTrigger(req, res) {
       // check sees preview === preview (both sides equal because project.url
       // was already overridden) and silently destroys the real fingerprints.
       ? crawlAndGenerateTests(
-          { ...project, url: previewUrl || project.url, canonicalUrl: project.url },
+          // Shared helper's signature is `(project, environment, { previewUrl })`
+          // — `previewUrl` always wins over `environment.baseUrl`.
+          buildEnvScopedProject(project, environment, { previewUrl }),
           run,
           { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
         )
       // AUTO-001: dispatch the risk-ordered + budget-capped subset, not the
       // full approved set. The persisted run (buildTestRun) still records the
       // approved-test order via `tests` for audit fidelity.
-      : runTests(project, selectedTests, run, { parallelWorkers, signal }),
+      // DIF-012: env override applies at execution only — project.url and
+      // project.credentials are preserved in the DB; only this run sees the
+      // env baseUrl + credentials.
+      : runTests(
+          buildEnvScopedProject(project, environment),
+          selectedTests,
+          run,
+          { parallelWorkers, signal }
+        ),
     {
       onSuccess: () => {
         logActivity({
@@ -811,7 +937,9 @@ async function launchPreviewCrawl({ project, previewUrl, provider, tokenRow, dia
     // Without this, production baselines would be overwritten with
     // preview-URL fingerprints every time a deployment webhook fires.
     (signal) => crawlAndGenerateTests(
-      { ...project, url: previewUrl, canonicalUrl: project.url },
+      // launchPreviewCrawl is the Vercel/Netlify webhook path — no env
+      // override here, only the deploy-preview URL.
+      buildEnvScopedProject(project, null, { previewUrl }),
       run,
       { dialsPrompt, testCount, explorerMode, explorerTuning, signal }
     ),

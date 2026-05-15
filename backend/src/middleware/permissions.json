@@ -223,7 +223,7 @@
     "GET /api/v1/integrations/github/install/callback": {
       "role": "state_jwt (admin-issued)",
       "source": "backend/src/routes/integrations/github.js",
-      "noUi": "Auth via signed one-shot state JWT, NOT requireAuth — SameSite=Strict cookies are not sent on cross-site redirects from github.com. The state JWT is issued by GET /install/start (admin-gated) so the callback inherits admin authority transitively."
+      "noUi": "Auth via signed one-shot state JWT, NOT requireAuth \u2014 SameSite=Strict cookies are not sent on cross-site redirects from github.com. The state JWT is issued by GET /install/start (admin-gated) so the callback inherits admin authority transitively."
     },
     "POST /api/v1/integrations/github/app-webhook": {
       "role": "public (GitHub HMAC)",
@@ -233,7 +233,27 @@
     "POST /api/v1/projects/:id/trigger/github": {
       "role": "trigger_token + GitHub HMAC",
       "source": "backend/src/routes/trigger.js",
-      "noUi": "machine-only GitHub PR webhook [no-ui] — dual-auth (Bearer trigger token via requireTrigger + X-Hub-Signature-256 HMAC keyed by GITHUB_WEBHOOK_SECRET)"
+      "noUi": "machine-only GitHub PR webhook [no-ui] \u2014 dual-auth (Bearer trigger token via requireTrigger + X-Hub-Signature-256 HMAC keyed by GITHUB_WEBHOOK_SECRET)"
+    },
+    "POST /api/v1/tests/:testId/fixtures": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "GET /api/v1/projects/:id/environments": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/projects.js"
+    },
+    "POST /api/v1/projects/:id/environments": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
+    },
+    "PATCH /api/v1/projects/:id/environments/:environmentId": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
+    },
+    "DELETE /api/v1/projects/:id/environments/:environmentId": {
+      "role": "admin",
+      "source": "backend/src/routes/projects.js"
     }
   },
   "anyAuthenticatedMember": [
@@ -254,7 +274,8 @@
     "GET /api/v1/recycle-bin",
     "GET /api/v1/auth/export",
     "DELETE /api/v1/auth/account",
-    "POST /api/v1/chat"
+    "POST /api/v1/chat",
+    "GET /api/v1/tests/:testId/fixtures"
   ],
   "outOfScope": {
     "$comment": "Endpoints / flows present in code but not yet shipped end-to-end. Do NOT manually QA \u2014 file enhancement requests instead.",

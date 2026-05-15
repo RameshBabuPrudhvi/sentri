@@ -275,6 +275,72 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* ── DIF-012: Per-environment pass rate + last green run ── */}
+          {(data?.environmentPassRates?.length ?? 0) > 0 && (
+            <div className="card card-padded mb-md">
+              <div className="flex-between mb-md">
+                <div className="flex-center gap-sm">
+                  <Activity size={14} color="var(--accent)" />
+                  <span className="section-title" style={{ marginBottom: 0 }}>Environments</span>
+                </div>
+                <span className="text-xs text-muted">
+                  {data.environmentPassRates.length} environment{data.environmentPassRates.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Environment</th>
+                    <th>Pass rate</th>
+                    <th>Last green run</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.environmentPassRates.map((row) => {
+                    const key = `${row.projectId}::${row.environmentId || "default"}`;
+                    const pct = row.passRate;
+                    const rateClass = pct == null ? "dash-env-rate--none"
+                      : pct >= 80 ? "dash-env-rate--good"
+                      : pct >= 50 ? "dash-env-rate--warn"
+                      : "dash-env-rate--bad";
+                    return (
+                      <tr key={key}>
+                        <td className="dash-env-project" onClick={() => navigate(`/projects/${row.projectId}`)}>
+                          {row.projectName}
+                        </td>
+                        <td className="dash-env-name">
+                          {row.environmentName}
+                          {row.baseUrl && <span className="dash-env-base">{row.baseUrl}</span>}
+                        </td>
+                        <td>
+                          <span className={`dash-env-rate ${rateClass}`}>
+                            {pct == null ? "—" : `${pct}%`}
+                          </span>
+                          <span className="dash-env-count">
+                            ({row.passed}/{row.total})
+                          </span>
+                        </td>
+                        <td>
+                          {row.lastGreenRunAt ? (
+                            <span
+                              className="dash-env-green-link"
+                              onClick={() => row.lastGreenRunId && navigate(`/runs/${row.lastGreenRunId}`)}
+                            >
+                              {new Date(row.lastGreenRunAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          ) : (
+                            <span className="dash-env-never">Never</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {(data?.topAccessibilityOffenders?.length ?? 0) > 0 && (
             <div className="card card-padded mb-md">
               <div className="flex-between" style={{ marginBottom: 14 }}>

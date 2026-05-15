@@ -171,6 +171,46 @@
 /* ── Checkbox accent ────────────────────────────────────────────────────────── */
 .pd-checkbox { accent-color: var(--accent); cursor: pointer; }
 
+/* ── Environments tab (DIF-012) ─────────────────────────────────────────────── */
+/* Scoped to the EnvironmentsTab panel mounted on ProjectDetail. Mirrors the
+   `.pd-*` prefix used by sibling tabs (review, runs, traceability). Only
+   the env-specific bits live here — buttons, cards, tables, flex helpers,
+   inputs, and text colours all reuse components.css / utilities.css. */
+.pd-env-header {
+  padding: 16px 20px 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.pd-env-heading { font-weight: 700; font-size: 0.95rem; margin: 0; }
+.pd-env-hint    { font-size: 0.73rem; color: var(--text3); margin-left: 8px; }
+.pd-env-empty   { padding: 20px; font-size: 0.82rem; color: var(--text3); }
+.pd-env-row-name    { font-weight: 600; font-size: 0.82rem; }
+.pd-env-row-url     { font-size: 0.78rem; color: var(--text2); }
+.pd-env-row-cred    {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.73rem; color: var(--text2);
+}
+.pd-env-row-actions { display: flex; gap: 4px; }
+.pd-env-actions-col { width: 160px; }
+
+/* Loading-state spinner — replaces inline { opacity: 0.3, marginBottom: 12 }
+   on the icon inside .pd-empty for the EnvironmentsTab loading view. */
+.pd-env-loading-icon { opacity: 0.3; margin-bottom: 12px; }
+
+/* Add/edit form panel */
+.pd-env-form          { padding: 18px 20px; }
+.pd-env-form-title    { font-weight: 700; font-size: 0.95rem; margin: 0 0 12px; }
+.pd-env-form-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;
+}
+.pd-env-form-label    { font-size: 0.78rem; color: var(--text2); }
+.pd-env-form-input    { height: 38px; }
+.pd-env-form-actions  { display: flex; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 600px) {
+  .pd-env-form-grid { grid-template-columns: 1fr; }
+  .pd-env-actions-col { width: auto; }
+}
+
 /* ── Empty state (centered) ─────────────────────────────────────────────────── */
 .pd-empty {
   padding: 60px 24px; text-align: center; color: var(--text2);

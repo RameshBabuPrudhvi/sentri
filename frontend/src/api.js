@@ -256,6 +256,10 @@ export const api = {
   getTest:      (testId)            => req("GET",    `/tests/${testId}`),
   /** @param {string} testId @param {Object} data - Fields to update. */
   updateTest:   (testId, data)      => req("PATCH",  `/tests/${testId}`, data),
+
+  uploadTestFixture: (testId, payload) => req("POST", `/tests/${testId}/fixtures`, payload),
+  getTestFixtures: (testId) => req("GET", `/tests/${testId}/fixtures`),
+
   /** @param {string} projectId @param {Object} data - `{ name, steps }`. Saved as Draft. */
   createTest:   (projectId, data)   => req("POST",   `/projects/${projectId}/tests`, data),
   /**
@@ -554,6 +558,19 @@ export const api = {
    * @returns {Promise<{ok: boolean}>}
    */
   deleteSchedule: (projectId) => req("DELETE", `/projects/${projectId}/schedule`),
+
+
+  // ── Environments (DIF-012) ───────────────────────────────────────────────
+  /** @param {string} projectId */
+  getProjectEnvironments:    (projectId)               => req("GET",    `/projects/${projectId}/environments`),
+  /** @param {string} projectId @param {{name: string, baseUrl: string, credentials?: Object}} payload */
+  createProjectEnvironment:  (projectId, payload)      => req("POST",   `/projects/${projectId}/environments`, payload),
+  /** @param {string} projectId @param {string} environmentId @param {Object} payload */
+  updateProjectEnvironment:  (projectId, environmentId, payload) =>
+    req("PATCH", `/projects/${projectId}/environments/${environmentId}`, payload),
+  /** @param {string} projectId @param {string} environmentId */
+  deleteProjectEnvironment:  (projectId, environmentId) =>
+    req("DELETE", `/projects/${projectId}/environments/${environmentId}`),
 
   // ── Dashboard ───────────────────────────────────────────────────────────────
   /** @returns {Promise<Object>} Analytics: pass rate, defects, flaky tests, MTTR, etc. */

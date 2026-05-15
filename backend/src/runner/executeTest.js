@@ -623,3 +623,45 @@ async function executeApiTest(test, runId, stepIndex, runStart) {
 
   return result;
 }
+
+
+/**
+ * CAP-001: run `runSingle(iterTest)` once per fixture row, substituting
+ * `{{key}}` placeholders in `playwrightCode` from the row values. When
+ * `fixtureRows` is empty/missing the test runs once unchanged (zero-
+ * regression contract — fixture-less tests behave exactly as before).
+ *
+ * Every iteration runs to completion so failures are attributable to a
+ * specific row (`NEXT.md` acceptance criterion: "5-row CSV → 5 iteration
+ * results"). Each result carries `iterationIndex` + `fixtureRow` snapshot
+ * so the run UI can surface per-row attribution; callers decide retry/abort
+ * semantics based on the returned array.
+ *
+ * @param {Object} test
+ * @param {Array<Object>|undefined} fixtureRows
+ * @param {function(Object): Promise<Object>} runSingle
+ * @returns {Promise<Array<Object>>}
+ */
+export async function executeTestIterations(test, fixtureRows, runSingle) {
+  const rows = Array.isArray(fixtureRows) && fixtureRows.length ? fixtureRows : [null];
+  const out = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const iterTest = row
+      ? {
+          ...test,
+          playwrightCode: Object.entries(row).reduce(
+            (code, [k, v]) => String(code || "").replaceAll(`{{${k}}}`, String(v ?? "")),
+            test.playwrightCode || "",
+          ),
+        }
+      : test;
+    const iterResult = await runSingle(iterTest);
+    if (row) {
+      iterResult.iterationIndex = i;
+      iterResult.fixtureRow = row;
+    }
+    out.push(iterResult);
+  }
+  return out;
+}

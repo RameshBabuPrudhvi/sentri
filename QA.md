@@ -33,11 +33,14 @@ If the user asks for… read only this section:
 | "Auto-approve tests / revoke / calibration" | [Auto-Approval](#-auto-approval-auto-003b) | 582–647 |
 | "Edit test code / steps" | [Test Code Editing](#%EF%B8%8F-test-code-editing-steps--source) | 676–724 |
 | "Schedule / trigger from CI" | [Automation](#-automation-cicd--scheduled-runs) | 727–758 |
-| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
+| "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | 851–912 |
+| "Distributed sharding / shards: N / cross-process test split" | [Distributed Sharding](#-distributed-sharding-cap-002) | 915–980 |
+| "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 982–1020 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | navigate by anchor — line ranges stale post-PR-#7 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
-| "Verify security / authorization" | [Security](#-security) | 997–1025 |
-| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 1104–1149 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1306–1339 |
+| "Verify security / authorization" | [Security](#-security) | navigate by anchor — line ranges stale post-PR-#7 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | navigate by anchor — line ranges stale post-PR-#7 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | navigate by anchor — line ranges stale post-PR-#7 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
@@ -54,42 +57,53 @@ auto-approval:       { lines: 582-647 }     # NEW (AUTO-003b)
 ai-fix:              { lines: 650-673 }
 test-code-editing:   { lines: 676-724 }
 automation:          { lines: 727-758 }
-quality-gates:       { lines: 761-815 }     # NEW (AUTO-012)
-visual-testing:      { lines: 818-835 }
-dashboard:           { lines: 838-856 }
-ai-chat:             { lines: 860-889 }
-settings:            { lines: 893-910 }
-account-gdpr:        { lines: 914-924 }
-email-verification:  { lines: 927-934 }
-recycle-bin:         { lines: 938-948 }
-audit-log:           { lines: 951-959 }
-notifications:       { lines: 963-994 }
-security:            { lines: 997-1025 }
-reports-pdf:         { lines: 1028-1043 }
-system-diagnostics:  { lines: 1047-1056 }
-new-project:         { lines: 1060-1071 }
-runs-list:           { lines: 1075-1086 }
-project-detail:      { lines: 1089-1101 }
-bulk-actions:        { lines: 1104-1149 }
-modals:              { lines: 1152-1180 }
-api-test-imports:    { lines: 1184-1199 }
-onboarding:          { lines: 1203-1212 }
-demo-mode:           { lines: 1216-1227 }
-settings-data-tab:   { lines: 1231-1245 }
-workspace-switcher:  { lines: 1249-1257 }
+quality-gates:       { lines: 795-849 }     # NEW (AUTO-012)
+environments:        { lines: 851-912 }     # NEW (DIF-012)
+distributed-sharding:{ lines: 915-980 }     # NEW (CAP-002)
+data-driven-fixtures:{ lines: 982-1020 }    # NEW (CAP-001)
+
+# ── Stale post-PR-#7: line ranges below shifted by ~+170 lines and have
+#    NOT been recomputed. Navigate by heading anchor instead:
+#       grep -n '^### ' QA.md
+#    Entries kept as anchor names only — line ranges intentionally omitted
+#    so agents can't accidentally `sed -n A,Bp` into wrong content.
+visual-testing:      # anchor only
+dashboard:           # anchor only
+ai-chat:             # anchor only
+settings:            # anchor only
+account-gdpr:        # anchor only
+email-verification:  # anchor only
+recycle-bin:         # anchor only
+audit-log:           # anchor only
+notifications:       # anchor only
+security:            # anchor only
+reports-pdf:         # anchor only
+system-diagnostics:  # anchor only
+new-project:         # anchor only
+runs-list:           # anchor only
+project-detail:      # anchor only
+bulk-actions:        # anchor only
+modals:              # anchor only
+api-test-imports:    # anchor only
+onboarding:          # anchor only
+demo-mode:           # anchor only
+settings-data-tab:   # anchor only
+workspace-switcher:  # anchor only
 
 # Meta sections
 golden-happy-path:       { lines: 241-342 }
 canonical-ui-test-shape: { lines: 95-109 }
 permissions-matrix:      { lines: 152-200 }
 setup:                   { lines: 204-237 }
-cross-cutting-checks:    { lines: 1185-1213 }
-known-issues:            { lines: 1217-1228 }
-bug-template:            { lines: 1232-1263 }
-coverage-checklist:      { lines: 1267-1313 }
+cross-cutting-checks:    # anchor only — stale post-PR-#7
+known-issues:            # anchor only — stale post-PR-#7
+bug-template:            # anchor only — stale post-PR-#7
+coverage-checklist:      # anchor only — stale post-PR-#7
 ```
 
-> **Read-only boundary:** line ranges are approximate and can drift ±5 lines after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
+> **Read-only boundary:** line ranges are approximate and can drift after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.
+
+> ⚠️ **Index staleness notice (CAP-001 / DIF-012 / CAP-002, PR #5):** The Environments / Distributed Sharding / Data-driven fixtures sections were inserted at lines 853–1020, shifting **every section below them by ~+170 lines**. The numeric line ranges for entries below `data-driven-fixtures` in the YAML index — including `visual-testing`, `dashboard`, `ai-chat`, `settings`, `account-gdpr`, `email-verification`, `recycle-bin`, `audit-log`, `notifications`, `security`, `reports-pdf`, `system-diagnostics`, `new-project`, `runs-list`, `project-detail`, `bulk-actions`, `modals`, `api-test-imports`, `onboarding`, `demo-mode`, `settings-data-tab`, `workspace-switcher`, `cross-cutting-checks`, `known-issues`, `bug-template`, `coverage-checklist` — and the matching rows in the intent-map table above are **out of date**. Until they're recomputed, **navigate by heading anchor** (`grep -n '^### ' QA.md`) instead of by line number for those sections. The CAP-001 / DIF-012 / CAP-002 entries themselves and everything at or above `quality-gates` remain accurate.
 
 > ⚠️ **Agents generating Playwright tests for Sentri: read this.**
 > Sentri's primary output is **UI / browser tests** that drive a real browser via `await page.goto(...)`, role-based selectors (`getByRole` / `getByLabel` / `getByText`), `safeClick` / `safeFill`, and `expect(page....)` assertions on rendered DOM.
@@ -844,6 +858,180 @@ The Quality Gates and Web Vitals Budgets panels live exclusively on the `/automa
 
 ---
 
+### 🌐 Environments (DIF-012)
+
+_(automated: see `tests/e2e/specs/environments-ui.spec.mjs` for the Environments tab CRUD round-trip + RunRegressionModal dropdown via `page.route()` mock; backend integration coverage in `backend/tests/environments.test.js`. Coverage tracked in `tests/e2e/COVERAGE.md`.)_
+
+**Preconditions:** Project exists; `admin` user logged in for mutations, `qa_lead`+ for reads. Endpoints documented in `docs/api/projects.md` § Environment management; permissions in `backend/src/middleware/permissions.json`.
+
+**Run-scoped credential override** (DIF-012): when an environment carries `credentials`, both `environment.baseUrl` AND `environment.credentials` override their `project.*` counterparts for the duration of one run only. The project row is never mutated; the override happens via `envScopedProject()` in `backend/src/routes/runs.js` (UI-triggered runs) and `buildEnvScopedProject()` in `backend/src/routes/trigger.js` (CI/webhook-triggered runs). The shared scope contract: `canonicalUrl` is preserved so the AUTO-015 baseline guard treats env-scoped crawls as preview-style and doesn't overwrite production baselines. Envs **without** their own `credentials` inherit the project's auth — same shape as before.
+
+**UI surface — ProjectDetail → Environments tab** (`frontend/src/components/project/EnvironmentsTab.jsx`):
+1. Open `/projects/:id` → click the **Environments** tab (between Runs and Traceability) → empty-state copy reads "No environments defined. Runs will target the project's default URL."
+2. Fill the add-environment form with `name: staging`, `baseUrl: https://staging.example.com` → click **Add environment** → toast `Environment created`; row appears in the table above with the `staging` name + `staging.example.com` URL.
+3. Add a second env (`preprod`) with `username: qa` + `password: secret` filled in → row renders with a 🔒 lock icon + `qa` username (the password never echoes back — server response carries decrypted credentials; the table only renders the username).
+4. Click **Edit** on the `preprod` row → form pre-fills with name + baseUrl (and `username: qa` — password field stays blank by design, never echoed). Change the `name` to `preprod-2` and save WITHOUT typing a new password → toast `Environment updated`; verify via DB inspection that the stored credentials still decrypt to `{ username: "qa", password: "secret" }` — the secret was NOT wiped.
+5. Click **Edit** on the same row → clear both username and password fields → save → server stores `credentials: null`; reload tab → 🔒 column reads `—`.
+6. Click the trash-can on a row → confirmation prompt → confirm → toast `Environment deleted`; row gone; reload to verify persistence.
+7. As `qa_lead` (not `admin`) → tab renders, table is visible, but the add/edit form is hidden and per-row Edit / Delete buttons are disabled (admin-only mutations enforced by `requireRole("admin")` server-side; UI gates via the `canEdit` prop derived from `useAuth`).
+
+**UI surface — Test Lab (crawl + generate)** (`frontend/src/pages/TestLab.jsx`):
+8a. Open `/test-lab` (or `/projects/:id/test-lab`) → select a project with ≥ 1 environment → the right-rail launch panel renders an **Environment** dropdown below the Examples list (Requirement tab) or below the Estimate (Crawl tab). Selecting a non-default env causes the next **Start Crawl & Generate** / **Generate Tests** click to send `environmentId` in the POST body — verify by network-inspecting `/api/v1/projects/:id/crawl` or `/api/v1/projects/:id/tests/generate`.
+8b. Switch projects in the left sidebar → env list reloads against the new project, selection resets to "Default" (no stale envId leak). Switch to a project with zero envs → dropdown disappears entirely.
+8c. The recorder launched from Test Lab inherits the page-level env selection via the `defaultEnvironmentId` prop — clicking **Record a test** while a non-default env is selected pre-fills the recorder's Environment dropdown to match.
+
+**UI surface — RecorderModal environment selector** (`frontend/src/components/run/RecorderModal.jsx`):
+8d. Open the recorder on a project with ≥ 1 environment → idle form shows an **Environment** dropdown below the Project picker. Selecting an env auto-fills the **Starting URL** field with `environment.baseUrl` (operator lands on the right env from the first frame).
+8e. Clicking **Launch recorder** sends `environmentId` in the `POST /record` body so the run record's `environmentId` column is set — verify by inspecting the `runs` row (`SELECT environmentId FROM runs WHERE id = '<sessionId>'`).
+8f. The recorder is interactive (operator-driven) — `environment.credentials` are NOT auto-applied to login forms inside the recorder. Operators who need to log in to a non-default env will manually fill the form. Auto-login from env credentials applies to crawl/generate/run paths only (where it runs unattended).
+
+**UI surface — RunRegressionModal environment selector** (`frontend/src/components/run/RunRegressionModal.jsx`):
+8. From `/runs` click **Run Tests** → modal opens. With a project that has zero environments selected, the **Environment** dropdown does NOT render (clutter-free for env-less projects).
+9. Switch the project selector to a project with ≥ 1 environment → the **Environment** dropdown appears with `Default (project URL)` as the first option, followed by each env as `<name> — <baseUrl>`.
+10. Switch back to the env-less project → dropdown disappears AND any envId selected against the previous project is cleared (stale selection never leaks into the next run payload).
+11. Select a non-default environment + click **Run Tests** → POST body to `/api/v1/projects/:id/run` includes `environmentId: "ENV-<uuid>"`. Leave on `Default` → body omits the field entirely.
+
+**UI surface — Dashboard "Environments" panel** (`frontend/src/pages/Dashboard.jsx`):
+12. Open `/dashboard` in a workspace where no project has any environments → the **Environments** panel does NOT render (zero-regression for workspaces that haven't adopted the feature).
+13. Add an environment to any project + run regression at least once against each of "default" and the new env → reload dashboard → **Environments** panel renders with one row per `(project, environment)` bucket that has executed ≥ 1 completed test run.
+14. Each row shows project name (click → `/projects/:id`), environment name + baseUrl, pass-rate cell (green ≥ 80%, amber 50–79%, red < 50%) with `(passed/total)` counts, and a **Last green run** cell that's clickable → navigates to that run's RunDetail. Buckets with zero green runs show "Never" in grey.
+15. Switch workspace → panel resets and recomputes against the new workspace's projects.
+
+**API flow — happy path** (admin token unless noted):
+16. `POST /api/v1/projects/:id/environments` with `{ "name": "staging", "baseUrl": "https://staging.example.com" }` → **201** with the created env (`id` is `ENV-<uuid>`, `credentials: null`, `createdAt` ISO timestamp).
+17. `POST /api/v1/projects/:id/environments` with `{ "name": "preprod", "baseUrl": "https://preprod.example.com", "credentials": { "username": "qa", "password": "secret" } }` → **201**; response includes `credentials` in decrypted form. Verify via direct DB read that the stored column is AES-encrypted (`backend/src/utils/credentialEncryption.js`).
+18. `GET /api/v1/projects/:id/environments` (`qa_lead+`) → returns both environments, ordered by `createdAt ASC`.
+19. Trigger a regression run with `{ "environmentId": "<staging-id>" }` → run dispatches; `GET /api/v1/projects/:id` still returns the original `url` (project row never mutates — verified at `backend/tests/environments.test.js`).
+20. Inspect the run record via `GET /runs/:runId` → `environmentId` is persisted in the lean run columns (`backend/src/database/repositories/runRepo.js` `INSERT_COLS`).
+21. `PATCH /api/v1/projects/:id/environments/:environmentId` with `{ "name": "staging-2", "baseUrl": "https://staging-2.example.com", "credentials": { "username": "u2", "password": "p2" } }` → **200**, response carries decrypted updated credentials.
+22. PATCH the same env with only `{ "name": "staging-3" }` (no `credentials` key) → stored credentials decrypt to `u2`/`p2` unchanged (PATCH-without-key preserves stored secret).
+23. PATCH with `{ "credentials": null }` → secret cleared in DB.
+24. `DELETE /api/v1/projects/:id/environments/:environmentId` → **200** `{ ok: true }`; subsequent GET returns the remaining environments without this row.
+
+**Negative / edge — all must hold:**
+- `POST` with missing `name` or `baseUrl` → **400** `name and baseUrl are required`.
+- Run with `environmentId: "ENV-does-not-exist"` → **400** `invalid environmentId` BEFORE the no-approved-tests check; trigger token path raises the same error.
+- Run on project A with `environmentId` belonging to project B → **400** `invalid environmentId` (cross-project leak rejected — see `backend/src/routes/trigger.js`).
+- Run on a project with NO environments AND NO `environmentId` in payload → behaves identically to pre-DIF-012 (zero regression — gate fails on no-approved-tests, not on env validation).
+- `viewer` calling `GET /api/v1/projects/:id/environments` → **403** (`qa_lead+` gate).
+- `qa_lead` calling `POST` / `PATCH` / `DELETE` on environments → **403** (admin-only mutations).
+- Cross-workspace ACL — outsider hitting `/api/v1/projects/:id/environments` for a project in another workspace → **404** (workspace scope enforced upstream by `workspaceScope` middleware), and outsider PATCH on a known env id → **404** (not 403, to avoid leaking existence).
+- Delete an environment that has existing runs → DELETE succeeds; the historical runs keep their `environmentId` value, but the env row is gone (dashboard buckets for that env stop appearing the next time the aggregation runs).
+- `credentials` payload must be a plain object — passing a string or array currently round-trips as-is through `encryptCredentials` (verify; file as enhancement if hardening is desired).
+
+---
+
+### 🔀 Distributed Sharding (CAP-002)
+
+_(automated: backend coverage in `backend/tests/run-sharding.test.js` (partition algorithm + route clamp + BUG-0001 decoupling), `backend/tests/run-storage-concurrency.test.js` (atomic `appendRunResults` + `incrementShardsCompleted` under 8× concurrent writers), `backend/tests/run-shard-finalizer.test.js` (race-safety: stats composition + exactly-one-finalizer + over-firing + interleave), `backend/tests/run-shard-crash.test.js` (first-writer-wins + late-abort race for `markRunFailedFirstWriterWins` / `markRunCompletedFirstWriterWins`), `backend/tests/run-shard-registry.test.js` (parent/shard `workerAbortControllers` registry), `backend/tests/run-worker-shard-retry.test.js` (shard-scoped retry reset), `backend/tests/run-abort-pubsub.test.js` (Redis pub/sub cross-replica abort, gated on `REDIS_URL`). UI coverage in `tests/e2e/specs/run-sharding-ui.spec.mjs` for the modal input + RunDetail badge.)_
+
+**Preconditions:** Project with ≥ 5 approved tests; Redis running (`REDIS_URL` set) for the cross-process fan-out path; `qa_lead` or `admin` logged in. Without Redis, sharding falls back to in-process sequential partition (the badge still progresses but there is no wall-clock speedup — this is intentional and documented).
+
+**Request shape** (`POST /api/v1/projects/:id/run` + `POST /api/v1/projects/:id/trigger`): body `{ "shards": 4 }`. Server-clamped to `[1, MAX_WORKERS]` (default `MAX_WORKERS=2`); default `1` (legacy zero-regression). `shards` is **decoupled from** `dialsConfig.parallelWorkers` — `shardCount` only persists `> 1` when the caller explicitly requested sharding (BUG-0001). A project using only `dialsConfig.parallelWorkers: 4` does NOT surface a misleading "Shards M/N" badge.
+
+**RunRegressionModal `Shards` input:**
+
+1. Open `/runs` → **Run Tests** → **Shards** numeric input renders below device + browser selectors; default `1`. Non-integer (`"3.7"`) coerces to `3`; negative or blank coerces to `1`. Values above `MAX_WORKERS` are server-clamped and the persisted `run.shardCount` reflects the clamp.
+2. With `shards: 1`, the request body must NOT include the `shards` key (verify via DevTools Network). With `shards: 4`, the body includes `"shards": 4`.
+
+**RunDetail "Shards M/N" badge:**
+
+3. Submit `shards: 4` → header renders a blue **Shards 0/4** badge that ticks `0/4 → 4/4` as each shard's last test finishes (once per shard, NOT per test — data-driven tests do not drain the counter prematurely).
+4. **Single-shard / pre-CAP-002** runs (or migrations < `025_run_shards.sql`) → no badge renders; header is bit-for-bit identical to legacy.
+5. **`shards > tests.length`** — empty shards are pre-credited as complete the moment the partition computes; e.g. `shards: 4` on a 2-test suite shows `2/4` immediately, then `4/4` after the two non-empty shards finish.
+6. **Hard browser-launch failure** — runner flushes `shardsCompleted` to `shardCount` so the badge reads `N/N` on the failed run (not stuck at `0/N`).
+
+**Per-shard trace dropdown:**
+
+7. Completed sharded run with ≥ 2 captured traces → "Open Trace" action becomes a `<select>` listing one option per non-empty `tracePaths[]` slot (`Shard 1/4`, `Shard 2/4`, …). Single-shard runs keep the single-link button.
+8. **Sparse `tracePaths`** — when one shard crashed before flushing its trace, its slot is `null`; the dropdown skips it but preserves the original shard index in the label (no silent re-numbering).
+
+**Coordinator fan-out (Redis available):**
+
+9. Submit `shards: 4` → route partitions `selectedTests` into 4 contiguous slices via `partitionTestIdsForShards()` (Playwright `--shard=N/M`) and enqueues 4 BullMQ jobs of type `test_run_shard` sharing the parent `runId`. Each `jobId` is `${runId}:s${i}` (verify via BullMQ Redis keys).
+10. Each shard worker pulls its pre-partitioned `testIds` slice from `job.data.options.testIds` — workers **never re-derive the split**. Verify via `worker.job_start` log entries with `type: "test_run_shard"`.
+11. **No-Redis fallback** — unset `REDIS_URL` and re-run with `shards: 4` → in-process `runWithAbort` executes all 4 shards sequentially in one process; badge still progresses; run completes normally; no regression.
+12. **Trigger path** — same fan-out for `POST /api/v1/projects/:id/trigger` with `shards: 4`. Response 202 shape unchanged from single-shard triggers.
+
+**Finalization handoff:**
+
+13. Exactly **one** shard per run finalizes — whichever shard's `incrementShardsCompleted` UPDATE both returns 1 AND lands the counter at `shardCount`. SQL row-lock predicate guarantees exactly-one even under heavy concurrency (covered by `run-shard-finalizer.test.js`).
+14. The finalizer runs the AI feedback loop exactly once, transitions `status: "completed"` via `markRunCompletedFirstWriterWins`, emits one `done` SSE event, logs one `test_run.complete` activity row, fires notifications, completes the GitHub Check (if `run.githubCheck.checkRunId` is set), and POSTs the optional `callbackUrl` (trigger path only).
+15. Aggregate `passed`/`failed`/`total` on the parent `runs` row reflect the sum across all shards. Data-driven tests' iteration overflow (`totalDelta`) composes correctly.
+
+**Race-safety scenarios:**
+
+16. **Concurrent shard finish** — 40 tests × `shards: 4` such that all shards complete near-simultaneously → exactly one `test_run.complete` activity row, one `done` SSE event, one notification fire. No duplicates.
+17. **Mid-run abort** — long-running sharded run → click **Abort** halfway → abort route fans out to every shard's `workerAbortControllers` entry on this replica via `abortAllShardsForRun(runId)` AND publishes to `sentri:run-abort` so sibling replicas drain. Final status = `aborted`; `done` SSE event reports `status: "aborted"`.
+18. **Late-abort race** — click Abort just as the last shard's `incrementShardsCompleted` lands → the finalizer's `markRunCompletedFirstWriterWins` UPDATE becomes a clean no-op (predicate `WHERE status = 'running'` evaluates false). Finalizer logs `run.finalize_skipped_terminal` and bails out before activity / done / notifications / callback. Final status = `aborted` (NOT overwritten to `completed`).
+19. **Shard crash → run failed** — one shard's slice deterministically fails → first crasher writes the failure reason atomically via `markRunFailedFirstWriterWins`; subsequent crashing shards become no-ops (predicate evaluates false), preserving the first crasher's classified error. Worker publishes to `sentri:run-abort` so sibling shards drain. Final status = `failed`; `shardsCompleted < shardCount` preserved on the badge (truthful partial completion, NOT flushed to N/N).
+20. **Cross-replica abort** (multi-replica deployments) — abort from replica A → replica B's workers receive the signal via `sentri:run-abort` within one Redis round-trip and cancel their in-flight controllers.
+
+**CI/CD `callbackUrl` on sharded trigger runs:**
+
+21. `POST /api/v1/projects/:id/trigger` with `{ "shards": 4, "callbackUrl": "https://ci.example.com/hooks/sentri" }` + Bearer token → 202 immediately. After the run completes, the callback URL receives exactly **one** POST with the same payload shape as single-shard trigger runs (`runId`, `status`, `passed`, `failed`, `total`, `error`, `gateResult`, `webVitalsResult`). SSRF-safe via `safeFetch` (re-resolves DNS, blocks redirects).
+22. CI consumers can use one handler for both sharded and non-sharded runs — payload shape is identical.
+
+**Permissions:**
+
+23. `viewer` calling `POST /run` or `POST /trigger` with `shards: N` → 403 (same gate as single-shard).
+24. Cross-workspace ACL — outsider hitting `/api/v1/runs/:runId` for a sharded run in another workspace → 404 (workspace scope enforced upstream).
+
+**Negative / edge:**
+
+- `shards: 0` or `shards: -5` → coerces to `1` (no error, no behaviour change from absent `shards`).
+- `shards: "abc"` → coerces to `1` (non-numeric fallback).
+- `shards: 100` with `MAX_WORKERS=2` → server clamps to `2`; persisted `run.shardCount: 2`.
+- A test deleted between enqueue and worker pickup → that shard's `byId.get(id)` returns `undefined`, filtered out by `.filter(Boolean)`; the shard runs the remaining tests in its slice without crashing.
+- A shard's BullMQ retry → wipes ONLY that shard's results via `purgeShardResults` (atomic, dialect-aware row lock); sibling shards' already-completed results survive the retry.
+
+---
+
+### 📊 Data-driven test fixtures (CAP-001)
+
+_(automated: see `tests/e2e/specs/test-fixtures-ui.spec.mjs` for TestFixturePanel CSV upload round-trip, RunDetail iteration badges via `page.route()` mock, and Automation → Iterations panel save. Backend HTTP coverage in `backend/tests/test-fixtures-routes.test.js`; repo + runner unit coverage in `backend/tests/fixture-iteration.test.js`. Coverage tracked in `tests/e2e/COVERAGE.md`.)_
+
+**Preconditions:** Project exists with `qa_lead` or `admin` access. A test exists with `playwrightCode` containing `{{column}}` placeholders. Endpoints documented in `backend/src/routes/tests.js` (fixtures CRUD), `backend/src/routes/projects.js` (`iterationCap` PATCH bypass), and `backend/src/middleware/permissions.json`.
+
+**Fixture upload (TestDetail → Data-driven fixtures panel, `frontend/src/components/test/TestFixturePanel.jsx`):**
+1. Open `/tests/:testId` → scroll to the **Data-driven fixtures** card → version badge reads `v<test.codeVersion>` (e.g. `v1` for a freshly created test).
+2. Default format is **CSV**. Paste a 3-row CSV (`email,role\na@…,admin\nb@…,viewer\nc@…,viewer`) → click **Save fixture** → toast `Saved 3 row(s) at version 1`; history table renders one row with format `CSV`, count `3`, and an **active** badge (matches current `codeVersion`).
+3. Switch the format select to **JSON array** → paste `[{"email":"a@…","role":"admin"}]` → save → second history row appears for the same version (replaces — fixtures are keyed on `(testId, version)`; verify by re-opening and confirming only one row per version).
+4. **Same-version overwrite warning** — re-upload at the same `codeVersion` → `window.confirm` prompt appears (`A fixture already exists for version N (M row(s)). Saving will replace it. Continue?`). Cancel → no change; confirm → upserts.
+5. **Different-version upload** — bump `codeVersion` (via an edit that triggers regeneration) → upload again → no confirm prompt fires (different version, not a replace).
+6. **Iteration cap override** — fill the `iteration cap` input with `5` and upload a 15-row CSV → toast reads `Saved 5 row(s) at version N (truncated to cap 5)`; the response carries `capApplied: 5, truncated: true`.
+7. **JSON validation** — paste invalid JSON → inline error `JSON is not valid — expected an array of row objects.` (form-level guard before request fires).
+8. **Empty rows** — paste a CSV with only a header row → server returns 400 `fixture rows required`; the panel surfaces the error inline.
+
+**Per-project iteration cap (`/automation` → Quality Gates → expand a project → **Iterations** inner tab, `IterationCapPanel`):**
+9. Default state: `iterationCap` is `null` → server-side `clampIterationCap` falls through to the default **10** rows per data-driven test.
+10. Fill the input with `25` → click **Save** → toast `Iteration cap set to 25`. Reload tab → value persists.
+11. Clear the input → save → toast `Iteration cap cleared — using default (10).`; underlying PATCH sets `iterationCap: null`.
+12. **Validation** — enter `0` / `101` / `1.5` → frontend error `Iteration cap must be empty or an integer between 1 and 100.` (server also returns 400 with the same range message at `backend/src/routes/projects.js`).
+13. **Single-field PATCH bypass** — body `{ iterationCap: 25 }` with no `name`/`url` succeeds (mirrors the existing `autoApproveThreshold` bypass). A body that mixes `iterationCap` with another field (e.g. `status`) falls through to the full validator (verified by the `SINGLE_FIELD_BYPASS` set in `backend/src/routes/projects.js`).
+
+**Run-time iteration (`backend/src/runner/executeTest.js` `executeTestIterations`, `backend/src/testRunner.js`):**
+14. With a 3-row fixture saved at `v1` and a test whose `playwrightCode` references `{{email}}` → trigger a run → **3 iteration results land in `run.results`**, one per row. Each carries `iterationIndex` (0/1/2) + `fixtureRow` (the source row snapshot).
+15. RunDetail → expand the test → each result row renders an `iteration #1` / `#2` / `#3` badge alongside the status pill. Hover the badge → the substituted row JSON is the tooltip (`title` attr).
+16. **5-row CSV → 5 iteration results** acceptance criterion: upload 5 rows → run → all 5 must execute even if intermediate rows fail; verify by inducing a row 2 failure and confirming rows 3-5 still appear in `run.results` (the `executeTestIterations` for-loop never short-circuits).
+17. **Fixture-less zero-regression** — a test with no fixture row uploaded at its current `codeVersion` runs **exactly once**; the result carries neither `iterationIndex` nor `fixtureRow`. Re-confirm by uploading a fixture at `v1`, bumping the test to `v2` via an AI fix, and running — the runner reads `(testId, v2)`, finds nothing, and falls back to the single-iteration path.
+18. **Retry suppression for data-driven tests** — induce a row-level failure → the run log carries `↻ Skipping retry for <test> — N/M fixture iteration(s) failed (data-driven tests don't retry)`; fixture-less failures still go through the standard `MAX_TEST_RETRIES` flow.
+19. **Cap clamp at runtime** — even if `projects.iterationCap` is set to `9999` via direct DB write, the runner's `clampIterationCap` enforces `[1, 100]` on every dispatch — verify by inspecting the dispatched batch size.
+
+**Permissions:**
+20. `viewer` calling `POST /api/v1/tests/:testId/fixtures` → 403. `qa_lead` and `admin` succeed.
+21. `GET /api/v1/tests/:testId/fixtures` is `anyAuthenticatedMember` — viewer can read fixture history but not upload.
+22. Cross-workspace ACL — outsider hitting `/api/v1/tests/:testId/fixtures` for a test in another workspace → 404 (workspace scope enforced via the test's parent project).
+
+**Negative / edge:**
+- Format allowlist — POST with `format: "xml"` → 400 `format must be 'csv' or 'json'` (matches the migration's CHECK constraint).
+- CSV parser is RFC 4180-flavoured: handles quoted fields with embedded commas, CRLF line endings, and `""`-escaped quotes; trailing blank lines are dropped. A header-only file returns 400 (no data rows). Verified at `backend/tests/fixture-iteration.test.js`.
+- Fixtures are scoped to `(testId, codeVersion)` — after an AI fix bumps `codeVersion`, old fixtures stay around for run-history replay but the new version starts fresh (zero rows → single iteration). Verify by inspecting the history table: old version rows lose their **active** badge once `codeVersion` increases.
+- The fixture history table never grows unbounded for a single version: re-uploading at the same `(testId, version)` is an upsert, not an append (`backend/src/database/repositories/testFixtureRepo.js`).
+- `iterationCap` in [1, 100] is enforced at three layers: frontend input validation, route-level PATCH validation, and `clampIterationCap` at runtime — verify each by attempting a `9999` write via each path.
+
+---
+
 ### 🖼️ Visual Testing
 
 **Preconditions:** Test with screenshot steps exists.
@@ -1444,3 +1632,5 @@ A release is QA-approved only when **all** of the following are true:
 - Do NOT report a bug without a build/commit SHA and browser+OS.
 - Do NOT file duplicates of Known Issues.
 - Do NOT mark a flow as passing until **every** expected result is observed.
+
+- Run Detail root cause checks: verify panel appears when `rootCauses.length >= 1`; defaults collapsed for single cluster; auto-expands for 2+ clusters.

@@ -29,9 +29,10 @@
  */
 
 import { extractTestBody, isApiTest } from "./runner/codeParsing.js";
-import { executeTest } from "./runner/executeTest.js";
+import { executeTest, executeTestIterations } from "./runner/executeTest.js";
 import { runFeedbackLoop } from "./runner/feedbackIntegration.js";
 import { isSmokeTest } from "./pipeline/riskScorer.js";
+import { clusterFailures } from "./pipeline/failureClusterer.js";
 import { TRACES_DIR, DEFAULT_PARALLEL_WORKERS, MAX_TEST_RETRIES, launchBrowser, resolveBrowser, BROWSER_HEADLESS } from "./runner/config.js";
 import { executeWithRetries } from "./runner/retry.js";
 import { finalizeRunIfNotAborted, isRunAborted } from "./utils/abortHelper.js";
@@ -41,6 +42,7 @@ import { classifyError } from "./utils/errorClassifier.js";
 import { structuredLog, formatLogLine } from "./utils/logFormatter.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as testFixtureRepo from "./database/repositories/testFixtureRepo.js";
 import { signRunArtifacts, signArtifactUrl } from "./middleware/appSetup.js";
 import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
@@ -143,6 +145,105 @@ export { evaluateQualityGates as __evaluateQualityGatesForTest, evaluateWebVital
 // in `items` with at most `concurrency` in-flight at once. Results are returned
 // in the original item order.
 
+/**
+ * CAP-002 — Compute per-shard sizes using Playwright's `--shard=N/M`
+ * algorithm: the first `total % shardCount` shards receive one extra item,
+ * so shard sizes differ by at most one. Pure function — no I/O, no
+ * mutation, no allocations beyond the returned array. The single source
+ * of truth for the partition shape; both `partitionTestsIntoShards`
+ * (stamps `_shardIndex` on test objects) and `partitionTestIdsForShards`
+ * (slices plain-string arrays) derive their output from this.
+ *
+ * @param {number} total       - Total item count.
+ * @param {number} shardCount  - 1..MAX_WORKERS (caller is responsible for clamp).
+ * @returns {number[]} `sizes[shardIndex]` — per-shard item count. Empty
+ *   trailing shards (possible when `shardCount > total`) yield 0.
+ */
+export function computeShardSizes(total, shardCount) {
+  const count = Math.max(1, Number(shardCount) || 1);
+  const safeTotal = Math.max(0, Number(total) || 0);
+  const baseSize = Math.floor(safeTotal / count);
+  const remainder = safeTotal % count;
+  return new Array(count).fill(0).map((_, s) => baseSize + (s < remainder ? 1 : 0));
+}
+
+/**
+ * CAP-002 — Partition tests into `shardCount` contiguous slices using the
+ * shared {@link computeShardSizes} algorithm. Tags each test with
+ * `_shardIndex` in place (callers rely on this to attribute results to the
+ * correct shard at completion time) and returns the `sizes[]` array so the
+ * runner can detect "last test in shard S has finished" without re-deriving
+ * the partition. Pure function — no DB or side effects — so the partition
+ * contract can be exercised in isolation by `backend/tests/run-sharding.test.js`.
+ *
+ * @param {Object[]} tests       - Tests in dispatch order (post-smoke-pin).
+ * @param {number}   shardCount  - 1..MAX_WORKERS (caller is responsible for clamp).
+ * @returns {{ sizes: number[] }} per-shard test counts.
+ */
+export function partitionTestsIntoShards(tests, shardCount) {
+  const sizes = computeShardSizes(tests.length, shardCount);
+  let cursor = 0;
+  let shard = 0;
+  for (let i = 0; i < tests.length; i++) {
+    while (shard < sizes.length - 1 && i >= cursor + sizes[shard]) {
+      cursor += sizes[shard];
+      shard++;
+    }
+    tests[i]._shardIndex = shard;
+  }
+  return { sizes };
+}
+
+/**
+ * CAP-002 Phase 2 — Partition test IDs into `shardCount` contiguous slices
+ * using the shared {@link computeShardSizes} algorithm. The route layer
+ * calls this at enqueue time to pre-compute each BullMQ shard job's
+ * `testIds` payload — the coordinator is the single source of truth for
+ * the split; workers never re-derive the partition (avoids drift if a
+ * future test sort changes the approved-test order between enqueue and
+ * worker pickup).
+ *
+ * Implementation note: slices the input array directly rather than allocating
+ * a tagged-copy. `computeShardSizes` is the single source of truth shared
+ * with `partitionTestsIntoShards`, so the algorithm cannot drift between
+ * the two callers.
+ *
+ * @param {string[]} testIds    - Approved test IDs in dispatch order.
+ * @param {number}   shardCount - 1..MAX_WORKERS (caller is responsible for clamp).
+ * @returns {string[][]} `slices[shardIndex]` is the array of test IDs for
+ *   that shard. Empty shards (possible when `shardCount > testIds.length`)
+ *   yield `[]` at their slot.
+ */
+export function partitionTestIdsForShards(testIds, shardCount) {
+  const ids = Array.isArray(testIds) ? testIds : [];
+  const sizes = computeShardSizes(ids.length, shardCount);
+  const slices = [];
+  let cursor = 0;
+  for (const size of sizes) {
+    slices.push(ids.slice(cursor, cursor + size));
+    cursor += size;
+  }
+  return slices;
+}
+
+/**
+ * CAP-002 Phase 2 (Prerequisite #2) — Compute the public artifact URL for a
+ * shard's trace zip. The path mirrors the on-disk layout in `TRACES_DIR` so
+ * `signArtifactUrl` and the trace-viewer static-file mount can resolve nested
+ * paths without special-casing. `shardIndex == null` (legacy / single-shard
+ * runs) returns the flat `${runId}.zip` URL — zero regression for every
+ * existing consumer of `run.tracePath`. Pure: no I/O, no DB, exported so
+ * `backend/tests/run-sharding.test.js` can assert the contract directly.
+ *
+ * @param {string}       runId
+ * @param {number|null}  shardIndex - 0-based shard index, or null for legacy single-path runs.
+ * @returns {string} `/artifacts/traces/<runId>.zip` or `/artifacts/traces/<runId>/shard-<idx>.zip`
+ */
+export function shardTraceArtifactPath(runId, shardIndex) {
+  if (shardIndex == null) return `/artifacts/traces/${runId}.zip`;
+  return `/artifacts/traces/${runId}/shard-${shardIndex}.zip`;
+}
+
 async function poolMap(items, concurrency, fn, signal) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -182,11 +283,27 @@ async function poolMap(items, concurrency, fn, signal) {
  * @param {string}      [options.timezoneId]       - IANA timezone (AUTO-007).
  * @param {Object}      [options.geolocation]      - `{ latitude, longitude }` (AUTO-007).
  * @param {AbortSignal} [options.signal]           - Abort signal for cancellation.
+ * @param {number|null} [options.shardIndex]       - CAP-002 Phase 2: when set,
+ *   the cross-process shard worker passes its 0-based shard index so trace
+ *   artifacts land at `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`
+ *   instead of the single-path layout. `null` (default) preserves the
+ *   pre-shard zero-regression path — same filename, same `run.tracePath`,
+ *   no `tracePaths[]` JSON column populated. See migration 026.
  * @returns {Promise<void>}
  */
-export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal } = {}) {
+export async function runTests(project, tests, run, { parallelWorkers, browser: browserName, device, locale, timezoneId, geolocation, networkCondition, signal, shardIndex = null } = {}) {
   const runId = run.id;
-  const tracePath = `${TRACES_DIR}/${runId}.zip`;
+  // CAP-002 Phase 2 (Prerequisite #2) — shard-mode trace artifacts live in a
+  // per-run subdirectory keyed by shard index so N concurrent shard workers
+  // can write side-by-side without colliding on a single `${runId}.zip`.
+  // Single-shard runs (`shardIndex == null`) preserve the legacy single-path
+  // layout for bit-for-bit zero regression. The route-relative artifact path
+  // mirrors the on-disk shape — `signArtifactUrl` and the trace-viewer
+  // static-file route already handle nested paths via `req.params[0]`.
+  const isShardMode = shardIndex != null;
+  const tracePath = isShardMode
+    ? `${TRACES_DIR}/${runId}/shard-${shardIndex}.zip`
+    : `${TRACES_DIR}/${runId}.zip`;
 
   // AUTO-001: smoke tests always dispatch first regardless of caller order.
   // This is a runner-level invariant — any callsite of runTests (route layer,
@@ -204,6 +321,57 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   // Resolve concurrency: per-run override → env default → 1 (sequential)
   const workers = Math.max(1, Math.min(10, parallelWorkers || DEFAULT_PARALLEL_WORKERS));
+
+  // CAP-002 — partition the dispatch queue into `run.shardCount` contiguous
+  // slices and tag each test with its shard index. Today the partition runs
+  // in-process via `poolMap`; the follow-up cross-process PR (see
+  // ROADMAP CAP-002 — coordinator + BullMQ shard jobs + Redis pub/sub
+  // abort) will lift this same partition algorithm into the queue layer
+  // so `partitionTestsIntoShards` is the single source of truth for the
+  // split. `run.shardCount` defaults to 1 (the route layer only writes >1
+  // when the caller explicitly passed `shards: N`), so fixture-less runs
+  // and runs that only set `dialsConfig.parallelWorkers` go through the
+  // single-shard zero-regression path.
+  const shardCount = Math.max(1, Number(run.shardCount) || 1);
+  // CAP-002 Phase 2 — when invoked by a shard worker (`shardIndex != null`),
+  // the caller has already pre-partitioned the suite at enqueue time
+  // (`partitionTestIdsForShards` in routes/runs.js), so this single call
+  // owns ONE shard's slice. Stamp every test with the assigned shardIndex
+  // so `processResult` attributes results to the right shard; skip the
+  // in-process partition + shard-progress tracking (the worker drives
+  // shard completion externally via `runRepo.incrementShardsCompleted`
+  // after this function returns). Legacy single-process / non-sharded
+  // callers (`isShardMode === false`) keep using the in-process partition
+  // bit-for-bit — zero regression.
+  let shardSizes;
+  let shardRemaining;
+  if (isShardMode) {
+    // Pre-partitioned slice — every test belongs to this shard.
+    for (const t of tests) { t._shardIndex = shardIndex; }
+    shardSizes = [tests.length];
+    shardRemaining = [tests.length];
+  } else {
+    ({ sizes: shardSizes } = partitionTestsIntoShards(tests, shardCount));
+    // Track shard completion via a remaining-tests counter so we increment
+    // `run.shardsCompleted` exactly when a shard's *last* test reports back —
+    // poolMap may interleave shards (workers > shardCount, or shards of
+    // different sizes), so a naive "increment per shard at boundary" would
+    // miscount under concurrent dispatch.
+    shardRemaining = [...shardSizes];
+    if (run.shardsCompleted == null) run.shardsCompleted = 0;
+    // CAP-002 — empty shards (size 0, possible when shardCount > tests.length)
+    // have no tests to drain via `recordTestShardComplete`, so the counter
+    // would never advance for them. Without pre-crediting, the badge would
+    // surface "Shards M/N" with M < N during execution and only reconcile at
+    // the very end of `finalizeRunIfNotAborted` — and if the run is aborted
+    // before finalization, the badge would be permanently stuck at the
+    // partial value. SSE snapshots fire on every result, so the badge needs
+    // to reflect "no work to do here" the moment the partition is computed.
+    const emptyShards = shardSizes.filter((s) => s === 0).length;
+    if (emptyShards > 0) {
+      run.shardsCompleted = Math.min(shardCount, run.shardsCompleted + emptyShards);
+    }
+  }
 
   // Classify each test once upfront and cache the result on the test object.
   // This avoids re-parsing the code body via isApiTest() multiple times per
@@ -239,6 +407,10 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
+      // CAP-002 — no tests will execute on this run, so no shard will drain
+      // naturally via processResult. Mark every shard as "completed" so the
+      // UI badge reads `N/N` rather than `0/N` after a hard launch failure.
+      run.shardsCompleted = shardCount;
       logError(run, classified.message);
       structuredLog("browser.launch_failed", { runId, error: classified.message });
       throw launchErr;
@@ -259,6 +431,9 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       run.error = classified.message;
       run.errorCategory = classified.category;
       run.finishedAt = new Date().toISOString();
+      // CAP-002 — same rationale as the browser.launch_failed branch above:
+      // no tests run, so flush shardsCompleted to shardCount for UI clarity.
+      run.shardsCompleted = shardCount;
       logError(run, classified.message);
       throw ctxErr;
     }
@@ -277,21 +452,82 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   const runStart = Date.now();
   const allVideoSegments = [];
+  // CAP-002 Phase 2 — per-shard stat accumulators. The worker composes the
+  // parent `runs` row's totals from each shard's returned delta via
+  // `runRepo.incrementRunStats`. For legacy single-shard runs these stay
+  // aligned with `run.passed` / `run.failed` and are simply returned for
+  // completeness — the caller may ignore them. `shardTotalDelta` captures
+  // data-driven tests' iteration overflow (N fixture rows expand to N
+  // iteration results — the original slice size already counted 1).
+  let shardPassed = 0;
+  let shardFailed = 0;
+  let shardTotalDelta = 0;
+
+  // CAP-002 — advance shard progress once per *test* (not per iteration
+  // result). Data-driven tests call processResult N times for a single
+  // test, so decrementing inside processResult would drain the shard
+  // counter mid-test and surface a premature "Shards M/N" badge. The
+  // poolMap callback below calls this helper exactly once after a test
+  // fully resolves (success or crash), so each shard's counter reaches
+  // zero precisely when its last test reports back. `_shardIndex` is
+  // stamped by `partitionTestsIntoShards`; defensive `?? 0` covers
+  // tests that bypass the partition (single-shard runs still attribute
+  // to shard 0 — same effective behaviour).
+  //
+  // In `isShardMode` (cross-process shard worker), the BullMQ worker
+  // drives `run.shardsCompleted` externally via
+  // `runRepo.incrementShardsCompleted` after this function returns —
+  // this helper must NOT touch the counter, or the boundary-crossing
+  // finalizer detection in `runWorker.js` would double-count. The
+  // previous implementation no-op'd by accident: tests are stamped
+  // with the worker's `shardIndex` (e.g. 2) while `shardRemaining` is
+  // sized `[tests.length]` (length 1), so `shardRemaining[2]` was
+  // `undefined` and the `!= null` guard silently bailed. Make the
+  // intent explicit so a future refactor of `shardRemaining` sizing
+  // can't silently start incrementing here and break the worker's
+  // external counter management.
+  function recordTestShardComplete(test) {
+    if (isShardMode) return;
+    const shardIdx = test?._shardIndex ?? 0;
+    if (shardRemaining[shardIdx] != null) {
+      shardRemaining[shardIdx] -= 1;
+      if (shardRemaining[shardIdx] === 0) {
+        run.shardsCompleted = Math.min(shardCount, (run.shardsCompleted || 0) + 1);
+      }
+    }
+  }
 
   // ── Process a single test result — shared by the pool worker callback ────
   function processResult(test, result) {
+    // CAP-002 Phase 2 (Prerequisite #3) — stamp the result with its parent
+    // test's shard index so the retry-reset path in `runWorker.js` can
+    // identify which results to wipe (this shard's) vs. which to preserve
+    // (sibling shards that already completed). Single-shard runs stamp
+    // `_shardIndex: 0` uniformly — the retry filter is a no-op in that case.
+    // `?? 0` covers the pre-partition path (crash-synth before
+    // partitionTestsIntoShards stamps the test); shard 0 is the right
+    // default for a single-shard run.
+    result._shardIndex = test?._shardIndex ?? 0;
     run.results.push(result);
 
     if (result.videoPath) allVideoSegments.push(result.videoPath);
 
+    // CAP-002 Phase 2 — count locally so we can return the shard's stats
+    // delta to the worker, AND mirror to `run.passed` / `run.failed` for
+    // legacy single-shard callers. In shard mode the worker composes the
+    // parent run's totals from each shard's returned delta via
+    // `runRepo.incrementRunStats`, so we don't bump the parent here.
     if (result.status === "passed") {
-      run.passed++;
+      if (!isShardMode) run.passed++;
+      shardPassed++;
       logSuccess(run, `PASSED (${result.durationMs}ms)`);
     } else if (result.status === "warning") {
-      run.passed++;
+      if (!isShardMode) run.passed++;
+      shardPassed++;
       logWarn(run, `WARNING: ${result.error}`);
     } else {
-      run.failed++;
+      if (!isShardMode) run.failed++;
+      shardFailed++;
       logError(run, `FAILED: ${result.error}`);
     }
 
@@ -313,16 +549,31 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       lastRunAt: new Date().toISOString(),
     });
 
-    // Flush run state to SQLite after each result so a crash mid-run
-    // doesn't lose all results collected so far. SQLite writes are
-    // synchronous (~1ms) so this adds negligible overhead per test.
-    runRepo.save(run);
+    // CAP-002 Phase 2 — flush this single result via the atomic primitive
+    // in shard mode so N concurrent shard workers don't last-write-wins
+    // each other's results. Legacy single-process runs continue to use
+    // `runRepo.save(run)` (the full-snapshot path) for bit-for-bit zero
+    // regression. The atomic primitive splices in a single SQL statement
+    // (row-locked by SQLite/Postgres) — Prerequisite #1's contract,
+    // verified end-to-end by `run-storage-concurrency.test.js`.
+    if (isShardMode) {
+      runRepo.appendRunResults(run.id, [result]);
+    } else {
+      // Flush run state to SQLite after each result so a crash mid-run
+      // doesn't lose all results collected so far. SQLite writes are
+      // synchronous (~1ms) so this adds negligible overhead per test.
+      runRepo.save(run);
+    }
 
     // Broadcast a snapshot after each result so the frontend progress bar
     // updates in real time (especially important during parallel execution
-    // where multiple results arrive in quick succession).
+    // where multiple results arrive in quick succession). In shard mode the
+    // snapshot is re-read from the DB so sibling-shard results that just
+    // landed are reflected — the local `run` object only carries this
+    // shard's slice.
     if (!isRunAborted(run, signal)) {
-      emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(run) });
+      const snapshotRun = isShardMode ? (runRepo.getById(run.id) || run) : run;
+      emitRunEvent(run.id, "snapshot", { run: signRunArtifacts(snapshotRun) });
     }
   }
 
@@ -337,22 +588,100 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       log(run, `▶ [${i + 1}/${tests.length}]${workerTag} ${test.name} (${typeTag})`);
 
       try {
-        const { result, retryCount } = await executeWithRetries(async (attempt) => {
+        // The retry callback returns the *array* of iteration results (not a
+        // single result) so processResult fires exactly once per iteration of
+        // the final attempt — calling processResult inside the callback would
+        // double-count `run.passed` / `run.failed` on every retry and push
+        // `run.results.length` past `run.total`, corrupting quality-gate
+        // evaluation, the SSE progress bar, and the `run.retryCount` /
+        // `run.failedAfterRetry` aggregations below.
+        const { result: iterResults, retryCount } = await executeWithRetries(async (attempt) => {
           if (attempt > 0) {
             logWarn(run, `↻ Retrying ${test.name} (attempt ${attempt + 1}/${MAX_TEST_RETRIES + 1})`);
           }
-          const attemptResult = await executeTest(test, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition });
-          if (attemptResult.status === "failed") {
-            const retryErr = new Error(attemptResult.error || "Test failed");
-            retryErr.result = attemptResult;
+          // CAP-001: pull the fixture row-set keyed to this test's current
+          // codeVersion. Falsy → fixture-less single-iteration path (zero
+          // regression). On retries we re-resolve the fixture so a freshly
+          // uploaded fixture between attempts is picked up; the cost is one
+          // indexed SELECT per attempt (1-3 max).
+          const fixture = testFixtureRepo.getFixture(test.id, Number(test.codeVersion || 1));
+          const fixtureRows = fixture?.rows;
+          const attemptResults = await executeTestIterations(
+            test,
+            fixtureRows,
+            (iterTest) => executeTest(iterTest, browser, runId, i, runStart, { browser: resolvedBrowser, device, locale, timezoneId, geolocation, networkCondition }),
+          );
+          const lastResult = attemptResults[attemptResults.length - 1] || null;
+          // Retry semantics:
+          //  - Fixture-less tests (single iteration): preserve the original
+          //    contract — throw on failure so executeWithRetries reruns the
+          //    test up to MAX_TEST_RETRIES times. Earlier attempts are
+          //    discarded; only the final attempt's results are surfaced.
+          //  - Data-driven tests (≥1 fixture row): never retry. Retrying
+          //    would re-execute every row (including the passes) on every
+          //    failure, multiplying browser work. A visible log line keeps
+          //    the suppression explicit — otherwise a failed data-driven
+          //    test looks identical to a fixture-less retry exhaustion in
+          //    the run timeline, masking the design choice from reviewers.
+          // Log the retry-skip when *any* iteration failed, not just the
+          // last one — an intermediate row failure with a passing tail row
+          // would otherwise silently drop the message and break QA
+          // acceptance criterion #18 in `QA.md`.
+          const failedRows = attemptResults.filter((r) => r?.status === "failed").length;
+          if (fixtureRows?.length && failedRows > 0) {
+            logWarn(run, `↻ Skipping retry for ${test.name} — ${failedRows}/${attemptResults.length} fixture iteration(s) failed (data-driven tests don't retry)`);
+          }
+          if (!fixtureRows?.length && lastResult?.status === "failed") {
+            const retryErr = new Error(lastResult.error || "Test failed");
+            retryErr.result = lastResult;
+            // Stash the attempt's results so the catch block can surface
+            // them once after retries are exhausted (avoids double-emit).
+            retryErr.attemptResults = attemptResults;
             throw retryErr;
           }
-          return attemptResult;
+          return attemptResults;
         }, MAX_TEST_RETRIES);
-        result.retryCount = retryCount;
-        result.failedAfterRetry = false;
-        structuredLog("test.result", { runId, testId: test.id, status: result.status, durationMs: result.durationMs });
-        processResult(test, result);
+        // CAP-001: `run.total` is initialised at the route layer to
+        // `tests.length` (`backend/src/routes/runs.js:209`) — i.e. one slot
+        // per *test*. Data-driven tests fan out into N iteration results
+        // and each iteration increments `run.passed` / `run.failed` via
+        // `processResult` below, so without adjusting `run.total` here the
+        // pass-rate denominator in `evaluateQualityGates` (and the matching
+        // `flakyPct` denominator) underflows, producing pass rates >100%
+        // and making `minPassRate` / `maxFailures` gates unreachable. The
+        // RunDetail progress bar would also render "5 / 1 test cases
+        // executed". Bump the total by (N - 1) so the dispatched-iteration
+        // count and the run aggregator stay in lock-step. Fixture-less
+        // tests yield exactly one iteration → no adjustment, zero
+        // regression.
+        if (iterResults.length > 1) {
+          const overflow = iterResults.length - 1;
+          if (isShardMode) {
+            // Shard mode: the parent run row's `total` is composed by the
+            // worker via `incrementRunStats(totalDelta)` after this function
+            // returns. Track the delta locally and surface it on return —
+            // bumping `run.total` here would not persist (we don't save the
+            // full snapshot in shard mode) and would mislead local SSE
+            // snapshots that re-read from the DB anyway.
+            shardTotalDelta += overflow;
+          } else {
+            run.total += overflow;
+          }
+        }
+        // Surface every iteration from the final attempt to the run
+        // aggregator — exactly once, after retries have fully resolved.
+        for (const iterResult of iterResults) {
+          iterResult.retryCount = retryCount;
+          iterResult.failedAfterRetry = false;
+          processResult(test, iterResult);
+        }
+        // CAP-002 — drain the shard counter once per test, after every
+        // iteration result has been recorded. See `recordTestShardComplete`.
+        recordTestShardComplete(test);
+        const finalResult = iterResults[iterResults.length - 1];
+        if (finalResult) {
+          structuredLog("test.result", { runId, testId: test.id, status: finalResult.status, durationMs: finalResult.durationMs });
+        }
       } catch (err) {
         // Build a synthetic result and route through processResult so SSE
         // `result` and `snapshot` events are emitted — otherwise the
@@ -370,7 +699,12 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
           ? err.retryCount
           : MAX_TEST_RETRIES;
         errorResult.failedAfterRetry = true;
+        // processResult fires exactly once on exhaustion — earlier attempts
+        // were discarded inside the retry loop so we never double-count.
         processResult(test, errorResult);
+        // CAP-002 — crash path also resolves the test exactly once, so
+        // drain the shard counter here too (matches the success path).
+        recordTestShardComplete(test);
       }
     }, signal);
   } finally {
@@ -382,8 +716,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
         // Route through the storage adapter so S3-mode deployments upload
         // the trace zip; in local mode this is effectively a no-op rewrite
         // of the same file Playwright just produced.
+        // CAP-002 Phase 2 (Prerequisite #2) — single source of truth for the
+        // trace artifact URL. Mirrors the on-disk shard layout so the
+        // trace-viewer route resolves nested paths verbatim. Single-shard
+        // runs keep the legacy `/artifacts/traces/${runId}.zip` URL for
+        // bit-for-bit zero regression with `run.tracePath` consumers
+        // (RunDetail link, GitHub Check summary, signed-URL middleware).
+        const traceArtifactPath = shardTraceArtifactPath(runId, isShardMode ? shardIndex : null);
         try {
-          const traceArtifactPath = `/artifacts/traces/${runId}.zip`;
           await writeArtifactBuffer({
             artifactPath: traceArtifactPath,
             absolutePath: tracePath,
@@ -391,9 +731,22 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
             contentType: "application/zip",
           });
           run.tracePath = traceArtifactPath;
+          // In shard mode also record the per-shard URL in the new
+          // `tracePaths` JSON column (migration 026) so `RunDetail.jsx`
+          // renders a dropdown when `shardCount > 1`. Use the atomic
+          // primitive — N shard workers writing different slots on the
+          // same `runs` row must compose, not last-write-wins. The
+          // primitive's transaction wrapper serializes the read+write so
+          // a concurrent sibling-shard update to a different slot can't
+          // be lost (Prerequisite #1 contract for the trace-paths column).
+          if (isShardMode) {
+            if (!Array.isArray(run.tracePaths)) run.tracePaths = [];
+            run.tracePaths[shardIndex] = traceArtifactPath;
+            runRepo.setShardTracePath(runId, shardIndex, traceArtifactPath);
+          }
         } catch (uploadErr) {
           logWarn(run, `Trace upload failed: ${uploadErr.message}`);
-          run.tracePath = `/artifacts/traces/${runId}.zip`;
+          run.tracePath = traceArtifactPath;
         }
         log(run, `📊 Trace saved`);
       } catch (e) {
@@ -414,6 +767,34 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     log(run, `  🎬 ${allVideoSegments.length} video segment(s) saved`);
   }
 
+  // CAP-002 Phase 2 — in shard mode, hand off to the worker for finalization.
+  // The shard owns its slice's execution + trace flush; the worker composes
+  // the parent run's totals via `incrementRunStats`, increments
+  // `shardsCompleted`, and the boundary-crossing shard runs the feedback
+  // loop + finalize + `done` event exactly once. Returning here avoids:
+  //   - Running the feedback loop N times (once per shard) — wasteful AI calls
+  //     and N redundant `testRepo.update(... reviewStatus: "draft")` writes.
+  //   - N shards racing on `run.status = "completed"` via
+  //     `finalizeRunIfNotAborted` — last-shard-wins semantics belong in the
+  //     worker, gated on the atomic `incrementShardsCompleted` boundary.
+  //   - N `done` SSE events for a single logical run.
+  // Returns the shard's stats delta so the worker can compose them onto the
+  // parent `runs` row atomically.
+  if (isShardMode) {
+    const elapsed = ((Date.now() - runStart) / 1000).toFixed(1);
+    structuredLog("run.shard_execution_done", {
+      runId, shardIndex,
+      passed: shardPassed, failed: shardFailed,
+      totalDelta: shardTotalDelta, elapsedSec: parseFloat(elapsed),
+    });
+    return {
+      passed: shardPassed,
+      failed: shardFailed,
+      totalDelta: shardTotalDelta,
+      tracePath: run.tracePath || null,
+    };
+  }
+
   // AUTO-005: aggregate per-result retry telemetry onto the run record so
   // the dedicated `runs.retryCount` / `runs.failedAfterRetry` columns
   // (migration 011) are populated for run-level analytics queries.
@@ -422,6 +803,7 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
 
   run.gateResult = evaluateQualityGates(project.qualityGates, run);
   run.webVitalsResult = evaluateWebVitalsBudgets(project.webVitalsBudgets, run);
+  run.rootCauses = clusterFailures({ results: run.results });
 
   // AUTO-017.3: persist per-run Web Vitals samples for MET-001 trend charts.
   // Best-effort only — telemetry failures must never fail the run.
@@ -476,6 +858,14 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // append to run.logs but the SSE broadcast would be silently lost.
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
+    // CAP-002 — `run.shardsCompleted` is incremented per-shard in
+    // processResult as each shard's last test reports. A normal completion
+    // should already have shardsCompleted === shardCount; this final
+    // reconciliation only matters if a shard had zero tests (possible when
+    // `shards > tests.length` clamps to per-shard size 0), which would
+    // otherwise leave shardsCompleted < shardCount and surface a stuck
+    // "Shards N-1/N" badge on the completed run.
+    if ((run.shardsCompleted || 0) < shardCount) run.shardsCompleted = shardCount;
     run.duration = Date.now() - runStart;
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {
