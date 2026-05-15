@@ -26,11 +26,24 @@
  * stream.
  */
 
-import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } from "./config.js";
+import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, resolveDevice, DEVICE_PRESETS } from "./config.js";
 import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { buildInjectedBootstrapScript } from "./playwrightSelectorGenerator.js";
+
+/**
+ * DIF-015c Gap 5 — set of device names accepted by the recorder. Built
+ * once at module load from the curated `DEVICE_PRESETS` exported by
+ * `config.js` (the same list `RunRegressionModal` mirrors), plus the
+ * empty-string sentinel for "Desktop (default)". Any other value is a
+ * 400 from the route layer — we deliberately do NOT accept arbitrary
+ * `playwright.devices` keys at the recorder boundary because the curated
+ * list is what the UI exposes and what `executeTest.js` exercises in CI.
+ *
+ * @internal
+ */
+const ACCEPTED_DEVICE_NAMES = new Set(DEVICE_PRESETS.map((d) => d.value));
 
 /**
  * Tunable timing constants for the recorder. Centralised so reviewers can
@@ -176,6 +189,13 @@ export function isNoisyTestId(value) {
  * @property {"recording"|"stopping"|"stopped"} status
  * @property {Array<RecordedAction>} actions
  * @property {number}  startedAt
+ * @property {string}  [device]          - DIF-015c Gap 5: active device profile
+ *                                          (e.g. `"iPhone 14"`); empty string
+ *                                          or undefined → desktop default.
+ * @property {{width: number, height: number}} [viewport] - Resolved viewport
+ *                                          (from device descriptor, falling
+ *                                          back to `VIEWPORT_WIDTH/HEIGHT`).
+ * @property {boolean} [paused]           - DIF-015c Gap 3: pause flag.
  * @property {Object}  [browser]         - Playwright Browser (internal).
  * @property {Object}  [context]         - Playwright BrowserContext (internal).
  * @property {Object}  [page]            - Playwright Page (internal).
@@ -1291,6 +1311,38 @@ export function popLastRecordingAction(sessionId) {
 }
 
 /**
+ * DIF-015c Gap 5 — pure helper that resolves a device name to a
+ * `browser.newContext()` options object plus the effective viewport.
+ * Mirrors the device-descriptor merge already done by `executeTest.js`
+ * (`backend/src/runner/executeTest.js:208-232`) so recorder runs feel
+ * identical to test runs at the same device profile.
+ *
+ * Empty / unknown device names fall back to the desktop defaults so a
+ * caller that never opts into device emulation behaves bit-for-bit
+ * identically to the pre-Gap-5 recorder.
+ *
+ * @param {string} [device] - One of `DEVICE_PRESETS[].value` (curated list).
+ * @returns {{ contextOpts: Object, viewport: {width: number, height: number}, descriptor: Object|null }}
+ */
+function resolveDeviceContext(device) {
+  const descriptor = resolveDevice(device || "");
+  const viewport = descriptor?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
+  // Spread the descriptor first so explicit overrides below take precedence
+  // — same merge order as `executeTest.js`. Without `viewport` overridden
+  // explicitly, a missing descriptor would leave the context at Playwright's
+  // default 1280×720 even when the caller asked for desktop, which is
+  // already what we want; the explicit assignment keeps the contract
+  // observable to readers.
+  const contextOpts = {
+    ...(descriptor || {}),
+    viewport,
+    ignoreHTTPSErrors: true,
+    acceptDownloads: true,
+  };
+  return { contextOpts, viewport, descriptor: descriptor || null };
+}
+
+/**
  * Start a new interactive recording session. Opens a Playwright browser,
  * navigates to `startUrl`, installs the capture script, and begins a CDP
  * screencast on the given session ID (reused as the SSE run ID).
@@ -1299,9 +1351,13 @@ export function popLastRecordingAction(sessionId) {
  * @param {string} args.sessionId   - Unique ID used for SSE + session tracking.
  * @param {string} args.projectId
  * @param {string} args.startUrl
+ * @param {string} [args.device]    - DIF-015c Gap 5: optional device name
+ *   from `DEVICE_PRESETS` (e.g. `"iPhone 14"`). Empty string / undefined →
+ *   desktop default (legacy behaviour). Unknown values are rejected at the
+ *   route layer; this helper assumes the caller has already validated.
  * @returns {Promise<RecordingSession>}
  */
-export async function startRecording({ sessionId, projectId, startUrl }) {
+export async function startRecording({ sessionId, projectId, startUrl, device = "" }) {
   if (sessions.has(sessionId)) {
     throw new Error(`Recording session ${sessionId} is already active.`);
   }
@@ -1313,11 +1369,8 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
   let context;
   let page;
   try {
-    context = await browser.newContext({
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-      ignoreHTTPSErrors: true,
-      acceptDownloads: true,
-    });
+    const { contextOpts, viewport: effectiveViewport } = resolveDeviceContext(device);
+    context = await browser.newContext(contextOpts);
 
     const session = /** @type {RecordingSession} */ ({
       id: sessionId,
@@ -1326,6 +1379,8 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       status: "recording",
       actions: [],
       startedAt: Date.now(),
+      device: device || "",
+      viewport: effectiveViewport,
       browser,
       context,
     });
@@ -1564,7 +1619,13 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Start CDP screencast so the RecorderModal can show the live browser.
     // startScreencast now returns { stop, cdpSession } — store both so the
     // recorder can forward mouse/keyboard events from the canvas overlay.
-    const screencastResult = await startScreencast(page, sessionId, { interactive: true });
+    // DIF-015c Gap 5: pass the resolved viewport so iPhone / Pixel device
+    // profiles stream JPEG frames at native resolution (390×844 for an
+    // iPhone 14) instead of being letterboxed inside the desktop default.
+    const screencastResult = await startScreencast(page, sessionId, {
+      interactive: true,
+      viewport: effectiveViewport,
+    });
     if (screencastResult) {
       session.stopScreencast = screencastResult.stop;
       session.cdpSession = screencastResult.cdpSession;
