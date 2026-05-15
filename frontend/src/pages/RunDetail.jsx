@@ -297,13 +297,19 @@ export default function RunDetail() {
   // mutate `rootCauses` without clobbering a user-toggled collapse/expand.
   // The mount-time reset (in the runId-keyed effect above) re-arms the ref
   // when navigating to a different run.
+  //
+  // `runId` is included in the dep array so navigating between two cached
+  // runs that happen to have the same `rootCausesCount` still re-fires the
+  // effect — without it, the `runId`-keyed reset would flip the ref back to
+  // `false` but `rootCausesCount` (unchanged) wouldn't trigger the effect,
+  // leaving the new run's panel collapsed.
   const rootCausesCount = Array.isArray(run?.rootCauses) ? run.rootCauses.length : 0;
   useEffect(() => {
     if (hasSetInitialExpand.current) return;
     if (rootCausesCount === 0) return;
     hasSetInitialExpand.current = true;
     setRootCauseExpanded(rootCausesCount >= 2);
-  }, [rootCausesCount]);
+  }, [rootCausesCount, runId]);
 
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
