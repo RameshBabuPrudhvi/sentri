@@ -1188,14 +1188,14 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
-| Autonomous Intelligence | 29 | 18 | 0 | 11 | AUTO-008–011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
+| Autonomous Intelligence | 29 | 19 | 0 | 10 | AUTO-008/009/011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **59** | **0** | **40** | |
+| **Totals** | **99** | **60** | **0** | **39** | |
 
 
-**Total tracked items:** 99 across 9 categories — **59 complete** (59%), **0 in current PR**, **40 remaining**
+**Total tracked items:** 99 across 9 categories — **60 complete** (59%), **0 in current PR**, **39 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
