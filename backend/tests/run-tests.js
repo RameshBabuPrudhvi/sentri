@@ -98,6 +98,7 @@ const files = [
   "tests/run-shard-crash.test.js",
   "tests/run-shard-registry.test.js",
   "tests/run-shard-finalizer.test.js",
+  "tests/failure-clusterer.test.js",
 ];
 
 let passed = 0;

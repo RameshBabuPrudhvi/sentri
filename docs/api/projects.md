@@ -479,3 +479,5 @@ When provided, the run executes against the selected environment `baseUrl` only 
 **Finalization handoff:** the BullMQ shard whose `incrementShardsCompleted` UPDATE crosses the `shardCount` boundary is the single finalizer per run. It evaluates quality gates + Web Vitals against the full results array, runs the AI feedback loop exactly once, transitions status to `completed` via a first-writer-wins UPDATE that catches the late-abort race, emits the single `done` SSE event, and POSTs the optional `callbackUrl` for trigger-path runs. SQL row-locking is the linearization point — no JS-side mutex required.
 
 **CI/CD callbackUrl on sharded runs:** when `shards: N > 1` is combined with `callbackUrl` on a trigger run, the callback POSTs exactly once with the same payload shape as single-shard runs (`runId`, `status`, `passed`, `failed`, `total`, `error`, `gateResult`, `webVitalsResult`).
+
+- Added `run.rootCauses[]` to `GET /api/v1/runs/:runId` response: `{ fingerprint, affectedTestIds[], sharedUrl, sharedSelector, errorPattern, size }`.

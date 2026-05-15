@@ -1626,3 +1626,5 @@ A release is QA-approved only when **all** of the following are true:
 - Do NOT report a bug without a build/commit SHA and browser+OS.
 - Do NOT file duplicates of Known Issues.
 - Do NOT mark a flow as passing until **every** expected result is observed.
+
+- Run Detail root cause checks: verify panel appears when `rootCauses.length >= 1`; defaults collapsed for single cluster; auto-expands for 2+ clusters.

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -134,6 +134,7 @@ export default function RunDetail() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState(null);
   const [priorRuns, setPriorRuns] = useState([]);
+  const [rootCauseExpanded, setRootCauseExpanded] = useState(false);
   const { addNotification } = useNotifications();
 
   // Cap the streamed token buffer so long-running generation jobs don't
@@ -264,6 +265,13 @@ export default function RunDetail() {
     }
   }, [run, rerunning, navigate, addNotification]);
 
+  // AUTO-010 — Track whether the initial auto-expand decision has been made
+  // for the current run. Reset on `runId` change so navigating to a different
+  // run re-arms the decision; once flipped to `true` for a given run, later
+  // SSE updates that mutate `rootCauses.length` won't override the user's
+  // manual collapse/expand toggle.
+  const hasSetInitialExpand = useRef(false);
+
   // Reset live-stream state when navigating to a different run
   useEffect(() => {
     setFrames([]);
@@ -275,7 +283,33 @@ export default function RunDetail() {
     setCompareLoading(false);
     setCompareError(null);
     setPriorRuns([]);
+    // AUTO-010 — re-arm the initial-expand decision for the new run.
+    hasSetInitialExpand.current = false;
+    setRootCauseExpanded(false);
   }, [runId]);
+
+  // AUTO-010 — Auto-expand the Root Cause Summary panel the first time
+  // `rootCauses` actually loads with ≥2 clusters (multiple clusters is the
+  // high-signal case worth surfacing immediately). At mount the TanStack
+  // Query data is still loading so `run` is `null` and `rootCausesCount === 0`
+  // — gating on `hasSetInitialExpand.current` ensures the effect fires once
+  // when the data arrives and never again, so subsequent SSE snapshots can
+  // mutate `rootCauses` without clobbering a user-toggled collapse/expand.
+  // The mount-time reset (in the runId-keyed effect above) re-arms the ref
+  // when navigating to a different run.
+  //
+  // `runId` is included in the dep array so navigating between two cached
+  // runs that happen to have the same `rootCausesCount` still re-fires the
+  // effect — without it, the `runId`-keyed reset would flip the ref back to
+  // `false` but `rootCausesCount` (unchanged) wouldn't trigger the effect,
+  // leaving the new run's panel collapsed.
+  const rootCausesCount = Array.isArray(run?.rootCauses) ? run.rootCauses.length : 0;
+  useEffect(() => {
+    if (hasSetInitialExpand.current) return;
+    if (rootCausesCount === 0) return;
+    hasSetInitialExpand.current = true;
+    setRootCauseExpanded(rootCausesCount >= 2);
+  }, [rootCausesCount, runId]);
 
   // SSE — receives live updates while the run is active.
   // Pass run?.status as initialStatus so the hook can skip SSE entirely
@@ -405,6 +439,11 @@ export default function RunDetail() {
   // verdict and the rendered pass rate will disagree on the same run.
   const passRateDenominator = Math.max(0, total - countNonExecutedSkips(results));
   const passRate = passRateDenominator > 0 ? Math.round((passed / passRateDenominator) * 100) : null;
+
+  // AUTO-010 — `useEffect` for the initial-expand decision lives at the top
+  // of the component (before the early returns) so the React hooks-rules
+  // contract holds. This local is just the array reference for rendering.
+  const rootCauses = Array.isArray(run.rootCauses) ? run.rootCauses : [];
 
   const traceUrl = run.tracePath ?? null;
   const traceViewerUrl = traceUrl ? `/trace-viewer/?trace=${encodeURIComponent(traceUrl)}` : null;
@@ -897,6 +936,32 @@ export default function RunDetail() {
               CI pipelines polling the trigger endpoint receive <code>gateResult.passed: false</code> and should exit non-zero.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Root cause summary (AUTO-010) ───────────────────────────────── */}
+      {run.type === "test_run" && rootCauses.length >= 1 && (
+        <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setRootCauseExpanded((v) => !v)}>{rootCauseExpanded ? "▼" : "▶"} Root Cause Summary ({rootCauses.length})</button>
+          {rootCauseExpanded && (
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {rootCauses.map((cluster) => {
+                // AUTO-010 — surface the deduplicated test-id count so data-
+                // driven tests with N failing iterations don't inflate the
+                // "N affected test(s)" copy. `cluster.size` still reflects
+                // total failed-result rows for analytics consumers.
+                const affectedCount = Array.isArray(cluster.affectedTestIds)
+                  ? cluster.affectedTestIds.length
+                  : cluster.size;
+                return (
+                  <div key={cluster.fingerprint} className="card" style={{ padding: 10 }}>
+                    <div style={{ fontWeight: 600 }}>{cluster.errorPattern || "Likely root cause"}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--text3)" }}>{affectedCount} affected test(s)</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

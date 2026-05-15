@@ -39,17 +39,23 @@ const JSON_FIELDS = [
   "changedFiles", "impactAnalysis", // AUTO-004: git-diff impact analysis summary
   "githubCheck", // INT-002: GitHub Check Run metadata
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
+  "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
 ];
 
 function rowToRun(row) {
   if (!row) return undefined;
   const obj = { ...row };
+  // Fields whose canonical empty shape is an array, not null. Keeping
+  // them as `[]` on legacy / pre-migration rows avoids null-guard
+  // boilerplate at every consumer (e.g. external API callers reading
+  // `run.rootCauses.length` should never blow up on a pre-AUTO-010 run).
+  const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses"]);
   for (const f of JSON_FIELDS) {
     if (obj[f]) {
       try { obj[f] = JSON.parse(obj[f]); }
-      catch { obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null; }
+      catch { obj[f] = ARRAY_DEFAULT_FIELDS.has(f) ? [] : null; }
     } else {
-      obj[f] = f === "tests" || f === "results" || f === "videoSegments" || f === "pages" ? [] : null;
+      obj[f] = ARRAY_DEFAULT_FIELDS.has(f) ? [] : null;
     }
   }
   // Always initialise logs as an empty array; callers that need the full
@@ -97,6 +103,7 @@ const INSERT_COLS = [
   "environmentId", // DIF-012: optional project environment scope (migration 024)
   "shardCount", "shardsCompleted", // CAP-002: distributed shard telemetry (migration 025)
   "tracePaths", // CAP-002 Phase 2: per-shard trace zip paths (migration 026)
+  "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
 ];
 
 const INSERT_SQL = `INSERT INTO runs (${INSERT_COLS.join(", ")})

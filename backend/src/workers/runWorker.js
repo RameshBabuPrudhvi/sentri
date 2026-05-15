@@ -40,6 +40,7 @@ import { subscribeToRunAborts, publishRunAbort } from "../utils/runAbortChannel.
 import { runFeedbackLoop } from "../runner/feedbackIntegration.js"; // CAP-002 Phase 2 — last-shard finalizer runs the AI feedback loop exactly once.
 import { finalizeRunIfNotAborted } from "../utils/abortHelper.js";
 import { __evaluateQualityGatesForTest, __evaluateWebVitalsBudgetsForTest } from "../testRunner.js";
+import { clusterFailures } from "../pipeline/failureClusterer.js"; // AUTO-010 — sharded-run parity with single-process tail in testRunner.js
 import { trackTelemetry } from "../utils/telemetry.js";
 import { safeFetch } from "../utils/ssrfGuard.js"; // CAP-002 Phase 2 — trigger-path callbackUrl POST from sharded finalizer.
 
@@ -665,6 +666,13 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
   run.gateResult = __evaluateQualityGatesForTest(project.qualityGates, run);
   run.webVitalsResult = __evaluateWebVitalsBudgetsForTest(project.webVitalsBudgets, run);
 
+  // AUTO-010 — Deterministic root-cause clustering on the full DB results
+  // set. Mirrors the single-process tail in `testRunner.js`; the
+  // sharded-finalizer path bypasses that call site, so without this every
+  // multi-shard run would persist `rootCauses: null` and the RunDetail
+  // Root Cause Summary panel would never render for sharded runs.
+  run.rootCauses = clusterFailures({ results });
+
   // Persist aggregates BEFORE the feedback loop so a feedback-loop crash
   // doesn't lose the gate verdict (CI consumers polling `/trigger/runs/:id`
   // would otherwise see a `null` gateResult on a failed-feedback run).
@@ -673,6 +681,7 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     failedAfterRetry: run.failedAfterRetry,
     gateResult: run.gateResult,
     webVitalsResult: run.webVitalsResult,
+    rootCauses: run.rootCauses, // AUTO-010
   });
 
   // Feedback loop — runs exactly once per run. Load the FULL approved test
