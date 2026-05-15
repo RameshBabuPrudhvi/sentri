@@ -36,11 +36,11 @@ If the user asks for… read only this section:
 | "Multi-environment / staging vs prod / environment selector" | [Environments](#-environments-dif-012) | 851–912 |
 | "Distributed sharding / shards: N / cross-process test split" | [Distributed Sharding](#-distributed-sharding-cap-002) | 915–980 |
 | "Data-driven test fixtures / CSV / iterations" | [Data-driven fixtures](#-data-driven-test-fixtures-cap-001) | 982–1020 |
-| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | 818–835 |
+| "Visual / screenshot testing" | [Visual Testing](#%EF%B8%8F-visual-testing) | navigate by anchor — line ranges stale post-PR-#7 |
 | "Verify permissions" | [`permissions.json`](./backend/src/middleware/permissions.json) **(canonical, read this, not prose)** | — |
-| "Verify security / authorization" | [Security](#-security) | 997–1025 |
-| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | 1104–1149 |
-| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | 1306–1339 |
+| "Verify security / authorization" | [Security](#-security) | navigate by anchor — line ranges stale post-PR-#7 |
+| "Bulk actions / keyboard shortcuts" | [Bulk Actions](#%EF%B8%8F-bulk-actions--keyboard-shortcuts) | navigate by anchor — line ranges stale post-PR-#7 |
+| "Report a bug" | [Bug Reporting Template](#-bug-reporting-template) | navigate by anchor — line ranges stale post-PR-#7 |
 
 ### Section index (line ranges, for `sed -n 'A,Bp'` / partial reads)
 
@@ -61,38 +61,44 @@ quality-gates:       { lines: 795-849 }     # NEW (AUTO-012)
 environments:        { lines: 851-912 }     # NEW (DIF-012)
 distributed-sharding:{ lines: 915-980 }     # NEW (CAP-002)
 data-driven-fixtures:{ lines: 982-1020 }    # NEW (CAP-001)
-visual-testing:      { lines: 818-835 }
-dashboard:           { lines: 838-856 }
-ai-chat:             { lines: 860-889 }
-settings:            { lines: 893-910 }
-account-gdpr:        { lines: 914-924 }
-email-verification:  { lines: 927-934 }
-recycle-bin:         { lines: 938-948 }
-audit-log:           { lines: 951-959 }
-notifications:       { lines: 963-994 }
-security:            { lines: 997-1025 }
-reports-pdf:         { lines: 1028-1043 }
-system-diagnostics:  { lines: 1047-1056 }
-new-project:         { lines: 1060-1071 }
-runs-list:           { lines: 1075-1086 }
-project-detail:      { lines: 1089-1101 }
-bulk-actions:        { lines: 1104-1149 }
-modals:              { lines: 1152-1180 }
-api-test-imports:    { lines: 1184-1199 }
-onboarding:          { lines: 1203-1212 }
-demo-mode:           { lines: 1216-1227 }
-settings-data-tab:   { lines: 1231-1245 }
-workspace-switcher:  { lines: 1249-1257 }
+
+# ── Stale post-PR-#7: line ranges below shifted by ~+170 lines and have
+#    NOT been recomputed. Navigate by heading anchor instead:
+#       grep -n '^### ' QA.md
+#    Entries kept as anchor names only — line ranges intentionally omitted
+#    so agents can't accidentally `sed -n A,Bp` into wrong content.
+visual-testing:      # anchor only
+dashboard:           # anchor only
+ai-chat:             # anchor only
+settings:            # anchor only
+account-gdpr:        # anchor only
+email-verification:  # anchor only
+recycle-bin:         # anchor only
+audit-log:           # anchor only
+notifications:       # anchor only
+security:            # anchor only
+reports-pdf:         # anchor only
+system-diagnostics:  # anchor only
+new-project:         # anchor only
+runs-list:           # anchor only
+project-detail:      # anchor only
+bulk-actions:        # anchor only
+modals:              # anchor only
+api-test-imports:    # anchor only
+onboarding:          # anchor only
+demo-mode:           # anchor only
+settings-data-tab:   # anchor only
+workspace-switcher:  # anchor only
 
 # Meta sections
 golden-happy-path:       { lines: 241-342 }
 canonical-ui-test-shape: { lines: 95-109 }
 permissions-matrix:      { lines: 152-200 }
 setup:                   { lines: 204-237 }
-cross-cutting-checks:    { lines: 1185-1213 }
-known-issues:            { lines: 1217-1228 }
-bug-template:            { lines: 1232-1263 }
-coverage-checklist:      { lines: 1267-1313 }
+cross-cutting-checks:    # anchor only — stale post-PR-#7
+known-issues:            # anchor only — stale post-PR-#7
+bug-template:            # anchor only — stale post-PR-#7
+coverage-checklist:      # anchor only — stale post-PR-#7
 ```
 
 > **Read-only boundary:** line ranges are approximate and can drift after edits — always stop at the next `### ` heading. Don't read beyond the listed range for a given section.

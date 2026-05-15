@@ -684,6 +684,25 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     rootCauses: run.rootCauses, // AUTO-010
   });
 
+  // Re-read live status from the DB before the (expensive) feedback loop.
+  // The `run` snapshot above came from `runRepo.getById` at the boundary-
+  // crossing call site; the user could have clicked Abort between that
+  // read and now. The DB-level `markRunCompletedFirstWriterWins` below
+  // catches the race correctly (returns false → skips side effects), but
+  // running the AI feedback loop against an already-aborted run is wasted
+  // ACUs. Cheap one-column SELECT closes most of the race window without
+  // changing the correctness guarantee. (The window between *this* read
+  // and the markRunCompletedFirstWriterWins UPDATE further down is still
+  // open, but it's far shorter than the feedback-loop duration.)
+  const liveStatus = runRepo.getById(runId)?.status;
+  if (liveStatus === "aborted" || liveStatus === "failed") {
+    structuredLog("run.finalize_skipped_terminal", {
+      runId,
+      reason: `live status ${liveStatus} — skipping feedback loop and finalization`,
+    });
+    return;
+  }
+
   // Feedback loop — runs exactly once per run. Load the FULL approved test
   // set (every shard's slice combined) so the AI regeneration sees the
   // same tests the original dispatch did. Aborts mid-feedback are swallowed

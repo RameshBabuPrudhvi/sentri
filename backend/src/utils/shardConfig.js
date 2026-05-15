@@ -15,10 +15,22 @@
  *
  *   - `shardCount` — cross-process partition count. Only `> 1` when the
  *     caller explicitly passed `shards: N`. Drives the per-shard progress
- *     badge on RunDetail and the BullMQ job fan-out.
- *   - `parallelWorkers` — concurrency *inside* one shard's process.
- *     `shards: N` implies "execute N partitions concurrently", so the
- *     effective concurrency is `max(dialsRequest, shardCount)`.
+ *     badge on RunDetail and the BullMQ job fan-out. Cross-shard
+ *     parallelism comes from BullMQ's worker pool (`concurrency: MAX_WORKERS`
+ *     in `backend/src/workers/runWorker.js`); each shard runs in its own
+ *     job and is picked up by a separate worker slot.
+ *   - `parallelWorkers` — concurrency *inside* one shard's process (the
+ *     in-shard test pool). Reflects only the dials input; defaults to `1`.
+ *
+ * `shardCount` and `parallelWorkers` are **independent** — total
+ * concurrent browser instances on one replica is bounded by
+ * `MAX_WORKERS × parallelWorkers`, NOT `shardCount × parallelWorkers`.
+ * The previous formula `max(shardCount, dialsParallelWorkers)` re-coupled
+ * the two and produced surprising N² concurrency for callers requesting
+ * `shards: 4` without an explicit dials override (one slot per shard ×
+ * 4 internal workers per shard = 16 browsers). Decoupled here so
+ * `shards: 4` with no dials input gives 4× cross-process parallelism at
+ * 1 browser per shard — the operator-intuitive shape.
  *
  * A request that only sets `dialsConfig.parallelWorkers: 4` leaves
  * `shardCount = 1` so no shard badge is shown (BUG-0001 — discovered during
@@ -37,6 +49,6 @@ export function normalizeShardConfig(shardsInput, dialsParallelWorkers) {
     ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(shardsInput))))
     : null;
   const shardCount = normalizedShards ?? 1;
-  const parallelWorkers = Math.max(shardCount, dialsParallelWorkers ?? 1);
+  const parallelWorkers = Math.max(1, dialsParallelWorkers ?? 1);
   return { shardCount, parallelWorkers, maxWorkers };
 }

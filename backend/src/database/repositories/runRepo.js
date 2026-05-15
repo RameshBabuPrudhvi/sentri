@@ -566,13 +566,16 @@ export function update(id, fields) {
  * and `||` (string concat) are spelled identically in both dialects, so the
  * statement runs unmodified through the adapter's translation layer. The
  * column is only ever written by `JSON.stringify(...)` via `runToRow`, so
- * the canonical format guarantees the closing `]` is the final character
- * — no whitespace stripping required.
+ * the canonical format produces a closing `]` as the final character — the
+ * `rtrim(...)` calls below are defensive insurance against a future writer
+ * (or direct DB migration) that pretty-prints or appends trailing
+ * whitespace, which would otherwise corrupt the splice into malformed JSON.
  *
  * Strategy: build the new chunk client-side as `JSON.stringify(newResults)`
  * (always shaped `[...]`), then in SQL:
  *   - if `results` is NULL or `'[]'` → overwrite with the new chunk
- *   - otherwise → `substr(results, 1, length(results) - 1) || ',' || substr(newChunk, 2)`
+ *   - otherwise → trim trailing whitespace, then
+ *     `substr(rtrim(results), 1, length(rtrim(results)) - 1) || ',' || substr(newChunk, 2)`
  *     i.e. drop the existing trailing `]`, append `,`, then append the new
  *     chunk's interior `…]`.
  *
@@ -594,10 +597,14 @@ export function appendRunResults(runId, newResults) {
   // The interior of newChunk is `substr(newChunk, 2)` — skips the leading `[`.
   // SQLite `length()` returns characters; Postgres `length()` on TEXT returns
   // characters too (vs `octet_length()` for bytes) so the indexes match.
+  // `rtrim(...)` is portable across SQLite and Postgres (no adapter
+  // translation required) and defends the splice against a column written
+  // with trailing whitespace by any future writer / migration. When the
+  // column is canonical (no trailing whitespace), rtrim is a no-op.
   db.prepare(
     `UPDATE runs SET results = CASE
-       WHEN results IS NULL OR results = '[]' THEN ?
-       ELSE substr(results, 1, length(results) - 1) || ',' || substr(?, 2)
+       WHEN results IS NULL OR rtrim(results) = '[]' THEN ?
+       ELSE substr(rtrim(results), 1, length(rtrim(results)) - 1) || ',' || substr(?, 2)
      END
      WHERE id = ?`
   ).run(newChunk, newChunk, runId);
