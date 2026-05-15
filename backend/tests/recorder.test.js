@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { actionsToPlaywrightCode, forwardInput, recordedActionToStepText, _testSeedSession, isEmittableAction, filterEmittableActions, isNoisyTestId } from "../src/runner/recorder.js";
+import { actionsToPlaywrightCode, forwardInput, recordedActionToStepText, _testSeedSession, isEmittableAction, filterEmittableActions, isNoisyTestId, addAssertionAction, getRecording } from "../src/runner/recorder.js";
 
 let passed = 0;
 let failed = 0;
@@ -281,6 +281,9 @@ test("supports recorder parity actions (dblclick/right-click/hover/upload/assert
     { kind: "assertText", selector: "#toast", value: "Saved", ts: 6 },
     { kind: "assertValue", selector: "#email", value: "a@b.com", ts: 7 },
     { kind: "assertUrl", value: "dashboard", ts: 8 },
+    // DIF-015c Gap 2 — count + class assertions.
+    { kind: "assertCount", selector: ".row", value: "3", ts: 9 },
+    { kind: "assertHasClass", selector: "#submit", value: "is-loading", ts: 10 },
   ]);
   assert.match(code, /\.locator\('#open'\)\.dblclick\(\);/);
   assert.match(code, /\.locator\('#menu'\)\.click\(\{ button: 'right' \}\);/);
@@ -294,6 +297,11 @@ test("supports recorder parity actions (dblclick/right-click/hover/upload/assert
   assert.match(code, /await expect\([^)]*\.locator\('#toast'\)\)\.toContainText\('Saved'\);/);
   assert.match(code, /await expect\([^)]*\.locator\('#email'\)\)\.toHaveValue\('a@b\.com'\);/);
   assert.match(code, /await expect\(page\)\.toHaveURL\(new RegExp\('dashboard'\)\);/);
+  // DIF-015c Gap 2 — toHaveCount uses the parsed integer (not the raw
+  // string), and toHaveClass uses a word-boundary regex so partial-class
+  // matches behave as expected.
+  assert.match(code, /await expect\([^)]*\.locator\('\.row'\)\)\.toHaveCount\(3\);/);
+  assert.match(code, /await expect\([^)]*\.locator\('#submit'\)\)\.toHaveClass\(new RegExp\('\(\^\|\\\\s\)is-loading\(\\\\s\|\$\)'\)\);/);
 });
 
 // ── Devin Review BUG_0002 regression — URL escaping ────────────────────────
@@ -589,6 +597,23 @@ test("renders human-readable prose for assertion + parity action kinds", () => {
   assert.equal(recordedActionToStepText({ kind: "assertText", label: "Toast", value: "Saved", ts: 1 }), "The 'Toast' contains 'Saved'");
   assert.equal(recordedActionToStepText({ kind: "assertValue", label: "Email", value: "a@b.com", ts: 1 }), "The 'Email' field has value 'a@b.com'");
   assert.equal(recordedActionToStepText({ kind: "assertUrl", value: "dashboard", ts: 1 }), "The page address contains 'dashboard'");
+  // DIF-015c Gap 2 — count + class step text.
+  assert.equal(
+    recordedActionToStepText({ kind: "assertCount", label: "row", value: "3", ts: 1 }),
+    "There are 3 matching 'row'",
+  );
+  assert.equal(
+    recordedActionToStepText({ kind: "assertCount", selector: ".x", value: "3", ts: 1 }),
+    "There are 3 matching elements",
+  );
+  assert.equal(
+    recordedActionToStepText({ kind: "assertHasClass", label: "Submit", value: "is-loading", ts: 1 }),
+    "The 'Submit' has the 'is-loading' class",
+  );
+  assert.equal(
+    recordedActionToStepText({ kind: "assertHasClass", selector: ".x", value: "is-loading", ts: 1 }),
+    "The matched element has the 'is-loading' class",
+  );
 });
 
 test("assertion fallbacks degrade cleanly when no friendly label is available", () => {
@@ -845,6 +870,9 @@ test("isEmittableAction: matches required-field branches in actionsToPlaywrightC
   assert.equal(isEmittableAction({ kind: "press", key: "Enter" }), true);
   assert.equal(isEmittableAction({ kind: "drag", selector: "#a", target: "#b" }), true);
   assert.equal(isEmittableAction({ kind: "assertUrl", value: "/dashboard" }), true);
+  // DIF-015c Gap 2 — both new kinds need selector AND value.
+  assert.equal(isEmittableAction({ kind: "assertCount", selector: ".row", value: "3" }), true);
+  assert.equal(isEmittableAction({ kind: "assertHasClass", selector: "#x", value: "is-loading" }), true);
 
   // Missing required field for each branch — must be rejected.
   assert.equal(isEmittableAction({ kind: "goto" }), false);
@@ -853,6 +881,10 @@ test("isEmittableAction: matches required-field branches in actionsToPlaywrightC
   assert.equal(isEmittableAction({ kind: "drag", selector: "#a" }), false);
   assert.equal(isEmittableAction({ kind: "drag", target: "#b" }), false);
   assert.equal(isEmittableAction({ kind: "assertUrl" }), false);
+  assert.equal(isEmittableAction({ kind: "assertCount", selector: ".row" }), false);
+  assert.equal(isEmittableAction({ kind: "assertCount", value: "3" }), false);
+  assert.equal(isEmittableAction({ kind: "assertHasClass", selector: "#x" }), false);
+  assert.equal(isEmittableAction({ kind: "assertHasClass", value: "is-loading" }), false);
 
   // Defensive — null / undefined / unknown kinds.
   assert.equal(isEmittableAction(null), false);
@@ -1181,6 +1213,83 @@ await (async () => {
     assert.match(scriptBody, /tagName\s*===\s*"SELECT"/);
   });
 })();
+
+// ── DIF-015c Gap 2 — addAssertionAction validation ────────────────────────
+// Lock down the allowlist + per-kind required-field validation so the
+// route handler's regex-based 400/404 mapping in `backend/src/routes/tests.js`
+// keeps working. Each guard mirrors a branch in `isEmittableAction` and
+// `actionsToPlaywrightCode`; drift between them is what produces the
+// "assertion shown in Steps panel but missing from playwrightCode" class
+// of bug — the shared validator + predicate prevent that.
+console.log("\n🧪 recorder — addAssertionAction (Gap 2 validation)");
+
+test("addAssertionAction accepts all six assertion kinds", () => {
+  const dispose = _testSeedSession("REC-assert-ok");
+  try {
+    addAssertionAction("REC-assert-ok", { kind: "assertVisible", selector: "#x" });
+    addAssertionAction("REC-assert-ok", { kind: "assertText", selector: "#x", value: "Saved" });
+    addAssertionAction("REC-assert-ok", { kind: "assertValue", selector: "#x", value: "a@b.com" });
+    addAssertionAction("REC-assert-ok", { kind: "assertUrl", value: "/dashboard" });
+    addAssertionAction("REC-assert-ok", { kind: "assertCount", selector: ".row", value: "3" });
+    addAssertionAction("REC-assert-ok", { kind: "assertHasClass", selector: "#x", value: "is-loading" });
+    const kinds = getRecording("REC-assert-ok").actions.map((a) => a.kind);
+    assert.deepEqual(kinds, [
+      "assertVisible", "assertText", "assertValue", "assertUrl",
+      "assertCount", "assertHasClass",
+    ]);
+  } finally { dispose(); }
+});
+
+test("addAssertionAction rejects assertCount without a numeric value", () => {
+  const dispose = _testSeedSession("REC-assert-count-bad");
+  try {
+    // Missing value → "value is required" branch.
+    assert.throws(
+      () => addAssertionAction("REC-assert-count-bad", { kind: "assertCount", selector: ".row" }),
+      /value is required/i,
+    );
+    // Non-numeric value → "must be a non-negative integer" branch. Each
+    // case in the inner array exercises a distinct rejection path: NaN,
+    // negative integer, float, leading-space (would survive parseInt but
+    // fail the canonical-form check).
+    for (const bad of ["abc", "-1", "1.5", " 1"]) {
+      assert.throws(
+        () => addAssertionAction("REC-assert-count-bad", { kind: "assertCount", selector: ".row", value: bad }),
+        /non-negative integer/i,
+        `value "${bad}" should be rejected`,
+      );
+    }
+    // Selector missing → reuses the existing "selector is required" path.
+    assert.throws(
+      () => addAssertionAction("REC-assert-count-bad", { kind: "assertCount", value: "3" }),
+      /selector is required/i,
+    );
+  } finally { dispose(); }
+});
+
+test("addAssertionAction rejects assertHasClass without selector or value", () => {
+  const dispose = _testSeedSession("REC-assert-class-bad");
+  try {
+    assert.throws(
+      () => addAssertionAction("REC-assert-class-bad", { kind: "assertHasClass", selector: "#x" }),
+      /value is required/i,
+    );
+    assert.throws(
+      () => addAssertionAction("REC-assert-class-bad", { kind: "assertHasClass", value: "is-loading" }),
+      /selector is required/i,
+    );
+  } finally { dispose(); }
+});
+
+test("addAssertionAction rejects unknown assertion kinds (defends the route's 400 path)", () => {
+  const dispose = _testSeedSession("REC-assert-unknown");
+  try {
+    assert.throws(
+      () => addAssertionAction("REC-assert-unknown", { kind: "assertWhatever", selector: "#x" }),
+      /Invalid assertion kind/i,
+    );
+  } finally { dispose(); }
+});
 
 console.log("\n──────────────────────────────────────────────────");
 console.log(`Results: ${passed} passed, ${failed} failed`);

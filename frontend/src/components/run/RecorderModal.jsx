@@ -230,8 +230,17 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     if (assertKind !== "assertUrl" && !assertSelector.trim()) {
       setError("Selector is required for this verification."); return;
     }
-    if ((assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && !assertValue.trim()) {
+    if ((assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl" || assertKind === "assertCount" || assertKind === "assertHasClass") && !assertValue.trim()) {
       setError("Value is required for this verification."); return;
+    }
+    // DIF-015c Gap 2 — front-end mirrors the backend's
+    // non-negative-integer guard so the user sees the error inline rather
+    // than as a 400 banner from `addAssertionAction`.
+    if (assertKind === "assertCount") {
+      const n = Number.parseInt(assertValue.trim(), 10);
+      if (!Number.isFinite(n) || n < 0 || String(n) !== assertValue.trim()) {
+        setError("Count must be a non-negative integer."); return;
+      }
     }
     setError(null);
     try {
@@ -534,6 +543,11 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   <option value="assertText">Element contains text</option>
                   <option value="assertValue">Field has value</option>
                   <option value="assertUrl">URL contains</option>
+                  {/* DIF-015c Gap 2 — count + class assertions. Backend
+                      validates selector + value for both; assertCount
+                      additionally requires a non-negative integer value. */}
+                  <option value="assertCount">Element count equals</option>
+                  <option value="assertHasClass">Element has class</option>
                 </select>
                 {assertKind !== "assertUrl" && (
                   <input className="input" value={assertSelector} onChange={(e) => setAssertSelector(e.target.value)}
@@ -541,9 +555,20 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 )}
                 <input className="input" value={assertLabel} onChange={(e) => setAssertLabel(e.target.value)}
                   placeholder="friendly label (optional)" />
-                {(assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl") && (
-                  <input className="input" value={assertValue} onChange={(e) => setAssertValue(e.target.value)}
-                    placeholder={assertKind === "assertUrl" ? "URL fragment or regex text" : "expected value"} />
+                {(assertKind === "assertText" || assertKind === "assertValue" || assertKind === "assertUrl" || assertKind === "assertCount" || assertKind === "assertHasClass") && (
+                  <input
+                    className="input"
+                    value={assertValue}
+                    onChange={(e) => setAssertValue(e.target.value)}
+                    type={assertKind === "assertCount" ? "number" : "text"}
+                    min={assertKind === "assertCount" ? 0 : undefined}
+                    placeholder={
+                      assertKind === "assertUrl" ? "URL fragment or regex text"
+                      : assertKind === "assertCount" ? "expected count (e.g. 3)"
+                      : assertKind === "assertHasClass" ? "class name (e.g. is-loading)"
+                      : "expected value"
+                    }
+                  />
                 )}
                 <button className="btn btn-ghost" onClick={handleAddAssertion}>
                   Add verification step

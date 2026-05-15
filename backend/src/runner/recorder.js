@@ -150,7 +150,7 @@ export function isNoisyTestId(value) {
 
 /**
  * @typedef {Object} RecordedAction
- * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
+ * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"|"assertCount"|"assertHasClass"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
  * @property {string} [label]      - Human-readable label for the target
  *                                   element (aria-label / inner text /
@@ -908,6 +908,29 @@ export function recordedActionToStepText(a) {
       // "page address" so the persisted step reads naturally next to AI-
       // generated steps like "User opens the dashboard page".
       return `The page address contains '${truncVal(a.value, 60)}'`;
+    case "assertCount": {
+      // Outcome-style assertion matching the AI pipeline's phrasing. With
+      // a captured label we read "There are N 'Item' rows"; without one we
+      // degrade cleanly to a generic "There are N matching elements"
+      // rather than leaking the selector. The captured `value` is the
+      // expected count (string-coerced upstream); render as an integer.
+      const n = Number(a.value);
+      const count = Number.isFinite(n) ? n : a.value;
+      const t = friendlyTarget(a);
+      return t
+        ? `There are ${count} matching${t}`
+        : `There are ${count} matching elements`;
+    }
+    case "assertHasClass": {
+      // Reads as "The 'Submit' button has the 'is-loading' class" so it
+      // sits naturally next to assertVisible / assertText prose. No label
+      // → fall back to "The matched element has the 'X' class" rather
+      // than emitting a bare quote with nothing in front of it.
+      const t = friendlyTarget(a);
+      return t
+        ? `The${t} has the '${truncVal(a.value)}' class`
+        : `The matched element has the '${truncVal(a.value)}' class`;
+    }
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
@@ -949,6 +972,12 @@ export function isEmittableAction(a) {
     case "press":        return !!a.key;
     case "drag":         return !!a.selector && !!a.target;
     case "assertUrl":    return !!a.value;
+    // assertCount + assertHasClass need BOTH a selector (to bind the
+    // expectation to) AND a value (the count / class name). Without
+    // either field the code generator would emit nothing — match that
+    // here so steps[].length and `// Step N:` comment count stay aligned.
+    case "assertCount":
+    case "assertHasClass": return !!a.selector && a.value != null && String(a.value).length > 0;
     default:             return false;
   }
 }
@@ -1108,6 +1137,26 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       lines.push(`// Step ${stepNo}: Assert URL`);
       lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
+    } else if (a.kind === "assertCount" && sel && a.value != null) {
+      // Coerce to a non-negative integer so `toHaveCount(NaN)` can't slip
+      // through. Anything that doesn't parse cleanly falls back to 0 —
+      // emit the assertion anyway so the reviewer sees a clearly broken
+      // step in the Test Detail view rather than the action silently
+      // disappearing from playwrightCode.
+      const n = Number.parseInt(String(a.value), 10);
+      const expected = Number.isFinite(n) && n >= 0 ? n : 0;
+      lines.push(`// Step ${stepNo}: Assert element count`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveCount(${expected});`);
+    } else if (a.kind === "assertHasClass" && sel && a.value != null && String(a.value).length > 0) {
+      // Playwright's `toHaveClass` matches the FULL class attribute when
+      // given a string, so partial-class matches (the common case — "is
+      // this button currently `is-loading`?") need a regex. Build a
+      // word-boundary regex with escaped metacharacters so a class name
+      // like `btn.primary` (rare but valid in framework-generated CSS)
+      // doesn't break out of its regex literal.
+      const literal = String(a.value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      lines.push(`// Step ${stepNo}: Assert element class`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveClass(new RegExp('(^|\\\\s)${escapeJsSingleQuote(literal)}(\\\\s|$)'));`);
     } else {
       continue;
     }
@@ -1137,7 +1186,12 @@ export function addAssertionAction(sessionId, action) {
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
   if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
   const kind = String(action?.kind || "");
-  const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
+  const allowed = new Set([
+    "assertVisible", "assertText", "assertValue", "assertUrl",
+    // DIF-015c Gap 2 — count + class assertions. Both require selector AND
+    // value (count: integer-parseable; hasClass: non-empty class token).
+    "assertCount", "assertHasClass",
+  ]);
   if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
   const selector = action?.selector ? String(action.selector).slice(0, 200) : undefined;
   const value = action?.value != null ? String(action.value).slice(0, 500) : undefined;
@@ -1148,8 +1202,18 @@ export function addAssertionAction(sessionId, action) {
   if (kind !== "assertUrl" && !selector) {
     throw new Error(`Invalid assertion: selector is required for ${kind}.`);
   }
-  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl") && !value) {
+  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl" || kind === "assertCount" || kind === "assertHasClass") && !value) {
     throw new Error(`Invalid assertion: value is required for ${kind}.`);
+  }
+  // assertCount needs a non-negative integer-parseable value. Reject
+  // anything that wouldn't survive Number.parseInt cleanly so the route
+  // surfaces a 400 instead of letting the code generator fall back to its
+  // `expected = 0` defence and confusing the reviewer at replay time.
+  if (kind === "assertCount") {
+    const n = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(n) || n < 0 || String(n) !== String(value).trim()) {
+      throw new Error("Invalid assertion: value for assertCount must be a non-negative integer.");
+    }
   }
   const row = {
     kind,
