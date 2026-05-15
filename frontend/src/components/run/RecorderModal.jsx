@@ -464,10 +464,24 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 Captured steps ({actions.length})
               </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <button className="btn btn-ghost" onClick={handlePauseResume}>
+                {/* DIF-015c Gap 3 — pause/resume + undo. Buttons are
+                    disabled during the `stopping` phase because the
+                    server is tearing the session down; firing pause /
+                    pop-last in that window would race the cleanup and
+                    surface a 404 error banner. The undo button is also
+                    disabled when there's nothing to undo. */}
+                <button
+                  className="btn btn-ghost"
+                  onClick={handlePauseResume}
+                  disabled={phase === "stopping"}
+                >
                   {paused ? "Resume capture" : "Pause capture"}
                 </button>
-                <button className="btn btn-ghost" onClick={handleUndoLast}>
+                <button
+                  className="btn btn-ghost"
+                  onClick={handleUndoLast}
+                  disabled={phase === "stopping" || actions.length === 0}
+                >
                   Undo last step
                 </button>
               </div>

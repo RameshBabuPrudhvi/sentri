@@ -1162,6 +1162,26 @@ export function addAssertionAction(sessionId, action) {
   return row;
 }
 
+/**
+ * DIF-015c Gap 3 — pause action capture on an in-flight recording.
+ * Flips `session.paused = true`; the browser stays open and the
+ * screencast continues so the operator can navigate the SUT without
+ * polluting `actions[]`. Three call sites honour the flag:
+ *
+ *   1. {@link forwardInput} — short-circuits CDP dispatch so user
+ *      clicks / keystrokes from the canvas overlay never reach the page.
+ *   2. The `__sentriRecord` exposeBinding callback in {@link startRecording}
+ *      — drops in-page-captured DOM events (debounced fills flushing,
+ *      framework re-renders firing change handlers, programmatic clicks
+ *      from page JS) so in-flight work that started before pause does
+ *      not silently leak in.
+ *   3. The popup + debounced main-page `framenavigated` handlers —
+ *      drop synthesised `goto` actions while paused.
+ *
+ * @param {string} sessionId
+ * @returns {{ paused: true }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
 export function pauseRecording(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
@@ -1170,6 +1190,15 @@ export function pauseRecording(sessionId) {
   return { paused: true };
 }
 
+/**
+ * DIF-015c Gap 3 — resume action capture after a pause. Idempotent on a
+ * session that was never paused (the flag was already falsy). See
+ * {@link pauseRecording} for the list of guarded call sites.
+ *
+ * @param {string} sessionId
+ * @returns {{ paused: false }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
 export function resumeRecording(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
@@ -1178,6 +1207,17 @@ export function resumeRecording(sessionId) {
   return { paused: false };
 }
 
+/**
+ * DIF-015c Gap 3 — undo the most recent recorded action. Idempotent on
+ * an empty `session.actions[]` (returns `{ removed: null, actionCount: 0 }`
+ * rather than 4xx) so the UI can fire the button without first checking
+ * the step count — matches the spec's "idempotent on empty actions[]"
+ * acceptance criterion in `NEXT.md`.
+ *
+ * @param {string} sessionId
+ * @returns {{ removed: RecordedAction|null, actionCount: number }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
 export function popLastRecordingAction(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
@@ -1243,6 +1283,14 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Expose a binding for the injected script to relay captured events.
     await context.exposeBinding("__sentriRecord", (source, action) => {
       if (session.status !== "recording") return;
+      // While paused, drop all in-page-captured actions. `forwardInput`
+      // already short-circuits user-initiated CDP input at the route
+      // layer, but the page can still emit events from in-flight work
+      // that started before pause (debounced fills flushing, framework
+      // re-renders firing change handlers, programmatic clicks fired by
+      // page JS, …). Without this guard those would leak into
+      // `session.actions[]` and surprise the operator at replay time.
+      if (session.paused === true) return;
       if (!action || typeof action !== "object") return;
       const sourcePage = source?.page || null;
       const sourceFrame = source?.frame || null;
@@ -1384,6 +1432,7 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       if (pageAliases.has(p)) return;
       pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
       p.on("framenavigated", (frame) => {
+        if (session.paused === true) return;
         if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
           session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
         }
@@ -1434,6 +1483,11 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       frameNavTimer = setTimeout(() => {
         frameNavTimer = null;
         if (session.status !== "recording") return;
+        // Pause also drops debounced framenavigated flushes — a
+        // navigation that started before pause but settled after should
+        // not produce a recorded `goto` (matches the `__sentriRecord`
+        // binding guard above; consistent operator-facing model).
+        if (session.paused === true) return;
         // Deduplicate: skip if the settled URL is the same as the last
         // recorded goto so initial-page echoes and trivial hash changes
         // don't produce spurious Navigate steps in the sidebar.

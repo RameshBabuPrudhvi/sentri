@@ -1707,7 +1707,21 @@ router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"),
   }
 });
 
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/pause
+ * Pause action capture for an in-flight recording. The headless browser
+ * stays open and the screencast keeps streaming, but `forwardInput` and
+ * the `__sentriRecord` binding short-circuit while `session.paused` is
+ * true so user clicks/keystrokes during the pause window are not
+ * persisted as recorded actions.
+ */
 router.post("/projects/:id/record/:sessionId/pause", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
   try {
     const result = pauseRecording(req.params.sessionId);
     res.json({ ok: true, ...result });
@@ -1717,7 +1731,18 @@ router.post("/projects/:id/record/:sessionId/pause", requireRole("qa_lead"), (re
   }
 });
 
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/resume
+ * Resume action capture after a pause. Idempotent — calling resume on a
+ * session that was never paused is a no-op.
+ */
 router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
   try {
     const result = resumeRecording(req.params.sessionId);
     res.json({ ok: true, ...result });
@@ -1727,7 +1752,20 @@ router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (r
   }
 });
 
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/pop-last
+ * Undo the most recent captured action. Idempotent on an empty
+ * `session.actions[]` — returns `{ removed: null, actionCount: 0 }`
+ * rather than 4xx so the UI can fire the button without first checking
+ * step count.
+ */
 router.post("/projects/:id/record/:sessionId/pop-last", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
   try {
     const result = popLastRecordingAction(req.params.sessionId);
     res.json({ ok: true, ...result });
