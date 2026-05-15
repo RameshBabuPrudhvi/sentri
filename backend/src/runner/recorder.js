@@ -687,6 +687,28 @@ const RECORDER_SCRIPT = `
     }
   }
   let shortcutCaptureBudget = 0;
+  // SEC-007-followup — hover capture is OFF by default.
+  //
+  // The dwell-timer emit path below previously recorded a `hover` action
+  // every time the operator's cursor rested on an interactive ancestor for
+  // 600 ms, even when the operator's intent was to click / pick / read. The
+  // "strip trailing hover if same selector" guard in the binding (see
+  // `INTERACTION_KINDS.has(row.kind) && row.selector` block in
+  // `_attachAndOpenRecorderPage`) only fires when the hover selector
+  // matches the next interaction's selector — but in real flows the hover
+  // lands on a heading / link wrapper (`<h1>` inside `<a>`, `role=heading`)
+  // while the click lands on a button or input. The selectors differ, the
+  // guard misses, and every test ends up with junk `hover` steps before
+  // every intended action.
+  //
+  // Industry-standard recorders (Playwright codegen, Mabl, Testim) all
+  // default hover capture OFF for exactly this reason. Operators who need a
+  // hover-to-reveal step for a tooltip flow can enable capture via the
+  // exposed setter (UI toggle in `RecorderModal` is a follow-up); the
+  // detection scaffolding (dwell timer, interactive-ancestor walk, sel dedup)
+  // is preserved verbatim so flipping the flag back on requires zero code
+  // change beyond the gate.
+  let hoverCaptureEnabled = false;
   function eventElement(ev) {
     const p = ev.composedPath && ev.composedPath();
     return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
@@ -753,6 +775,12 @@ const RECORDER_SCRIPT = `
     hoverDwellTimer = setTimeout(() => {
       hoverDwellTimer = null;
       lastHoverSelector = sel;
+      // SEC-007-followup — only emit the hover action when capture is
+      // explicitly enabled. Default is off (matches Playwright codegen,
+      // Mabl, Testim). The dwell timer still runs so the lastHoverSelector
+      // bookkeeping stays consistent — flipping the flag back on at
+      // runtime takes effect on the next dwell without state leak.
+      if (!hoverCaptureEnabled) return;
       window.__sentriRecord && window.__sentriRecord({
         kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
       });
@@ -1010,6 +1038,15 @@ const RECORDER_SCRIPT = `
   window.__sentriRecorderSetShortcutBudget = (n) => {
     const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
     shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
+  };
+  // SEC-007-followup — setter for the hover-capture opt-in. Strict boolean
+  // coercion (mirrors how Gap 6 stealth coerces) so a stringy "true" can't
+  // accidentally enable capture from a misconfigured caller. The frontend
+  // would call this via a `page.evaluate` shim from a route handler that
+  // accepts the toggle from a UI control; without that wiring the flag
+  // stays off and recordings are clean by default.
+  window.__sentriRecorderSetHoverCapture = (enabled) => {
+    hoverCaptureEnabled = enabled === true;
   };
   // DIF-015c Gap 2 (point-and-click assert UX) — expose the in-page
   // selectorGenerator + bestLabel + the closest-interactive-ancestor
