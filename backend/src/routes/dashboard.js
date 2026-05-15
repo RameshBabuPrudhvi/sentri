@@ -18,10 +18,11 @@ import * as accessibilityViolationRepo from "../database/repositories/accessibil
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
 import { getTopFlakyTests } from "../utils/flakyDetector.js";
+import { getQueueStats, isQueueAvailable } from "../queue.js";
 
 const router = Router();
 
-router.get("/dashboard", (req, res) => {
+router.get("/dashboard", async (req, res) => {
   // ACL-001: Scope dashboard data to the user's workspace.
   // Projects are filtered by workspaceId; runs and tests are filtered by
   // the set of project IDs that belong to this workspace.
@@ -355,6 +356,7 @@ router.get("/dashboard", (req, res) => {
     defectBreakdown,
     flakyTestCount,
     topFlakyTests,
+    workerPool,
     testGrowth,
     mttrMs,
     testsByUrl,

@@ -296,3 +296,19 @@ The `/api/v1/system` response includes `activeProvider`, `redis`, `postgres`, an
 - [Environment Variables](/guide/env-vars) — full reference for all backend + frontend env vars
 - [Docker Deployment](/guide/docker) — production Docker setup
 - [Production Checklist](/guide/production) — what to harden before exposing Sentri to a team
+
+
+## Distributed runner (AUTO-008)
+
+When Redis is configured, you can scale run workers independently from the web container:
+
+```bash
+docker compose --profile redis up -d --scale worker=4
+```
+
+Recommended env vars:
+
+- `REDIS_URL=redis://redis:6379`
+- `WORKER_CONCURRENCY=2` per worker container
+
+Without Redis (or without worker replicas), Sentri automatically degrades to single-process mode.
