@@ -425,6 +425,18 @@ export const api = {
    */
   recordSwitchDevice: (projectId, sessionId, device) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/device`, { device }),
+  /**
+   * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
+   * resolves the `{selector, label, rect}` for an arbitrary viewport
+   * coordinate. Used by `LiveBrowserView` in assert-mode to highlight the
+   * hovered element and pre-fill the verification form on click. Returns
+   * `{ probe: null }` when no interactive ancestor is found.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {{x: number, y: number}} point - Viewport coordinates (scaled).
+   */
+  recordProbe: (projectId, sessionId, point) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/probe`, point),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */

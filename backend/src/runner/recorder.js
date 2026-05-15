@@ -690,6 +690,40 @@ const RECORDER_SCRIPT = `
     const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
     shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
   };
+  // DIF-015c Gap 2 (point-and-click assert UX) — expose the in-page
+  // selectorGenerator + bestLabel + the closest-interactive-ancestor
+  // walk on \`window\` so the Node-side \`probeAtPoint\` helper can
+  // resolve \`{selector, label, rect}\` for an arbitrary viewport
+  // coordinate via \`page.evaluate\`. Without these exports the probe
+  // would have to re-implement the same Playwright + hand-rolled
+  // fallback logic, which is exactly the drift class of bug AGENT.md
+  // §"Do not duplicate shared utilities" warns against. Returns null
+  // when no interactive ancestor is found so the caller can fall back
+  // to the operator's manual selector paste.
+  window.__sentriProbeAtPoint = (x, y) => {
+    try {
+      const el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      const target = el.closest
+        ? (el.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || el)
+        : el;
+      const selector = selectorGenerator(target);
+      const label = bestLabel(target);
+      const rect = target.getBoundingClientRect();
+      return {
+        selector: selector || "",
+        label: label || "",
+        rect: {
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+      };
+    } catch (_) {
+      return null;
+    }
+  };
 
   document.addEventListener("drop", (ev) => {
     const target = eventElement(ev);
@@ -1308,6 +1342,60 @@ export function popLastRecordingAction(sessionId) {
   if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
   const removed = session.actions.length ? session.actions.pop() : null;
   return { removed, actionCount: session.actions.length };
+}
+
+/**
+ * DIF-015c Gap 2 (point-and-click assert UX) — resolve the
+ * `{selector, label, rect}` for an arbitrary viewport coordinate so the
+ * frontend can highlight the hovered element and pre-fill the
+ * "Add verification" form on click. Mirrors how Playwright codegen's
+ * inspector probes the page under the cursor.
+ *
+ * The probe runs entirely in the page context via `page.evaluate`,
+ * calling the `window.__sentriProbeAtPoint` helper that the recorder
+ * script attaches at init time. That helper reuses the SAME selector +
+ * label heuristics the click/fill listeners use, so the picker's
+ * suggestion is byte-aligned with what a real click would have captured.
+ *
+ * The probe is cheap (~5 ms in practice) and idempotent — the operator
+ * can pump events at hover frequency (~30 fps) without polluting the
+ * session. We deliberately do NOT record the probe as an action; it's
+ * a read-only inspection.
+ *
+ * @param {string} sessionId
+ * @param {{x: number, y: number}} point - Viewport coordinates (already
+ *   scaled by the frontend from CSS pixels via `LiveBrowserView.scaleCoords`).
+ * @returns {Promise<{selector: string, label: string, rect: {x: number, y: number, width: number, height: number}}|null>}
+ *   The hovered element's selector + friendly label + bounding rect, or
+ *   `null` when no interactive ancestor was found (e.g. cursor over the
+ *   page background). The caller falls back to manual selector paste.
+ * @throws {Error} when the session is unknown or not recording.
+ */
+export async function probeAtPoint(sessionId, point) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  if (!session.page) throw new Error(`Recording session ${sessionId} has no active page.`);
+  const x = Math.max(0, Math.round(Number(point?.x) || 0));
+  const y = Math.max(0, Math.round(Number(point?.y) || 0));
+  try {
+    const probe = await session.page.evaluate(
+      ({ x, y }) => {
+        if (typeof window.__sentriProbeAtPoint !== "function") return null;
+        return window.__sentriProbeAtPoint(x, y);
+      },
+      { x, y },
+    );
+    return probe || null;
+  } catch (err) {
+    // Page navigating mid-probe → return null so the frontend just drops
+    // the highlight rather than surfacing a 500 to the operator. The
+    // probe is best-effort by design.
+    if (process.env.LOG_LEVEL === "debug") {
+      console.error(formatLogLine("debug", null, `[recorder] probeAtPoint failed: ${err.message}`));
+    }
+    return null;
+  }
 }
 
 /**

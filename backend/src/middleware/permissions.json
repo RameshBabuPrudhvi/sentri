@@ -164,6 +164,10 @@
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js"
     },
+    "POST /api/v1/projects/:id/record/:sessionId/probe": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
     "POST /api/v1/tests/:testId/fix": {
       "role": "qa_lead",
       "source": "backend/src/routes/testFix.js:152"

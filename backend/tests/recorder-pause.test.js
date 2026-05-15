@@ -6,6 +6,7 @@ import {
   forwardInput,
   getRecording,
   switchDevice,
+  probeAtPoint,
   _testSeedSession,
 } from "../src/runner/recorder.js";
 
@@ -271,6 +272,119 @@ await asyncTest("switchDevice preserves session.actions[] across the rebuild pat
     /session\.actions\s*=\s*[^=]/,
     "switchDevice must NEVER reassign session.actions (would wipe captured steps)",
   );
+});
+
+console.log("\nrecorder-pause — probeAtPoint (DIF-015c Gap 2 hover-pick)");
+
+await asyncTest("probeAtPoint throws when session is unknown", async () => {
+  await assert.rejects(probeAtPoint("REC-nope", { x: 10, y: 20 }), /not found/i);
+});
+
+await asyncTest("probeAtPoint throws when session is mid-teardown", async () => {
+  const dispose = _testSeedSession("REC-probe-stop", { status: "stopping" });
+  try {
+    await assert.rejects(probeAtPoint("REC-probe-stop", { x: 10, y: 20 }), /not recording/i);
+  } finally { dispose(); }
+});
+
+await asyncTest("probeAtPoint throws when session has no active page", async () => {
+  // Default seed leaves session.page undefined — the helper must surface
+  // a clear error rather than crashing on `session.page.evaluate`.
+  const dispose = _testSeedSession("REC-probe-nopage");
+  try {
+    await assert.rejects(probeAtPoint("REC-probe-nopage", { x: 1, y: 1 }), /no active page/i);
+  } finally { dispose(); }
+});
+
+await asyncTest("probeAtPoint forwards rounded integer coordinates to page.evaluate", async () => {
+  // Defensive contract: the helper rounds + clamps coordinates to ≥ 0
+  // integers before calling page.evaluate, so a malformed payload (NaN,
+  // negative, fractional CSS pixel) never reaches CDP. Use a fake page
+  // that records its evaluate args.
+  const evalCalls = [];
+  const fakePage = {
+    evaluate: async (_fn, arg) => {
+      evalCalls.push(arg);
+      return { selector: "#x", label: "x", rect: { x: 0, y: 0, width: 1, height: 1 } };
+    },
+  };
+  const dispose = _testSeedSession("REC-probe-args", { page: fakePage });
+  try {
+    await probeAtPoint("REC-probe-args", { x: 12.7, y: -5 });
+    assert.equal(evalCalls.length, 1);
+    assert.equal(evalCalls[0].x, 13, "x must be rounded");
+    assert.equal(evalCalls[0].y, 0, "y must be clamped to 0 when negative");
+    // NaN / non-numeric falls back to 0, never NaN reaching CDP.
+    await probeAtPoint("REC-probe-args", { x: "garbage", y: undefined });
+    assert.equal(evalCalls[1].x, 0);
+    assert.equal(evalCalls[1].y, 0);
+  } finally { dispose(); }
+});
+
+await asyncTest("probeAtPoint returns null when the in-page helper is missing", async () => {
+  // Simulates the case where the recorder script hasn't installed
+  // `__sentriProbeAtPoint` yet (page mid-load, init script failed).
+  // The page-side IIFE returns null in that branch, and the Node-side
+  // helper passes that through verbatim so the frontend can drop the
+  // highlight overlay rather than show a stale outline.
+  const fakePage = {
+    evaluate: async () => null,
+  };
+  const dispose = _testSeedSession("REC-probe-nohelper", { page: fakePage });
+  try {
+    const result = await probeAtPoint("REC-probe-nohelper", { x: 10, y: 20 });
+    assert.equal(result, null);
+  } finally { dispose(); }
+});
+
+await asyncTest("probeAtPoint returns the in-page helper's payload verbatim", async () => {
+  const expected = {
+    selector: 'role=button[name="Sign in"]',
+    label: "Sign in",
+    rect: { x: 100, y: 200, width: 80, height: 32 },
+  };
+  const fakePage = { evaluate: async () => expected };
+  const dispose = _testSeedSession("REC-probe-ok", { page: fakePage });
+  try {
+    const result = await probeAtPoint("REC-probe-ok", { x: 140, y: 216 });
+    assert.deepEqual(result, expected);
+  } finally { dispose(); }
+});
+
+await asyncTest("probeAtPoint returns null on transient page navigation errors (best-effort)", async () => {
+  // Page navigating mid-probe → page.evaluate rejects. The helper
+  // swallows and returns null so the frontend just drops the highlight
+  // rather than surfacing a 500 to the operator. Mirrors the same
+  // "ignore transient CDP errors" pattern in `forwardInput`.
+  const fakePage = {
+    evaluate: async () => { throw new Error("Target closed"); },
+  };
+  const dispose = _testSeedSession("REC-probe-err", { page: fakePage });
+  try {
+    const result = await probeAtPoint("REC-probe-err", { x: 5, y: 5 });
+    assert.equal(result, null);
+  } finally { dispose(); }
+});
+
+console.log("\nrecorder-pause — RECORDER_SCRIPT exposes __sentriProbeAtPoint (source-level contract)");
+
+await asyncTest("RECORDER_SCRIPT installs window.__sentriProbeAtPoint with selector + label + rect", async () => {
+  // The Node-side `probeAtPoint` calls `window.__sentriProbeAtPoint`
+  // via page.evaluate; lock down at source level that the recorder
+  // script DOES expose this helper, so a future RECORDER_SCRIPT refactor
+  // can't silently strip it. Mirrors the source-inspection pattern used
+  // for the `__sentriRecord` binding.
+  const fs = await import("node:fs");
+  const urlMod = await import("node:url");
+  const here = urlMod.fileURLToPath(new URL(".", import.meta.url));
+  const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+  assert.match(src, /window\.__sentriProbeAtPoint\s*=\s*\(\s*x\s*,\s*y\s*\)\s*=>/, "recorder script must install __sentriProbeAtPoint");
+  // The probe must walk to the closest interactive ancestor (same set
+  // the click/fill listeners use) so the picker's suggestion is byte-
+  // aligned with what a real click would have captured.
+  assert.match(src, /elementFromPoint\(x,\s*y\)/, "probe must use document.elementFromPoint");
+  assert.match(src, /selectorGenerator\(target\)/, "probe must call the existing selectorGenerator");
+  assert.match(src, /bestLabel\(target\)/, "probe must call the existing bestLabel");
 });
 
 console.log("\n──────────────────────────────────────────────────");

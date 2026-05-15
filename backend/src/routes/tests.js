@@ -63,7 +63,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction, switchDevice } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction, switchDevice, probeAtPoint } from "../runner/recorder.js";
 import { DEVICE_PRESETS } from "../runner/config.js";
 /**
  * DIF-015c Gap 5 — allowlist of device names accepted at the route
@@ -1772,6 +1772,41 @@ router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (r
     res.json({ ok: true, ...result });
   } catch (err) {
     if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/probe
+ * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
+ * returns the `{selector, label, rect}` for an arbitrary viewport
+ * coordinate. The frontend uses this to highlight the hovered element
+ * inside `LiveBrowserView` and pre-fill the "Add verification" form on
+ * click, matching how Playwright codegen's inspector behaves. NOT a
+ * mutation — does not record an action; safe to call at hover frequency.
+ *
+ * Returns `{ probe: null }` when no interactive ancestor is found under
+ * the cursor (page background, missing recorder script) so the frontend
+ * can drop the highlight rather than show a stale overlay.
+ */
+router.post("/projects/:id/record/:sessionId/probe", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  const { x, y } = req.body || {};
+  if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
+    return res.status(400).json({ error: "x and y must be finite numbers" });
+  }
+  try {
+    const probe = await probeAtPoint(req.params.sessionId, { x, y });
+    res.json({ probe });
+  } catch (err) {
+    if (/not found|not recording|no active page/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
     return res.status(500).json({ error: "Internal server error" });
   }
 });

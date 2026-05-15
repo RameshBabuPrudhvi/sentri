@@ -62,6 +62,17 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [device, setDevice] = useState("");
   const [pendingDeviceSwitch, setPendingDeviceSwitch] = useState(null);
   const [deviceSwitching, setDeviceSwitching] = useState(false);
+  // DIF-015c Gap 2 (point-and-click assert UX) — assert mode state.
+  // When `assertMode` is true the canvas suppresses input forwarding and
+  // instead shows a hover-driven highlight overlay; clicking commits the
+  // pick by pre-filling the verification form with `{selector, label}`
+  // from the most recent probe. `currentProbe` holds the latest
+  // `{selector, label}` so a click can fire even if the user happens to
+  // click before a fresh hover probe has settled.
+  const [assertMode, setAssertMode] = useState(false);
+  const [highlightRect, setHighlightRect] = useState(null);
+  const currentProbeRef = useRef(null);
+  const probeTimerRef = useRef(null);
   // Candidate URLs surfaced as a datalist suggestion list under the Starting
   // URL input — seed URL + any pages discovered on the latest successful
   // crawl. Fetched lazily when the modal opens so projects without a crawl
@@ -164,6 +175,10 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       // the parent unmounts us directly.
       for (const t of resolveTimersRef.current.values()) clearTimeout(t);
       resolveTimersRef.current.clear();
+      // DIF-015c Gap 2 — drop the in-flight probe timer too so the
+      // debounced setTimeout doesn't fire after unmount and try to
+      // setState on a dead component.
+      if (probeTimerRef.current) { clearTimeout(probeTimerRef.current); probeTimerRef.current = null; }
       if (sessionIdRef.current && projectIdRef.current) {
         api.recordDiscard(projectIdRef.current, sessionIdRef.current).catch(() => {});
         sessionIdRef.current = null;
@@ -343,6 +358,63 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     setPendingDeviceSwitch(nextDevice);
   }
 
+  /**
+   * DIF-015c Gap 2 (point-and-click assert UX) — debounced hover probe
+   * that POSTs the cursor's viewport coordinate to
+   * `/record/:sessionId/probe` and renders the returned bounding rect
+   * as a highlight overlay on the canvas. Debounce (~120 ms) keeps the
+   * round-trip rate sensible at 60 fps mouse moves.
+   *
+   * The latest `{selector, label}` is stashed in `currentProbeRef` so
+   * a subsequent click can commit the pick even if no fresh probe has
+   * settled (rare race: operator clicks immediately after the canvas
+   * gains focus, before the first hover probe has returned).
+   */
+  const handleProbe = useCallback(({ x, y }) => {
+    if (!sessionIdRef.current) return;
+    if (probeTimerRef.current) clearTimeout(probeTimerRef.current);
+    probeTimerRef.current = setTimeout(async () => {
+      probeTimerRef.current = null;
+      try {
+        const { probe } = await api.recordProbe(projectIdRef.current, sessionIdRef.current, { x, y });
+        if (!probe) {
+          // No interactive ancestor under the cursor — drop the
+          // highlight rather than show a stale outline. The pick
+          // ref is also cleared so a click in this region falls
+          // through to manual selector paste.
+          setHighlightRect(null);
+          currentProbeRef.current = null;
+          return;
+        }
+        currentProbeRef.current = { selector: probe.selector, label: probe.label };
+        setHighlightRect(probe.rect);
+      } catch {
+        // Page navigating mid-probe is normal — drop the highlight,
+        // don't surface an error banner.
+        setHighlightRect(null);
+        currentProbeRef.current = null;
+      }
+    }, 120);
+  }, []);
+
+  /**
+   * DIF-015c Gap 2 — commit the pick. Pre-fills the existing
+   * verification form's selector + label fields with the latest probe
+   * and exits assert mode so subsequent operator clicks return to
+   * driving the page. The form's existing kind/value/Add button stay
+   * unchanged — operators choose `assertVisible` / `assertText` / etc.
+   * from the dropdown they already use.
+   */
+  function handlePick() {
+    const probe = currentProbeRef.current;
+    if (!probe) return;
+    if (probe.selector) setAssertSelector(probe.selector);
+    if (probe.label) setAssertLabel(probe.label);
+    setAssertMode(false);
+    setHighlightRect(null);
+    currentProbeRef.current = null;
+  }
+
   async function executeDeviceSwitch() {
     const nextDevice = pendingDeviceSwitch;
     if (nextDevice == null) return;
@@ -377,6 +449,12 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
     resolveTimersRef.current.clear();
     setResolvedIndices(new Set());
     setFlashIndices(new Set());
+    // DIF-015c Gap 2 — drop any in-flight probe timer + assert-mode
+    // overlay so a teardown leaves no stale state for the next session.
+    if (probeTimerRef.current) { clearTimeout(probeTimerRef.current); probeTimerRef.current = null; }
+    currentProbeRef.current = null;
+    setHighlightRect(null);
+    setAssertMode(false);
   }
 
   function handleCancel() {
@@ -563,6 +641,10 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
               onInput={handleInput}
               viewportW={viewport.width}
               viewportH={viewport.height}
+              assertMode={assertMode}
+              onProbe={handleProbe}
+              onPick={handlePick}
+              highlightRect={highlightRect}
             />
           </div>
 
@@ -667,6 +749,32 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 <div className="recorder-sidebar__heading" style={{ marginBottom: 2 }}>
                   Add verification
                 </div>
+                {/* DIF-015c Gap 2 — Pick-by-click toggle. When on, the
+                    canvas swaps to inspect mode (crosshair cursor,
+                    hover highlight, suppressed event forwarding) and
+                    a click pre-fills the selector + label fields below
+                    so the operator can finish picking the kind +
+                    value + clicking "Add verification step" without
+                    pasting a selector. NEXT.md `:51`: "No manual
+                    selector paste required." */}
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    if (assertMode) {
+                      // Cancel — drop any half-set probe state so the
+                      // next entry into assert mode starts clean.
+                      setHighlightRect(null);
+                      currentProbeRef.current = null;
+                    }
+                    setAssertMode(!assertMode);
+                  }}
+                  disabled={phase === "stopping" || deviceSwitching}
+                  style={{ marginBottom: 6 }}
+                >
+                  {assertMode
+                    ? "✓ Pick mode active — click an element on the canvas"
+                    : "🎯 Pick element by clicking"}
+                </button>
                 <select className="input" value={assertKind} onChange={(e) => setAssertKind(e.target.value)}>
                   <option value="assertVisible">Element visible</option>
                   <option value="assertText">Element contains text</option>
