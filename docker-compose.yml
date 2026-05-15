@@ -89,6 +89,12 @@ services:
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+      # Workers MUST share the same database as the backend. Distributed mode
+      # therefore requires a network-accessible DB (PostgreSQL) — a per-container
+      # SQLite file cannot be shared across replicas. If DATABASE_URL is unset
+      # we default to the bundled `postgres` service (activate with
+      # `--profile redis --profile postgres`).
+      - DATABASE_URL=${DATABASE_URL:-postgres://sentri:sentri@postgres:5432/sentri}
     restart: unless-stopped
     security_opt:
       - seccomp=unconfined
