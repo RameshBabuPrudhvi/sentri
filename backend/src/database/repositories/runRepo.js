@@ -42,14 +42,17 @@ const JSON_FIELDS = [
   "rootCauses", // AUTO-010: deterministic root-cause clustering output (migration 027)
 ];
 
+// Fields whose canonical empty shape is an array, not null. Keeping them as
+// `[]` on legacy / pre-migration rows avoids null-guard boilerplate at every
+// consumer (e.g. external API callers reading `run.rootCauses.length` should
+// never blow up on a pre-AUTO-010 run). Hoisted to module scope so bulk
+// reads (e.g. `getWithResultsByProjectIds` on the dashboard) don't allocate
+// a fresh Set per row.
+const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses"]);
+
 function rowToRun(row) {
   if (!row) return undefined;
   const obj = { ...row };
-  // Fields whose canonical empty shape is an array, not null. Keeping
-  // them as `[]` on legacy / pre-migration rows avoids null-guard
-  // boilerplate at every consumer (e.g. external API callers reading
-  // `run.rootCauses.length` should never blow up on a pre-AUTO-010 run).
-  const ARRAY_DEFAULT_FIELDS = new Set(["tests", "results", "videoSegments", "pages", "rootCauses"]);
   for (const f of JSON_FIELDS) {
     if (obj[f]) {
       try { obj[f] = JSON.parse(obj[f]); }

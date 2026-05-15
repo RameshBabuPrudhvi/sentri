@@ -196,6 +196,22 @@ async function processJob(job) {
     return;
   }
 
+  // CAP-002 Phase 2 — defense-in-depth terminal-status guard. If
+  // `finalizeShardedRun` throws after `markRunCompletedFirstWriterWins`
+  // succeeds (e.g. a DB error during `logActivity` / `fireNotifications` /
+  // `safeFetch`), BullMQ would retry the job. Without this guard the retry
+  // would re-execute the shard against an already-terminal parent run,
+  // double-counting stats via `incrementRunStats`. The window is extremely
+  // narrow (all post-persist code is best-effort try/catch) but the guard
+  // is cheap and correct — same predicate the first-writer-wins primitives
+  // use, just enforced at job-start instead of UPDATE-time.
+  if (run.status === "completed" || run.status === "failed" || run.status === "aborted") {
+    structuredLog("worker.job_skipped_terminal", {
+      runId, projectId, type, jobId: job.id, status: run.status,
+    });
+    return;
+  }
+
   // DIF-012: resolve the per-run environment override (if any) from the
   // persisted run record. The route handler validated the envId at enqueue
   // time, so we only need to look it up here. A row that was deleted
