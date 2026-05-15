@@ -612,19 +612,16 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   surfaces the cost/benefit so operators don't enable it
                   speculatively. */}
               <div>
-                <label
-                  className="recorder-idle__label"
-                  style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                >
+                <label className="recorder-idle__label recorder-stealth-toggle">
                   <input
                     type="checkbox"
+                    className="recorder-stealth-toggle__checkbox"
                     checked={stealth}
                     onChange={(e) => setStealth(e.target.checked)}
-                    style={{ width: 14, height: 14 }}
                   />
                   Stealth mode (bypass headless detection)
                 </label>
-                <div style={{ fontSize: 12, color: "var(--muted, #888)", marginTop: 4 }}>
+                <div className="recorder-stealth-help">
                   Patches <code>navigator.webdriver</code> and 4 other
                   fingerprint surfaces so sites that block headless
                   browsers render normally. Off by default; opt in only
@@ -697,13 +694,13 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
               <div className="recorder-sidebar__heading">
                 Captured steps ({actions.length})
               </div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                {/* DIF-015c Gap 3 — pause/resume + undo. Buttons are
-                    disabled during the `stopping` phase because the
-                    server is tearing the session down; firing pause /
-                    pop-last in that window would race the cleanup and
-                    surface a 404 error banner. The undo button is also
-                    disabled when there's nothing to undo. */}
+              {/* DIF-015c Gap 3 — pause/resume + undo. Buttons are
+                  disabled during the `stopping` phase because the
+                  server is tearing the session down; firing pause /
+                  pop-last in that window would race the cleanup and
+                  surface a 404 error banner. The undo button is also
+                  disabled when there's nothing to undo. */}
+              <div className="recorder-action-row">
                 <button
                   className="btn btn-ghost"
                   onClick={handlePauseResume}
@@ -728,20 +725,9 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   Suppressed when stealth is off so the recording stage
                   stays clutter-free for the common case. */}
               {stealth && (
-                <div style={{
-                  marginBottom: 8,
-                  padding: "4px 8px",
-                  background: "rgba(34, 197, 94, 0.1)",
-                  border: "1px solid rgba(34, 197, 94, 0.3)",
-                  borderRadius: 4,
-                  fontSize: 12,
-                  color: "var(--muted, #16a34a)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}>
+                <div className="recorder-stealth-badge">
                   <span>🥷 Stealth mode active —</span>
-                  <span style={{ opacity: 0.8 }}>
+                  <span className="recorder-stealth-badge__subtext">
                     headless fingerprints patched on every page
                   </span>
                 </div>
@@ -752,7 +738,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   acceptance: dropdown shows the same options as
                   RunRegressionModal, switching resizes the canvas,
                   selectors regenerate at the new pixel scale. */}
-              <div style={{ marginBottom: 8 }}>
+              <div className="recorder-device-picker">
                 <label className="recorder-sidebar__footer-label" htmlFor="recorder-device-mid">
                   Device profile
                 </label>
@@ -768,7 +754,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   ))}
                 </select>
                 {deviceSwitching && (
-                  <div style={{ fontSize: 12, color: "var(--muted, #888)", marginTop: 4 }}>
+                  <div className="recorder-device-picker__hint">
                     Switching device — rebuilding browser context…
                   </div>
                 )}
@@ -826,7 +812,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                     pasting a selector. NEXT.md `:51`: "No manual
                     selector paste required." */}
                 <button
-                  className="btn btn-ghost"
+                  className="btn btn-ghost recorder-pick-toggle"
                   onClick={() => {
                     if (assertMode) {
                       // Cancel — drop any half-set probe state so the
@@ -837,7 +823,6 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                     setAssertMode(!assertMode);
                   }}
                   disabled={phase === "stopping" || deviceSwitching}
-                  style={{ marginBottom: 6 }}
                 >
                   {assertMode
                     ? "✓ Pick mode active — click an element on the canvas"

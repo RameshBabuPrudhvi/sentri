@@ -313,20 +313,19 @@ export default function LiveBrowserView({
         if (rect.width === 0 || rect.height === 0) return null;
         const sx = rect.width / viewportW;
         const sy = rect.height / viewportH;
+        // Only the computed rect (left/top/width/height) stays inline —
+        // every static visual (border, shadow, transition, z-index)
+        // lives in `.recorder-highlight-overlay`. AGENT.md `:127`
+        // explicitly carves out "dynamic/data-driven values" as the
+        // legitimate inline-style use case.
         return (
           <div
+            className="recorder-highlight-overlay"
             style={{
-              position: "absolute",
               left: highlightRect.x * sx,
               top: highlightRect.y * sy,
               width: Math.max(2, highlightRect.width * sx),
               height: Math.max(2, highlightRect.height * sy),
-              border: "2px solid #3b82f6",
-              boxShadow: "0 0 0 2px rgba(59, 130, 246, 0.25), 0 0 12px rgba(59, 130, 246, 0.5)",
-              borderRadius: 2,
-              pointerEvents: "none",
-              transition: "left 80ms linear, top 80ms linear, width 80ms linear, height 80ms linear",
-              zIndex: 2,
             }}
           />
         );
@@ -334,13 +333,7 @@ export default function LiveBrowserView({
       {/* DIF-015c Gap 2 — Assert-mode badge so the operator can tell at
           a glance the canvas is in inspect mode rather than drive mode. */}
       {assertMode && (
-        <div style={{
-          position: "absolute", top: 8, right: 8,
-          background: "rgba(59,130,246,0.95)", color: "#fff",
-          borderRadius: 99, padding: "3px 9px",
-          fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
-          boxShadow: "0 2px 8px rgba(59,130,246,0.4)",
-        }}>
+        <div className="recorder-assert-badge">
           ASSERT MODE — CLICK TO PICK
         </div>
       )}
