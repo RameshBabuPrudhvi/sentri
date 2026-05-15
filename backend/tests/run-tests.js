@@ -91,6 +91,7 @@ const files = [
   "tests/fixture-iteration.test.js",
   "tests/test-fixtures-routes.test.js",
   "tests/environments.test.js",
+  "tests/shard-config.test.js",
   "tests/run-sharding.test.js",
   "tests/run-storage-concurrency.test.js",
   "tests/run-worker-shard-retry.test.js",

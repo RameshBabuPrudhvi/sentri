@@ -196,6 +196,22 @@ async function processJob(job) {
     return;
   }
 
+  // CAP-002 Phase 2 — defense-in-depth terminal-status guard. If
+  // `finalizeShardedRun` throws after `markRunCompletedFirstWriterWins`
+  // succeeds (e.g. a DB error during `logActivity` / `fireNotifications` /
+  // `safeFetch`), BullMQ would retry the job. Without this guard the retry
+  // would re-execute the shard against an already-terminal parent run,
+  // double-counting stats via `incrementRunStats`. The window is extremely
+  // narrow (all post-persist code is best-effort try/catch) but the guard
+  // is cheap and correct — same predicate the first-writer-wins primitives
+  // use, just enforced at job-start instead of UPDATE-time.
+  if (run.status === "completed" || run.status === "failed" || run.status === "aborted") {
+    structuredLog("worker.job_skipped_terminal", {
+      runId, projectId, type, jobId: job.id, status: run.status,
+    });
+    return;
+  }
+
   // DIF-012: resolve the per-run environment override (if any) from the
   // persisted run record. The route handler validated the envId at enqueue
   // time, so we only need to look it up here. A row that was deleted
@@ -683,6 +699,25 @@ async function finalizeShardedRun(project, run, jobOptions = {}) {
     webVitalsResult: run.webVitalsResult,
     rootCauses: run.rootCauses, // AUTO-010
   });
+
+  // Re-read live status from the DB before the (expensive) feedback loop.
+  // The `run` snapshot above came from `runRepo.getById` at the boundary-
+  // crossing call site; the user could have clicked Abort between that
+  // read and now. The DB-level `markRunCompletedFirstWriterWins` below
+  // catches the race correctly (returns false → skips side effects), but
+  // running the AI feedback loop against an already-aborted run is wasted
+  // ACUs. Cheap one-column SELECT closes most of the race window without
+  // changing the correctness guarantee. (The window between *this* read
+  // and the markRunCompletedFirstWriterWins UPDATE further down is still
+  // open, but it's far shorter than the feedback-loop duration.)
+  const liveStatus = runRepo.getById(runId)?.status;
+  if (liveStatus === "aborted" || liveStatus === "failed") {
+    structuredLog("run.finalize_skipped_terminal", {
+      runId,
+      reason: `live status ${liveStatus} — skipping feedback loop and finalization`,
+    });
+    return;
+  }
 
   // Feedback loop — runs exactly once per run. Load the FULL approved test
   // set (every shard's slice combined) so the AI regeneration sees the
