@@ -63,7 +63,15 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction, switchDevice } from "../runner/recorder.js";
+import { DEVICE_PRESETS } from "../runner/config.js";
+/**
+ * DIF-015c Gap 5 — allowlist of device names accepted at the route
+ * layer. Built once at module load from the same `DEVICE_PRESETS` the
+ * `RunRegressionModal` dropdown surfaces, so the recorder's accepted
+ * inputs stay byte-aligned with the rest of the regression suite.
+ */
+const RECORDER_DEVICE_VALUES = new Set(DEVICE_PRESETS.map((d) => d.value));
 import { randomUUID } from "crypto";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
@@ -1410,7 +1418,16 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       // session start, for audit consistency with crawl/run/generate paths.
       environmentId: environment?.id || null,
     });
-    await startRecording({ sessionId, projectId: project.id, startUrl });
+    // DIF-015c Gap 5: optional device profile (`"iPhone 14"` etc). Empty
+    // string / undefined → desktop default. Validate against the curated
+    // allowlist BEFORE calling startRecording so a typo doesn't leak past
+    // the recorder boundary as an opaque Playwright error.
+    const rawDevice = req.body?.device;
+    const device = rawDevice == null ? "" : String(rawDevice);
+    if (device && !RECORDER_DEVICE_VALUES.has(device)) {
+      return res.status(400).json({ error: `Invalid device: ${device}` });
+    }
+    await startRecording({ sessionId, projectId: project.id, startUrl, device });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
@@ -1418,11 +1435,18 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     });
     // Return the server-side viewport so the frontend can scale forwarded
     // pointer coordinates correctly on deployments that override the default
-    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars.
+    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars, OR — DIF-015c
+    // Gap 5 — when a Playwright device descriptor (e.g. iPhone 14 = 390×844)
+    // overrides the desktop default. Read the resolved viewport off the
+    // session we just created so the canvas sizes correctly on the first
+    // SSE frame.
+    const sess = getRecording(sessionId);
+    const resolvedViewport = sess?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
     res.status(202).json({
       sessionId,
       startUrl,
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      device: sess?.device || "",
+      viewport: resolvedViewport,
     });
   } catch (err) {
     // Roll back the stub row so a failed launch doesn't leave an orphaned
@@ -1748,6 +1772,42 @@ router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (r
     res.json({ ok: true, ...result });
   } catch (err) {
     if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/device
+ * DIF-015c Gap 5 — switch the active device profile mid-recording. The
+ * server tears down the current page + Playwright context, rebuilds them
+ * under the new descriptor against the same browser process, and
+ * restarts the CDP screencast at the new viewport. Captured
+ * `session.actions[]` survive the switch; page state (cookies, form
+ * values) does not. The frontend gates the call behind a confirmation
+ * modal so operators understand the trade-off.
+ */
+router.post("/projects/:id/record/:sessionId/device", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  const rawDevice = req.body?.device;
+  const device = rawDevice == null ? "" : String(rawDevice);
+  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
+    return res.status(400).json({ error: `Invalid device: ${device}` });
+  }
+  try {
+    const result = await switchDevice(req.params.sessionId, device);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    if (/Invalid device/i.test(err.message || "")) return res.status(400).json({ error: err.message });
+    if (/Device switch failed/i.test(err.message || "")) {
+      console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/device] ${err.message}`));
+      return res.status(500).json({ error: "Device switch failed — recorder torn down. Re-launch the recorder to continue." });
+    }
     return res.status(500).json({ error: "Internal server error" });
   }
 });

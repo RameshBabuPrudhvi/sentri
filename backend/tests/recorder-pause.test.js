@@ -5,6 +5,7 @@ import {
   popLastRecordingAction,
   forwardInput,
   getRecording,
+  switchDevice,
   _testSeedSession,
 } from "../src/runner/recorder.js";
 
@@ -180,6 +181,95 @@ await asyncTest("popup + debounced framenavigated handlers both skip captures wh
   assert.ok(
     matches.length >= 4,
     `expected ≥4 session.paused guards (forwardInput + __sentriRecord + 2 × framenavigated), got ${matches.length}`,
+  );
+});
+
+console.log("\nrecorder-pause — switchDevice (DIF-015c Gap 5)");
+
+await asyncTest("switchDevice throws when session is unknown", async () => {
+  await assert.rejects(switchDevice("REC-nope", "iPhone 14"), /not found/i);
+});
+
+await asyncTest("switchDevice throws when session is mid-teardown", async () => {
+  const dispose = _testSeedSession("REC-dev-stop", { status: "stopping" });
+  try {
+    await assert.rejects(switchDevice("REC-dev-stop", "iPhone 14"), /not recording/i);
+  } finally { dispose(); }
+});
+
+await asyncTest("switchDevice rejects an unknown device name", async () => {
+  // The allowlist is built from DEVICE_PRESETS at module load. Any
+  // device outside that curated list must be a 400 from the caller's
+  // perspective; the helper surfaces it as a thrown Error which the
+  // route layer maps to 400 via the regex `/Invalid device/i` check.
+  const dispose = _testSeedSession("REC-dev-bogus");
+  try {
+    await assert.rejects(switchDevice("REC-dev-bogus", "NokiaN95"), /Invalid device/i);
+  } finally { dispose(); }
+});
+
+await asyncTest("switchDevice is idempotent on the active device (returns current viewport, no teardown)", async () => {
+  // Seed a session that's already on iPhone 14. Asking to switch to the
+  // same device must NOT touch session.browser / context / page — those
+  // are null in the seed and a teardown attempt would crash. The helper
+  // detects the equal-device case BEFORE the teardown code path runs.
+  const dispose = _testSeedSession("REC-dev-idemp", {
+    device: "iPhone 14",
+    viewport: { width: 390, height: 844 },
+    url: "https://example.com",
+  });
+  try {
+    const result = await switchDevice("REC-dev-idemp", "iPhone 14");
+    assert.equal(result.device, "iPhone 14");
+    assert.deepEqual(result.viewport, { width: 390, height: 844 });
+    assert.equal(result.url, "https://example.com");
+  } finally { dispose(); }
+});
+
+await asyncTest("switchDevice throws when session has no browser (defensive)", async () => {
+  // Defensive guard for the case where a session was seeded without a
+  // browser (e.g. a test-only path that bypassed startRecording). The
+  // helper surfaces this clearly rather than crashing on
+  // `session.browser.newContext` with a TypeError.
+  const dispose = _testSeedSession("REC-dev-nobrowser", {
+    device: "",
+    viewport: { width: 1280, height: 720 },
+  });
+  try {
+    await assert.rejects(
+      switchDevice("REC-dev-nobrowser", "iPhone 14"),
+      /no browser to switch device on/i,
+    );
+  } finally { dispose(); }
+});
+
+console.log("\nrecorder-pause — switchDevice source-level guards");
+
+await asyncTest("switchDevice preserves session.actions[] across the rebuild path (contract assertion)", async () => {
+  // We can't exercise the full rebuild without a real Chromium, but the
+  // critical contract is that `session.actions` is NEVER reassigned —
+  // the teardown only nulls `context/page/cdpSession/stopScreencast`.
+  // Lock that down at source level the same way the in-page paused
+  // guards are locked down: assert the file source does NOT contain
+  // `session.actions =` (an assignment that would clear the array).
+  const fs = await import("node:fs");
+  const urlMod = await import("node:url");
+  const here = urlMod.fileURLToPath(new URL(".", import.meta.url));
+  const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+
+  // A bare `session.actions =` (assignment) inside switchDevice would
+  // wipe captured steps. The only legitimate writes are .push / .pop /
+  // .splice. Locate switchDevice and scan its body for the forbidden
+  // pattern.
+  const idx = src.indexOf("export async function switchDevice(");
+  assert.ok(idx >= 0, "switchDevice must exist");
+  // Bounded window — `switchDevice` is ~80 lines, helper ~100 lines,
+  // 5000 chars is safely larger than both.
+  const slice = src.slice(idx, idx + 5000);
+  assert.doesNotMatch(
+    slice,
+    /session\.actions\s*=\s*[^=]/,
+    "switchDevice must NEVER reassign session.actions (would wipe captured steps)",
   );
 });
 

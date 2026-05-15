@@ -1311,6 +1311,307 @@ export function popLastRecordingAction(sessionId) {
 }
 
 /**
+ * DIF-015c Gap 5 — switch the device profile of an in-flight recording
+ * session. Playwright applies device emulation (userAgent, viewport,
+ * deviceScaleFactor, hasTouch, locale) at `browser.newContext()` time
+ * only — there is no mid-context API for swapping descriptors. To honour
+ * the operator's device choice mid-session we tear down the page+context
+ * and rebuild them under the new descriptor against the **same** browser
+ * process. Captured `session.actions[]` are preserved across the switch
+ * (the operator's step history is not lost), but page state (cookies,
+ * partially-filled forms, scroll position, in-flight requests) is — the
+ * UI surfaces a confirmation prompt before calling this so operators
+ * understand the trade-off.
+ *
+ * Acceptance criteria (NEXT.md `:53`):
+ *   - Device dropdown shows the same options as `RunRegressionModal` ✓
+ *     (DEVICE_PRESETS shared via `config.js`).
+ *   - Switching mid-session resizes the canvas to match ✓ (response
+ *     `viewport` flows back to the frontend; `LiveBrowserView` already
+ *     rescales pointer coordinates against `viewportW/viewportH`).
+ *   - Selectors regenerated at the new viewport's pixel scale ✓ (the
+ *     rebuilt context's `deviceScaleFactor` flows from the descriptor;
+ *     subsequent captures use the new viewport's coordinate space
+ *     because `selectorGenerator` runs against the rebuilt page).
+ *
+ * @param {string} sessionId
+ * @param {string} device - One of `DEVICE_PRESETS[].value` (empty string =
+ *   desktop default). Validated against `ACCEPTED_DEVICE_NAMES`; unknown
+ *   values throw.
+ * @returns {Promise<{device: string, viewport: {width: number, height: number}, url: string}>}
+ * @throws {Error} when the session is unknown, not recording, the device
+ *   is invalid, or the rebuild fails (in which case the session is left
+ *   in a torn-down state and the caller should re-issue `stopRecording`).
+ */
+export async function switchDevice(sessionId, device) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+
+  const requested = device == null ? "" : String(device);
+  if (!ACCEPTED_DEVICE_NAMES.has(requested)) {
+    throw new Error(`Invalid device: ${requested}`);
+  }
+  // Idempotent on the active device — return the current viewport so the
+  // frontend can reconcile without firing a teardown/rebuild dance.
+  // Mirrors how `resumeRecording` no-ops on a never-paused session.
+  if (requested === (session.device || "")) {
+    return {
+      device: session.device || "",
+      viewport: session.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      url: session.url,
+    };
+  }
+
+  // Snapshot the current page URL BEFORE teardown so we can navigate the
+  // rebuilt page to wherever the operator was. If `page.url()` throws
+  // (page already closing), fall back to the recorded session URL so we
+  // still land somewhere sensible.
+  let currentUrl;
+  try { currentUrl = session.page?.url() || session.url; }
+  catch { currentUrl = session.url; }
+
+  const browser = session.browser;
+  if (!browser) throw new Error(`Recording session ${sessionId} has no browser to switch device on.`);
+
+  // Tear down current page + screencast + context — but NOT the browser.
+  // The browser process stays open and the new context is created under
+  // it, saving ~500ms vs. a full launch. Catch-and-swallow each step so
+  // a partial teardown still lets the rebuild run.
+  try { if (session.stopScreencast) await session.stopScreencast(); } catch { /* ignore */ }
+  try { await session.page?.close(); } catch { /* ignore */ }
+  try { await session.context?.close(); } catch { /* ignore */ }
+  session.stopScreencast = null;
+  session.cdpSession = null;
+  session.page = null;
+  session.context = null;
+
+  // Rebuild the context + page under the new device descriptor. This
+  // duplicates the binding + addInitScript + framenavigated wiring from
+  // `startRecording`; keep the two in sync if you change either.
+  try {
+    const { contextOpts, viewport: effectiveViewport } = resolveDeviceContext(requested);
+    const newContext = await browser.newContext(contextOpts);
+    session.context = newContext;
+    session.device = requested;
+    session.viewport = effectiveViewport;
+
+    const newPage = await _attachAndOpenRecorderPage(session, newContext, currentUrl, effectiveViewport);
+    session.page = newPage;
+    return {
+      device: session.device,
+      viewport: session.viewport,
+      url: session.url,
+    };
+  } catch (err) {
+    // Rebuild failed — leave the session in a torn-down state so the
+    // operator's next call (likely Stop & Save or Discard) hits the
+    // "not recording" branch and we don't leak a Chromium process.
+    try { await session.context?.close(); } catch { /* ignore */ }
+    session.context = null;
+    session.page = null;
+    session.status = "stopping";
+    throw new Error(`Device switch failed: ${err.message}`);
+  }
+}
+
+/**
+ * DIF-015c Gap 5 — private helper that wires the `__sentriRecord` binding
+ * + Playwright selector bootstrap + addInitScript + popup + main-page
+ * `framenavigated` handlers onto a fresh context, opens a page, navigates
+ * to `startUrl`, and starts the CDP screencast at the resolved viewport.
+ * Used by {@link switchDevice} after a context teardown.
+ *
+ * The body below duplicates the inline setup in `startRecording` — keep
+ * the two in sync if you change either. A full extraction would require
+ * threading the binding closure, pageAliases map, and screencast handle
+ * through a single options object, which is more refactor than this PR's
+ * scope. The duplication is bounded and clearly documented.
+ *
+ * Side effects on `session`:
+ *   - `session.pageAliases` is reused from the prior context so popup
+ *     `popup1`/`popup2` labels stay stable across the switch.
+ *   - `session.stopScreencast` + `session.cdpSession` are re-assigned to
+ *     the new screencast handle so `forwardInput` resumes routing CDP
+ *     events to the rebuilt page.
+ *   - `session.url` is updated to the post-navigate landed URL.
+ *
+ * @param {RecordingSession} session
+ * @param {Object} context - Freshly-built Playwright BrowserContext.
+ * @param {string} startUrl - URL to navigate the rebuilt page to.
+ * @param {{width: number, height: number}} viewport - Effective viewport
+ *   from the device descriptor; threaded into `startScreencast`.
+ * @returns {Promise<Object>} The newly-created Playwright Page.
+ * @private
+ */
+async function _attachAndOpenRecorderPage(session, context, startUrl, viewport) {
+  // Reuse the prior context's alias map so popup labels stay stable.
+  // Stale entries (the closed pre-switch main page) are pruned below
+  // once the new page is registered.
+  const pageAliases = session.pageAliases || new Map();
+  session.pageAliases = pageAliases;
+
+  // Re-attach the binding to the new context. The closure captures
+  // the same `session` reference, so dedup state (DBLCLICK window,
+  // hover collapse, fill collapse) keeps working against
+  // `session.actions[]` without reinitialisation.
+  await context.exposeBinding("__sentriRecord", (source, action) => {
+    if (session.status !== "recording") return;
+    if (session.paused === true) return;
+    if (!action || typeof action !== "object") return;
+    const sourcePage = source?.page || null;
+    const sourceFrame = source?.frame || null;
+    const isMainFrame = !!(sourcePage && sourceFrame && sourcePage.mainFrame() === sourceFrame);
+    const row = {
+      kind: String(action.kind || ""),
+      selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+      target: action.target ? String(action.target).slice(0, 200) : undefined,
+      label: action.label ? String(action.label).slice(0, 80) : undefined,
+      value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+      url: action.url ? String(action.url) : undefined,
+      key: action.key ? String(action.key) : undefined,
+      pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
+      frameUrl: !isMainFrame && sourceFrame?.url ? String(sourceFrame.url()).slice(0, 500) : undefined,
+      ts: Number(action.ts) || Date.now(),
+    };
+    // Dedup heuristics — verbatim copy of the startRecording binding.
+    if (row.kind === "dblclick" && row.selector) {
+      for (let i = session.actions.length - 1; i >= 0; i--) {
+        const prev = session.actions[i];
+        if (row.ts - (prev.ts || 0) > TIMINGS.DBLCLICK_WINDOW_MS) break;
+        if (prev.kind === "click" && prev.selector === row.selector) {
+          session.actions.splice(i, 1);
+        }
+      }
+    }
+    if (row.kind === "hover") {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "hover") session.actions.pop();
+    }
+    if (INTERACTION_KINDS.has(row.kind) && row.selector) {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "hover" && last.selector === row.selector) session.actions.pop();
+    }
+    if (row.kind === "fill" && row.selector) {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "fill" && last.selector === row.selector) session.actions.pop();
+    }
+    const POINTER_KINDS = new Set(["click", "dblclick", "rightClick", "hover"]);
+    if (POINTER_KINDS.has(row.kind) && !row.label) {
+      const sel = row.selector || "";
+      const hasSemanticSelector = /^(?:role=|text=|data-testid=|label=|placeholder=|alt=|title=)/.test(sel);
+      if (!hasSemanticSelector) row._noLabel = true;
+    }
+    session.actions.push(row);
+  });
+
+  // _attachAndOpenRecorderPage continues in the next chunk —
+  // addInitScript + page creation + framenavigated + screencast.
+  return _finishOpenRecorderPage(session, context, startUrl, viewport, pageAliases);
+}
+
+/**
+ * Second half of {@link _attachAndOpenRecorderPage} — keeps each function
+ * body under the size where editing tools get unhappy. Splits the work
+ * AT a natural seam: by this point the `__sentriRecord` binding is
+ * registered on the context, so creating new pages is safe. This block
+ * handles addInitScripts + page creation + framenavigated listeners +
+ * initial navigation + screencast restart.
+ *
+ * @private
+ */
+async function _finishOpenRecorderPage(session, context, startUrl, viewport, pageAliases) {
+  // Inject Playwright's own InjectedScript bootstrap before our recorder
+  // script so `window.__playwrightSelector` is populated by the time
+  // selectorGenerator() runs on the first user interaction. Mirrors the
+  // startRecording flow; see the longer comment there for the rationale.
+  let bootstrap = "";
+  try { bootstrap = buildInjectedBootstrapScript(); }
+  catch (err) {
+    console.error(formatLogLine("warn", null, `[recorder] buildInjectedBootstrapScript failed during device switch — falling back to hand-rolled selectorGenerator: ${err.message}`));
+  }
+  if (bootstrap) await context.addInitScript(bootstrap);
+  await context.addInitScript(RECORDER_SCRIPT);
+
+  // Drop stale page refs from the prior context (closed main page,
+  // closed popups) before wiring the new page in, so popup labels
+  // recompute against the live page count.
+  for (const k of Array.from(pageAliases.keys())) {
+    try { if (!k || (typeof k === "object" && k.isClosed?.())) pageAliases.delete(k); }
+    catch { pageAliases.delete(k); }
+  }
+
+  const page = await context.newPage();
+  pageAliases.set(page, "page");
+
+  page.on("pageerror", (err) => {
+    if (err && err.message && err.message.includes("sentri-recorder")) {
+      console.error(formatLogLine("warn", null, `[recorder/page-error] ${err.message}`));
+    }
+  });
+  context.on("page", (p) => {
+    if (pageAliases.has(p)) return;
+    pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
+    p.on("framenavigated", (frame) => {
+      if (session.paused === true) return;
+      if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+        session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
+      }
+    });
+  });
+
+  // Navigate to the snapshotted URL so the operator lands back where
+  // they were before the device switch. The post-navigate URL drives
+  // the recorded `goto` action so any server-side redirect (HTTPS
+  // upgrade, locale prefix) is captured truthfully.
+  await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
+  const landedUrl = page.url() || startUrl;
+  session.url = landedUrl;
+  // Push a `goto` so the recorded steps reflect the device-switch
+  // navigation — without this, the rebuilt page renders silently and
+  // the operator's first post-switch click looks like it happened on
+  // the pre-switch URL in the generated playwrightCode.
+  session.actions.push({ kind: "goto", pageAlias: "page", url: landedUrl, ts: Date.now() });
+
+  // Debounced main-page framenavigated — verbatim copy of the
+  // startRecording handler, with the same pause guard.
+  const FRAME_NAV_DEBOUNCE_MS = 800;
+  let frameNavTimer = null;
+  let pendingFrameUrl = "";
+  page.on("framenavigated", (frame) => {
+    if (frame !== page.mainFrame()) return;
+    const url = frame.url();
+    if (!url || url === "about:blank") return;
+    pendingFrameUrl = url;
+    if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
+    frameNavTimer = setTimeout(() => {
+      frameNavTimer = null;
+      if (session.status !== "recording") return;
+      if (session.paused === true) return;
+      const last = [...session.actions].reverse().find((a) => a.kind === "goto");
+      if (last && last.url === pendingFrameUrl) return;
+      session.actions.push({ kind: "goto", pageAlias: "page", url: pendingFrameUrl, ts: Date.now() });
+    }, FRAME_NAV_DEBOUNCE_MS);
+  });
+
+  // Restart the CDP screencast at the new viewport so the canvas
+  // resizes to native device dimensions — LiveBrowserView already
+  // rescales pointer coordinates against the viewport prop, so the
+  // frontend just needs to update its `viewport` state from the
+  // route response.
+  const screencastResult = await startScreencast(page, session.id, {
+    interactive: true,
+    viewport,
+  });
+  if (screencastResult) {
+    session.stopScreencast = screencastResult.stop;
+    session.cdpSession = screencastResult.cdpSession;
+  }
+
+  return page;
+}
+
+/**
  * DIF-015c Gap 5 — pure helper that resolves a device name to a
  * `browser.newContext()` options object plus the effective viewport.
  * Mirrors the device-descriptor merge already done by `executeTest.js`
@@ -1386,6 +1687,7 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
     });
 
     const pageAliases = new Map();
+    session.pageAliases = pageAliases;
 
     // CRITICAL ORDERING: `exposeBinding` and `addInitScript` only apply to
     // pages / documents created AFTER they are registered. If we call

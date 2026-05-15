@@ -413,6 +413,18 @@ export const api = {
     req("POST", `/projects/${projectId}/record/${sessionId}/resume`, {}),
   recordPopLast: (projectId, sessionId) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/pop-last`, {}),
+  /**
+   * DIF-015c Gap 5 — switch the active device profile mid-recording.
+   * The server tears down the current page+context and rebuilds them at
+   * the new descriptor. Captured `actions[]` survive; page state does not.
+   * Returns `{ device, viewport: {width, height}, url }` so the caller
+   * can resize the canvas and reconcile its viewport state.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {string} device - One of `DEVICE_PRESETS[].value` (empty string = desktop default).
+   */
+  recordSwitchDevice: (projectId, sessionId, device) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/device`, { device }),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */

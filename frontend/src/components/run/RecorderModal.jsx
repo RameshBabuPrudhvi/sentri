@@ -6,6 +6,26 @@ import { useSseStream } from "../../hooks/useSseStream.js";
 import { actionToStepText, actionRawLocator } from "../../utils/actionToStepText.js";
 import LiveBrowserView from "./LiveBrowserView.jsx";
 
+// DIF-015c Gap 5 — curated device presets. Mirrors DEVICE_PRESETS in
+// backend/src/runner/config.js and the identical list in
+// RunRegressionModal.jsx. Kept as a static list to avoid an extra API
+// call on every modal open; if you add a device server-side, mirror it
+// here AND in RunRegressionModal.
+const DEVICE_PRESETS = [
+  { label: "Desktop (default)", value: "" },
+  { label: "iPhone 14", value: "iPhone 14" },
+  { label: "iPhone 14 Pro Max", value: "iPhone 14 Pro Max" },
+  { label: "iPhone 12", value: "iPhone 12" },
+  { label: "iPad (gen 7)", value: "iPad (gen 7)" },
+  { label: "iPad Pro 11", value: "iPad Pro 11" },
+  { label: "Galaxy S9+", value: "Galaxy S9+" },
+  { label: "Pixel 7", value: "Pixel 7" },
+  { label: "Pixel 5", value: "Pixel 5" },
+  { label: "Galaxy Tab S4", value: "Galaxy Tab S4" },
+  { label: "Desktop Chrome HiDPI", value: "Desktop Chrome HiDPI" },
+  { label: "Desktop Firefox HiDPI", value: "Desktop Firefox HiDPI" },
+];
+
 export default function RecorderModal({ open, onClose, onSaved, projectId, defaultUrl = "", projects = null, defaultEnvironmentId = "" }) {
   const [phase, setPhase] = useState("idle");
   // Selected project — initialised from the `projectId` prop but mutable in the
@@ -35,6 +55,13 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [shortcutArmed, setShortcutArmed] = useState(false);
   const [paused, setPaused] = useState(false);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
+  // DIF-015c Gap 5 — selected device profile. Mirrors `RunRegressionModal`'s
+  // dropdown so operators get the same options across run + record flows.
+  // Empty string = desktop default. `pendingDeviceSwitch` gates the
+  // mid-session confirmation dialog described in NEXT.md `:53`.
+  const [device, setDevice] = useState("");
+  const [pendingDeviceSwitch, setPendingDeviceSwitch] = useState(null);
+  const [deviceSwitching, setDeviceSwitching] = useState(false);
   // Candidate URLs surfaced as a datalist suggestion list under the Starting
   // URL input — seed URL + any pages discovered on the latest successful
   // crawl. Fetched lazily when the modal opens so projects without a crawl
@@ -168,9 +195,15 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       // backend run an extra lookup before falling back to project.url.
       const startBody = { startUrl };
       if (environmentId) startBody.environmentId = environmentId;
-      const { sessionId: sid, viewport: vp } = await api.recordStart(selectedProjectId, startBody);
+      // DIF-015c Gap 5: only send device when the operator picked a
+      // non-default option, so the backend's allowlist check doesn't
+      // fire on the desktop-default path.
+      if (device) startBody.device = device;
+      const { sessionId: sid, viewport: vp, device: serverDevice } =
+        await api.recordStart(selectedProjectId, startBody);
       setSessionId(sid);
       setPaused(false);
+      if (typeof serverDevice === "string") setDevice(serverDevice);
       if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
       pollRef.current = setInterval(async () => {
@@ -283,6 +316,58 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       setActions((prev) => (prev.length ? prev.slice(0, -1) : prev));
     } catch (e) {
       setError(e.message || "failed to undo last step");
+    }
+  }
+
+  /**
+   * DIF-015c Gap 5 — handler for the mid-session device dropdown.
+   *
+   * **Idle phase:** updates local state only; the server hasn't launched
+   * yet, so the choice is applied at `recordStart` time via the body's
+   * `device` field (see `handleStart`).
+   *
+   * **Recording phase:** opens a confirmation modal. The server-side
+   * device swap tears down the current page+context, which means cookies,
+   * partially-filled forms, and scroll position are lost — operators
+   * need to know that before the rebuild fires. The actual API call
+   * lives in `executeDeviceSwitch` below; the confirmation prompt sets
+   * `pendingDeviceSwitch` to the requested device value and the modal's
+   * "Switch device" button invokes the executor.
+   */
+  function handleDeviceChange(nextDevice) {
+    if (phase !== "recording") {
+      setDevice(nextDevice);
+      return;
+    }
+    if (nextDevice === device) return; // no-op on same device
+    setPendingDeviceSwitch(nextDevice);
+  }
+
+  async function executeDeviceSwitch() {
+    const nextDevice = pendingDeviceSwitch;
+    if (nextDevice == null) return;
+    setPendingDeviceSwitch(null);
+    setDeviceSwitching(true);
+    try {
+      const result = await api.recordSwitchDevice(selectedProjectId, sessionId, nextDevice);
+      setDevice(result.device || "");
+      if (result.viewport?.width > 0 && result.viewport?.height > 0) {
+        setViewport({ width: result.viewport.width, height: result.viewport.height });
+      }
+    } catch (e) {
+      setError(e.message || "failed to switch device");
+      // If the backend reported a hard rebuild failure (5xx with the
+      // "torn down" message), the session is gone — drop the local
+      // sessionId so the modal returns to the idle form rather than
+      // dangling against a dead session.
+      if (/torn down|Device switch failed/i.test(e.message || "")) {
+        teardownStreams();
+        sessionIdRef.current = null;
+        setSessionId(null);
+        setPhase("error");
+      }
+    } finally {
+      setDeviceSwitching(false);
     }
   }
 
@@ -410,6 +495,23 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   </select>
                 </div>
               )}
+              {/* DIF-015c Gap 5 — Device profile picker. Mirrors the
+                  same dropdown in RunRegressionModal so the recorder and
+                  test runs surface the same curated list of viewports
+                  + user agents. Empty string = desktop default; backend
+                  validates against DEVICE_PRESETS in config.js. */}
+              <div>
+                <label className="recorder-idle__label">Device</label>
+                <select
+                  className="input recorder-idle__input"
+                  value={device}
+                  onChange={(e) => handleDeviceChange(e.target.value)}
+                >
+                  {DEVICE_PRESETS.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="recorder-idle__label">Test name</label>
                 <input
@@ -493,6 +595,33 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 >
                   Undo last step
                 </button>
+              </div>
+              {/* DIF-015c Gap 5 — Mid-session device switch. Disabled
+                  during `stopping` and during an in-flight switch so the
+                  operator can't queue two teardowns. NEXT.md `:53`
+                  acceptance: dropdown shows the same options as
+                  RunRegressionModal, switching resizes the canvas,
+                  selectors regenerate at the new pixel scale. */}
+              <div style={{ marginBottom: 8 }}>
+                <label className="recorder-sidebar__footer-label" htmlFor="recorder-device-mid">
+                  Device profile
+                </label>
+                <select
+                  id="recorder-device-mid"
+                  className="input"
+                  value={device}
+                  disabled={phase === "stopping" || deviceSwitching}
+                  onChange={(e) => handleDeviceChange(e.target.value)}
+                >
+                  {DEVICE_PRESETS.map((d) => (
+                    <option key={d.value} value={d.value}>{d.label}</option>
+                  ))}
+                </select>
+                {deviceSwitching && (
+                  <div style={{ fontSize: 12, color: "var(--muted, #888)", marginTop: 4 }}>
+                    Switching device — rebuilding browser context…
+                  </div>
+                )}
               </div>
               <button className="btn btn-ghost" onClick={armShortcutCapture} style={{ marginBottom: 8 }}>
                 {shortcutArmed ? "Shortcut capture armed (next 3 keys)" : "Record keyboard shortcut"}
@@ -592,6 +721,34 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* DIF-015c Gap 5 — Mid-session device switch confirmation. The
+          server tears down the page+context to apply the new descriptor,
+          so cookies / form state / scroll position are lost. Captured
+          steps survive, but operators need to acknowledge the page-state
+          reset before the rebuild fires. */}
+      {pendingDeviceSwitch != null && (
+        <div className="recorder-confirm">
+          <div className="recorder-confirm__dialog">
+            <div className="recorder-confirm__head">
+              <div className="recorder-confirm__title">Switch device profile?</div>
+            </div>
+            <p className="recorder-confirm__body">
+              Switching to <strong>{DEVICE_PRESETS.find((d) => d.value === pendingDeviceSwitch)?.label || pendingDeviceSwitch || "Desktop (default)"}</strong> rebuilds the browser context at the new viewport.
+              <br /><br />
+              Your <strong>{actions.length} captured step{actions.length !== 1 ? "s" : ""}</strong> will be preserved, but the page will reload — any open forms, cookies, and scroll position will be lost.
+            </p>
+            <div className="recorder-confirm__actions">
+              <button className="recorder-confirm__keep" onClick={() => setPendingDeviceSwitch(null)}>
+                Cancel
+              </button>
+              <button className="recorder-confirm__discard" onClick={executeDeviceSwitch}>
+                Switch device
+              </button>
+            </div>
           </div>
         </div>
       )}
