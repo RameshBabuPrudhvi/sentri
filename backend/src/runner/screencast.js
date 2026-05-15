@@ -47,11 +47,24 @@ import { formatLogLine } from "../utils/logFormatter.js";
  *   should NOT have their `visibilityState` forced (it can mask real
  *   visibility-related bugs in the application under test) and don't
  *   need the doubled JPEG encoding cost — they're not user-interactive.
+ * @param {{width: number, height: number}} [options.viewport] - DIF-015c
+ *   Gap 5: per-session viewport so mobile-device recordings stream JPEG
+ *   frames at the device's native size (e.g. iPhone 14 = 390×844)
+ *   instead of being letterboxed inside the hardcoded 1280×720 box.
+ *   Falls back to 1280×720 when not supplied — matches the legacy
+ *   behaviour for desktop runs and existing tests.
  * @returns {Promise<{stop: function(): Promise<void>, cdpSession: Object}|null>}
  *   `{ stop, cdpSession }` on success, or `null` if CDP is unavailable.
  */
 export async function startScreencast(page, runId, options = {}) {
   const interactive = !!options.interactive;
+  // Clamp to integers ≥ 1 so a malformed viewport from a route handler
+  // (e.g. `width: NaN`) can't crash CDP startScreencast with a non-numeric
+  // arg. Default to 1280×720 (the historical hardcode) when no viewport
+  // override is supplied — desktop runs / pre-Gap-5 callers behave
+  // identically to before this change.
+  const vw = Math.max(1, Math.trunc(Number(options.viewport?.width) || 1280));
+  const vh = Math.max(1, Math.trunc(Number(options.viewport?.height) || 720));
   // Always start the screencast — SSE clients typically connect *after* the
   // run begins (the user is redirected to /runs/:id after clicking "Run").
   // The previous guard `if (!runListeners.get(runId)?.size) return null`
@@ -83,8 +96,11 @@ export async function startScreencast(page, runId, options = {}) {
     await cdpSession.send("Page.startScreencast", {
       format: "jpeg",
       quality: 50,
-      maxWidth: 1280,
-      maxHeight: 720,
+      // DIF-015c Gap 5: track the session viewport so iPhone / Pixel /
+      // tablet device profiles stream at native resolution rather than
+      // being letterboxed inside the desktop default box.
+      maxWidth: vw,
+      maxHeight: vh,
       // Recorder needs every frame for responsive feel; non-interactive
       // test runs sample every other frame to halve CDP JPEG encoding
       // cost (the captured video is only used for failure diagnosis, not

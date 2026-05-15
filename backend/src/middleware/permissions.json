@@ -148,6 +148,26 @@
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js:1172"
     },
+    "POST /api/v1/projects/:id/record/:sessionId/pause": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/resume": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/pop-last": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/device": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/probe": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
     "POST /api/v1/tests/:testId/fix": {
       "role": "qa_lead",
       "source": "backend/src/routes/testFix.js:152"

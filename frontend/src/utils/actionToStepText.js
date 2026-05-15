@@ -129,6 +129,28 @@ export function actionToStepText(action) {
     case "assertUrl":
       return `Verify URL contains '${truncVal(action.value, 60)}'`;
 
+    case "assertCount": {
+      // DIF-015c Gap 2 — mirror backend's recordedActionToStepText() count
+      // prose. With a captured label we read "There are N matching 'Item'";
+      // without one we degrade to "There are N matching elements" rather
+      // than leaking the selector.
+      const n = Number(action.value);
+      const count = Number.isFinite(n) ? n : action.value;
+      const t = friendlyTarget(action);
+      return t
+        ? `There are ${count} matching${t}`
+        : `There are ${count} matching elements`;
+    }
+
+    case "assertHasClass": {
+      // DIF-015c Gap 2 — mirror backend's recordedActionToStepText() class
+      // prose. Reads as "The 'Submit' has the 'is-loading' class".
+      const t = friendlyTarget(action);
+      return t
+        ? `The${t} has the '${truncVal(action.value)}' class`
+        : `The matched element has the '${truncVal(action.value)}' class`;
+    }
+
     default:
       return `${action.kind || "action"}${friendlyTarget(action)}`;
   }

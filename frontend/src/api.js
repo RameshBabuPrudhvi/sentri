@@ -407,6 +407,36 @@ export const api = {
    */
   recordAddAssertion: (projectId, sessionId, action) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/assertion`, action),
+  recordPause: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pause`, {}),
+  recordResume: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/resume`, {}),
+  recordPopLast: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pop-last`, {}),
+  /**
+   * DIF-015c Gap 5 — switch the active device profile mid-recording.
+   * The server tears down the current page+context and rebuilds them at
+   * the new descriptor. Captured `actions[]` survive; page state does not.
+   * Returns `{ device, viewport: {width, height}, url }` so the caller
+   * can resize the canvas and reconcile its viewport state.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {string} device - One of `DEVICE_PRESETS[].value` (empty string = desktop default).
+   */
+  recordSwitchDevice: (projectId, sessionId, device) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/device`, { device }),
+  /**
+   * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
+   * resolves the `{selector, label, rect}` for an arbitrary viewport
+   * coordinate. Used by `LiveBrowserView` in assert-mode to highlight the
+   * hovered element and pre-fill the verification form on click. Returns
+   * `{ probe: null }` when no interactive ancestor is found.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {{x: number, y: number}} point - Viewport coordinates (scaled).
+   */
+  recordProbe: (projectId, sessionId, point) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/probe`, point),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
