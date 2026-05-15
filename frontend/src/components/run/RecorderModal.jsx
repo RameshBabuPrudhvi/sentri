@@ -701,6 +701,28 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
 
             {/* TOP: Captured steps — takes all remaining space, scrolls internally */}
             <div className="recorder-sidebar__steps">
+              {/* Recording-phase error banner. Surfaces failures from
+                  pause/resume, undo, device switch, and add-verification
+                  validation that would otherwise be silently swallowed —
+                  the idle-phase banner at line ~668 only renders inside
+                  `isIdle`, so without this duplicate the recorder swallows
+                  every error a user could trigger after launch. Dismissible
+                  via the `×` so a stale error doesn't linger after the
+                  operator has seen it (next mutation that succeeds also
+                  clears it via the existing `setError(null)` call sites). */}
+              {error && (
+                <div className="banner banner-error recorder-error-banner" role="alert">
+                  <span>{error}</span>
+                  <button
+                    type="button"
+                    className="recorder-error-banner__dismiss"
+                    aria-label="Dismiss error"
+                    onClick={() => setError(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
               <div className="recorder-sidebar__heading">
                 Captured steps ({actions.length})
               </div>
