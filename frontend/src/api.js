@@ -407,6 +407,12 @@ export const api = {
    */
   recordAddAssertion: (projectId, sessionId, action) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/assertion`, action),
+  recordPause: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pause`, {}),
+  recordResume: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/resume`, {}),
+  recordPopLast: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pop-last`, {}),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */

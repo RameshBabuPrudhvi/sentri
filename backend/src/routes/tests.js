@@ -63,7 +63,7 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction } from "../runner/recorder.js";
 import { randomUUID } from "crypto";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
@@ -1703,6 +1703,36 @@ router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"),
     if (/not found|not recording/i.test(err.message || "")) {
       return res.status(404).json({ error: "recording session not found" });
     }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/projects/:id/record/:sessionId/pause", requireRole("qa_lead"), (req, res) => {
+  try {
+    const result = pauseRecording(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (req, res) => {
+  try {
+    const result = resumeRecording(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/projects/:id/record/:sessionId/pop-last", requireRole("qa_lead"), (req, res) => {
+  try {
+    const result = popLastRecordingAction(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
     return res.status(500).json({ error: "Internal server error" });
   }
 });

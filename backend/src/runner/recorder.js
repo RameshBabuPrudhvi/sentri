@@ -1162,6 +1162,30 @@ export function addAssertionAction(sessionId, action) {
   return row;
 }
 
+export function pauseRecording(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  session.paused = true;
+  return { paused: true };
+}
+
+export function resumeRecording(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  session.paused = false;
+  return { paused: false };
+}
+
+export function popLastRecordingAction(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  const removed = session.actions.length ? session.actions.pop() : null;
+  return { removed, actionCount: session.actions.length };
+}
+
 /**
  * Start a new interactive recording session. Opens a Playwright browser,
  * navigates to `startUrl`, installs the capture script, and begins a CDP
@@ -1575,6 +1599,7 @@ export async function forwardInput(sessionId, event) {
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
   if (!session.cdpSession) throw new Error(`Session ${sessionId} has no CDP session — cannot forward input.`);
   if (session.status !== "recording") return; // ignore input after stop is called
+  if (session.paused === true) return;
 
   const cdp = session.cdpSession;
   const { type } = event;

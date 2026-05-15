@@ -33,6 +33,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [error, setError] = useState(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [shortcutArmed, setShortcutArmed] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   // Candidate URLs surfaced as a datalist suggestion list under the Starting
   // URL input — seed URL + any pages discovered on the latest successful
@@ -169,6 +170,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       if (environmentId) startBody.environmentId = environmentId;
       const { sessionId: sid, viewport: vp } = await api.recordStart(selectedProjectId, startBody);
       setSessionId(sid);
+      setPaused(false);
       if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
       pollRef.current = setInterval(async () => {
@@ -252,6 +254,27 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       setShortcutArmed(true);
       window.setTimeout(() => setShortcutArmed(false), 4000);
     } catch {}
+  }
+
+  async function handlePauseResume() {
+    if (!sessionId) return;
+    try {
+      if (paused) await api.recordResume(selectedProjectId, sessionId);
+      else await api.recordPause(selectedProjectId, sessionId);
+      setPaused(!paused);
+    } catch (e) {
+      setError(e.message || "failed to update recorder state");
+    }
+  }
+
+  async function handleUndoLast() {
+    if (!sessionId) return;
+    try {
+      await api.recordPopLast(selectedProjectId, sessionId);
+      setActions((prev) => (prev.length ? prev.slice(0, -1) : prev));
+    } catch (e) {
+      setError(e.message || "failed to undo last step");
+    }
   }
 
   function teardownStreams() {
@@ -439,6 +462,14 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
             <div className="recorder-sidebar__steps">
               <div className="recorder-sidebar__heading">
                 Captured steps ({actions.length})
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button className="btn btn-ghost" onClick={handlePauseResume}>
+                  {paused ? "Resume capture" : "Pause capture"}
+                </button>
+                <button className="btn btn-ghost" onClick={handleUndoLast}>
+                  Undo last step
+                </button>
               </div>
               <button className="btn btn-ghost" onClick={armShortcutCapture} style={{ marginBottom: 8 }}>
                 {shortcutArmed ? "Shortcut capture armed (next 3 keys)" : "Record keyboard shortcut"}
