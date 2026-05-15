@@ -527,6 +527,41 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 - **Assertion validation** — `POST /record/:sessionId/assertion` rejects payloads with invalid `kind` (anything other than `assertVisible` / `assertText` / `assertValue` / `assertUrl`) with 400. Missing `selector` for non-`assertUrl` kinds → 400. Missing `value` for `assertText` / `assertValue` / `assertUrl` → 400. Verify each branch returns a clear error message.
 - **Step prose contract** — the persisted `steps[]` array must NEVER leak raw `role=…[name="…"]` selectors, `#id` CSS, or `.class` selectors into the rendered step. The fallback chain (`label` → role-selector name extraction → empty target phrase) at `backend/src/runner/recorder.js:440-489` is property-tested at `backend/tests/recorder.test.js` (`never leaks raw role=…[name="…"] or CSS selectors into the rendered step`).
 
+**DIF-015c — Recorder gaps (this PR):**
+
+- **Gap 2 — point-and-click assert UX** (`POST /api/v1/projects/:id/record/:sessionId/probe`, `RecorderModal.jsx`):
+  1. Start a recording. In the right sidebar, click **🎯 Pick element by clicking** — the button label flips to "✓ Pick mode active — click an element on the canvas" and the canvas swaps to a crosshair cursor with the "ASSERT MODE — CLICK TO PICK" badge in the top-right.
+  2. Hover any interactive element (button, input, link) on the canvas → a blue outline appears around the hovered element within ~120 ms (the debounced probe round-trip). The outline tracks the cursor smoothly via an 80 ms CSS transition.
+  3. Click the element → the verification form's **Selector** + **friendly label** fields pre-fill from the probe response, and assert mode exits automatically. Pick the verification kind from the dropdown and click **Add verification step** — the assertion is appended to `session.actions` without a manual selector paste (NEXT.md `:51` acceptance).
+  4. Toggle pick mode on, then off without clicking — the overlay clears and the canvas returns to drive mode (clicks navigate the page again). No stale highlight rect persists.
+  5. **Edge:** hover over the page background (no interactive ancestor) → the outline drops (the probe returns `null`). A click in this region is a no-op rather than a malformed pick.
+
+- **Gap 2 — new assertion kinds** (`assertCount`, `assertHasClass`, `POST /record/:sessionId/assertion`):
+  6. In the verification form, pick **Element count equals** → an integer input appears. Enter `3`, paste a selector, click **Add verification step** → the captured step renders as `There are 3 matching '<label>'` in the sidebar; the generated playwrightCode emits `await expect(<actor>.locator('<sel>')).toHaveCount(3)`.
+  7. Same flow with **Element has class** + value `is-loading` → step text reads `The '<label>' has the 'is-loading' class`; generated code emits `await expect(<actor>.locator('<sel>')).toHaveClass(new RegExp('(^|\\s)is-loading(\\s|$)'))` (word-boundary regex so multi-class attributes match correctly).
+  8. **Negative:** enter a non-integer count (`1.5`, `-1`, `abc`) → the frontend shows "Count must be a non-negative integer." inline before the request fires. Empty count value → "Value is required for this verification."
+
+- **Gap 3 — pause / resume / undo** (`POST /record/:sessionId/{pause,resume,pop-last}`):
+  9. Recording an interactive site, click **Pause capture** → the button label flips to **Resume capture**. Continue clicking and typing on the canvas → no new steps appear in the sidebar. Click **Resume capture** → subsequent clicks resume appending.
+  10. While paused, verify that programmatic page activity (toast popping, animations, framework re-renders firing `change` handlers) does NOT leak any actions into the sidebar — pause guards live at four call sites (`forwardInput`, `__sentriRecord` binding, popup `framenavigated`, debounced main-page `framenavigated`).
+  11. Click **Undo last step** → the most recent action disappears from the sidebar (optimistic update) and the `actionCount` from the server response matches.
+  12. Click **Undo last step** repeatedly until the action list is empty → the button stays clickable (the route is idempotent — returns `{ removed: null, actionCount: 0 }` rather than 4xx).
+  13. **Buttons are disabled during the `stopping` phase** so the operator can't race the server-side teardown (a pause request after Stop & Save would otherwise surface a 404 banner).
+
+- **Gap 5 — device profile at launch + mid-session** (`POST /record` with `device`, `POST /record/:sessionId/device`):
+  14. On the idle launch form, pick **iPhone 14** from the Device dropdown → click **Launch recorder**. The canvas opens at 390×844 (not letterboxed inside the desktop 1280×720 default). Pointer coordinates scale correctly — clicks land where the cursor is, not offset.
+  15. The dropdown list **exactly mirrors** `RunRegressionModal`'s dropdown (the curated `DEVICE_PRESETS` list). Add a device server-side → it must appear in both modals.
+  16. While recording, change the Device profile dropdown in the right sidebar to **Pixel 7** → a confirmation modal appears explaining "your N captured step(s) will be preserved, but the page will reload — any open forms, cookies, and scroll position will be lost." Click **Switch device**.
+  17. The canvas resizes to 412×915 (Pixel 7), the recorder navigates back to the URL the operator was on, and `session.actions[]` are preserved across the switch (visible in the sidebar). The "Device profile" dropdown shows the new active value.
+  18. **Selectors regenerate at the new pixel scale** — click a button after the switch; the captured selector reflects the new viewport's coordinate space (NEXT.md `:53` acceptance).
+  19. Cancel the confirmation modal → no state changes (dropdown reverts to the active device).
+  20. **Negative:** select the SAME device that's already active → modal does NOT appear (idempotent; helper returns current viewport without touching the browser).
+  21. **Disabled states:** the dropdown is disabled while the switch is in flight ("Switching device — rebuilding browser context…" hint) and disabled during the `stopping` phase.
+
+- **Permissions (all five new routes):**
+  22. `viewer` attempts `POST /record/:sessionId/{pause,resume,pop-last,device,probe}` → 403.
+  23. Cross-workspace attempt — outsider `qa_lead` POSTs to a sessionId they don't own → 404 (not 403; existence isn't leaked). All five routes call `projectRepo.getByIdInWorkspace` + `sess.projectId !== project.id` upstream.
+
 ---
 
 ### ▶️ Runs

@@ -318,14 +318,26 @@ Requires `qa_lead` role. Rate-limited via the expensive-operations limiter.
 
 **Body (optional):**
 ```json
-{ "startUrl": "https://example.com" }
+{
+  "startUrl": "https://example.com",
+  "device": "iPhone 14"
+}
 ```
 
+`device` is an optional Playwright device profile name from the curated
+`DEVICE_PRESETS` allowlist (see `backend/src/runner/config.js`). Empty
+string or omitted → desktop default. Unknown values return `400 { error:
+"Invalid device: <name>" }`. The list mirrors `RunRegressionModal`'s
+device dropdown so test-run + recording device coverage stay byte-aligned
+(DIF-015c Gap 5).
+
 Defaults to the project's configured URL. Returns
-`{ sessionId, startUrl, viewport: { width, height } }`. The `viewport`
-reflects the server-side `VIEWPORT_WIDTH` / `VIEWPORT_HEIGHT` so the
-frontend can scale forwarded pointer coordinates correctly. The frontend
-subscribes to `/api/v1/runs/:sessionId/events` for live screencast frames.
+`{ sessionId, startUrl, device, viewport: { width, height } }`. The
+`viewport` reflects the resolved device descriptor (e.g. `iPhone 14`
+→ `{ width: 390, height: 844 }`) or the server-side `VIEWPORT_WIDTH` /
+`VIEWPORT_HEIGHT` defaults so the frontend can scale forwarded pointer
+coordinates correctly. The frontend subscribes to
+`/api/v1/runs/:sessionId/events` for live screencast frames.
 
 ### Stop / Save / Discard
 
@@ -403,11 +415,23 @@ without forwarding any browser input.
 ```
 
 `kind` must be one of `assertVisible`, `assertText`, `assertValue`,
-`assertUrl`. `selector` is required for everything except `assertUrl`;
-`value` is required for `assertText`, `assertValue`, and `assertUrl`. Returns
-`201 { ok: true, action }`. Returns 400 on incomplete payloads — the route
-rejects assertions that would later be silently dropped by the codegen
-(e.g. an `assertText` without a value).
+`assertUrl`, `assertCount`, or `assertHasClass` (DIF-015c Gap 2).
+`selector` is required for everything except `assertUrl`; `value` is
+required for `assertText`, `assertValue`, `assertUrl`, `assertCount`,
+and `assertHasClass`. `assertCount` additionally requires a
+non-negative-integer-parseable value (e.g. `"3"`); anything else
+(`"-1"`, `"1.5"`, `"abc"`) returns `400 { error: "Invalid assertion:
+value for assertCount must be a non-negative integer." }`. Returns
+`201 { ok: true, action }`. Returns 400 on incomplete payloads — the
+route rejects assertions that would later be silently dropped by the
+codegen (e.g. an `assertText` without a value).
+
+The two count + class kinds emit:
+
+- `assertCount` → `await expect(locator).toHaveCount(N)`
+- `assertHasClass` → `await expect(locator).toHaveClass(new RegExp('(^|\\s)<class>(\\s|$)'))`
+  (word-boundary regex so partial-class matches like `is-loading` /
+  `is-active` work as expected against multi-class attributes)
 
 ### Poll Recording Status
 
@@ -443,3 +467,147 @@ Each action additionally carries (when applicable):
   popups. Wired through to the generated Playwright code via `ensurePopup()`.
 - `frameUrl` — when the action originated inside an iframe, the frame's URL
   (used by `ensureFrame()` in the generated code).
+
+### Pause / Resume Capture (DIF-015c Gap 3)
+
+```
+POST /api/v1/projects/:id/record/:sessionId/pause
+POST /api/v1/projects/:id/record/:sessionId/resume
+```
+
+Requires `qa_lead` role. Workspace-scoped via the session's parent
+project (matches the convention used by the other recorder routes;
+cross-workspace sessionId guesses return 404, not 403, so existence
+isn't leaked).
+
+`pause` flips `session.paused = true`. While paused the browser stays
+open and the screencast keeps streaming, but **four** capture sites
+honour the flag and skip action emission:
+
+- `forwardInput` (`/input` route) short-circuits CDP dispatch so the
+  operator can navigate the SUT without polluting `actions[]`.
+- The `__sentriRecord` exposeBinding callback drops DOM-emitted events
+  (debounced fills flushing, framework re-renders firing change handlers,
+  programmatic clicks fired by page JS) that started before pause but
+  settled after.
+- The popup `framenavigated` listener skips synthesised `goto` actions
+  on newly-opened tabs.
+- The debounced main-page `framenavigated` flush drops settled
+  navigations that started before pause.
+
+`resume` flips it back. Both routes are idempotent: pausing an
+already-paused session and resuming a never-paused session are no-ops.
+Both return `{ ok: true, paused: <bool> }`.
+
+### Undo Last Captured Step (DIF-015c Gap 3)
+
+```
+POST /api/v1/projects/:id/record/:sessionId/pop-last
+```
+
+Requires `qa_lead` role. Pops the most recent entry from
+`session.actions[]` and returns it for an optional client-side
+optimistic update. Idempotent on an empty list — returns
+`{ ok: true, removed: null, actionCount: 0 }` rather than 4xx so the
+UI can fire the button without first checking the step count.
+
+**Response:**
+```json
+{ "ok": true, "removed": { "kind": "click", "selector": "#ok", "ts": 1713873601500 }, "actionCount": 4 }
+```
+
+### Switch Device Mid-Session (DIF-015c Gap 5)
+
+```
+POST /api/v1/projects/:id/record/:sessionId/device
+```
+
+Requires `qa_lead` role. **Tears down the page + Playwright context and
+rebuilds them under the new descriptor against the same browser process**
+— Playwright applies device emulation (userAgent, viewport,
+deviceScaleFactor, hasTouch, locale) only at `browser.newContext()` time,
+so an honest mid-session swap means a fresh context. Captured
+`session.actions[]` **survive** the switch (operator's step history is
+not lost), but page state (cookies, partially-filled forms, scroll
+position, in-flight requests) does not. The frontend gates the call
+behind a confirmation modal that explains the trade-off.
+
+**Body:**
+```json
+{ "device": "iPhone 14" }
+```
+
+Empty string = desktop default. Validated against the same
+`DEVICE_PRESETS` allowlist used at session launch — unknown values
+return `400 { error: "Invalid device: <name>" }`. Idempotent on the
+active device (returns the current viewport without touching the
+context, mirroring how `resume` no-ops on a never-paused session).
+
+**Response:**
+```json
+{ "ok": true, "device": "iPhone 14", "viewport": { "width": 390, "height": 844 }, "url": "https://example.com/login" }
+```
+
+The frontend reads the new `viewport` to resize the canvas; subsequent
+`probe` and `input` calls flow through `LiveBrowserView`'s existing
+coordinate scaling against the new viewport prop.
+
+Returns `500 { error: "Device switch failed — recorder torn down. Re-launch the recorder to continue." }`
+when the rebuild fails (rare — browser process gone). The session is
+left in `stopping` state so any subsequent recorder route on the same
+sessionId returns 404 cleanly.
+
+### Probe Element Under Cursor (DIF-015c Gap 2)
+
+```
+POST /api/v1/projects/:id/record/:sessionId/probe
+```
+
+Requires `qa_lead` role. Read-only probe that resolves the
+`{selector, label, rect}` for an arbitrary viewport coordinate so the
+frontend can highlight the hovered element and pre-fill the
+"Add verification" form on click. **Does not record an action.**
+Mirrors how Playwright codegen's inspector probes the page under the
+cursor.
+
+**Body:**
+```json
+{ "x": 320, "y": 180 }
+```
+
+Coordinates are in viewport space (already scaled by
+`LiveBrowserView.scaleCoords` from CSS pixels). The route validates
+that both are finite numbers; malformed inputs return
+`400 { error: "x and y must be finite numbers" }`. The probe itself
+clamps to non-negative integers before reaching the page, so a
+fractional or negative payload that survives JSON parsing still
+produces a sensible probe rather than crashing CDP.
+
+**Response (interactive ancestor found):**
+```json
+{
+  "probe": {
+    "selector": "role=button[name=\"Sign in\"]",
+    "label": "Sign in",
+    "rect": { "x": 100, "y": 200, "width": 80, "height": 32 }
+  }
+}
+```
+
+**Response (no interactive ancestor under cursor):**
+```json
+{ "probe": null }
+```
+
+The page-side helper (`window.__sentriProbeAtPoint`, installed by
+`RECORDER_SCRIPT`) walks to the closest interactive ancestor
+(`a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']`)
+and reuses the SAME `selectorGenerator` + `bestLabel` heuristics the
+click/fill listeners use — so the picker's suggestion is byte-aligned
+with what a real click would have captured.
+
+The probe is best-effort: transient page-navigation errors
+(`page.evaluate` rejects mid-probe) are swallowed and return
+`{ probe: null }` so the frontend just drops the highlight rather than
+surfacing a 500. Safe to call at hover frequency (the frontend
+debounces to ~120 ms, so the route handles ~8 req/sec per session).
