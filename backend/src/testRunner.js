@@ -473,7 +473,21 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
   // stamped by `partitionTestsIntoShards`; defensive `?? 0` covers
   // tests that bypass the partition (single-shard runs still attribute
   // to shard 0 — same effective behaviour).
+  //
+  // In `isShardMode` (cross-process shard worker), the BullMQ worker
+  // drives `run.shardsCompleted` externally via
+  // `runRepo.incrementShardsCompleted` after this function returns —
+  // this helper must NOT touch the counter, or the boundary-crossing
+  // finalizer detection in `runWorker.js` would double-count. The
+  // previous implementation no-op'd by accident: tests are stamped
+  // with the worker's `shardIndex` (e.g. 2) while `shardRemaining` is
+  // sized `[tests.length]` (length 1), so `shardRemaining[2]` was
+  // `undefined` and the `!= null` guard silently bailed. Make the
+  // intent explicit so a future refactor of `shardRemaining` sizing
+  // can't silently start incrementing here and break the worker's
+  // external counter management.
   function recordTestShardComplete(test) {
+    if (isShardMode) return;
     const shardIdx = test?._shardIndex ?? 0;
     if (shardRemaining[shardIdx] != null) {
       shardRemaining[shardIdx] -= 1;
