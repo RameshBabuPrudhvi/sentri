@@ -562,25 +562,6 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### AUTO-010 — Root cause analysis and failure clustering ✅ Complete
-
-**Status:** ✅ Complete (PR #6) — see Completed Work Summary above for the full implementation details. Original spec body preserved below for historical context; the Completed Work Summary row is the canonical record.
-
-**Original status (pre-PR #6):** 🔲 Planned | **Effort:** L | **Source:** Competitive Gap Analysis
-
-**Problem:** When 15 tests fail, they often share a root cause (e.g., a login endpoint is down). Sentri reports each failure independently. An autonomous system should cluster failures by shared error pattern, common URL, or common failing selector and report "1 root cause → 15 affected tests." The `defectBreakdown` in `Dashboard.jsx:219-224` categorises by error type but does not cluster by shared cause.
-
-**Fix:** After each run, group failures by shared error message fingerprint, shared `sourceUrl`, and shared failing step selector. Report the top-N clusters with a "likely root cause" label in a Root Cause Summary panel on the run detail page.
-
-**Files to change:**
-- New `backend/src/utils/failureClusterer.js` — clustering algorithm
-- `backend/src/testRunner.js` — call clusterer on run completion
-- `frontend/src/pages/RunDetail.jsx` — Root Cause Summary panel
-
-**Dependencies:** None
-
----
-
 ### AUTO-011 — Historical trend analysis and anomaly detection 🔵 Medium
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** Competitive Gap Analysis
