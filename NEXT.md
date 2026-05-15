@@ -55,7 +55,7 @@ Current parallelism is 1–10 workers within a single Chromium process on one ma
 
 ---
 
-## ⏭ Queue (next 3 PRs after current)
+## ⏭ Queue (next 4 PRs after current)
 ### 1 · SEC-004 — MFA (TOTP / passkey) support
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
 
