@@ -62,6 +62,12 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
   const [device, setDevice] = useState("");
   const [pendingDeviceSwitch, setPendingDeviceSwitch] = useState(null);
   const [deviceSwitching, setDeviceSwitching] = useState(false);
+  // DIF-015c Gap 6 — opt-in stealth profile. The toggle lives in the
+  // idle launch form (post-launch the flag is immutable because the
+  // stealth init script is registered before the first navigation, and
+  // changing it would require a context rebuild that defeats the point
+  // — operators who change their mind discard and re-launch).
+  const [stealth, setStealth] = useState(false);
   // DIF-015c Gap 2 (point-and-click assert UX) — assert mode state.
   // When `assertMode` is true the canvas suppresses input forwarding and
   // instead shows a hover-driven highlight overlay; clicking commits the
@@ -214,11 +220,17 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
       // non-default option, so the backend's allowlist check doesn't
       // fire on the desktop-default path.
       if (device) startBody.device = device;
-      const { sessionId: sid, viewport: vp, device: serverDevice } =
+      // DIF-015c Gap 6: only send stealth: true when the operator
+      // explicitly opted in. The backend coerces to strict-true so a
+      // missing field is identical to false, but skipping the field
+      // entirely keeps the request body minimal on the common path.
+      if (stealth === true) startBody.stealth = true;
+      const { sessionId: sid, viewport: vp, device: serverDevice, stealth: serverStealth } =
         await api.recordStart(selectedProjectId, startBody);
       setSessionId(sid);
       setPaused(false);
       if (typeof serverDevice === "string") setDevice(serverDevice);
+      if (typeof serverStealth === "boolean") setStealth(serverStealth);
       if (vp && vp.width > 0 && vp.height > 0) setViewport({ width: vp.width, height: vp.height });
       setPhase("recording");
       pollRef.current = setInterval(async () => {
@@ -590,6 +602,35 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   ))}
                 </select>
               </div>
+              {/* DIF-015c Gap 6 — Stealth profile opt-in. Off by default
+                  so pre-Gap-6 behaviour stays bit-for-bit unchanged. When
+                  on, the backend installs STEALTH_SCRIPT before the
+                  recorder script so `navigator.webdriver` is undefined
+                  on the SUT's very first byte. The flag is immutable
+                  post-launch — toggling at runtime would require a
+                  context rebuild, which defeats the point. Help text
+                  surfaces the cost/benefit so operators don't enable it
+                  speculatively. */}
+              <div>
+                <label
+                  className="recorder-idle__label"
+                  style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={stealth}
+                    onChange={(e) => setStealth(e.target.checked)}
+                    style={{ width: 14, height: 14 }}
+                  />
+                  Stealth mode (bypass headless detection)
+                </label>
+                <div style={{ fontSize: 12, color: "var(--muted, #888)", marginTop: 4 }}>
+                  Patches <code>navigator.webdriver</code> and 4 other
+                  fingerprint surfaces so sites that block headless
+                  browsers render normally. Off by default; opt in only
+                  when a target SUT detects automation.
+                </div>
+              </div>
               <div>
                 <label className="recorder-idle__label">Test name</label>
                 <input
@@ -678,6 +719,33 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   Undo last step
                 </button>
               </div>
+              {/* DIF-015c Gap 6 — Stealth-active badge on the recording
+                  stage. The flag is immutable post-launch (changing it
+                  would require a context rebuild that the operator
+                  hasn't asked for), so this is a read-only indicator —
+                  the operator sees at a glance whether the SUT is
+                  receiving the patched navigator + chrome surfaces.
+                  Suppressed when stealth is off so the recording stage
+                  stays clutter-free for the common case. */}
+              {stealth && (
+                <div style={{
+                  marginBottom: 8,
+                  padding: "4px 8px",
+                  background: "rgba(34, 197, 94, 0.1)",
+                  border: "1px solid rgba(34, 197, 94, 0.3)",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  color: "var(--muted, #16a34a)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}>
+                  <span>🥷 Stealth mode active —</span>
+                  <span style={{ opacity: 0.8 }}>
+                    headless fingerprints patched on every page
+                  </span>
+                </div>
+              )}
               {/* DIF-015c Gap 5 — Mid-session device switch. Disabled
                   during `stopping` and during an in-flight switch so the
                   operator can't queue two teardowns. NEXT.md `:53`

@@ -562,6 +562,21 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
   22. `viewer` attempts `POST /record/:sessionId/{pause,resume,pop-last,device,probe}` → 403.
   23. Cross-workspace attempt — outsider `qa_lead` POSTs to a sessionId they don't own → 404 (not 403; existence isn't leaked). All five routes call `projectRepo.getByIdInWorkspace` + `sess.projectId !== project.id` upstream.
 
+- **Gap 6 — stealth launch profile** (`POST /record` with `stealth: true`):
+  24. On the idle launch form, tick the **Stealth mode (bypass headless detection)** checkbox → click **Launch recorder**. The recording sidebar shows a green **🥷 Stealth mode active** badge once the recorder is up.
+  25. The launch response includes `"stealth": true` in the body (verify via DevTools Network) and the backend log shows `[recorder] stealth profile enabled for session=REC-…`.
+  26. **Default-off contract** — launch a fresh recorder WITHOUT ticking the box → request body omits `stealth` (or sends `stealth: false`), response carries `stealth: false`, no `[recorder] stealth profile enabled` log line, and no green badge in the sidebar. Pre-Gap-6 default-mode behaviour is bit-for-bit unchanged.
+  27. **Strict-true coercion** — using a custom client, POST `{stealth: "true"}` (string), `{stealth: 1}`, or `{stealth: "yes"}` to `/record` → response carries `stealth: false`. Only the literal JSON boolean `true` opts in.
+  28. **Fingerprint patches verified** — launch a stealth session pointed at a test page that probes the patched surfaces (a small HTML page that renders `JSON.stringify({webdriver: navigator.webdriver, plugins: navigator.plugins.length, languages: navigator.languages, chrome: typeof window.chrome, perms: (await navigator.permissions.query({name:"notifications"})).state})`). The page should show:
+      - `webdriver: undefined` (not `true`)
+      - `plugins: 3` (not `0`)
+      - `languages: ["en-US","en"]` (not `[]`)
+      - `chrome: "object"` (not `"undefined"`)
+      - `perms: "prompt"` (not `"denied"`)
+  29. **Mid-session device switch preserves stealth** — launch with stealth on, switch to Pixel 7 via the mid-session dropdown, then probe the surfaces on the rebuilt page → all five still patched (the `_finishOpenRecorderPage` helper re-applies `STEALTH_SCRIPT` after the context rebuild).
+  30. **Immutability post-launch** — no UI control exists to toggle stealth on/off mid-session. Verify the idle-form checkbox is gone from the recording stage; operators who change their mind must Discard and re-launch.
+  31. **Init failure is non-fatal** — if `STEALTH_SCRIPT` throws at page-init (rare; possible if a future SUT replaces `Object.defineProperty`), the backend log shows `[sentri-stealth] init failed: <err>` but the recording continues. The half-applied profile is operator-visible via the log so they can decide whether to discard.
+
 ---
 
 ### ▶️ Runs

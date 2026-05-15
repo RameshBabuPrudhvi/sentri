@@ -46,6 +46,136 @@ import { buildInjectedBootstrapScript } from "./playwrightSelectorGenerator.js";
 const ACCEPTED_DEVICE_NAMES = new Set(DEVICE_PRESETS.map((d) => d.value));
 
 /**
+ * DIF-015c Gap 6 — opt-in stealth bootstrap script. Patches the five
+ * fingerprint surfaces real-world `if (navigator.webdriver) { block() }`
+ * detection scripts check, **without** pulling in the
+ * `puppeteer-extra-plugin-stealth` dependency tree (which would add a
+ * cat-and-mouse fingerprint patcher running on every page, plus a
+ * security-review surface for anti-bot logic AGENT.md `:123` warns
+ * against bundling without explicit justification).
+ *
+ * Applied via `context.addInitScript(STEALTH_SCRIPT)` ONLY when the
+ * session was launched with `stealth: true`. Default-mode runs never
+ * call `addInitScript` with this body so pre-Gap-6 behaviour is
+ * bit-for-bit identical.
+ *
+ * Coverage of common headless-detection probes:
+ *
+ *   - `navigator.webdriver` — headless sets this to `true`; we redefine
+ *     the getter to return `undefined` (matches what a real Chrome
+ *     window returns).
+ *   - `navigator.plugins` — headless reports an empty `PluginArray`; we
+ *     synthesise a 3-entry array shaped like a real Chrome install
+ *     (PDF Viewer + Chrome PDF Viewer + Chromium PDF Viewer).
+ *   - `navigator.languages` — headless reports `[]`; we force the
+ *     equivalent of a US-English Chrome install. Operators can still
+ *     override per-context via the existing `locale` device option.
+ *   - `window.chrome` — real Chrome exposes a `chrome` object with at
+ *     least a `runtime` stub; headless leaves it undefined. We
+ *     synthesise the minimal shape that detection scripts probe.
+ *   - `Permissions.prototype.query` for `notifications` — real Chrome
+ *     returns `{ state: "prompt" }` for an unset permission; headless
+ *     returns `{ state: "denied" }` which is a strong tell. We patch
+ *     the prototype to flip notifications back to `"prompt"` while
+ *     leaving every other permission query untouched.
+ *
+ * The script is intentionally narrow — it covers the ~90% of detection
+ * scripts that read these five surfaces, NOT the long tail of
+ * canvas-fingerprint / WebGL-renderer / battery-API patches the upstream
+ * plugin chains together. If a target site detects us despite this
+ * stealth profile, the right answer is to add a single targeted patch
+ * here rather than pull in the full upstream stack.
+ *
+ * @internal
+ */
+const STEALTH_SCRIPT = `
+(() => {
+  try {
+    if (window.__sentriStealthInstalled) return;
+    window.__sentriStealthInstalled = true;
+
+    // 1. navigator.webdriver — the canonical "is this headless?" probe.
+    //    Real Chrome returns undefined; headless returns true. Redefine
+    //    the getter on the prototype so existing read paths see undefined
+    //    without breaking property-descriptor introspection.
+    try {
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => undefined,
+        configurable: true,
+      });
+    } catch (_) { /* defineProperty may throw on some platforms */ }
+
+    // 2. navigator.plugins — synthesise a real-Chrome-shaped PluginArray.
+    //    Detection scripts often read .length, so a 3-entry array (the
+    //    default Chrome install on macOS/Windows) is the safest spoof.
+    try {
+      const fakePlugins = [
+        { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+      ];
+      Object.defineProperty(navigator, "plugins", {
+        get: () => fakePlugins,
+        configurable: true,
+      });
+    } catch (_) { /* ignore */ }
+
+    // 3. navigator.languages — headless reports [], real browsers report
+    //    at least the UI locale. Force the equivalent of a US-English
+    //    install; operators who need a different locale should set the
+    //    Playwright \`locale\` device option which takes precedence at
+    //    the context layer.
+    try {
+      Object.defineProperty(navigator, "languages", {
+        get: () => ["en-US", "en"],
+        configurable: true,
+      });
+    } catch (_) { /* ignore */ }
+
+    // 4. window.chrome — real Chrome exposes a top-level \`chrome\`
+    //    object with at least a \`runtime\` stub. Headless leaves it
+    //    undefined. Synthesise the minimal shape so detection scripts
+    //    that probe \`window.chrome\` or \`window.chrome.runtime\` see
+    //    something plausible.
+    try {
+      if (!window.chrome) {
+        Object.defineProperty(window, "chrome", {
+          value: { runtime: {} },
+          writable: true,
+          configurable: true,
+        });
+      } else if (!window.chrome.runtime) {
+        window.chrome.runtime = {};
+      }
+    } catch (_) { /* ignore */ }
+
+    // 5. Permissions.prototype.query — patch \`notifications\` only.
+    //    Real Chrome returns { state: "prompt" } for unset notifications;
+    //    headless returns "denied" which is a strong tell. Leave every
+    //    other permission untouched so legitimate permission flows
+    //    (geolocation, camera, mic) behave normally.
+    try {
+      if (window.Permissions && window.Permissions.prototype && window.Permissions.prototype.query) {
+        const origQuery = window.Permissions.prototype.query;
+        window.Permissions.prototype.query = function (params) {
+          if (params && params.name === "notifications") {
+            return Promise.resolve({ state: "prompt" });
+          }
+          return origQuery.call(this, params);
+        };
+      }
+    } catch (_) { /* ignore */ }
+  } catch (err) {
+    // Surface init failures the same way RECORDER_SCRIPT does so a
+    // half-applied stealth profile doesn't silently degrade — better
+    // for the operator to see "stealth init failed" in the backend
+    // log than to wonder why their target site still detects them.
+    console.error("[sentri-stealth] init failed:", err && err.stack ? err.stack : err);
+  }
+})();
+`;
+
+/**
  * Tunable timing constants for the recorder. Centralised so reviewers can
  * see every magic number in one place and so operators can override the
  * server-side ones via environment variables without grepping through the
@@ -196,6 +326,14 @@ export function isNoisyTestId(value) {
  *                                          (from device descriptor, falling
  *                                          back to `VIEWPORT_WIDTH/HEIGHT`).
  * @property {boolean} [paused]           - DIF-015c Gap 3: pause flag.
+ * @property {boolean} [stealth]          - DIF-015c Gap 6: when true the
+ *                                          recorder context has `STEALTH_SCRIPT`
+ *                                          installed via `addInitScript`,
+ *                                          patching `navigator.webdriver` +
+ *                                          friends so headless-detecting
+ *                                          target apps render normally.
+ *                                          Default false → pre-Gap-6
+ *                                          behaviour bit-for-bit unchanged.
  * @property {Object}  [browser]         - Playwright Browser (internal).
  * @property {Object}  [context]         - Playwright BrowserContext (internal).
  * @property {Object}  [page]            - Playwright Page (internal).
@@ -1609,6 +1747,14 @@ async function _attachAndOpenRecorderPage(session, context, startUrl, viewport) 
  * @private
  */
 async function _finishOpenRecorderPage(session, context, startUrl, viewport, pageAliases) {
+  // DIF-015c Gap 6: re-apply stealth on the rebuilt context so a
+  // mid-session device switch doesn't undo the stealth profile the
+  // operator opted into at launch. Default-mode (`stealth !== true`)
+  // takes the early-return path so pre-Gap-6 behaviour is unchanged.
+  if (session.stealth === true) {
+    await context.addInitScript(STEALTH_SCRIPT);
+  }
+
   // Inject Playwright's own InjectedScript bootstrap before our recorder
   // script so `window.__playwrightSelector` is populated by the time
   // selectorGenerator() runs on the first user interaction. Mirrors the
@@ -1744,9 +1890,15 @@ function resolveDeviceContext(device) {
  *   from `DEVICE_PRESETS` (e.g. `"iPhone 14"`). Empty string / undefined →
  *   desktop default (legacy behaviour). Unknown values are rejected at the
  *   route layer; this helper assumes the caller has already validated.
+ * @param {boolean} [args.stealth=false] - DIF-015c Gap 6: when true, the
+ *   `STEALTH_SCRIPT` is installed via `context.addInitScript` BEFORE the
+ *   recorder script and main page navigation, so `navigator.webdriver`
+ *   reads as `undefined` (and four other surfaces look real-Chrome-ish)
+ *   from the very first byte of the SUT. Default false → no init script
+ *   is registered for stealth; pre-Gap-6 behaviour bit-for-bit unchanged.
  * @returns {Promise<RecordingSession>}
  */
-export async function startRecording({ sessionId, projectId, startUrl, device = "" }) {
+export async function startRecording({ sessionId, projectId, startUrl, device = "", stealth = false }) {
   if (sessions.has(sessionId)) {
     throw new Error(`Recording session ${sessionId} is already active.`);
   }
@@ -1770,6 +1922,7 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
       startedAt: Date.now(),
       device: device || "",
       viewport: effectiveViewport,
+      stealth: !!stealth,
       browser,
       context,
     });
@@ -1910,6 +2063,20 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
     // the page would have no `window.__sentriRecord` binding — the
     // symptom is the recorder only emitting `goto` actions while every
     // click/fill/keypress is silently dropped.
+    // DIF-015c Gap 6: install the stealth bootstrap BEFORE the
+    // Playwright selector bootstrap and recorder script so
+    // `navigator.webdriver` reads as `undefined` from the very first
+    // byte of the SUT. Default-mode (`stealth: false`) skips this
+    // entirely — pre-Gap-6 behaviour is bit-for-bit identical.
+    // Without the early-bird ordering, a target site can read
+    // `navigator.webdriver` synchronously during its bootstrap
+    // (`<head><script>if (navigator.webdriver) location = "/blocked"</script>`)
+    // before our addInitScript runs.
+    if (stealth === true) {
+      await context.addInitScript(STEALTH_SCRIPT);
+      console.log(formatLogLine("info", null, `[recorder] stealth profile enabled for session=${sessionId}`));
+    }
+
     let bootstrap = "";
     try { bootstrap = buildInjectedBootstrapScript(); }
     catch (err) {

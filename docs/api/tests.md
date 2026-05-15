@@ -320,7 +320,8 @@ Requires `qa_lead` role. Rate-limited via the expensive-operations limiter.
 ```json
 {
   "startUrl": "https://example.com",
-  "device": "iPhone 14"
+  "device": "iPhone 14",
+  "stealth": true
 }
 ```
 
@@ -331,13 +332,27 @@ string or omitted → desktop default. Unknown values return `400 { error:
 device dropdown so test-run + recording device coverage stay byte-aligned
 (DIF-015c Gap 5).
 
+`stealth` (DIF-015c Gap 6) is an optional boolean that opts the session
+into a hand-rolled stealth profile — the server installs an init script
+that patches `navigator.webdriver`, `navigator.plugins`,
+`navigator.languages`, `window.chrome`, and
+`Permissions.prototype.query` so target SUTs that block headless
+browsers render normally. **Only the literal JSON `true` opts in**;
+every other value (including string `"true"`, `1`, missing) leaves
+stealth off. The flag is immutable post-launch — operators who change
+their mind must discard and re-launch (changing it mid-session would
+require a context rebuild, which defeats the point of early-byte
+patching).
+
 Defaults to the project's configured URL. Returns
-`{ sessionId, startUrl, device, viewport: { width, height } }`. The
-`viewport` reflects the resolved device descriptor (e.g. `iPhone 14`
+`{ sessionId, startUrl, device, stealth, viewport: { width, height } }`.
+The `viewport` reflects the resolved device descriptor (e.g. `iPhone 14`
 → `{ width: 390, height: 844 }`) or the server-side `VIEWPORT_WIDTH` /
 `VIEWPORT_HEIGHT` defaults so the frontend can scale forwarded pointer
-coordinates correctly. The frontend subscribes to
-`/api/v1/runs/:sessionId/events` for live screencast frames.
+coordinates correctly. `stealth` echoes the server-coerced strict
+boolean so the frontend can render the active state without round-trip
+guessing. The frontend subscribes to `/api/v1/runs/:sessionId/events`
+for live screencast frames.
 
 ### Stop / Save / Discard
 

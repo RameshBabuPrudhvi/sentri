@@ -366,6 +366,77 @@ await asyncTest("probeAtPoint returns null on transient page navigation errors (
   } finally { dispose(); }
 });
 
+console.log("\nrecorder-pause — STEALTH_SCRIPT (DIF-015c Gap 6 source-level contracts)");
+
+await asyncTest("STEALTH_SCRIPT exists at module scope and patches the five expected surfaces", async () => {
+  // Real Chromium isn't available in this harness, so we can't actually
+  // launch a stealth context and probe `navigator.webdriver`. The next
+  // best contract is source-level: lock down that STEALTH_SCRIPT
+  // exists, runs as an IIFE inside the page context, and patches
+  // exactly the five fingerprint surfaces the JSDoc promises. Drift
+  // here would silently break Gap 6 — a target site that detects via
+  // one of the omitted surfaces would still block the recorder.
+  const fs = await import("node:fs");
+  const urlMod = await import("node:url");
+  const here = urlMod.fileURLToPath(new URL(".", import.meta.url));
+  const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+
+  // 1. The constant must exist as a top-level template literal so
+  //    it's interpolation-free (no runtime injection of secrets).
+  assert.match(src, /const STEALTH_SCRIPT = `/, "STEALTH_SCRIPT must be a top-level template-literal constant");
+
+  // 2. Page-side guard against double-install (mirrors __sentriRecorder).
+  assert.match(src, /window\.__sentriStealthInstalled/, "STEALTH_SCRIPT must guard against double-install");
+
+  // 3. Each of the five patched surfaces — match the property name + the
+  //    fact that we redefine it via defineProperty / replacement. If any
+  //    of these stops matching, a target site that probes that surface
+  //    will see the headless tell unpatched.
+  assert.match(src, /Object\.defineProperty\(navigator, "webdriver"/, "must patch navigator.webdriver");
+  assert.match(src, /Object\.defineProperty\(navigator, "plugins"/, "must patch navigator.plugins");
+  assert.match(src, /Object\.defineProperty\(navigator, "languages"/, "must patch navigator.languages");
+  assert.match(src, /window\.chrome[^a-z]/, "must reference window.chrome (the runtime stub)");
+  assert.match(src, /window\.Permissions\.prototype\.query/, "must patch Permissions.prototype.query");
+
+  // 4. Default-mode safety: STEALTH_SCRIPT must NOT appear in any code
+  //    path that runs unconditionally. Both addInitScript(STEALTH_SCRIPT)
+  //    sites are gated by `if (session.stealth === true)` /
+  //    `if (stealth === true)` — assert both gates are present so a
+  //    refactor that drops the guard can't silently apply stealth to
+  //    every recording session.
+  const addInitCalls = src.match(/await context\.addInitScript\(STEALTH_SCRIPT\)/g) || [];
+  assert.ok(addInitCalls.length >= 2, "STEALTH_SCRIPT must be installed in both startRecording AND _finishOpenRecorderPage");
+  // Both call sites must sit inside `stealth === true` predicates.
+  const guardedCalls = src.match(/if\s*\(\s*(?:session\.)?stealth\s*===\s*true\s*\)\s*\{\s*\n\s*await context\.addInitScript\(STEALTH_SCRIPT\)/g) || [];
+  assert.equal(
+    guardedCalls.length, 2,
+    "both STEALTH_SCRIPT addInitScript calls must be guarded by `stealth === true` — default-mode runs would otherwise install stealth unconditionally",
+  );
+});
+
+await asyncTest("STEALTH_SCRIPT registers BEFORE bootstrap + RECORDER_SCRIPT (ordering contract)", async () => {
+  // The init-script order matters: stealth must run first so that
+  // by the time RECORDER_SCRIPT's selectorGenerator (and any SUT
+  // bootstrap script) reads `navigator.webdriver`, the patched
+  // `undefined` is what they see. If a future refactor reorders the
+  // addInitScript calls, a target site that probes webdriver
+  // synchronously during its own bootstrap could still detect us
+  // even with stealth on.
+  const fs = await import("node:fs");
+  const urlMod = await import("node:url");
+  const here = urlMod.fileURLToPath(new URL(".", import.meta.url));
+  const src = fs.readFileSync(`${here}../src/runner/recorder.js`, "utf8");
+
+  // Locate the startRecording stealth call and the matching
+  // addInitScript(RECORDER_SCRIPT) below it. The stealth index must be
+  // smaller (earlier in the function body) than the RECORDER_SCRIPT
+  // index for the ordering to hold.
+  const stealthIdx = src.indexOf("await context.addInitScript(STEALTH_SCRIPT)");
+  assert.ok(stealthIdx >= 0, "STEALTH_SCRIPT addInitScript must exist");
+  const recorderIdx = src.indexOf("await context.addInitScript(RECORDER_SCRIPT)", stealthIdx);
+  assert.ok(recorderIdx > stealthIdx, "RECORDER_SCRIPT addInitScript must come AFTER STEALTH_SCRIPT in source order");
+});
+
 console.log("\nrecorder-pause — RECORDER_SCRIPT exposes __sentriProbeAtPoint (source-level contract)");
 
 await asyncTest("RECORDER_SCRIPT installs window.__sentriProbeAtPoint with selector + label + rect", async () => {

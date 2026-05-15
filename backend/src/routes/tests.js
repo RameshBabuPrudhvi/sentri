@@ -1427,7 +1427,14 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     if (device && !RECORDER_DEVICE_VALUES.has(device)) {
       return res.status(400).json({ error: `Invalid device: ${device}` });
     }
-    await startRecording({ sessionId, projectId: project.id, startUrl, device });
+    // DIF-015c Gap 6: optional stealth profile. Coerce to a strict
+    // boolean so a stringy `"true"` payload from a misconfigured client
+    // doesn't accidentally enable stealth (or vice versa). Only the
+    // literal JSON `true` opts in — every other value (false, null,
+    // omitted, "true", 1) leaves stealth off so default-mode runs are
+    // bit-for-bit unchanged.
+    const stealth = req.body?.stealth === true;
+    await startRecording({ sessionId, projectId: project.id, startUrl, device, stealth });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
@@ -1446,6 +1453,12 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       sessionId,
       startUrl,
       device: sess?.device || "",
+      // DIF-015c Gap 6: surface the resolved stealth flag so the
+      // frontend can reflect the active state in the recording-stage
+      // sidebar (and so an operator who toggled stealth but hit a
+      // server-side error sees an explicit `stealth: false` rather
+      // than guessing from missing UI).
+      stealth: sess?.stealth === true,
       viewport: resolvedViewport,
     });
   } catch (err) {
