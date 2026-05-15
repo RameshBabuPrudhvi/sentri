@@ -93,7 +93,8 @@ There is no `COMPAT_<ID>_API_KEY` env equivalent — OpenAI-compatible slots (De
 | `DATABASE_URL` | — | PostgreSQL connection string (e.g. `postgres://user:pass@host:5432/db`). When set, uses PostgreSQL instead of SQLite. Requires `pg` + `pg-native` (or `deasync` as fallback) |
 | `PG_POOL_SIZE` | `10` | Max PostgreSQL connection pool size (ignored for SQLite) |
 | `REDIS_URL` | — | Redis connection URL (e.g. `redis://localhost:6379`). When set, enables shared rate limiting, cross-instance token revocation, SSE pub/sub, and BullMQ job queue. Requires `ioredis`. For Redis-backed rate limiting also install `rate-limit-redis` |
-| `MAX_WORKERS` | `2` | Global concurrency limit for BullMQ run execution (INF-003). Each slot processes one crawl or test run at a time. Ignored when Redis/BullMQ is not available |
+| `MAX_WORKERS` | `2` | Global concurrency limit for BullMQ run execution (INF-003). Each slot processes one crawl or test run at a time. Ignored when Redis/BullMQ is not available. **Superseded by `WORKER_CONCURRENCY`** — kept as a fallback for backward compatibility |
+| `WORKER_CONCURRENCY` | `2` | Per-container concurrency for the BullMQ run worker (AUTO-008). Used by both the in-process worker started by the backend and the standalone `worker` Compose service (`node src/worker.js`). Falls back to `MAX_WORKERS` when unset |
 
 #### Local Redis setup
 
