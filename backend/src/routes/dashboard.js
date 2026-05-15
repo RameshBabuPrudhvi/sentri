@@ -19,10 +19,17 @@ import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
 import { getTopFlakyTests } from "../utils/flakyDetector.js";
 import { getQueueStats, isQueueAvailable, runQueue } from "../queue.js";
+import { formatLogLine } from "../utils/logFormatter.js";
 
 const router = Router();
 
 router.get("/dashboard", async (req, res) => {
+  // Express 4 does NOT auto-catch rejected promises from async handlers, so
+  // any synchronous throw (e.g. a repo call) would otherwise hang the request
+  // until the client times out. Wrap the entire body so failures surface as
+  // a 500 instead. Mirrors the pattern used by other async routes (e.g.
+  // routes/auth.js).
+  try {
   // ACL-001: Scope dashboard data to the user's workspace.
   // Projects are filtered by workspaceId; runs and tests are filtered by
   // the set of project IDs that belong to this workspace.
@@ -402,6 +409,10 @@ router.get("/dashboard", async (req, res) => {
     topAccessibilityOffenders,
     environmentPassRates, // DIF-012 — null when no envs configured
   });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[dashboard] ${err?.stack || err?.message || err}`));
+    return res.status(500).json({ error: "Dashboard data unavailable." });
+  }
 });
 
 export default router;
