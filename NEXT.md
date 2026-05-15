@@ -31,6 +31,15 @@ PR #115 made the recorder canvas interactive and aligned recorded steps with the
 PR #118 already shipped the backend: `POST /api/v1/projects/:id/record/:sessionId/assertion` (`backend/src/routes/tests.js:1164-1184`) and server-side `addAssertionAction()` (`backend/src/runner/recorder.js:827-855`) support `assertVisible`, `assertText`, `assertValue`, and `assertUrl`. The `RecorderModal` already exposes an "Add assertion" form. **Remaining:** point-and-click UX — when the assert toggle is active, suppress `forwardInput` on the canvas, highlight the hovered element via CDP `Overlay.highlightNode`, and open the assertion picker pre-filled with that element's `bestSelector()` output. Add an `assertMode` prop on `frontend/src/components/run/LiveBrowserView.jsx` that suppresses input forwarding and surfaces hover targets back to the modal. `assertCount` and `assertHasClass` need a new action kind on the backend (typedef + `actionsToPlaywrightCode` branch + `recordedActionToStepText` branch + `isEmittableAction` branch + regression test); the other four are already wired.
 ### Gap 3 — Pause / resume + undo last action
 Once recording starts, every action is captured through to Stop. Add `POST /record/:sessionId/{pause,resume,pop-last}` routes + session-state guards in `forwardInput` (short-circuit when `session.paused === true`). The server-side change is small; the UX work in `RecorderModal` (pause/resume control + undo affordance + optional mid-recording edit of the last action's fill value) is the larger lift. Justifies: recorder captures password keystrokes when pause was unavailable (currently truncated to 40 chars in step prose but the full value lives in `playwrightCode`) → pause closes that exfiltration window; mis-clicks today force a full session discard → undo restores the prior investment.
+#### Gap 4 — Authentication / pre-logged-in state handling
+
+The recorder starts at `startUrl` with a fresh browser context — no cookies, no localStorage, no logged-in state. Three flows have no good answer today:
+
+1. **Recording a test against an authenticated app** — user must record the login flow as part of every test, even though the resulting test will execute under a different fixture in CI. Workaround is to record the full login each time.
+2. **Recording behind SSO / OAuth** — login redirects through a third-party IdP (Google / Okta / Azure AD); the recorder captures the IdP form fields but those selectors are useless at replay (the IdP UI changes; tests cannot be rerun against a different env).
+3. **MFA-protected logins** — every recording requires re-doing MFA, which is not deterministic.
+
+Possible fix: integrate with project credential profiles (DIF-010) so the recorder browser context is seeded with `storageState` from a captured login, skipping login entirely. Pair with environment-aware credential profiles per `MNT-004` / `DIF-012`.
 ### Gap 5 — Mobile / touch / device profile during recording
 The recorder runs at desktop viewport only — no device dropdown in `RecorderModal`. Thread a `device` param through `POST /api/v1/projects/:id/record` → `backend/src/runner/recorder.js`, and set `browser.newContext({ ...devices[device] })` the same way `executeTest.js` already does for runs (DIF-003). UX is a device dropdown in `RecorderModal` mirroring the one in `RunRegressionModal.jsx`.
 ### Gap 6 — Stealth launch profile for sites that detect headless
@@ -56,6 +65,7 @@ Some target apps detect headless Chromium (via `navigator.webdriver`, missing ch
 ### PR checklist (DIF-015c)
 - [ ] Gap 2 — point-and-click assert UX: `LiveBrowserView.assertMode` prop suppresses `forwardInput`; CDP `Overlay.highlightNode` wired on hover; popover writes via existing `POST /record/:sessionId/assertion`; `assertCount` + `assertHasClass` action kinds added with regression coverage in `backend/tests/recorder.test.js`
 - [ ] Gap 3 — pause / resume / undo: `POST /record/:sessionId/{pause,resume,pop-last}` registered in `permissions.json` (qa_lead+); `forwardInput` short-circuits when `session.paused === true`; pop-last idempotent on empty `actions[]`; UI affordances with visible state indicator
+- [ ] Gap 4
 - [ ] Gap 5 — device profile: `device` param threaded `POST /record → recorder.js`; `browser.newContext({ ...devices[device] })` applied; dropdown in `RecorderModal` mirrors `RunRegressionModal`; mid-session device switch verified
 - [ ] Gap 6 — stealth profile: opt-in `stealth: true` session param; `launchBrowser()` accepts and applies the stealth-plugin stack; default-mode bit-for-bit unchanged; headless-detection bypass verified against guard-script fixture
 - [ ] `backend/tests/recorder.test.js` covers all four gaps and is registered in `backend/tests/run-tests.js`
