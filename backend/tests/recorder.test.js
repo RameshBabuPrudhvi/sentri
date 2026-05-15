@@ -1249,10 +1249,11 @@ test("addAssertionAction rejects assertCount without a numeric value", () => {
       /value is required/i,
     );
     // Non-numeric value → "must be a non-negative integer" branch. Each
-    // case in the inner array exercises a distinct rejection path: NaN,
-    // negative integer, float, leading-space (would survive parseInt but
-    // fail the canonical-form check).
-    for (const bad of ["abc", "-1", "1.5", " 1"]) {
+    // case in the inner array exercises a distinct rejection path: NaN
+    // (alphabetic), negative integer, float. Leading/trailing whitespace
+    // is intentionally NOT rejected — the validator trims before the
+    // canonical-form check so `" 3"` is accepted and the count works.
+    for (const bad of ["abc", "-1", "1.5"]) {
       assert.throws(
         () => addAssertionAction("REC-assert-count-bad", { kind: "assertCount", selector: ".row", value: bad }),
         /non-negative integer/i,
