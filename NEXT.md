@@ -24,7 +24,7 @@
 
 ---
 
-## ▶ Current PR — DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion
+## ▶ Current PR — DIF-015c (Gaps 2/3/4/5/6) — Recorder gaps completion
 **Effort:** M (bundled 4×S) | **Priority:** 🟢 Differentiator (parity with BearQ / Mabl / Testim) | **Dependencies:** DIF-015 ✅, DIF-015b ✅, DIF-015c Gap 1 ✅ PR #11, DIF-015c Gap 2 backend ✅ PR #118 | **Source:** `ROADMAP.md` Phase 3 (DIF-015c sub-items) — promoted per `NEXT.md` rotation after AUTO-010 shipped in PR #6
 PR #115 made the recorder canvas interactive and aligned recorded steps with the AI-generated / manual format, but four gaps remain that surface during real use against e-commerce, kanban, and admin-dashboard targets. Bundled because all four touch the same `backend/src/runner/recorder.js` + `frontend/src/components/run/RecorderModal.jsx` surface within a single reviewable boundary; doing them separately means re-opening the same files four times with merge-conflict risk on `RECORDER_SCRIPT`.
 ### Gap 2 — Inline assertion authoring (point-and-click UX, parity with BearQ)
