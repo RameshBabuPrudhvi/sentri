@@ -1282,19 +1282,18 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 - 🔴 **NEW from AUDIT.md Phase 5 — 6 items unresolved:** SEC-004 (MFA), SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness).
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
-1. `INT-002b` (current PR — GitHub integration polish: OAuth install callback + App-level webhook receiver, closes two `TODO(INT-002b):` markers left in PR #15)
-2. `AUTO-004` (test impact analysis from git diff, consumes INT-002's GitHub PR-files API path now that the integration plumbing is fully closed out)
-3. `INF-008` + `MNT-014` (bundled — Postgres default + migration linter)
-4. `INF-007` + `MNT-013` (bundled — OTel/Sentry + request-ID propagation)
-5. `SEC-004` (MFA — compliance unlock)
-6. `AUTO-022` (eval harness — regression protection before any prompt change)
-7. `SEC-006` (PII firewall — uses AUTO-022 golden set as test fixture)
-8. `CAP-001` (data-driven testing — parameterized iterations) / `DIF-012` (multi-environment, pairs with shipped INT-002 for per-env check-name suffixes)
+1. `DIF-015c` Gaps 2/3/5/6 (current PR — recorder gaps completion: point-and-click assertion UX, pause/resume/undo, device profile during recording, stealth launch profile; bundled 4×S touching the same `recorder.js` + `RecorderModal.jsx` surface)
+2. `AUTO-008` (distributed runner across multiple machines — generalises CAP-002's shard pattern to multi-host worker pools; SaaS-readiness pairing with CAP-002b's chaos / DLQ / fair-scheduling follow-ups)
+3. `SEC-004` (MFA / TOTP — 🔴 Blocker per AUDIT.md S1, compliance prerequisite for SOC 2 / ISO 27001; gates any regulated-industry sale)
+4. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)
+5. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation)
+6. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
+7. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts)
+8. `DIF-008` (Jira / Linear issue sync — competitive parity; auto-creates tickets on confirmed failures, syncs status back to `linkedIssueKey`)
 
 This rotation alternates between audit-driven hardening and feature delivery so neither narrative starves.
 
-**Lowest effort / highest immediate value (excluding current PR):**
-`MNT-014` (XS — migration linter, bundles with INF-008) · `MNT-013` (S — request-ID propagation, bundles with INF-007) · `DIF-012` (L — multi-environment, enterprise procurement) · `AUTO-021` (S — AI-generated test suite health insights, BearQ parity).
+**Lowest effort / highest immediate value (excluding current PR):** `SEC-004` (MFA) — L effort, unblocks regulated-industry sales pipeline and resolves the longest-standing 🔴 Blocker on the board. Pair with `INF-007` (OTel/Sentry) for the next sprint pair: combined they move industry-readiness from 6.0/10 → ~7.5/10 per AUDIT.md targets.
 
 ---
 
