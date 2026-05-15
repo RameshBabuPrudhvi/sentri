@@ -1189,11 +1189,14 @@ await (async () => {
     );
     // The "change" handler's text-INPUT/TEXTAREA branch must consult the
     // dedup cache and bail out when the input handler already covered the
-    // same selector + value. Match the exact comparison shape so the
-    // contract is tight against accidental refactors.
+    // same selector + value. SEC-007 introduced an `effectiveValue` local
+    // that aliases `el.value` for non-sensitive fields and the sentinel for
+    // sensitive ones, so the comparison may use either identifier — the
+    // dedup contract is the same either way. Match both shapes so the test
+    // doesn't pin to one variable name and falsely flag the SEC-007 rename.
     assert.match(
       scriptBody,
-      /lastEmittedFill\.get\(sel\)\s*===\s*el\.value/,
+      /lastEmittedFill\.get\(sel\)\s*===\s*(?:el\.value|effectiveValue)/,
       "change handler must skip emission when (sel, value) already emitted by input handler",
     );
     // The change handler must also flush any still-pending input-handler

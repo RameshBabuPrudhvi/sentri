@@ -1816,7 +1816,12 @@ router.post("/projects/:id/record/:sessionId/probe", requireRole("qa_lead"), asy
     return res.status(404).json({ error: "recording session not found" });
   }
   const { x, y } = req.body || {};
-  if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
+  // Reject `null` / `undefined` / missing-key payloads explicitly — `Number(null)`
+  // coerces to 0 (finite), which would otherwise let `{ "x": null, "y": null }`
+  // slip past as a probe at viewport (0, 0). `probeAtPoint` clamps gracefully
+  // downstream, but the operator would see whatever happens to be at the
+  // top-left corner returned as the "hovered" element, which is confusing.
+  if (x == null || y == null || !Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
     return res.status(400).json({ error: "x and y must be finite numbers" });
   }
   try {

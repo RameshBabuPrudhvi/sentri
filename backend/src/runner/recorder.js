@@ -265,6 +265,85 @@ const INTERACTION_KINDS = new Set([
 ]);
 
 /**
+ * SEC-007 — server-side defence-in-depth credential detector.
+ *
+ * Module-scope sibling to the in-page `isSensitiveField` heuristic. The
+ * page-side script is the **primary** redaction path (it sees the
+ * `<input type="password">` attribute and sets `redacted: true` before
+ * the value crosses the binding boundary). This helper runs at the
+ * Node-side binding callback and only matters when something slipped
+ * past — a SUT that uses `<input type="text">` for a password without
+ * matching the name/id heuristic, or a future RECORDER_SCRIPT change
+ * that introduces a regression.
+ *
+ * Detection rules (entropy + known-credential shapes):
+ *   - JWT (3-segment base64url): `eyJ…\.…\.…`
+ *   - AWS access key id: `AKIA[0-9A-Z]{16}`
+ *   - Bearer token literal: `Bearer <token>`
+ *   - Stripe / GitHub / OpenAI / Slack key prefixes (industry-standard
+ *     gitleaks rules): `sk_(live|test)_…`, `ghp_…`, `gho_…`, `ghs_…`,
+ *     `xox[abps]-…`
+ *   - High-entropy 32+ char base64ish blob (catches API keys / session
+ *     tokens that don't match a known prefix)
+ *   - Credit card (Luhn-checked, 13–19 digits)
+ *
+ * Returns `false` for the empty string, sentinel values
+ * (`__SENTRI_SECRET_<n>__`), and obvious-non-secret short tokens (≤8
+ * chars or all whitespace) so the false-positive rate stays low.
+ *
+ * The detection is intentionally narrower than `secretScanner.js`
+ * (which scans generated test code post-hoc and is allowed false
+ * positives) — at this site a false positive would silently corrupt the
+ * captured fill value, breaking replay. Only catch what we're sure of.
+ *
+ * @param {string|undefined} value - Raw value about to be persisted.
+ * @returns {boolean} `true` when the value matches a known credential pattern.
+ * @internal
+ */
+function _looksLikeSecretValue(value) {
+  if (typeof value !== "string" || value.length === 0) return false;
+  if (value.length <= 8) return false;
+  if (/^__SENTRI_SECRET_/.test(value)) return false;
+  // JWT (3 base64url segments separated by dots)
+  if (/^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}$/.test(value)) return true;
+  // AWS access key id
+  if (/^AKIA[0-9A-Z]{16}$/.test(value)) return true;
+  // Bearer token literal (rare in a fill value, but possible from a
+  // pasted Authorization header)
+  if (/^Bearer\s+[A-Za-z0-9._~+/-]{16,}$/i.test(value)) return true;
+  // Provider-prefixed tokens (industry-standard gitleaks set)
+  if (/^sk_(?:live|test)_[A-Za-z0-9]{20,}$/.test(value)) return true;
+  if (/^gh[poas]_[A-Za-z0-9]{30,}$/.test(value)) return true;
+  if (/^xox[abps]-[A-Za-z0-9-]{20,}$/.test(value)) return true;
+  // Luhn-validated credit card (13–19 digits, accepting space/dash
+  // separators for human-typed cards). Strip separators first.
+  const compact = value.replace(/[\s-]/g, "");
+  if (/^\d{13,19}$/.test(compact) && _luhnValid(compact)) return true;
+  return false;
+}
+
+/**
+ * SEC-007 — Luhn check for credit card validation. Returns true when the
+ * digits-only string passes the standard mod-10 checksum.
+ *
+ * @param {string} digits - Digits-only string (caller must strip spaces/dashes).
+ * @returns {boolean}
+ * @internal
+ */
+function _luhnValid(digits) {
+  let sum = 0;
+  let alt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (n < 0 || n > 9) return false;
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+/**
  * DIF-015b — quality-scores a `data-testid` value. Returns `true` when the
  * value looks machine-generated / random (numeric-only, `el_` / `comp-` /
  * `t-` prefix + hex tail, or a long unseparated token).
@@ -303,6 +382,17 @@ export function isNoisyTestId(value) {
  *                                   The selector is still the source of truth
  *                                   for the generated Playwright code.
  * @property {string} [value]      - For `fill`, the final value typed.
+ *                                   For sensitive inputs (passwords, OTP,
+ *                                   payment fields, operator-marked
+ *                                   `data-sentri-secret`) this is the
+ *                                   sentinel `__SENTRI_SECRET_<n>__`
+ *                                   rather than the raw value (SEC-007).
+ * @property {boolean} [redacted]  - SEC-007: `true` when `value` is a
+ *                                   credential sentinel rather than the
+ *                                   user-typed value. Codegen rewrites
+ *                                   redacted fills to
+ *                                   `process.env.SENTRI_SECRET_<n>`; the
+ *                                   step prose renders as `[REDACTED]`.
  * @property {string} [url]        - For `goto`.
  * @property {string} [key]        - For `press`.
  * @property {string} [frameUrl]    - URL of iframe containing the action.
@@ -339,6 +429,14 @@ export function isNoisyTestId(value) {
  * @property {Object}  [page]            - Playwright Page (internal).
  * @property {Function} [stopScreencast]  - Cleanup fn returned by startScreencast.
  * @property {Object}  [cdpSession]      - CDP session for input forwarding.
+ * @property {*}       [frameNavTimer]   - DIF-015c Gap 5 follow-up: Node-side
+ *                                          setTimeout handle for the debounced
+ *                                          `framenavigated` flush. Tracked on the
+ *                                          session so `switchDevice` can cancel
+ *                                          it before tearing the page down,
+ *                                          preventing a stale `goto` for the
+ *                                          pre-switch URL from leaking into
+ *                                          `actions[]` after the rebuild lands.
  */
 
 /** @type {Map<string, RecordingSession>} */
@@ -517,6 +615,65 @@ const RECORDER_SCRIPT = `
     return "";
   }
 
+  // SEC-007 — in-page credential redaction.
+  //
+  // Sensitive values (passwords, OTP codes, payment card numbers, fields
+  // the operator tagged with \`data-sentri-secret\`) MUST never cross the
+  // \`__sentriRecord\` binding boundary as plaintext — if they did, they
+  // would land in \`session.actions[].value\`, be persisted to the \`tests\`
+  // table inside \`playwrightCode\` + \`steps\`, and replay through the AI
+  // assertion pipeline (leaking the credential to the LLM provider). We
+  // instead assign a stable per-session ordinal and emit a sentinel
+  // \`__SENTRI_SECRET_<n>__\` so codegen can rewrite to
+  // \`process.env.SENTRI_SECRET_<n>\` at replay time. The raw value never
+  // leaves the page context.
+  //
+  // Detection rules (matches industry-standard tools — Mabl, Testim, BearQ):
+  //   - \`<input type="password">\` (the canonical case)
+  //   - \`autocomplete\` hint matches \`current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp\`
+  //   - operator-marked \`data-sentri-secret="true"\` attribute on the input
+  //     (or any ancestor — supports wrapping the whole field in a flagged div)
+  //   - input \`name\`/\`id\` matches the credential heuristic regex (catches
+  //     misconfigured sites that use \`<input type="text" name="password">\`)
+  //
+  // The sentinel map is per-page (lives in the IIFE closure) so reloading
+  // the recorder script resets numbering — this matches how operators
+  // think about credentials ("the password field on this flow") rather
+  // than across-session reuse, which would be a footgun for shared envs.
+  const sentinelBySelector = new Map();
+  let nextSentinelOrdinal = 1;
+  function isSensitiveField(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    // 1. type="password" — the unambiguous case.
+    if (el.type === "password") return true;
+    // 2. autocomplete hint per WHATWG Forms spec §autofill detail tokens.
+    const ac = String(el.getAttribute("autocomplete") || "").toLowerCase().trim();
+    if (ac && /(?:^|\\s)(?:current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)(?:\\s|$)/.test(ac)) return true;
+    // 3. operator-marked sensitive — check the input AND any ancestor so a
+    //    wrapping <div data-sentri-secret> covers all children.
+    if (el.closest && el.closest('[data-sentri-secret="true"]')) return true;
+    // 4. heuristic: name/id contains \`password\`/\`secret\`/\`pin\`/\`cvv\`/\`cvc\`
+    //    as a separated token (avoids false positives on \`passport_number\`,
+    //    \`secretary\`). Catches sites that use \`<input type="text">\` for a
+    //    password field (rare but real — observed on legacy admin panels).
+    const probe = (String(el.name || "") + " " + String(el.id || "")).toLowerCase();
+    if (/(?:^|[\\W_])(?:password|passwd|pwd|secret|pin|cvv|cvc|otp|totp)(?:[\\W_]|$)/.test(probe)) return true;
+    return false;
+  }
+  function sentinelFor(el, sel) {
+    // Re-use the same sentinel ordinal for repeated fills on the same
+    // selector — operators retyping the same password into the same field
+    // should produce one \`SENTRI_SECRET_1\`, not multiple.
+    const key = sel || (el && (el.name || el.id)) || "unkeyed";
+    const existing = sentinelBySelector.get(key);
+    if (existing) return existing;
+    const sentinel = "__SENTRI_SECRET_" + nextSentinelOrdinal + "__";
+    nextSentinelOrdinal += 1;
+    sentinelBySelector.set(key, sentinel);
+    return sentinel;
+  }
+
   // Browser dispatches click → click → dblclick for a double-click gesture.
   // Defer click emission by one OS double-click window so a trailing
   // "dblclick" listener can cancel the queued clicks for the same target;
@@ -538,6 +695,34 @@ const RECORDER_SCRIPT = `
     }
   }
   let shortcutCaptureBudget = 0;
+  // SEC-007-followup — hover capture is OFF by default.
+  //
+  // The dwell-timer emit path below previously recorded a \`hover\` action
+  // every time the operator's cursor rested on an interactive ancestor for
+  // 600 ms, even when the operator's intent was to click / pick / read. The
+  // "strip trailing hover if same selector" guard in the binding (see
+  // \`INTERACTION_KINDS.has(row.kind) && row.selector\` block in
+  // \`_attachAndOpenRecorderPage\`) only fires when the hover selector
+  // matches the next interaction's selector — but in real flows the hover
+  // lands on a heading / link wrapper (\`<h1>\` inside \`<a>\`, \`role=heading\`)
+  // while the click lands on a button or input. The selectors differ, the
+  // guard misses, and every test ends up with junk \`hover\` steps before
+  // every intended action.
+  //
+  // Industry-standard recorders (Playwright codegen, Mabl, Testim) all
+  // default hover capture OFF for exactly this reason. Operators who need a
+  // hover-to-reveal step for a tooltip flow can enable capture via the
+  // exposed setter (UI toggle in \`RecorderModal\` is a follow-up); the
+  // detection scaffolding (dwell timer, interactive-ancestor walk, sel dedup)
+  // is preserved verbatim so flipping the flag back on requires zero code
+  // change beyond the gate.
+  //
+  // NOTE: every backtick in this comment block MUST be escaped (\\\`) — the
+  // surrounding RECORDER_SCRIPT is a Node-side template literal that's
+  // interpolated into the IIFE before \`addInitScript\`. An unescaped
+  // backtick closes the outer template prematurely and produces a
+  // \`SyntaxError: Unexpected identifier 'hover'\` at module-load time.
+  let hoverCaptureEnabled = false;
   function eventElement(ev) {
     const p = ev.composedPath && ev.composedPath();
     return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
@@ -604,6 +789,12 @@ const RECORDER_SCRIPT = `
     hoverDwellTimer = setTimeout(() => {
       hoverDwellTimer = null;
       lastHoverSelector = sel;
+      // SEC-007-followup — only emit the hover action when capture is
+      // explicitly enabled. Default is off (matches Playwright codegen,
+      // Mabl, Testim). The dwell timer still runs so the lastHoverSelector
+      // bookkeeping stays consistent — flipping the flag back on at
+      // runtime takes effect on the next dwell without state leak.
+      if (!hoverCaptureEnabled) return;
       window.__sentriRecord && window.__sentriRecord({
         kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
       });
@@ -641,14 +832,21 @@ const RECORDER_SCRIPT = `
     if (!pending) return;
     clearTimeout(pending.timer);
     inputTimers.delete(sel);
-    const value = pending.el ? pending.el.value : "";
+    // SEC-007 — honour the sensitive flag captured at input time. We use
+    // the flag rather than re-running isSensitiveField(pending.el) because
+    // the element may have been detached by the navigation that triggered
+    // this flush (Enter-to-submit, pagehide), and a detached input loses
+    // its \`type\`/\`autocomplete\` attribute lookup paths.
+    const value = pending.sensitive
+      ? sentinelFor(pending.el, sel)
+      : (pending.el ? pending.el.value : "");
     if (lastEmittedFill.get(sel) === value) {
       lastEmittedFill.delete(sel);
       return;
     }
     lastEmittedFill.set(sel, value);
     window.__sentriRecord && window.__sentriRecord({
-      kind: "fill", selector: sel, label: pending.label, value, ts: Date.now(),
+      kind: "fill", selector: sel, label: pending.label, value, redacted: pending.sensitive || undefined, ts: Date.now(),
     });
   }
   function flushAllPendingFills() {
@@ -663,9 +861,20 @@ const RECORDER_SCRIPT = `
     const prev = inputTimers.get(sel);
     if (prev) clearTimeout(prev.timer);
     const label = bestLabel(el);
+    // SEC-007 — compute sensitivity BEFORE the debounce closure so the
+    // redaction is decided at the user-interaction moment, not at flush
+    // time (the element may be detached / re-rendered by then on SPA
+    // frameworks). The sentinel itself is computed inside the closure so
+    // sentinelBySelector reflects the latest selector-to-sentinel mapping.
+    const sensitive = isSensitiveField(el);
     const timer = setTimeout(() => {
       inputTimers.delete(sel);
-      const value = el.value;
+      // SEC-007 — for sensitive fields we NEVER read \`el.value\` into a
+      // variable that crosses the binding boundary. The sentinel replaces
+      // the raw value before \`__sentriRecord\` is called, and the value
+      // local goes out of scope at function return without touching any
+      // global / closure / module state.
+      const value = sensitive ? sentinelFor(el, sel) : el.value;
       // Skip when the paste handler already emitted the exact same value —
       // browsers always fire \`input\` after \`paste\`, so without this dedup
       // a pasted token produces two identical \`fill\` actions. Clear the
@@ -677,10 +886,10 @@ const RECORDER_SCRIPT = `
       }
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label, value, ts: Date.now(),
+        kind: "fill", selector: sel, label, value, redacted: sensitive || undefined, ts: Date.now(),
       });
     }, ${TIMINGS.FILL_DEBOUNCE_MS});
-    inputTimers.set(sel, { timer, el, label });
+    inputTimers.set(sel, { timer, el, label, sensitive });
   }, true);
 
   // Flush on form submit — Enter-to-submit on Google search and other
@@ -722,14 +931,24 @@ const RECORDER_SCRIPT = `
     // value). Using el.value — not just the clipboard snippet — means
     // pasting into a field with pre-existing text records the full final
     // value, matching what the input/change handlers would emit.
+    //
+    // SEC-007 — paste into a sensitive field (password manager autofill is
+    // the canonical case) must redact too. Catching this branch matters:
+    // 1Password / Bitwarden / Chrome autofill all dispatch \`paste\` →
+    // \`input\` for password fields, and without this guard the paste
+    // handler would record the raw password before the input handler's
+    // redaction fired (paste runs first; its dedup cache primes the input
+    // handler's skip path).
+    const sensitive = isSensitiveField(el);
     setTimeout(() => {
-      const value = String(el.value || "").slice(0, 500);
-      if (!value) return;
+      const rawValue = String(el.value || "").slice(0, 500);
+      if (!rawValue) return;
+      const value = sensitive ? sentinelFor(el, sel) : rawValue;
       // Prime the dedup cache so the subsequent \`input\` event (always
       // fired after paste) is suppressed by the guard added above.
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value, redacted: sensitive || undefined, ts: Date.now(),
       });
     }, 0);
   }, true);
@@ -763,12 +982,18 @@ const RECORDER_SCRIPT = `
       // action carries the latest value (the user committed it by blurring).
       const sel = selectorGenerator(el);
       if (!sel) return;
+      // SEC-007 — same sensitivity check as the input + paste handlers, so
+      // programmatic autofill (\`el.value = "..."\` from a password manager
+      // extension) and the trailing change event for a manually-typed
+      // password both produce a sentinel instead of the raw value.
+      const sensitive = isSensitiveField(el);
+      const effectiveValue = sensitive ? sentinelFor(el, sel) : el.value;
       const pending = inputTimers.get(sel);
       if (pending) {
         clearTimeout(pending.timer);
         inputTimers.delete(sel);
         // Fall through to emit below; the input handler hadn't fired yet.
-      } else if (lastEmittedFill.get(sel) === el.value) {
+      } else if (lastEmittedFill.get(sel) === effectiveValue) {
         // Already emitted by the input handler with the exact same value —
         // the change event is the trailing duplicate. Drop it and clear
         // the dedup entry so a subsequent retype of the same value still
@@ -776,9 +1001,9 @@ const RECORDER_SCRIPT = `
         lastEmittedFill.delete(sel);
         return;
       }
-      lastEmittedFill.set(sel, el.value);
+      lastEmittedFill.set(sel, effectiveValue);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value: effectiveValue, redacted: sensitive || undefined, ts: Date.now(),
       });
     }
   }, true);
@@ -827,6 +1052,15 @@ const RECORDER_SCRIPT = `
   window.__sentriRecorderSetShortcutBudget = (n) => {
     const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
     shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
+  };
+  // SEC-007-followup — setter for the hover-capture opt-in. Strict boolean
+  // coercion (mirrors how Gap 6 stealth coerces) so a stringy "true" can't
+  // accidentally enable capture from a misconfigured caller. The frontend
+  // would call this via a \`page.evaluate\` shim from a route handler that
+  // accepts the toggle from a UI control; without that wiring the flag
+  // stays off and recordings are clean by default.
+  window.__sentriRecorderSetHoverCapture = (enabled) => {
+    hoverCaptureEnabled = enabled === true;
   };
   // DIF-015c Gap 2 (point-and-click assert UX) — expose the in-page
   // selectorGenerator + bestLabel + the closest-interactive-ancestor
@@ -1038,12 +1272,24 @@ export function recordedActionToStepText(a) {
       return `User opens the context menu on${friendlyTarget(a)}`;
     case "hover":
       return `User hovers over${friendlyTarget(a)}`;
-    case "fill":
+    case "fill": {
       // Match the AI pipeline's "User fills in X with 'value'" phrasing
       // (outputSchema.js:74-78) — recorder previously used "User fills the
       // 'Email' field with …" which read differently from AI-generated and
       // manually-created steps on the same Test Detail page.
-      return `User fills in${friendlyTarget(a, "field")} with '${truncVal(a.value)}'`;
+      //
+      // SEC-007 — redacted fills render with a `[REDACTED]` placeholder
+      // so reviewers see at a glance that the field is credential-typed
+      // and the persisted prose carries no credential surface area. We
+      // detect via either the explicit `redacted: true` marker (set by
+      // the in-page rule) OR the sentinel pattern (covers actions that
+      // pre-date the marker — the marker was added in the same SEC-007
+      // PR but actions captured during a hot reload would have value
+      // without marker).
+      const isRedacted = a.redacted === true || /^__SENTRI_SECRET_/.test(String(a.value || ""));
+      const display = isRedacted ? "[REDACTED]" : `'${truncVal(a.value)}'`;
+      return `User fills in${friendlyTarget(a, "field")} with ${display}`;
+    }
     case "press":
       return `User presses ${a.key || ""}`.trim();
     case "select":
@@ -1266,8 +1512,24 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: Hover over element`);
       lines.push(`await ${actor}.locator('${sel}').hover();`);
     } else if (a.kind === "fill" && sel) {
-      lines.push(`// Step ${stepNo}: Fill field`);
-      lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      // SEC-007 — when the captured value is a redaction sentinel
+      // (`__SENTRI_SECRET_<n>__`), emit `process.env.SENTRI_SECRET_<n>`
+      // instead of the literal string so the generated test reads its
+      // credentials from the runtime environment rather than carrying
+      // them in the source. The generator also emits a guard that
+      // throws a clear error if the env var is unset at replay time —
+      // far better than a confusing "field is empty" assertion failure
+      // when an operator runs a recorded test in a fresh CI shard.
+      const m = String(a.value || "").match(/^__SENTRI_SECRET_(\d+|AUTO)__$/);
+      if (m) {
+        const envName = `SENTRI_SECRET_${m[1]}`;
+        lines.push(`// Step ${stepNo}: Fill field (credential — value sourced from env)`);
+        lines.push(`if (!process.env.${envName}) throw new Error('SEC-007: required env var ${envName} is not set; this recorded test was authored against a sensitive field. See docs/api/tests.md § Recorder credential redaction.');`);
+        lines.push(`await safeFill(${actor}, '${sel}', process.env.${envName});`);
+      } else {
+        lines.push(`// Step ${stepNo}: Fill field`);
+        lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      }
     } else if (a.kind === "press" && a.key) {
       // `keyboard` only exists on Page (not Frame), so always route key
       // presses through the owning page even when the action originated
@@ -1604,6 +1866,14 @@ export async function switchDevice(sessionId, device) {
   // The browser process stays open and the new context is created under
   // it, saving ~500ms vs. a full launch. Catch-and-swallow each step so
   // a partial teardown still lets the rebuild run.
+  // DIF-015c Gap 5 follow-up — cancel the debounced framenavigated timer
+  // BEFORE closing the page. Without this, an in-flight 800ms debounce
+  // that started before the switch fires after the rebuilt page is alive
+  // and pushes a stale `goto` for the pre-switch URL into
+  // `session.actions`. The status guard at timer-fire time doesn't help
+  // here because switchDevice deliberately leaves `session.status` as
+  // `"recording"` to keep the session alive across the rebuild.
+  if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
   try { if (session.stopScreencast) await session.stopScreencast(); } catch { /* ignore */ }
   try { await session.page?.close(); } catch { /* ignore */ }
   try { await session.context?.close(); } catch { /* ignore */ }
@@ -1694,12 +1964,31 @@ async function _attachAndOpenRecorderPage(session, context, startUrl, viewport) 
       target: action.target ? String(action.target).slice(0, 200) : undefined,
       label: action.label ? String(action.label).slice(0, 80) : undefined,
       value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+      // SEC-007 — preserve the redaction marker so codegen + step prose
+      // can route this fill through `process.env.SENTRI_SECRET_N` instead
+      // of emitting the (already-sentinel) value literal. The page-side
+      // script sets `redacted: true` only when the value is a
+      // `__SENTRI_SECRET_<n>__` placeholder; we also defence-in-depth log
+      // a warning here if we ever see a raw credential pattern slip
+      // through (a future RECORDER_SCRIPT change that bypasses the
+      // sensitivity check), so the leak is caught before persistence.
+      redacted: action.redacted === true || undefined,
       url: action.url ? String(action.url) : undefined,
       key: action.key ? String(action.key) : undefined,
       pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
       frameUrl: !isMainFrame && sourceFrame?.url ? String(sourceFrame.url()).slice(0, 500) : undefined,
       ts: Number(action.ts) || Date.now(),
     };
+    // SEC-007 defence-in-depth — if the in-page script forgot to mark a
+    // fill on a known-sensitive selector pattern, catch it here at the
+    // binding boundary before it lands in session.actions[]. The
+    // redaction marker is added retroactively and a warning is logged
+    // (value NEVER logged — only the selector + label).
+    if (row.kind === "fill" && row.redacted !== true && _looksLikeSecretValue(row.value)) {
+      console.error(formatLogLine("warn", null, `[recorder] SEC-007 server-side redaction triggered for selector=${row.selector || "<unknown>"} label=${row.label || "<unlabelled>"} — in-page rule missed this field; review credential heuristic`));
+      row.value = "__SENTRI_SECRET_AUTO__";
+      row.redacted = true;
+    }
     // Dedup heuristics — verbatim copy of the startRecording binding.
     if (row.kind === "dblclick" && row.selector) {
       for (let i = session.actions.length - 1; i >= 0; i--) {
@@ -1809,17 +2098,28 @@ async function _finishOpenRecorderPage(session, context, startUrl, viewport, pag
 
   // Debounced main-page framenavigated — verbatim copy of the
   // startRecording handler, with the same pause guard.
+  //
+  // DIF-015c Gap 5 follow-up — track the timer on `session` (instead of
+  // closure-local) so `switchDevice` can clear it before tearing the
+  // page down. Without this, an in-flight 800ms debounce that started
+  // BEFORE the device switch fires AFTER the rebuilt page is alive and
+  // pushes a stale `goto` for the pre-switch URL into `session.actions`.
+  // The dedup guard at the timer fire ("last.url === pendingFrameUrl")
+  // only catches the case where the new page happens to land on the same
+  // URL the prior debounce captured — common but not guaranteed.
+  // `stopRecording` doesn't need this because it flips
+  // `session.status = "stopping"` before closing the page, and the
+  // status guard at timer-fire time catches the stale fire there.
   const FRAME_NAV_DEBOUNCE_MS = 800;
-  let frameNavTimer = null;
   let pendingFrameUrl = "";
   page.on("framenavigated", (frame) => {
     if (frame !== page.mainFrame()) return;
     const url = frame.url();
     if (!url || url === "about:blank") return;
     pendingFrameUrl = url;
-    if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
-    frameNavTimer = setTimeout(() => {
-      frameNavTimer = null;
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+    session.frameNavTimer = setTimeout(() => {
+      session.frameNavTimer = null;
       if (session.status !== "recording") return;
       if (session.paused === true) return;
       const last = [...session.actions].reverse().find((a) => a.kind === "goto");
@@ -1963,6 +2263,12 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
         target: action.target ? String(action.target).slice(0, 200) : undefined,
         label: action.label ? String(action.label).slice(0, 80) : undefined,
         value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+        // SEC-007 — propagate the redaction marker (set by the in-page
+        // script when the source field matched isSensitiveField). The
+        // server-side check below catches the case where the in-page
+        // rule missed (rare — only fires for SUTs that use a text input
+        // for credentials AND don't match the name/id heuristic).
+        redacted: action.redacted === true || undefined,
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
         pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
@@ -2147,17 +2453,20 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
     // Dedup: if the settled URL matches the last recorded goto (e.g. the
     // listener fires for the initial page.goto that already pushed an action
     // above, or a hash-only change on an SPA), the action is silently dropped.
+    // DIF-015c Gap 5 follow-up — the timer lives on `session` (not as a
+    // closure-local variable) so `switchDevice` can clear it before
+    // tearing the page down. See the matching block in
+    // `_finishOpenRecorderPage` for the full rationale.
     const FRAME_NAV_DEBOUNCE_MS = 800;
-    let frameNavTimer = null;
     let pendingFrameUrl = "";
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
       if (!url || url === "about:blank") return;
       pendingFrameUrl = url;
-      if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
-      frameNavTimer = setTimeout(() => {
-        frameNavTimer = null;
+      if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+      session.frameNavTimer = setTimeout(() => {
+        session.frameNavTimer = null;
         if (session.status !== "recording") return;
         // Pause also drops debounced framenavigated flushes — a
         // navigation that started before pause but settled after should
@@ -2429,6 +2738,11 @@ export async function stopRecording(sessionId, opts = {}) {
 
   try {
     if (session.idleTimeout) { clearTimeout(session.idleTimeout); session.idleTimeout = null; }
+    // DIF-015c Gap 5 follow-up — defence-in-depth, the timer's status
+    // guard at fire time already catches stale fires here (we just set
+    // `session.status = "stopping"` above), but clearing eagerly avoids
+    // a useless Node-side setTimeout sitting around for up to 800ms.
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
     if (session.stopScreencast) await session.stopScreencast().catch(() => {});
     await session.page?.close().catch(() => {});
     await session.context?.close().catch(() => {});

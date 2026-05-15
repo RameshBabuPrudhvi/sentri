@@ -248,7 +248,13 @@ export default function LiveBrowserView({
   if (!hasFrames) {
     return fallback ?? (
       <div style={{
-        aspectRatio: "16/9", width: "100%", background: "#0a0a0f",
+        // DIF-015c Gap 5 — match the wrapper aspect ratio to the actual
+        // server-side viewport so device profiles (iPhone 14 = 390×844 ≈
+        // 9:19, Pixel 7 = 412×915, etc.) don't letterbox inside a
+        // hardcoded 16:9 box. Pre-Gap-5 desktop default (1280×720) still
+        // resolves to 16:9, so existing recordings render bit-for-bit
+        // identically.
+        aspectRatio: `${viewportW} / ${viewportH}`, width: "100%", background: "#0a0a0f",
         borderRadius: 8, display: "flex", alignItems: "center",
         justifyContent: "center", flexDirection: "column", gap: 10,
       }}>
@@ -265,7 +271,24 @@ export default function LiveBrowserView({
   }
 
   return (
-    <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", background: "#000", aspectRatio: "16/9", width: "100%" }}>
+    // DIF-015c Gap 5 — wrapper aspect ratio is computed from the actual
+    // viewport (`viewportW / viewportH`) instead of a hardcoded 16:9.
+    // Without this fix, mobile device profiles (iPhone 14 = 390×844 ≈
+    // 9:19, Pixel 7 = 412×915) letterbox inside a 16:9 box and the
+    // canvas's `objectFit: "contain"` shrinks the live frame to a thin
+    // vertical strip in the centre — leaving wide horizontal dead-zones
+    // that `scaleCoords()` (line 87) and the assert-mode highlight
+    // overlay (line 310) still treat as visible content. Coordinates
+    // mapped from those dead-zones produce wildly wrong viewport pixels
+    // (an extreme case: a click at the dead-zone's left edge maps to
+    // viewport x≈144 instead of x=0 for an iPhone 14 canvas in an
+    // 800px-wide CSS box). Driving the wrapper from the real viewport
+    // means the canvas always fills the wrapper exactly — no
+    // letterboxing — so `getBoundingClientRect()` IS the content rect
+    // and every existing scaling formula stays correct without changes.
+    // Desktop default (1280×720) still resolves to 16:9 so pre-Gap-5
+    // recordings render bit-for-bit identically.
+    <div style={{ position: "relative", borderRadius: 8, overflow: "hidden", background: "#000", aspectRatio: `${viewportW} / ${viewportH}`, width: "100%" }}>
       <canvas
         ref={canvasRef}
         tabIndex={isInteractive ? 0 : undefined}

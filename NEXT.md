@@ -55,17 +55,21 @@ Current parallelism is 1–10 workers within a single Chromium process on one ma
 
 ---
 
-## ⏭ Queue (next 3 PRs after current)
+## ⏭ Queue (next 4 PRs after current)
 ### 1 · SEC-004 — MFA (TOTP / passkey) support
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
 
 ### 2 · SEC-006 — PII firewall
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-006)
 
-### 3 · INF-007 — OTel / Sentry observability
+### 3 · SEC-007 — Compliance audit log surface (immutability + auth events + admin export)
+**Effort:** M | **Priority:** 🟡 High (promoted from 🟢 Strategic) | **Dependencies:** SEC-004 (auth events emit from MFA routes — bundle if SEC-004 ships first; otherwise ship Phase 1 immutability MVP standalone) | **Source:** `ROADMAP.md` Phase 5 (SEC-007)
+Sentri already records ~30 event types into `activities` via `logActivity()` with per-user attribution (ENH-021 ✅). Six gaps block SOC2/ISO27001: (1) `DELETE /api/v1/data/activities` lets admins purge the log — hard compliance fail; (2) auth events (login/logout/MFA/role-change/API-key) not emitted; (3) no admin-only workspace-wide compliance surface (the existing per-project Activity feed is a developer view); (4) no CSV/NDJSON export; (5) no retention policy enforcement; (6) no SIEM streaming. Phased fix: P1 immutability + auth events MVP, P2 admin page + export + retention, P3 SIEM (deferred until customer demand).
+
+### 4 · INF-007 — OTel / Sentry observability
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 5 (INF-007)
 
-> **Phase 5 audit-hardening blockers** (`SEC-004` MFA, `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5.
+> **Phase 5 audit-hardening blockers** (`SEC-004` MFA, `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5. `SEC-007` (compliance audit log surface) sits between SEC-006 and INF-007 at 🟡 High — pairs naturally with SEC-004 since the auth-event emission lives alongside MFA enrolment routes.
 
 ---
 

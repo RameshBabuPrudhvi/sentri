@@ -334,4 +334,25 @@
 }
 .recorder-error-banner {
   margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
 }
+/* Recording-phase dismiss button. The idle-phase banner lives in a static
+ * form layout with no other interactive controls competing for the gap, so
+ * the dismiss is recording-specific — without it, an error from a failed
+ * pause/undo/device-switch would linger until the operator's next mutation
+ * succeeded and called `setError(null)` implicitly. */
+.recorder-error-banner__dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.recorder-error-banner__dismiss:hover { opacity: 1; }

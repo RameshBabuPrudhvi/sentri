@@ -15,7 +15,7 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `AUTO-008` (distributed runner across multiple machines) — promoted after `DIF-015c` Gaps 2/3/5/6 shipped in PR #8. SEC-004 (MFA) holds queue slot 1, SEC-006 (PII firewall) slot 2, INF-007 (OTel) slot 3.
+> **Current sprint:** `AUTO-008` (distributed runner across multiple machines) — promoted after `DIF-015c` Gaps 2/3/5/6 shipped in PR #8. SEC-004 (MFA) holds queue slot 1, SEC-006 (PII firewall) slot 2, SEC-007 (compliance audit log surface — promoted from 🟢 Strategic to 🟡 High; pairs with SEC-004 as a SOC2/ISO27001 prerequisite) slot 3, INF-007 (OTel) slot 4.
 >
 > **Blockers:** none remaining · **Remaining:** ~16 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
@@ -660,19 +660,44 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### SEC-007 — Audit log export + SIEM integration 🟢 Strategic
+### SEC-007 — Compliance audit log surface + export + SIEM integration 🟡 High
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md Enterprise Readiness §9 (formerly `ENT-002` in AUDIT_IMPL.md)
 
-**Problem:** No audit log export. No SIEM integration. Enterprise security teams require immutable audit trails (who did what, when, from where) exportable to Splunk/Datadog/Elastic.
+**Problem:** Sentri already records ~30 kinds of operator + system events into the `activities` table via `logActivity()` (`backend/src/utils/activityLogger.js`) — project/test/run CRUD, auto-approvals + revokes, AI-fix events, GitHub integration installs/disables, deployment-triggered crawls, recycle-bin operations, scheduled runs, and per-user attribution (`userId` + `userName` per row, ENH-021 ✅). The feed surfaces at `GET /api/v1/activities` (`backend/src/routes/system.js:10`) filterable by `type` + `projectId`. **What's missing for enterprise / SOC2 / ISO27001:** (1) **immutability** — `DELETE /api/v1/data/activities` (`backend/src/routes/system.js:15`) lets admins truncate the audit log, which is a hard compliance fail; (2) **auth events** — login/logout/MFA-enroll/role-change/API-key create-revoke are not currently logged; (3) **dedicated admin page** — the existing per-project activity feed is a developer view, not the workspace-wide compliance surface auditors expect; (4) **export** — no CSV/JSON download for a given date range; (5) **retention policy** — no documented or enforced minimum window; (6) **SIEM forwarding** — no streaming/push to Splunk/Datadog/Elastic. For an autonomous QA platform specifically, the "who/what/when" question also applies to **AI-driven actions** (auto-approval, AI fix, AI-generated tests) — auditors will ask how to trace every AI decision back to its trigger.
 
-**Fix:** Extend `activities` table with `ipAddress`, `userAgent` columns. Add `GET /api/v1/workspaces/:id/audit-log` endpoint: filterable by `userId`, `type`, `dateFrom`, `dateTo`; paginated; CSV / NDJSON export. Add a Webhook delivery option for real-time SIEM streaming (reuse FEA-001 webhook infrastructure). Emit audit events for all security-sensitive actions: login, logout, MFA enroll/disable, SSO config change, API key create/revoke, permission change, test approve/revoke, workspace setting change.
+**Fix (phased, ship the immutability + auth-events MVP first, defer SIEM forwarding until customer demand):**
+
+**Phase 1 — Immutability + auth events (MVP, ships with SEC-004 MFA):**
+1. Remove (or admin-gate behind a `DANGER_ALLOW_AUDIT_PURGE=true` env flag) the `DELETE /api/v1/data/activities` route in `backend/src/routes/system.js`. SOC2 auditors fail this on sight; the route was added for dev convenience and is the single biggest compliance blocker.
+2. Extend `activities` with `ipAddress` + `userAgent` columns (additive migration; null-tolerant for historical rows). Capture both in `logActivity()` from `req.ip` + `req.get('user-agent')` — already available in every route handler.
+3. Add new `ACTIVITY_TYPES` entries in `backend/src/constants/activityTypes.js` (mirrored in `frontend/src/constants/activityTypes.js`): `auth.login`, `auth.login.failed`, `auth.logout`, `auth.mfa.enroll`, `auth.mfa.disable`, `auth.password.reset`, `auth.role.change`, `auth.api_key.create`, `auth.api_key.revoke`, `auth.session.revoke`. Emit from `backend/src/routes/auth.js` + SEC-004 MFA routes.
+4. **Optional tamper-evidence**: per-row `prevHash` column populated as `sha256(prevHash || JSON.stringify(rowMinusHash))` in a trigger or in `activityRepo.create()`. Detection-only (not prevention); operators can verify the chain via a new `/api/v1/audit/verify` route. Ship behind a feature flag — chained writes serialise inserts under contention, so make it opt-in for low-volume compliance-sensitive deployments.
+
+**Phase 2 — Dedicated admin surface + export:**
+5. New `GET /api/v1/workspaces/:workspaceId/audit-log` endpoint (admin-gated in `permissions.json`) — filterable by `userId`, `type` (multi-select), `dateFrom`, `dateTo`, `ipAddress`; paginated via the existing `ENH-010` pagination primitives; returns the same row shape as `/activities` plus the new auth + IP/UA fields.
+6. CSV + NDJSON download via `?format=csv` / `?format=ndjson` (signed-URL pattern from ENH-007 if response would exceed 5MB).
+7. New frontend page `frontend/src/pages/AuditLog.jsx` mounted under Settings → Compliance (admin-only via `userHasRole(authUser, "admin")` in the route guard). Workspace-scoped filters, virtualized table for 10k+ rows, "Export" button hits the CSV/NDJSON route. Distinct from the existing per-project Activity feed — this is the compliance surface, that one stays a developer view.
+8. Document retention policy in `docs/guide/compliance.md` (new): default 365 days (matches SOC2 Common Criteria CC7.2), configurable via `AUDIT_RETENTION_DAYS` env var with a hard floor of 90 days. Retention sweep runs in `backend/src/scheduler.js` once daily.
+
+**Phase 3 — SIEM streaming (defer until customer demand):**
+9. Add an admin-configurable webhook target reusing FEA-001's notification dispatcher (`backend/src/utils/notifications.js`) — every audit-log INSERT fires a POST to the configured Splunk HEC / Datadog Logs Intake / Elastic ingest endpoint. HMAC-signed payload, retry with exponential backoff, dead-letter on persistent 5xx. Per-workspace config in the same Settings → Compliance panel.
+10. Document the integration shape (NDJSON event schema, HMAC signature scheme, retry semantics) so customers can wire their own SIEM without proprietary connectors.
 
 **Files to change:**
-- New migration — `ipAddress`, `userAgent` columns on `activities`
-- `backend/src/routes/workspaces.js` — `GET /audit-log` (CSV/NDJSON)
-- `backend/src/middleware/appSetup.js` — capture `ipAddress` + `userAgent` into request context
-- `backend/src/middleware/permissions.json` — `audit-log` read = `admin`
+- New migration — `ipAddress`, `userAgent`, optional `prevHash` columns on `activities`
+- `backend/src/routes/system.js` — remove or env-gate `DELETE /api/v1/data/activities`; add `GET /workspaces/:workspaceId/audit-log` with CSV/NDJSON export
+- `backend/src/utils/activityLogger.js` — capture `req.ip` + `req.get('user-agent')`; optional hash-chain `prevHash` computation
+- `backend/src/database/repositories/activityRepo.js` — `getByWorkspace(workspaceId, filters)` accessor with paginated cursor for the new admin endpoint
+- `backend/src/constants/activityTypes.js` + `frontend/src/constants/activityTypes.js` — add `auth.*` event literals (keep both files in sync per existing convention)
+- `backend/src/routes/auth.js` — emit `auth.login`, `auth.login.failed`, `auth.logout`, `auth.password.reset`, `auth.role.change`, `auth.api_key.{create,revoke}`, `auth.session.revoke` via `logActivity()`
+- `backend/src/middleware/permissions.json` — register the new admin-gated `/workspaces/:id/audit-log` route
+- `backend/src/scheduler.js` — daily retention sweep honouring `AUDIT_RETENTION_DAYS` (default 365, floor 90)
+- New `frontend/src/pages/AuditLog.jsx` — admin-only compliance surface (Settings → Compliance) with virtualized table, type/user/date/IP filters, export button
+- `frontend/src/api.js` — `getWorkspaceAuditLog(workspaceId, filters)` + `exportWorkspaceAuditLog(workspaceId, filters, format)` helpers (PROC-001 invariant — every new route gets a real consumer)
+- New `docs/guide/compliance.md` — retention policy, immutability contract, hash-chain verification procedure, SIEM integration shape
+- `backend/tests/audit-log-routes.test.js` (new, registered in `run-tests.js`) — admin-gating, workspace-scoped filtering, CSV/NDJSON export, retention-sweep correctness, optional hash-chain verification round-trip
+- `QA.md` § Audit log (SEC-007) — manual test plan covering each new event type emission, export round-trip, retention boundary, permission denials
 - `frontend/src/pages/Settings.jsx` — Audit Log tab with date-range filter + CSV export
 
 **Acceptance criteria:**
@@ -1136,7 +1161,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
-| Security & Compliance | 7 | 3 | 0 | 4 | SEC-004 🔴 (MFA), SEC-005 (SSO), SEC-006 🔴 (PII firewall), SEC-007 (audit log/SIEM) |
+| Security & Compliance | 7 | 3 | 0 | 4 | SEC-004 🔴 (MFA), SEC-005 (SSO), SEC-006 🔴 (PII firewall), SEC-007 🟡 (compliance audit log surface — promoted from 🟢 Strategic, pairs with SEC-004 for SOC2/ISO27001) |
 | Infrastructure | 10 | 6 | 0 | 4 | INF-007 🔴 (OTel/Sentry), INF-008 🔴 (Postgres default), INF-009 (Helm/DR), INF-010 (SDK + CLI) |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |

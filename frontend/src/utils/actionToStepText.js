@@ -84,8 +84,17 @@ export function actionToStepText(action) {
     case "hover":
       return `Hover over${friendlyTarget(action)}`;
 
-    case "fill":
-      return `Fill in${friendlyTarget(action, "field")} with '${truncVal(action.value)}'`;
+    case "fill": {
+      // SEC-007 — render redacted fills as `[REDACTED]` so the recorder
+      // sidebar matches the backend's `recordedActionToStepText` and the
+      // operator sees at a glance which fields were captured as
+      // credentials. Detection mirrors the backend: explicit
+      // `redacted: true` marker OR sentinel pattern (handles legacy
+      // actions captured before the marker was added).
+      const isRedacted = action.redacted === true || /^__SENTRI_SECRET_/.test(String(action.value || ""));
+      const display = isRedacted ? "[REDACTED]" : `'${truncVal(action.value)}'`;
+      return `Fill in${friendlyTarget(action, "field")} with ${display}`;
+    }
 
     case "press":
       return `Press ${action.key || ""}`.trim();
