@@ -223,45 +223,13 @@ The following items have been verified complete against the codebase and are **n
 
 ### DIF-015c — Recorder gaps backlog (action vocabulary, assertions, pause/undo, auth, mobile) 🔵 Medium
 
-**Status:** 🔲 Planned | **Effort:** L (split into sub-items below) | **Source:** PR #115 dogfooding + competitive review (BearQ / Mabl / Testim)
+**Status:** ✅ Mostly complete (Gaps 1/2/3/5/6 shipped in PR #11 + PR #8; Gap 4 remains 🔲 Planned, blocked on DIF-010) | **Effort:** L (split into sub-items below) | **Source:** PR #115 dogfooding + competitive review (BearQ / Mabl / Testim)
 
-**Problem:** PR #115 made the canvas interactive and aligned recorded steps with the AI-generated / manual format, but the recorder still has six distinct gaps that surface during real use against e-commerce, kanban, and admin-dashboard targets. These are scoped here as a backlog so future PRs can pick them off individually without re-doing this analysis.
+**Problem:** PR #115 made the canvas interactive and aligned recorded steps with the AI-generated / manual format, but the recorder still has six distinct gaps that surface during real use against e-commerce, kanban, and admin-dashboard targets. Gaps 1/2/3/5/6 have been shipped — see the Completed Work Summary table for full implementation details. Only Gap 4 (auth / storageState integration) remains, blocked on DIF-010 (multi-auth profile support).
 
-#### Gap 1 — Expanded action vocabulary
+#### Gaps 1/2/3/5/6 — ✅ Shipped
 
-> **Update (PR #118):** This gap was originally written against the PR #115 baseline where `RECORDER_SCRIPT` listened for only `click`, `change`, `keydown`. PR #118 (folding in PR #116 / #117) extended the listener set to also cover `dblclick`, `contextmenu`, `mouseover`/`mouseout`, `input`, `dragstart`/`drop`, plus the existing `change` branch for `<input type="file">`. The corresponding action kinds (`dblclick`, `rightClick`, `hover`, `fill` debounced, `upload`, `drag`) all flow through `actionsToPlaywrightCode` (`backend/src/runner/recorder.js:677-817`) and `recordedActionToStepText` (`backend/src/runner/recorder.js:521-616`) with regression tests in `backend/tests/recorder.test.js`. The remaining work is **paste** (and the deferred items below).
-
-`RECORDER_SCRIPT` (`backend/src/runner/recorder.js:180-395`) currently listens for `click`, `dblclick`, `contextmenu`, `mouseover`/`mouseout`, `input`, `change`, `keydown`, `dragstart`, `drop`. Two common gestures still produce zero captured actions:
-
-| Gesture | Why it matters | Status | Suggested mapping |
-|---|---|---|---|
-| **Drag-and-drop** | Trello, Notion, kanban boards, file pickers | ✅ shipped (PR #118) | `dragstart`+`drop` paired → `locator.dragTo(targetLocator)` |
-| **Double-click** | Inline editors, text selection | ✅ shipped (PR #118) | `dblclick` → `locator.dblclick()` |
-| **Right-click** | Context menus | ✅ shipped (PR #118) | `contextmenu` → `locator.click({ button: 'right' })` |
-| **File upload** | `<input type="file">` content | ✅ shipped (PR #118 — placeholder fixture path, captured filename in NOTE comment) | `change` on file input → `safeUpload(sel, [])` + comment with captured names |
-| **Hover with intent** | Hover-only menus, tooltips | ✅ shipped (PR #118 — 600 ms dwell timer) | sustained `mouseover` → `locator.hover()` |
-| **Paste** | Pasted tokens / addresses / JSON | ✅ shipped (PR #11) | `paste` event clipboard text → one `safeFill(sel, '<text>')` truncated to 500 chars; cancels any pending input-debounce timer so the fill isn't emitted twice |
-| **Keyboard shortcuts** | Ctrl+A / Ctrl+C / Cmd+Enter | ✅ shipped (PR #11) | Opt-in `shortcutCaptureBudget` — frontend "Record keyboard shortcut" button in `RecorderModal` sends `shortcutCapture` to `/record/:sessionId/input`; backend `forwardInput` arms `window.__sentriRecorderSetShortcutBudget(N)` (default 3) so the next N printable keydowns on editable fields flow through to `press` instead of being suppressed; budget auto-decrements to 0 so modifier noise isn't permanent |
-
-Each remaining kind requires a typedef union member, an `actionsToPlaywrightCode` branch, a `recordedActionToStepText` branch, an `isEmittableAction` branch (`backend/src/runner/recorder.js:634-654` — single source of truth for the "is this action well-formed enough to emit code for?" predicate), and a regression test. Coordinate with DIF-015b (selectorGenerator) to avoid `RECORDER_SCRIPT` merge conflicts.
-
-#### Gap 2 — Inline assertion authoring during recording
-
-> **Update (PR #118):** Partially shipped. PR #118 added `POST /api/v1/projects/:id/record/:sessionId/assertion` (`backend/src/routes/tests.js:1164-1184`) and the matching server-side `addAssertionAction()` (`backend/src/runner/recorder.js:827-855`), supporting `assertVisible`, `assertText`, `assertValue`, and `assertUrl`. The frontend `RecorderModal` already exposes an "Add assertion" form alongside the live canvas. What's missing is the **point-and-click** UX: the user has to manually paste a selector into the form rather than hovering an element on the canvas to highlight it. The visual / hover-to-pick affordance (the part competitors charge for) is still planned.
-
-The recorder captures *what the user did* but never *what they expected* unless the user explicitly opens the assertion form. Stage 6 of the AI pipeline infers assertions post-hoc, which produces weak / missing assertions for negative tests, state-dependent flows ("cart count is 3"), cross-page assertions, and count assertions. Competitors (BearQ, Mabl, Testim) all let the user toggle into "assert mode" mid-recording, click an element, and pick an assertion type from a popover (`is visible` / `has text` / `has count` / `URL matches` / `has class`).
-
-Remaining implementation: when the assert toggle in `RecorderModal` is active, suppress `forwardInput` on the canvas, highlight the hovered element via CDP `Overlay.highlightNode`, and open the assertion picker pre-filled with that element's `bestSelector()` output. The route + step rendering already exist — this is purely a frontend / UX change in `frontend/src/components/run/RecorderModal.jsx` and `frontend/src/components/run/LiveBrowserView.jsx` (an `assertMode` prop that suppresses input forwarding and surfaces hover targets back to the modal). `assertCount` and `assertHasClass` would need a new action kind on the backend; the other four are already wired.
-
-#### Gap 3 — Pause / resume + undo last action
-
-Once recording starts, every action is captured through to Stop. There is no way to:
-- **Pause** while authenticating manually (recorder captures the password keystrokes — currently truncated to 40 chars in step prose, but the full value lives in `playwrightCode`).
-- **Resume** from a paused state to continue the same recording.
-- **Undo** the last captured action when the user mis-clicks (current workaround: discard the entire session and start over).
-- **Edit** an action mid-recording (e.g. fix a typo in a fill value before saving).
-
-Server-side change is small (a `pause` / `resume` / `pop-last` route + session-state guards in `forwardInput`); the UX work in `RecorderModal` is the larger lift.
+See the Completed Work Summary table entries for `DIF-015c (Gap 1)` (PR #11) and `DIF-015c (Gaps 2 + 3 + 5 + 6)` (PR #8) for full implementation details. The detailed gap descriptions that were here previously have been pruned per ROADMAP.md convention — shipped items live in the summary table, not inline.
 
 #### Gap 4 — Authentication / pre-logged-in state handling
 
@@ -273,19 +241,7 @@ The recorder starts at `startUrl` with a fresh browser context — no cookies, n
 
 Possible fix: integrate with project credential profiles (DIF-010) so the recorder browser context is seeded with `storageState` from a captured login, skipping login entirely. Pair with environment-aware credential profiles per `MNT-004` / `DIF-012`.
 
-#### Gap 5 — Mobile / touch / device profile during recording
-
-The recorder runs at desktop viewport only. There is no device dropdown in `RecorderModal`. Users who want to record a mobile-only flow (touch interactions, hamburger menus, mobile checkout) currently have to record at desktop and replay at mobile, which produces brittle selectors and miss-tagged steps.
-
-Fix is small: thread a `device` param through `POST /projects/:id/record` → `recorder.js`, and set `browser.newContext({ ...devices[device] })` the same way `executeTest.js` already does for runs (DIF-003). UX is a device dropdown in `RecorderModal` mirroring the one in `RunRegressionModal`.
-
-#### Gap 6 — Sites that block embedding / detect headless
-
-Some target apps detect headless Chromium (via `navigator.webdriver`, missing chrome plugins, viewport inconsistencies) and refuse to render or behave differently. Sentri's recorder uses a real Chromium, but with default Playwright launch args that include the webdriver flag.
-
-Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). Long-term fix is to add a "stealth" launch profile to `launchBrowser()` that hides automation markers — `playwright-extra` + `puppeteer-extra-plugin-stealth` is the conventional choice. Track separately if customer demand surfaces.
-
-**Suggested split into PRs:**
+**Sub-item status:**
 
 | Sub-item | Effort | Priority | Status |
 |---|---|---|---|
@@ -296,16 +252,12 @@ Workaround today is to set `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). L
 | Gap 5 — Device profile during recording | S | 🔵 Medium | ✅ Complete (PR #8 — launch + mid-session switch with context rebuild) |
 | Gap 6 — Stealth launch profile | S | 🔵 Medium | ✅ Complete (PR #8 — hand-rolled, no `playwright-extra` dep) |
 
-**Files to change** (per sub-item — not all-at-once):
-- `backend/src/runner/recorder.js` — RECORDER_SCRIPT extensions, action typedef, code/step generators
-- `backend/src/routes/tests.js` — POST /record param surface
-- `frontend/src/components/run/RecorderModal.jsx` — Assert toggle, pause/resume controls, device dropdown
-- `frontend/src/components/run/LiveBrowserView.jsx` — assertMode prop that suppresses forwardInput
-- `backend/tests/recorder.test.js` — coverage for each new kind / mode
-- `QA.md` recorder section — captured / not-captured lists per gap
-- `docs/changelog.md` — `### Added` entries per shipped sub-item
+**Remaining files to change** (Gap 4 only):
+- `backend/src/runner/recorder.js` — seed `storageState` on context from selected credential profile
+- `backend/src/routes/tests.js` — accept `authProfileId` on `POST /record`
+- `frontend/src/components/run/RecorderModal.jsx` — auth profile picker in the idle form
 
-**Dependencies:** DIF-015 ✅. DIF-015b (selectorGenerator) should land before Gap 1 to avoid `RECORDER_SCRIPT` merge conflicts. DIF-010 (multi-auth profiles) is a soft prerequisite for Gap 4. DIF-003 (device emulation) provides the runtime infra Gap 5 reuses.
+**Dependencies:** DIF-010 (multi-auth profiles) is a hard prerequisite for Gap 4 — the credential-profile infrastructure must exist before the recorder can seed `storageState` from it.
 
 ---
 
