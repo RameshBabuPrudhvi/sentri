@@ -79,5 +79,3 @@ Current parallelism is 1–10 workers within a single Chromium process on one ma
 | DIF-012 | Multi-environment support (staging vs. production). | #2 |
 
 *Full completed list → ROADMAP.md § Completed Work*
-
-_END OF FILE — everything below was removed during the CAP-002 → AUTO-010 sprint rotation._
