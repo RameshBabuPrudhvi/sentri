@@ -519,7 +519,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
 
       {/* ── Top bar ── */}
       <div className="recorder-topbar">
-        <span style={{ fontSize: 20 }}>🎥</span>
+        <span className="recorder-topbar__emoji">🎥</span>
         <div className="recorder-topbar__title-group">
           <div>
             <div className="recorder-topbar__title">Record a test</div>
@@ -665,7 +665,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                 </datalist>
               </div>
             </div>
-            {error && <div className="banner banner-error" style={{ marginBottom: 16 }}>{error}</div>}
+            {error && <div className="banner banner-error recorder-error-banner">{error}</div>}
             <div className="recorder-idle__divider" />
             <div className="recorder-idle__actions">
               <button className="btn btn-ghost" onClick={handleCancel}>Cancel</button>
@@ -769,7 +769,7 @@ export default function RecorderModal({ open, onClose, onSaved, projectId, defau
                   </div>
                 )}
               </div>
-              <button className="btn btn-ghost" onClick={armShortcutCapture} style={{ marginBottom: 8 }}>
+              <button className="btn btn-ghost recorder-shortcut-btn" onClick={armShortcutCapture}>
                 {shortcutArmed ? "Shortcut capture armed (next 3 keys)" : "Record keyboard shortcut"}
               </button>
               <div className="recorder-sidebar__steps-list">

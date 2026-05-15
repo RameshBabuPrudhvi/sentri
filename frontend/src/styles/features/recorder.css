@@ -321,3 +321,17 @@
 .recorder-stealth-badge__subtext {
   opacity: 0.8;
 }
+
+/* ── Pre-existing inline-style cleanup ─────────────────────────────── */
+/* These three classes replace inline `style={{…}}` that predated the
+ * DIF-015c work but were in the same file (RecorderModal.jsx). Fixed
+ * per AGENT.md `:148` ("Default: fix it — you are already in the file"). */
+.recorder-topbar__emoji {
+  font-size: 20px;
+}
+.recorder-shortcut-btn {
+  margin-bottom: 8px;
+}
+.recorder-error-banner {
+  margin-bottom: 16px;
+}
