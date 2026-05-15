@@ -1329,7 +1329,7 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       lines.push(`// Step ${stepNo}: Assert URL`);
       lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
-    } else if (a.kind === "assertCount" && sel && a.value != null) {
+    } else if (a.kind === "assertCount" && sel && a.value != null && String(a.value).length > 0) {
       // Coerce to a non-negative integer so `toHaveCount(NaN)` can't slip
       // through. Anything that doesn't parse cleanly falls back to 0 —
       // emit the assertion anyway so the reviewer sees a clearly broken
