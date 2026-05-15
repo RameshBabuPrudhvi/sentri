@@ -429,6 +429,14 @@ export function isNoisyTestId(value) {
  * @property {Object}  [page]            - Playwright Page (internal).
  * @property {Function} [stopScreencast]  - Cleanup fn returned by startScreencast.
  * @property {Object}  [cdpSession]      - CDP session for input forwarding.
+ * @property {*}       [frameNavTimer]   - DIF-015c Gap 5 follow-up: Node-side
+ *                                          setTimeout handle for the debounced
+ *                                          `framenavigated` flush. Tracked on the
+ *                                          session so `switchDevice` can cancel
+ *                                          it before tearing the page down,
+ *                                          preventing a stale `goto` for the
+ *                                          pre-switch URL from leaking into
+ *                                          `actions[]` after the rebuild lands.
  */
 
 /** @type {Map<string, RecordingSession>} */
@@ -1858,6 +1866,14 @@ export async function switchDevice(sessionId, device) {
   // The browser process stays open and the new context is created under
   // it, saving ~500ms vs. a full launch. Catch-and-swallow each step so
   // a partial teardown still lets the rebuild run.
+  // DIF-015c Gap 5 follow-up — cancel the debounced framenavigated timer
+  // BEFORE closing the page. Without this, an in-flight 800ms debounce
+  // that started before the switch fires after the rebuilt page is alive
+  // and pushes a stale `goto` for the pre-switch URL into
+  // `session.actions`. The status guard at timer-fire time doesn't help
+  // here because switchDevice deliberately leaves `session.status` as
+  // `"recording"` to keep the session alive across the rebuild.
+  if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
   try { if (session.stopScreencast) await session.stopScreencast(); } catch { /* ignore */ }
   try { await session.page?.close(); } catch { /* ignore */ }
   try { await session.context?.close(); } catch { /* ignore */ }
@@ -2082,17 +2098,28 @@ async function _finishOpenRecorderPage(session, context, startUrl, viewport, pag
 
   // Debounced main-page framenavigated — verbatim copy of the
   // startRecording handler, with the same pause guard.
+  //
+  // DIF-015c Gap 5 follow-up — track the timer on `session` (instead of
+  // closure-local) so `switchDevice` can clear it before tearing the
+  // page down. Without this, an in-flight 800ms debounce that started
+  // BEFORE the device switch fires AFTER the rebuilt page is alive and
+  // pushes a stale `goto` for the pre-switch URL into `session.actions`.
+  // The dedup guard at the timer fire ("last.url === pendingFrameUrl")
+  // only catches the case where the new page happens to land on the same
+  // URL the prior debounce captured — common but not guaranteed.
+  // `stopRecording` doesn't need this because it flips
+  // `session.status = "stopping"` before closing the page, and the
+  // status guard at timer-fire time catches the stale fire there.
   const FRAME_NAV_DEBOUNCE_MS = 800;
-  let frameNavTimer = null;
   let pendingFrameUrl = "";
   page.on("framenavigated", (frame) => {
     if (frame !== page.mainFrame()) return;
     const url = frame.url();
     if (!url || url === "about:blank") return;
     pendingFrameUrl = url;
-    if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
-    frameNavTimer = setTimeout(() => {
-      frameNavTimer = null;
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+    session.frameNavTimer = setTimeout(() => {
+      session.frameNavTimer = null;
       if (session.status !== "recording") return;
       if (session.paused === true) return;
       const last = [...session.actions].reverse().find((a) => a.kind === "goto");
@@ -2426,17 +2453,20 @@ export async function startRecording({ sessionId, projectId, startUrl, device = 
     // Dedup: if the settled URL matches the last recorded goto (e.g. the
     // listener fires for the initial page.goto that already pushed an action
     // above, or a hash-only change on an SPA), the action is silently dropped.
+    // DIF-015c Gap 5 follow-up — the timer lives on `session` (not as a
+    // closure-local variable) so `switchDevice` can clear it before
+    // tearing the page down. See the matching block in
+    // `_finishOpenRecorderPage` for the full rationale.
     const FRAME_NAV_DEBOUNCE_MS = 800;
-    let frameNavTimer = null;
     let pendingFrameUrl = "";
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
       if (!url || url === "about:blank") return;
       pendingFrameUrl = url;
-      if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
-      frameNavTimer = setTimeout(() => {
-        frameNavTimer = null;
+      if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+      session.frameNavTimer = setTimeout(() => {
+        session.frameNavTimer = null;
         if (session.status !== "recording") return;
         // Pause also drops debounced framenavigated flushes — a
         // navigation that started before pause but settled after should
@@ -2708,6 +2738,11 @@ export async function stopRecording(sessionId, opts = {}) {
 
   try {
     if (session.idleTimeout) { clearTimeout(session.idleTimeout); session.idleTimeout = null; }
+    // DIF-015c Gap 5 follow-up — defence-in-depth, the timer's status
+    // guard at fire time already catches stale fires here (we just set
+    // `session.status = "stopping"` above), but clearing eagerly avoids
+    // a useless Node-side setTimeout sitting around for up to 800ms.
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
     if (session.stopScreencast) await session.stopScreencast().catch(() => {});
     await session.page?.close().catch(() => {});
     await session.context?.close().catch(() => {});
