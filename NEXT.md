@@ -44,6 +44,7 @@ Possible fix: integrate with project credential profiles (DIF-010) so the record
 The recorder runs at desktop viewport only — no device dropdown in `RecorderModal`. Thread a `device` param through `POST /api/v1/projects/:id/record` → `backend/src/runner/recorder.js`, and set `browser.newContext({ ...devices[device] })` the same way `executeTest.js` already does for runs (DIF-003). UX is a device dropdown in `RecorderModal` mirroring the one in `RunRegressionModal.jsx`.
 ### Gap 6 — Stealth launch profile for sites that detect headless
 Some target apps detect headless Chromium (via `navigator.webdriver`, missing chrome plugins, viewport inconsistencies) and refuse to render. Today's workaround is `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). Add a "stealth" launch profile to `launchBrowser()` that hides automation markers — `playwright-extra` + `puppeteer-extra-plugin-stealth` is the conventional choice. Gate behind an opt-in `stealth: true` session param so default recordings stay deterministic.
+
 **Files to change:**
 - `backend/src/runner/recorder.js` — `RECORDER_SCRIPT` extensions for Gap 2 action kinds; typedef + `actionsToPlaywrightCode` + `recordedActionToStepText` + `isEmittableAction` branches; pause/resume/pop-last session-state guards in `forwardInput`; `device` + `stealth` params threaded through session creation
 - `backend/src/routes/tests.js` — `POST /record` param surface (`device`, `stealth`); new `POST /record/:sessionId/{pause,resume,pop-last}` endpoints
