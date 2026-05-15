@@ -18,7 +18,7 @@ import * as accessibilityViolationRepo from "../database/repositories/accessibil
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { classifyFailure } from "../pipeline/feedbackLoop.js";
 import { getTopFlakyTests } from "../utils/flakyDetector.js";
-import { getQueueStats, isQueueAvailable } from "../queue.js";
+import { getQueueStats, isQueueAvailable, runQueue } from "../queue.js";
 
 const router = Router();
 
@@ -334,6 +334,45 @@ router.get("/dashboard", async (req, res) => {
         passRate: b.total > 0 ? Math.round((b.passed / b.total) * 100) : null,
         windowDays: ENV_AGGREGATION_WINDOW_DAYS,
       }));
+  }
+
+  // ── AUTO-008: Distributed worker pool visibility ───────────────────────
+  // When BullMQ/Redis is available, surface live queue depth + per-worker
+  // health so operators can see whether the pool is keeping up. Falls back
+  // to a `single-process` stub (zeroed counters) when Redis is absent so the
+  // frontend never has to special-case missing fields.
+  let workerPool = {
+    mode: "single-process",
+    queue: { waiting: 0, active: 0, completed: 0, delayed: 0, failed: 0 },
+    activeWorkers: 0,
+    idleWorkers: 0,
+    totalWorkers: 0,
+  };
+  if (isQueueAvailable()) {
+    try {
+      const queue = await getQueueStats();
+      // BullMQ Queue#getWorkers() returns one entry per live Worker process
+      // connected to the queue (across every container/replica). It does NOT
+      // report per-slot concurrency, so "active" here is the number of
+      // worker processes currently leasing a job, derived from queue.active
+      // capped by the worker count. Idle = remaining workers.
+      let totalWorkers = 0;
+      if (typeof runQueue?.getWorkers === "function") {
+        const workers = await runQueue.getWorkers();
+        totalWorkers = Array.isArray(workers) ? workers.length : 0;
+      }
+      const activeWorkers = Math.min(queue.active || 0, totalWorkers);
+      const idleWorkers = Math.max(0, totalWorkers - activeWorkers);
+      workerPool = {
+        mode: "distributed",
+        queue,
+        activeWorkers,
+        idleWorkers,
+        totalWorkers,
+      };
+    } catch {
+      // Best-effort — never let queue introspection fail the dashboard.
+    }
   }
 
   res.json({

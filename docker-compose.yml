@@ -60,11 +60,19 @@ services:
       start_period: 20s
 
 
+  # ── Distributed runner worker (AUTO-008) ────────────────────────────────────
+  # Same image as `backend`; overrides CMD to run the queue-only entrypoint
+  # (`src/worker.js`) so workers don't bind port 3001. Scale with:
+  #   docker compose --profile redis up -d --scale worker=4
+  # Lives under the `redis` profile because BullMQ requires Redis.
   worker:
     image: ghcr.io/rameshbabuprudhvi/sentri-backend:latest
     build:
       context: .
       dockerfile: backend/Dockerfile
+    profiles:
+      - redis
+    command: ["node", "src/worker.js"]
     environment:
       - AI_PROVIDER=${AI_PROVIDER}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -76,13 +84,11 @@ services:
       - OPENROUTER_REFERER=${OPENROUTER_REFERER}
       - OPENROUTER_APP_TITLE=${OPENROUTER_APP_TITLE}
       - JWT_SECRET=${JWT_SECRET}
-      - PORT=3001
       - NODE_ENV=production
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
-      - WORKER_ONLY=true
     restart: unless-stopped
     security_opt:
       - seccomp=unconfined
