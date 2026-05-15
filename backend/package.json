@@ -6,7 +6,6 @@
     "start": "node src/index.js",
     "dev": "node --watch-path=src src/index.js",
     "test": "node tests/run-tests.js",
-    "typecheck": "tsc --noEmit",
     "docs": "jsdoc -c jsdoc.json",
     "docs:watch": "nodemon --watch src -e js --exec 'npm run docs'",
     "postinstall": "node scripts/copy-trace-viewer.js"
@@ -40,7 +39,6 @@
     "rate-limit-redis": "^4.2.0"
   },
   "devDependencies": {
-    "jsdoc": "^4.0.4",
-    "typescript": "^5.6.3"
+    "jsdoc": "^4.0.4"
   }
 }
