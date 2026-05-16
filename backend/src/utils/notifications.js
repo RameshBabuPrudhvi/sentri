@@ -418,16 +418,21 @@ export async function dispatchSiemEvent(workspaceId, row) {
     ...(cfg.headers || {}),
   };
 
-  // 3 attempts at 1s, 2s, 4s. `safeFetch` enforces SSRF protection on the
-  // target URL (same guard used by notification webhooks) so an attacker
-  // configuring a malicious SIEM URL (169.254.169.254, etc.) can't pivot
-  // through Sentri to reach cloud metadata endpoints.
-  const backoffMs = [0, 1000, 2000, 4000];
+  // 3 attempts at 0s, 1s, 2s (cumulative 3s). `safeFetch` enforces SSRF
+  // protection on the target URL (same guard used by notification webhooks)
+  // so an attacker configuring a malicious SIEM URL (169.254.169.254, etc.)
+  // can't pivot through Sentri to reach cloud metadata endpoints.
+  //
+  // First attempt fires immediately (no backoff); subsequent attempts back
+  // off exponentially. Aligning the loop and array indices avoids an
+  // off-by-one that would otherwise add a spurious 1-second delay before
+  // every initial dispatch.
+  const backoffMs = [0, 1000, 2000];
   let lastError = "unknown";
   let attempts = 0;
 
-  for (let i = 1; i <= 3; i++) {
-    attempts = i;
+  for (let i = 0; i < 3; i++) {
+    attempts = i + 1;
     if (backoffMs[i] > 0) await _sleep(backoffMs[i]);
     try {
       const res = await safeFetch(cfg.targetUrl, {
