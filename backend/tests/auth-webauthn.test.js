@@ -257,11 +257,20 @@ async function main() {
       const cred = fakeCred(u.user.id);
       webauthnRepo.create(cred);
 
-      // Workspace requires MFA past grace
+      // Workspace requires MFA past grace. Backdate joinedAt + createdAt so
+      // policyAt wins the MAX(policyAt, joinedAt, accountAt) anchor —
+      // otherwise the just-created membership/account would re-anchor the
+      // clock to now and evaluateMfaEnforcement would return "grace" instead
+      // of "block", letting the delete through.
       const db = t.getDatabase();
+      const policyAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      const backdate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       db.prepare(
         "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 0, mfaPolicyUpdatedAt = ? WHERE id = ?"
-      ).run(new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(), u.user.workspaceId);
+      ).run(policyAt, u.user.workspaceId);
+      db.prepare("UPDATE workspace_members SET joinedAt = ? WHERE userId = ? AND workspaceId = ?")
+        .run(backdate, u.user.id, u.user.workspaceId);
+      db.prepare("UPDATE users SET createdAt = ? WHERE id = ?").run(backdate, u.user.id);
 
       const res = await fetch(`${base}/api/v1/auth/webauthn/credentials/${cred.id}`, {
         method: "DELETE",

@@ -246,9 +246,16 @@ async function main() {
     await test("/login within grace sets X-MFA-Grace-Period-Days-Remaining header", async () => {
       const u = await setupUser("login-grace");
       const db = t.getDatabase();
+      // Backdate joinedAt + user.createdAt so policyAt (2 days ago) wins the
+      // MAX(policyAt, joinedAt, accountAt) anchor in evaluateMfaEnforcement.
+      const policyAt = new Date(Date.now() - 2 * DAY_MS).toISOString();
+      const backdate = new Date(Date.now() - 30 * DAY_MS).toISOString();
       db.prepare(
         "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 7, mfaPolicyUpdatedAt = ? WHERE id = ?"
-      ).run(new Date(Date.now() - 2 * DAY_MS).toISOString(), u.user.workspaceId);
+      ).run(policyAt, u.user.workspaceId);
+      db.prepare("UPDATE workspace_members SET joinedAt = ? WHERE userId = ? AND workspaceId = ?")
+        .run(backdate, u.user.id, u.user.workspaceId);
+      db.prepare("UPDATE users SET createdAt = ? WHERE id = ?").run(backdate, u.user.id);
 
       const res = await fetch(`${base}/api/v1/auth/login`, {
         method: "POST",
