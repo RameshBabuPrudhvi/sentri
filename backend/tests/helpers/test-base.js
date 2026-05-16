@@ -140,6 +140,12 @@ const RESET_TABLES = [
   "runs",
   "tests",
   "oauth_ids",
+  // SEC-007: clear the compliance audit-log DLQ + SIEM config between test
+  // files so DLQ-N counter restarts don't collide with rows persisted by an
+  // earlier test file (the `counters` table is reset below but the data
+  // tables aren't — leading to `UNIQUE constraint failed: audit_dlq.id`).
+  "audit_dlq",
+  "workspace_siem_config",
   // SEC-004: webauthn_credentials cascade-deletes via FK ON DELETE CASCADE
   // from users, but list it explicitly to match the established pattern —
   // every entity table is reset by name so test isolation doesn't depend
