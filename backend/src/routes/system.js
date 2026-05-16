@@ -165,6 +165,7 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
     // ── Fetch ──
     const { rows, nextCursor } = activityRepo.getWorkspaceAuditLog(req.workspaceId, {
       userId: req.query.userId || undefined,
+      projectId: req.query.projectId || undefined,
       types,
       dateFrom: req.query.dateFrom || undefined,
       dateTo: req.query.dateTo || undefined,
@@ -195,6 +196,7 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
         rowCount: rows.length,
         filters: {
           userId: req.query.userId || null,
+          projectId: req.query.projectId || null,
           types: types.length ? types : null,
           dateFrom: req.query.dateFrom || null,
           dateTo: req.query.dateTo || null,

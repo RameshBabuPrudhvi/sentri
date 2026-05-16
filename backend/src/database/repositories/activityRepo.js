@@ -113,10 +113,14 @@ export function create(activity) {
 
   if (chainEnabled) {
     const tx = db.transaction((row) => {
-      // Order by createdAt DESC, id DESC as a tiebreaker for sub-millisecond
-      // bursts where two rows can share the same ISO timestamp.
+      // Order by createdAt DESC then numerically by the trailing integer of
+      // the `ACT-N` id (see idGenerator.js) as a tiebreaker for sub-
+      // millisecond bursts. A plain `id DESC` would sort lexicographically
+      // (ACT-10 < ACT-2), so at every digit boundary (9→10, 99→100, …) the
+      // INSERT side would chain off ACT-9 while the verify-side ASC walk
+      // visits ACT-10 right after ACT-1 — producing a spurious chain break.
       const prev = db.prepare(
-        "SELECT prevHash FROM activities WHERE workspaceId = ? ORDER BY createdAt DESC, id DESC LIMIT 1"
+        "SELECT prevHash FROM activities WHERE workspaceId = ? ORDER BY createdAt DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC LIMIT 1"
       ).get(row.workspaceId);
       // Pass the stringified meta (matching what's about to be persisted) so
       // computePrevHash's normaliser sees the same bytes the verifier will.
@@ -431,7 +435,7 @@ export function purgeOlderThan(days) {
  *   first order; `nextCursor` is the timestamp to pass to the next call,
  *   or `null` when there are no more rows.
  */
-export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
+export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
   const db = getDatabase();
   // Hard-cap defensively even though the route handler also clamps — a
   // direct repo caller (test, future internal job) shouldn't be able to
@@ -440,22 +444,46 @@ export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom
   let sql = "SELECT * FROM activities WHERE workspaceId = ?";
   const params = [workspaceId];
   if (userId) { sql += " AND userId = ?"; params.push(userId); }
+  if (projectId) { sql += " AND projectId = ?"; params.push(projectId); }
   if (types?.length) { sql += ` AND type IN (${types.map(() => "?").join(",")})`; params.push(...types); }
   if (dateFrom) { sql += " AND createdAt >= ?"; params.push(dateFrom); }
   if (dateTo) { sql += " AND createdAt <= ?"; params.push(dateTo); }
   if (ipAddress) { sql += " AND ipAddress = ?"; params.push(ipAddress); }
-  // Cursor: strict `<` so the row at the cursor is NOT returned again on the
-  // next page. Sub-millisecond ties are broken by `id DESC` in the ORDER BY
-  // — paired with the same tuple on writes (see `create()` transaction).
-  if (cursor) { sql += " AND createdAt < ?"; params.push(cursor); }
+  // Composite cursor — `createdAt|id`. Strict `<` on createdAt with an
+  // equal-timestamp tiebreaker on the numeric id avoids the data-loss case
+  // where multiple rows share the same `createdAt` and a page boundary falls
+  // within them: a plain `createdAt < ?` filter would skip every remaining
+  // row at that exact timestamp. The id comparison is numeric (CAST) to
+  // match the ORDER BY tiebreaker and the INSERT-side chain ordering.
+  if (cursor) {
+    const sep = cursor.lastIndexOf("|");
+    const cursorTs = sep >= 0 ? cursor.slice(0, sep) : cursor;
+    const cursorIdRaw = sep >= 0 ? cursor.slice(sep + 1) : null;
+    const cursorIdNum = cursorIdRaw && cursorIdRaw.startsWith("ACT-")
+      ? Number.parseInt(cursorIdRaw.slice(4), 10)
+      : Number.parseInt(cursorIdRaw, 10);
+    if (Number.isFinite(cursorIdNum)) {
+      sql += " AND (createdAt < ? OR (createdAt = ? AND CAST(SUBSTR(id, 5) AS INTEGER) < ?))";
+      params.push(cursorTs, cursorTs, cursorIdNum);
+    } else {
+      // Back-compat: legacy timestamp-only cursors still work, just with the
+      // known edge-case of skipping rows that share the boundary timestamp.
+      sql += " AND createdAt < ?";
+      params.push(cursorTs);
+    }
+  }
   // Fetch one extra row so we can tell whether a next page exists without
-  // a second COUNT query.
-  sql += " ORDER BY createdAt DESC, id DESC LIMIT ?";
+  // a second COUNT query. Numeric id tiebreaker matches the INSERT-side
+  // ordering in `create()` so sub-millisecond bursts stay deterministic.
+  sql += " ORDER BY createdAt DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC LIMIT ?";
   params.push(cap + 1);
   const all = db.prepare(sql).all(...params).map(hydrate);
   const hasMore = all.length > cap;
   const rows = hasMore ? all.slice(0, cap) : all;
-  const nextCursor = hasMore && rows.length > 0 ? rows[rows.length - 1].createdAt : null;
+  // Encode the composite (createdAt, id) cursor so the next page can skip
+  // past the last row even when several rows share its timestamp.
+  const last = rows[rows.length - 1];
+  const nextCursor = hasMore && last ? `${last.createdAt}|${last.id}` : null;
   return { rows, nextCursor };
 }
 
@@ -485,8 +513,13 @@ export function verifyAuditChain(workspaceId) {
   // SELECT * so we have every column needed to reproduce `rowMinusHash`.
   // Tiebreaker `id ASC` matches the INSERT-side `id DESC` ordering for
   // sub-millisecond bursts where two rows share the same createdAt.
+  // Numeric tiebreaker on the trailing integer of the `ACT-N` id — see the
+  // matching DESC ordering in `create()`. Lexicographic `id ASC` would
+  // visit ACT-10 immediately after ACT-1, mis-pairing it with ACT-1's hash
+  // instead of ACT-9's and breaking the verification walk at every
+  // digit-boundary burst.
   const rows = db.prepare(
-    "SELECT * FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC, id ASC"
+    "SELECT * FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC, CAST(SUBSTR(id, 5) AS INTEGER) ASC"
   ).all(workspaceId);
   let previousHash = null;
   for (let i = 0; i < rows.length; i++) {

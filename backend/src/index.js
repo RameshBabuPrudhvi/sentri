@@ -77,8 +77,13 @@ dotenv.config();
 // hatch ("never delete"); any other value < 90 is rejected.
 {
   const raw = process.env.AUDIT_RETENTION_DAYS;
+  // Mirror the scheduler's default of 365 when the var is unset so the
+  // hash-chain incompatibility check below catches the implicit-default case
+  // (otherwise an operator who only sets AUDIT_HASH_CHAIN=true would boot
+  // successfully, then have the 03:30 UTC sweep silently shred their chain).
+  let days = 365;
   if (raw !== undefined && raw !== "") {
-    const days = Number.parseInt(raw, 10);
+    days = Number.parseInt(raw, 10);
     if (!Number.isFinite(days) || days < 0) {
       throw new Error(
         `AUDIT_RETENTION_DAYS must be a non-negative integer (got "${raw}"). ` +
@@ -91,6 +96,20 @@ dotenv.config();
         `Set it to 0 to disable retention entirely, or to a value ≥ 90 to comply.`
       );
     }
+  }
+  // SEC-007: retention + hash chain are mutually exclusive. Deleting old
+  // rows breaks the chain — the first surviving row's `prevHash` was
+  // computed against a now-deleted predecessor, so the verifier walks
+  // from `previousHash = null` and immediately mismatches. Refuse to
+  // boot with both enabled rather than silently producing an audit log
+  // that fails its own verification on the next sweep.
+  if (days > 0 && process.env.AUDIT_HASH_CHAIN === "true") {
+    throw new Error(
+      `AUDIT_HASH_CHAIN=true is incompatible with AUDIT_RETENTION_DAYS=${days}` +
+      `${raw === undefined || raw === "" ? " (default)" : ""}. ` +
+      `Retention purges would break the prevHash chain. ` +
+      `Set AUDIT_RETENTION_DAYS=0 to disable retention, or unset AUDIT_HASH_CHAIN to allow purges.`
+    );
   }
 }
 

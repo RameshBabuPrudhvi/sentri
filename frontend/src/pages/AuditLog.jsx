@@ -41,7 +41,8 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useNotifications } from "../context/NotificationContext.jsx";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { fmtDateTime, fmtDate } from "../utils/formatters.js";
-import "../styles/pages/audit-log.css";
+// audit-log.css is imported from `frontend/src/index.css` after
+// approvals-timeline.css, so the ITCSS cascade order is guaranteed.
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
