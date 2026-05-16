@@ -36,8 +36,7 @@ import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifi
 import { generateAllTests, generateFromDescription, generateApiTests } from "./pipeline/journeyGenerator.js";
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
-import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
-import { sanitizeDomSnapshot } from "./pipeline/domSanitizer.js";
+import { runPostGenerationPipeline, sanitizeRunInputs } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { setStep } from "./utils/pipelineState.js";
@@ -585,16 +584,14 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
 
   throwIfAborted(signal);
 
-  const piiAllowlist = Array.isArray(project.piiAllowlist) ? project.piiAllowlist : [];
-  const strictPiiFirewall = project.strictPiiFirewall !== false;
-  let effectiveSnapshotsByUrl = snapshotsByUrl;
-  let effectiveClassifiedPages = classifiedPages;
-  if (strictPiiFirewall) {
-    const sanitizedSnapshots = sanitizeDomSnapshot(snapshotsByUrl, { allowlist: piiAllowlist, runId: run.id });
-    const sanitizedClassified = sanitizeDomSnapshot(classifiedPages, { allowlist: piiAllowlist, runId: run.id });
-    effectiveSnapshotsByUrl = sanitizedSnapshots.output;
-    effectiveClassifiedPages = sanitizedClassified.output;
-  }
+  // SEC-006: PII firewall — sanitize snapshots + classified pages before
+  // they reach `generateAllTests` (which builds the LLM prompt). Wiring
+  // lives in `pipelineOrchestrator.sanitizeRunInputs` so any future caller
+  // of the generation pipeline gets the same firewall behaviour from one
+  // place. Honours `project.strictPiiFirewall` (default ON) and
+  // `project.piiAllowlist`.
+  const { snapshotsByUrl: effectiveSnapshotsByUrl, classifiedPages: effectiveClassifiedPages } =
+    sanitizeRunInputs(project, run, { snapshotsByUrl, classifiedPages });
 
   // ── Step 4: AI test generation ──────────────────────────────────────────
   setStep(run, 4);
