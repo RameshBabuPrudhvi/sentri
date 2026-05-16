@@ -371,19 +371,92 @@ export function clearByWorkspaceId(workspaceId) {
   return info.changes;
 }
 
-
-export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom, dateTo, ipAddress, limit = 200, offset = 0 } = {}) {
+/**
+ * SEC-007: retention sweep — delete activity rows older than `days` days.
+ *
+ * Called from the scheduler's daily retention task. The cutoff is computed
+ * in JS (ISO 8601 UTC) and passed as a parameterised string so the
+ * comparison stays lexicographic — matching the column's storage format
+ * and the existing `after` / `before` filters in `getFiltered`.
+ *
+ * Caller is responsible for the SOC-2 floor (≥ 90 days or 0 to disable);
+ * this function simply does what it's told. Boot-time validation in
+ * `backend/src/index.js` rejects `AUDIT_RETENTION_DAYS` values below 90.
+ *
+ * @param {number} days — Retention window in days. Must be > 0; rows with
+ *   `createdAt < (now - days)` are deleted. Callers that want to disable
+ *   the sweep entirely should not invoke this function at all (the
+ *   scheduler honours `AUDIT_RETENTION_DAYS=0` by skipping).
+ * @returns {number} Number of deleted rows.
+ */
+export function purgeOlderThan(days) {
+  if (!Number.isFinite(days) || days <= 0) return 0;
   const db = getDatabase();
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const info = db.prepare("DELETE FROM activities WHERE createdAt < ?").run(cutoff);
+  return info.changes;
+}
+
+
+/**
+ * SEC-007: workspace-scoped audit-log fetch with cursor pagination (ENH-010).
+ *
+ * Cursor pagination — vs. LIMIT/OFFSET — is stable under concurrent writes:
+ * a new row arriving between two pages cannot shift the window because the
+ * cursor is the row's own `createdAt`, not its ordinal position. The cursor
+ * is opaque to the caller (an ISO string), so the API surface can later
+ * change to a composite cursor without a breaking change.
+ *
+ * The ordering tuple is `(createdAt DESC, id DESC)` — matches the INSERT-
+ * side tiebreaker in `create()` so sub-millisecond bursts stay deterministic.
+ *
+ * Filters are AND-combined and all parameterised. `types` is an array; an
+ * empty array means "no type filter".
+ *
+ * @param {string} workspaceId — Required. The authenticated workspace; the
+ *   route handler MUST pass `req.workspaceId`, not a user-supplied URL param,
+ *   so cross-workspace reads are impossible.
+ * @param {Object}   [filters]
+ * @param {string}   [filters.userId]
+ * @param {string[]} [filters.types]
+ * @param {string}   [filters.dateFrom]   — ISO 8601 lower bound (inclusive).
+ * @param {string}   [filters.dateTo]     — ISO 8601 upper bound (inclusive).
+ * @param {string}   [filters.ipAddress]
+ * @param {string}   [filters.cursor]     — Opaque cursor from the previous
+ *   page's `nextCursor`. Internally the last row's `createdAt`. Pass
+ *   `undefined` (or omit) for the first page.
+ * @param {number}   [filters.limit=200]  — Hard-capped at 1000 by the
+ *   caller to bound memory.
+ * @returns {{ rows: Object[], nextCursor: string|null }} Rows in newest-
+ *   first order; `nextCursor` is the timestamp to pass to the next call,
+ *   or `null` when there are no more rows.
+ */
+export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom, dateTo, ipAddress, cursor, limit = 200 } = {}) {
+  const db = getDatabase();
+  // Hard-cap defensively even though the route handler also clamps — a
+  // direct repo caller (test, future internal job) shouldn't be able to
+  // accidentally pull the whole table.
+  const cap = Math.max(1, Math.min(1000, Number.isFinite(limit) ? limit : 200));
   let sql = "SELECT * FROM activities WHERE workspaceId = ?";
   const params = [workspaceId];
   if (userId) { sql += " AND userId = ?"; params.push(userId); }
-  if (types?.length) { sql += ` AND type IN (${types.map(() => '?').join(',')})`; params.push(...types); }
+  if (types?.length) { sql += ` AND type IN (${types.map(() => "?").join(",")})`; params.push(...types); }
   if (dateFrom) { sql += " AND createdAt >= ?"; params.push(dateFrom); }
   if (dateTo) { sql += " AND createdAt <= ?"; params.push(dateTo); }
   if (ipAddress) { sql += " AND ipAddress = ?"; params.push(ipAddress); }
-  sql += " ORDER BY createdAt DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-  return db.prepare(sql).all(...params).map(hydrate);
+  // Cursor: strict `<` so the row at the cursor is NOT returned again on the
+  // next page. Sub-millisecond ties are broken by `id DESC` in the ORDER BY
+  // — paired with the same tuple on writes (see `create()` transaction).
+  if (cursor) { sql += " AND createdAt < ?"; params.push(cursor); }
+  // Fetch one extra row so we can tell whether a next page exists without
+  // a second COUNT query.
+  sql += " ORDER BY createdAt DESC, id DESC LIMIT ?";
+  params.push(cap + 1);
+  const all = db.prepare(sql).all(...params).map(hydrate);
+  const hasMore = all.length > cap;
+  const rows = hasMore ? all.slice(0, cap) : all;
+  const nextCursor = hasMore && rows.length > 0 ? rows[rows.length - 1].createdAt : null;
+  return { rows, nextCursor };
 }
 
 /**

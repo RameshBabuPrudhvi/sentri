@@ -68,6 +68,32 @@ import { runAbortControllers } from "./utils/runWithAbort.js";
 
 dotenv.config();
 
+// ─── SEC-007: validate AUDIT_RETENTION_DAYS at boot ──────────────────────────
+// The compliance retention sweep (see scheduler.js) deletes audit-log rows
+// older than this many days. SOC 2 Common Criteria CC7.2 requires retention
+// of ≥ 90 days for security-relevant logs, so we refuse to boot with a
+// shorter window — silently honouring a too-low value would put deployments
+// out of compliance without any operator signal. `0` is a legitimate escape
+// hatch ("never delete"); any other value < 90 is rejected.
+{
+  const raw = process.env.AUDIT_RETENTION_DAYS;
+  if (raw !== undefined && raw !== "") {
+    const days = Number.parseInt(raw, 10);
+    if (!Number.isFinite(days) || days < 0) {
+      throw new Error(
+        `AUDIT_RETENTION_DAYS must be a non-negative integer (got "${raw}"). ` +
+        `Use 0 to disable retention, or a value ≥ 90 to enable it.`
+      );
+    }
+    if (days !== 0 && days < 90) {
+      throw new Error(
+        `AUDIT_RETENTION_DAYS=${days} is below the SOC 2 / ISO 27001 minimum of 90 days. ` +
+        `Set it to 0 to disable retention entirely, or to a value ≥ 90 to comply.`
+      );
+    }
+  }
+}
+
 // ─── Process-level crash guards ───────────────────────────────────────────────
 // Prevent the server from dying on unhandled errors.
 // Playwright can throw unhandled rejections from browser internals, page event

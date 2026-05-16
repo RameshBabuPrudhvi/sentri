@@ -235,15 +235,18 @@
     },
     "GET /api/v1/audit/verify": {
       "role": "admin",
-      "source": "backend/src/routes/system.js"
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 walks the prevHash chain for the caller's workspace. No-op (chainDisabled:true) when AUDIT_HASH_CHAIN is unset."
     },
     "GET /api/v1/workspaces/:workspaceId/audit-log": {
       "role": "admin",
-      "source": "backend/src/routes/system.js"
-    } ,
-    "POST /api/v1/workspaces/:id/audit-log/dlq/:dlqId/replay": {
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 workspace-scoped audit log with cursor pagination. The :workspaceId URL param is validated against req.workspaceId (the authenticated workspace) to prevent cross-workspace reads."
+    },
+    "POST /api/v1/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay": {
       "role": "admin",
-      "source": "backend/src/routes/system.js"
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Route handler not yet implemented; permission entry pre-registered for the upcoming SIEM forwarder PR."
     },
     "GET /api/v1/settings/github-checks": {
       "role": "qa_lead",

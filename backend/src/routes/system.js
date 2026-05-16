@@ -58,35 +58,118 @@ router.get("/activities", (req, res) => {
 });
 
 
+/**
+ * SEC-007: verify the audit-log hash chain for the caller's workspace.
+ *
+ * No-op when `AUDIT_HASH_CHAIN` is unset (returns `chainDisabled: true`) —
+ * the chain feature flag is off by default because chained writes
+ * serialise INSERTs under contention.
+ *
+ * @route GET /api/v1/audit/verify
+ */
 router.get("/audit/verify", requireRole("admin"), (req, res) => {
-  if (process.env.AUDIT_HASH_CHAIN !== "true") return res.json({ verified: true, chainDisabled: true });
-  return res.json(activityRepo.verifyAuditChain(req.workspaceId));
+  try {
+    if (process.env.AUDIT_HASH_CHAIN !== "true") {
+      return res.json({ verified: true, chainDisabled: true });
+    }
+    return res.json(activityRepo.verifyAuditChain(req.workspaceId));
+  } catch (err) {
+    // AGENT.md: 5xx never leaks internal details. Log server-side, return
+    // a stable error code the frontend can branch on.
+    console.error(formatLogLine("error", null, `[audit/verify] ${err.message}`));
+    return res.status(500).json({ error: "Audit chain verification unavailable.", code: "AUDIT_VERIFY_FAILED" });
+  }
 });
 
+/**
+ * SEC-007: workspace-scoped audit log. Admin-gated. Returns rows in newest-
+ * first order with opaque cursor pagination (`nextCursor`). Supports
+ * `?format=csv` and `?format=ndjson` exports of the current page.
+ *
+ * ### Authorisation contract
+ * The `:workspaceId` URL param is validated against `req.workspaceId` (the
+ * authenticated workspace injected by `workspaceScope` middleware). A 403 is
+ * returned on mismatch — without this check an admin in workspace A could
+ * read workspace B's audit log by changing the URL.
+ *
+ * ### Query params
+ * | Param      | Type     | Notes                                          |
+ * |------------|----------|------------------------------------------------|
+ * | userId     | string   | Filter by acting user.                         |
+ * | type       | string|string[] | Repeat to filter by multiple types.     |
+ * | dateFrom   | ISO date | Inclusive lower bound.                         |
+ * | dateTo     | ISO date | Inclusive upper bound.                         |
+ * | ipAddress  | string   | Exact-match filter.                            |
+ * | cursor     | ISO date | Opaque cursor from previous page's nextCursor. |
+ * | limit      | int      | 1..1000, default 200.                          |
+ * | format     | csv\|ndjson | Exports the current page in that format.    |
+ *
+ * @route GET /api/v1/workspaces/:workspaceId/audit-log
+ */
 router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), (req, res) => {
-  const workspaceId = req.params.workspaceId;
-  const types = Array.isArray(req.query.type) ? req.query.type : (req.query.type ? [req.query.type] : []);
-  const rows = activityRepo.getWorkspaceAuditLog(workspaceId, {
-    userId: req.query.userId || undefined,
-    types,
-    dateFrom: req.query.dateFrom || undefined,
-    dateTo: req.query.dateTo || undefined,
-    ipAddress: req.query.ipAddress || undefined,
-    limit: Number.parseInt(req.query.limit, 10) || 200,
-    offset: Number.parseInt(req.query.offset, 10) || 0,
-  });
-  if (req.query.format === "ndjson") {
-    res.setHeader("Content-Type", "application/x-ndjson");
-    return res.send(rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  try {
+    // ── Authorisation: URL param must match the authenticated workspace ──
+    // Without this, the URL param overrides the middleware-injected scope
+    // and an admin in workspace A can read workspace B's audit log just by
+    // editing the URL. Return 403 (not 404) so we don't leak whether the
+    // target workspace exists.
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "Audit log is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+
+    // ── Parse + validate query params ──
+    const types = Array.isArray(req.query.type)
+      ? req.query.type
+      : (req.query.type ? [req.query.type] : []);
+    // Same hard cap as the existing /activities route (line 41) so an
+    // attacker cannot pull the entire table with ?limit=999999.
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(1000, rawLimit)) : 200;
+    const cursor = typeof req.query.cursor === "string" && req.query.cursor.length > 0
+      ? req.query.cursor
+      : undefined;
+
+    // ── Fetch ──
+    const { rows, nextCursor } = activityRepo.getWorkspaceAuditLog(req.workspaceId, {
+      userId: req.query.userId || undefined,
+      types,
+      dateFrom: req.query.dateFrom || undefined,
+      dateTo: req.query.dateTo || undefined,
+      ipAddress: req.query.ipAddress || undefined,
+      cursor,
+      limit,
+    });
+
+    // ── Export formats ──
+    if (req.query.format === "ndjson") {
+      res.setHeader("Content-Type", "application/x-ndjson");
+      // Disposition hint for browsers that open the response directly.
+      res.setHeader("Content-Disposition", `attachment; filename="sentri-audit-log-${new Date().toISOString().slice(0, 10)}.ndjson"`);
+      return res.send(rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""));
+    }
+    if (req.query.format === "csv") {
+      // RFC 4180: wrap every field in quotes, double internal quotes.
+      const header = "timestamp,userId,userName,type,meta,ipAddress,userAgent,workspaceId";
+      const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+      const body = rows.map((r) =>
+        [r.createdAt, r.userId, r.userName, r.type, JSON.stringify(r.meta ?? null), r.ipAddress, r.userAgent, r.workspaceId]
+          .map(esc).join(","),
+      ).join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="sentri-audit-log-${new Date().toISOString().slice(0, 10)}.csv"`);
+      return res.send(`${header}\n${body}${body ? "\n" : ""}`);
+    }
+
+    return res.json({ rows, nextCursor });
+  } catch (err) {
+    // AGENT.md: 5xx errors never leak internal details. Log server-side,
+    // return a stable code so the UI can render a clean "try again" state.
+    console.error(formatLogLine("error", null, `[audit-log] ${err.message}`));
+    return res.status(500).json({ error: "Audit log unavailable.", code: "AUDIT_READ_FAILED" });
   }
-  if (req.query.format === "csv") {
-    const header = "timestamp,userId,userName,type,meta,ipAddress,userAgent,workspaceId";
-    const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
-    const body = rows.map((r) => [r.createdAt, r.userId, r.userName, r.type, JSON.stringify(r.meta ?? null), r.ipAddress, r.userAgent, r.workspaceId].map(esc).join(",")).join("\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    return res.send(`${header}\n${body}\n`);
-  }
-  res.json({ rows, nextOffset: rows.length ? (Number.parseInt(req.query.offset,10)||0)+rows.length : null });
 });
 
 // ─── URL reachability test ────────────────────────────────────────────────────
