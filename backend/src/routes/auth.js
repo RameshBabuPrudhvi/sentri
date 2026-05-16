@@ -770,7 +770,14 @@ router.post("/login", async (req, res) => {
     const valid = user?.passwordHash ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
 
     if (!user || !valid) {
-      logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: null });
+      // SEC-007: when the email matches a known account, snapshot the user's
+      // primary workspace so the failed-login row appears in that workspace's
+      // audit log. With `workspaceId: null` the row is invisible to the
+      // workspace-scoped `GET /workspaces/:id/audit-log` endpoint that admins
+      // use for security monitoring. For unknown emails (`user == null`) the
+      // workspace is genuinely unresolvable and `null` is correct.
+      const failedWorkspaceId = user ? workspaceRepo.getByUserId(user.id)?.[0]?.id || null : null;
+      logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: failedWorkspaceId });
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
@@ -1238,7 +1245,13 @@ router.post("/reset-password", async (req, res) => {
     console.log(`[auth/reset-password] Password reset for ${user.email}`);
   }
 
-  logActivity({ type: "auth.password.reset", req, userId: user.id, userName: user.name || user.email, workspaceId: req.workspaceId || null });
+  // SEC-007: `/reset-password` is a public endpoint so `req.workspaceId` is
+  // unset. Resolve the user's primary workspace from their membership (same
+  // pattern as the MFA pending-login flow above) so the reset event is
+  // visible in the workspace-scoped audit log rather than orphaned with
+  // `workspaceId = NULL`.
+  const resetWorkspaceId = req.workspaceId || workspaceRepo.getByUserId(user.id)?.[0]?.id || null;
+  logActivity({ type: "auth.password.reset", req, userId: user.id, userName: user.name || user.email, workspaceId: resetWorkspaceId });
   return res.json({ message: "Password has been reset successfully. You can now sign in." });
 });
 
