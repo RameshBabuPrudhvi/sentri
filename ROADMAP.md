@@ -1141,7 +1141,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 **Sentri's unique strengths:** Self-hosted + AI generation + human review queue + multi-provider LLM + standalone Playwright export (✅ DIF-006). No competitor offers all five together. BearQ narrows the AI generation gap but remains SaaS-only with no self-hosted option or LLM provider choice.
 
-**Critical gaps to close next:** DIF-015c Gaps 2/3/5/6 (recorder gaps completion — current PR) · AUTO-008 (distributed runner across machines, queue slot 1) · SEC-004 (MFA, queue slot 2) · SEC-006 (PII firewall, queue slot 3). Prior critical gaps closed: AI-001 ✅ PR #14 (generic OpenAI-compatible provider adapter), AUTO-001 ✅ PR #15 (risk-based test selection), AUTO-004 ✅ PR #18 (test impact analysis from git diff / GitHub PR files), INT-002 ✅ PR #15 (GitHub PR check comments), CAP-001 ✅ PR #1 (data-driven test fixtures), DIF-012 ✅ PR #2 (multi-environment support), CAP-002 ✅ PR #3 (distributed test sharding), AUTO-010 ✅ PR #6 (root-cause failure clustering).
+**Critical gaps to close next:**  SEC-004 (MFA, queue slot 2) · SEC-006 (PII firewall, queue slot 3). Prior critical gaps closed: AI-001 ✅ PR #14 (generic OpenAI-compatible provider adapter), AUTO-001 ✅ PR #15 (risk-based test selection), AUTO-004 ✅ PR #18 (test impact analysis from git diff / GitHub PR files), INT-002 ✅ PR #15 (GitHub PR check comments), CAP-001 ✅ PR #1 (data-driven test fixtures), DIF-012 ✅ PR #2 (multi-environment support), CAP-002 ✅ PR #3 (distributed test sharding), AUTO-010 ✅ PR #6 (root-cause failure clustering).
 
 > **Previous priorities ✅ shipped:** DIF-001 · DIF-002/002b · DIF-003 · DIF-004 · DIF-005 · DIF-006 · DIF-007 · DIF-011 · DIF-013 · DIF-014 · DIF-015 · DIF-015b · DIF-016 · INT-002 (PR #15) · AUTO-001 (PR #15) · AUTO-002/002b/005/006/007/012/013/015/015b/016/016b/017/019 · AI-001 (PR #14) · CAP-003 · CAP-004 · MET-001 · UI-REFACTOR-001.
 
@@ -1156,11 +1156,11 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
 | Differentiators | 22 | 16 | 0 | 6 | DIF-002c, 008, 009, 010, 012, 015c (sub-gaps 2–6) |
-| Autonomous Intelligence | 29 | 19 | 0 | 10 | AUTO-008/009/011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
+| Autonomous Intelligence | 29 | 20 | 0 | 9 | AUTO-009/011/014/018/021/022 🔴 (eval harness)/023 (DAG runner)/024 (critic)/025 (healing loop) (AUTO-020 superseded by AUTO-015) |
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **60** | **0** | **39** | |
+| **Totals** | **99** | **61** | **0** | **38** | |
 
 
 **Total tracked items:** 99 across 9 categories — **60 complete** (59%), **0 in current PR**, **39 remaining**
@@ -1170,14 +1170,12 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 - 🔴 **NEW from AUDIT.md Phase 5 — 6 items unresolved:** SEC-004 (MFA), SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness).
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
-1. `DIF-015c` Gaps 2/3/5/6 (current PR — recorder gaps completion: point-and-click assertion UX, pause/resume/undo, device profile during recording, stealth launch profile; bundled 4×S touching the same `recorder.js` + `RecorderModal.jsx` surface)
-2. `AUTO-008` (distributed runner across multiple machines — generalises CAP-002's shard pattern to multi-host worker pools; SaaS-readiness pairing with CAP-002b's chaos / DLQ / fair-scheduling follow-ups)
-3. `SEC-004` (MFA / TOTP — 🔴 Blocker per AUDIT.md S1, compliance prerequisite for SOC 2 / ISO 27001; gates any regulated-industry sale)
-4. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)
-5. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation)
-6. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
-7. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts)
-8. `DIF-008` (Jira / Linear issue sync — competitive parity; auto-creates tickets on confirmed failures, syncs status back to `linkedIssueKey`)
+1. `SEC-004` (MFA / TOTP — 🔴 Blocker per AUDIT.md S1, compliance prerequisite for SOC 2 / ISO 27001; gates any regulated-industry sale)
+2. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)
+3. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation)
+4. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
+5. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts)
+6. `DIF-008` (Jira / Linear issue sync — competitive parity; auto-creates tickets on confirmed failures, syncs status back to `linkedIssueKey`)
 
 This rotation alternates between audit-driven hardening and feature delivery so neither narrative starves.
 
