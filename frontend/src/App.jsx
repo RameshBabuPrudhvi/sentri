@@ -16,7 +16,6 @@ const NewProject = lazy(() => import("./pages/NewProject.jsx"));
 const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
-const AuditLog = lazy(() => import("./pages/AuditLog.jsx"));
 const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
@@ -28,6 +27,7 @@ const TestLab       = lazy(() => import("./pages/TestLab.jsx"));
 const ReviewQueue   = lazy(() => import("./pages/ReviewQueue.jsx"));
 const HealingDashboard = lazy(() => import("./pages/HealingDashboard.jsx"));
 const ApprovalsTimeline = lazy(() => import("./pages/ApprovalsTimeline.jsx"));
+const AuditLog          = lazy(() => import("./pages/AuditLog.jsx"));
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -79,6 +79,7 @@ export default function App() {
                 <Route path="/review-queue" element={<ReviewQueue />} />
                 <Route path="/healing" element={<HealingDashboard />} />
                 <Route path="/approvals" element={<ApprovalsTimeline />} />
+                <Route path="/audit-log" element={<AuditLog />} />
                 <Route path="/projects/:id/test-lab" element={<TestLab />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

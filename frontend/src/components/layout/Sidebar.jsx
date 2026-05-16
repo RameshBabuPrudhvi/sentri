@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Home, FolderKanban, SquareCheckBig, PlayCircle, BarChart3, Bot, Server,
     Settings, ChevronDown, Check, ChevronRight, PanelLeftClose, PanelLeftOpen,
-    Atom, Shield, ClipboardCheck,
+    Atom, Shield, ClipboardCheck, ScrollText,
 } from "lucide-react";
 import AppLogo from "./AppLogo.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -38,6 +38,7 @@ const NAV_GROUPS = [
       { to: "/automation", icon: Bot,    label: "Automation" },
       { to: "/approvals",  icon: ClipboardCheck, label: "Approvals" },
       { to: "/healing", icon: Shield, label: "Healing" },
+      { to: "/audit-log",  icon: ScrollText,     label: "Audit log" },
       { to: "/system",     icon: Server, label: "System"     },
     ],
   },
