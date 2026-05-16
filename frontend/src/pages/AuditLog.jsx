@@ -40,7 +40,7 @@ import { API_PATH } from "../utils/apiBase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useNotifications } from "../context/NotificationContext.jsx";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
-import { fmtDateTime, fmtDate } from "../utils/formatters.js";
+import { fmtDateTime, fmtDate, fmtAuditTimestamp } from "../utils/formatters.js";
 // audit-log.css is imported from `frontend/src/index.css` after
 // approvals-timeline.css, so the ITCSS cascade order is guaranteed.
 
@@ -301,7 +301,14 @@ function describeMetaAuditEntry(entry) {
 
 function ActivityEntry({ entry }) {
   const { badgeClass, label } = entryMeta(entry.type);
-  const time = fmtDateTime(entry.createdAt);
+  // SEC-007: SOC 2 / PCI-DSS 10.3.3 require absolute UTC timestamps on
+  // every audit row. The "X minutes ago" rendering used by other activity
+  // feeds in the app is fine for a UX feed but unacceptable for a
+  // compliance trail — an auditor reading the log months later cannot
+  // correlate "5m ago" to an instant. `fmtAuditTimestamp` returns the
+  // industry-standard `YYYY-MM-DD HH:MM:SS UTC` form used by Splunk,
+  // CloudTrail, GitHub Audit Log, and Datadog.
+  const time = fmtAuditTimestamp(entry.createdAt);
   const score = entry.meta?.score;
   const wasAuto = entry.meta?.wasAutoApproved;
   // SEC-007: many audit rows (`audit.read`, `audit.role.change`, etc.) have
@@ -341,15 +348,31 @@ function ActivityEntry({ entry }) {
           <span className="badge badge-amber al-entry__was-auto">was auto</span>
         )}
 
-        {/* Actor + IP (SEC-007: session-reconstruction evidence). The IP is
-            rendered as a `title` on the actor so a SOC 2 reviewer can hover
-            for the full {IP, user-agent} pair without cluttering the row. */}
+        {/* Actor (SEC-007: SOC 2 / ISO 27001 session-reconstruction
+            evidence). The actor name is the primary display; the
+            user-agent is folded into a `title` tooltip to avoid blowing
+            out the row width with a long UA string. The IP gets its own
+            column so a reviewer scanning a busy feed can spot probes from
+            unexpected addresses without hovering every row. */}
         {entry.userName && (
           <span
             className="al-entry__actor"
-            title={entry.ipAddress ? `${entry.ipAddress}${entry.userAgent ? ` · ${entry.userAgent}` : ""}` : undefined}
+            title={entry.userAgent || undefined}
           >
             {entry.userName}
+          </span>
+        )}
+        {/* IP address — always rendered when present so SOC 2 reviewers
+            can read it directly. Falls back to em-dash for rows without
+            an IP (e.g. system-emitted rows from the scheduler that have
+            no `req` context). Monospaced via the existing `--font-mono`
+            on the score column so IPv4 / IPv6 stay aligned. */}
+        {entry.ipAddress && (
+          <span
+            className="al-entry__ip"
+            title={entry.userAgent ? `User-Agent: ${entry.userAgent}` : undefined}
+          >
+            {entry.ipAddress}
           </span>
         )}
 

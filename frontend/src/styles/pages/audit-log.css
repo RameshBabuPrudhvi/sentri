@@ -231,11 +231,39 @@
   white-space: nowrap;
 }
 
-.al-entry__time {
-  font-size: 0.73rem;
+/* SEC-007: IP column. Monospaced so IPv4 / IPv6 stay aligned in a scan
+ * of the feed (matches the convention used by .al-entry__score). Slightly
+ * dimmer than the actor to keep the actor as the primary identity.
+ * Min-width sized for a typical IPv4 (e.g. "203.0.113.7" = 11 chars);
+ * IPv6 will truncate with ellipsis — the full address is in the title.
+ */
+.al-entry__ip {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   color: var(--text3);
   white-space: nowrap;
-  min-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 96px;
+  max-width: 140px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* SEC-007: compliance-grade UTC timestamp column. Monospaced so every
+ * row's `YYYY-MM-DD HH:MM:SS UTC` aligns under a vertical scan — a
+ * SOC 2 reviewer comparing two events spots time drift instantly when
+ * digit positions line up. Min-width sized for the full 23-char string
+ * (the variable-width relative strings the rest of the app uses are
+ * unacceptable on a compliance trail — see fmtAuditTimestamp's docstring
+ * for the standards rationale).
+ */
+.al-entry__time {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text3);
+  white-space: nowrap;
+  min-width: 180px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -472,6 +500,15 @@
   }
 
   .al-entry__actor {
+    display: none;
+  }
+
+  /* IP follows the actor — both are forensic-evidence columns that
+     belong together; hiding one without the other leaves a useless
+     stub. The full IP is still in the row's structured meta and the
+     CSV/NDJSON export, so SOC 2 reviewers using narrow viewports
+     can still pull it via the Export buttons. */
+  .al-entry__ip {
     display: none;
   }
 }
