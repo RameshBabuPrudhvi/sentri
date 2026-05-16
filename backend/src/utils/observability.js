@@ -1,22 +1,28 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "crypto";
-import { context, trace } from "@opentelemetry/api";
-import { NodeSDK } from "@opentelemetry/sdk-node";
-import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 
 export const requestContext = new AsyncLocalStorage();
 let sdkStarted = false;
+let otelApi = null;
 
-export function initOpenTelemetry() {
+export async function initOpenTelemetry() {
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (!endpoint || sdkStarted) return;
+
+  const [{ NodeSDK }, { getNodeAutoInstrumentations }, { OTLPTraceExporter }, api] = await Promise.all([
+    import("@opentelemetry/sdk-node"),
+    import("@opentelemetry/auto-instrumentations-node"),
+    import("@opentelemetry/exporter-trace-otlp-http"),
+    import("@opentelemetry/api"),
+  ]);
+
+  otelApi = api;
   const sdk = new NodeSDK({
     serviceName: process.env.OTEL_SERVICE_NAME || "sentri-backend",
     traceExporter: new OTLPTraceExporter({ url: endpoint }),
     instrumentations: [getNodeAutoInstrumentations()],
   });
-  sdk.start();
+  await sdk.start();
   sdkStarted = true;
 }
 
@@ -29,8 +35,8 @@ export function getRequestId() {
 }
 
 export function getSpanContext() {
-  const span = trace.getSpan(context.active());
+  if (!otelApi) return null;
+  const span = otelApi.trace.getSpan(otelApi.context.active());
   const sc = span?.spanContext?.();
-  if (!sc) return null;
-  return { traceId: sc.traceId, spanId: sc.spanId };
+  return sc ? { traceId: sc.traceId, spanId: sc.spanId } : null;
 }

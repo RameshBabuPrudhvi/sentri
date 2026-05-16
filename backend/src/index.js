@@ -21,9 +21,9 @@
  * compatibility during the transition window (INF-005).
  */
 
+import { initOpenTelemetry } from "./utils/observability.js";
 import dotenv from "dotenv";
 import * as Sentry from "@sentry/node";
-import { initOpenTelemetry } from "./utils/observability.js";
 import { getDatabase, closeDatabase } from "./database/sqlite.js";
 import { migrateFromJsonIfNeeded } from "./database/migrate.js";
 import * as runRepo from "./database/repositories/runRepo.js";
@@ -69,7 +69,7 @@ export { runAbortControllers } from "./utils/runWithAbort.js";
 import { runAbortControllers } from "./utils/runWithAbort.js";
 
 dotenv.config();
-initOpenTelemetry();
+await initOpenTelemetry();
 if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0), beforeSend(event) { if (event.request) delete event.request.headers; return event; } });
 }
