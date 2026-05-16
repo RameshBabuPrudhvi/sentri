@@ -283,6 +283,77 @@ async function main() {
       assert.ok(webauthnRepo.getById(cred.id), "credential must still exist");
     });
 
+    await test("DELETE /webauthn/credentials/:id self-lockout guard ALSO blocks within grace (defers lockout, not prevents it)", async () => {
+      // Regression: before the fix, the guard only fired on enforcement
+      // state === "block". A freshly-joined user of a workspace with
+      // mfaRequired=1 lands in "grace" (joinedAt re-anchors the clock), so
+      // they could remove their last passkey during grace and walk into a
+      // lockout on day N+1. The guard must refuse for BOTH block AND grace.
+      const u = await setupUser("route-del-grace-lockout");
+      const cred = fakeCred(u.user.id);
+      webauthnRepo.create(cred);
+
+      // Workspace requires MFA, grace = 7 days. Leave joinedAt + createdAt
+      // at their default (now) so the grace clock re-anchors to today and
+      // evaluateMfaEnforcement returns "grace" (NOT "block").
+      const db = t.getDatabase();
+      db.prepare(
+        "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 7, mfaPolicyUpdatedAt = ? WHERE id = ?"
+      ).run(new Date().toISOString(), u.user.workspaceId);
+
+      const res = await fetch(`${base}/api/v1/auth/webauthn/credentials/${cred.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+        body: JSON.stringify({ password: u.password }),
+      });
+      assert.equal(res.status, 400, "removing last factor within grace must also be 400");
+      const body = await res.json();
+      assert.equal(body.code, "MFA_LAST_FACTOR_PROTECTED");
+      assert.ok(body.gracePeriodDaysRemaining > 0, "should surface gracePeriodDaysRemaining for UX");
+      assert.ok(webauthnRepo.getById(cred.id), "credential must still exist");
+    });
+
+    await test("POST /auth/mfa/disable self-lockout guard ALSO blocks within grace", async () => {
+      // Mirror of the WebAuthn guard test — /mfa/disable must refuse for
+      // grace too. We enroll TOTP via the API (no passkey), then put the
+      // workspace into mfaRequired=1 with grace=7 leaving joinedAt at now.
+      const u = await setupUser("disable-grace-lockout");
+
+      // Enable TOTP via the API so the user has exactly one factor (TOTP, no passkey).
+      let enrollRes = await fetch(`${base}/api/v1/auth/mfa/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+      });
+      const { secret } = await enrollRes.json();
+      const code = t.generateTotpCode(secret);
+      const enableRes = await fetch(`${base}/api/v1/auth/mfa/enable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+        body: JSON.stringify({ token: code }),
+      });
+      assert.equal(enableRes.status, 200, "TOTP enable must succeed");
+
+      // Workspace requires MFA, grace = 7 days, anchored at now.
+      const db = t.getDatabase();
+      db.prepare(
+        "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 7, mfaPolicyUpdatedAt = ? WHERE id = ?"
+      ).run(new Date().toISOString(), u.user.workspaceId);
+
+      const res = await fetch(`${base}/api/v1/auth/mfa/disable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+        body: JSON.stringify({ password: u.password }),
+      });
+      assert.equal(res.status, 400, "disabling last factor within grace must be 400");
+      const body = await res.json();
+      assert.equal(body.code, "MFA_LAST_FACTOR_PROTECTED");
+      assert.ok(body.gracePeriodDaysRemaining > 0, "should surface gracePeriodDaysRemaining for UX");
+
+      // Confirm the user is still MFA-enabled.
+      const userRow = db.prepare("SELECT mfaEnabled FROM users WHERE id = ?").get(u.user.id);
+      assert.equal(userRow.mfaEnabled, 1, "TOTP must NOT have been disabled");
+    });
+
     await test("DELETE /webauthn/credentials/:id succeeds with correct password (no enforcement)", async () => {
       const u = await setupUser("route-del-ok");
       const cred = fakeCred(u.user.id);

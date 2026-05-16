@@ -51,6 +51,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  *   and that this is their last passkey, so the live `webauthnRepo.countByUser`
  *   read (which still sees the passkey since it hasn't been deleted yet)
  *   would falsely return `"allow"` and let the user lock themselves out.
+ *
+ * ### Self-lockout guard contract
+ * Callers that use this to decide whether to allow a factor-removal action
+ * (e.g. `/mfa/disable`, `DELETE /webauthn/credentials/:id`) MUST refuse the
+ * action for BOTH `"block"` and `"grace"` outcomes, not just `"block"`.
+ * Permitting removal during grace defers the lockout by N days but does not
+ * prevent it — the user signs out and is blocked at next login. Only the
+ * `"allow"` state (no workspace requires MFA) permits factor removal.
+ *
  * @returns {MfaEnforcementDecision}
  */
 export function evaluateMfaEnforcement(user, opts = {}) {

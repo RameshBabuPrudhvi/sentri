@@ -1816,21 +1816,26 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
     if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
 
     // SEC-004: self-lockout guard. If TOTP is the user's only second factor
-    // (no passkeys) and a workspace they belong to requires MFA past grace,
-    // refuse the disable. Without this, the user clears their only factor,
-    // signs out, and gets blocked at /login with no path back to Settings.
-    // Mirror of the guard in DELETE /webauthn/credentials/:id; passes
+    // (no passkeys) and a workspace they belong to requires MFA, refuse the
+    // disable — for BOTH "block" (past grace) AND "grace" (within grace).
+    // Allowing the disable during grace would just defer the lockout: the
+    // user drops to zero factors and walks into a 403 on day N+1. Mirror of
+    // the guard in DELETE /webauthn/credentials/:id; passes
     // `skipWebauthnCheck: true` so a 0-passkey user is correctly seen as
     // factor-less (the live passkey count is already 0 here, so the flag
     // is defensive — it future-proofs against accidental reordering).
     const passkeyCount = webauthnRepo.countByUser(user.id);
     if (passkeyCount === 0) {
       const enforcement = evaluateMfaEnforcement({ ...user, mfaEnabled: 0 }, { skipWebauthnCheck: true });
-      if (enforcement.state === "block") {
+      if (enforcement.state !== "allow") {
+        const inGrace = enforcement.state === "grace";
         return res.status(400).json({
-          error: "Cannot disable MFA — your workspace requires it. Enroll a passkey first, or ask an administrator to extend the grace window.",
+          error: inGrace
+            ? `Cannot disable MFA — your workspace will require it in ${enforcement.gracePeriodDaysRemaining} day${enforcement.gracePeriodDaysRemaining === 1 ? "" : "s"}. Enroll a passkey first.`
+            : "Cannot disable MFA — your workspace requires it. Enroll a passkey first, or ask an administrator to extend the grace window.",
           code: "MFA_LAST_FACTOR_PROTECTED",
           workspaceId: enforcement.workspaceId,
+          gracePeriodDaysRemaining: enforcement.gracePeriodDaysRemaining,
         });
       }
     }

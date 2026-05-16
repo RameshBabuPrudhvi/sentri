@@ -539,7 +539,13 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
     if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
 
     // Self-lockout guard: if this is the user's only factor and a workspace
-    // they belong to requires MFA past grace, refuse the delete.
+    // they belong to requires MFA, refuse the delete — for BOTH "block" (past
+    // grace) AND "grace" (within grace). Allowing the delete during grace
+    // would just defer the lockout: the user drops to zero factors and walks
+    // into a 403 on day N+1. From the platform's perspective the user is one
+    // sign-out away from being locked out either way, so we refuse and tell
+    // them to enroll a TOTP factor first. The only state that permits the
+    // delete is "allow" (no workspace requires MFA at all).
     const credCount = webauthnRepo.countByUser(user.id);
     const isLastFactor = credCount <= 1 && user.mfaEnabled !== 1;
     if (isLastFactor) {
@@ -550,11 +556,15 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
       // fire. The simulation needs to ask "what would enforcement say after
       // this delete?", not "what does it say right now?".
       const enforcement = evaluateMfaEnforcement({ ...user, mfaEnabled: 0 }, { skipWebauthnCheck: true });
-      if (enforcement.state === "block") {
+      if (enforcement.state !== "allow") {
+        const inGrace = enforcement.state === "grace";
         return res.status(400).json({
-          error: "Cannot remove your last second factor — your workspace requires MFA. Enroll a TOTP authenticator first.",
+          error: inGrace
+            ? `Cannot remove your last second factor — your workspace will require MFA in ${enforcement.gracePeriodDaysRemaining} day${enforcement.gracePeriodDaysRemaining === 1 ? "" : "s"}. Enroll a TOTP authenticator first.`
+            : "Cannot remove your last second factor — your workspace requires MFA. Enroll a TOTP authenticator first.",
           code: "MFA_LAST_FACTOR_PROTECTED",
           workspaceId: enforcement.workspaceId,
+          gracePeriodDaysRemaining: enforcement.gracePeriodDaysRemaining,
         });
       }
     }
