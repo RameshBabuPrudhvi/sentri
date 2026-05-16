@@ -687,18 +687,6 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
-    // INF-007: emit crawl-run outcome + duration histograms. Bucketed by
-    // `(type, status)` so the `completed_empty` short-circuit (no changes
-    // since baseline, or no interactive elements) surfaces as a distinct
-    // series from `completed` — operators can distinguish "crawls that ran
-    // but found nothing" from real successes without re-querying the DB.
-    // Best-effort.
-    try {
-      const labels = { type: "crawl", status: run?.status || "completed" };
-      runOutcomeTotal.inc(labels);
-      const seconds = Number(run.duration || 0) / 1000;
-      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
-    } catch { /* best-effort */ }
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     // Show both the crawl breadth AND the diff-aware generation scope when
@@ -760,6 +748,21 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
       durationMs: run.duration,
       url: project.url,
     });
+    // INF-007: emit crawl-run outcome + duration histograms. Bucketed by
+    // `(type, status)` so the `completed_empty` short-circuit (no changes
+    // since baseline, or no interactive elements) surfaces as a distinct
+    // series from `completed` — operators can distinguish "crawls that ran
+    // but found nothing" from real successes without re-querying the DB.
+    // Emitted at the END of the finalize callback (after the empty-result
+    // branch above may have flipped `run.status` to `completed_empty`) so
+    // the label reflects the final status, not the default set by
+    // `finalizeRunIfNotAborted`. Best-effort.
+    try {
+      const labels = { type: "crawl", status: run?.status || "completed" };
+      runOutcomeTotal.inc(labels);
+      const seconds = Number(run.duration || 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
     emitRunEvent(run.id, "done", { status: run.status, testsGenerated: run.tests.length });
   });
 }

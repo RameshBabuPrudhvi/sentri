@@ -20,9 +20,13 @@
  * `express`, `pg`, etc. are ever evaluated.
  *
  * This module is referenced from:
- *   - `backend/package.json` scripts (`start`, `dev`, `test`)
+ *   - `backend/package.json` scripts (`start`, `dev`, `worker`)
  *   - `backend/Dockerfile` CMD
  *   - `docker-compose.yml` worker service command
+ *
+ * The `test` script deliberately does NOT preload this module — tests don't
+ * need OTel auto-instrumentation, and skipping it keeps the test harness
+ * free of phantom spans / Sentry init noise.
  *
  * ### Safety contract
  * - `initOpenTelemetry()` is a no-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset.
