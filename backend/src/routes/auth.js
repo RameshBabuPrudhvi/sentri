@@ -50,6 +50,7 @@ import { encryptString, decryptString } from "../utils/credentialEncryption.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
+import { SYSTEM_WORKSPACE_ID } from "../constants/systemWorkspace.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 import {
   signJwt, getJwtSecret, revokedTokens,
@@ -770,31 +771,20 @@ router.post("/login", async (req, res) => {
     const valid = user?.passwordHash ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
 
     if (!user || !valid) {
-      // SEC-007: when the email matches a known account, snapshot the user's
-      // primary workspace so the failed-login row appears in that workspace's
-      // audit log. With `workspaceId: null` the row is invisible to the
-      // workspace-scoped `GET /workspaces/:id/audit-log` endpoint that admins
-      // use for security monitoring. For unknown emails (`user == null`) the
-      // workspace is genuinely unresolvable and `null` is correct.
-      //
-      // KNOWN GAP — credential-stuffing probes against UNKNOWN emails produce
-      // `workspaceId: null` rows that are invisible to:
-      //   - `/api/v1/activities`           (system.js:80, workspace-scoped)
-      //   - `/api/v1/workspaces/:id/audit-log` (system.js:141, workspace-scoped)
-      //   - The SIEM forwarder            (activityLogger.js:83 short-circuits
-      //                                    when `activity.workspaceId` is null)
-      // The rows are persisted in SQLite but currently have no surfacing path.
-      // Direct DB query or a server-side log scrape is the only way to see
-      // them today.
-      //
-      // The fix needs a dedicated "system events" pseudo-workspace (or a new
-      // admin-only `/system/security-events` route that intentionally
-      // bypasses the workspace filter for auth events with `userId IS NULL`).
-      // Tracked as a follow-up — the tenancy implications (which admins see
-      // cross-tenant probe data? does the SIEM forwarder broadcast to every
-      // configured target, or pick a "system" one?) deserve their own design
-      // pass rather than a one-line scoping change here.
-      const failedWorkspaceId = user ? workspaceRepo.getByUserId(user.id)?.[0]?.id || null : null;
+      // SEC-007: route the failed-login row so it's reachable from an admin
+      // UI, never `workspaceId: null` (which is invisible to every scoped
+      // query). Three cases:
+      //   1. Known email → snapshot the user's primary workspace; the row
+      //      appears in that workspace's audit log.
+      //   2. Unknown email (credential-stuffing probe) → tag with the
+      //      `SYSTEM_WORKSPACE_ID` sentinel so admins can list it via
+      //      `GET /api/v1/system/security-events`. The sentinel is a fixed
+      //      string that can never collide with a real workspace UUID, so
+      //      the row cannot leak into any tenant's workspace-scoped view.
+      //   3. Empty-string email → treat as case 2 for safety.
+      const failedWorkspaceId = user
+        ? workspaceRepo.getByUserId(user.id)?.[0]?.id || SYSTEM_WORKSPACE_ID
+        : SYSTEM_WORKSPACE_ID;
       logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: failedWorkspaceId });
       return res.status(401).json({ error: "Invalid email or password." });
     }

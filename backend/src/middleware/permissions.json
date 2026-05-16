@@ -238,6 +238,11 @@
       "source": "backend/src/routes/system.js",
       "$comment": "SEC-007 \u2014 walks the prevHash chain for the caller's workspace. No-op (chainDisabled:true) when AUDIT_HASH_CHAIN is unset."
     },
+    "GET /api/v1/system/security-events": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 lists deployment-wide security events tagged with the SYSTEM_WORKSPACE_ID sentinel (chiefly auth.login.failed against unknown emails \u2014 credential-stuffing probes that fire before a tenant can be resolved). Cross-tenant by design; the workspace-scoped routes naturally exclude these rows. Defence-in-depth: rejects callers whose own workspaceId equals the sentinel."
+    },
     "GET /api/v1/workspaces/:workspaceId/audit-log": {
       "role": "admin",
       "source": "backend/src/routes/system.js",

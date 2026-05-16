@@ -365,6 +365,15 @@ export default function AuditLog() {
   const [dlqLoading, setDlqLoading] = useState(false);
   const [replayingId, setReplayingId] = useState(null);
 
+  // ── System security events (SEC-007) ────────────────────────────────────────
+  // Cross-tenant deployment-wide events with workspaceId = SYSTEM_WORKSPACE_ID
+  // (chiefly auth.login.failed against unknown emails — credential-stuffing
+  // probes that fire before a tenant can be resolved). Surfaced via a
+  // dedicated admin-only panel rather than the workspace-scoped feed.
+  const [sysEventsOpen, setSysEventsOpen] = useState(false);
+  const [sysEventsRows, setSysEventsRows] = useState(null);
+  const [sysEventsLoading, setSysEventsLoading] = useState(false);
+
   // ── SIEM config state (SEC-007 Part C) ─────────────────────────────────────
   // Lazy-loaded — only fetched when the panel is opened. `null` means
   // "panel never opened or no config exists yet".
@@ -659,6 +668,22 @@ export default function AuditLog() {
     }
   }
 
+  // ── System security events (SEC-007) ────────────────────────────────────────
+  async function openSystemEvents() {
+    setSysEventsOpen(true);
+    if (sysEventsRows !== null) return; // already loaded
+    setSysEventsLoading(true);
+    try {
+      const res = await api.getSystemSecurityEvents({ limit: 200 });
+      setSysEventsRows(Array.isArray(res?.rows) ? res.rows : []);
+    } catch (err) {
+      addNotification({ type: "error", message: err.message || "Failed to load system events." });
+      setSysEventsRows([]);
+    } finally {
+      setSysEventsLoading(false);
+    }
+  }
+
   // ── SIEM config handlers (SEC-007 Part C) ──────────────────────────────────
   async function openSiemConfig() {
     if (!workspaceId) return;
@@ -789,14 +814,7 @@ export default function AuditLog() {
           >
             {verifying ? "Verifying…" : "Verify chain"}
           </button>
-          {/* DLQ inspector — opens the SIEM dead-letter panel below. */}
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={openDlq}
-            title="Inspect SIEM dead-letter queue"
-          >
-            DLQ{dlqRows && dlqRows.length > 0 ? ` (${dlqRows.length})` : ""}
-          </button>
+
           {/* SIEM forwarder configuration — admin-only per-workspace. */}
           <button
             className="btn btn-ghost btn-sm"
@@ -885,6 +903,48 @@ export default function AuditLog() {
                         {replayingId === r.id ? "Replaying…" : "Replay"}
                       </button>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── System security events panel (SEC-007) ── */}
+      {sysEventsOpen && (
+        <div className="card card-padded-sm al-dlq" role="region" aria-label="System security events">
+          <div className="al-dlq__header">
+            <strong>System security events</strong>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setSysEventsOpen(false)}
+              aria-label="Close system events panel"
+            >
+              ✕
+            </button>
+          </div>
+          {sysEventsLoading && <div className="al-dlq__empty">Loading…</div>}
+          {!sysEventsLoading && sysEventsRows !== null && sysEventsRows.length === 0 && (
+            <div className="al-dlq__empty">No deployment-wide security events.</div>
+          )}
+          {!sysEventsLoading && sysEventsRows && sysEventsRows.length > 0 && (
+            <table className="al-dlq__table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Event</th>
+                  <th>Email / user</th>
+                  <th>IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sysEventsRows.map((r) => (
+                  <tr key={r.id}>
+                    <td>{fmtDateTime(r.createdAt)}</td>
+                    <td><code>{r.type}</code></td>
+                    <td>{r.userName || "—"}</td>
+                    <td className="al-dlq__error" title={r.userAgent || ""}>{r.ipAddress || "—"}</td>
                   </tr>
                 ))}
               </tbody>

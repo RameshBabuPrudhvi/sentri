@@ -127,6 +127,36 @@ async function main() {
 
       const row = latestRow(db, u.user.id, "auth.login.failed");
       assertCaptured(row, "auth.login.failed");
+      // SEC-007: row routes to the user's workspace, never null.
+      assert.ok(row.workspaceId, "workspaceId must not be null for a known user");
+      assert.notEqual(row.workspaceId, "__system__",
+        "known-user probes route to the user's workspace, not the system sentinel");
+    });
+
+    await test("auth.login.failed against UNKNOWN email routes to SYSTEM_WORKSPACE_ID", async () => {
+      // SEC-007: credential-stuffing probes against emails that don't match
+      // any account must still be discoverable by an admin. They land in the
+      // system sentinel workspace (never null) so they're queryable via
+      // `GET /api/v1/system/security-events` without leaking into any real
+      // tenant's workspace-scoped audit log.
+      const db = t.getDatabase();
+      const unknownEmail = `nobody-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@nowhere.test`;
+      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": TEST_UA },
+        body: JSON.stringify({ email: unknownEmail, password: "AnyPassword1!" }),
+      });
+      assert.equal(res.status, 401);
+
+      const row = db.prepare(
+        "SELECT * FROM activities WHERE type = 'auth.login.failed' AND userName = ? ORDER BY createdAt DESC, id DESC LIMIT 1",
+      ).get(unknownEmail);
+      assert.ok(row, "an auth.login.failed row must exist for the unknown email");
+      assert.equal(row.userId, null, "userId is null for unknown emails (no account)");
+      assert.equal(row.workspaceId, "__system__",
+        "unknown-email probes route to the SYSTEM_WORKSPACE_ID sentinel, never null");
+      assert.ok(row.ipAddress, "ipAddress is still captured for unknown-email probes");
+      assert.equal(row.userAgent, TEST_UA, "userAgent is still captured");
     });
 
     // ── auth.logout ──────────────────────────────────────────────────────

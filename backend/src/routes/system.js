@@ -31,6 +31,7 @@ import { actor } from "../utils/actor.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { activeTaskCount } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
+import { SYSTEM_WORKSPACE_ID } from "../constants/systemWorkspace.js";
 
 const router = Router();
 
@@ -117,6 +118,59 @@ router.get("/audit/verify", requireRole("admin"), (req, res) => {
     // a stable error code the frontend can branch on.
     console.error(formatLogLine("error", null, `[audit/verify] ${err.message}`));
     return res.status(500).json({ error: "Audit chain verification unavailable.", code: "AUDIT_VERIFY_FAILED" });
+  }
+});
+
+/**
+ * SEC-007: list system-scoped security events (workspaceId = SYSTEM_WORKSPACE_ID).
+ *
+ * These are audit rows that fire BEFORE a tenant can be resolved — chiefly
+ * `auth.login.failed` against unknown emails (credential-stuffing probes
+ * against the deployment as a whole). Routing them to the system sentinel
+ * workspace keeps them queryable without leaking any tenant's existence
+ * via the side-channel of "which workspace did the row land in?".
+ *
+ * Cross-tenant by design — only deployment-level admins should see this
+ * surface. We gate on `requireRole("admin")` AND require that the caller's
+ * own workspace is non-system (a defence-in-depth check; no real workspace
+ * uses the sentinel ID, but listing this route on it would be confusing).
+ *
+ * Reuses `getFiltered` rather than `getWorkspaceAuditLog` because the
+ * latter's cursor pagination and meta-audit emission make sense for
+ * tenant audit logs, not the deployment-wide security-events stream.
+ *
+ * @route GET /api/v1/system/security-events
+ */
+router.get("/system/security-events", requireRole("admin"), (req, res) => {
+  try {
+    // Defence-in-depth: the system sentinel is never a real workspace, so
+    // a request whose own scope IS the sentinel is malformed (or an attempt
+    // to spoof access). Reject explicitly.
+    if (req.workspaceId === SYSTEM_WORKSPACE_ID) {
+      return res.status(403).json({
+        error: "Caller workspace cannot be the system sentinel.",
+        code: "SYSTEM_SCOPE_MISUSE",
+      });
+    }
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(1000, rawLimit)) : 200;
+    const rawOffset = Number.parseInt(req.query.offset, 10);
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : undefined;
+    const rows = activityRepo.getFiltered({
+      workspaceId: SYSTEM_WORKSPACE_ID,
+      type: req.query.type || undefined,
+      after: req.query.after || undefined,
+      before: req.query.before || undefined,
+      limit,
+      offset,
+    });
+    return res.json({ rows, count: rows.length });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[system/security-events] ${err.message}`));
+    return res.status(500).json({
+      error: "System security events unavailable.",
+      code: "SYSTEM_SECURITY_EVENTS_FAILED",
+    });
   }
 });
 

@@ -947,6 +947,15 @@ export const api = {
    */
   verifyAuditChain: () => req("GET", "/audit/verify"),
   /**
+   * SEC-007: list deployment-wide security events (workspaceId =
+   * SYSTEM_WORKSPACE_ID sentinel). Surfaces rows that have no resolvable
+   * tenant — chiefly `auth.login.failed` against unknown emails. Admin-only,
+   * cross-tenant by design.
+   * @param {{ type?: string, after?: string, before?: string, limit?: number, offset?: number }} [filters]
+   * @returns {Promise<{ rows: Object[], count: number }>}
+   */
+  getSystemSecurityEvents: (filters = {}) => req("GET", `/system/security-events${toQuery(filters)}`),
+  /**
    * SEC-007: list SIEM dead-letter queue entries for the workspace. Used by
    * the AuditLog DLQ inspector to render the "N retry-failed" badge and the
    * per-row replay actions.
