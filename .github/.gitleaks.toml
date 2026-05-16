@@ -45,6 +45,10 @@ useDefault = true
     # row. Allowlisted so the scanner doesn't flag the test fixture as a real
     # credential (same pattern as the OpenAI-compat tests above).
     "backend/tests/audit-auth-events.test.js",
+    # SEC-007 — exercises the SIEM forwarder's HMAC-signing path with a fake
+    # workspace `hmacSecret`. The string is a literal test fixture asserted
+    # against round-tripped encryption, never a real credential.
+    "backend/tests/audit-siem-forwarder.test.js",
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth
