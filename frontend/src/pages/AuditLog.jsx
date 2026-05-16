@@ -35,6 +35,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Download, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
 import { API_PATH } from "../utils/apiBase.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -418,6 +419,66 @@ function ActivityEntry({ entry }) {
  *
  * @param {{ label: string, items: object[] }} props
  */
+/**
+ * SEC-007: dropdown export menu — single "Export ▾" button with a
+ * format picker. Mirrors `components/project/ProjectExportMenu.jsx`
+ * (the established pattern used on Tests + ProjectDetail) so admins
+ * see a consistent shape across the app.
+ *
+ * The two CSV/NDJSON buttons that previously cluttered the header are
+ * replaced by this one component. Both formats remain accessible — they
+ * just live behind one click of disclosure now.
+ *
+ * @param {Object} props
+ * @param {boolean} props.disabled — Disables the trigger when there are
+ *   no rows to export (mirrors the previous button-level disabled state).
+ * @param {Function} props.onExport — Called with `"csv"` or `"ndjson"`.
+ *   The caller (`AuditLog`) handles the actual fetch + meta-audit emission;
+ *   this component is purely presentational.
+ */
+function AuditExportMenu({ disabled, onExport }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        title="Download the current page as CSV or NDJSON (rate-limited 10 / 15 min per admin)"
+        style={{ gap: 4 }}
+      >
+        <Download size={12} /> Export <ChevronDown size={10} />
+      </button>
+      {open && (
+        <>
+          {/* Backdrop closes on outside click — same pattern as ProjectExportMenu. */}
+          <div className="pd-popover-backdrop" onClick={() => setOpen(false)} />
+          <div className="pd-dropdown" style={{ top: "calc(100% + 4px)", right: 0 }}>
+            <div className="pd-dropdown-heading">Audit-log export</div>
+            <button
+              onClick={() => { setOpen(false); onExport("csv"); }}
+              className="pd-dropdown-item"
+              style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
+            >
+              <div className="pd-dropdown-item-title">CSV</div>
+              <div className="pd-dropdown-item-desc">Spreadsheet-friendly · `createdAt` first column</div>
+            </button>
+            <button
+              onClick={() => { setOpen(false); onExport("ndjson"); }}
+              className="pd-dropdown-item"
+              style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
+            >
+              <div className="pd-dropdown-item-title">NDJSON</div>
+              <div className="pd-dropdown-item-desc">SIEM-importer friendly · one event per line</div>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DayGroup({ label, items }) {
   return (
     <div className="al-day-group">
@@ -1001,21 +1062,15 @@ export default function AuditLog() {
           >
             SIEM
           </button>
-          {/* Server-side exports — meta-audited + rate-limited (10/15min). */}
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => handleExport("csv")}
+          {/* Server-side exports — meta-audited + rate-limited (10/15min).
+              Single "Export ▾" button with a format-picker dropdown so the
+              header doesn't bloat with one button per format. Mirrors the
+              ProjectExportMenu pattern (`components/project/ProjectExportMenu.jsx`)
+              used on Tests + ProjectDetail. */}
+          <AuditExportMenu
             disabled={rows.length === 0}
-          >
-            Export CSV
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => handleExport("ndjson")}
-            disabled={rows.length === 0}
-          >
-            Export NDJSON
-          </button>
+            onExport={handleExport}
+          />
         </div>
       </div>
 
