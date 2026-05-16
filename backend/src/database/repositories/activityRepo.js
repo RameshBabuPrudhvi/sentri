@@ -12,8 +12,8 @@ import { getDatabase } from "../sqlite.js";
 export function create(activity) {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName, workspaceId, meta)
-    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName, @workspaceId, @meta)
+    INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName, workspaceId, meta, ipAddress, userAgent, prevHash)
+    VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName, @workspaceId, @meta, @ipAddress, @userAgent, @prevHash)
   `).run({
     id: activity.id,
     type: activity.type,
@@ -31,6 +31,9 @@ export function create(activity) {
     // object; readers below re-parse it. Null when absent so the column is
     // genuinely empty rather than the string "null".
     meta: activity.meta != null ? JSON.stringify(activity.meta) : null,
+    ipAddress: activity.ipAddress || null,
+    userAgent: activity.userAgent || null,
+    prevHash: activity.prevHash || null,
   });
 }
 
@@ -274,4 +277,28 @@ export function clearByWorkspaceId(workspaceId) {
   const db = getDatabase();
   const info = db.prepare("DELETE FROM activities WHERE workspaceId = ?").run(workspaceId);
   return info.changes;
+}
+
+
+export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom, dateTo, ipAddress, limit = 200, offset = 0 } = {}) {
+  const db = getDatabase();
+  let sql = "SELECT * FROM activities WHERE workspaceId = ?";
+  const params = [workspaceId];
+  if (userId) { sql += " AND userId = ?"; params.push(userId); }
+  if (types?.length) { sql += ` AND type IN (${types.map(() => '?').join(',')})`; params.push(...types); }
+  if (dateFrom) { sql += " AND createdAt >= ?"; params.push(dateFrom); }
+  if (dateTo) { sql += " AND createdAt <= ?"; params.push(dateTo); }
+  if (ipAddress) { sql += " AND ipAddress = ?"; params.push(ipAddress); }
+  sql += " ORDER BY createdAt DESC LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+  return db.prepare(sql).all(...params).map(hydrate);
+}
+
+export function verifyAuditChain(workspaceId) {
+  const db = getDatabase();
+  const rows = db.prepare("SELECT id, prevHash FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC").all(workspaceId);
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i].prevHash !== rows[i - 1].prevHash) return { verified: false, firstBrokenRowId: rows[i].id, total: rows.length };
+  }
+  return { verified: true, total: rows.length };
 }

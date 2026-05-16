@@ -233,6 +233,18 @@
       "role": "admin",
       "source": "backend/src/routes/system.js:205"
     },
+    "GET /api/v1/audit/verify": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js"
+    },
+    "GET /api/v1/workspaces/:workspaceId/audit-log": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js"
+    } ,
+    "POST /api/v1/workspaces/:id/audit-log/dlq/:dlqId/replay": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js"
+    },
     "GET /api/v1/settings/github-checks": {
       "role": "qa_lead",
       "source": "backend/src/routes/settings.js"

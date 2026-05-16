@@ -57,6 +57,38 @@ router.get("/activities", (req, res) => {
   res.json(activities);
 });
 
+
+router.get("/audit/verify", requireRole("admin"), (req, res) => {
+  if (process.env.AUDIT_HASH_CHAIN !== "true") return res.json({ verified: true, chainDisabled: true });
+  return res.json(activityRepo.verifyAuditChain(req.workspaceId));
+});
+
+router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), (req, res) => {
+  const workspaceId = req.params.workspaceId;
+  const types = Array.isArray(req.query.type) ? req.query.type : (req.query.type ? [req.query.type] : []);
+  const rows = activityRepo.getWorkspaceAuditLog(workspaceId, {
+    userId: req.query.userId || undefined,
+    types,
+    dateFrom: req.query.dateFrom || undefined,
+    dateTo: req.query.dateTo || undefined,
+    ipAddress: req.query.ipAddress || undefined,
+    limit: Number.parseInt(req.query.limit, 10) || 200,
+    offset: Number.parseInt(req.query.offset, 10) || 0,
+  });
+  if (req.query.format === "ndjson") {
+    res.setHeader("Content-Type", "application/x-ndjson");
+    return res.send(rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+  }
+  if (req.query.format === "csv") {
+    const header = "timestamp,userId,userName,type,meta,ipAddress,userAgent,workspaceId";
+    const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+    const body = rows.map((r) => [r.createdAt, r.userId, r.userName, r.type, JSON.stringify(r.meta ?? null), r.ipAddress, r.userAgent, r.workspaceId].map(esc).join(",")).join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    return res.send(`${header}\n${body}\n`);
+  }
+  res.json({ rows, nextOffset: rows.length ? (Number.parseInt(req.query.offset,10)||0)+rows.length : null });
+});
+
 // ─── URL reachability test ────────────────────────────────────────────────────
 
 router.post("/test-connection", requireRole("qa_lead"), async (req, res) => {
@@ -212,6 +244,9 @@ router.delete("/data/runs", requireRole("admin"), (req, res) => {
 });
 
 router.delete("/data/activities", requireRole("admin"), (req, res) => {
+  if (process.env.DANGER_ALLOW_AUDIT_PURGE !== "true") {
+    return res.status(403).json({ error: "Audit purge is disabled.", code: "AUDIT_PURGE_DISABLED" });
+  }
   const count = activityRepo.clearByWorkspaceId(req.workspaceId);
   res.json({ ok: true, cleared: count });
 });

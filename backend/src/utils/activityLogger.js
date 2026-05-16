@@ -39,7 +39,7 @@ import { formatLogLine } from "./logFormatter.js";
  * @param {Object}      [opts.meta]      - Structured metadata persisted as JSON (migration 018). E.g. `{ score, threshold }` on auto-approval, `{ wasAutoApproved }` on revoke.
  * @returns {Object}    The created activity record.
  */
-export function logActivity({ type, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId, meta }) {
+export function logActivity({ type, req, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId, meta }) {
   // Warn when a project-scoped activity is logged without a workspaceId.
   // Activities with workspaceId=NULL become orphaned — invisible to
   // workspace-scoped queries (/api/activities, /api/data/activities).
@@ -63,6 +63,9 @@ export function logActivity({ type, projectId, projectName, testId, testName, de
     userName: userName || null,
     workspaceId: workspaceId || null,
     meta: meta || null,
+    ipAddress: req?.ip || null,
+    userAgent: req?.get?.("user-agent") || null,
+    prevHash: null,
   };
   activityRepo.create(activity);
   return activity;

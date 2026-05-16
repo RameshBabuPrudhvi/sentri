@@ -755,6 +755,7 @@ router.post("/login", async (req, res) => {
     const valid = user?.passwordHash ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
 
     if (!user || !valid) {
+      logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: null });
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
@@ -801,6 +802,7 @@ router.post("/login", async (req, res) => {
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
@@ -820,6 +822,7 @@ router.post("/login", async (req, res) => {
 router.post("/logout", requireAuth, (req, res) => {
   const { jti, exp } = req.authUser;
   if (jti) revokedTokens.set(jti, exp);
+  logActivity({ type: "auth.logout", req, userId: req.authUser.sub, userName: req.authUser.name || null, workspaceId: req.workspaceId || req.authUser.workspaceId || null });
   clearAuthCookies(res);
   return res.json({ message: "Signed out successfully." });
 });
@@ -1220,6 +1223,7 @@ router.post("/reset-password", async (req, res) => {
     console.log(`[auth/reset-password] Password reset for ${user.email}`);
   }
 
+  logActivity({ type: "auth.password.reset", req, userId: user.id, userName: user.name || user.email, workspaceId: req.workspaceId || null });
   return res.json({ message: "Password has been reset successfully. You can now sign in." });
 });
 
@@ -1295,6 +1299,7 @@ router.get("/github/callback", async (req, res) => {
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
@@ -1368,6 +1373,7 @@ router.get("/google/callback", async (req, res) => {
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {

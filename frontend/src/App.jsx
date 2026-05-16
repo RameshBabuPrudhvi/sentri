@@ -16,6 +16,7 @@ const NewProject = lazy(() => import("./pages/NewProject.jsx"));
 const RunDetail = lazy(() => import("./pages/RunDetail.jsx"));
 const TestDetail = lazy(() => import("./pages/TestDetail.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
+const AuditLog = lazy(() => import("./pages/AuditLog.jsx"));
 const Projects = lazy(() => import("./pages/Projects.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Runs = lazy(() => import("./pages/Runs.jsx"));
@@ -68,6 +69,7 @@ export default function App() {
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                <Route path="/settings/compliance" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />

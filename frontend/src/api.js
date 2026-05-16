@@ -40,6 +40,17 @@ const TIMEOUT_LONG    = 300_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
+function toQuery(obj = {}) {
+  const params = new URLSearchParams();
+  for (const [k,v] of Object.entries(obj)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((item) => params.append(k, String(item)));
+    else params.set(k, String(v));
+  }
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
 /**
  * Handle a 401 Unauthorized response by clearing the stored user profile
  * and redirecting to the login page.
@@ -910,6 +921,10 @@ export const api = {
    * @returns {Promise<{totalMembers: number, enrolled: number, notEnrolled: number, members: Array<{userId: string, name: string, email: string, role: string, mfaEnabled: boolean}>}>}
    */
   getWorkspaceMfaCompliance: () => req("GET", "/workspaces/current/mfa-compliance"),
+  getWorkspaceAuditLog: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery(filters)}`),
+  exportWorkspaceAuditLog: (workspaceId, filters = {}, format = "csv") => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery({ ...filters, format })}`),
+  verifyAuditChain: () => req("GET", "/audit/verify"),
+  replayAuditDlq: (workspaceId, dlqId) => req("POST", `/workspaces/${workspaceId}/audit-log/dlq/${dlqId}/replay`),
 
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**
