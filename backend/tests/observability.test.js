@@ -60,6 +60,17 @@ async function main() {
     OTEL_EXPORTER_OTLP_ENDPOINT: "",
     METRICS_SCRAPE_KEY: TEST_SCRAPE_KEY,
   });
+
+  // Mount `/health` on the test app so we exercise the real production code
+  // path for X-Request-Id propagation. `t.app` exposes the appSetup.js
+  // middleware (request-id middleware + /metrics route) but the `/health`
+  // endpoint itself is registered in `backend/src/index.js` — which we
+  // deliberately don't boot here (it would pull in DB init, BullMQ worker,
+  // scheduler, SSE listeners, …). Mounting a one-line stub of the same
+  // route gives the test a real 200-response surface that the request-id
+  // middleware sits in front of, exactly mirroring the production wiring.
+  t.app.get("/health", (_req, res) => res.json({ ok: true }));
+
   const server = t.app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -70,27 +81,20 @@ async function main() {
     });
 
     await runner.test("X-Request-Id header is minted on responses when no inbound header", async () => {
-      // The X-Request-Id middleware runs BEFORE any route in the chain
-      // (`appSetup.js:119-123`), so the header lands on every response —
-      // including 404s. We hit `/__no_route__` deliberately because the
-      // imported `app` only carries `appSetup.js` middleware (the `/health`
-      // and `/api/v1/*` routes are registered in `index.js`, which we don't
-      // boot here to keep the test light). Status is irrelevant; we only
-      // care that the header is set on every response.
-      const res = await fetch(`${base}/__observability_test__`);
+      const res = await fetch(`${base}/health`);
+      assert.equal(res.status, 200);
       const id = res.headers.get("x-request-id");
-      assert.ok(id, `response missing X-Request-Id header (status=${res.status})`);
+      assert.ok(id, "response missing X-Request-Id header");
       // UUID v4 shape — `createRequestId` uses `crypto.randomUUID()`.
       assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     });
 
     await runner.test("X-Request-Id header echoes inbound value verbatim", async () => {
-      // Same rationale as the previous test — middleware runs before
-      // routing so 404s carry the echoed inbound id.
       const inbound = "req-inbound-correlation-id-9876";
-      const res = await fetch(`${base}/__observability_test__`, {
+      const res = await fetch(`${base}/health`, {
         headers: { "X-Request-Id": inbound },
       });
+      assert.equal(res.status, 200);
       assert.equal(res.headers.get("x-request-id"), inbound);
     });
 
