@@ -287,6 +287,7 @@ router.post("/register/verify", requireAuth, async (req, res) => {
 
     logActivity({
       type: "auth.mfa.webauthn_registered",
+      req,
       detail: "Registered a WebAuthn credential.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,
@@ -407,6 +408,7 @@ router.post("/authenticate/verify", async (req, res) => {
     if (!stored || stored.userId !== entry.userId) {
       logActivity({
         type: "auth.mfa.verify_failed",
+        req,
         detail: "WebAuthn assertion for unknown credential.",
         userId: entry.userId,
         workspaceId: entry.workspaceId,
@@ -436,6 +438,7 @@ router.post("/authenticate/verify", async (req, res) => {
     } catch (verifyErr) {
       logActivity({
         type: "auth.mfa.verify_failed",
+        req,
         detail: "WebAuthn assertion failed verification.",
         userId: entry.userId,
         workspaceId: entry.workspaceId,
@@ -457,6 +460,7 @@ router.post("/authenticate/verify", async (req, res) => {
     if (newCounter !== 0 && newCounter <= stored.counter) {
       logActivity({
         type: "auth.mfa.verify_failed",
+        req,
         detail: "WebAuthn clone detected — counter rollback.",
         userId: entry.userId,
         workspaceId: entry.workspaceId,
@@ -479,6 +483,7 @@ router.post("/authenticate/verify", async (req, res) => {
 
     logActivity({
       type: "auth.mfa.webauthn_verified",
+      req,
       detail: "WebAuthn login verified.",
       userId: user.id, userName: user.name || user.email,
       // SEC-004: attribute to the workspace snapshotted at /login time so the
@@ -583,6 +588,7 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
 
     logActivity({
       type: "auth.mfa.webauthn_removed",
+      req,
       detail: "Removed a WebAuthn credential.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,

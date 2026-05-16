@@ -1586,6 +1586,7 @@ router.post("/mfa/enroll", requireAuth, (req, res) => {
 
     logActivity({
       type: "auth.mfa.enroll_started",
+      req,
       detail: "Started TOTP enrollment.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,
@@ -1638,6 +1639,7 @@ router.post("/mfa/enable", requireAuth, (req, res) => {
     if (!verifyTotp(token, secret)) {
       logActivity({
         type: "auth.mfa.verify_failed",
+        req,
         detail: "Invalid TOTP code during enable.",
         userId: user.id, userName: user.name || user.email,
         workspaceId: req.authUser.workspaceId,
@@ -1650,6 +1652,7 @@ router.post("/mfa/enable", requireAuth, (req, res) => {
 
     logActivity({
       type: "auth.mfa.enabled",
+      req,
       detail: "Enabled TOTP MFA.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,
@@ -1775,6 +1778,7 @@ router.post("/mfa/verify", async (req, res) => {
     if (!ok) {
       logActivity({
         type: "auth.mfa.verify_failed",
+        req,
         detail: "Invalid MFA code during login.",
         userId: user.id, userName: user.name || user.email,
         workspaceId: pending.workspaceId,
@@ -1796,6 +1800,7 @@ router.post("/mfa/verify", async (req, res) => {
       userRepo.update(user.id, { mfaRecoveryCodes: updatedRecovery, updatedAt: new Date().toISOString() });
       logActivity({
         type: "auth.mfa.recovery_code_consumed",
+        req,
         detail: "Consumed a recovery code during MFA login.",
         userId: user.id, userName: user.name || user.email,
         workspaceId: pending.workspaceId,
@@ -1804,6 +1809,7 @@ router.post("/mfa/verify", async (req, res) => {
     } else {
       logActivity({
         type: "auth.mfa.login_verified",
+        req,
         detail: "MFA login verified.",
         userId: user.id, userName: user.name || user.email,
         workspaceId: pending.workspaceId,
@@ -1867,6 +1873,7 @@ router.post("/mfa/recovery-codes/regenerate", requireAuth, async (req, res) => {
 
     logActivity({
       type: "auth.mfa.recovery_codes_regenerated",
+      req,
       detail: "Regenerated MFA recovery codes.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,
@@ -1936,6 +1943,7 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
 
     logActivity({
       type: "auth.mfa.disabled",
+      req,
       detail: "Disabled MFA.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: req.authUser.workspaceId,
