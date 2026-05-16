@@ -1684,3 +1684,12 @@ A release is QA-approved only when **all** of the following are true:
 - Do NOT mark a flow as passing until **every** expected result is observed.
 
 - Run Detail root cause checks: verify panel appears when `rootCauses.length >= 1`; defaults collapsed for single cluster; auto-expands for 2+ clusters.
+
+
+### 🚚 Distributed Runner (AUTO-008)
+
+1. Start stack with Redis + multiple workers: `docker compose --profile redis up --scale worker=4`.
+2. Trigger a sharded run (`shards: 4`) and confirm queue drains while workers process in parallel.
+3. Stop one worker container during execution; confirm run continues and completes via remaining workers (retry if needed).
+4. Open Dashboard and verify Runner Mode = Distributed with queue depth + active/idle worker metrics.
+5. Disable Redis and confirm Dashboard falls back to Single-process mode without errors.

@@ -36,15 +36,25 @@
  * `shardCount = 1` so no shard badge is shown (BUG-0001 — discovered during
  * the CAP-002 review pass).
  *
- * `shards` is clamped to `[1, MAX_WORKERS]` server-side regardless of input
- * type. Non-numeric / negative / fractional values fall back to `1`.
+ * `shards` is clamped to `[1, WORKER_CONCURRENCY]` server-side regardless of
+ * input type. Non-numeric / negative / fractional values fall back to `1`.
+ *
+ * The upper bound is read from `WORKER_CONCURRENCY` with `MAX_WORKERS` as a
+ * backward-compatible fallback — the same precedence the BullMQ worker uses
+ * in `backend/src/workers/runWorker.js`. Without this mirror, a deployment
+ * that sets `WORKER_CONCURRENCY=8` (AUTO-008's preferred knob) but leaves
+ * `MAX_WORKERS` unset would silently clamp `shards: 8` requests down to 2,
+ * wasting 6 worker slots.
  *
  * @param {unknown}     shardsInput  - Raw `req.body.shards` (any type).
  * @param {number|null} [dialsParallelWorkers] - Validated dials request, may be undefined.
  * @returns {{ shardCount: number, parallelWorkers: number, maxWorkers: number }}
  */
 export function normalizeShardConfig(shardsInput, dialsParallelWorkers) {
-  const maxWorkers = Math.max(1, parseInt(process.env.MAX_WORKERS || "2", 10) || 2);
+  const maxWorkers = Math.max(
+    1,
+    parseInt(process.env.WORKER_CONCURRENCY || process.env.MAX_WORKERS || "2", 10) || 2,
+  );
   const normalizedShards = Number.isFinite(Number(shardsInput))
     ? Math.max(1, Math.min(maxWorkers, Math.trunc(Number(shardsInput))))
     : null;

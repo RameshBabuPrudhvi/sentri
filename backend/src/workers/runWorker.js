@@ -150,7 +150,7 @@ export function abortAllShardsForRun(runId) {
   });
 }
 
-const MAX_WORKERS = parseInt(process.env.MAX_WORKERS, 10) || 2;
+const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || process.env.MAX_WORKERS, 10) || 2;
 
 /**
  * Process a single run job from the queue.
@@ -859,7 +859,7 @@ export function startWorker() {
         url: process.env.REDIS_URL,
         maxRetriesPerRequest: null,
       },
-      concurrency: MAX_WORKERS,
+      concurrency: WORKER_CONCURRENCY,
     });
 
     _worker.on("failed", (job, err) => {
@@ -873,7 +873,7 @@ export function startWorker() {
     });
 
     console.log(formatLogLine("info", null,
-      `[worker] BullMQ worker started (concurrency: ${MAX_WORKERS})`));
+      `[worker] BullMQ worker started (concurrency: ${WORKER_CONCURRENCY})`));
 
     // CAP-002 Phase 2 (Prerequisite #5) — subscribe to the cross-process
     // run-abort channel so an abort triggered on another replica reaches

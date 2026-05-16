@@ -1,75 +1,81 @@
 # NEXT.md — Current Sprint Target
 
-> **For agents:** Read this file only. Do not read ROADMAP.md unless you need context on items
-> beyond the current PR. Everything you need to start work is here.
+> **Agents:** Start here. Everything needed to begin the current PR is in this file. Open `ROADMAP.md` only to look up a specific item by ID or review phase context.
 >
-> **For humans:** Update this file when a PR ships. Move the completed item to ROADMAP.md ✅ table,
-> promote the next item from the queue below, and rewrite the "Current PR" block.
-
-> **Bundling guidance — for agents writing code:** When working on the Current PR, if you
-> spot adjacent items in the Queue (or in `ROADMAP.md`) that share files, infrastructure,
-> or a natural review boundary with the in-flight scope, **flag them as bundling candidates
-> in your PR description** rather than expanding the PR mid-flight. Good bundling signals:
-> (1) the items touch the same module / shared abstraction, so reviewing them together
-> reduces churn (e.g. CAP-004 + MET-001 share `<TrendChart>`); (2) one item validates
-> another end-to-end (e.g. a CI guard validates the convention it documents);
-> (3) both are S/XS effort and skipping a hand-off cycle saves more than it costs in
-> review surface (e.g. AUTO-017.3 + PROC-001 in slot 2). **Bad** bundling signals: items
-> in different phases, items that grow the PR past M effort, items that change the
-> reviewer's mental model (UX rewrite + backend rewrite), or items the agent identifies
-> *after* CI is already green on the original scope. When in doubt, surface the candidate
-> bundle as a comment on the PR and let the human decide — never silently expand scope
-> beyond the Current PR's `### PR checklist`. Recording the rejected candidates is also
-> useful: it builds the dataset for future planning.
+> **Humans:** When a PR ships — move the item to `ROADMAP.md` ✅ table, promote the next queue item to Current PR, and update Recently Completed.
 
 ---
 
-## ▶ Current PR — AUTO-008 — Distributed runner across multiple machines
-**Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** INF-003 ✅, INF-002 ✅, CAP-002 ✅ (PR #3) | **Source:** `ROADMAP.md` Phase 4 (AUTO-008) — promoted per `NEXT.md` rotation after DIF-015c Gaps 2/3/5/6 shipped in PR #8
-Current parallelism is 1–10 workers within a single Chromium process on one machine (`testRunner.js:48-67`). For large suites (500+ tests), execution must distribute across multiple machines. BullMQ (INF-003) and the in-process sharding primitives (CAP-002) provide the foundation; this item extracts the browser worker into a standalone, stateless container image so any number of worker replicas can pull jobs from the shared queue.
+## Bundling guidance
+
+Flag adjacent items as bundling candidates in your PR description rather than expanding scope mid-flight. Good signals: items touch the same module, one validates the other end-to-end, or both are S/XS effort and skipping a handoff saves more than it costs in review surface. Bad signals: different phases, M+ effort expansion, or the candidate surfaces after CI is already green. When in doubt, comment on the PR and let the human decide — never silently expand beyond the Current PR checklist.
+
+---
+
+## ▶ Current PR — SEC-004 — MFA (TOTP / passkey) support
+
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
+
+**Problem:** No multi-factor authentication. MFA is a compliance requirement (SOC 2, ISO 27001) and a sales blocker for regulated industries.
+
+**Fix:** Add TOTP-based MFA using `otplib`. Store the encrypted TOTP secret in the `users` table. Add a setup flow (QR code generation), MFA verification at login, and recovery codes. Passkey (WebAuthn) support can follow in a subsequent sprint.
 
 **Files to change:**
-- `backend/src/workers/runWorker.js` — make fully stateless and containerisable; accept per-worker `WORKER_CONCURRENCY` env var
-- `docker-compose.yml` — add scalable `worker` service alongside the existing `web` service
-- `frontend/src/pages/Dashboard.jsx` — worker pool status panel (queue depth, active workers, idle workers)
-- `backend/src/routes/dashboard.js` — expose BullMQ queue metrics (`waiting`, `active`, `completed`, `failed`) when Redis is available
-- `docs/guide/getting-started.md` — document the multi-machine deployment pattern
+- `backend/src/routes/auth.js` — MFA enroll, verify, and recovery endpoints
+- `backend/src/database/migrations/` — add `mfaSecret`, `mfaEnabled`, `mfaRecoveryCodes` to `users`
+- `frontend/src/pages/Login.jsx` — MFA verification step
+- `frontend/src/pages/Settings.jsx` — MFA setup and management
 - `docs/changelog.md` `## [Unreleased]` § Added
 
 **Acceptance criteria:**
-- `docker-compose up --scale worker=4` launches 4 independent worker containers that each pull jobs from the shared BullMQ queue
-- A 40-test suite with `shards: 4` completes in ~1/4 the wall-clock time of `shards: 1` (same acceptance criterion as CAP-002b Gap 1)
-- Worker crash mid-test → BullMQ retry picks up the job on a surviving worker; no orphan `running` runs
-- Dashboard shows live worker count + queue depth when Redis is configured; gracefully degrades to "single-process mode" when Redis is absent
-- Zero regression: single-process deployments (no Redis, no `worker` service) behave identically to today
+- Users can enrol a TOTP secret via QR code from Settings; secret stored AES-encrypted via `credentialEncryption.js`
+- Login prompts for TOTP when `mfaEnabled = 1`; recovery codes accepted as one-shot fallbacks
+- Per-workspace MFA enforcement policy configurable by admins
+- Users without MFA enrolled continue to log in via password / OAuth unchanged
 
-### PR checklist (AUTO-008)
-- [ ] `backend/src/workers/runWorker.js` is stateless — no local-filesystem state survives a container restart
-- [ ] `docker-compose.yml` `worker` service uses the same image as `web` with a different entrypoint
-- [ ] Dashboard worker-pool panel renders queue metrics from BullMQ
-- [ ] `backend/tests/` covers worker-crash recovery + multi-worker job distribution
-- [ ] `docs/guide/getting-started.md` documents the `--scale worker=N` deployment pattern
+### PR checklist (SEC-004)
+- [ ] TOTP secret column AES-encrypted at rest (reuse `encryptString` / `decryptString`)
+- [ ] Recovery codes hashed (single-use, audit-logged on consumption)
+- [ ] `permissions.json` updated for new MFA routes
+- [ ] `backend/tests/` covers enrol, verify, recovery, and disabled-MFA happy path
 - [ ] `docs/changelog.md` `## [Unreleased]` updated
-- [ ] `QA.md` § Distributed Runner updated with manual test plan
-- [ ] PROC-001 satisfied: any new backend route has a matching frontend consumer
+- [ ] `QA.md` § MFA updated with manual test plan
+- [ ] PROC-001 satisfied: every new backend route has a matching frontend consumer
 
 ---
 
 ## ⏭ Queue (next 4 PRs after current)
-### 1 · SEC-004 — MFA (TOTP / passkey) support
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
 
-### 2 · SEC-006 — PII firewall
+### 1 · SEC-006 — PII firewall
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-006)
 
-### 3 · SEC-007 — Compliance audit log surface (immutability + auth events + admin export)
-**Effort:** M | **Priority:** 🟡 High (promoted from 🟢 Strategic) | **Dependencies:** SEC-004 (auth events emit from MFA routes — bundle if SEC-004 ships first; otherwise ship Phase 1 immutability MVP standalone) | **Source:** `ROADMAP.md` Phase 5 (SEC-007)
-Sentri already records ~30 event types into `activities` via `logActivity()` with per-user attribution (ENH-021 ✅). Six gaps block SOC2/ISO27001: (1) `DELETE /api/v1/data/activities` lets admins purge the log — hard compliance fail; (2) auth events (login/logout/MFA/role-change/API-key) not emitted; (3) no admin-only workspace-wide compliance surface (the existing per-project Activity feed is a developer view); (4) no CSV/NDJSON export; (5) no retention policy enforcement; (6) no SIEM streaming. Phased fix: P1 immutability + auth events MVP, P2 admin page + export + retention, P3 SIEM (deferred until customer demand).
+### 2 · SEC-007 — Compliance audit log surface (immutability + auth events + admin export)
+**Effort:** M | **Priority:** 🟡 High | **Dependencies:** SEC-004 (auth events from MFA routes — bundle if SEC-004 ships first; otherwise ship Phase 1 immutability MVP standalone) | **Source:** `ROADMAP.md` Phase 5 (SEC-007)
 
-### 4 · INF-007 — OTel / Sentry observability
+Six gaps block SOC 2 / ISO 27001: the activity log is purgeable by admins, auth events are not emitted, there is no admin compliance surface or export, and no retention policy or SIEM streaming. Phased fix: P1 immutability + auth events, P2 admin page + export + retention, P3 SIEM on demand.
+
+### 3 · INF-007 — OTel / Sentry observability
 **Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none | **Source:** `ROADMAP.md` Phase 5 (INF-007)
 
-> **Phase 5 audit-hardening blockers** (`SEC-004` MFA, `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5. `SEC-007` (compliance audit log surface) sits between SEC-006 and INF-007 at 🟡 High — pairs naturally with SEC-004 since the auth-event emission lives alongside MFA enrolment routes.
+### 4 · INF-008 — Postgres-default + dual-DB CI matrix
+**Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
+
+---
+
+## 🔀 Parallel opportunities
+
+Items that do not overlap SEC-004's changed files and can land in a separate PR while SEC-004 is in flight. "Shared files?" lists any files that *would* conflict if merged concurrently — flag in your PR description if you pick one up.
+
+| ID | Title | Effort | Priority | Shared files? |
+|----|-------|--------|----------|---------------|
+| INF-007 | OTel / Sentry observability | L | 🔴 Blocker | None — touches `appSetup.js`, `otel.js`, `metrics.js`, `aiProvider.js`, `testRunner.js`, `selfHealing.js`, `main.jsx`; no overlap with auth or Settings |
+| SEC-006 | PII firewall (domSanitizer pipeline stage) | M | 🔴 Blocker | None — `domSanitizer.js`, `pipelineOrchestrator.js`; entirely pipeline-layer |
+| AUTO-022 | AI eval harness with golden-set regression | L | 🔴 Blocker | None — `pipelineEval.js`, `scorers.js`, `eval.yml`, `pipelineOrchestrator.js` (additive `promptVersion` emit only) |
+| INF-008 | Postgres-default + dual-DB CI matrix | M | 🔴 Blocker | ⚠️ `backend/src/database/migrations/` — SEC-004 adds MFA migration files to the same directory; coordinate numeric prefix assignment to avoid collisions |
+| MNT-001 | Vision-based locator healing | XL | 🟢 Differentiator | None — `selfHealing.js`, `executeTest.js` only |
+| AUTO-009 | Browser code coverage mapping | L | 🟢 Differentiator | None — `executeTest.js`, `coverageAggregator.js`, `Dashboard.jsx` |
+
+**Note:** SEC-007 (compliance audit log surface) depends on SEC-004 auth events — it cannot start Phase 1 independently until SEC-004's `auth.*` activity emission is merged. It is listed in the Queue, not here.
 
 ---
 
@@ -77,9 +83,8 @@ Sentri already records ~30 event types into `activities` via `logActivity()` wit
 
 | ID | Title | PR |
 |----|-------|----|
-| DIF-015c (Gaps 2/3/5/6) | Recorder gaps completion — point-and-click assert UX + `assertCount`/`assertHasClass` kinds + pause/resume/undo + device profiles (launch + mid-session switch) + stealth launch profile (hand-rolled, no new deps). 5 new `qa_lead`-gated routes, 31-step QA plan, 5 Tier-3 UI tests, 25+ backend unit tests. | #8 |
-| AUTO-010 | Root-cause failure clustering. Deterministic clusterer (`failureClusterer.js`) groups failed results by normalised error fingerprint, URL origin prefix, and selector edit-distance — no DB, no LLM. `runs.rootCauses` persisted via migration 027; called from both the single-process tail in `testRunner.js` AND `finalizeShardedRun` in `runWorker.js` (CAP-002 parity). Run Detail renders a collapsible "Root Cause Summary" panel that auto-expands when ≥2 clusters surface. | #6 |
-| CAP-002 | Distributed test sharding across runners. End-to-end cross-process sharding for `POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger`. `shards: N > 1` fans out across N BullMQ shard workers; boundary-crossing shard finalizes exactly once via atomic `incrementShardsCompleted` + `markRunCompletedFirstWriterWins`. 7 dedicated backend test files, 24-step QA manual plan, per-shard trace dropdown, CI/CD callback + GitHub Check completion on sharded runs. Deferred to CAP-002b: 10 SaaS-readiness follow-ups. | #3 |
-| DIF-012 | Multi-environment support (staging vs. production). | #2 |
+| AUTO-008 | Distributed runner — standalone `worker` Compose service, `WORKER_CONCURRENCY` env var, dashboard worker-pool panel (Runner Mode / Queue Depth / Active Workers / Completed Jobs) | #9 |
+| DIF-015c (Gaps 2/3/5/6) | Recorder gaps — point-and-click assert UX, `assertCount`/`assertHasClass` kinds, pause/resume/undo, device profiles (launch + mid-session switch), stealth launch profile | #8 |
+| AUTO-010 | Root-cause failure clustering — deterministic clusterer grouping failed results by error fingerprint, URL prefix, and selector edit-distance; `runs.rootCauses` persisted; Run Detail "Root Cause Summary" panel | #6 |
 
-*Full completed list → ROADMAP.md § Completed Work*
+*Full completed list → ROADMAP.md § Completed Work Summary*
