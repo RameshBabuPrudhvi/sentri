@@ -39,6 +39,12 @@ useDefault = true
     "backend/tests/secret-scanner.test.js",
     "backend/tests/openai-compat-provider.test.js",
     "backend/tests/compat-config-cache.test.js",
+    # SEC-007 — drives the auth.api_key.{create,revoke} audit-log assertion
+    # path with a fake API key value. The route's ≥10-char validation accepts
+    # any string; the assertion confirms the raw key never lands in the audit
+    # row. Allowlisted so the scanner doesn't flag the test fixture as a real
+    # credential (same pattern as the OpenAI-compat tests above).
+    "backend/tests/audit-auth-events.test.js",
   ]
 
   # Test fixtures and seed data may contain fake credentials for testing auth
