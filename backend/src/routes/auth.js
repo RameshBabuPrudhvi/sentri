@@ -584,6 +584,26 @@ export function _internalCheckRateLimit(bucket, ip) {
 }
 
 /**
+ * SEC-004: Industry-standard "security-posture change → terminate session"
+ * primitive. Revokes the current request's JTI and clears the auth cookies
+ * so the caller is forced to re-authenticate immediately. Matches the
+ * DELETE /account pattern and the behaviour of Auth0, Clerk, Okta, GitHub
+ * on credential / MFA changes.
+ *
+ * Exported as an underscore-prefixed cross-module helper so
+ * `routes/webauthn.js` can apply the same semantics on passkey removal
+ * without duplicating the JTI-revoke + cookie-clear plumbing.
+ *
+ * @param {Object} req - Must carry `req.authUser` (the JWT payload).
+ * @param {Object} res
+ */
+export function _internalRevokeCurrentSession(req, res) {
+  const { jti, exp } = req.authUser || {};
+  if (jti) revokedTokens.set(jti, exp);
+  clearAuthCookies(res);
+}
+
+/**
  * SEC-004: apply workspace MFA enforcement at the end of an auth flow.
  *
  * Centralises the three-way `evaluateMfaEnforcement(user)` outcome handling
@@ -1739,6 +1759,15 @@ router.post("/mfa/verify", async (req, res) => {
 
     // SEC-004 §5c: MFA-asserted session — tag with both pwd (login flow
     // already proved the password) and mfa (second factor verified).
+    //
+    // NOTE: applyMfaEnforcement is intentionally NOT called here. The
+    // invariant is: this branch is only reachable when the user has at
+    // least one MFA factor (TOTP/recovery/passkey), and
+    // evaluateMfaEnforcement returns "allow" the moment any factor is
+    // present. If a future rule expands enforcement to require something
+    // beyond "has any factor" (e.g. "factor must be a hardware key"), the
+    // applyMfaEnforcement call must be added back here — leave this
+    // comment as the contract reminder.
     const payload = buildJwtPayload(user, undefined, { amr: ["pwd", "mfa"] });
     const jwt = signJwt(payload, getJwtSecret());
     const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
@@ -1790,7 +1819,16 @@ router.post("/mfa/recovery-codes/regenerate", requireAuth, async (req, res) => {
       meta: { count: recovery.raw.length },
     });
 
-    return res.json({ recoveryCodes: recovery.raw });
+    // SEC-004: Regenerating recovery codes is the user's "panic button" — the
+    // typical trigger is "my old codes leaked" or "I lost them and might've
+    // exposed them". Revoke the current session so a parallel cookie on
+    // another device (e.g. an attacker holding the one that triggered the
+    // panic) cannot continue acting under the regenerated set. Matches the
+    // industry baseline (Auth0, Clerk, Okta, GitHub all terminate sessions
+    // on credential change).
+    _internalRevokeCurrentSession(req, res);
+
+    return res.json({ recoveryCodes: recovery.raw, sessionRevoked: true });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/mfa/recovery-codes/regenerate] ${err.message}`));
     return res.status(500).json({ error: "Failed to regenerate recovery codes." });
@@ -1850,7 +1888,15 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
       meta: {},
     });
 
-    return res.json({ ok: true });
+    // SEC-004: Disabling MFA is a security-posture downgrade — the user's
+    // session is currently MFA-asserted (amr=["pwd","mfa"]) but after this
+    // call the user no longer has a second factor. Revoking the current
+    // session forces re-authentication so the new cookie reflects the new
+    // posture (amr=["pwd"]). Matches the industry baseline for security-
+    // impacting account changes.
+    _internalRevokeCurrentSession(req, res);
+
+    return res.json({ ok: true, sessionRevoked: true });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/mfa/disable] ${err.message}`));
     return res.status(500).json({ error: "Failed to disable MFA." });

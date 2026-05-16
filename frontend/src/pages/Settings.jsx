@@ -1299,7 +1299,8 @@ function WorkspaceMfaPolicyPanel() {
 }
 
 function SecurityTabInner() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const isAdmin = user?.workspaceRole === "admin";
   // OAuth-only users have no password — destructive actions skip the modal
   // entirely (the OAuth session itself proves identity, matching backend
@@ -1320,6 +1321,11 @@ function SecurityTabInner() {
   const [pendingAction, setPendingAction] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionErr, setActionErr] = useState(null);
+  // SEC-004: When recovery codes are regenerated, the backend revokes the
+  // current session AND we still need to show the new codes one final time.
+  // This flag tells the RecoveryCodesPanel.onDismiss handler to chain
+  // logout+redirect after the user confirms they've saved the codes.
+  const [sessionRevokedPending, setSessionRevokedPending] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1372,22 +1378,50 @@ function SecurityTabInner() {
     setActionBusy(true);
     setActionErr(null);
     try {
+      // SEC-004: All three destructive actions revoke the current session on
+      // the backend (see `_internalRevokeCurrentSession` in routes/auth.js +
+      // routes/webauthn.js). The response carries `sessionRevoked: true` so
+      // we know to redirect to /login instead of refetching factor state on
+      // a now-invalid cookie. Matches the industry baseline (Auth0, Clerk,
+      // Okta, GitHub) — security-posture changes terminate the session.
+      let response;
       if (action.kind === "disable") {
-        await api.mfaDisable(needsPassword ? password : "");
+        response = await api.mfaDisable(needsPassword ? password : "");
       } else if (action.kind === "regenerate") {
-        const data = await api.mfaRegenerateRecoveryCodes(needsPassword ? password : "");
-        setRecoveryCodes(data.recoveryCodes);
+        response = await api.mfaRegenerateRecoveryCodes(needsPassword ? password : "");
+        // Show the new codes one last time before the session ends — the
+        // recovery panel has its own "I've saved them" gate. The user can
+        // download / copy before they're forced out.
+        setRecoveryCodes(response.recoveryCodes);
       } else if (action.kind === "removePasskey") {
-        await api.webauthnDeleteCredential(action.credentialId, needsPassword ? password : "");
+        response = await api.webauthnDeleteCredential(action.credentialId, needsPassword ? password : "");
       }
       setPendingAction(null);
+
+      if (response?.sessionRevoked) {
+        // For regenerate, defer the redirect until the user dismisses the
+        // recovery-codes panel — otherwise we'd kick them out before they can
+        // save the codes. The other two actions have no follow-up UI.
+        if (action.kind === "regenerate") {
+          // Stash a flag the RecoveryCodesPanel.onDismiss handler reads to
+          // chain the logout+redirect after the user confirms they saved.
+          setSessionRevokedPending(true);
+        } else {
+          await logout();
+          navigate("/login", {
+            state: { notice: "Your session was ended for security. Please sign in again." },
+          });
+        }
+        return;
+      }
+
       await load();
     } catch (err) {
       setActionErr(err.message);
     } finally {
       setActionBusy(false);
     }
-  }, [needsPassword, load]);
+  }, [needsPassword, load, logout, navigate]);
 
   // OAuth-only path: no password modal — run the action immediately.
   useEffect(() => {
@@ -1449,7 +1483,20 @@ function SecurityTabInner() {
         <RecoveryCodesPanel
           codes={recoveryCodes}
           userEmail={user?.email || "account"}
-          onDismiss={() => setRecoveryCodes(null)}
+          onDismiss={async () => {
+            setRecoveryCodes(null);
+            // SEC-004: if regenerate revoked the session, complete the
+            // logout chain now that the user has confirmed they saved the
+            // new codes. Without this, the next API call would 401 with
+            // no explanation.
+            if (sessionRevokedPending) {
+              setSessionRevokedPending(false);
+              await logout();
+              navigate("/login", {
+                state: { notice: "Your session was ended for security. Please sign in again." },
+              });
+            }
+          }}
         />
       )}
 

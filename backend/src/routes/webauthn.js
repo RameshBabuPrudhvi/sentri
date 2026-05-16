@@ -48,6 +48,7 @@ import {
   _internalConsumePendingMfaLogin,
   _internalCheckRateLimit,
   _internalVerifyAccountPassword,
+  _internalRevokeCurrentSession,
 } from "./auth.js";
 
 // ─── Lazy-loaded SimpleWebAuthn server module ─────────────────────────────────
@@ -254,13 +255,15 @@ router.post("/register/verify", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Attestation did not verify." });
     }
 
-    // SimpleWebAuthn v11 returns { credential: { id, publicKey, counter, transports } }.
-    // Older v10 callers used { credentialID, credentialPublicKey, counter }. Handle
-    // both shapes so a self-hoster pinning an older version doesn't break.
+    // SimpleWebAuthn v11 (pinned in package.json) returns
+    //   { credential: { id, publicKey, counter, transports } }
+    // No v10 fallback — the dependency pin is the contract. If a future
+    // major bumps the shape, this read will surface a clean 500 and the
+    // upgrade PR must adapt deliberately.
     const info = verification.registrationInfo;
-    const credIdRaw = info.credential?.id ?? info.credentialID;
-    const pubKeyRaw = info.credential?.publicKey ?? info.credentialPublicKey;
-    const counter = info.credential?.counter ?? info.counter ?? 0;
+    const credIdRaw = info.credential?.id;
+    const pubKeyRaw = info.credential?.publicKey;
+    const counter = info.credential?.counter ?? 0;
     if (!credIdRaw || !pubKeyRaw) {
       return res.status(500).json({ error: "Verification returned an unexpected shape." });
     }
@@ -415,17 +418,11 @@ router.post("/authenticate/verify", async (req, res) => {
         expectedOrigin: origin,
         expectedRPID: rpID,
         requireUserVerification: false,
-        // SimpleWebAuthn v11 takes `credential`; v10 takes `authenticator`.
-        // We pass both shapes for forward-compat.
+        // SimpleWebAuthn v11 (pinned in package.json) takes `credential`.
+        // Pin is the contract — see the parallel note in /register/verify.
         credential: {
           id: stored.id,
           publicKey: Buffer.from(stored.publicKey, "base64"),
-          counter: stored.counter,
-          transports: stored.transports,
-        },
-        authenticator: {
-          credentialID: stored.id,
-          credentialPublicKey: Buffer.from(stored.publicKey, "base64"),
           counter: stored.counter,
           transports: stored.transports,
         },
@@ -580,7 +577,14 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
       meta: { credentialId: req.params.id },
     });
 
-    return res.json({ ok: true });
+    // SEC-004: Removing a passkey is a security-posture change — the user's
+    // current session may have been MFA-asserted via this exact credential.
+    // Revoke so the next request forces re-authentication and the new
+    // session's `amr` reflects whatever factors remain. Matches /mfa/disable
+    // and the industry baseline (Auth0, Clerk, Okta, GitHub).
+    _internalRevokeCurrentSession(req, res);
+
+    return res.json({ ok: true, sessionRevoked: true });
   } catch (err) {
     console.error(formatLogLine("error", null, `[webauthn/credentials/:id] ${err.message}`));
     return res.status(500).json({ error: "Failed to remove passkey." });
