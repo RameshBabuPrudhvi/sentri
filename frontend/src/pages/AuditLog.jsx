@@ -551,7 +551,7 @@ export default function AuditLog() {
       }
       setNextCursor(res?.nextCursor || null);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load more" });
+      addNotification({ type: "error", title: "Audit log", body: err.message || "Failed to load more" });
     } finally {
       setLoadingMore(false);
     }
@@ -581,25 +581,28 @@ export default function AuditLog() {
       // the filter chips, not the search box.
       addNotification({
         type: "info",
-        message: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
+        title: "Export",
+        body: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
       });
     }
     const url = `${API_PATH}/workspaces/${workspaceId}/audit-log?${params.toString()}`;
     try {
       const res = await fetch(url, { credentials: "include" });
       if (res.status === 429) {
-        const body = await res.json().catch(() => ({}));
+        const errBody = await res.json().catch(() => ({}));
         addNotification({
           type: "error",
-          message: body.error || "Too many audit-log exports. Try again later.",
+          title: "Export rate-limited",
+          body: errBody.error || "Too many audit-log exports. Try again later.",
         });
         return;
       }
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+        const errBody = await res.json().catch(() => ({}));
         addNotification({
           type: "error",
-          message: body.error || `Export failed (${res.status}).`,
+          title: "Export failed",
+          body: errBody.error || `Export failed (${res.status}).`,
         });
         return;
       }
@@ -612,7 +615,7 @@ export default function AuditLog() {
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Export failed." });
+      addNotification({ type: "error", title: "Export failed", body: err.message || "Export failed." });
     }
   }
 
@@ -628,7 +631,7 @@ export default function AuditLog() {
       const res = await api.verifyAuditChain();
       setVerifyResult(res);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Verification failed." });
+      addNotification({ type: "error", title: "Verify chain", body: err.message || "Verification failed." });
     } finally {
       setVerifying(false);
     }
@@ -644,7 +647,7 @@ export default function AuditLog() {
       const res = await api.listAuditDlq(workspaceId, { limit: 200 });
       setDlqRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load DLQ." });
+      addNotification({ type: "error", title: "DLQ", body: err.message || "Failed to load DLQ." });
       setDlqRows([]);
     } finally {
       setDlqLoading(false);
@@ -656,7 +659,7 @@ export default function AuditLog() {
     setReplayingId(dlqId);
     try {
       await api.replayAuditDlq(workspaceId, dlqId);
-      addNotification({ type: "success", message: "DLQ entry replayed." });
+      addNotification({ type: "success", title: "DLQ replay", body: "DLQ entry replayed." });
       setDlqRows((prev) => (prev || []).filter((r) => r.id !== dlqId));
     } catch (err) {
       // SIEM_NOT_CONFIGURED is distinct from real dispatch failures —
@@ -667,10 +670,11 @@ export default function AuditLog() {
       if (code === "SIEM_NOT_CONFIGURED") {
         addNotification({
           type: "info",
-          message: "No SIEM target configured. Open SIEM config to set one.",
+          title: "SIEM not configured",
+          body: "No SIEM target configured. Open SIEM config to set one.",
         });
       } else {
-        addNotification({ type: "error", message: err.message || "Replay failed." });
+        addNotification({ type: "error", title: "DLQ replay", body: err.message || "Replay failed." });
       }
     } finally {
       setReplayingId(null);
@@ -686,7 +690,7 @@ export default function AuditLog() {
       const res = await api.getSystemSecurityEvents({ limit: 200 });
       setSysEventsRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load system events." });
+      addNotification({ type: "error", title: "System events", body: err.message || "Failed to load system events." });
       setSysEventsRows([]);
     } finally {
       setSysEventsLoading(false);
@@ -773,7 +777,7 @@ export default function AuditLog() {
       // Clear the hmacSecret field after a successful save so it's not
       // hanging around in the DOM.
       setSiemForm((prev) => ({ ...prev, hmacSecret: "" }));
-      addNotification({ type: "success", message: "SIEM forwarder saved." });
+      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder saved." });
     } catch (err) {
       setSiemError(err.message || "Failed to save SIEM config.");
     } finally {
@@ -789,7 +793,7 @@ export default function AuditLog() {
       await api.deleteWorkspaceSiemConfig(workspaceId);
       setSiemConfig(null);
       setSiemForm({ targetUrl: "", hmacSecret: "", headersJson: "", enabled: true });
-      addNotification({ type: "success", message: "SIEM forwarder removed." });
+      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder removed." });
     } catch (err) {
       setSiemError(err.message || "Failed to delete SIEM config.");
     } finally {
