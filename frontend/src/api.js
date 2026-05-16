@@ -798,11 +798,18 @@ export const api = {
   verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Exchange an OAuth authorization code for a session.
+   *
+   * SEC-004: returns `{ data, headers }` via `returnRaw` so the caller can
+   * read the `X-MFA-Grace-Period-Days-Remaining` header the backend sets on
+   * a successful OAuth callback when the user's workspace requires MFA but
+   * they're still inside the grace window. Without this, the post-grace
+   * banner only fires for password-login users, not OAuth users.
+   *
    * @param {string} provider - `"github"` or `"google"`.
    * @param {string} code     - Authorization code from the OAuth redirect.
-   * @returns {Promise<Object>}
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
    */
-  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
 
   // ── Email verification (SEC-001) ──────────────────────────────────────────────
   /**

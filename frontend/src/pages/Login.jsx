@@ -154,7 +154,24 @@ export default function Login() {
       if (!returnedState || returnedState !== savedState) {
         throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
       }
-      const data = await api.oauthCallback(provider, code);
+      // SEC-004: api.oauthCallback returns { data, headers } so we can read
+      // the X-MFA-Grace-Period-Days-Remaining header the backend sets when
+      // the workspace requires MFA and the user is within grace. Without
+      // this, OAuth users within the grace window never see the banner.
+      const raw = await api.oauthCallback(provider, code);
+      const data = raw.data;
+      const headers = raw.headers || {};
+      // Persist grace banner for the post-login dashboard (same as handleSubmit).
+      const remaining = headers["x-mfa-grace-period-days-remaining"];
+      const endsAt = headers["x-mfa-grace-ends-at"];
+      if (remaining) {
+        try {
+          sessionStorage.setItem("mfa_grace_banner", JSON.stringify({
+            daysRemaining: Number(remaining),
+            endsAt: endsAt || null,
+          }));
+        } catch { /* sessionStorage unavailable — banner is best-effort */ }
+      }
       login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
     } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
