@@ -237,11 +237,79 @@ function groupByDay(rows) {
  *
  * @param {{ entry: object }} props
  */
+/**
+ * SEC-007: derive a human-readable description for activity rows that
+ * have no `testName`/`detail` but DO carry useful structured `meta`.
+ * Without this, the audit log feed renders "—" for every meta-audit row
+ * (`audit.read`, `audit.export`, `audit.purge`) and every auth event —
+ * dominating the feed with placeholder text instead of the filter shape
+ * / event context a SOC 2 reviewer actually needs.
+ *
+ * Returns null when the row has no row-specific context worth summarising;
+ * the caller renders the existing "—" fallback.
+ *
+ * @param {Object} entry — activity row
+ * @returns {string|null}
+ */
+function describeMetaAuditEntry(entry) {
+  const meta = entry.meta || {};
+  switch (entry.type) {
+    case ACTIVITY_TYPES.AUDIT_READ:
+    case ACTIVITY_TYPES.AUDIT_EXPORT: {
+      // `meta.filters` carries the full filter shape the route handler
+      // captured. Surface the most meaningful slice: format, row count,
+      // and any non-null filter.
+      const fmt = meta.format || "json";
+      const count = typeof meta.rowCount === "number" ? `${meta.rowCount} rows` : "";
+      const f = meta.filters || {};
+      const activeFilters = [];
+      if (f.userId) activeFilters.push(`user=${f.userId}`);
+      if (f.projectId) activeFilters.push(`project=${f.projectId}`);
+      if (Array.isArray(f.types) && f.types.length) activeFilters.push(`types=${f.types.join(",")}`);
+      if (f.dateFrom) activeFilters.push(`from=${f.dateFrom.slice(0, 10)}`);
+      if (f.dateTo) activeFilters.push(`to=${f.dateTo.slice(0, 10)}`);
+      if (f.ipAddress) activeFilters.push(`ip=${f.ipAddress}`);
+      const parts = [fmt.toUpperCase(), count, activeFilters.join(" · ")].filter(Boolean);
+      return parts.join(" · ") || null;
+    }
+    case ACTIVITY_TYPES.AUDIT_PURGE:
+      return meta.cleared != null
+        ? `Cleared ${meta.cleared} activity row(s)`
+        : "Audit log truncated";
+    case ACTIVITY_TYPES.AUTH_LOGIN:
+    case ACTIVITY_TYPES.AUTH_LOGIN_FAILED:
+    case ACTIVITY_TYPES.AUTH_LOGOUT:
+    case ACTIVITY_TYPES.AUTH_PASSWORD_RESET:
+      // userName already shown in the actor column; nothing extra to add
+      // unless the route added a `reason` (e.g. session.revoke).
+      return null;
+    case ACTIVITY_TYPES.AUTH_ROLE_CHANGE:
+      return (meta.from && meta.to)
+        ? `${meta.from} → ${meta.to}`
+        : null;
+    case ACTIVITY_TYPES.AUTH_API_KEY_CREATE:
+    case ACTIVITY_TYPES.AUTH_API_KEY_REVOKE:
+      return meta.provider
+        ? `Provider: ${meta.providerName || meta.provider}`
+        : null;
+    case ACTIVITY_TYPES.AUTH_SESSION_REVOKE:
+      return meta.reason ? `Reason: ${meta.reason}` : null;
+    default:
+      return null;
+  }
+}
+
 function ActivityEntry({ entry }) {
   const { badgeClass, label } = entryMeta(entry.type);
   const time = fmtDateTime(entry.createdAt);
   const score = entry.meta?.score;
   const wasAuto = entry.meta?.wasAutoApproved;
+  // SEC-007: many audit rows (`audit.read`, `audit.role.change`, etc.) have
+  // no `testName` or `detail` because they're not test-scoped — but they
+  // DO carry structured `meta`. Without this, the feed renders "—" for
+  // every such row and looks empty. Falls back to "—" only when no useful
+  // context exists.
+  const metaDescription = describeMetaAuditEntry(entry);
 
   return (
     <div className="al-entry">
@@ -249,10 +317,10 @@ function ActivityEntry({ entry }) {
         {/* Event badge */}
         <span className={`badge ${badgeClass} al-entry__badge`}>{label}</span>
 
-        {/* Test name + project */}
+        {/* Test name + project + meta-derived context */}
         <div className="al-entry__body">
           <span className="al-entry__test-name">
-            {entry.testName || entry.detail || "—"}
+            {entry.testName || entry.detail || metaDescription || "—"}
           </span>
           {entry.projectName && (
             <span className="al-entry__project">{entry.projectName}</span>
