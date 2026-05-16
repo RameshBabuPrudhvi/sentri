@@ -12,80 +12,72 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 
 ---
 
-## ▶ Current PR — INF-007 — OTel / Sentry observability
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none — bundles naturally with MNT-013 (request-ID propagation) | **Source:** `ROADMAP.md` Phase 5 (INF-007)
-`@opentelemetry/sdk-node` auto-instrumentation for Express/pg/Redis/HTTP; `requestId` via `AsyncLocalStorage` plumbed through `formatLogLine()`; Prometheus `/metrics` endpoint via `prom-client` (scrape-key protected); `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` (no-op when unset).
+## ▶ Current PR — INF-008 — Postgres-default + dual-DB CI matrix
+**Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
+Promote PostgreSQL to the default DB and add a dual-DB CI matrix so SQLite-only regressions cannot reach `main`. Rename colliding migration prefixes (`007_*` × 2, `015_*` × 2), fix `migrationRunner.js` sort, default `.env.example` + `docker-compose.yml` to Postgres, add a CI matrix `db: [sqlite, postgres]` that runs full `npm test` under both engines, and add a new `scripts/lint-migrations.mjs` that fails on duplicate prefixes.
 
-**Problem:** Sentri has zero observability infrastructure. Backend errors surface only in `console.error`; there are no distributed traces, no structured metrics, no crash-reporting pipeline, and no Prometheus scrape endpoint. Operators deploying to production have no way to answer "what's slow?", "what's failing?", or "how many requests per second?" without grepping logs. Every competitor (Mabl, Testim, BrowserStack) ships with built-in APM.
+**Problem:** Sentri ships with SQLite as the default DB but production deployments need PostgreSQL. CI runs against SQLite only, so any Postgres-only regression (dialect-specific SQL, JSON-column shape mismatches, migration ordering issues) sneaks through review and surfaces in production. Two pairs of migrations collide on numeric prefix (`007_*` × 2, `015_*` × 2); `migrationRunner.js` resolves the collision by lexical filename sort which is non-deterministic on case-insensitive filesystems. Operators copy-pasting `.env.example` start on SQLite and only discover the prod ↔ dev drift after their first deploy.
 **Fix:**
-1. `@opentelemetry/sdk-node` with auto-instrumentations for Express (`@opentelemetry/instrumentation-express`), `pg` (`@opentelemetry/instrumentation-pg`), Redis (`@opentelemetry/instrumentation-ioredis`), and outbound HTTP (`@opentelemetry/instrumentation-http`). Exports traces via OTLP to any collector (Jaeger, Tempo, Datadog, Honeycomb) configured via `OTEL_EXPORTER_OTLP_ENDPOINT`.
-2. `requestId` via `AsyncLocalStorage` — generated per-request in `appSetup.js`, plumbed through `formatLogLine()` so every log line carries a correlation ID. Exposed as `X-Request-Id` response header.
-3. Prometheus `/metrics` endpoint via `prom-client` — default Node.js metrics + custom counters (`sentri_runs_total`, `sentri_tests_executed_total`, `sentri_crawl_pages_total`). Protected by `METRICS_SCRAPE_KEY` env var (Bearer token on the `/metrics` route).
-4. `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` env var — no-op when unset. Backend: Express error handler + `beforeSend` scrubber strips PII. Frontend: `ErrorBoundary` integration + breadcrumbs on route changes.
-5. Bundle MNT-013 (request-ID propagation) into this PR since both touch `appSetup.js` + `formatLogLine()`.
+1. Rename the colliding migration prefixes — bump the second of each conflicting pair to the next free slot. Document the rule in a comment at the top of `migrationRunner.js` so future migrations don't recreate the collision.
+2. Fix `migrationRunner.js` sort to use the numeric prefix (`parseInt(filename.split("_")[0])`) before falling back to the full filename, so newly-added migrations never reorder behind existing ones on case-insensitive filesystems.
+3. Flip `.env.example`, `docker-compose.yml`, and `docs/guide/getting-started.md` to Postgres-default. SQLite stays as the supported quick-start escape hatch — documented but no longer the unannotated default.
+4. CI matrix `db: [sqlite, postgres]` in `.github/workflows/ci.yml` runs the full `backend/npm test` lane under both engines. Postgres lane spins up a Postgres 16 service container; SQLite lane stays in-process. Both lanes gate merge.
+5. New `scripts/lint-migrations.mjs` walks `backend/src/database/migrations/`, asserts every numeric prefix is unique, and is wired into the CI lint lane so a duplicate-prefix migration fails the build the same day it's pushed.
 **Files to change:**
-- `backend/package.json` — add `@opentelemetry/sdk-node`, `@opentelemetry/auto-instrumentations-node`, `@opentelemetry/exporter-trace-otlp-http`, `prom-client`, `@sentry/node`
-- `frontend/package.json` — add `@sentry/react`
-- `backend/src/middleware/appSetup.js` — OTel SDK init (must be first import), `AsyncLocalStorage` request-ID middleware, `/metrics` route
-- `backend/src/utils/logFormatter.js` — read `requestId` from `AsyncLocalStorage` store, include in every `formatLogLine()` output
-- `backend/src/utils/structuredLog.js` — add OTel span context to structured log events
-- `backend/src/index.js` — Sentry init (after OTel), error handler registration
-- `frontend/src/main.jsx` or `frontend/src/App.jsx` — Sentry browser init behind `VITE_SENTRY_DSN`
-- `frontend/src/components/layout/ErrorBoundary.jsx` — wire Sentry `captureException`
-- `backend/.env.example` — document `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `METRICS_SCRAPE_KEY`, `SENTRY_DSN`
-- `docs/guide/env-vars.md` — new Observability section
-- `docs/changelog.md` — `## [Unreleased]` § Added
-- `backend/tests/observability.test.js` (new, registered in `run-tests.js`) — `/metrics` returns Prometheus text format, `X-Request-Id` header present on responses, OTel SDK initialises without throwing when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
+- `backend/src/database/migrations/` — rename one of each colliding `007_*` pair and one of each `015_*` pair to the next free prefix; update any cross-migration references
+- `backend/src/database/migrationRunner.js` — numeric-prefix sort with full-filename tiebreaker; add a comment block at the top documenting the unique-prefix rule
+- `backend/.env.example` — flip `DATABASE_URL` default to the bundled `postgres://…`; keep the SQLite line as a commented escape hatch
+- `docker-compose.yml` — surface `postgres` in the default profile; document the `--profile sqlite` opt-out
+- `.github/workflows/ci.yml` — add `strategy.matrix.db: [sqlite, postgres]` to the backend job, Postgres service-container block, env-var switch in test setup
+- `scripts/lint-migrations.mjs` (new) — duplicate-prefix detector, exits non-zero on conflict, wired into CI
+- `docs/guide/getting-started.md` — Postgres-first quick-start; SQLite kept as the "fastest local boot" alternative
+- `docs/changelog.md` — `## [Unreleased]` § Changed (call out the default-flip as BREAKING for operators relying on the implicit SQLite default)
+- `backend/tests/migration-runner.test.js` (new or extended, registered in `run-tests.js`) — covers numeric-prefix sort, duplicate-prefix detection in `lint-migrations.mjs`, and the dialect switch via `DATABASE_URL`
 **Acceptance criteria:**
-- `GET /metrics` returns `text/plain` Prometheus exposition format with `nodejs_*` default metrics + `sentri_runs_total` counter. Protected by `METRICS_SCRAPE_KEY` (401 without it).
-- Every HTTP response carries `X-Request-Id` header; every `formatLogLine()` output includes the same ID.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` set → traces export to the configured collector (verify with Jaeger local). Unset → OTel SDK is a no-op (no crash, no console spam).
-- `SENTRY_DSN` set → unhandled exceptions + unhandled rejections captured. Unset → Sentry is a no-op.
-- Frontend `VITE_SENTRY_DSN` set → `ErrorBoundary` reports to Sentry. Unset → existing console-only behaviour unchanged.
-- `cd backend && npm test` passes; new test file registered in `run-tests.js`.
-- `cd frontend && npm run build` passes.
-### PR checklist (INF-007)
-- [x] PR title follows Conventional Commits (`feat(infra): INF-007 — OpenTelemetry + Sentry observability`)
-- [x] Branch is off `develop`, not `main`
-- [x] `cd backend && npm test` passes locally; new test file registered in `backend/tests/run-tests.js`
-- [x] `cd frontend && npm run build && npm test` passes locally
-- [x] OTel SDK init runs BEFORE any application module loads — via `node --import ./src/otel-preload.mjs` in `package.json` scripts, `Dockerfile` `CMD`, and the worker `docker-compose.yml` command (in-graph init was too late for `@opentelemetry/auto-instrumentations-node` to patch `express`/`pg`/`ioredis`).
-- [x] `/metrics` endpoint protected by `METRICS_SCRAPE_KEY` — 401 without Bearer token
-- [x] `X-Request-Id` header present on every response; same ID in log lines
-- [x] `SENTRY_DSN` unset → zero runtime effect (no console warnings, no network calls)
-- [x] `OTEL_EXPORTER_OTLP_ENDPOINT` unset → zero runtime effect
-- [x] `backend/.env.example` documents all new env vars
-- [x] `docs/guide/env-vars.md` updated with Observability section
-- [x] `docs/changelog.md` updated under `## [Unreleased]`
-- [x] `permissions.json` updated if `/metrics` route is added
-- [x] No new `devDependencies` that should be `dependencies` (OTel + Sentry are runtime deps)
-- [x] ROADMAP.md `### INF-007` section flipped to `**Status:** ✅ Complete (PR #14)`
-- [x] Metric names use brand-neutral `app_*` prefix per `docs/guide/rebranding.md` (avoids adding rebrand-surface tokens for Prometheus dashboards / alerts).
+- Both CI lanes (`db: sqlite` + `db: postgres`) pass on the PR; failure on either gates the merge.
+- `scripts/lint-migrations.mjs` exits 0 on the current tree and exits non-zero if a duplicate prefix is introduced (unit-tested with a temp-dir fixture).
+- Fresh `docker compose up` on `develop` brings up Postgres + the backend and `GET /health` reports `db: postgres`.
+- `backend/src/database/migrations/` has zero duplicate numeric prefixes when sorted.
+- `cd backend && npm test` passes on both engines locally (`DATABASE_URL=postgres://…` and unset).
+### PR checklist (INF-008)
+- [ ] PR title follows Conventional Commits (`feat(infra): INF-008 — Postgres-default + dual-DB CI matrix`)
+- [ ] Branch is off `develop`, not `main`
+- [ ] `cd backend && npm test` passes locally under SQLite (`DATABASE_URL` unset)
+- [ ] `cd backend && npm test` passes locally under Postgres (`DATABASE_URL=postgres://…`)
+- [ ] `cd frontend && npm run build && npm test` passes locally
+- [ ] `scripts/lint-migrations.mjs` exits 0 on the current tree; unit test covers duplicate-prefix detection
+- [ ] CI matrix `db: [sqlite, postgres]` is wired in `.github/workflows/ci.yml` and both lanes are required for merge
+- [ ] `backend/src/database/migrations/` has zero duplicate numeric prefixes (verify with `ls backend/src/database/migrations/ | awk -F_ '{print $1}' | sort | uniq -d` returning empty)
+- [ ] `backend/.env.example` + `docker-compose.yml` default to Postgres; SQLite path documented as the escape hatch
+- [ ] `docs/guide/getting-started.md` rewritten Postgres-first with SQLite kept as the alternative
+- [ ] `docs/changelog.md` updated under `## [Unreleased]` § Changed, with BREAKING flag for the default-DB flip
+- [ ] No new `devDependencies` that should be `dependencies` (none expected — Postgres driver `pg` is already a runtime dep via INF-001)
+- [ ] ROADMAP.md `### INF-008` section flipped to `**Status:** ✅ Complete (PR #N)` and Completed Work Summary row added
 
 ---
 ## ⏭ Queue (next 3 PRs after current)
-### 1 · INF-008 — Postgres-default + dual-DB CI matrix
-**Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
-Rename colliding migration prefixes (`007_*` × 2, `015_*` × 2); fix `migrationRunner.js` sort; default `.env.example` + `docker-compose.yml` to Postgres; CI matrix `db: [sqlite, postgres]` runs full `npm test` under both; new `lint-migrations.mjs` fails on duplicate prefixes.
-### 2 · AUTO-022 — AI eval harness with golden-set regression
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** INF-007 (`metric_samples` infra) | **Source:** `ROADMAP.md` Phase 5 (AUTO-022)
+### 1 · AUTO-022 — AI eval harness with golden-set regression
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** INF-007 ✅ (`metric_samples` infra) | **Source:** `ROADMAP.md` Phase 5 (AUTO-022)
 50-case golden-set fixture; `backend/src/eval/pipelineEval.js` scores selectors/actions/assertions via Levenshtein; CI job `eval.yml` path-filtered to `pipeline/` / `aiProvider.js` / prompt files; fails build on >5% regression; persists eval scores as `metric_samples` rows.
-### 3 · INF-009 — Helm chart + K8s readiness/liveness + DR playbook
-**Effort:** L | **Priority:** 🟡 High | **Dependencies:** INF-008 (Postgres-default), INF-007 (metrics endpoint for liveness) | **Source:** `ROADMAP.md` Phase 5 (INF-009)
+### 2 · INF-009 — Helm chart + K8s readiness/liveness + DR playbook
+**Effort:** L | **Priority:** 🟡 High | **Dependencies:** INF-008 (Postgres-default), INF-007 ✅ (metrics endpoint for liveness) | **Source:** `ROADMAP.md` Phase 5 (INF-009)
 `helm/sentri/` chart with separate `backend` + `worker` Deployments, Postgres StatefulSet, Redis Deployment, ingress/configmap/secret; `readinessProbe`/`livenessProbe` on `GET /api/v1/health`; nightly `pg_dump` to S3 + restore playbook with explicit RTO (<4h) / RPO (<24h) targets.
+### 3 · MNT-001 — Vision-based locator healing
+**Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** none | **Source:** `ROADMAP.md` Maintenance row (MNT-001)
+Add a vision-based fallback to `selfHealing.js` so locator failures route through an LLM screenshot pass before the test is marked broken. Wraps the existing DOM-only heal path; gated behind a per-project `visionHealing` toggle so OCR / vision-model spend stays opt-in. Touches `selfHealing.js` + `executeTest.js` only — zero overlap with INF-008's database surface.
 
 ---
 
 ## 🔀 Parallel opportunities
 
-Items that do not overlap INF-007's changed files and can land in a separate PR while it is in flight.
+Items that do not overlap INF-008's changed files and can land in a separate PR while it is in flight. INF-008 touches `backend/src/database/migrations/`, `migrationRunner.js`, `.env.example`, `docker-compose.yml`, and `.github/workflows/ci.yml` — any PR adding a new migration or a new CI lane will conflict and should wait.
 
 | ID | Title | Effort | Priority | Shared files? |
 |----|-------|--------|----------|---------------|
-| INF-008 | Postgres-default + dual-DB CI matrix | M | 🔴 Blocker | ⚠️ `backend/src/database/migrations/` — coordinate with any new migrations from INF-007 |
-| AUTO-022 | AI eval harness with golden-set regression | L | 🔴 Blocker | None — `backend/src/eval/`, `pipelineOrchestrator.js`; no overlap with observability |
+| AUTO-022 | AI eval harness with golden-set regression | L | 🔴 Blocker | ⚠️ `.github/workflows/` — new `eval.yml` workflow file is independent of `ci.yml`, but coordinate the matrix-strategy change with INF-008 |
 | MNT-001 | Vision-based locator healing | XL | 🟢 Differentiator | None — `selfHealing.js`, `executeTest.js` only |
 | AUTO-009 | Browser code coverage mapping | L | 🟢 Differentiator | None — `executeTest.js`, `coverageAggregator.js`, `Dashboard.jsx` |
+| DIF-008 | Jira / Linear issue sync | L | 🟢 Differentiator | None — `routes/settings.js`, `Settings.jsx`, new `utils/integrations.js` |
 
 ---
 
@@ -93,9 +85,9 @@ Items that do not overlap INF-007's changed files and can land in a separate PR 
 
 | ID | Title | PR |
 |----|-------|----|
+| INF-007 | OpenTelemetry + Sentry observability — preloaded OTel SDK (`node --import ./src/otel-preload.mjs`) with auto-instrumentation for Express/pg/ioredis/HTTP; `requestId` via `AsyncLocalStorage` + `X-Request-Id` response header + `requestId`/`traceId`/`spanId` on every `formatLogLine()` + `structuredLog()` output (3-way Sentry→Loki→Jaeger correlation pivot); Prometheus `/metrics` endpoint with timing-safe Bearer-token auth via `crypto.timingSafeEqual` over SHA-256 digests and live `app_queue_depth` gauge refresh on every scrape; 14 brand-neutral `app_*` metrics (HTTP RED histograms with route-template labels never raw URLs, run lifecycle `app_runs_total` + `app_run_outcome_total` + `app_run_duration_seconds`, per-test `app_tests_executed_total` + `app_test_duration_seconds`, pipeline stage histogram, AI provider latency/token/error counters with `classifyAiError` cardinality-bounded label, BullMQ queue gauges); backend Sentry with multi-tenant `Sentry.setUser({ id })` + `workspace_id`/`user_role` tags from `workspaceScope.attachSentryContext` + `beforeSend` PII scrub of request headers; frontend `@sentry/react` with `browserTracingIntegration` route-change breadcrumbs + `stripUrlSecrets` query-string scrubber + `sendDefaultPii: false` + explicit deletion of auto-collected `email`/`username`/`ip_address`; 11 Prometheus alert rules in `monitoring/prometheus/alerts.yml` each with `runbook_url` anchors in new `docs/guide/observability.md` on-call runbook; every layer no-op when its env var is unset (`OTEL_EXPORTER_OTLP_ENDPOINT`, `METRICS_SCRAPE_KEY`, `SENTRY_DSN`, `VITE_SENTRY_DSN`); 9 integration tests in `backend/tests/observability.test.js` covering `/metrics` auth (no key / wrong token / correct token), Prometheus exposition format, `X-Request-Id` minting + inbound echo, OTel no-op behaviour, `formatLogLine` requestId propagation through `AsyncLocalStorage`. | #14 |
 | SEC-007 | Compliance audit log — immutability gate (`DANGER_ALLOW_AUDIT_PURGE` + `audit.purge` meta-audit row emitted BEFORE truncate), 8 password-path `auth.*` events with IP+UA (rendered in dedicated column, not just tooltip), SHA-256 hash chain (`AUDIT_HASH_CHAIN`, boot-time mutual exclusion with `AUDIT_RETENTION_DAYS > 0`, skips pre-chain `prevHash IS NULL` rows on verify), cursor-paginated admin surface with CSV/NDJSON export (`createdAt` header column for SIEM importer parity) + anti-exfiltration rate-limiter, meta-audit (`audit.read`/`audit.export` per PCI-DSS 10.2.6), industry-standard event dedup matching Splunk / CloudTrail / Auth0 / Datadog convention (`AUDIT_DEDUP_WINDOW_SEC` default 60s, collapses identical reads with `count++`/`lastAt`, never deduped for destructive user actions, mutually exclusive with hash chain at the row level, migration `034_activities_dedup.sql`), UTC second-precision timestamps via `fmtAuditTimestamp` (PCI-DSS 10.3.3), daily retention sweep (`AUDIT_RETENTION_DAYS`), `SYSTEM_WORKSPACE_ID` sentinel + admin-only `GET /api/v1/system/security-events` for cross-tenant probe rows (unknown-email failed logins), SIEM forwarder (`dispatchSiemEvent` with HMAC-SHA256 signed NDJSON + system-headers-first spread + 32-char min key per NIST SP 800-107 + reserved-header rejection + 3-retry [0s/1s/2s] + DLQ), per-workspace SIEM config (AES-256-GCM encrypted secret with rotation-optional UPDATE), DLQ inspector + replay (`SIEM_NOT_CONFIGURED` 503 distinct from `SIEM_DISPATCH_FAILED` 502), `docs/guide/compliance.md` (incl. dedup section mapping to PCI-DSS 10.5.3), 44-step QA.md manual test plan, 3 backend test suites (audit-log-routes + audit-auth-events + audit-siem-forwarder) | #12 |
 | SEC-006 | PII firewall — `domSanitizer` pipeline stage redacting emails / phones / SSNs / Luhn-checked cards / JWTs / Bearer & Basic auth headers / `?token=` / `?code=` / `?access_token=` query params before crawler snapshots reach `aiProvider.js`; deterministic placeholders, per-project `strictPiiFirewall` toggle + `piiAllowlist`, migration `030_projects_pii_firewall.sql`, `pipeline.pii_redacted` structured audit log | #11 |
 | SEC-004 | MFA — TOTP enrollment + recovery codes + WebAuthn passkeys, per-workspace enforcement with grace period, JWT `amr` claim, login factor picker, audit logging | #10 |
-| AUTO-008 | Distributed runner — standalone `worker` Compose service, `WORKER_CONCURRENCY` env var, dashboard worker-pool panel (Runner Mode / Queue Depth / Active Workers / Completed Jobs) | #9 |
 
 *Full completed list → ROADMAP.md § Completed Work Summary*
