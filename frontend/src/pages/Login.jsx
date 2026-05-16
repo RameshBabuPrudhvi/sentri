@@ -357,30 +357,28 @@ export default function Login() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="mfa-modal-title"
-            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"grid",placeItems:"center",zIndex:50,padding:16}}
+            className="mfa-overlay"
           >
             <form
               onSubmit={handleMfaVerify}
-              className="card"
-              style={{padding:24,width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:14}}
+              className="card mfa-modal"
             >
               <div>
-                <h3 id="mfa-modal-title" style={{margin:0}}>Two-factor verification</h3>
-                <p className="text-sub" style={{margin:"4px 0 0",fontSize:"0.85rem"}}>
+                <h3 id="mfa-modal-title" className="mfa-modal__title">Two-factor verification</h3>
+                <p className="text-sub mfa-modal__subtitle">
                   Confirm your identity to finish signing in.
                 </p>
               </div>
 
               {/* Factor picker — only render when multiple factors exist. */}
               {(mfaMethods.totp || mfaMethods.webauthn) && (
-                <div role="tablist" aria-label="Verification method" style={{display:"flex",gap:6}}>
+                <div role="tablist" aria-label="Verification method" className="mfa-tablist">
                   {mfaMethods.webauthn && (
                     <button
                       type="button"
                       role="tab"
                       aria-selected={mfaFactor === "webauthn"}
                       className={`btn btn-sm ${mfaFactor === "webauthn" ? "btn-primary" : "btn-ghost"}`}
-                      style={{flex:1}}
                       onClick={() => { setMfaFactor("webauthn"); setError(""); }}
                     >
                       Passkey
@@ -392,7 +390,6 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "totp"}
                       className={`btn btn-sm ${mfaFactor === "totp" ? "btn-primary" : "btn-ghost"}`}
-                      style={{flex:1}}
                       onClick={() => { setMfaFactor("totp"); setError(""); }}
                     >
                       Authenticator
@@ -404,7 +401,6 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "recovery"}
                       className={`btn btn-sm ${mfaFactor === "recovery" ? "btn-primary" : "btn-ghost"}`}
-                      style={{flex:1}}
                       onClick={() => { setMfaFactor("recovery"); setError(""); }}
                     >
                       Recovery code
@@ -414,7 +410,7 @@ export default function Login() {
               )}
 
               {error && (
-                <div className="lp-alert lp-aerr" role="alert" style={{margin:0}}>
+                <div className="lp-alert lp-aerr" role="alert">
                   {error}
                 </div>
               )}
@@ -422,7 +418,7 @@ export default function Login() {
               {/* Passkey panel */}
               {mfaFactor === "webauthn" && (
                 <>
-                  <p className="text-sub" style={{margin:0,fontSize:"0.85rem"}}>
+                  <p className="text-sub mfa-panel__hint">
                     Use a registered passkey (security key, Touch ID, Windows Hello, etc.).
                   </p>
                   <button
@@ -444,7 +440,7 @@ export default function Login() {
                     6-digit code from your authenticator app
                     <input
                       id="mfa-totp-code"
-                      className="input"
+                      className="input mfa-code-input"
                       type="text"
                       inputMode="numeric"
                       autoComplete="one-time-code"
@@ -452,7 +448,6 @@ export default function Login() {
                       value={mfaCode}
                       onChange={e => setMfaCode(e.target.value.replace(/[^\d]/g, ""))}
                       placeholder="123456"
-                      style={{marginTop:6,letterSpacing:"0.15em",fontFamily:"var(--font-mono)"}}
                       autoFocus
                     />
                   </label>
@@ -474,17 +469,16 @@ export default function Login() {
                     Recovery code
                     <input
                       id="mfa-recovery-code"
-                      className="input"
+                      className="input mfa-recovery-input"
                       type="text"
                       autoComplete="off"
                       maxLength={16}
                       value={mfaCode}
                       onChange={e => setMfaCode(e.target.value.trim())}
                       placeholder="abcd1234"
-                      style={{marginTop:6,fontFamily:"var(--font-mono)"}}
                       autoFocus
                     />
-                    <span className="text-xs text-sub" style={{marginTop:4,display:"block"}}>
+                    <span className="text-xs text-sub mfa-recovery-hint">
                       Each recovery code can be used once.
                     </span>
                   </label>
@@ -519,16 +513,16 @@ export default function Login() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="mfa-blocked-title"
-            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"grid",placeItems:"center",zIndex:50,padding:16}}
+            className="mfa-overlay"
           >
-            <div className="card" style={{padding:24,width:"min(460px,92vw)",display:"flex",flexDirection:"column",gap:14}}>
-              <h3 id="mfa-blocked-title" style={{margin:0}}>MFA enrollment required</h3>
-              <p className="text-sub" style={{margin:0,fontSize:"0.9rem"}}>
+            <div className="card mfa-blocked">
+              <h3 id="mfa-blocked-title" className="mfa-blocked__title">MFA enrollment required</h3>
+              <p className="text-sub mfa-blocked__body">
                 Your workspace
                 {mfaEnrollmentRequired.workspaceName ? <> <strong>{mfaEnrollmentRequired.workspaceName}</strong></> : null}
                 {" "}requires multi-factor authentication, and your grace period has ended.
               </p>
-              <p className="text-sub" style={{margin:0,fontSize:"0.85rem"}}>
+              <p className="text-sub mfa-blocked__detail">
                 Contact a workspace administrator to enroll a second factor or
                 extend the grace window. You will not be able to sign in until
                 this is resolved.

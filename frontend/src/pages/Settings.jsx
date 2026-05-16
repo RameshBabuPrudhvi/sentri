@@ -1001,39 +1001,27 @@ function RecoveryCodesPanel({ codes, userEmail, onDismiss }) {
   }
 
   return (
-    <div className="card card-padded" style={{ borderColor: "var(--amber)", background: "rgba(255,176,32,0.06)" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+    <div className="card card-padded recovery-panel">
+      <div className="recovery-panel__header">
         <AlertTriangle size={18} color="var(--amber)" className="shrink-0" style={{ marginTop: 2 }} />
         <div>
-          <div className="font-bold" style={{ fontSize: "0.95rem" }}>Save these recovery codes now</div>
-          <div className="text-xs text-muted" style={{ marginTop: 4 }}>
+          <div className="font-bold recovery-panel__title">Save these recovery codes now</div>
+          <div className="text-xs text-muted recovery-panel__hint">
             Each code can be used once to sign in if you lose your authenticator. They will not be shown again.
           </div>
         </div>
       </div>
-      <div
-        className="text-mono text-sm"
-        style={{
-          background: "var(--bg3)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius)",
-          padding: 12,
-          display: "grid",
-          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-          gap: "6px 14px",
-          marginBottom: 12,
-        }}
-      >
+      <div className="text-mono text-sm recovery-panel__grid">
         {codes.map((c) => <span key={c}>{c}</span>)}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="recovery-panel__actions">
         <button className="btn btn-ghost btn-sm" onClick={handleDownload}>
           <Download size={13} /> Download .txt
         </button>
         <button className="btn btn-ghost btn-sm" onClick={handleCopy}>
           <FileText size={13} /> Copy
         </button>
-        <label className="text-xs text-muted" style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+        <label className="text-xs text-muted recovery-panel__confirm">
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
           I've saved them
         </label>
@@ -1066,37 +1054,32 @@ function PasswordConfirmModal({ title, description, busy, error, onConfirm, onCa
       role="dialog"
       aria-modal="true"
       aria-labelledby="pwd-modal-title"
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-        display: "grid", placeItems: "center", zIndex: 60,
-      }}
+      className="pwd-modal-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <form
-        className="card card-padded"
-        style={{ width: "min(420px, 92vw)" }}
+        className="card card-padded pwd-modal"
         onSubmit={(e) => { e.preventDefault(); onConfirm(password); }}
       >
-        <h3 id="pwd-modal-title" style={{ marginTop: 0, marginBottom: 6 }}>{title}</h3>
-        {description && <p className="text-sm text-muted" style={{ marginTop: 0 }}>{description}</p>}
-        <label className="text-sm font-semi" style={{ display: "block", marginTop: 12 }}>
+        <h3 id="pwd-modal-title" className="pwd-modal__title">{title}</h3>
+        {description && <p className="text-sm text-muted pwd-modal__desc">{description}</p>}
+        <label className="text-sm font-semi pwd-modal__label">
           Password
           <input
             ref={inputRef}
-            className="input"
+            className="input pwd-modal__input"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            style={{ marginTop: 6 }}
           />
         </label>
         {error && (
-          <div className="st-status-err" style={{ marginTop: 10 }}>
+          <div className="st-status-err pwd-modal__error">
             <AlertCircle size={12} /> {error}
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+        <div className="pwd-modal__actions">
           <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !password.trim()}>
             {busy ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
@@ -1121,22 +1104,21 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
 
   return (
     <form
-      className="card card-padded flex-col gap-md"
+      className="card card-padded flex-col gap-md totp-enroll"
       onSubmit={(e) => { e.preventDefault(); onEnable(token); }}
-      style={{ borderColor: "var(--accent)" }}
     >
       <div className="font-bold">Scan with your authenticator app</div>
       <div className="text-sm text-muted">
         Use Google Authenticator, 1Password, Authy, or any TOTP-compatible app.
       </div>
       {qrUrl && (
-        <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
+        <div className="totp-enroll__qr-wrap">
           <img
             src={qrUrl}
             width="200"
             height="200"
             alt="MFA QR code — scan with your authenticator app"
-            style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "#fff", padding: 8 }}
+            className="totp-enroll__qr"
           />
         </div>
       )}
@@ -1144,10 +1126,7 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
         <div className="text-xs text-muted" style={{ marginBottom: 4 }}>
           Or enter this secret manually:
         </div>
-        <div className="text-mono text-sm" style={{
-          background: "var(--bg3)", padding: "8px 10px", borderRadius: "var(--radius)",
-          wordBreak: "break-all",
-        }}>
+        <div className="text-mono text-sm totp-enroll__secret">
           {enrollment?.secret}
         </div>
       </div>
@@ -1162,7 +1141,7 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
           value={token}
           onChange={(e) => setToken(e.target.value.replace(/[^\d]/g, ""))}
           placeholder="123456"
-          style={{ marginTop: 6, letterSpacing: "0.15em", fontFamily: "var(--font-mono)" }}
+          className="totp-enroll__code-input"
           required
         />
       </label>
@@ -1171,7 +1150,7 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
           <AlertCircle size={12} /> {error}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <div className="totp-enroll__actions">
         <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
         <button type="submit" className="btn btn-primary btn-sm" disabled={busy || token.length < 6}>
           {busy ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
@@ -1263,8 +1242,8 @@ function WorkspaceMfaPolicyPanel() {
       </div>
 
       {compliance && (
-        <div className="card-padded-sm" style={{ background: "var(--bg3)" }}>
-          <div className="text-xs text-muted font-semi" style={{ marginBottom: 6 }}>
+        <div className="card-padded-sm ws-enforce__compliance">
+          <div className="text-xs text-muted font-semi ws-enforce__compliance-title">
             Current enrollment
           </div>
           <div className="text-sm">
@@ -1290,16 +1269,15 @@ function WorkspaceMfaPolicyPanel() {
       <label className="text-sm font-semi" style={{ display: "block" }}>
         Grace period (days)
         <input
-          className="input"
+          className="input ws-enforce__grace-input"
           type="number"
           min={0}
           max={90}
           value={draftGrace}
           onChange={(e) => setDraftGrace(e.target.value)}
           disabled={!draftEnabled}
-          style={{ marginTop: 6, width: 120 }}
         />
-        <div className="hint" style={{ marginTop: 4 }}>
+        <div className="hint ws-enforce__grace-hint">
           Members have this many days from when the policy is enabled (or from
           when they join) to enroll before they are blocked at login.
         </div>
@@ -1486,11 +1464,11 @@ function SecurityTabInner() {
         />
       ) : (
         <div className="card card-padded flex-col gap-md">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="factor-row">
             <Smartphone size={18} color={totpEnabled ? "var(--green)" : "var(--text3)"} />
-            <div className="flex-1">
+            <div className="factor-row__info">
               <div className="font-bold">Authenticator app (TOTP)</div>
-              <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+              <div className="text-xs text-muted factor-row__sub">
                 {totpEnabled
                   ? `Enabled · ${factors.recoveryCodesRemaining} recovery code${factors.recoveryCodesRemaining === 1 ? "" : "s"} remaining`
                   : "Not enrolled"}
@@ -1521,11 +1499,11 @@ function SecurityTabInner() {
       )}
 
       <div className="card card-padded flex-col gap-md">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="factor-row">
           <KeyRound size={18} color={passkeys.length > 0 ? "var(--green)" : "var(--text3)"} />
-          <div className="flex-1">
+          <div className="factor-row__info">
             <div className="font-bold">Passkeys</div>
-            <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+            <div className="text-xs text-muted factor-row__sub">
               {passkeys.length === 0
                 ? "No passkeys registered"
                 : `${passkeys.length} passkey${passkeys.length === 1 ? "" : "s"} registered`}
@@ -1538,15 +1516,12 @@ function SecurityTabInner() {
         {passkeys.length > 0 && (
           <div className="flex-col gap-xs">
             {passkeys.map((cred) => (
-              <div key={cred.id} style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
-                background: "var(--bg3)", borderRadius: "var(--radius)",
-              }}>
-                <div className="flex-1" style={{ minWidth: 0 }}>
-                  <div className="text-sm font-semi" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div key={cred.id} className="passkey-item">
+                <div className="passkey-item__info">
+                  <div className="text-sm font-semi passkey-item__name">
                     {cred.deviceName || "Unnamed passkey"}
                   </div>
-                  <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  <div className="text-xs text-muted passkey-item__meta">
                     Added {fmtDeletedDate(cred.createdAt)}
                     {cred.lastUsedAt && ` · last used ${fmtDeletedDate(cred.lastUsedAt)}`}
                   </div>

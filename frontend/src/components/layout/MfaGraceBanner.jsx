@@ -68,18 +68,10 @@ export default function MfaGraceBanner() {
     <div
       role="status"
       aria-live="polite"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 16px",
-        background: isUrgent ? "rgba(239,68,68,0.08)" : "rgba(255,176,32,0.08)",
-        borderBottom: `1px solid ${isUrgent ? "rgba(239,68,68,0.25)" : "rgba(255,176,32,0.25)"}`,
-        fontSize: "0.85rem",
-      }}
+      className={`grace-banner ${isUrgent ? "grace-banner--urgent" : "grace-banner--warn"}`}
     >
       <AlertTriangle size={16} color={isUrgent ? "var(--danger)" : "var(--amber)"} />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="grace-banner__body">
         <strong>Multi-factor authentication required:</strong>{" "}
         Your workspace requires MFA. You have <strong>{days}</strong> day{days === 1 ? "" : "s"} remaining
         to enroll before sign-in is blocked.
