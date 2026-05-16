@@ -19,6 +19,7 @@
  */
 
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createTestContext } from "./helpers/test-base.js";
 import { requestContext } from "../src/utils/observability.js";
 import { formatLogLine } from "../src/utils/logFormatter.js";
@@ -27,6 +28,15 @@ import { register as metricsRegister } from "../src/utils/metrics.js";
 
 const t = createTestContext();
 const runner = t.createTestRunner();
+
+// INF-007: Per-test-run random scrape token. Generated at runtime so the
+// gitleaks `generic-api-key` rule doesn't flag a high-entropy literal in
+// the test source (false positive — the value is ephemeral and never
+// leaves the process). Each test run gets a fresh value, which also
+// guards against accidental cross-process reuse if these tests are ever
+// parallelised.
+const TEST_SCRAPE_KEY = crypto.randomBytes(16).toString("hex");
+const TEST_BEARER = `Bearer ${TEST_SCRAPE_KEY}`;
 
 async function main() {
   // ── 1. requestId propagation through formatLogLine ──────────────────────
@@ -48,7 +58,7 @@ async function main() {
   // ── 4. OTel SDK no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset ─────────
   const env = t.setupEnv({
     OTEL_EXPORTER_OTLP_ENDPOINT: "",
-    METRICS_SCRAPE_KEY: "test-scrape-key-12345",
+    METRICS_SCRAPE_KEY: TEST_SCRAPE_KEY,
   });
   const server = t.app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -91,7 +101,7 @@ async function main() {
 
     await runner.test("GET /metrics returns Prometheus exposition format with correct Bearer token", async () => {
       const res = await fetch(`${base}/metrics`, {
-        headers: { Authorization: "Bearer test-scrape-key-12345" },
+        headers: { Authorization: TEST_BEARER },
       });
       assert.equal(res.status, 200);
       const ct = res.headers.get("content-type") || "";
@@ -109,7 +119,7 @@ async function main() {
       const innerEnv = t.setupEnv({ METRICS_SCRAPE_KEY: "" });
       try {
         const res = await fetch(`${base}/metrics`, {
-          headers: { Authorization: "Bearer test-scrape-key-12345" },
+          headers: { Authorization: TEST_BEARER },
         });
         assert.equal(res.status, 401);
       } finally {
