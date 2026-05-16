@@ -222,6 +222,13 @@ const _CSRF_EXEMPT_AUTH_SUFFIXES = [
   "login", "register", "logout", "refresh",
   "forgot-password", "reset-password", "resend-verification",
   "github/callback", "google/callback",
+  // SEC-004: pre-auth MFA endpoints. The user has no auth cookie yet —
+  // they're exchanging a pendingToken (TOTP / WebAuthn) for one. Without
+  // the cookie the double-submit check would reject any request that
+  // happens to carry a stale _csrf cookie from a previous session.
+  "mfa/verify",
+  "webauthn/authenticate/options",
+  "webauthn/authenticate/verify",
 ];
 const CSRF_EXEMPT_PATHS = new Set(
   _CSRF_EXEMPT_AUTH_SUFFIXES.flatMap(s => [

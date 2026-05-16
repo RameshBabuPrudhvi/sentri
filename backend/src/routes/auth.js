@@ -42,6 +42,7 @@ import * as verificationTokenRepo from "../database/repositories/verificationTok
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as accountRepo from "../database/repositories/accountRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
+import * as webauthnRepo from "../database/repositories/webauthnRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
@@ -456,16 +457,51 @@ function createPendingMfaLogin(userId) {
  * Atomically consume a pending-MFA token. Returns the entry on success and
  * deletes it (single-use). Returns null when missing, already consumed, or
  * expired.
+ *
+ * The optional `{ peek: true }` option returns the entry WITHOUT consuming
+ * it — used by the WebAuthn flow's `/authenticate/options` endpoint, which
+ * needs to look up the user before issuing a challenge but must leave the
+ * token intact for the subsequent `/authenticate/verify` call.
+ *
  * @param {string} token
+ * @param {{ peek?: boolean }} [opts]
  * @returns {{ userId: string, expiresAt: number } | null}
  * @private
  */
-function consumePendingMfaLogin(token) {
+function consumePendingMfaLogin(token, opts) {
   const entry = mfaPendingLogins.get(token);
   if (!entry) return null;
-  mfaPendingLogins.delete(token);
-  if (entry.expiresAt < Date.now()) return null;
+  if (entry.expiresAt < Date.now()) {
+    mfaPendingLogins.delete(token);
+    return null;
+  }
+  if (!opts?.peek) mfaPendingLogins.delete(token);
   return entry;
+}
+
+/**
+ * Internal cross-module helper — exported so `routes/webauthn.js` can
+ * consume / peek pending-MFA tokens issued by `/login` without duplicating
+ * the in-memory store. Underscore prefix marks it as not part of the
+ * public API contract.
+ * @param {string} token
+ * @param {{ peek?: boolean }} [opts]
+ * @returns {{ userId: string, expiresAt: number } | null}
+ */
+export function _internalConsumePendingMfaLogin(token, opts) {
+  return consumePendingMfaLogin(token, opts);
+}
+
+/**
+ * Internal cross-module helper — exported so `routes/webauthn.js` can reuse
+ * the password-confirmation policy (OAuth-only users skip the password
+ * check; everyone else must supply a matching password).
+ * @param {Object} user
+ * @param {string} password
+ * @returns {Promise<boolean>}
+ */
+export async function _internalVerifyAccountPassword(user, password) {
+  return verifyAccountPassword(user, password);
 }
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -592,9 +628,18 @@ router.post("/login", async (req, res) => {
     // ACL-001: Ensure the user has a workspace before issuing a token.
     ensureUserWorkspace(user);
 
-    if (user.mfaEnabled === 1 && user.mfaSecret) {
+    // SEC-004: MFA challenge — issue a pendingToken if EITHER a TOTP secret
+    // is configured OR the user has registered WebAuthn credentials. The
+    // frontend uses the `methods` map to render a factor picker.
+    const hasTotp = user.mfaEnabled === 1 && !!user.mfaSecret;
+    const webauthnCount = webauthnRepo.countByUser(user.id);
+    if (hasTotp || webauthnCount > 0) {
       const pendingToken = createPendingMfaLogin(user.id);
-      return res.status(200).json({ mfaRequired: true, pendingToken });
+      return res.status(200).json({
+        mfaRequired: true,
+        pendingToken,
+        methods: { totp: hasTotp, webauthn: webauthnCount > 0 },
+      });
     }
 
     // SEC-004: per-workspace MFA enforcement. If any workspace this user
