@@ -168,8 +168,12 @@ const rateBuckets = {
   resetPassword: { map: new Map(), max: 5 },   // 5 reset attempts per IP per 15 min
   // SEC-004: MFA-specific buckets — verify is the brute-force surface (only
   // 6 digits of entropy per attempt), enroll prevents secret-flooding abuse.
-  mfaVerify:     { map: new Map(), max: 5 },   // 5 verify attempts per IP per 15 min
-  mfaEnroll:     { map: new Map(), max: 3 },   // 3 enroll cycles per IP per 15 min
+  mfaVerify:        { map: new Map(), max: 5 },   // 5 TOTP verify attempts per IP per 15 min
+  mfaEnroll:        { map: new Map(), max: 3 },   // 3 enroll cycles per IP per 15 min
+  // SEC-004 §5a: WebAuthn verify is also a brute-force surface (an attacker
+  // with a stolen pendingToken could try arbitrary assertions). Same budget
+  // as TOTP — failed assertions cost the same as failed codes.
+  webauthnVerify:   { map: new Map(), max: 5 },   // 5 passkey verify attempts per IP per 15 min
 };
 
 /**
@@ -502,6 +506,18 @@ export function _internalConsumePendingMfaLogin(token, opts) {
  */
 export async function _internalVerifyAccountPassword(user, password) {
   return verifyAccountPassword(user, password);
+}
+
+/**
+ * Internal cross-module helper — exposes the per-bucket rate limiter so the
+ * WebAuthn router can apply the shared `webauthnVerify` bucket without
+ * duplicating the limiter state.
+ * @param {string} bucket
+ * @param {string} ip
+ * @returns {{ allowed: boolean, retryAfterSec?: number }}
+ */
+export function _internalCheckRateLimit(bucket, ip) {
+  return checkRateLimit(bucket, ip);
 }
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -1354,6 +1370,49 @@ router.get("/mfa/status", requireAuth, (req, res) => {
 });
 
 /**
+ * Aggregate view of all second-factor state for the Settings UI — one
+ * round trip instead of three (status + recovery count + passkey list).
+ *
+ * @route GET /api/v1/auth/mfa/factors
+ * @returns {200} `{
+ *   totp: boolean,
+ *   recoveryCodesRemaining: number,
+ *   webauthn: [{ id, deviceName, transports, createdAt, lastUsedAt }]
+ * }`
+ */
+router.get("/mfa/factors", requireAuth, (req, res) => {
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    let recoveryCodesRemaining = 0;
+    if (user.mfaEnabled === 1 && user.mfaRecoveryCodes) {
+      try {
+        const codes = JSON.parse(user.mfaRecoveryCodes);
+        if (Array.isArray(codes)) recoveryCodesRemaining = codes.length;
+      } catch { /* malformed JSON — count as zero */ }
+    }
+
+    const credentials = webauthnRepo.listByUser(user.id).map((c) => ({
+      id: c.id,
+      deviceName: c.deviceName,
+      transports: c.transports,
+      createdAt: c.createdAt,
+      lastUsedAt: c.lastUsedAt,
+    }));
+
+    return res.json({
+      totp: user.mfaEnabled === 1,
+      recoveryCodesRemaining,
+      webauthn: credentials,
+    });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/factors] ${err.message}`));
+    return res.status(500).json({ error: "Failed to fetch MFA factors." });
+  }
+});
+
+/**
  * Begin TOTP enrollment — generate a fresh secret + otpauth URL for the
  * user's authenticator app. The secret is encrypted at rest (AES-GCM via
  * `credentialEncryption.js`) and the user is NOT marked enabled until they
@@ -1546,6 +1605,52 @@ router.post("/mfa/verify", async (req, res) => {
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/mfa/verify] ${err.message}`));
     return res.status(500).json({ error: "Failed to verify MFA." });
+  }
+});
+
+/**
+ * Regenerate the user's recovery codes. Invalidates the previous set and
+ * returns a fresh batch (shown once — the client must save them immediately).
+ * Requires password confirmation; OAuth-only users authenticate by session.
+ *
+ * Audit-logged so admins can correlate "I lost my codes" support tickets
+ * with the regeneration event.
+ *
+ * @route POST /api/v1/auth/mfa/recovery-codes/regenerate
+ * @param {Object} req.body
+ * @param {string} req.body.password
+ * @returns {200} `{ recoveryCodes: string[] }`
+ * @returns {400} MFA not enabled.
+ * @returns {403} Password confirmation failed.
+ */
+router.post("/mfa/recovery-codes/regenerate", requireAuth, async (req, res) => {
+  try {
+    const user = userRepo.getById(req.authUser.sub);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    if (user.mfaEnabled !== 1) {
+      return res.status(400).json({ error: "MFA is not enabled. Enable MFA before regenerating recovery codes." });
+    }
+    const valid = await verifyAccountPassword(user, req.body?.password);
+    if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
+
+    const recovery = mintRecoveryCodes();
+    userRepo.update(user.id, {
+      mfaRecoveryCodes: JSON.stringify(recovery.hashed),
+      updatedAt: new Date().toISOString(),
+    });
+
+    logActivity({
+      type: "auth.mfa.recovery_codes_regenerated",
+      detail: "Regenerated MFA recovery codes.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: req.authUser.workspaceId,
+      meta: { count: recovery.raw.length },
+    });
+
+    return res.json({ recoveryCodes: recovery.raw });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[auth/mfa/recovery-codes/regenerate] ${err.message}`));
+    return res.status(500).json({ error: "Failed to regenerate recovery codes." });
   }
 });
 

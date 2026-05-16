@@ -46,6 +46,7 @@ import { signJwt, getJwtSecret } from "../middleware/authenticate.js";
 import {
   setAuthCookie, JWT_TTL_SEC, requireAuth,
   _internalConsumePendingMfaLogin,
+  _internalCheckRateLimit,
 } from "./auth.js";
 
 // ─── Lazy-loaded SimpleWebAuthn server module ─────────────────────────────────
@@ -364,6 +365,12 @@ router.post("/authenticate/options", async (req, res) => {
  */
 router.post("/authenticate/verify", async (req, res) => {
   if (bailIfUnavailable(res)) return;
+  const ip = req.ip || "unknown";
+  const rate = _internalCheckRateLimit("webauthnVerify", ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many passkey verification attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
   try {
     const entry = consumeChallenge(String(req.body?.challengeToken || ""));
     if (!entry || entry.kind !== "authenticate") {
