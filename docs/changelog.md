@@ -294,3 +294,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth state parameter validated before code exchange.
 - JWT fallback secret replaced with random per-process generation.
 - `verifyJwt` hardened with explicit buffer length check.
+
+- Added observability baseline: request-id correlation (`X-Request-Id`), protected `/metrics`, optional OpenTelemetry exporter, and optional Sentry init (backend + frontend).

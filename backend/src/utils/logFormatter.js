@@ -1,3 +1,4 @@
+import { getRequestId, getSpanContext } from "./observability.js";
 /**
  * @module utils/logFormatter
  * @description Centralised log formatting with `.env`-driven configuration.
@@ -86,11 +87,13 @@ const jsonMode = (process.env.LOG_JSON || "false").toLowerCase() === "true";
 export function formatLogLine(level, runId, msg) {
   const ts = formatTimestamp();
   if (jsonMode) {
-    return JSON.stringify({ ts, level, runId: runId || undefined, msg });
+    return JSON.stringify({ ts, level, runId: runId || undefined, requestId: getRequestId() || undefined, msg });
   }
   const tag = level.toUpperCase().padEnd(5);
   const rid = runId ? ` [${runId}]` : "";
-  return `[${ts}] [${tag}]${rid} ${msg}`;
+  const req = getRequestId();
+  const reqTag = req ? ` [req:${req}]` : "";
+  return `[${ts}] [${tag}]${rid}${reqTag} ${msg}`;
 }
 
 /**
@@ -113,9 +116,12 @@ export function structuredLog(event, props = {}) {
   if (!shouldLog("info")) return;
   const ts = formatTimestamp();
   if (jsonMode) {
-    console.log(JSON.stringify({ ts, event, ...props }));
+    const span = getSpanContext();
+    console.log(JSON.stringify({ ts, event, requestId: getRequestId() || undefined, traceId: span?.traceId, spanId: span?.spanId, ...props }));
   } else {
-    const kvPairs = Object.entries(props)
+    const span = getSpanContext();
+    const merged = { requestId: getRequestId() || undefined, traceId: span?.traceId, spanId: span?.spanId, ...props };
+    const kvPairs = Object.entries(merged)
       .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
       .join(" ");
     console.log(`[${ts}] [EVENT] ${event}${kvPairs ? " " + kvPairs : ""}`);

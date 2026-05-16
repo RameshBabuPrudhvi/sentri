@@ -28,6 +28,8 @@ import { AUTH_COOKIE } from "./authenticate.js";
 import { redis, isRedisAvailable } from "../utils/redisClient.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { isS3Storage, signS3ArtifactUrl, s3PublicOrigin } from "../utils/objectStorage.js";
+import client from "prom-client";
+import { requestContext, createRequestId } from "../utils/observability.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -110,6 +112,30 @@ app.use(cors({
   // set by the backend domain, so the token is echoed in this header instead.
   exposedHeaders: ["X-CSRF-Token"],
 }));
+
+
+
+// Observability: per-request correlation id
+app.use((req, res, next) => {
+  const requestId = req.headers["x-request-id"] || createRequestId();
+  res.setHeader("X-Request-Id", requestId);
+  requestContext.run({ requestId }, () => next());
+});
+
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
+export const sentriRunsTotal = new client.Counter({ name: "sentri_runs_total", help: "Total run records created", registers: [register] });
+export const sentriTestsExecutedTotal = new client.Counter({ name: "sentri_tests_executed_total", help: "Total tests executed", registers: [register] });
+export const sentriCrawlPagesTotal = new client.Counter({ name: "sentri_crawl_pages_total", help: "Total crawled pages", registers: [register] });
+
+app.get("/metrics", async (req, res) => {
+  const key = process.env.METRICS_SCRAPE_KEY;
+  if (!key || req.headers.authorization !== `Bearer ${key}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  res.set("Content-Type", register.contentType);
+  res.end(await register.metrics());
+});
 
 // ─── Cross-origin cookie helper ──────────────────────────────────────────────
 // When the frontend and backend live on different origins (e.g. GitHub Pages +

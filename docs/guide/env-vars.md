@@ -298,3 +298,10 @@ S3_ENDPOINT=https://minio.internal:9000
 | `GITHUB_PAGES` | — | Set to `true` to use `/sentri/` base path |
 | `VITE_GITHUB_CLIENT_ID` | — | GitHub OAuth client ID (passed to frontend) |
 | `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID (passed to frontend) |
+
+### Observability
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: Optional OTLP endpoint for OpenTelemetry trace export.
+- `OTEL_SERVICE_NAME`: Service name for OTel (default `sentri-backend`).
+- `METRICS_SCRAPE_KEY`: Bearer token required for `GET /metrics`.
+- `SENTRY_DSN`: Backend Sentry DSN (optional; no-op when unset).
+- `VITE_SENTRY_DSN`: Frontend Sentry DSN (optional; no-op when unset).
