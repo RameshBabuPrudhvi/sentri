@@ -1,4 +1,4 @@
-import { getRequestId, getSpanContext } from "./observability.js";
+import { getRequestId } from "./observability.js";
 /**
  * @module utils/logFormatter
  * @description Centralised log formatting with `.env`-driven configuration.
@@ -96,35 +96,9 @@ export function formatLogLine(level, runId, msg) {
   return `[${ts}] [${tag}]${rid}${reqTag} ${msg}`;
 }
 
-/**
- * Emit a structured lifecycle event to stdout.
- *
- * When LOG_JSON=true, emits a JSON line with the event name and all props:
- *   {"ts":"...","event":"run.start","runId":"RUN-42","tests":5}
- *
- * When LOG_JSON=false, emits a human-readable line:
- *   [2025-04-03T12:34:56.789Z] [EVENT] run.start runId=RUN-42 tests=5
- *
- * Use this for machine-filterable lifecycle events (run start/end, browser
- * launch, pipeline stage transitions). Use `formatLogLine()` for free-form
- * human-readable messages.
- *
- * @param {string} event — semantic event name (e.g. `"run.start"`, `"browser.launched"`)
- * @param {Object} [props] — structured key-value pairs to include
- */
-export function structuredLog(event, props = {}) {
-  if (!shouldLog("info")) return;
-  const ts = formatTimestamp();
-  if (jsonMode) {
-    const span = getSpanContext();
-    console.log(JSON.stringify({ ts, event, requestId: getRequestId() || undefined, traceId: span?.traceId, spanId: span?.spanId, ...props }));
-  } else {
-    const span = getSpanContext();
-    const merged = { requestId: getRequestId() || undefined, traceId: span?.traceId, spanId: span?.spanId, ...props };
-    const kvPairs = Object.entries(merged)
-      .filter(([, v]) => v !== undefined && v !== null)
-      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-      .join(" ");
-    console.log(`[${ts}] [EVENT] ${event}${kvPairs ? " " + kvPairs : ""}`);
-  }
-}
+// INF-007: `structuredLog` is owned by `./structuredLog.js` (NEXT.md INF-007
+// "Files to change" lists it as a separate module). Re-exported here so the
+// many existing `import { structuredLog } from "./utils/logFormatter.js"`
+// call sites (crawler, testRunner, pipeline/*, runner/*, index.js, …) keep
+// working unchanged. New code should import directly from `./structuredLog.js`.
+export { structuredLog } from "./structuredLog.js";

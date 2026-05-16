@@ -45,7 +45,7 @@ import { structuredLog } from "./utils/logFormatter.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import * as crawlBaselineRepo from "./database/repositories/crawlBaselineRepo.js";
 import { diffCrawlSnapshots } from "./pipeline/crawlDiff.js";
-import { crawlPagesTotal } from "./utils/metrics.js"; // INF-007 — bump per discovered crawl page.
+import { crawlPagesTotal, runOutcomeTotal, runDurationSeconds } from "./utils/metrics.js"; // INF-007 — crawler + run-level telemetry.
 
 /**
  * setStep is imported from utils/pipelineState.js — shared with pipelineOrchestrator.js.
@@ -289,6 +289,17 @@ export async function generateFromUserDescription(project, run, { name, descript
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
+    // INF-007: emit run-outcome + duration histograms for description-mode
+    // generation (no crawl). Labelled `type: "generate"` so dashboards can
+    // split crawl-driven generation from description-driven generation —
+    // the latter has very different latency characteristics (no Playwright
+    // launch, no element classification). Best-effort.
+    try {
+      const labels = { type: "generate", status: run?.status || "completed" };
+      runOutcomeTotal.inc(labels);
+      const seconds = Number(run.duration || 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     log(run, `Raw: ${rawTests.length} | Enhanced: ${enhancedTests.length} | Validated: ${validatedTests.length} | Rejected: ${rejected}`);
@@ -586,12 +597,13 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   throwIfAborted(signal);
 
   // INF-007: Prometheus counter for total pages discovered by the crawler
-  // (`app_crawl_pages_total`). `pagesCrawled` is the full breadth from
-  // either the link-crawl or state-explorer branch above, before
-  // AUTO-002 diff-aware filtering narrows `snapshots` to changed pages
-  // only — the counter measures crawl cost, not generation scope.
-  // Best-effort: a counter hiccup must never fail the run.
-  try { if (pagesCrawled > 0) crawlPagesTotal.inc(pagesCrawled); } catch { /* best-effort */ }
+  // (`app_crawl_pages_total`), labelled by explorer mode so link-crawl vs.
+  // state-exploration cost can be tracked independently in dashboards.
+  // `pagesCrawled` is the full breadth from either branch above, BEFORE
+  // AUTO-002 diff-aware filtering narrows `snapshots` to changed pages — the
+  // counter measures crawl cost, not generation scope. Best-effort: a
+  // counter hiccup must never fail the run.
+  try { if (pagesCrawled > 0) crawlPagesTotal.inc({ mode }, pagesCrawled); } catch { /* best-effort */ }
 
   // SEC-006: PII firewall — sanitize snapshots + classified pages before
   // they reach `generateAllTests` (which builds the LLM prompt). Wiring
@@ -675,6 +687,18 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   finalizeRunIfNotAborted(run, () => {
     run.finishedAt = new Date().toISOString();
     run.duration = Date.now() - runStart;
+    // INF-007: emit crawl-run outcome + duration histograms. Bucketed by
+    // `(type, status)` so the `completed_empty` short-circuit (no changes
+    // since baseline, or no interactive elements) surfaces as a distinct
+    // series from `completed` — operators can distinguish "crawls that ran
+    // but found nothing" from real successes without re-querying the DB.
+    // Best-effort.
+    try {
+      const labels = { type: "crawl", status: run?.status || "completed" };
+      runOutcomeTotal.inc(labels);
+      const seconds = Number(run.duration || 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
     setStep(run, 8);
     log(run, `\n📊 Pipeline Summary:`);
     // Show both the crawl breadth AND the diff-aware generation scope when

@@ -281,6 +281,32 @@ S3_ENDPOINT=https://minio.internal:9000
 | `LOG_TIMEZONE` | system | IANA timezone for `local` format |
 | `LOG_JSON` | `false` | Emit structured JSON logs |
 
+### Observability (INF-007)
+
+OpenTelemetry traces, Prometheus metrics, and optional Sentry crash reporting. **All variables are optional** — every feature is a no-op when its toggle is unset, so a default deployment ships with zero external telemetry traffic.
+
+Trace ↔ log correlation: when OTel is active, every `formatLogLine()` and `structuredLog()` call automatically carries `requestId`, `traceId`, and `spanId`, so jumping from a slow span in Jaeger / Tempo / Datadog to the matching log lines in Loki / ELK is one filter away.
+
+> **Init order.** OTel SDK + Sentry are loaded via `node --import ./src/otel-preload.mjs` (configured in `backend/package.json`, `backend/Dockerfile`, and the worker `docker-compose.yml` command). This guarantees `@opentelemetry/auto-instrumentations-node` patches `express` / `pg` / `ioredis` **before** the application graph loads — patching after the fact would silently lose all framework-level spans. See `backend/src/otel-preload.mjs` for the full rationale.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/HTTP endpoint for trace export (e.g. `http://localhost:4318/v1/traces` for a local Jaeger or Tempo collector, or a vendor URL for Datadog / Honeycomb / Grafana Cloud). When unset, `initOpenTelemetry()` is a no-op — no SDK boot, no network traffic, no console spam. |
+| `OTEL_SERVICE_NAME` | `sentri-backend` | Service name attached to every emitted span. Override per-deployment to distinguish staging vs. production traces in the same backend. |
+| `METRICS_SCRAPE_KEY` | — | Bearer token required to scrape `GET /metrics`. When unset, the endpoint returns `401` to every caller — i.e. metrics are effectively disabled until you set a token. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. |
+| `SENTRY_DSN` | — | Backend Sentry DSN (sentry.io project or self-hosted). When set, `Sentry.init()` runs in the preload and `Sentry.setupExpressErrorHandler(app)` is registered after all routes. `beforeSend` strips `event.request.headers` so Authorization / Cookie / X-CSRF-Token never leave the host. Unset → SDK is a no-op. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of backend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting only. |
+
+**Prometheus exposition surface** — `GET /metrics` returns the standard `text/plain; version=0.0.4` format containing:
+
+- Default Node.js process metrics from `prom-client` (`nodejs_heap_size_total_bytes`, `nodejs_eventloop_lag_seconds`, `process_cpu_seconds_total`, …).
+- Three brand-neutral custom counters (`app_` prefix per [Rebranding](./rebranding.md)):
+  - `app_runs_total` — every persisted `runs` row (all types).
+  - `app_tests_executed_total` — every test result that actually executed (passed / warning / failed; skipped rows are pre-seeded at the route layer and never reach the increment site).
+  - `app_crawl_pages_total` — pages discovered per crawl, bumped by `pagesCrawled` at the end of each crawl run.
+
+Counter naming uses `app_*` rather than a product-name prefix so Prometheus dashboards and alerting rules don't need to be migrated during a [product rebrand](./rebranding.md).
+
 ### OAuth
 
 | Variable | Description |
@@ -299,10 +325,5 @@ S3_ENDPOINT=https://minio.internal:9000
 | `GITHUB_PAGES` | — | Set to `true` to use `/sentri/` base path |
 | `VITE_GITHUB_CLIENT_ID` | — | GitHub OAuth client ID (passed to frontend) |
 | `VITE_GOOGLE_CLIENT_ID` | — | Google OAuth client ID (passed to frontend) |
-
-### Observability
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: Optional OTLP endpoint for OpenTelemetry trace export.
-- `OTEL_SERVICE_NAME`: Service name for OTel (default `sentri-backend`).
-- `METRICS_SCRAPE_KEY`: Bearer token required for `GET /metrics`.
-- `SENTRY_DSN`: Backend Sentry DSN (optional; no-op when unset).
-- `VITE_SENTRY_DSN`: Frontend Sentry DSN (optional; no-op when unset).
+| `VITE_SENTRY_DSN` | — | Frontend Sentry DSN. When set, `Sentry.init()` runs at app boot with `browserTracingIntegration()` so React Router navigations emit pageload + navigation breadcrumbs, and `ErrorBoundary` reports caught exceptions via `Sentry.captureException`. Unset → SDK is a no-op (no network traffic). |
+| `VITE_SENTRY_TRACES_SAMPLE_RATE` | `0` | Fraction (0–1) of frontend transactions sampled for Sentry performance traces. Default `0` keeps Sentry to crash reporting + breadcrumbs only. |

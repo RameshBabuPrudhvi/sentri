@@ -33,6 +33,33 @@ import { formatLogLine } from "./utils/logFormatter.js";
 import * as apiKeyRepo from "./database/repositories/apiKeyRepo.js";
 import * as compatConfigCache from "./utils/compatConfigCache.js";
 import { validateUrl } from "./utils/ssrfGuard.js";
+// INF-007: AI provider telemetry — latency histograms, token counters, and
+// error counters. The single most important metric surface for a SaaS QA
+// platform: it drives unit-economics (cost per workspace per day = tokens ×
+// vendor price), capacity planning (p99 latency per provider), and the
+// circuit-breaker (FEA-003) trip signal. See `utils/metrics.js` for the
+// full registration and label cardinality discipline.
+import {
+  aiProviderLatencySeconds,
+  aiProviderTokensTotal,
+  aiProviderErrorsTotal,
+  classifyAiError,
+} from "./utils/metrics.js";
+
+/**
+ * Normalise the provider id used as a metric label. Compat providers
+ * (`compat:<slot-id>`) get folded to the literal `"compat"` so per-slot
+ * cardinality doesn't explode the time-series database — operators who
+ * need per-slot detail get it via OTel spans, not Prometheus labels.
+ *
+ * @param {string} provider - The detected provider id.
+ * @returns {string} A small-enum label value.
+ */
+function providerMetricLabel(provider) {
+  if (!provider) return "unknown";
+  if (typeof provider === "string" && provider.startsWith("compat:")) return "compat";
+  return provider;
+}
 
 /**
  * Build a `fetch` implementation that re-validates the target URL via the
@@ -984,7 +1011,77 @@ function getFallbackProviders(primaryProvider) {
 
 // ── Core API call ─────────────────────────────────────────────────────────────
 
+/**
+ * INF-007 — Instrumentation wrapper around the raw `_callProviderUnsafe`.
+ * Records latency / outcome / error-reason metrics around every LLM call so
+ * SaaS operators get RED dashboards (Rate / Errors / Duration) per provider
+ * without ad-hoc logging or invasive try/catch at every call site.
+ *
+ * - Latency: `app_ai_provider_latency_seconds{provider, outcome}` — histogram.
+ *   Outcomes are constrained to `{success, rate_limited, error}` so the
+ *   p99-latency-by-outcome panel can detect when slow timeouts are inflating
+ *   the error tail.
+ * - Errors: `app_ai_provider_errors_total{provider, reason}` — counter with
+ *   reason ∈ `{rate_limit, timeout, auth, server_error, network, unknown}`,
+ *   classified by `classifyAiError()` to avoid emitting raw error messages as
+ *   labels (cardinality bomb).
+ *
+ * Best-effort: every metric call is wrapped in `try/catch` so a registry
+ * hiccup never converts a successful AI call into a failure. The metrics are
+ * observability, not load-bearing.
+ *
+ * Token counts are recorded inside `_callProviderUnsafe` per-branch because
+ * each SDK exposes usage in a different response shape (`msg.usage`,
+ * `res.usage`, `result.response.usageMetadata`, etc).
+ */
 async function callProvider(provider, promptOrMessages, maxTokens, signal, responseFormat) {
+  const label = providerMetricLabel(provider);
+  const startedAt = process.hrtime.bigint();
+  try {
+    const result = await _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat);
+    try {
+      const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+      aiProviderLatencySeconds.observe({ provider: label, outcome: "success" }, seconds);
+    } catch { /* best-effort */ }
+    return result;
+  } catch (err) {
+    try {
+      const seconds = Number(process.hrtime.bigint() - startedAt) / 1e9;
+      const reason = classifyAiError(err);
+      const outcome = reason === "rate_limit" ? "rate_limited" : "error";
+      aiProviderLatencySeconds.observe({ provider: label, outcome }, seconds);
+      aiProviderErrorsTotal.inc({ provider: label, reason });
+    } catch { /* best-effort */ }
+    throw err;
+  }
+}
+
+/**
+ * Record token usage from a provider response, bucketed by `kind`. Each
+ * provider's SDK exposes usage on a different shape; the caller passes the
+ * normalised `{ input, output }` counts. Per-1k token cost varies by provider
+ * and model, so the dashboard layer multiplies these counters by a pricing
+ * lookup to compute spend.
+ *
+ * @param {string} provider - Detected provider id (used as label after normalisation).
+ * @param {object} usage - `{ input?: number, output?: number }`. Missing fields are skipped.
+ */
+function recordAiTokens(provider, usage) {
+  if (!usage) return;
+  const label = providerMetricLabel(provider);
+  try {
+    const inTokens = Number(usage.input);
+    if (Number.isFinite(inTokens) && inTokens > 0) {
+      aiProviderTokensTotal.inc({ provider: label, kind: "input" }, inTokens);
+    }
+    const outTokens = Number(usage.output);
+    if (Number.isFinite(outTokens) && outTokens > 0) {
+      aiProviderTokensTotal.inc({ provider: label, kind: "output" }, outTokens);
+    }
+  } catch { /* best-effort */ }
+}
+
+async function _callProviderUnsafe(provider, promptOrMessages, maxTokens, signal, responseFormat) {
   const tokens = maxTokens || DEFAULT_MAX_TOKENS;
   const { system, user, combined } = normaliseMessages(promptOrMessages);
   // Default to JSON for backward compatibility (pipeline needs structured output).
@@ -1008,6 +1105,10 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         // Anthropic natively supports a top-level "system" field
         if (system) params.system = system;
         const msg = await client.messages.create(params, { signal: composedSignal });
+        // INF-007: Anthropic exposes token usage on `msg.usage` as
+        // `{ input_tokens, output_tokens }`. Record per-call so the cost
+        // dashboard can integrate over time.
+        recordAiTokens(provider, { input: msg?.usage?.input_tokens, output: msg?.usage?.output_tokens });
         return msg.content[0].text;
       } finally { cleanup(); }
     }, "Anthropic");
@@ -1033,6 +1134,11 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         const params = { model, max_tokens: tokens, messages };
         if (useJson) params.response_format = { type: "json_object" };
         const res = await client.chat.completions.create(params, { signal: composedSignal });
+        // INF-007: OpenAI-shape responses expose `res.usage` as
+        // `{ prompt_tokens, completion_tokens, total_tokens }`. Compat
+        // providers fold to the literal `compat` label inside
+        // `providerMetricLabel()` so per-slot cardinality stays bounded.
+        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
         return res.choices?.[0]?.message?.content || "";
       } finally { cleanup(); }
     }, `OpenAI-compat (${provider})`);
@@ -1053,6 +1159,8 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         };
         if (useJson) params.response_format = { type: "json_object" };
         const res = await client.chat.completions.create(params, { signal: composedSignal });
+        // INF-007: see compat branch — OpenAI exposes the same `res.usage` shape.
+        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
         return res.choices[0].message.content;
       } finally { cleanup(); }
     }, "OpenAI");
@@ -1083,6 +1191,9 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         };
         if (useJson) params.response_format = { type: "json_object" };
         const res = await client.chat.completions.create(params, { signal: composedSignal });
+        // INF-007: OpenRouter proxies provider responses through the OpenAI
+        // wire format and propagates `usage.prompt_tokens`/`completion_tokens`.
+        recordAiTokens(provider, { input: res?.usage?.prompt_tokens, output: res?.usage?.completion_tokens });
         return res.choices[0].message.content;
       } finally { cleanup(); }
     }, "OpenRouter");
@@ -1103,6 +1214,12 @@ async function callProvider(provider, promptOrMessages, maxTokens, signal, respo
         if (system) modelConfig.systemInstruction = { parts: [{ text: system }] };
         const model = genAI.getGenerativeModel(modelConfig);
         const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: user }] }] }, { signal: composedSignal });
+        // INF-007: Gemini exposes `result.response.usageMetadata` as
+        // `{ promptTokenCount, candidatesTokenCount, totalTokenCount }`.
+        // Normalised to the same `{ input, output }` shape as the OpenAI
+        // family so the dashboards merge cleanly.
+        const um = result?.response?.usageMetadata;
+        recordAiTokens(provider, { input: um?.promptTokenCount, output: um?.candidatesTokenCount });
         return result.response.text();
       } finally { cleanup(); }
     }, "Google Gemini");

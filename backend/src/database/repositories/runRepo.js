@@ -524,10 +524,14 @@ export function create(run) {
   // (runToRow already normalised any boolean value to 0/1).
   if (params.secretScanBlocked == null) params.secretScanBlocked = 0;
   db.prepare(INSERT_SQL).run(params);
-  // INF-007: bump the Prometheus counter for every persisted run row, regardless
-  // of type. Wrapped in try/catch so a metrics-registry hiccup never fails the
-  // actual run creation — the counter is observability, not load-bearing.
-  try { metricsRunsTotal.inc(); } catch { /* best-effort */ }
+  // INF-007: bump the Prometheus counter for every persisted run row, labelled
+  // by run type so dashboards can split crawl vs. test_run vs. generate vs.
+  // record volume. `run.type` is set by every route that builds a run record;
+  // fall back to "unknown" as defence-in-depth so a future write path without
+  // a type doesn't pollute the series with `undefined`. Wrapped in try/catch
+  // so a metrics-registry hiccup never fails the actual run creation — the
+  // counter is observability, not load-bearing.
+  try { metricsRunsTotal.inc({ type: run?.type || "unknown" }); } catch { /* best-effort */ }
 }
 
 // Set of valid column names for filtering unknown properties in update().

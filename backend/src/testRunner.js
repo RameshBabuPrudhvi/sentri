@@ -48,7 +48,7 @@ import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
-import { testsExecutedTotal } from "./utils/metrics.js"; // INF-007 — bump per executed test result.
+import { testsExecutedTotal, testDurationSeconds, runOutcomeTotal, runDurationSeconds } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
 
 
 function evaluateQualityGates(gates, run) {
@@ -531,12 +531,20 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       shardFailed++;
       logError(run, `FAILED: ${result.error}`);
     }
-    // INF-007: count every executed result (passed + warning + failed).
-    // Skipped results never reach `processResult` — they're pre-seeded into
-    // `run.results` at the route layer before this function runs — so this
-    // counter cleanly captures "tests that actually executed in a browser".
-    // Best-effort: a counter hiccup must never fail the run.
-    try { testsExecutedTotal.inc(); } catch { /* best-effort */ }
+    // INF-007: count every executed result (passed + warning + failed) AND
+    // record per-test duration so dashboards get p50/p95/p99 latency split by
+    // browser engine + outcome. Skipped results never reach `processResult` —
+    // they're pre-seeded into `run.results` at the route layer before this
+    // function runs — so the counter cleanly captures "tests that actually
+    // executed in a browser". Best-effort: a metrics hiccup must never fail
+    // the run. `durationMs` is set by `executeTest.js` for every result; the
+    // `?? 0` defence covers synth crash rows that didn't carry timing.
+    try {
+      const labels = { status: result.status || "unknown", browser: run?.browser || "unknown" };
+      testsExecutedTotal.inc(labels);
+      const seconds = Number(result.durationMs ?? 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) testDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
 
     // Emit result event (without the heavy base64 screenshot)
     const { screenshot: _ss, ...resultLean } = result;
@@ -874,6 +882,16 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     // "Shards N-1/N" badge on the completed run.
     if ((run.shardsCompleted || 0) < shardCount) run.shardsCompleted = shardCount;
     run.duration = Date.now() - runStart;
+    // INF-007: emit run-level outcome + duration histograms. Bucketing by
+    // `(type, status)` enables both the per-type success-rate panel and the
+    // per-type p99 latency SLO panel from a single PromQL query. Best-effort:
+    // any metrics-registry hiccup must not block the finalize callback.
+    try {
+      const labels = { type: run?.type || "test_run", status: run?.status || "completed" };
+      runOutcomeTotal.inc(labels);
+      const seconds = Number(run.duration || 0) / 1000;
+      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+    } catch { /* best-effort */ }
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {
       runId, projectId: project.id,
