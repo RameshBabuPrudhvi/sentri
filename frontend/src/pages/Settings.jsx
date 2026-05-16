@@ -1003,7 +1003,7 @@ function RecoveryCodesPanel({ codes, userEmail, onDismiss }) {
   return (
     <div className="card card-padded recovery-panel">
       <div className="recovery-panel__header">
-        <AlertTriangle size={18} color="var(--amber)" className="shrink-0" style={{ marginTop: 2 }} />
+        <AlertTriangle size={18} color="var(--amber)" className="shrink-0 recovery-panel__icon" />
         <div>
           <div className="font-bold recovery-panel__title">Save these recovery codes now</div>
           <div className="text-xs text-muted recovery-panel__hint">
@@ -1123,7 +1123,7 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
         </div>
       )}
       <div>
-        <div className="text-xs text-muted" style={{ marginBottom: 4 }}>
+        <div className="text-xs text-muted totp-enroll__secret-label">
           Or enter this secret manually:
         </div>
         <div className="text-mono text-sm totp-enroll__secret">
@@ -1266,7 +1266,7 @@ function WorkspaceMfaPolicyPanel() {
         Require MFA for all workspace members
       </label>
 
-      <label className="text-sm font-semi" style={{ display: "block" }}>
+      <label className="text-sm font-semi mfa-label">
         Grace period (days)
         <input
           className="input ws-enforce__grace-input"

@@ -436,7 +436,7 @@ export default function Login() {
               {/* TOTP panel */}
               {mfaFactor === "totp" && (
                 <>
-                  <label className="text-sm font-semi" htmlFor="mfa-totp-code" style={{display:"block"}}>
+                  <label className="text-sm font-semi mfa-label" htmlFor="mfa-totp-code">
                     6-digit code from your authenticator app
                     <input
                       id="mfa-totp-code"
@@ -465,7 +465,7 @@ export default function Login() {
               {/* Recovery-code panel */}
               {mfaFactor === "recovery" && (
                 <>
-                  <label className="text-sm font-semi" htmlFor="mfa-recovery-code" style={{display:"block"}}>
+                  <label className="text-sm font-semi mfa-label" htmlFor="mfa-recovery-code">
                     Recovery code
                     <input
                       id="mfa-recovery-code"

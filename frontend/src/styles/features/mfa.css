@@ -152,6 +152,10 @@
   padding: 8px;
 }
 
+.totp-enroll__secret-label {
+  margin-bottom: 4px;
+}
+
 .totp-enroll__secret {
   background: var(--bg3);
   padding: 8px 10px;
@@ -190,6 +194,10 @@
 
 .recovery-panel__hint {
   margin-top: 4px;
+}
+
+.recovery-panel__icon {
+  margin-top: 2px;
 }
 
 .recovery-panel__grid {
@@ -239,6 +247,11 @@
 .grace-banner__body {
   flex: 1;
   min-width: 0;
+}
+
+/* ── Shared label override (HTML labels default to inline) ─────────────────── */
+.mfa-label {
+  display: block;
 }
 
 /* ── Workspace enforcement admin panel ─────────────────────────────────────── */
