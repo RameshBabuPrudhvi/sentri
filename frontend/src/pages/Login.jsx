@@ -174,7 +174,23 @@ export default function Login() {
       }
       login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
-    } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
+    } catch (e) {
+      // SEC-004: Workspace requires MFA and the OAuth user is past grace.
+      // Surface the same dedicated panel as the password-login path
+      // (handleSubmit) instead of a raw error string — OAuth-only users
+      // have no password fallback and need actionable "contact your admin"
+      // guidance to unblock themselves.
+      if (e.body?.code === "MFA_ENROLLMENT_REQUIRED") {
+        setMfaEnrollmentRequired({
+          workspaceId: e.body.workspaceId,
+          workspaceName: e.body.workspaceName,
+        });
+      } else {
+        setError(e.message);
+      }
+      setOauthLoading(null);
+      window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
+    }
   }
 
   function handleGitHubLogin() {

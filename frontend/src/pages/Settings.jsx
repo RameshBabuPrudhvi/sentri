@@ -1133,15 +1133,14 @@ function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
       <label className="text-sm font-semi">
         6-digit code from your app
         <input
-          className="input"
+          className="input totp-enroll__code-input"
           type="text"
           inputMode="numeric"
           autoComplete="one-time-code"
-          maxLength={8}
+          maxLength={6}
           value={token}
           onChange={(e) => setToken(e.target.value.replace(/[^\d]/g, ""))}
           placeholder="123456"
-          className="totp-enroll__code-input"
           required
         />
       </label>

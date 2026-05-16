@@ -466,13 +466,20 @@ function mintRecoveryCodes() {
 /**
  * Issue a single-use pending-MFA token after password verification succeeds.
  * Exchanged at `POST /mfa/verify` for the auth cookie.
+ *
+ * The `workspaceId` is snapshotted here so subsequent `auth.mfa.*` audit log
+ * entries can attribute the event to a workspace — without it, the rows are
+ * persisted with `workspaceId = NULL` and disappear from the workspace-scoped
+ * activity view that admins rely on for security monitoring.
+ *
  * @param {string} userId
+ * @param {string} [workspaceId] - Resolved active workspace at login time.
  * @returns {string} Opaque base64url token (24 bytes of entropy).
  * @private
  */
-function createPendingMfaLogin(userId) {
+function createPendingMfaLogin(userId, workspaceId) {
   const token = crypto.randomBytes(24).toString("base64url");
-  mfaPendingLogins.set(token, { userId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
+  mfaPendingLogins.set(token, { userId, workspaceId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
   return token;
 }
 
@@ -671,7 +678,12 @@ router.post("/login", async (req, res) => {
     const hasTotp = user.mfaEnabled === 1 && !!user.mfaSecret;
     const webauthnCount = webauthnRepo.countByUser(user.id);
     if (hasTotp || webauthnCount > 0) {
-      const pendingToken = createPendingMfaLogin(user.id);
+      // Snapshot the active workspace into the pending entry so /mfa/verify
+      // can attribute audit-log rows. ensureUserWorkspace() above guarantees
+      // at least one membership exists.
+      const memberships = workspaceRepo.getByUserId(user.id);
+      const activeWorkspaceId = memberships?.[0]?.id;
+      const pendingToken = createPendingMfaLogin(user.id, activeWorkspaceId);
       return res.status(200).json({
         mfaRequired: true,
         pendingToken,
@@ -1501,6 +1513,15 @@ router.post("/mfa/enable", requireAuth, (req, res) => {
   try {
     const user = userRepo.getById(req.authUser.sub);
     if (!user) return res.status(404).json({ error: "User not found." });
+    // SEC-004 §2a: refuse to re-finalize when MFA is already on. Without
+    // this, a stolen-cookie attacker (or even a confused legitimate user)
+    // could call /enable a second time and silently replace the existing
+    // recovery codes via mintRecoveryCodes() below — invalidating the codes
+    // the user has already stored offline. /mfa/enroll has the same guard;
+    // this is the symmetric check on the finalization step.
+    if (user.mfaEnabled === 1) {
+      return res.status(409).json({ error: "MFA is already enabled. Disable it first to re-enroll." });
+    }
     const secret = decryptString(user.mfaSecret);
     if (!secret) return res.status(400).json({ error: "MFA enrollment is not initialized." });
     const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
@@ -1561,7 +1582,14 @@ router.post("/mfa/verify", async (req, res) => {
   }
 
   try {
-    const pending = consumePendingMfaLogin(sanitiseString(req.body?.pendingToken, 200));
+    // SEC-004: PEEK (don't consume) the pending token first so a wrong TOTP
+    // or recovery code does not waste the user's MFA session. The token is
+    // only consumed at the bottom of the success path. Matches the WebAuthn
+    // flow at routes/webauthn.js: defer consume until verification passes,
+    // letting the rate limiter (5/15min) absorb retries instead of forcing a
+    // full re-login on every typo.
+    const pendingTokenStr = sanitiseString(req.body?.pendingToken, 200);
+    const pending = consumePendingMfaLogin(pendingTokenStr, { peek: true });
     if (!pending) return res.status(401).json({ error: "MFA session expired. Sign in again." });
     const user = userRepo.getById(pending.userId);
     if (!user) return res.status(404).json({ error: "User not found." });
@@ -1598,7 +1626,16 @@ router.post("/mfa/verify", async (req, res) => {
         workspaceId: pending.workspaceId,
         meta: { method: token ? "unknown" : "missing", phase: "login" },
       });
+      // Token is intentionally NOT consumed here — the rate limiter bounds
+      // brute force, and preserving the token lets the user retry without
+      // re-entering email+password after a typo.
       return res.status(400).json({ error: "Invalid authentication code." });
+    }
+
+    // Verification passed — consume the token now, atomically. If a parallel
+    // request raced and already consumed it, treat this as expired.
+    if (!consumePendingMfaLogin(pendingTokenStr)) {
+      return res.status(401).json({ error: "MFA session expired. Sign in again." });
     }
 
     if (updatedRecovery !== null) {
