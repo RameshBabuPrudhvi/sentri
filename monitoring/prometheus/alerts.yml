@@ -183,20 +183,30 @@ groups:
           runbook_url: "https://docs.sentri.dev/guide/observability#eventlooplaghigh"
 
       # ── Heap pressure ──────────────────────────────────────────────────────
+      # IMPORTANT: `nodejs_heap_size_total_bytes` is V8's `heapTotal` — the
+      # *currently allocated* heap, which V8 dynamically resizes (shrinks
+      # after GC). Dividing used/total against it produces false positives:
+      # after a GC cycle shrinks `heapTotal`, the ratio spikes toward 1.0 even
+      # though heap usage is healthy relative to V8's actual `heap_size_limit`.
+      # The same pitfall is documented at `backend/src/index.js:373-377` where
+      # the `/health/ready` probe deliberately uses `v8.getHeapStatistics()`'s
+      # `heap_size_limit` instead.
+      #
+      # `prom-client.collectDefaultMetrics` does not expose `heap_size_limit`,
+      # so we alert on absolute resident-memory pressure instead — a value
+      # close to (and trending past) the container memory limit is the real
+      # OOM-kill predictor. The threshold here assumes a 2 GiB container; tune
+      # `HEAP_RSS_BYTES_HIGH` per deployment via a recording rule if your
+      # container memory request differs.
       - alert: HeapUsageHigh
-        expr: |
-          (
-            nodejs_heap_size_used_bytes
-            /
-            nodejs_heap_size_total_bytes
-          ) > 0.9
+        expr: process_resident_memory_bytes > 1.8e9
         for: 15m
         labels:
           severity: warning
           component: runtime
         annotations:
-          summary: "Node.js heap above 90% utilisation for 15 minutes"
-          description: "Heap usage at {{ $value | humanizePercentage }}. Imminent OOM-kill risk. Bump container memory or hunt the leak (unbounded cache, runaway run.logs buffer)."
+          summary: "Node.js RSS above 1.8 GiB for 15 minutes"
+          description: "Resident memory is {{ $value | humanize1024 }}B (approaching a 2 GiB container limit). Imminent OOM-kill risk. Bump container memory or hunt the leak (unbounded cache, runaway run.logs buffer)."
           runbook_url: "https://docs.sentri.dev/guide/observability#heapusagehigh"
 
       # ── Observability liveness (the meta-alert) ────────────────────────────

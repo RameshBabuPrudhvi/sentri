@@ -17,9 +17,16 @@ export async function initOpenTelemetry() {
   ]);
 
   otelApi = api;
+  // INF-007: per the OTel spec, `OTEL_EXPORTER_OTLP_ENDPOINT` is a BASE URL —
+  // the SDK appends the signal-specific `/v1/traces` path when the env var is
+  // consumed natively. Passing the raw value as `url` to OTLPTraceExporter
+  // bypasses that path-appending, so an operator who sets the standard
+  // `http://collector:4318` would silently POST to `/` instead of `/v1/traces`.
+  // Construct without an explicit `url` so the exporter reads the env var via
+  // the standard OTel-SDK code path and appends the signal segment correctly.
   const sdk = new NodeSDK({
     serviceName: process.env.OTEL_SERVICE_NAME || "sentri-backend",
-    traceExporter: new OTLPTraceExporter({ url: endpoint }),
+    traceExporter: new OTLPTraceExporter(),
     instrumentations: [getNodeAutoInstrumentations()],
   });
   await sdk.start();
