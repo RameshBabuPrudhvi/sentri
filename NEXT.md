@@ -62,6 +62,23 @@ Six gaps block SOC 2 / ISO 27001: the activity log is purgeable by admins, auth 
 
 ---
 
+## 🔀 Parallel opportunities
+
+Items that do not overlap SEC-004's changed files and can land in a separate PR while SEC-004 is in flight. "Shared files?" lists any files that *would* conflict if merged concurrently — flag in your PR description if you pick one up.
+
+| ID | Title | Effort | Priority | Shared files? |
+|----|-------|--------|----------|---------------|
+| INF-007 | OTel / Sentry observability | L | 🔴 Blocker | None — touches `appSetup.js`, `otel.js`, `metrics.js`, `aiProvider.js`, `testRunner.js`, `selfHealing.js`, `main.jsx`; no overlap with auth or Settings |
+| SEC-006 | PII firewall (domSanitizer pipeline stage) | M | 🔴 Blocker | None — `domSanitizer.js`, `pipelineOrchestrator.js`; entirely pipeline-layer |
+| AUTO-022 | AI eval harness with golden-set regression | L | 🔴 Blocker | None — `pipelineEval.js`, `scorers.js`, `eval.yml`, `pipelineOrchestrator.js` (additive `promptVersion` emit only) |
+| INF-008 | Postgres-default + dual-DB CI matrix | M | 🔴 Blocker | ⚠️ `backend/src/database/migrations/` — SEC-004 adds MFA migration files to the same directory; coordinate numeric prefix assignment to avoid collisions |
+| MNT-001 | Vision-based locator healing | XL | 🟢 Differentiator | None — `selfHealing.js`, `executeTest.js` only |
+| AUTO-009 | Browser code coverage mapping | L | 🟢 Differentiator | None — `executeTest.js`, `coverageAggregator.js`, `Dashboard.jsx` |
+
+**Note:** SEC-007 (compliance audit log surface) depends on SEC-004 auth events — it cannot start Phase 1 independently until SEC-004's `auth.*` activity emission is merged. It is listed in the Queue, not here.
+
+---
+
 ## ✅ Recently completed
 
 | ID | Title | PR |
