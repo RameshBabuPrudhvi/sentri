@@ -56,7 +56,7 @@ async function main() {
   mountRoutesOnce();
   t.resetDb();
 
-  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true" });
+  const env = t.setupEnv({ SKIP_EMAIL_VERIFICATION: "true", MFA_TOTP_WINDOW: "2" });
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   const runner = t.createTestRunner();

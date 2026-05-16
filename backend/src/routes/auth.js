@@ -162,8 +162,14 @@ const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 // one endpoint (e.g. forgot-password) doesn't lock out login.
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 
+// CI/test environments (SKIP_EMAIL_VERIFICATION=true) run dozens of
+// register+login cycles from 127.0.0.1 in seconds. The production budget
+// of 10 logins / 15 min would cause cascading 429s in the test suite.
+// Raise the ceiling to 200 in dev/CI mode — the bucket is still enforced
+// so the rate-limit code path is exercised, just with a higher threshold.
+const _isTestMode = process.env.SKIP_EMAIL_VERIFICATION === "true";
 const rateBuckets = {
-  login:         { map: new Map(), max: 10 },  // 10 login attempts per IP per 15 min
+  login:         { map: new Map(), max: _isTestMode ? 200 : 10 },  // 10 login attempts per IP per 15 min (200 in test mode)
   forgotPassword:{ map: new Map(), max: 5 },   // 5 reset requests per IP per 15 min
   resetPassword: { map: new Map(), max: 5 },   // 5 reset attempts per IP per 15 min
   // SEC-004: MFA-specific buckets — verify is the brute-force surface (only
