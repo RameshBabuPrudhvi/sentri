@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-05-16
+
 ### Added
 - **SEC-007** — Compliance audit log surface. New admin-only `GET /api/v1/workspaces/:workspaceId/audit-log` endpoint with cursor pagination (`?cursor=…&limit=…`), CSV / NDJSON export (`?format=csv|ndjson` with `Content-Disposition: attachment`), and per-(workspace × admin) export rate limiter (10 / 15 min, configurable via `AUDIT_EXPORT_RATE_LIMIT`, JSON browsing exempt) to guard against bulk exfiltration. New `GET /api/v1/audit/verify` admin endpoint walks the optional SHA-256 prevHash chain (enabled with `AUDIT_HASH_CHAIN=true`) and reports `firstBrokenRowId` on tamper. New `GET /api/v1/workspaces/:workspaceId/audit-log/dlq` and `POST .../dlq/:dlqId/replay` admin endpoints for SIEM dead-letter inspection and replay (returns `503 SIEM_NOT_CONFIGURED` until the forwarder lands in a follow-up PR). Daily retention sweep deletes activity rows older than `AUDIT_RETENTION_DAYS` (default 365, SOC 2 CC7.2 baseline); `0` disables, `< 90` is rejected at boot. Migration `031_activities_compliance.sql` adds `ipAddress` / `userAgent` / `prevHash` columns (null-tolerant for historical rows) and the `audit_dlq` table. Frontend `AuditLog.jsx` page mounted at `/audit-log` (admin-only via `ProtectedRoute requiredRole="admin"`).
 - **SEC-007** — Eight new password-path auth activity types — `auth.login`, `auth.login.failed`, `auth.logout`, `auth.password.reset`, `auth.role.change`, `auth.api_key.create`, `auth.api_key.revoke`, `auth.session.revoke` — emit from `routes/auth.js`, `routes/workspaces.js`, `routes/settings.js`, and the shared `_internalRevokeCurrentSession` helper. Every emission captures `req.ip` and `req.get('user-agent')` for SOC 2 / ISO 27001 session-reconstruction evidence.
@@ -295,5 +297,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth state parameter validated before code exchange.
 - JWT fallback secret replaced with random per-process generation.
 - `verifyJwt` hardened with explicit buffer length check.
-
 - Added observability baseline: request-id correlation (`X-Request-Id`), protected `/metrics`, optional OpenTelemetry exporter, and optional Sentry init (backend + frontend).
