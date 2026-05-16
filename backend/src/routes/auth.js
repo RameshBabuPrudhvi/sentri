@@ -1662,7 +1662,16 @@ router.post("/mfa/verify", async (req, res) => {
       // error with no clue why. SHA-256 is one-way so we cannot recover from
       // case at the storage end — normalise at compare time.
       const hashed = hashRecoveryCode(token.toLowerCase());
-      const codes = JSON.parse(user.mfaRecoveryCodes || "[]");
+      // Tolerate malformed `mfaRecoveryCodes` JSON: a corrupted column should
+      // produce a clean 400 "Invalid authentication code" (via the !ok branch
+      // below), not a 500 from JSON.parse throwing into the outer try/catch.
+      // The symmetric branch at /mfa/factors (~line 1454) and the
+      // not-configured guard below already use the same try/catch shape.
+      let codes = [];
+      try {
+        const parsed = JSON.parse(user.mfaRecoveryCodes || "[]");
+        if (Array.isArray(parsed)) codes = parsed;
+      } catch { /* malformed JSON — treat as no codes */ }
       const idx = findRecoveryCodeIndex(codes, hashed);
       if (idx >= 0) {
         codes.splice(idx, 1);

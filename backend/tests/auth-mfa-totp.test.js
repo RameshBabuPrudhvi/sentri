@@ -20,17 +20,21 @@
  */
 
 import assert from "node:assert/strict";
-import authRouter from "../src/routes/auth.js";
+import authRouter, { requireAuth } from "../src/routes/auth.js";
+import workspacesRouter from "../src/routes/workspaces.js";
 import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
 import { decryptString } from "../src/utils/credentialEncryption.js";
 
 const t = createTestContext();
-const { app } = t;
+const { app, workspaceScope } = t;
 
 let mounted = false;
 function mountRoutesOnce() {
   if (mounted) return;
   app.use("/api/v1/auth", authRouter);
+  // SEC-004 §5c: mount workspaces router so the amr-preservation test can
+  // hit POST /workspaces/switch alongside POST /auth/refresh.
+  app.use("/api/v1/workspaces", requireAuth, workspaceScope, workspacesRouter);
   mounted = true;
 }
 
@@ -346,6 +350,146 @@ async function main() {
         body: JSON.stringify({ pendingToken: pending, token: code }),
       });
       assert.equal(res.status, 400, "consumed recovery code must be rejected on reuse");
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    console.log("\n🔐 amr claim persistence across reissue paths");
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** Complete the full MFA login flow and return the resulting cookies + jar. */
+    async function loginWithMfa(u, secret) {
+      let res = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email, password: u.password }),
+      });
+      const { pendingToken } = await res.json();
+      res = await fetch(`${base}/api/v1/auth/mfa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pendingToken, token: t.generateTotpCode(secret) }),
+      });
+      assert.equal(res.status, 200, "MFA verify must succeed");
+      const cookies = parseCookies(res);
+      return { cookies, cookieHeader: buildCookieHeader(cookies), csrf: cookies._csrf?.value };
+    }
+
+    await test("/refresh preserves amr=[pwd,mfa] from MFA-asserted session", async () => {
+      const u = await setupUser("amr-refresh");
+      const { secret } = await enrollAndEnable(u);
+      const session = await loginWithMfa(u, secret);
+
+      // Sanity-check the pre-refresh state — the test would pass trivially if
+      // /mfa/verify didn't set amr=[pwd,mfa] in the first place.
+      assert.deepEqual(
+        t.decodeJwtPayload(session.cookies.access_token.value).amr,
+        ["pwd", "mfa"],
+        "MFA verify must issue amr=[pwd,mfa]",
+      );
+
+      const res = await fetch(`${base}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { Cookie: session.cookieHeader, "X-CSRF-Token": session.csrf },
+      });
+      assert.equal(res.status, 200);
+      const refreshed = parseCookies(res);
+      assert.ok(refreshed.access_token, "refresh must reissue auth cookie");
+      assert.deepEqual(
+        t.decodeJwtPayload(refreshed.access_token.value).amr,
+        ["pwd", "mfa"],
+        "refresh must NOT downgrade amr — MFA assertion must persist",
+      );
+    });
+
+    await test("/workspaces/switch preserves amr=[pwd,mfa] from MFA-asserted session", async () => {
+      const u = await setupUser("amr-switch");
+      const { secret } = await enrollAndEnable(u);
+      const session = await loginWithMfa(u, secret);
+
+      // Switch into the user's existing workspace (the auto-created personal
+      // one from setupUser). We only need to exercise the reissue path —
+      // multi-workspace coverage lives in auth-mfa-enforcement.test.js.
+      const res = await fetch(`${base}/api/v1/workspaces/switch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: session.cookieHeader,
+          "X-CSRF-Token": session.csrf,
+        },
+        body: JSON.stringify({ workspaceId: u.user.workspaceId }),
+      });
+      assert.equal(res.status, 200, `switch failed: ${res.status}`);
+      const switched = parseCookies(res);
+      assert.ok(switched.access_token, "switch must reissue auth cookie");
+      assert.deepEqual(
+        t.decodeJwtPayload(switched.access_token.value).amr,
+        ["pwd", "mfa"],
+        "workspace switch must NOT downgrade amr — MFA assertion must persist",
+      );
+    });
+
+    await test("/refresh preserves amr=[pwd] from password-only session (no upgrade)", async () => {
+      // Negative case: a password-only session must NOT acquire ["pwd","mfa"]
+      // via refresh. Guards against an over-eager forwarding bug that might
+      // copy from a wrong source (e.g. user.mfaEnabled).
+      const u = await setupUser("amr-refresh-pwd-only");
+      const res = await fetch(`${base}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: { Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+      });
+      assert.equal(res.status, 200);
+      const refreshed = parseCookies(res);
+      assert.deepEqual(
+        t.decodeJwtPayload(refreshed.access_token.value).amr,
+        ["pwd"],
+        "password-only refresh must stay amr=[pwd]",
+      );
+    });
+
+    // ──────────────────────────────────────────────────────────────────────
+    console.log("\n🔐 /auth/mfa/verify — malformed mfaRecoveryCodes column");
+    // ──────────────────────────────────────────────────────────────────────
+
+    await test("/mfa/verify returns 400 (not 500) when mfaRecoveryCodes is malformed JSON", async () => {
+      // Regression for T10: JSON.parse on a corrupted column previously threw
+      // into the outer try/catch and surfaced as 500. Should be a clean 400.
+      const u = await setupUser("verify-malformed-recovery");
+      const { secret } = await enrollAndEnable(u);
+      // Corrupt the column directly — represents either a partial write,
+      // future migration shape drift, or manual DB tampering.
+      const db = t.getDatabase();
+      db.prepare("UPDATE users SET mfaRecoveryCodes = ? WHERE id = ?")
+        .run("not-valid-json{", u.user.id);
+
+      let res = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email, password: u.password }),
+      });
+      const { pendingToken } = await res.json();
+
+      // TOTP path should still work (recovery-code parse is independent).
+      res = await fetch(`${base}/api/v1/auth/mfa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pendingToken, token: t.generateTotpCode(secret) }),
+      });
+      assert.equal(res.status, 200, "valid TOTP must still verify with malformed recovery column");
+
+      // Recovery-code path: arbitrary 8-hex submission with malformed column
+      // must NOT 500 — it should fall through to the generic 400 below.
+      res = await fetch(`${base}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email, password: u.password }),
+      });
+      const { pendingToken: pt2 } = await res.json();
+      res = await fetch(`${base}/api/v1/auth/mfa/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pendingToken: pt2, token: "deadbeef" }),
+      });
+      assert.equal(res.status, 400, "malformed recovery column must yield 400, not 500");
     });
 
     // ──────────────────────────────────────────────────────────────────────
