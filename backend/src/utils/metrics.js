@@ -153,6 +153,32 @@ export const activeRuns = new client.Gauge({
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * INF-007 — Record run-level outcome + duration metrics in one shot. Extracted
+ * because three finalize sites (testRunner.js, crawler.js's description-mode
+ * branch, and crawler.js's crawl-mode branch) each used a verbatim copy of
+ * this 7-line try/catch block; a single helper keeps the label set + ms→s
+ * conversion + best-effort guard in one place so future metric additions
+ * (e.g. `app_run_total_seconds_quality_gate_outcome`) only need touching
+ * here.
+ *
+ * Best-effort: a metrics-registry hiccup must never block the finalize
+ * callback, so the whole body is wrapped in `try/catch`.
+ *
+ * @param {Object} run - Mutable run object (`type`, `status`, `duration` are read).
+ * @param {string} [defaultType="unknown"] - Fallback when `run.type` is unset
+ *   (description-mode passes `"generate"`, crawl-mode passes `"crawl"`).
+ */
+export function recordRunOutcome(run, defaultType = "unknown") {
+  try {
+    const labels = { type: run?.type || defaultType, status: run?.status || "completed" };
+    runOutcomeTotal.inc(labels);
+    const seconds = Number(run?.duration || 0) / 1000;
+    if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
+  } catch { /* best-effort */ }
+}
+
 /**
  * Map an Error / response object to an AI provider error reason label.
  * Constrains the label cardinality to a small, stable enumeration — never

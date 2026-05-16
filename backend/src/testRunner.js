@@ -48,7 +48,7 @@ import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
-import { testsExecutedTotal, testDurationSeconds, runOutcomeTotal, runDurationSeconds } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
+import { testsExecutedTotal, testDurationSeconds, recordRunOutcome } from "./utils/metrics.js"; // INF-007 — per-test + per-run telemetry.
 
 
 function evaluateQualityGates(gates, run) {
@@ -882,16 +882,13 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
     // "Shards N-1/N" badge on the completed run.
     if ((run.shardsCompleted || 0) < shardCount) run.shardsCompleted = shardCount;
     run.duration = Date.now() - runStart;
-    // INF-007: emit run-level outcome + duration histograms. Bucketing by
-    // `(type, status)` enables both the per-type success-rate panel and the
-    // per-type p99 latency SLO panel from a single PromQL query. Best-effort:
-    // any metrics-registry hiccup must not block the finalize callback.
-    try {
-      const labels = { type: run?.type || "test_run", status: run?.status || "completed" };
-      runOutcomeTotal.inc(labels);
-      const seconds = Number(run.duration || 0) / 1000;
-      if (Number.isFinite(seconds) && seconds >= 0) runDurationSeconds.observe(labels, seconds);
-    } catch { /* best-effort */ }
+    // INF-007: emit run-level outcome + duration histograms via the shared
+    // helper. The label shape (`type`, `status`) drives both the per-type
+    // success-rate panel and the per-type p99 latency SLO panel from a single
+    // PromQL query. See `utils/metrics.js#recordRunOutcome` for the full
+    // contract — falls back to `test_run` for the type label, and is fully
+    // best-effort so a metrics-registry hiccup never blocks finalize.
+    recordRunOutcome(run, "test_run");
     logSuccess(run, `Run complete: ${run.passed} passed, ${run.failed} failed out of ${run.total}`);
     structuredLog("run.complete", {
       runId, projectId: project.id,
