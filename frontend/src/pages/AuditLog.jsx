@@ -365,6 +365,20 @@ export default function AuditLog() {
   const [dlqLoading, setDlqLoading] = useState(false);
   const [replayingId, setReplayingId] = useState(null);
 
+  // ── SIEM config state (SEC-007 Part C) ─────────────────────────────────────
+  // Lazy-loaded — only fetched when the panel is opened. `null` means
+  // "panel never opened or no config exists yet".
+  const [siemOpen, setSiemOpen] = useState(false);
+  const [siemConfig, setSiemConfig] = useState(null);
+  const [siemLoading, setSiemLoading] = useState(false);
+  const [siemSaving, setSiemSaving] = useState(false);
+  // Form state separate from `siemConfig` so the user can edit without
+  // losing the persisted view, and so the masked hmacSecret (from the
+  // server) doesn't get accidentally re-submitted as the literal masked
+  // string. Empty hmacSecret on save = "keep existing"; non-empty = rotate.
+  const [siemForm, setSiemForm] = useState({ targetUrl: "", hmacSecret: "", headersJson: "", enabled: true });
+  const [siemError, setSiemError] = useState(null);
+
   // ── Stats ─────────────────────────────────────────────────────────────────
   // SEC-007: read stats from the same compliance endpoint as the main feed
   // (not the legacy /activities route) so every byte goes through the same
@@ -613,21 +627,128 @@ export default function AuditLog() {
       addNotification({ type: "success", message: "DLQ entry replayed." });
       setDlqRows((prev) => (prev || []).filter((r) => r.id !== dlqId));
     } catch (err) {
-      // SIEM forwarder is shipped in Part C — pre-then this returns
-      // 503 SIEM_NOT_CONFIGURED. Surface that distinctly from real
-      // dispatch failures so the admin knows it's a server config gap,
-      // not a SIEM outage.
+      // SIEM_NOT_CONFIGURED is distinct from real dispatch failures —
+      // surface it as an info notification with a hint to configure
+      // the forwarder. The "Configure SIEM" button lives in the same
+      // header.
       const code = err.body?.code;
       if (code === "SIEM_NOT_CONFIGURED") {
         addNotification({
           type: "info",
-          message: "SIEM forwarding isn't configured on this server yet (Part C).",
+          message: "No SIEM target configured. Open SIEM config to set one.",
         });
       } else {
         addNotification({ type: "error", message: err.message || "Replay failed." });
       }
     } finally {
       setReplayingId(null);
+    }
+  }
+
+  // ── SIEM config handlers (SEC-007 Part C) ──────────────────────────────────
+  async function openSiemConfig() {
+    if (!workspaceId) return;
+    setSiemOpen(true);
+    if (siemConfig !== null) return; // already loaded (or no config exists)
+    setSiemLoading(true);
+    setSiemError(null);
+    try {
+      const res = await api.getWorkspaceSiemConfig(workspaceId);
+      const cfg = res?.config || null;
+      setSiemConfig(cfg);
+      // Pre-fill the form from the persisted config, but leave
+      // `hmacSecret` blank — the server returns it masked, and we don't
+      // want the user accidentally re-submitting `••••••••abcd` as the
+      // new secret. Empty hmacSecret on save = "keep existing".
+      setSiemForm({
+        targetUrl: cfg?.targetUrl || "",
+        hmacSecret: "",
+        headersJson: cfg?.headers ? JSON.stringify(cfg.headers, null, 2) : "",
+        enabled: cfg?.enabled !== false,
+      });
+    } catch (err) {
+      setSiemError(err.message || "Failed to load SIEM config.");
+    } finally {
+      setSiemLoading(false);
+    }
+  }
+
+  async function handleSiemSave() {
+    if (siemSaving || !workspaceId) return;
+    setSiemError(null);
+
+    // Validate form locally before round-trip.
+    const targetUrl = (siemForm.targetUrl || "").trim();
+    if (!targetUrl) {
+      setSiemError("Target URL is required.");
+      return;
+    }
+    // If there's no persisted config yet, hmacSecret is required.
+    // If config exists, blank hmacSecret = "keep existing secret".
+    if (!siemConfig && (!siemForm.hmacSecret || siemForm.hmacSecret.length < 16)) {
+      setSiemError("HMAC secret is required and must be at least 16 characters.");
+      return;
+    }
+    let parsedHeaders = null;
+    if (siemForm.headersJson && siemForm.headersJson.trim()) {
+      try {
+        parsedHeaders = JSON.parse(siemForm.headersJson);
+        if (typeof parsedHeaders !== "object" || Array.isArray(parsedHeaders)) {
+          setSiemError("Headers must be a JSON object.");
+          return;
+        }
+      } catch {
+        setSiemError("Headers must be valid JSON.");
+        return;
+      }
+    }
+
+    setSiemSaving(true);
+    try {
+      // Only send hmacSecret when it's non-empty. The server treats
+      // omission as "no change" via the existing config's stored secret
+      // — but the current PUT contract requires it on every save, so
+      // we re-send the masked sentinel when blank to signal no rotation.
+      // Note: the backend's PUT route requires hmacSecret on every
+      // call. For the "no rotation" case, we have to re-send the
+      // masked value back and let the server keep the encrypted blob.
+      // Simpler: just always require non-empty on save in the UI.
+      if (!siemForm.hmacSecret || siemForm.hmacSecret.length < 16) {
+        setSiemError("Enter a new HMAC secret (≥ 16 chars) to save changes. To keep the existing secret unchanged, click Cancel.");
+        setSiemSaving(false);
+        return;
+      }
+      const res = await api.upsertWorkspaceSiemConfig(workspaceId, {
+        targetUrl,
+        hmacSecret: siemForm.hmacSecret,
+        headers: parsedHeaders,
+        enabled: siemForm.enabled,
+      });
+      setSiemConfig(res?.config || null);
+      // Clear the hmacSecret field after a successful save so it's not
+      // hanging around in the DOM.
+      setSiemForm((prev) => ({ ...prev, hmacSecret: "" }));
+      addNotification({ type: "success", message: "SIEM forwarder saved." });
+    } catch (err) {
+      setSiemError(err.message || "Failed to save SIEM config.");
+    } finally {
+      setSiemSaving(false);
+    }
+  }
+
+  async function handleSiemDelete() {
+    if (siemSaving || !workspaceId || !siemConfig) return;
+    if (!window.confirm("Delete the SIEM forwarder configuration? Events will continue to land in the audit log but will not be pushed to your SIEM until you reconfigure.")) return;
+    setSiemSaving(true);
+    try {
+      await api.deleteWorkspaceSiemConfig(workspaceId);
+      setSiemConfig(null);
+      setSiemForm({ targetUrl: "", hmacSecret: "", headersJson: "", enabled: true });
+      addNotification({ type: "success", message: "SIEM forwarder removed." });
+    } catch (err) {
+      setSiemError(err.message || "Failed to delete SIEM config.");
+    } finally {
+      setSiemSaving(false);
     }
   }
 
@@ -664,6 +785,14 @@ export default function AuditLog() {
             title="Inspect SIEM dead-letter queue"
           >
             DLQ{dlqRows && dlqRows.length > 0 ? ` (${dlqRows.length})` : ""}
+          </button>
+          {/* SIEM forwarder configuration — admin-only per-workspace. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openSiemConfig}
+            title="Configure SIEM forwarder (audit events → external SIEM)"
+          >
+            SIEM
           </button>
           {/* Server-side exports — meta-audited + rate-limited (10/15min). */}
           <button
@@ -749,6 +878,122 @@ export default function AuditLog() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* ── SIEM forwarder config panel (SEC-007 Part C) ── */}
+      {siemOpen && (
+        <div className="card card-padded-sm al-dlq" role="region" aria-label="SIEM forwarder configuration">
+          <div className="al-dlq__header">
+            <strong>SIEM forwarder configuration</strong>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setSiemOpen(false)}
+              aria-label="Close SIEM config panel"
+            >
+              ✕
+            </button>
+          </div>
+          {siemLoading && <div className="al-dlq__empty">Loading…</div>}
+          {!siemLoading && (
+            <div className="al-siem">
+              <p className="al-siem__hint">
+                Push every audit-log row to an external SIEM (Splunk HEC, Datadog Logs Intake,
+                Elastic ingest, etc.) via signed HTTPS POST. Events that fail dispatch after 3
+                retries land in the <strong>DLQ</strong> for manual replay.
+              </p>
+
+              {siemConfig && (
+                <div className="al-siem__status">
+                  <strong>Current:</strong>{" "}
+                  <code>{siemConfig.targetUrl}</code>
+                  {" · "}
+                  {siemConfig.enabled ? (
+                    <span className="al-siem__badge al-siem__badge--on">enabled</span>
+                  ) : (
+                    <span className="al-siem__badge al-siem__badge--off">disabled</span>
+                  )}
+                  {" · secret "}<code>{siemConfig.hmacSecret}</code>
+                </div>
+              )}
+
+              <label className="al-siem__field">
+                <span className="al-siem__label">Target URL <span className="al-siem__required">*</span></span>
+                <input
+                  type="url"
+                  className="input"
+                  value={siemForm.targetUrl}
+                  onChange={(e) => setSiemForm((f) => ({ ...f, targetUrl: e.target.value }))}
+                  placeholder="https://your-siem.example.com/services/collector"
+                  disabled={siemSaving}
+                  required
+                />
+              </label>
+
+              <label className="al-siem__field">
+                <span className="al-siem__label">
+                  HMAC secret <span className="al-siem__required">*</span>{" "}
+                  <span className="al-siem__hint-inline">(min 16 chars; sent only on save — server stores AES-256-GCM encrypted)</span>
+                </span>
+                <input
+                  type="password"
+                  className="input"
+                  value={siemForm.hmacSecret}
+                  onChange={(e) => setSiemForm((f) => ({ ...f, hmacSecret: e.target.value }))}
+                  placeholder={siemConfig ? "Enter a new secret to rotate, or close to keep existing" : "At least 16 characters"}
+                  autoComplete="new-password"
+                  disabled={siemSaving}
+                />
+              </label>
+
+              <label className="al-siem__field">
+                <span className="al-siem__label">
+                  Custom headers <span className="al-siem__hint-inline">(optional JSON object, e.g. <code>{`{"Authorization": "Splunk <token>"}`}</code>)</span>
+                </span>
+                <textarea
+                  className="input al-siem__textarea"
+                  value={siemForm.headersJson}
+                  onChange={(e) => setSiemForm((f) => ({ ...f, headersJson: e.target.value }))}
+                  placeholder='{"Authorization": "Splunk YOUR-TOKEN"}'
+                  rows={3}
+                  disabled={siemSaving}
+                />
+              </label>
+
+              <label className="al-siem__field al-siem__field--checkbox">
+                <input
+                  type="checkbox"
+                  checked={siemForm.enabled}
+                  onChange={(e) => setSiemForm((f) => ({ ...f, enabled: e.target.checked }))}
+                  disabled={siemSaving}
+                />
+                <span>Enabled — push events to the target on every audit-log row</span>
+              </label>
+
+              {siemError && (
+                <div className="banner banner-error al-siem__error" role="alert">{siemError}</div>
+              )}
+
+              <div className="al-siem__actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleSiemSave}
+                  disabled={siemSaving || !siemForm.targetUrl || !siemForm.hmacSecret}
+                >
+                  {siemSaving ? "Saving…" : siemConfig ? "Save changes" : "Enable forwarder"}
+                </button>
+                {siemConfig && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleSiemDelete}
+                    disabled={siemSaving}
+                  >
+                    Remove configuration
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

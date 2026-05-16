@@ -251,7 +251,22 @@
     "POST /api/v1/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay": {
       "role": "admin",
       "source": "backend/src/routes/system.js",
-      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Re-dispatches the stored snapshot via dispatchSiemEvent. Returns 503 SIEM_NOT_CONFIGURED until the SIEM forwarder (Part C) lands."
+      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Re-dispatches the stored snapshot via dispatchSiemEvent. Returns 503 SIEM_NOT_CONFIGURED when no SIEM target is configured for the workspace."
+    },
+    "GET /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 returns the masked SIEM forwarder config. hmacSecret is replaced with \u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022<last4> so admins can confirm which secret is configured without exposing the value."
+    },
+    "PUT /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 upsert SIEM config. hmacSecret encrypted at rest via credentialEncryption (AES-256-GCM). targetUrl validated by SSRF guard. headers JSON bounded at 4096 chars. Emits settings.update activity for audit trail."
+    },
+    "DELETE /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 idempotent delete. Returns { ok: true, removed: false } when no config existed."
     },
     "GET /api/v1/settings/github-checks": {
       "role": "qa_lead",

@@ -359,6 +359,104 @@
   font-size: 0.78rem;
 }
 
+/* ── SEC-007 Part C — SIEM forwarder config panel ────────────────────────── */
+.al-siem {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.al-siem__hint {
+  margin: 0;
+  color: var(--text2);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.al-siem__status {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--bg3);
+  font-size: 0.82rem;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.al-siem__status code {
+  background: transparent;
+  padding: 0;
+}
+
+.al-siem__badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.al-siem__badge--on {
+  background: var(--accent);
+  color: #fff;
+}
+
+.al-siem__badge--off {
+  background: var(--bg3);
+  color: var(--text3);
+  border: 1px solid var(--border);
+}
+
+.al-siem__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.al-siem__field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.al-siem__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.al-siem__required {
+  color: var(--danger, #dc2626);
+}
+
+.al-siem__hint-inline {
+  font-weight: 400;
+  color: var(--text3);
+  font-size: 0.74rem;
+}
+
+.al-siem__textarea {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.al-siem__error {
+  margin: 0;
+}
+
+.al-siem__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
 /* 900px: toolbar wraps, actor column hidden */

@@ -68,5 +68,25 @@ export function logActivity({ type, req, projectId, projectName, testId, testNam
     prevHash: null,
   };
   activityRepo.create(activity);
+
+  // SEC-007 Part C: fire-and-forget SIEM forwarding. Every persisted
+  // audit row is pushed to the workspace's configured SIEM target on
+  // a deferred microtask so the originating request is never blocked
+  // by a SIEM outage. The forwarder itself NEVER throws — failures
+  // land in the `audit_dlq` table for admin replay.
+  //
+  // Lazy-imported to break the import cycle: notifications.js imports
+  // auditDlqRepo, which imports counterRepo, which… etc. Using a
+  // dynamic import here keeps activityLogger's top-level dependency
+  // graph minimal (the original notification dispatcher uses the same
+  // dynamic-import pattern in routes/system.js for the replay path).
+  if (activity.workspaceId) {
+    setImmediate(() => {
+      import("./notifications.js")
+        .then((mod) => mod.dispatchSiemEvent?.(activity.workspaceId, activity))
+        .catch(() => { /* best-effort; row is already persisted */ });
+    });
+  }
+
   return activity;
 }

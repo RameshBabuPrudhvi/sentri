@@ -957,12 +957,36 @@ export const api = {
   listAuditDlq: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log/dlq${toQuery(filters)}`),
   /**
    * Re-dispatch a DLQ entry against the SIEM forwarder. Returns
-   * `503 SIEM_NOT_CONFIGURED` until the forwarder ships in Part C.
+   * `503 SIEM_NOT_CONFIGURED` when no SIEM target is configured for
+   * the workspace.
    * @param {string} workspaceId
    * @param {string} dlqId
    * @returns {Promise<{ ok: boolean, id: string, replayedAt: string }>}
    */
   replayAuditDlq: (workspaceId, dlqId) => req("POST", `/workspaces/${workspaceId}/audit-log/dlq/${dlqId}/replay`),
+  /**
+   * SEC-007 Part C: read the per-workspace SIEM forwarder config.
+   * Server returns the masked `hmacSecret` (`••••••••<last4>`) so admins
+   * can confirm which secret is configured without exposing it.
+   * @param {string} workspaceId
+   * @returns {Promise<{ config: { workspaceId: string, targetUrl: string, hmacSecret: string, headers: Object|null, enabled: boolean, createdAt: string, updatedAt: string } | null }>}
+   */
+  getWorkspaceSiemConfig: (workspaceId) => req("GET", `/workspaces/${workspaceId}/siem-config`),
+  /**
+   * SEC-007 Part C: upsert the per-workspace SIEM forwarder config.
+   * The plaintext `hmacSecret` is sent on every save (the server encrypts
+   * it at rest); subsequent reads only return the masked form.
+   * @param {string} workspaceId
+   * @param {{ targetUrl: string, hmacSecret: string, headers?: Object|null, enabled?: boolean }} config
+   */
+  upsertWorkspaceSiemConfig: (workspaceId, config) => req("PUT", `/workspaces/${workspaceId}/siem-config`, config),
+  /**
+   * SEC-007 Part C: delete the per-workspace SIEM forwarder config.
+   * Idempotent — `removed: false` when no config existed.
+   * @param {string} workspaceId
+   * @returns {Promise<{ ok: boolean, removed: boolean }>}
+   */
+  deleteWorkspaceSiemConfig: (workspaceId) => req("DELETE", `/workspaces/${workspaceId}/siem-config`),
 
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**

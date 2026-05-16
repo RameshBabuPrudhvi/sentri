@@ -23,7 +23,9 @@ import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
 import * as auditDlqRepo from "../database/repositories/auditDlqRepo.js";
+import * as workspaceSiemConfigRepo from "../database/repositories/workspaceSiemConfigRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
+import { validateUrl } from "../utils/ssrfGuard.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
 import { formatLogLine } from "../utils/logFormatter.js";
@@ -340,6 +342,153 @@ router.post("/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay", requireRole(
   } catch (err) {
     console.error(formatLogLine("error", null, `[audit-log/dlq/replay] ${err.message}`));
     return res.status(500).json({ error: "Audit DLQ replay unavailable.", code: "AUDIT_DLQ_REPLAY_FAILED" });
+  }
+});
+
+/**
+ * SEC-007 Part C: GET per-workspace SIEM forwarder configuration.
+ *
+ * Returns the masked config — `hmacSecret` is replaced with
+ * `••••••••<last4>` so admins can confirm which secret is configured
+ * without exposing the value. Returns `{ config: null }` when no
+ * config exists.
+ *
+ * @route GET /api/v1/workspaces/:workspaceId/siem-config
+ */
+router.get("/workspaces/:workspaceId/siem-config", requireRole("admin"), (req, res) => {
+  try {
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "SIEM config is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+    const config = workspaceSiemConfigRepo.getMasked(req.workspaceId);
+    return res.json({ config });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[siem-config] ${err.message}`));
+    return res.status(500).json({ error: "SIEM config unavailable.", code: "SIEM_CONFIG_READ_FAILED" });
+  }
+});
+
+/**
+ * SEC-007 Part C: PUT (upsert) per-workspace SIEM forwarder configuration.
+ *
+ * The HMAC secret is encrypted at rest via `credentialEncryption.js`.
+ * The target URL is validated against the SSRF guard so cloud-metadata
+ * endpoints / RFC 1918 ranges / link-local / etc. are rejected at write
+ * time. The `headers` object is bounded at 4096 chars JSON-serialised to
+ * stop a malicious admin from blowing out the DB.
+ *
+ * The route emits a `settings.update` activity (workspace-scoped) on
+ * success so the change is audit-trailed alongside other admin
+ * configuration changes.
+ *
+ * @route PUT /api/v1/workspaces/:workspaceId/siem-config
+ */
+router.put("/workspaces/:workspaceId/siem-config", requireRole("admin"), async (req, res) => {
+  try {
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "SIEM config is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+
+    const { targetUrl, hmacSecret, headers, enabled } = req.body || {};
+
+    // Required-field validation up front — clearer errors than the SSRF
+    // check tripping on undefined.
+    if (typeof targetUrl !== "string" || !targetUrl.trim()) {
+      return res.status(400).json({ error: "targetUrl is required.", code: "SIEM_CONFIG_INVALID" });
+    }
+    if (typeof hmacSecret !== "string" || hmacSecret.length < 16) {
+      return res.status(400).json({
+        error: "hmacSecret is required and must be at least 16 characters.",
+        code: "SIEM_CONFIG_INVALID",
+      });
+    }
+
+    // SSRF: block cloud metadata + private ranges + link-local. Same
+    // validator the notification webhook config uses. ALLOW_PRIVATE_URLS
+    // escape hatch is honoured for dev/CI per the existing pattern.
+    if (process.env.ALLOW_PRIVATE_URLS !== "true") {
+      const ssrfErr = await validateUrl(targetUrl);
+      if (ssrfErr) {
+        return res.status(400).json({ error: ssrfErr, code: "SIEM_CONFIG_INVALID_URL" });
+      }
+    }
+
+    // Bound `headers` size — an admin pasting 100KB of headers would
+    // (a) bloat the DB row and (b) make every dispatched HTTP request
+    // larger than necessary. 4096 chars JSON is generous for legitimate
+    // SIEM-vendor token headers (Splunk HEC tokens are ~36 chars).
+    if (headers !== undefined && headers !== null) {
+      if (typeof headers !== "object" || Array.isArray(headers)) {
+        return res.status(400).json({ error: "headers must be an object.", code: "SIEM_CONFIG_INVALID" });
+      }
+      if (JSON.stringify(headers).length > 4096) {
+        return res.status(400).json({ error: "headers exceeds 4096 chars.", code: "SIEM_CONFIG_INVALID" });
+      }
+    }
+
+    const persisted = workspaceSiemConfigRepo.upsert(req.workspaceId, {
+      targetUrl: targetUrl.trim(),
+      hmacSecret,
+      headers: headers || null,
+      enabled: enabled !== false, // default true
+    });
+
+    // Audit-trail the config change. The hmacSecret is NOT in the meta —
+    // only the targetUrl + enabled state, so the activity row is safe to
+    // expose to any admin viewing the workspace audit log.
+    logActivity({
+      ...actor(req),
+      type: "settings.update",
+      req,
+      workspaceId: req.workspaceId,
+      detail: `SIEM forwarder ${enabled === false ? "disabled" : "configured"} (${targetUrl})`,
+      meta: { surface: "siem-config", targetUrl: targetUrl.trim(), enabled: enabled !== false },
+    });
+
+    return res.json({ config: persisted });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[siem-config/upsert] ${err.message}`));
+    return res.status(500).json({ error: "SIEM config save unavailable.", code: "SIEM_CONFIG_WRITE_FAILED" });
+  }
+});
+
+/**
+ * SEC-007 Part C: DELETE the per-workspace SIEM forwarder configuration.
+ *
+ * Idempotent — returns `{ ok: true, removed: false }` when no config
+ * existed. Emits a `settings.update` activity for audit trail.
+ *
+ * @route DELETE /api/v1/workspaces/:workspaceId/siem-config
+ */
+router.delete("/workspaces/:workspaceId/siem-config", requireRole("admin"), (req, res) => {
+  try {
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "SIEM config is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+    const removed = workspaceSiemConfigRepo.remove(req.workspaceId);
+    if (removed) {
+      logActivity({
+        ...actor(req),
+        type: "settings.update",
+        req,
+        workspaceId: req.workspaceId,
+        detail: "SIEM forwarder configuration removed",
+        meta: { surface: "siem-config", action: "delete" },
+      });
+    }
+    return res.json({ ok: true, removed });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[siem-config/delete] ${err.message}`));
+    return res.status(500).json({ error: "SIEM config delete unavailable.", code: "SIEM_CONFIG_DELETE_FAILED" });
   }
 });
 

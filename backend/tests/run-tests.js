@@ -53,6 +53,8 @@ const files = [
   // SEC-007 — Compliance audit log (hash chain, retention, DLQ, routes).
   "tests/audit-log-routes.test.js",
   "tests/audit-auth-events.test.js",
+  // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
+  "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",

@@ -19,7 +19,10 @@
  * ```
  */
 
+import crypto from "node:crypto";
 import * as notificationSettingsRepo from "../database/repositories/notificationSettingsRepo.js";
+import * as workspaceSiemConfigRepo from "../database/repositories/workspaceSiemConfigRepo.js";
+import * as auditDlqRepo from "../database/repositories/auditDlqRepo.js";
 import { sendEmail, escapeHtml } from "./emailSender.js";
 import { formatLogLine } from "./logFormatter.js";
 import { safeFetch } from "./ssrfGuard.js";
@@ -303,4 +306,167 @@ export async function fireNotifications(run, project) {
   }
 
   await Promise.allSettled(dispatches);
+}
+
+// ─── SEC-007 Part C: SIEM audit-log forwarder ─────────────────────────────────
+
+/**
+ * Sleep for `ms` milliseconds. Used by the SIEM retry loop's exponential
+ * backoff schedule.
+ *
+ * @param {number} ms
+ * @returns {Promise<void>}
+ * @private
+ */
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Compute the HMAC-SHA256 signature of an NDJSON body.
+ *
+ * SIEM operators verify this header on their ingest endpoint to confirm
+ * the event came from the configured workspace's Sentri instance.
+ *
+ *   X-Sentri-Audit-Signature: sha256=<hex(hmac_sha256(secret, body))>
+ *
+ * @param {string} secret - Per-workspace HMAC secret (plaintext).
+ * @param {string} body   - The NDJSON body string.
+ * @returns {string}        sha256=<hex digest>
+ * @private
+ */
+function _hmacSignature(secret, body) {
+  const hex = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  return `sha256=${hex}`;
+}
+
+/**
+ * Determine whether an HTTP response status should trigger a retry.
+ *
+ * - 5xx server errors → retry (transient)
+ * - 408 Request Timeout, 429 Too Many Requests → retry (back-pressure)
+ * - 4xx (other) → DO NOT retry; the SIEM target rejected our payload
+ *   shape or our auth, so retrying with the same bytes won't help.
+ *   The DLQ inspector + admin replay path is the recovery surface for
+ *   config-issue failures.
+ *
+ * @param {number} status
+ * @returns {boolean}
+ * @private
+ */
+function _isRetryableStatus(status) {
+  if (status >= 500) return true;
+  if (status === 408 || status === 429) return true;
+  return false;
+}
+
+/**
+ * SEC-007 Part C — forward a single audit row to the workspace's configured
+ * SIEM target.
+ *
+ * Lookup chain:
+ *   1. Read per-workspace config via `workspaceSiemConfigRepo.getDecrypted`.
+ *      If no row, or row has `enabled = false`, return immediately (no-op).
+ *   2. POST the row as one NDJSON line with:
+ *        Content-Type: application/x-ndjson
+ *        X-Sentri-Audit-Signature: sha256=<hex(hmac(secret, body))>
+ *        ... + any configured custom headers (e.g. Splunk HEC token).
+ *   3. Retry on 5xx / 408 / 429 with exponential backoff (1s → 2s → 4s).
+ *   4. After 3 attempts, enqueue the row in `audit_dlq` so an admin can
+ *      replay it via the AuditLog DLQ inspector.
+ *
+ * Fire-and-forget contract: this function NEVER throws to the caller.
+ * It's invoked from `logActivity` after every audit INSERT, and a SIEM
+ * outage MUST NOT block the originating request. Failures land in the
+ * DLQ; persistent outages surface as a non-empty DLQ count in the UI.
+ *
+ * @param {string} workspaceId - The workspace whose SIEM config to load.
+ * @param {Object} row         - The activity row that was just persisted.
+ * @returns {Promise<{ ok: boolean, attempts?: number, lastError?: string }>}
+ */
+export async function dispatchSiemEvent(workspaceId, row) {
+  if (!workspaceId || !row) return { ok: false, lastError: "missing workspaceId or row" };
+
+  let cfg;
+  try {
+    cfg = workspaceSiemConfigRepo.getDecrypted(workspaceId);
+  } catch (err) {
+    // Reading the config shouldn't fail under normal conditions, but if
+    // the DB is locked / decryption errors / etc., treat as not-configured.
+    // Logging at warn (not error) because this is best-effort and the row
+    // is already safely persisted in `activities`.
+    console.warn(formatLogLine("warn", null,
+      `[siem] Failed to load config for ${workspaceId}: ${err.message}`));
+    return { ok: false, lastError: err.message };
+  }
+
+  if (!cfg || !cfg.enabled || !cfg.targetUrl) {
+    // Not configured or disabled — silent no-op (the audit row is still
+    // safely in the DB; SIEM forwarding is an optional extension).
+    return { ok: false, lastError: "siem-not-configured" };
+  }
+
+  // NDJSON one-line body. The verifying side feeds the exact bytes
+  // received into HMAC-SHA256 — any whitespace change here would break
+  // verification, so we serialise the row exactly once.
+  const body = JSON.stringify(row) + "\n";
+  const signature = _hmacSignature(cfg.hmacSecret, body);
+
+  const headers = {
+    "Content-Type": "application/x-ndjson",
+    "X-Sentri-Audit-Signature": signature,
+    ...(cfg.headers || {}),
+  };
+
+  // 3 attempts at 1s, 2s, 4s. `safeFetch` enforces SSRF protection on the
+  // target URL (same guard used by notification webhooks) so an attacker
+  // configuring a malicious SIEM URL (169.254.169.254, etc.) can't pivot
+  // through Sentri to reach cloud metadata endpoints.
+  const backoffMs = [0, 1000, 2000, 4000];
+  let lastError = "unknown";
+  let attempts = 0;
+
+  for (let i = 1; i <= 3; i++) {
+    attempts = i;
+    if (backoffMs[i] > 0) await _sleep(backoffMs[i]);
+    try {
+      const res = await safeFetch(cfg.targetUrl, {
+        method: "POST",
+        headers,
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        return { ok: true, attempts };
+      }
+      // Non-2xx — decide whether to keep trying or bail to DLQ.
+      const bodyText = await res.text().catch(() => "");
+      lastError = `HTTP ${res.status}: ${bodyText.slice(0, 200)}`;
+      if (!_isRetryableStatus(res.status)) {
+        // 4xx config issue — don't waste budget retrying. Go straight to DLQ.
+        break;
+      }
+    } catch (err) {
+      // Network / DNS / TLS / SSRF rejection / timeout. All retryable.
+      lastError = err.message || String(err);
+    }
+  }
+
+  // All retries exhausted (or 4xx short-circuit). Enqueue for admin replay.
+  try {
+    auditDlqRepo.enqueue({
+      workspaceId,
+      rowSnapshot: row,
+      lastError,
+    });
+    console.warn(formatLogLine("warn", null,
+      `[siem] Dispatch failed after ${attempts} attempt(s) for ws=${workspaceId} row=${row.id || "?"} — enqueued to DLQ: ${lastError}`));
+  } catch (dlqErr) {
+    // DLQ failure is a P1 — the audit row is safely persisted but its
+    // dispatch trace is now lost. Log loudly so operators can investigate.
+    console.error(formatLogLine("error", null,
+      `[siem] DLQ enqueue failed for ws=${workspaceId} row=${row.id || "?"}: ${dlqErr.message} (original dispatch error: ${lastError})`));
+  }
+
+  return { ok: false, attempts, lastError };
 }
