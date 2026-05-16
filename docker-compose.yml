@@ -63,8 +63,12 @@ services:
   # ── Distributed runner worker (AUTO-008) ────────────────────────────────────
   # Same image as `backend`; overrides CMD to run the queue-only entrypoint
   # (`src/worker.js`) so workers don't bind port 3001. Scale with:
-  #   docker compose --profile redis up -d --scale worker=4
-  # Lives under the `redis` profile because BullMQ requires Redis.
+  #   docker compose --profile redis --profile postgres up -d --scale worker=4
+  # Lives under the `redis` profile because BullMQ requires Redis. The
+  # `postgres` profile is also required by default because workers MUST share
+  # the backend's database (see DATABASE_URL note below) — SQLite cannot be
+  # shared across replicas. Omit `--profile postgres` only if you've pointed
+  # DATABASE_URL at an externally-managed PostgreSQL instance.
   worker:
     image: ghcr.io/rameshbabuprudhvi/sentri-backend:latest
     build:
