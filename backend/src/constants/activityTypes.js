@@ -38,4 +38,9 @@ export const ACTIVITY_TYPES = Object.freeze({
   AUTH_API_KEY_CREATE:"auth.api_key.create",
   AUTH_API_KEY_REVOKE:"auth.api_key.revoke",
   AUTH_SESSION_REVOKE:"auth.session.revoke",
+
+  // SEC-007: meta-audit — reads / exports of the audit log itself.
+  // Required by PCI-DSS 10.2.6 and SOC 2 CC7.2.
+  AUDIT_READ:         "audit.read",
+  AUDIT_EXPORT:       "audit.export",
 });

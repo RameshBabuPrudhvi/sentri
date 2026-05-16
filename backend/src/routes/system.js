@@ -17,6 +17,7 @@
  */
 
 import { Router } from "express";
+import { rateLimit } from "express-rate-limit";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
@@ -30,6 +31,34 @@ import { activeTaskCount } from "../scheduler.js";
 import { requireRole } from "../middleware/requireRole.js";
 
 const router = Router();
+
+/**
+ * SEC-007: anti-exfiltration rate limiter for bulk audit-log exports.
+ *
+ * Browsing the JSON paginated view is cheap; CSV/NDJSON exports return the
+ * entire current page in one shot and a determined exfiltrator can
+ * script the cursor loop to pull the whole log in seconds. Cap export
+ * calls at 10 per 15-min window per (workspace × admin) — generous for
+ * legitimate evidence requests (SOC 2 control-walk, customer DSAR), tight
+ * enough that a script tripping the limit shows up as a clear signal in
+ * both the rate-limit logs and the meta-audit `audit.export` rows.
+ *
+ * The keyGenerator includes `req.workspaceId + sub` so a compromised admin
+ * cookie can't burn the budget of an unrelated workspace.
+ */
+const auditExportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.AUDIT_EXPORT_RATE_LIMIT ?? "", 10) || 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.workspaceId || "no-ws"}::${req.authUser?.sub || req.ip || "anon"}`,
+  // Only count *export* calls toward the budget — JSON browsing is exempt.
+  skip: (req) => req.query.format !== "csv" && req.query.format !== "ndjson",
+  message: {
+    error: "Too many audit-log exports. Try again later.",
+    code: "AUDIT_EXPORT_RATE_LIMITED",
+  },
+});
 
 // ─── Activities ───────────────────────────────────────────────────────────────
 
@@ -107,7 +136,7 @@ router.get("/audit/verify", requireRole("admin"), (req, res) => {
  *
  * @route GET /api/v1/workspaces/:workspaceId/audit-log
  */
-router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), (req, res) => {
+router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExportLimiter, (req, res) => {
   try {
     // ── Authorisation: URL param must match the authenticated workspace ──
     // Without this, the URL param overrides the middleware-injected scope
@@ -142,6 +171,38 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), (req, res
       ipAddress: req.query.ipAddress || undefined,
       cursor,
       limit,
+    });
+
+    // ── Meta-audit: log every audit-log access ──
+    // PCI-DSS 10.2.6 and SOC 2 CC7.2 require that *reads of the audit log
+    // are themselves audited*. Without this, an insider with admin access
+    // could exfiltrate the entire compliance trail with zero trace.
+    //
+    // The actual filter shape goes into `meta` so a reviewer can later
+    // answer "who read the audit log, for which window, and how?".
+    // Exports use a distinct `audit.export` type so anti-exfiltration
+    // dashboards can alert on bulk export bursts separately from
+    // routine UI browsing.
+    const isExport = req.query.format === "csv" || req.query.format === "ndjson";
+    logActivity({
+      type: isExport ? "audit.export" : "audit.read",
+      req,
+      userId: req.authUser?.sub || null,
+      userName: req.authUser?.name || req.authUser?.email || null,
+      workspaceId: req.workspaceId,
+      meta: {
+        format: req.query.format || "json",
+        rowCount: rows.length,
+        filters: {
+          userId: req.query.userId || null,
+          types: types.length ? types : null,
+          dateFrom: req.query.dateFrom || null,
+          dateTo: req.query.dateTo || null,
+          ipAddress: req.query.ipAddress || null,
+          cursor: cursor || null,
+          limit,
+        },
+      },
     });
 
     // ── Export formats ──

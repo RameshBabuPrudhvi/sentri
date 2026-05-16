@@ -69,7 +69,13 @@ export default function App() {
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-                <Route path="/settings/compliance" element={<ProtectedRoute><AuditLog /></ProtectedRoute>} />
+                {/* SEC-007: compliance audit log — admin-gated at the route
+                    layer (defence-in-depth; backend also enforces admin
+                    via requireRole). Mounted at `/audit-log` only — the
+                    `/settings/compliance` alias was removed to avoid two
+                    paths to the same surface (which would split the
+                    meta-audit trail and confuse access logs). */}
+                <Route path="/audit-log" element={<ProtectedRoute requiredRole="admin"><AuditLog /></ProtectedRoute>} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />
@@ -79,7 +85,6 @@ export default function App() {
                 <Route path="/review-queue" element={<ReviewQueue />} />
                 <Route path="/healing" element={<HealingDashboard />} />
                 <Route path="/approvals" element={<ApprovalsTimeline />} />
-                <Route path="/audit-log" element={<AuditLog />} />
                 <Route path="/projects/:id/test-lab" element={<TestLab />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
