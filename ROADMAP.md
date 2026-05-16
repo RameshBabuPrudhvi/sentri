@@ -1140,7 +1140,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
-| Security & Compliance | 7 | 3 | 0 | 4 | SEC-004 🔴 (MFA), SEC-005 (SSO), SEC-006 🔴 (PII firewall), SEC-007 🟡 (compliance audit log surface — promoted from 🟢 Strategic, pairs with SEC-004 for SOC2/ISO27001) |
+| Security & Compliance | 7 | 4 | 0 | 3 | SEC-005 (SSO), SEC-006 🔴 (PII firewall), SEC-007 🟡 (compliance audit log surface — promoted from 🟢 Strategic, pairs with SEC-004 for SOC2/ISO27001) |
 | Infrastructure | 10 | 6 | 0 | 4 | INF-007 🔴 (OTel/Sentry), INF-008 🔴 (Postgres default), INF-009 (Helm/DR), INF-010 (SDK + CLI) |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
@@ -1149,22 +1149,21 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **61** | **0** | **38** | |
+| **Totals** | **99** | **62** | **0** | **37** | |
 
 
-**Total tracked items:** 99 across 9 categories — **60 complete** (59%), **0 in current PR**, **39 remaining**
+**Total tracked items:** 99 across 9 categories — **62 complete** (59%), **0 in current PR**, **37 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
-- 🔴 **NEW from AUDIT.md Phase 5 — 6 items unresolved:** SEC-004 (MFA), SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness).
+- 🔴 **NEW from AUDIT.md Phase 5 — 6 items unresolved:** SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness).
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
-1. `SEC-004` (MFA / TOTP — 🔴 Blocker per AUDIT.md S1, compliance prerequisite for SOC 2 / ISO 27001; gates any regulated-industry sale)
-2. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)
-3. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation)
-4. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
-5. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts)
-6. `DIF-008` (Jira / Linear issue sync — competitive parity; auto-creates tickets on confirmed failures, syncs status back to `linkedIssueKey`)
+1. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)
+2. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation)
+3. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
+4. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts)
+5. `DIF-008` (Jira / Linear issue sync — competitive parity; auto-creates tickets on confirmed failures, syncs status back to `linkedIssueKey`)
 
 This rotation alternates between audit-driven hardening and feature delivery so neither narrative starves.
 
