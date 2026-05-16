@@ -371,7 +371,7 @@ function _isRetryableStatus(status) {
  *        Content-Type: application/x-ndjson
  *        X-Sentri-Audit-Signature: sha256=<hex(hmac(secret, body))>
  *        ... + any configured custom headers (e.g. Splunk HEC token).
- *   3. Retry on 5xx / 408 / 429 with exponential backoff (1s → 2s → 4s).
+ *   3. Retry on 5xx / 408 / 429 with backoff (immediate, then 1s, then 2s).
  *   4. After 3 attempts, enqueue the row in `audit_dlq` so an admin can
  *      replay it via the AuditLog DLQ inspector.
  *
@@ -412,10 +412,16 @@ export async function dispatchSiemEvent(workspaceId, row) {
   const body = JSON.stringify(row) + "\n";
   const signature = _hmacSignature(cfg.hmacSecret, body);
 
+  // SEC-007: spread custom headers FIRST so the system-controlled integrity
+  // headers (`Content-Type`, `X-Sentri-Audit-Signature`) can never be
+  // overridden by an admin's `cfg.headers`. A malicious or careless admin
+  // setting `headers: { "X-Sentri-Audit-Signature": "sha256=0…0" }` would
+  // otherwise silently strip HMAC verification at the SIEM target. The PUT
+  // route validator also rejects reserved header names defensively.
   const headers = {
+    ...(cfg.headers || {}),
     "Content-Type": "application/x-ndjson",
     "X-Sentri-Audit-Signature": signature,
-    ...(cfg.headers || {}),
   };
 
   // 3 attempts at 0s, 1s, 2s (cumulative 3s). `safeFetch` enforces SSRF

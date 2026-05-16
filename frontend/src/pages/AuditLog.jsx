@@ -685,8 +685,10 @@ export default function AuditLog() {
     }
     // If there's no persisted config yet, hmacSecret is required.
     // If config exists, blank hmacSecret = "keep existing secret".
-    if (!siemConfig && (!siemForm.hmacSecret || siemForm.hmacSecret.length < 16)) {
-      setSiemError("HMAC secret is required and must be at least 16 characters.");
+    // 32-char minimum matches NIST SP 800-107 (key length ≥ HMAC-SHA256
+    // output length) — enforced by the backend PUT validator.
+    if (!siemConfig && (!siemForm.hmacSecret || siemForm.hmacSecret.length < 32)) {
+      setSiemError("HMAC secret is required and must be at least 32 characters.");
       return;
     }
     let parsedHeaders = null;
@@ -713,8 +715,8 @@ export default function AuditLog() {
       // call. For the "no rotation" case, we have to re-send the
       // masked value back and let the server keep the encrypted blob.
       // Simpler: just always require non-empty on save in the UI.
-      if (!siemForm.hmacSecret || siemForm.hmacSecret.length < 16) {
-        setSiemError("Enter a new HMAC secret (≥ 16 chars) to save changes. To keep the existing secret unchanged, click Cancel.");
+      if (!siemForm.hmacSecret || siemForm.hmacSecret.length < 32) {
+        setSiemError("Enter a new HMAC secret (≥ 32 chars) to save changes. To keep the existing secret unchanged, click Cancel.");
         setSiemSaving(false);
         return;
       }
@@ -934,14 +936,14 @@ export default function AuditLog() {
               <label className="al-siem__field">
                 <span className="al-siem__label">
                   HMAC secret <span className="al-siem__required">*</span>{" "}
-                  <span className="al-siem__hint-inline">(min 16 chars; sent only on save — server stores AES-256-GCM encrypted)</span>
+                  <span className="al-siem__hint-inline">(min 32 chars; sent only on save — server stores AES-256-GCM encrypted)</span>
                 </span>
                 <input
                   type="password"
                   className="input"
                   value={siemForm.hmacSecret}
                   onChange={(e) => setSiemForm((f) => ({ ...f, hmacSecret: e.target.value }))}
-                  placeholder={siemConfig ? "Enter a new secret to rotate, or close to keep existing" : "At least 16 characters"}
+                  placeholder={siemConfig ? "Enter a new secret to rotate, or close to keep existing" : "At least 32 characters"}
                   autoComplete="new-password"
                   disabled={siemSaving}
                 />

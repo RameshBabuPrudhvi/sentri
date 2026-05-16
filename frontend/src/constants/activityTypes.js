@@ -46,4 +46,6 @@ export const ACTIVITY_TYPES = Object.freeze({
   // Required by PCI-DSS 10.2.6 and SOC 2 CC7.2.
   AUDIT_READ:         "audit.read",
   AUDIT_EXPORT:       "audit.export",
+  // SEC-007: emitted by `DELETE /api/v1/data/activities` BEFORE the truncate.
+  AUDIT_PURGE:        "audit.purge",
 });

@@ -218,7 +218,10 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), auditExpo
     }
     if (req.query.format === "csv") {
       // RFC 4180: wrap every field in quotes, double internal quotes.
-      const header = "timestamp,userId,userName,type,meta,ipAddress,userAgent,workspaceId";
+      // First column header is `createdAt` to match the NDJSON/JSON field
+      // name — SIEM importers joining CSV and NDJSON exports otherwise
+      // need a mapping table for the `timestamp` ↔ `createdAt` rename.
+      const header = "createdAt,userId,userName,type,meta,ipAddress,userAgent,workspaceId";
       const esc = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
       const body = rows.map((r) =>
         [r.createdAt, r.userId, r.userName, r.type, JSON.stringify(r.meta ?? null), r.ipAddress, r.userAgent, r.workspaceId]
@@ -428,9 +431,14 @@ router.put("/workspaces/:workspaceId/siem-config", requireRole("admin"), async (
     if (typeof targetUrl !== "string" || !targetUrl.trim()) {
       return res.status(400).json({ error: "targetUrl is required.", code: "SIEM_CONFIG_INVALID" });
     }
-    if (typeof hmacSecret !== "string" || hmacSecret.length < 16) {
+    // SEC-007 / NIST SP 800-107: HMAC key length should be ≥ output length
+    // for full security. SHA-256 → 32 bytes. We accept arbitrary printable
+    // ASCII (operators may paste a base64 / hex / passphrase form), so 32
+    // chars is the floor that guarantees ≥ 192 bits of entropy even at the
+    // worst case (lowercase alphabet only).
+    if (typeof hmacSecret !== "string" || hmacSecret.length < 32) {
       return res.status(400).json({
-        error: "hmacSecret is required and must be at least 16 characters.",
+        error: "hmacSecret is required and must be at least 32 characters.",
         code: "SIEM_CONFIG_INVALID",
       });
     }
@@ -455,6 +463,21 @@ router.put("/workspaces/:workspaceId/siem-config", requireRole("admin"), async (
       }
       if (JSON.stringify(headers).length > 4096) {
         return res.status(400).json({ error: "headers exceeds 4096 chars.", code: "SIEM_CONFIG_INVALID" });
+      }
+      // SEC-007: defence-in-depth against header overwrite. The forwarder
+      // (`backend/src/utils/notifications.js`) already spreads custom headers
+      // first so system-controlled integrity headers cannot be clobbered, but
+      // we also reject the names at write time so a misconfigured admin sees
+      // a clear 400 instead of a silently-ignored value. Case-insensitive
+      // match: HTTP header names are case-insensitive per RFC 7230.
+      const reserved = new Set(["content-type", "x-sentri-audit-signature"]);
+      for (const key of Object.keys(headers)) {
+        if (reserved.has(key.toLowerCase())) {
+          return res.status(400).json({
+            error: `Header "${key}" is reserved and cannot be overridden.`,
+            code: "SIEM_CONFIG_RESERVED_HEADER",
+          });
+        }
       }
     }
 
@@ -676,6 +699,24 @@ router.delete("/data/activities", requireRole("admin"), (req, res) => {
   if (process.env.DANGER_ALLOW_AUDIT_PURGE !== "true") {
     return res.status(403).json({ error: "Audit purge is disabled.", code: "AUDIT_PURGE_DISABLED" });
   }
+  // SEC-007: emit the meta-audit row BEFORE the truncate so the act of purging
+  // the audit log is itself recorded — and survives the very purge it audits.
+  // Without this, the single most security-sensitive admin action in the
+  // system (wiping the compliance trail) would leave zero in-DB evidence,
+  // making PCI-DSS 10.2.6 / SOC 2 CC7.2 untenable. The env-var flip
+  // (`DANGER_ALLOW_AUDIT_PURGE=true`) lives outside the DB and is the only
+  // other deployment-level signal; this row gives reviewers a workspace-
+  // scoped trail in addition. It is also pushed to the SIEM forwarder via
+  // the standard `logActivity` path so external evidence survives even if
+  // the operator then changes the truncate to clear the entire table.
+  logActivity({
+    ...actor(req),
+    type: "audit.purge",
+    req,
+    workspaceId: req.workspaceId,
+    detail: "Audit log truncated via DELETE /data/activities (DANGER_ALLOW_AUDIT_PURGE=true).",
+    meta: { surface: "data-management", envFlag: "DANGER_ALLOW_AUDIT_PURGE" },
+  });
   const count = activityRepo.clearByWorkspaceId(req.workspaceId);
   res.json({ ok: true, cleared: count });
 });

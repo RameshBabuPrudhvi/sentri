@@ -254,7 +254,11 @@ async function main() {
       assert.equal(result.attempts, 3, "must retry up to 3 times on 5xx");
       assert.equal(siem.requests.length, before + 3, "exactly 3 POST attempts");
       assert.equal(auditDlqRepo.countByWorkspace(ws), dlqBefore + 1, "row should land in DLQ");
-    }).catch(() => {}); // 5xx retry test is slow (backoff sleeps); tolerate timing flake
+    });
+    // Note: this test is slow (~3s with the 1s/2s backoff between retries).
+    // If it becomes flaky in CI we should mock setTimeout via test hooks
+    // rather than swallow assertion failures — the previous .catch(()=>{})
+    // here was silently pretending the test passed.
 
     summary("audit-siem-forwarder");
     console.log("\n🎉 All audit-siem-forwarder tests passed!");

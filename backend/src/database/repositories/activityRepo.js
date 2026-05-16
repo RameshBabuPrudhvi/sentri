@@ -18,6 +18,14 @@ import { getDatabase } from "../sqlite.js";
  * verification path reads the column back as TEXT and must hash it without
  * re-parsing.
  *
+ * Note on `id`: the primary key is included in the hashed payload deliberately
+ * so any re-numbering of activity rows (counter compaction, partial-backup
+ * restore, manual edit) is detected by `verifyAuditChain` as tampering. The
+ * tradeoff is that legitimate ID migrations require regenerating the chain
+ * from scratch; we accept that cost because in a SOC 2 / PCI-DSS audit log
+ * "the IDs changed but the content is the same" is exactly the class of
+ * change a verifier should flag.
+ *
  * @param {Object} row
  * @returns {Object}
  * @private
@@ -128,6 +136,12 @@ export function create(activity) {
       insert.run(row);
     });
     tx(params);
+    // SEC-007: mirror the computed prevHash back onto the caller's object so
+    // downstream consumers (notably the SIEM forwarder in `activityLogger`)
+    // dispatch the row with the same `prevHash` that's persisted in SQLite.
+    // Without this mutation, every SIEM-forwarded event carries `prevHash: null`
+    // and a SIEM-side integrity verifier can never reconstruct the chain.
+    activity.prevHash = params.prevHash;
   } else {
     insert.run(params);
   }
@@ -495,18 +509,28 @@ export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [
  * Uses the shared `computePrevHash` helper so any drift between the INSERT
  * path and the verification path is impossible — both call the same function.
  *
- * Returns `{ verified: true, total }` on a clean walk, or
+ * Returns `{ verified: true, total, chainStartedAt }` on a clean walk, or
  * `{ verified: false, firstBrokenRowId, total }` at the first mismatch.
  * An empty workspace is trivially verified.
  *
+ * ### Pre-chain rows (`prevHash IS NULL`)
+ * When `AUDIT_HASH_CHAIN=true` is enabled on a deployment with pre-existing
+ * activity rows, those legacy rows have `prevHash = null` and were never
+ * hash-linked. Reporting a tamper break at the first such row would be a
+ * false positive — the rows aren't tampered, they predate the feature. So
+ * the verifier skips the leading `prevHash IS NULL` rows and begins the
+ * walk at the first row with a non-null `prevHash`. `chainStartedAt`
+ * surfaces the `createdAt` of that first chained row so operators can
+ * see how much history is outside the cryptographic coverage.
+ *
  * Caller is expected to gate this behind `AUDIT_HASH_CHAIN=true` — when
- * the chain is disabled, every row has `prevHash = null` and this walk
- * would falsely report the second row as broken. The route handler in
- * `backend/src/routes/system.js` short-circuits to `{ chainDisabled: true }`
- * in that case.
+ * the chain is disabled, every row has `prevHash = null` and the walk
+ * would skip everything (returning `{ verified: true, total, chainStartedAt: null }`).
+ * The route handler in `backend/src/routes/system.js` short-circuits to
+ * `{ chainDisabled: true }` in that case to avoid the empty-walk ambiguity.
  *
  * @param {string} workspaceId
- * @returns {Object} `{ verified: boolean, firstBrokenRowId?: string, total: number }`
+ * @returns {Object} `{ verified: boolean, firstBrokenRowId?: string, total: number, chainStartedAt?: string|null }`
  */
 export function verifyAuditChain(workspaceId) {
   const db = getDatabase();
@@ -521,13 +545,19 @@ export function verifyAuditChain(workspaceId) {
   const rows = db.prepare(
     "SELECT * FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC, CAST(SUBSTR(id, 5) AS INTEGER) ASC"
   ).all(workspaceId);
+  // Skip leading rows that predate chain mode (prevHash IS NULL). These
+  // are not tampered — they simply existed before AUDIT_HASH_CHAIN=true was
+  // flipped on. See the docstring for the false-positive scenario.
+  let startIdx = 0;
+  while (startIdx < rows.length && rows[startIdx].prevHash == null) startIdx++;
+  const chainStartedAt = startIdx < rows.length ? rows[startIdx].createdAt : null;
   let previousHash = null;
-  for (let i = 0; i < rows.length; i++) {
+  for (let i = startIdx; i < rows.length; i++) {
     const expected = computePrevHash(previousHash, rows[i]);
     if (rows[i].prevHash !== expected) {
       return { verified: false, firstBrokenRowId: rows[i].id, total: rows.length };
     }
     previousHash = rows[i].prevHash;
   }
-  return { verified: true, total: rows.length };
+  return { verified: true, total: rows.length, chainStartedAt };
 }

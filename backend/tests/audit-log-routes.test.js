@@ -351,7 +351,7 @@ async function main() {
       assert.match(res.headers.get("content-disposition") || "", /attachment/);
       const body = await res.text();
       const firstLine = body.split("\n")[0];
-      assert.equal(firstLine, "timestamp,userId,userName,type,meta,ipAddress,userAgent,workspaceId",
+      assert.equal(firstLine, "createdAt,userId,userName,type,meta,ipAddress,userAgent,workspaceId",
         "CSV header must match the documented column order");
     });
 
