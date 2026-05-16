@@ -1578,13 +1578,21 @@ router.post("/mfa/verify", async (req, res) => {
     const user = userRepo.getById(pending.userId);
     if (!user) return res.status(404).json({ error: "User not found." });
     const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
-    const secret = decryptString(user.mfaSecret);
-    if (!secret) return res.status(400).json({ error: "MFA is not configured." });
 
-    let ok = verifyTotp(token, secret);
-    let method = ok ? "totp" : null;
+    // Attempt TOTP verification only when the secret is decryptable.
+    // If the secret is corrupted / key-rotated, skip TOTP but still allow
+    // the recovery-code path below — that's the entire purpose of recovery
+    // codes (they're SHA-256 hashed independently of the AES-encrypted secret).
+    const secret = decryptString(user.mfaSecret);
+    let ok = false;
+    let method = null;
     let updatedRecovery = null;
     let remaining = null;
+
+    if (secret && token) {
+      ok = verifyTotp(token, secret);
+      if (ok) method = "totp";
+    }
 
     if (!ok && token) {
       // Recovery-code path: constant-time scan to avoid leaking which slot
@@ -1600,6 +1608,13 @@ router.post("/mfa/verify", async (req, res) => {
         ok = true;
         method = "recovery";
       }
+    }
+
+    // If BOTH the TOTP secret is undecryptable AND no recovery codes exist,
+    // surface a clear error rather than the generic "Invalid authentication
+    // code" — the user's MFA row is broken and they need admin help.
+    if (!ok && !secret && (!user.mfaRecoveryCodes || user.mfaRecoveryCodes === "[]")) {
+      return res.status(400).json({ error: "MFA is not configured. Contact an administrator." });
     }
 
     if (!ok) {
