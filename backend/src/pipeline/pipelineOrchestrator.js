@@ -38,8 +38,10 @@ import * as testRepo from "../database/repositories/testRepo.js";
  *
  * @param {object} project
  * @param {object} run
- * @param {{ snapshotsByUrl?: object, classifiedPages?: object[] }} inputs
- * @returns {{ snapshotsByUrl: object, classifiedPages: object[] }}
+ * @param {object} inputs
+ * @param {object} [inputs.snapshotsByUrl]
+ * @param {object[]} [inputs.classifiedPages]
+ * @returns {{snapshotsByUrl: object, classifiedPages: object[]}}
  */
 export function sanitizeRunInputs(project, run, { snapshotsByUrl = {}, classifiedPages = [] } = {}) {
   const strict = project?.strictPiiFirewall !== false;

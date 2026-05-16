@@ -23,7 +23,9 @@ function luhnValid(raw) {
  * values resolve to identical placeholder IDs across all calls (so the AI
  * can correlate references across snapshots + classified pages).
  *
- * @param {{ allowlist?: string[], runId?: string }} [opts]
+ * @param {object} [opts]
+ * @param {string[]} [opts.allowlist]
+ * @param {string} [opts.runId]
  */
 export function createPiiContext({ allowlist = [], runId } = {}) {
   return {
