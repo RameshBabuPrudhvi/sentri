@@ -511,8 +511,22 @@ export default function AuditLog() {
       // stays monotonic and `groupByDay` keeps producing contiguous day
       // headers. Appending here would interleave a chunk of older rows
       // *after* newer ones and shatter the day grouping.
+      //
+      // INVARIANT — this only works because the INITIAL fetch (above)
+      // also does `fetched = [...fetched].reverse()` in oldest-mode, so
+      // `prev` is already oldest-first. If the initial sort ever changes,
+      // update both branches together or this prepend will produce a
+      // non-monotonic sequence. Dev-mode guard makes a regression loud
+      // rather than silently rendering broken day groups.
       if (sortOrder === "oldest") {
         fetched = [...fetched].reverse();
+        if (process.env.NODE_ENV !== "production" && rows.length > 0 && fetched.length > 0) {
+          const prevOldest = rows[0]?.createdAt;
+          const fetchedNewest = fetched[fetched.length - 1]?.createdAt;
+          if (prevOldest && fetchedNewest && fetchedNewest >= prevOldest) {
+            console.warn("[AuditLog] loadMore oldest-mode invariant violated — page boundaries overlap; day groups may render incorrectly.");
+          }
+        }
         setRows((prev) => [...fetched, ...prev]);
       } else {
         setRows((prev) => [...prev, ...fetched]);
@@ -707,25 +721,20 @@ export default function AuditLog() {
 
     setSiemSaving(true);
     try {
-      // Only send hmacSecret when it's non-empty. The server treats
-      // omission as "no change" via the existing config's stored secret
-      // — but the current PUT contract requires it on every save, so
-      // we re-send the masked sentinel when blank to signal no rotation.
-      // Note: the backend's PUT route requires hmacSecret on every
-      // call. For the "no rotation" case, we have to re-send the
-      // masked value back and let the server keep the encrypted blob.
-      // Simpler: just always require non-empty on save in the UI.
-      if (!siemForm.hmacSecret || siemForm.hmacSecret.length < 32) {
-        setSiemError("Enter a new HMAC secret (≥ 32 chars) to save changes. To keep the existing secret unchanged, click Cancel.");
-        setSiemSaving(false);
-        return;
-      }
-      const res = await api.upsertWorkspaceSiemConfig(workspaceId, {
+      // SEC-007: the backend PUT route accepts an omitted/empty `hmacSecret`
+      // on UPDATE as "keep the existing encrypted secret". So we send the
+      // field only when the user typed a new value; blank means "no rotation"
+      // and the server reuses the stored blob. The insert-path validator
+      // already enforces presence + 32-char minimum when no row exists.
+      const payload = {
         targetUrl,
-        hmacSecret: siemForm.hmacSecret,
         headers: parsedHeaders,
         enabled: siemForm.enabled,
-      });
+      };
+      if (siemForm.hmacSecret && siemForm.hmacSecret.length > 0) {
+        payload.hmacSecret = siemForm.hmacSecret;
+      }
+      const res = await api.upsertWorkspaceSiemConfig(workspaceId, payload);
       setSiemConfig(res?.config || null);
       // Clear the hmacSecret field after a successful save so it's not
       // hanging around in the DOM.
@@ -943,7 +952,7 @@ export default function AuditLog() {
                   className="input"
                   value={siemForm.hmacSecret}
                   onChange={(e) => setSiemForm((f) => ({ ...f, hmacSecret: e.target.value }))}
-                  placeholder={siemConfig ? "Enter a new secret to rotate, or close to keep existing" : "At least 32 characters"}
+                  placeholder={siemConfig ? "Leave blank to keep existing — enter a new value to rotate" : "At least 32 characters"}
                   autoComplete="new-password"
                   disabled={siemSaving}
                 />
@@ -980,8 +989,11 @@ export default function AuditLog() {
               <div className="al-siem__actions">
                 <button
                   className="btn btn-primary btn-sm"
+                  // hmacSecret is optional on UPDATE (existing config) — the
+                  // server reuses the stored encrypted blob when omitted.
+                  // It IS required when creating a new config.
                   onClick={handleSiemSave}
-                  disabled={siemSaving || !siemForm.targetUrl || !siemForm.hmacSecret}
+                  disabled={siemSaving || !siemForm.targetUrl || (!siemConfig && !siemForm.hmacSecret)}
                 >
                   {siemSaving ? "Saving…" : siemConfig ? "Save changes" : "Enable forwarder"}
                 </button>

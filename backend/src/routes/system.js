@@ -431,14 +431,27 @@ router.put("/workspaces/:workspaceId/siem-config", requireRole("admin"), async (
     if (typeof targetUrl !== "string" || !targetUrl.trim()) {
       return res.status(400).json({ error: "targetUrl is required.", code: "SIEM_CONFIG_INVALID" });
     }
-    // SEC-007 / NIST SP 800-107: HMAC key length should be ≥ output length
-    // for full security. SHA-256 → 32 bytes. We accept arbitrary printable
-    // ASCII (operators may paste a base64 / hex / passphrase form), so 32
-    // chars is the floor that guarantees ≥ 192 bits of entropy even at the
-    // worst case (lowercase alphabet only).
-    if (typeof hmacSecret !== "string" || hmacSecret.length < 32) {
+    // SEC-007: `hmacSecret` is conditionally required.
+    //   - On INSERT (no existing row) → required, ≥ 32 chars.
+    //   - On UPDATE (row exists)      → optional. Omit or pass empty string
+    //     to keep the existing encrypted secret; pass ≥ 32 chars to rotate.
+    //
+    // The 32-char floor follows NIST SP 800-107 (HMAC key length should be
+    // ≥ output length; SHA-256 → 32 bytes). We accept arbitrary printable
+    // ASCII (operators may paste base64 / hex / passphrase form), so 32
+    // chars guarantees ≥ 192 bits of entropy even at the lowercase-only
+    // worst case.
+    const existingConfig = workspaceSiemConfigRepo.getMasked(req.workspaceId);
+    const hasNewSecret = typeof hmacSecret === "string" && hmacSecret.length > 0;
+    if (!existingConfig && !hasNewSecret) {
       return res.status(400).json({
-        error: "hmacSecret is required and must be at least 32 characters.",
+        error: "hmacSecret is required when creating a new SIEM config.",
+        code: "SIEM_CONFIG_INVALID",
+      });
+    }
+    if (hasNewSecret && hmacSecret.length < 32) {
+      return res.status(400).json({
+        error: "hmacSecret must be at least 32 characters.",
         code: "SIEM_CONFIG_INVALID",
       });
     }

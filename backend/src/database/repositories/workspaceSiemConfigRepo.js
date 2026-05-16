@@ -43,27 +43,52 @@ function maskSecret(secret) {
  * Upsert the SIEM config for a workspace. The HMAC secret is encrypted
  * before persist so even a DB-dump leak doesn't yield usable secrets.
  *
+ * ### `hmacSecret` semantics
+ * - **Insert path** (no existing row): `hmacSecret` is required — the
+ *   caller MUST pass a non-empty string. Callers should validate length
+ *   upstream (PUT route enforces ≥ 32 chars per NIST SP 800-107).
+ * - **Update path** (row exists): `hmacSecret` is OPTIONAL. Pass it to
+ *   rotate the secret; omit (`undefined`) or pass the empty string to
+ *   keep the existing encrypted secret unchanged. Admins editing just
+ *   the `targetUrl` / `enabled` / `headers` should not be forced to
+ *   re-enter the masked secret they can't see.
+ *
  * @param {string} workspaceId
  * @param {Object} cfg
  * @param {string} cfg.targetUrl - Validated by the route handler via SSRF guard.
- * @param {string} cfg.hmacSecret - Plaintext — encrypted here before INSERT.
+ * @param {string} [cfg.hmacSecret] - Plaintext. Required on insert, optional on update.
  * @param {Object|null} [cfg.headers] - Optional headers object.
  * @param {boolean} [cfg.enabled=true]
  * @returns {Object} The persisted row (without the plaintext secret).
+ * @throws {Error} When inserting a new row and `hmacSecret` is missing/empty.
  */
 export function upsert(workspaceId, { targetUrl, hmacSecret, headers = null, enabled = true }) {
   const db = getDatabase();
   const now = new Date().toISOString();
   const headersJson = headers ? JSON.stringify(headers) : null;
-  const encryptedSecret = encryptString(hmacSecret);
 
   // INSERT OR REPLACE is the cross-dialect way to upsert with this
   // module's translator (postgres-adapter rewrites to ON CONFLICT
   // DO UPDATE — see backend/src/database/adapters/postgres-adapter.js).
-  // Preserves `createdAt` on update by reading the existing row first.
-  const existing = db.prepare("SELECT createdAt FROM workspace_siem_config WHERE workspaceId = ?")
-    .get(workspaceId);
+  // Preserves `createdAt` AND the existing encrypted secret on update
+  // (when the caller omits `hmacSecret`) by reading the existing row first.
+  const existing = db.prepare(
+    "SELECT createdAt, hmacSecret FROM workspace_siem_config WHERE workspaceId = ?"
+  ).get(workspaceId);
   const createdAt = existing?.createdAt || now;
+
+  // Decide which encrypted blob to write:
+  //   1. Caller provided a non-empty hmacSecret → rotate (encrypt fresh).
+  //   2. Caller omitted on update → reuse the existing encrypted column.
+  //   3. Caller omitted on insert → reject (no secret to reuse).
+  let encryptedSecret;
+  if (typeof hmacSecret === "string" && hmacSecret.length > 0) {
+    encryptedSecret = encryptString(hmacSecret);
+  } else if (existing) {
+    encryptedSecret = existing.hmacSecret;
+  } else {
+    throw new Error("hmacSecret is required when creating a new SIEM config");
+  }
 
   db.prepare(`
     INSERT OR REPLACE INTO workspace_siem_config
@@ -71,9 +96,15 @@ export function upsert(workspaceId, { targetUrl, hmacSecret, headers = null, ena
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(workspaceId, targetUrl, encryptedSecret, headersJson, enabled ? 1 : 0, createdAt, now);
 
+  // Return the masked form of whatever secret is now persisted — either the
+  // newly rotated plaintext or the prior encrypted blob's decrypted preview.
+  const maskedSource = (typeof hmacSecret === "string" && hmacSecret.length > 0)
+    ? hmacSecret
+    : decryptString(encryptedSecret);
+
   return {
     workspaceId, targetUrl, headers, enabled, createdAt, updatedAt: now,
-    hmacSecret: maskSecret(hmacSecret),
+    hmacSecret: maskSecret(maskedSource),
   };
 }
 
