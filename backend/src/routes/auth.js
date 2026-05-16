@@ -631,6 +631,10 @@ export function _internalRevokeCurrentSession(req, res, auditMeta) {
  *     headers, return `false` (caller proceeds with cookie issue)
  *   - `allow` → no-op, return `false`
  *
+ * @param {Object} req  - SEC-007: forwarded to `logActivity` so the
+ *   `auth.mfa.enrollment_required` row captures `ipAddress` + `userAgent`.
+ *   Without it the row lands with both columns NULL, breaking SOC-2
+ *   session-reconstruction evidence.
  * @param {Object} res
  * @param {Object} user
  * @param {Object} auditMeta - Forwarded into the activity `meta` field
@@ -639,11 +643,12 @@ export function _internalRevokeCurrentSession(req, res, auditMeta) {
  * @returns {boolean} `true` when the request was already terminated with 403.
  * @private
  */
-function applyMfaEnforcement(res, user, auditMeta, auditDetail) {
+function applyMfaEnforcement(req, res, user, auditMeta, auditDetail) {
   const enforcement = evaluateMfaEnforcement(user);
   if (enforcement.state === "block") {
     logActivity({
       type: "auth.mfa.enrollment_required",
+      req,
       detail: auditDetail,
       userId: user.id, userName: user.name || user.email,
       workspaceId: enforcement.workspaceId,
@@ -823,7 +828,7 @@ router.post("/login", async (req, res) => {
     }
 
     // SEC-004: per-workspace MFA enforcement (block past grace, banner within).
-    if (applyMfaEnforcement(res, user, { method: "password" }, "Login blocked: workspace requires MFA.")) return;
+    if (applyMfaEnforcement(req, res, user, { method: "password" }, "Login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: tag password-only sessions with amr=["pwd"] so future
     // step-up auth checks can require MFA-asserted sessions explicitly.
@@ -993,16 +998,23 @@ router.post("/refresh", requireAuth, (req, res) => {
   const user = userRepo.getById(req.authUser.sub);
   if (!user) return res.status(401).json({ error: "User not found." });
 
-  // Revoke the old token
-  const { jti: oldJti, exp: oldExp } = req.authUser;
-  if (oldJti) revokedTokens.set(oldJti, oldExp);
-
   // SEC-004 §7: re-check workspace MFA enforcement on every refresh so a
   // policy change mid-session (admin enables mfaRequired with grace=0) is
   // enforced within one refresh cycle (~8h) rather than never. Without this,
   // a user whose session pre-dates the policy change stays logged in
   // indefinitely via the automatic refresh loop.
-  if (applyMfaEnforcement(res, user, { method: "refresh" }, "Session refresh blocked: workspace requires MFA.")) return;
+  //
+  // ORDERING: enforcement check MUST run BEFORE revoking the old token —
+  // otherwise a 403 `MFA_ENROLLMENT_REQUIRED` response leaves a revoked JTI
+  // in the cookie jar, and every subsequent authenticated request fails with
+  // a generic 401 "Session expired" instead of the actionable 403 the
+  // frontend uses to render the MFA enrollment panel. Mirrors the ordering
+  // in `/workspaces/switch` at routes/workspaces.js:152-170.
+  if (applyMfaEnforcement(req, res, user, { method: "refresh" }, "Session refresh blocked: workspace requires MFA.")) return;
+
+  // Revoke the old token only after enforcement passes
+  const { jti: oldJti, exp: oldExp } = req.authUser;
+  if (oldJti) revokedTokens.set(oldJti, oldExp);
 
   // Issue a fresh token with a new JTI (includes updated workspace context).
   // SEC-004 §5c: forward the existing `amr` claim so an MFA-asserted session
@@ -1327,7 +1339,7 @@ router.get("/github/callback", async (req, res) => {
 
     // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
     // password but still need MFA when the workspace policy demands it.
-    if (applyMfaEnforcement(res, user, { method: "oauth", provider: "github" }, "OAuth login blocked: workspace requires MFA.")) return;
+    if (applyMfaEnforcement(req, res, user, { method: "oauth", provider: "github" }, "OAuth login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
     // MFA-asserted — workspace MFA enforcement applies above.
@@ -1401,7 +1413,7 @@ router.get("/google/callback", async (req, res) => {
 
     // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
     // password but still need MFA when the workspace policy demands it.
-    if (applyMfaEnforcement(res, user, { method: "oauth", provider: "google" }, "OAuth login blocked: workspace requires MFA.")) return;
+    if (applyMfaEnforcement(req, res, user, { method: "oauth", provider: "google" }, "OAuth login blocked: workspace requires MFA.")) return;
 
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
     // MFA-asserted — workspace MFA enforcement applies above.
