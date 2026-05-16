@@ -47,8 +47,12 @@ export function getBySlug(slug) {
  */
 export function getByUserId(userId) {
   const db = getDatabase();
+  // SEC-004: `wm.joinedAt` is required by `evaluateMfaEnforcement()` so the
+  // grace clock anchors at MAX(policyAt, joinedAt, accountAt) — without
+  // selecting it the membership-age contribution silently falls out and new
+  // hires get zero grace if the policy is older than their account.
   return db.prepare(`
-    SELECT w.*, wm.role,
+    SELECT w.*, wm.role, wm.joinedAt,
            CASE WHEN w.ownerId = ? THEN 0 ELSE 1 END AS _sortOwner
     FROM workspaces w
     INNER JOIN workspace_members wm ON wm.workspaceId = w.id
@@ -129,11 +133,14 @@ export function create({ name, slug, ownerId }) {
 /**
  * Update workspace fields.
  * @param {string} id
- * @param {Object} fields — { name?, slug? }
+ * @param {Object} fields — { name?, slug?, mfaRequired?, mfaGracePeriodDays?, mfaPolicyUpdatedAt? }
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "slug"];
+  // SEC-004: MFA enforcement columns (migration 028) are admin-managed via
+  // PATCH /workspaces/current — keep them in the allowlist alongside the
+  // existing name/slug fields so a single update() call can persist them.
+  const allowed = ["name", "slug", "mfaRequired", "mfaGracePeriodDays", "mfaPolicyUpdatedAt"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
@@ -237,12 +244,20 @@ function slugify(name) {
 export function ensureDefaultWorkspaces() {
   const db = getDatabase();
 
-  // Find users who are not members of any workspace
+  // Find users who are not members of any workspace.
+  //
+  // SEC-007: explicitly exclude the `__system__` sentinel user (seeded by
+  // migration 033). It owns the `__system__` workspace (FK target for
+  // unknown-email failed-login rows) but has no `workspace_members` row
+  // by design, so without this filter every startup would treat it as
+  // orphan and create accumulating `system-XXX` default workspaces in
+  // production.
   const orphanUsers = db.prepare(`
     SELECT u.id, u.name FROM users u
-    WHERE NOT EXISTS (
-      SELECT 1 FROM workspace_members wm WHERE wm.userId = u.id
-    )
+    WHERE u.id != '__system__'
+      AND NOT EXISTS (
+        SELECT 1 FROM workspace_members wm WHERE wm.userId = u.id
+      )
   `).all();
 
   if (orphanUsers.length === 0) return;

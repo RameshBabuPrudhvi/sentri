@@ -227,3 +227,132 @@
   border: none; background: #dc2626;
   color: #fff; font-weight: 700;
 }
+
+/* ── DIF-015c Gap 2: assert-mode overlay (LiveBrowserView) ──────────── */
+/* Highlight outline drawn on top of the canvas frame when the operator
+ * is in assert mode. The `left/top/width/height` are computed at runtime
+ * from the probe response and therefore stay inline on the element; the
+ * static visual treatment (border, shadow, transition) lives here so the
+ * component doesn't reinvent CSS per AGENT.md §"Do not reinvent CSS". */
+.recorder-highlight-overlay {
+  position: absolute;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25), 0 0 12px rgba(59, 130, 246, 0.5);
+  border-radius: 2px;
+  pointer-events: none;
+  /* Smooth tracking as the operator hovers — matches the 80ms feel of
+   * Chrome DevTools' element inspector. */
+  transition: left 80ms linear, top 80ms linear, width 80ms linear, height 80ms linear;
+  z-index: 2;
+}
+/* "ASSERT MODE — CLICK TO PICK" badge anchored to the canvas's top-right
+ * corner. Static visual — never positioned dynamically. */
+.recorder-assert-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: rgba(59, 130, 246, 0.95);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+/* ── DIF-015c Gap 3: pause/undo button row ─────────────────────────── */
+/* Flex row above the Captured steps list holding the pause/resume +
+ * undo-last buttons. Single layout container so two more sidebar
+ * affordances (the Gap 5 device picker, Gap 2 pick toggle) can stack
+ * vertically next to it without nested inline-style wrappers. */
+.recorder-action-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* ── DIF-015c Gap 5: mid-session device picker wrapper ─────────────── */
+.recorder-device-picker {
+  margin-bottom: 8px;
+}
+.recorder-device-picker__hint {
+  font-size: 0.75rem;
+  color: var(--text3);
+  margin-top: 4px;
+}
+
+/* ── DIF-015c Gap 2: pick-by-click toggle button ───────────────────── */
+/* Just the spacing; the visual chrome comes from `.btn .btn-ghost`. */
+.recorder-pick-toggle {
+  margin-bottom: 6px;
+}
+
+/* ── DIF-015c Gap 6: stealth toggle + active-state badge ───────────── */
+.recorder-stealth-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.recorder-stealth-toggle__checkbox {
+  width: 14px;
+  height: 14px;
+}
+.recorder-stealth-help {
+  font-size: 0.75rem;
+  color: var(--text3);
+  margin-top: 4px;
+}
+/* Recording-stage badge shown while stealth is active. Read-only — the
+ * flag is immutable post-launch. */
+.recorder-stealth-badge {
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.10);
+  border: 1px solid rgba(34, 197, 94, 0.30);
+  color: var(--green, #16a34a);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.recorder-stealth-badge__subtext {
+  opacity: 0.8;
+}
+
+/* ── Pre-existing inline-style cleanup ─────────────────────────────── */
+/* These three classes replace inline `style={{…}}` that predated the
+ * DIF-015c work but were in the same file (RecorderModal.jsx). Fixed
+ * per AGENT.md `:148` ("Default: fix it — you are already in the file"). */
+.recorder-topbar__emoji {
+  font-size: 20px;
+}
+.recorder-shortcut-btn {
+  margin-bottom: 8px;
+}
+.recorder-error-banner {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Recording-phase dismiss button. The idle-phase banner lives in a static
+ * form layout with no other interactive controls competing for the gap, so
+ * the dismiss is recording-specific — without it, an error from a failed
+ * pause/undo/device-switch would linger until the operator's next mutation
+ * succeeded and called `setError(null)` implicitly. */
+.recorder-error-banner__dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.recorder-error-banner__dismiss:hover { opacity: 1; }

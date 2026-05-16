@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import AppLogo from "../components/layout/AppLogo.jsx";
@@ -69,6 +69,34 @@ export default function Login() {
   const [tIdx, setTIdx] = useState(0);
   const [verifyEmail, setVerifyEmail] = useState(""); // SEC-001: email needing verification
   const [resending, setResending] = useState(false);
+  // SEC-004: MFA challenge state — after `/login` succeeds with `mfaRequired`,
+  // we render an overlay with a factor picker (TOTP / passkey / recovery code).
+  // `mfaMethods` mirrors the `methods` map on the login response so we know
+  // which factors the user actually has registered.
+  const [mfaPendingToken, setMfaPendingToken] = useState("");
+  // SEC-004 (F3): per-factor input state. The TOTP and recovery-code panels
+  // each own their own buffer so switching tabs mid-typo preserves the
+  // partial input the user already typed (better UX). Each panel's submit
+  // path reads ONLY its own buffer, so the original wrong-tab-submission
+  // bug (a recovery code accidentally sent through the TOTP submit path
+  // and silently consumed) is structurally impossible — the TOTP submit
+  // sees `mfaTotpCode`, the recovery submit sees `mfaRecoveryCode`.
+  const [mfaTotpCode, setMfaTotpCode] = useState("");
+  const [mfaRecoveryCode, setMfaRecoveryCode] = useState("");
+  const [mfaMethods, setMfaMethods] = useState({ totp: false, webauthn: false });
+  // "totp" = 6-digit input · "recovery" = 8-char alpha input · "webauthn" = passkey flow
+  const [mfaFactor, setMfaFactor] = useState("totp");
+  const [webauthnBusy, setWebauthnBusy] = useState(false);
+  // SEC-004: When the workspace requires MFA and the user is past grace,
+  // `/login` returns 403 MFA_ENROLLMENT_REQUIRED. We surface a dedicated
+  // panel because the user cannot self-enroll without a session — they
+  // must contact a workspace admin.
+  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(null);
+  // SEC-004: Grace-period banner data is captured from the
+  // `X-MFA-Grace-Period-Days-Remaining` response header on a successful
+  // login and persisted to sessionStorage (key `mfa_grace_banner`) so the
+  // post-login surfaces (dashboard, navbar) can render it after navigation.
+  // No component-local state is needed here — the banner lives downstream.
 
   const from = location.state?.from?.pathname || "/dashboard";
 
@@ -124,6 +152,79 @@ export default function Login() {
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
   useEffect(() => { if (testiPaused) return; const t = setInterval(() => setTIdx(i => (i+1) % TESTIMONIALS.length), 4000); return () => clearInterval(t); }, [testiPaused]);
 
+  // SEC-004 a11y: dismiss MFA modals on Escape, trap Tab cycling inside the
+  // dialog, and capture the previously focused element so we can restore
+  // focus on close. Mirrors the pattern in Settings.jsx PasswordConfirmModal.
+  // Without these the dialog role + aria-modal=true would lie to AT users —
+  // background `inert` already prevents Tab from leaving the overlay, but the
+  // wrap-around keeps focus circling the modal's own controls per WAI-ARIA
+  // APG dialog guidance.
+  const modalOpen = !!mfaPendingToken || !!mfaEnrollmentRequired;
+  const lastFocusedRef = useRef(null);
+  // Selector for elements that participate in the focus trap. Mirrors the
+  // commonly accepted "tabbable" set — buttons, links, inputs, etc., minus
+  // anything explicitly opted out via tabindex="-1".
+  const FOCUSABLE_SELECTOR =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  useEffect(() => {
+    if (!modalOpen) return;
+    lastFocusedRef.current = document.activeElement;
+    function onKey(e) {
+      if (e.key === "Escape") {
+        // Don't allow Escape mid-passkey-verification — the browser's WebAuthn
+        // prompt has its own cancel UI and aborting the React modal would
+        // leave the passkey API in a confused state.
+        if (webauthnBusy) return;
+        if (mfaPendingToken) handleMfaCancel();
+        else if (mfaEnrollmentRequired) setMfaEnrollmentRequired(null);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // Focus trap: query the currently rendered overlay each time so we
+      // pick up the dynamic per-factor controls (TOTP input vs recovery
+      // input vs passkey button) without needing a ref on every panel.
+      const overlay = document.querySelector(".mfa-overlay");
+      if (!overlay) return;
+      const focusables = overlay.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // Restore focus to whatever the user was on before the modal opened,
+      // matching WAI-ARIA APG dialog guidance. Wrapped in try/catch since the
+      // node may no longer be in the DOM.
+      try { lastFocusedRef.current?.focus?.(); } catch { /* node gone */ }
+    };
+    // handleMfaCancel is stable enough — included in deps for lint cleanliness
+    // but the modalOpen toggle is the actual trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, webauthnBusy]);
+
+  // SEC-004 a11y: backdrop click dismisses the MFA modals — mirrors the
+  // pattern in Settings.jsx PasswordConfirmModal so the dismiss UX is
+  // consistent across the app. Gated on `e.target === e.currentTarget` so
+  // clicks inside the dialog don't bubble up and accidentally close it.
+  function handleMfaBackdropClick(e) {
+    if (e.target !== e.currentTarget) return;
+    // Same guard as the Escape handler — never abort mid-passkey-verification.
+    if (webauthnBusy) return;
+    handleMfaCancel();
+  }
+  function handleEnrollmentBackdropClick(e) {
+    if (e.target !== e.currentTarget) return;
+    setMfaEnrollmentRequired(null);
+  }
+
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
     try {
@@ -134,10 +235,45 @@ export default function Login() {
       if (!returnedState || returnedState !== savedState) {
         throw new Error("OAuth state mismatch — possible CSRF attack. Please try again.");
       }
-      const data = await api.oauthCallback(provider, code);
+      // SEC-004: api.oauthCallback returns { data, headers } so we can read
+      // the X-MFA-Grace-Period-Days-Remaining header the backend sets when
+      // the workspace requires MFA and the user is within grace. Without
+      // this, OAuth users within the grace window never see the banner.
+      const raw = await api.oauthCallback(provider, code);
+      const data = raw.data;
+      const headers = raw.headers || {};
+      // Persist grace banner for the post-login dashboard (same as handleSubmit).
+      const remaining = headers["x-mfa-grace-period-days-remaining"];
+      const endsAt = headers["x-mfa-grace-ends-at"];
+      if (remaining) {
+        try {
+          sessionStorage.setItem("mfa_grace_banner", JSON.stringify({
+            daysRemaining: Number(remaining),
+            endsAt: endsAt || null,
+          }));
+        } catch { /* sessionStorage unavailable — banner is best-effort */ }
+      }
+      // SEC-004 (F9): defensive guard on the response shape.
+      if (!data?.user) throw new Error("OAuth login returned an unexpected response. Please try again.");
       login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
-    } catch (e) { setError(e.message); setOauthLoading(null); window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`); }
+    } catch (e) {
+      // SEC-004: Workspace requires MFA and the OAuth user is past grace.
+      // Surface the same dedicated panel as the password-login path
+      // (handleSubmit) instead of a raw error string — OAuth-only users
+      // have no password fallback and need actionable "contact your admin"
+      // guidance to unblock themselves.
+      if (e.body?.code === "MFA_ENROLLMENT_REQUIRED") {
+        setMfaEnrollmentRequired({
+          workspaceId: e.body.workspaceId,
+          workspaceName: e.body.workspaceName,
+        });
+      } else {
+        setError(e.message);
+      }
+      setOauthLoading(null);
+      window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
+    }
   }
 
   function handleGitHubLogin() {
@@ -169,8 +305,18 @@ export default function Login() {
     try {
       const body = mode === "login" ? { email, password } : { name, email, password };
       let data;
+      let headers = {};
       try {
-        data = mode === "login" ? await api.login(body) : await api.register(body);
+        if (mode === "login") {
+          // SEC-004: api.login returns { data, headers } so we can read
+          // the X-MFA-Grace-Period-Days-Remaining banner header. Register
+          // still returns the plain body shape.
+          const raw = await api.login(body);
+          data = raw.data;
+          headers = raw.headers || {};
+        } else {
+          data = await api.register(body);
+        }
       } catch (fetchErr) {
         // SEC-001: Handle unverified email on login attempt.
         // req() attaches the parsed response body as error.body so we can
@@ -178,6 +324,25 @@ export default function Login() {
         // contract) instead of fragile string matching on the error message.
         if (fetchErr.body?.code === "EMAIL_NOT_VERIFIED") {
           setVerifyEmail(fetchErr.body.email || email);
+        }
+        // SEC-004: Workspace requires MFA but the user has not enrolled and
+        // is past the grace window. Render a dedicated panel instead of the
+        // generic error — they need a workspace admin to either disable
+        // enforcement, extend grace, or enroll them out-of-band.
+        //
+        // Tag the rethrown error with `_mfaHandled = true` so the outer catch
+        // (line below) knows the dedicated panel covers the failure and
+        // skips the generic error banner. The previous approach threw a
+        // blank-message Error which relied on `setError("")` rendering as a
+        // no-op — fragile because any future "fallback to a non-empty
+        // message" change in the outer catch would silently start showing a
+        // spurious banner underneath the dedicated panel.
+        if (fetchErr.body?.code === "MFA_ENROLLMENT_REQUIRED") {
+          setMfaEnrollmentRequired({
+            workspaceId: fetchErr.body.workspaceId,
+            workspaceName: fetchErr.body.workspaceName,
+          });
+          fetchErr._mfaHandled = true;
         }
         throw fetchErr;
       }
@@ -190,9 +355,111 @@ export default function Login() {
         }
         setMode("login"); setPassword(""); setConfirmPassword("");
       }
-      else login(data.user);
+      else if (data.mfaRequired && data.pendingToken) {
+        setMfaPendingToken(data.pendingToken);
+        // `methods` was added in the backend-webauthn lane. Pre-existing
+        // tokens issued before that change won't include it — default to
+        // TOTP only so the legacy flow still works.
+        const methods = data.methods || { totp: true, webauthn: false };
+        setMfaMethods(methods);
+        // Pick the strongest factor as the default: passkey if the user has
+        // one, otherwise TOTP. Recovery codes are opt-in via the toggle.
+        setMfaFactor(methods.webauthn ? "webauthn" : "totp");
+        setSuccess("Choose a verification method to finish signing in.");
+      } else {
+        // SEC-004: surface the grace-period banner via sessionStorage so
+        // post-login surfaces (dashboard, navbar) can render it. The header
+        // is only set when the workspace requires MFA AND the user is
+        // within grace — absent in every other login outcome.
+        const remaining = headers["x-mfa-grace-period-days-remaining"];
+        const endsAt = headers["x-mfa-grace-ends-at"];
+        if (remaining) {
+          try {
+            sessionStorage.setItem("mfa_grace_banner", JSON.stringify({
+              daysRemaining: Number(remaining),
+              endsAt: endsAt || null,
+            }));
+          } catch { /* sessionStorage unavailable — banner is best-effort */ }
+        }
+        // SEC-004 (F9): defensive guard on the response shape.
+        if (!data?.user) throw new Error("Login returned an unexpected response. Please try again.");
+        login(data.user);
+      }
+    } catch (e) {
+      // SEC-004: skip the generic banner when the MFA_ENROLLMENT_REQUIRED
+      // handler above already surfaced the dedicated panel. See `_mfaHandled`
+      // comment in the inner catch for rationale.
+      if (!e._mfaHandled) setError(e.message);
+    }
+    finally { setLoading(false); }
+  }
+
+  async function handleMfaVerify(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      // SEC-004 (F3): submit reads the per-factor buffer so a recovery code
+      // typed on the recovery tab can never be sent through the TOTP submit
+      // path (or vice versa) — preserves the wrong-tab-submission protection
+      // from the original shared-state design while keeping partial input
+      // across tab switches.
+      const code = mfaFactor === "recovery" ? mfaRecoveryCode : mfaTotpCode;
+      const data = await api.mfaVerify(mfaPendingToken, code);
+      // SEC-004 (F9): defensive guard on the response shape. The backend
+      // contract is `{ user }` on success (see `backend/src/routes/auth.js`
+      // `POST /mfa/verify`) but a partial payload from a future change
+      // would currently call `login(undefined)` and corrupt AuthContext.
+      // Surface a clear error instead.
+      if (!data?.user) throw new Error("MFA verification returned an unexpected response. Please try again.");
+      login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
+  }
+
+  /**
+   * Passkey verification during the login challenge. Calls the backend for
+   * options, hands them to `@simplewebauthn/browser`, then submits the
+   * assertion. On success the backend sets the auth cookie with
+   * `amr: ["pwd","mfa"]` and we proceed to the dashboard.
+   */
+  async function handleMfaWebauthn() {
+    setError("");
+    setWebauthnBusy(true);
+    try {
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const { options, challengeToken } = await api.webauthnAuthOptions(mfaPendingToken);
+      // SimpleWebAuthn v11 takes `{ optionsJSON }`; v10 takes the options
+      // object directly. Try v11 first, fall back to v10 on TypeError.
+      let assertion;
+      try {
+        assertion = await startAuthentication({ optionsJSON: options });
+      } catch (err) {
+        if (err?.name === "TypeError") assertion = await startAuthentication(options);
+        else throw err;
+      }
+      const data = await api.webauthnAuthVerify(challengeToken, assertion);
+      // SEC-004 (F9): defensive guard — same rationale as handleMfaVerify.
+      if (!data?.user) throw new Error("Passkey verification returned an unexpected response. Please try again.");
+      login(data.user);
+    } catch (e) {
+      const msg = e?.name === "NotAllowedError"
+        ? "Passkey verification was cancelled or denied by the browser."
+        : (e.message || "Passkey verification failed.");
+      setError(msg);
+    } finally {
+      setWebauthnBusy(false);
+    }
+  }
+
+  function handleMfaCancel() {
+    setMfaPendingToken("");
+    setMfaTotpCode("");
+    setMfaRecoveryCode("");
+    setMfaMethods({ totp: false, webauthn: false });
+    setMfaFactor("totp");
+    setSuccess("");
+    setError("");
   }
 
   const strength = (() => {
@@ -212,9 +479,208 @@ export default function Login() {
       {/* Styles loaded from styles/pages/login.css */}
 
       <div className={`lp-root${mounted?" on":""}`}>
+        {/* SEC-004: MFA challenge overlay — factor picker + per-factor UI. */}
+        {mfaPendingToken && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mfa-modal-title"
+            className="mfa-overlay"
+            onClick={handleMfaBackdropClick}
+          >
+            <form
+              onSubmit={handleMfaVerify}
+              className="card mfa-modal"
+            >
+              <div>
+                <h3 id="mfa-modal-title" className="mfa-modal__title">Two-factor verification</h3>
+                <p className="text-sub mfa-modal__subtitle">
+                  Confirm your identity to finish signing in.
+                </p>
+              </div>
+
+              {/* Factor picker — only render when multiple factors exist. */}
+              {(mfaMethods.totp || mfaMethods.webauthn) && (
+                <div role="tablist" aria-label="Verification method" className="mfa-tablist">
+                  {mfaMethods.webauthn && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "webauthn"}
+                      className={`btn btn-sm ${mfaFactor === "webauthn" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => { setMfaFactor("webauthn"); setError(""); }}
+                    >
+                      Passkey
+                    </button>
+                  )}
+                  {mfaMethods.totp && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "totp"}
+                      className={`btn btn-sm ${mfaFactor === "totp" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => { setMfaFactor("totp"); setError(""); }}
+                    >
+                      Authenticator
+                    </button>
+                  )}
+                  {mfaMethods.totp && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "recovery"}
+                      className={`btn btn-sm ${mfaFactor === "recovery" ? "btn-primary" : "btn-ghost"}`}
+                      onClick={() => { setMfaFactor("recovery"); setError(""); }}
+                    >
+                      Recovery code
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {error && (
+                <div className="lp-alert lp-aerr" role="alert">
+                  {error}
+                </div>
+              )}
+
+              {/* Passkey panel */}
+              {mfaFactor === "webauthn" && (
+                <>
+                  <p className="text-sub mfa-panel__hint">
+                    Use a registered passkey (security key, Touch ID, Windows Hello, etc.).
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleMfaWebauthn}
+                    disabled={webauthnBusy}
+                  >
+                    {webauthnBusy ? <Spinner/> : null}
+                    {webauthnBusy ? "Waiting for passkey…" : "Use passkey"}
+                  </button>
+                </>
+              )}
+
+              {/* TOTP panel */}
+              {mfaFactor === "totp" && (
+                <>
+                  <label className="text-sm font-semi mfa-label" htmlFor="mfa-totp-code">
+                    6-digit code from your authenticator app
+                    <input
+                      id="mfa-totp-code"
+                      className="input mfa-code-input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={mfaTotpCode}
+                      onChange={e => setMfaTotpCode(e.target.value.replace(/[^\d]/g, ""))}
+                      placeholder="123456"
+                      autoFocus
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={loading || mfaTotpCode.length < 6}
+                  >
+                    {loading ? <Spinner/> : null}
+                    {loading ? "Verifying…" : "Verify"}
+                  </button>
+                </>
+              )}
+
+              {/* Recovery-code panel */}
+              {mfaFactor === "recovery" && (
+                <>
+                  <label className="text-sm font-semi mfa-label" htmlFor="mfa-recovery-code">
+                    Recovery code
+                    <input
+                      id="mfa-recovery-code"
+                      className="input mfa-recovery-input"
+                      type="text"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      maxLength={16}
+                      value={mfaRecoveryCode}
+                      // SEC-004: lowercase as the user types. Recovery codes
+                      // are minted as lowercase hex; mobile auto-capitalize
+                      // would silently produce a wrong-case input. Backend
+                      // also normalises, but doing it here gives immediate
+                      // visual feedback that the input matches the format
+                      // the user was originally shown.
+                      onChange={e => setMfaRecoveryCode(e.target.value.trim().toLowerCase())}
+                      placeholder="abcd1234"
+                      autoFocus
+                    />
+                    <span className="text-xs text-sub mfa-recovery-hint">
+                      Each recovery code can be used once.
+                    </span>
+                  </label>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={loading || !mfaRecoveryCode.trim()}
+                  >
+                    {loading ? <Spinner/> : null}
+                    {loading ? "Verifying…" : "Verify"}
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleMfaCancel}
+                disabled={loading || webauthnBusy}
+              >
+                Cancel and sign in again
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* SEC-004: Workspace requires MFA but the user has no factor enrolled
+            and is past grace. They cannot reach Settings without a session, so
+            we surface a contact-admin panel instead of letting them retry. */}
+        {mfaEnrollmentRequired && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mfa-blocked-title"
+            className="mfa-overlay"
+            onClick={handleEnrollmentBackdropClick}
+          >
+            <div className="card mfa-blocked">
+              <h3 id="mfa-blocked-title" className="mfa-blocked__title">MFA enrollment required</h3>
+              <p className="text-sub mfa-blocked__body">
+                Your workspace
+                {mfaEnrollmentRequired.workspaceName ? <> <strong>{mfaEnrollmentRequired.workspaceName}</strong></> : null}
+                {" "}requires multi-factor authentication, and your grace period has ended.
+              </p>
+              <p className="text-sub mfa-blocked__detail">
+                Contact a workspace administrator to enroll a second factor or
+                extend the grace window. You will not be able to sign in until
+                this is resolved.
+              </p>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setMfaEnrollmentRequired(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* LEFT */}
-        <div className="lp-left">
+        {/* SEC-004 a11y (F7): `inert` removes the background panels from the
+            tab order + screen reader tree while a modal is open, so keyboard /
+            AT users cannot reach hidden form fields behind the overlay. */}
+        <div className="lp-left" {...(modalOpen ? { inert: "" } : {})}>
           <div className="lp-grid"/>
           <div className="lp-orb lp-orb-1"/><div className="lp-orb lp-orb-2"/><div className="lp-orb lp-orb-3"/>
           <div className="lp-brand flex-between">
@@ -259,7 +725,7 @@ export default function Login() {
         </div>
 
         {/* RIGHT */}
-        <div className="lp-right">
+        <div className="lp-right" {...(modalOpen ? { inert: "" } : {})}>
           <div className="lp-fw">
             <div className="lp-fh">
               <h2 className="lp-ftit">{mode==="login"?"Welcome back":"Create account"}</h2>

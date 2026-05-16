@@ -183,6 +183,40 @@ export default function Dashboard() {
             <StatCard label="Self-Healed" value={data?.healingSuccesses ?? 0} sub={`${data?.healingEntries ?? 0} elements tracked`} color="var(--purple)" icon={<Shield size={16} />} />
           </div>
 
+
+
+          {/* ── Row 2b: Distributed worker pool status (AUTO-008) ── */}
+          <div className="stat-grid">
+            <StatCard
+              label="Runner Mode"
+              value={data?.workerPool?.mode === "distributed" ? "Distributed" : "Single-process"}
+              sub={data?.workerPool?.mode === "distributed" ? "Redis queue enabled" : "Redis not configured"}
+              color={data?.workerPool?.mode === "distributed" ? "var(--blue)" : "var(--text3)"}
+              icon={<Activity size={16} />}
+            />
+            <StatCard
+              label="Queue Depth"
+              value={data?.workerPool?.queue?.waiting ?? 0}
+              sub={`${data?.workerPool?.queue?.active ?? 0} active · ${data?.workerPool?.queue?.failed ?? 0} failed`}
+              color="var(--purple)"
+              icon={<FileText size={16} />}
+            />
+            <StatCard
+              label="Active Workers"
+              value={data?.workerPool?.activeWorkers ?? 0}
+              sub={`${data?.workerPool?.idleWorkers ?? 0} idle`}
+              color="var(--green)"
+              icon={<CheckCircle2 size={16} />}
+            />
+            <StatCard
+              label="Completed Jobs"
+              value={data?.workerPool?.queue?.completed ?? 0}
+              sub="BullMQ completions"
+              color="var(--accent)"
+              icon={<SquareCheckBig size={16} />}
+            />
+          </div>
+
           {/* ── Row 3: Flaky Tests + Defect Breakdown ── */}
           {data?.totalRuns > 0 && (() => {
             const defectSegs = [

@@ -1,83 +1,90 @@
 # NEXT.md — Current Sprint Target
 
-> **For agents:** Read this file only. Do not read ROADMAP.md unless you need context on items
-> beyond the current PR. Everything you need to start work is here.
+> **Agents:** Start here. Everything needed to begin the current PR is in this file. Open `ROADMAP.md` only to look up a specific item by ID or review phase context.
 >
-> **For humans:** Update this file when a PR ships. Move the completed item to ROADMAP.md ✅ table,
-> promote the next item from the queue below, and rewrite the "Current PR" block.
-
-> **Bundling guidance — for agents writing code:** When working on the Current PR, if you
-> spot adjacent items in the Queue (or in `ROADMAP.md`) that share files, infrastructure,
-> or a natural review boundary with the in-flight scope, **flag them as bundling candidates
-> in your PR description** rather than expanding the PR mid-flight. Good bundling signals:
-> (1) the items touch the same module / shared abstraction, so reviewing them together
-> reduces churn (e.g. CAP-004 + MET-001 share `<TrendChart>`); (2) one item validates
-> another end-to-end (e.g. a CI guard validates the convention it documents);
-> (3) both are S/XS effort and skipping a hand-off cycle saves more than it costs in
-> review surface (e.g. AUTO-017.3 + PROC-001 in slot 2). **Bad** bundling signals: items
-> in different phases, items that grow the PR past M effort, items that change the
-> reviewer's mental model (UX rewrite + backend rewrite), or items the agent identifies
-> *after* CI is already green on the original scope. When in doubt, surface the candidate
-> bundle as a comment on the PR and let the human decide — never silently expand scope
-> beyond the Current PR's `### PR checklist`. Recording the rejected candidates is also
-> useful: it builds the dataset for future planning.
+> **Humans:** When a PR ships — move the item to `ROADMAP.md` ✅ table, promote the next queue item to Current PR, and update Recently Completed.
 
 ---
 
-## ▶ Current PR — DIF-015c (Gaps 2/3/5/6) — Recorder gaps completion
-**Effort:** M (bundled 4×S) | **Priority:** 🟢 Differentiator (parity with BearQ / Mabl / Testim) | **Dependencies:** DIF-015 ✅, DIF-015b ✅, DIF-015c Gap 1 ✅ PR #11, DIF-015c Gap 2 backend ✅ PR #118 | **Source:** `ROADMAP.md` Phase 3 (DIF-015c sub-items) — promoted per `NEXT.md` rotation after AUTO-010 shipped in PR #6
-PR #115 made the recorder canvas interactive and aligned recorded steps with the AI-generated / manual format, but four gaps remain that surface during real use against e-commerce, kanban, and admin-dashboard targets. Bundled because all four touch the same `backend/src/runner/recorder.js` + `frontend/src/components/run/RecorderModal.jsx` surface within a single reviewable boundary; doing them separately means re-opening the same files four times with merge-conflict risk on `RECORDER_SCRIPT`.
-### Gap 2 — Inline assertion authoring (point-and-click UX, parity with BearQ)
-PR #118 already shipped the backend: `POST /api/v1/projects/:id/record/:sessionId/assertion` (`backend/src/routes/tests.js:1164-1184`) and server-side `addAssertionAction()` (`backend/src/runner/recorder.js:827-855`) support `assertVisible`, `assertText`, `assertValue`, and `assertUrl`. The `RecorderModal` already exposes an "Add assertion" form. **Remaining:** point-and-click UX — when the assert toggle is active, suppress `forwardInput` on the canvas, highlight the hovered element via CDP `Overlay.highlightNode`, and open the assertion picker pre-filled with that element's `bestSelector()` output. Add an `assertMode` prop on `frontend/src/components/run/LiveBrowserView.jsx` that suppresses input forwarding and surfaces hover targets back to the modal. `assertCount` and `assertHasClass` need a new action kind on the backend (typedef + `actionsToPlaywrightCode` branch + `recordedActionToStepText` branch + `isEmittableAction` branch + regression test); the other four are already wired.
-### Gap 3 — Pause / resume + undo last action
-Once recording starts, every action is captured through to Stop. Add `POST /record/:sessionId/{pause,resume,pop-last}` routes + session-state guards in `forwardInput` (short-circuit when `session.paused === true`). The server-side change is small; the UX work in `RecorderModal` (pause/resume control + undo affordance + optional mid-recording edit of the last action's fill value) is the larger lift. Justifies: recorder captures password keystrokes when pause was unavailable (currently truncated to 40 chars in step prose but the full value lives in `playwrightCode`) → pause closes that exfiltration window; mis-clicks today force a full session discard → undo restores the prior investment.
-### Gap 5 — Mobile / touch / device profile during recording
-The recorder runs at desktop viewport only — no device dropdown in `RecorderModal`. Thread a `device` param through `POST /api/v1/projects/:id/record` → `backend/src/runner/recorder.js`, and set `browser.newContext({ ...devices[device] })` the same way `executeTest.js` already does for runs (DIF-003). UX is a device dropdown in `RecorderModal` mirroring the one in `RunRegressionModal.jsx`.
-### Gap 6 — Stealth launch profile for sites that detect headless
-Some target apps detect headless Chromium (via `navigator.webdriver`, missing chrome plugins, viewport inconsistencies) and refuse to render. Today's workaround is `BROWSER_HEADLESS=false` (per `REVIEW.md:154-156`). Add a "stealth" launch profile to `launchBrowser()` that hides automation markers — `playwright-extra` + `puppeteer-extra-plugin-stealth` is the conventional choice. Gate behind an opt-in `stealth: true` session param so default recordings stay deterministic.
+## Bundling guidance
+
+Flag adjacent items as bundling candidates in your PR description rather than expanding scope mid-flight. Good signals: items touch the same module, one validates the other end-to-end, or both are S/XS effort and skipping a handoff saves more than it costs in review surface. Bad signals: different phases, M+ effort expansion, or the candidate surfaces after CI is already green. When in doubt, comment on the PR and let the human decide — never silently expand beyond the Current PR checklist.
+
+---
+
+## ▶ Current PR — INF-007 — OTel / Sentry observability
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** none — bundles naturally with MNT-013 (request-ID propagation) | **Source:** `ROADMAP.md` Phase 5 (INF-007)
+`@opentelemetry/sdk-node` auto-instrumentation for Express/pg/Redis/HTTP; `requestId` via `AsyncLocalStorage` plumbed through `formatLogLine()`; Prometheus `/metrics` endpoint via `prom-client` (scrape-key protected); `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` (no-op when unset).
+
+**Problem:** Sentri has zero observability infrastructure. Backend errors surface only in `console.error`; there are no distributed traces, no structured metrics, no crash-reporting pipeline, and no Prometheus scrape endpoint. Operators deploying to production have no way to answer "what's slow?", "what's failing?", or "how many requests per second?" without grepping logs. Every competitor (Mabl, Testim, BrowserStack) ships with built-in APM.
+**Fix:**
+1. `@opentelemetry/sdk-node` with auto-instrumentations for Express (`@opentelemetry/instrumentation-express`), `pg` (`@opentelemetry/instrumentation-pg`), Redis (`@opentelemetry/instrumentation-ioredis`), and outbound HTTP (`@opentelemetry/instrumentation-http`). Exports traces via OTLP to any collector (Jaeger, Tempo, Datadog, Honeycomb) configured via `OTEL_EXPORTER_OTLP_ENDPOINT`.
+2. `requestId` via `AsyncLocalStorage` — generated per-request in `appSetup.js`, plumbed through `formatLogLine()` so every log line carries a correlation ID. Exposed as `X-Request-Id` response header.
+3. Prometheus `/metrics` endpoint via `prom-client` — default Node.js metrics + custom counters (`sentri_runs_total`, `sentri_tests_executed_total`, `sentri_crawl_pages_total`). Protected by `METRICS_SCRAPE_KEY` env var (Bearer token on the `/metrics` route).
+4. `@sentry/node` + `@sentry/react` behind `SENTRY_DSN` env var — no-op when unset. Backend: Express error handler + `beforeSend` scrubber strips PII. Frontend: `ErrorBoundary` integration + breadcrumbs on route changes.
+5. Bundle MNT-013 (request-ID propagation) into this PR since both touch `appSetup.js` + `formatLogLine()`.
 **Files to change:**
-- `backend/src/runner/recorder.js` — `RECORDER_SCRIPT` extensions for Gap 2 action kinds; typedef + `actionsToPlaywrightCode` + `recordedActionToStepText` + `isEmittableAction` branches; pause/resume/pop-last session-state guards in `forwardInput`; `device` + `stealth` params threaded through session creation
-- `backend/src/routes/tests.js` — `POST /record` param surface (`device`, `stealth`); new `POST /record/:sessionId/{pause,resume,pop-last}` endpoints
-- `backend/src/middleware/permissions.json` — register the three new recorder mutation routes (qa_lead+)
-- `frontend/src/components/run/RecorderModal.jsx` — assert toggle (Gap 2) with hover-to-pick; pause/resume controls (Gap 3); device dropdown (Gap 5); stealth toggle (Gap 6)
-- `frontend/src/components/run/LiveBrowserView.jsx` — `assertMode` prop suppresses `forwardInput`; hover-target callback surfaces selector back to the modal
-- `frontend/src/api.js` — `pauseRecorder`, `resumeRecorder`, `popLastRecorderAction`, `addRecorderAssertion` (point-and-click variant) consumers
-- `backend/tests/recorder.test.js` — per-Gap coverage (registered in `backend/tests/run-tests.js`); default-mode snapshot proves bit-for-bit unchanged
-- `tests/e2e/specs/recorder-gaps-ui.spec.mjs` (new, Tier-3 `page.route()` mocks) — assert popover renders, pause toggle visually distinct, device dropdown switches viewport on resume
-- `QA.md` § Recorder — captured / not-captured lists per gap; manual checks for `assertCount`/`assertHasClass`, pause-then-resume continuity, device profile mid-recording, stealth-flag headless detection
-- `docs/changelog.md` `## [Unreleased]` § Added — one entry per shipped sub-item
-- `docs/api/projects.md` — document the three new recorder routes alongside the existing assertion endpoint
+- `backend/package.json` — add `@opentelemetry/sdk-node`, `@opentelemetry/auto-instrumentations-node`, `@opentelemetry/exporter-trace-otlp-http`, `prom-client`, `@sentry/node`
+- `frontend/package.json` — add `@sentry/react`
+- `backend/src/middleware/appSetup.js` — OTel SDK init (must be first import), `AsyncLocalStorage` request-ID middleware, `/metrics` route
+- `backend/src/utils/logFormatter.js` — read `requestId` from `AsyncLocalStorage` store, include in every `formatLogLine()` output
+- `backend/src/utils/structuredLog.js` — add OTel span context to structured log events
+- `backend/src/index.js` — Sentry init (after OTel), error handler registration
+- `frontend/src/main.jsx` or `frontend/src/App.jsx` — Sentry browser init behind `VITE_SENTRY_DSN`
+- `frontend/src/components/layout/ErrorBoundary.jsx` — wire Sentry `captureException`
+- `backend/.env.example` — document `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `METRICS_SCRAPE_KEY`, `SENTRY_DSN`
+- `docs/guide/env-vars.md` — new Observability section
+- `docs/changelog.md` — `## [Unreleased]` § Added
+- `backend/tests/observability.test.js` (new, registered in `run-tests.js`) — `/metrics` returns Prometheus text format, `X-Request-Id` header present on responses, OTel SDK initialises without throwing when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
 **Acceptance criteria:**
-- Gap 2: Operator clicks "Assert" in `RecorderModal`, hovers a button on the live canvas → button highlights → click opens popover with `assertVisible / assertText / assertCount / assertHasClass / assertUrl`. Selecting one writes the assertion via the existing route. No manual selector paste required.
-- Gap 3: Pause → subsequent clicks / keystrokes do **not** append to `session.actions`. Resume → capture continues from a clean state (no buffered events replay). Pop-last → most recent action is removed from `session.actions` and disappears from the step preview; idempotent on empty `actions[]`.
-- Gap 5: Device dropdown shows the same options as `RunRegressionModal`. Switching mid-session resizes the canvas to match; selectors regenerated at the new viewport's pixel scale.
-- Gap 6: Stealth toggle on a fresh session disables `navigator.webdriver` and the headless-detection bypass works on a known guard-script fixture (regression test in `recorder.test.js`).
-- Zero regression: default-mode recordings (no assert toggle, no pause, no device override, no stealth) emit byte-identical `playwrightCode` to PR #11 baseline; covered by snapshot test.
-### PR checklist (DIF-015c)
-- [ ] Gap 2 — point-and-click assert UX: `LiveBrowserView.assertMode` prop suppresses `forwardInput`; CDP `Overlay.highlightNode` wired on hover; popover writes via existing `POST /record/:sessionId/assertion`; `assertCount` + `assertHasClass` action kinds added with regression coverage in `backend/tests/recorder.test.js`
-- [ ] Gap 3 — pause / resume / undo: `POST /record/:sessionId/{pause,resume,pop-last}` registered in `permissions.json` (qa_lead+); `forwardInput` short-circuits when `session.paused === true`; pop-last idempotent on empty `actions[]`; UI affordances with visible state indicator
-- [ ] Gap 5 — device profile: `device` param threaded `POST /record → recorder.js`; `browser.newContext({ ...devices[device] })` applied; dropdown in `RecorderModal` mirrors `RunRegressionModal`; mid-session device switch verified
-- [ ] Gap 6 — stealth profile: opt-in `stealth: true` session param; `launchBrowser()` accepts and applies the stealth-plugin stack; default-mode bit-for-bit unchanged; headless-detection bypass verified against guard-script fixture
-- [ ] `backend/tests/recorder.test.js` covers all four gaps and is registered in `backend/tests/run-tests.js`
-- [ ] `tests/e2e/specs/recorder-gaps-ui.spec.mjs` (Tier-3) covers the new UI affordances via `page.route()` mocks
-- [ ] PROC-001 satisfied: every new `router.<method>(…)` has a matching frontend consumer in `frontend/src/api.js` + `RecorderModal.jsx`
-- [ ] `permissions.json` updated for the three new recorder mutation routes
-- [ ] `docs/api/projects.md` documents the new routes; `docs/changelog.md` `## [Unreleased]` updated per shipped sub-item
-- [ ] `QA.md` § Recorder updated with the four-gap manual test plan
+- `GET /metrics` returns `text/plain` Prometheus exposition format with `nodejs_*` default metrics + `sentri_runs_total` counter. Protected by `METRICS_SCRAPE_KEY` (401 without it).
+- Every HTTP response carries `X-Request-Id` header; every `formatLogLine()` output includes the same ID.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` set → traces export to the configured collector (verify with Jaeger local). Unset → OTel SDK is a no-op (no crash, no console spam).
+- `SENTRY_DSN` set → unhandled exceptions + unhandled rejections captured. Unset → Sentry is a no-op.
+- Frontend `VITE_SENTRY_DSN` set → `ErrorBoundary` reports to Sentry. Unset → existing console-only behaviour unchanged.
+- `cd backend && npm test` passes; new test file registered in `run-tests.js`.
+- `cd frontend && npm run build` passes.
+### PR checklist (INF-007)
+- [ ] PR title follows Conventional Commits (`feat(infra): INF-007 — OpenTelemetry + Sentry observability`)
+- [ ] Branch is off `develop`, not `main`
+- [ ] `cd backend && npm test` passes locally; new test file registered in `backend/tests/run-tests.js`
+- [ ] `cd frontend && npm run build && npm test` passes locally
+- [ ] OTel SDK init is the FIRST import in `backend/src/index.js` (before Express, before DB)
+- [ ] `/metrics` endpoint protected by `METRICS_SCRAPE_KEY` — 401 without Bearer token
+- [ ] `X-Request-Id` header present on every response; same ID in log lines
+- [ ] `SENTRY_DSN` unset → zero runtime effect (no console warnings, no network calls)
+- [ ] `OTEL_EXPORTER_OTLP_ENDPOINT` unset → zero runtime effect
+- [ ] `backend/.env.example` documents all new env vars
+- [ ] `docs/guide/env-vars.md` updated with Observability section
+- [ ] `docs/changelog.md` updated under `## [Unreleased]`
+- [ ] `permissions.json` updated if `/metrics` route is added
+- [ ] No new `devDependencies` that should be `dependencies` (OTel + Sentry are runtime deps)
+- [ ] ROADMAP.md `### INF-007` section flipped to `**Status:** ✅ Complete (PR #N)`
+
+---
+## ⏭ Queue (next 3 PRs after current)
+### 1 · INF-008 — Postgres-default + dual-DB CI matrix
+**Effort:** M | **Priority:** 🔴 Blocker | **Dependencies:** INF-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (INF-008)
+Rename colliding migration prefixes (`007_*` × 2, `015_*` × 2); fix `migrationRunner.js` sort; default `.env.example` + `docker-compose.yml` to Postgres; CI matrix `db: [sqlite, postgres]` runs full `npm test` under both; new `lint-migrations.mjs` fails on duplicate prefixes.
+### 2 · AUTO-022 — AI eval harness with golden-set regression
+**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** INF-007 (`metric_samples` infra) | **Source:** `ROADMAP.md` Phase 5 (AUTO-022)
+50-case golden-set fixture; `backend/src/eval/pipelineEval.js` scores selectors/actions/assertions via Levenshtein; CI job `eval.yml` path-filtered to `pipeline/` / `aiProvider.js` / prompt files; fails build on >5% regression; persists eval scores as `metric_samples` rows.
+### 3 · INF-009 — Helm chart + K8s readiness/liveness + DR playbook
+**Effort:** L | **Priority:** 🟡 High | **Dependencies:** INF-008 (Postgres-default), INF-007 (metrics endpoint for liveness) | **Source:** `ROADMAP.md` Phase 5 (INF-009)
+`helm/sentri/` chart with separate `backend` + `worker` Deployments, Postgres StatefulSet, Redis Deployment, ingress/configmap/secret; `readinessProbe`/`livenessProbe` on `GET /api/v1/health`; nightly `pg_dump` to S3 + restore playbook with explicit RTO (<4h) / RPO (<24h) targets.
 
 ---
 
-## ⏭ Queue (next 3 PRs after current)
-### 1 · AUTO-008 — Distributed runner across multiple machines
-**Effort:** XL | **Priority:** 🟢 Differentiator | **Dependencies:** INF-003 ✅, INF-002 ✅, CAP-002 ✅ (PR #3) | **Source:** `ROADMAP.md` Phase 4 (AUTO-008)
+## 🔀 Parallel opportunities
 
-### 2 · SEC-004 — MFA (TOTP / passkey) support
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-004)
+Items that do not overlap INF-007's changed files and can land in a separate PR while it is in flight.
 
-### 3 · SEC-006 — PII firewall
-**Effort:** L | **Priority:** 🔴 Blocker | **Dependencies:** ACL-001 ✅ | **Source:** `ROADMAP.md` Phase 5 (SEC-006)
-
-> **Phase 5 audit-hardening blockers** (`SEC-004` MFA — slot 3 above; `SEC-006` PII firewall, `INF-007` OTel/Sentry, `INF-008` Postgres-default + dual-DB CI matrix, `AUTO-022` AI eval harness) remain queued in `ROADMAP.md` Phase 5.
+| ID | Title | Effort | Priority | Shared files? |
+|----|-------|--------|----------|---------------|
+| INF-008 | Postgres-default + dual-DB CI matrix | M | 🔴 Blocker | ⚠️ `backend/src/database/migrations/` — coordinate with any new migrations from INF-007 |
+| AUTO-022 | AI eval harness with golden-set regression | L | 🔴 Blocker | None — `backend/src/eval/`, `pipelineOrchestrator.js`; no overlap with observability |
+| MNT-001 | Vision-based locator healing | XL | 🟢 Differentiator | None — `selfHealing.js`, `executeTest.js` only |
+| AUTO-009 | Browser code coverage mapping | L | 🟢 Differentiator | None — `executeTest.js`, `coverageAggregator.js`, `Dashboard.jsx` |
 
 ---
 
@@ -85,10 +92,9 @@ Some target apps detect headless Chromium (via `navigator.webdriver`, missing ch
 
 | ID | Title | PR |
 |----|-------|----|
-| AUTO-010 | Root-cause failure clustering. Deterministic clusterer (`failureClusterer.js`) groups failed results by normalised error fingerprint, URL origin prefix, and selector edit-distance — no DB, no LLM. `runs.rootCauses` persisted via migration 027; called from both the single-process tail in `testRunner.js` AND `finalizeShardedRun` in `runWorker.js` (CAP-002 parity). Run Detail renders a collapsible "Root Cause Summary" panel that auto-expands when ≥2 clusters surface. | #6 |
-| CAP-002 | Distributed test sharding across runners. End-to-end cross-process sharding for `POST /api/v1/projects/:id/run` and `POST /api/v1/projects/:id/trigger`. `shards: N > 1` fans out across N BullMQ shard workers; boundary-crossing shard finalizes exactly once via atomic `incrementShardsCompleted` + `markRunCompletedFirstWriterWins`. 7 dedicated backend test files, 24-step QA manual plan, per-shard trace dropdown, CI/CD callback + GitHub Check completion on sharded runs. Deferred to CAP-002b: 10 SaaS-readiness follow-ups. | #3 |
-| DIF-012 | Multi-environment support (staging vs. production). | #2 |
+| SEC-007 | Compliance audit log — immutability gate (`DANGER_ALLOW_AUDIT_PURGE` + `audit.purge` meta-audit row emitted BEFORE truncate), 8 password-path `auth.*` events with IP+UA (rendered in dedicated column, not just tooltip), SHA-256 hash chain (`AUDIT_HASH_CHAIN`, boot-time mutual exclusion with `AUDIT_RETENTION_DAYS > 0`, skips pre-chain `prevHash IS NULL` rows on verify), cursor-paginated admin surface with CSV/NDJSON export (`createdAt` header column for SIEM importer parity) + anti-exfiltration rate-limiter, meta-audit (`audit.read`/`audit.export` per PCI-DSS 10.2.6), industry-standard event dedup matching Splunk / CloudTrail / Auth0 / Datadog convention (`AUDIT_DEDUP_WINDOW_SEC` default 60s, collapses identical reads with `count++`/`lastAt`, never deduped for destructive user actions, mutually exclusive with hash chain at the row level, migration `034_activities_dedup.sql`), UTC second-precision timestamps via `fmtAuditTimestamp` (PCI-DSS 10.3.3), daily retention sweep (`AUDIT_RETENTION_DAYS`), `SYSTEM_WORKSPACE_ID` sentinel + admin-only `GET /api/v1/system/security-events` for cross-tenant probe rows (unknown-email failed logins), SIEM forwarder (`dispatchSiemEvent` with HMAC-SHA256 signed NDJSON + system-headers-first spread + 32-char min key per NIST SP 800-107 + reserved-header rejection + 3-retry [0s/1s/2s] + DLQ), per-workspace SIEM config (AES-256-GCM encrypted secret with rotation-optional UPDATE), DLQ inspector + replay (`SIEM_NOT_CONFIGURED` 503 distinct from `SIEM_DISPATCH_FAILED` 502), `docs/guide/compliance.md` (incl. dedup section mapping to PCI-DSS 10.5.3), 44-step QA.md manual test plan, 3 backend test suites (audit-log-routes + audit-auth-events + audit-siem-forwarder) | #12 |
+| SEC-006 | PII firewall — `domSanitizer` pipeline stage redacting emails / phones / SSNs / Luhn-checked cards / JWTs / Bearer & Basic auth headers / `?token=` / `?code=` / `?access_token=` query params before crawler snapshots reach `aiProvider.js`; deterministic placeholders, per-project `strictPiiFirewall` toggle + `piiAllowlist`, migration `030_projects_pii_firewall.sql`, `pipeline.pii_redacted` structured audit log | #11 |
+| SEC-004 | MFA — TOTP enrollment + recovery codes + WebAuthn passkeys, per-workspace enforcement with grace period, JWT `amr` claim, login factor picker, audit logging | #10 |
+| AUTO-008 | Distributed runner — standalone `worker` Compose service, `WORKER_CONCURRENCY` env var, dashboard worker-pool panel (Runner Mode / Queue Depth / Active Workers / Completed Jobs) | #9 |
 
-*Full completed list → ROADMAP.md § Completed Work*
-
-_END OF FILE — everything below was removed during the CAP-002 → AUTO-010 sprint rotation._
+*Full completed list → ROADMAP.md § Completed Work Summary*

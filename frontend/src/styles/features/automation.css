@@ -340,6 +340,38 @@
   margin-top: 12px;
 }
 
+/* ── SEC-006: PII firewall panel ──────────────────────────────────────────
+   Shares the `.aap-*` panel scaffolding with the Auto-Approval and Iteration
+   tabs. Adds three layout helpers so the JSX stays class-driven per
+   AGENT.md ("do not write equivalent inline styles"). */
+.aap-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aap-stats--inline {
+  margin-top: -4px;
+}
+
+.aap-stats--hint {
+  margin-top: 6px;
+}
+
+.aap-section {
+  margin-top: 12px;
+}
+
+.aap-textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.aap-actions {
+  margin-top: 12px;
+}
+
 .auto-integ-icon {
   width: 38px;
   height: 38px;

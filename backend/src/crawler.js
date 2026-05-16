@@ -36,7 +36,7 @@ import { classifyPageWithAI, buildUserJourneys } from "./pipeline/intentClassifi
 import { generateAllTests, generateFromDescription, generateApiTests } from "./pipeline/journeyGenerator.js";
 import { crawlPages } from "./pipeline/crawlBrowser.js";
 import { exploreStates } from "./pipeline/stateExplorer.js";
-import { runPostGenerationPipeline } from "./pipeline/pipelineOrchestrator.js";
+import { runPostGenerationPipeline, sanitizeRunInputs } from "./pipeline/pipelineOrchestrator.js";
 import { persistGeneratedTests, buildPipelineStats } from "./pipeline/testPersistence.js";
 import { emitRunEvent, log, logWarn, logSuccess } from "./utils/runLogger.js";
 import { setStep } from "./utils/pipelineState.js";
@@ -584,11 +584,20 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
 
   throwIfAborted(signal);
 
+  // SEC-006: PII firewall — sanitize snapshots + classified pages before
+  // they reach `generateAllTests` (which builds the LLM prompt). Wiring
+  // lives in `pipelineOrchestrator.sanitizeRunInputs` so any future caller
+  // of the generation pipeline gets the same firewall behaviour from one
+  // place. Honours `project.strictPiiFirewall` (default ON) and
+  // `project.piiAllowlist`.
+  const { snapshotsByUrl: effectiveSnapshotsByUrl, classifiedPages: effectiveClassifiedPages } =
+    sanitizeRunInputs(project, run, { snapshotsByUrl, classifiedPages });
+
   // ── Step 4: AI test generation ──────────────────────────────────────────
   setStep(run, 4);
-  structuredLog("pipeline.generate", { runId: run.id, pages: classifiedPages.length, journeys: journeys.length });
+  structuredLog("pipeline.generate", { runId: run.id, pages: effectiveClassifiedPages.length, journeys: journeys.length });
   log(run, `🤖 Generating intent-driven tests...`);
-  const genResult = await generateAllTests(classifiedPages, journeys, snapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
+  const genResult = await generateAllTests(effectiveClassifiedPages, journeys, effectiveSnapshotsByUrl, (msg) => log(run, msg), { dialsPrompt, testCount, signal });
   const rawTests = genResult.tests;
   log(run, `📝 Raw UI tests: ${rawTests.length}`);
 
@@ -636,7 +645,7 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
 
   // ── Steps 5-7: Dedup → Enhance → Validate (shared pipeline) ────────────
   const { validatedTests, enhancedTests, rejected, removed, enhancedCount, dedupStats } =
-    await runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl, classifiedPagesByUrl, signal });
+    await runPostGenerationPipeline(rawTests, project, run, { snapshotsByUrl: effectiveSnapshotsByUrl, classifiedPagesByUrl, signal });
 
   // ── Step 8: Store & Done ────────────────────────────────────────────────
   persistGeneratedTests(validatedTests, project, run);

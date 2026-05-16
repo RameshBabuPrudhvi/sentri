@@ -1,60 +1,52 @@
 # Sentri — PR Review Checklist
 
-> **Reviewing agents (Devin, Copilot, Cursor): also read [AGENT.md](./AGENT.md) before
-> this file** — it contains the project's always-on rules (DO NOTs, architecture,
-> auth model). For coding conventions see [STANDARDS.md](./STANDARDS.md). For
-> table lookups (utils, env vars, auth strategies) see [REFERENCE.md](./REFERENCE.md).
-> For manual end-to-end validation (Golden E2E + per-feature checks) see [QA.md](./QA.md).
->
-> Read this file before submitting any pull request.
+> Also read [AGENT.md](./AGENT.md) (always-on rules), [STANDARDS.md](./STANDARDS.md) (coding conventions), [REFERENCE.md](./REFERENCE.md) (utils/env/auth tables), and [QA.md](./QA.md) (end-to-end validation) before submitting a PR.
 
 ---
 
 ## PR Checklist
 
-- [ ] PR title is a Conventional Commit (`feat:`, `fix:`, `perf:`, `feat!:`, etc.)
-- [ ] `docs/changelog.md` updated under `## [Unreleased]` (see Changelog section below)
-- [ ] All new backend logic has tests; new test files are registered in `backend/tests/run-tests.js`
+- [ ] PR title follows Conventional Commits (`feat:`, `fix:`, `perf:`, `feat!:`, etc.)
+- [ ] `docs/changelog.md` updated under `## [Unreleased]`
+- [ ] All new backend logic has tests; new test files registered in `backend/tests/run-tests.js`
 - [ ] CI passes locally (`cd backend && npm test` and `cd frontend && npm run build && npm test`)
-- [ ] Security checklist reviewed if the PR touches auth, routes, or data handling (see below)
+- [ ] Security checklist reviewed if the PR touches auth, routes, or data handling
 - [ ] Sprint tracker updated (see [Sprint Tracker Hand-off](#sprint-tracker) below)
-- [ ] Code review self-pass: no duplicated helpers, no duplicated CSS classes, no files edited outside NEXT.md scope, new utilities placed in shared `utils/` not inline, sibling-file conventions followed.
-- [ ] For user-visible changes: walked the affected section(s) of [QA.md](./QA.md). For changes that touch any flow in the Golden E2E Happy Path (auth → project → crawl → generate → approve → run → AI fix → visual → reports → automation → notifications → GDPR → permissions), rerun the full Golden E2E on Chrome plus one other browser.
-- [ ] `QA.md` updated when the PR adds, removes, or materially changes a user-facing flow (new page/modal/endpoint, new role gate, changed happy-path steps, shipped/unshipped feature moving in or out of the "Out of scope" list).
-- [ ] [`backend/src/middleware/permissions.json`](./backend/src/middleware/permissions.json) updated when the PR adds / removes / changes a `requireRole(...)` gate or adds a new role-gated endpoint. The JSON is the canonical machine-readable RBAC source for agents and reviewers.
-- [ ] **No orphan backend routes (PROC-001)** — every new `router.<method>(…)` call in `backend/src/routes/*.js` must ship its frontend consumer in the same PR (a helper added to `frontend/src/api.js` plus a callsite in `frontend/src/pages/*.jsx` or `frontend/src/components/**/*.jsx`). API-without-UI PRs are closed. The opt-out for genuinely UI-less endpoints (internal admin, healthchecks, machine-only triggers) is to add the `[no-ui]` token to the PR title; the `.github/workflows/no-orphan-routes.yml` workflow enforces this gate, so silently shipping a route without its consumer fails CI.
+- [ ] Self-review: no duplicated helpers or CSS classes, no files edited outside scope, new utilities in `utils/` not inline
+- [ ] User-visible changes: walked the relevant section of [QA.md](./QA.md). Changes to the Golden E2E flow (auth → project → crawl → generate → approve → run → AI fix → visual → reports → automation → notifications → GDPR → permissions) require a full rerun on Chrome plus one other browser.
+- [ ] `QA.md` updated if the PR adds, removes, or materially changes a user-facing flow
+- [ ] `backend/src/middleware/permissions.json` updated if the PR adds, removes, or changes a role gate or role-gated endpoint
+- [ ] **No orphan routes (PROC-001)** — every new `router.<method>()` in `backend/src/routes/*.js` must ship its frontend consumer in the same PR (helper in `frontend/src/api.js` + callsite in a page or component). Add `[no-ui]` to the PR title for genuinely UI-less endpoints (healthchecks, machine-only triggers); the `no-orphan-routes.yml` workflow enforces this.
 
 ---
 
 <a id="sprint-tracker"></a>
-## Sprint Tracker Hand-off (NEXT.md + ROADMAP.md)
+## Sprint Tracker Hand-off
 
-Every PR that closes a roadmap item **must** update the sprint trackers. This keeps the next agent unblocked — if `NEXT.md` still points at the item you just shipped, the next agent will waste a cycle re-implementing it.
+Every PR that closes a roadmap item must update the sprint trackers so the next agent knows what to build.
 
-### When your PR implements a roadmap item (e.g. DIF-006, AUTO-005, MNT-006)
+### When your PR implements a roadmap item
 
-- [ ] **`ROADMAP.md`** — Move the item from its phase table to the ✅ **Completed Work Summary** table. Include the PR number (e.g. `| DIF-006 | Standalone Playwright export | PR #112 |`). For **bundled PRs** (`AUTO-003 + AUTO-003b`), add **one row per shipped id** so each is independently searchable in `git blame` / Ctrl+F lookups; never use `(bundled)` as part of the row's `ID` cell — it leaks into ledger reads as a fake suffix.
-- [ ] **`ROADMAP.md`** — Update the per-category counts in the bottom-of-file `## Summary` table (`✅ Done` +N, `🔲 Pending` −N where N is the number of shipped items in your PR's category) and recompute the `**Totals**` row from the resulting per-category numbers. The narrative `Total tracked items: …` line directly below must match the Totals row exactly — the count is authoritative; if you find them out of step, treat Totals as truth and update the narrative from it.
-- [ ] **`ROADMAP.md`** — Update the "Remaining" count in the fast-path section at the top of the file (`> **Current sprint:** \`…\` … **Remaining:** ~N planned items`).
-- [ ] **`ROADMAP.md`** — Prune the shipped item's detailed `### <ID> — …` section — the row in `## Completed Work Summary` is the canonical record; the long-form spec only made sense while the item was in flight.
-- [ ] **`NEXT.md` → `## ▶ Current PR`** — **Replace the entire block**, not just the heading. Promote item 1 from the queue to be the new Current PR. Copy over its title, branch slug (e.g. `feat/auto-002-…`), effort/priority/dependencies meta-line, the spec body verbatim, and a fresh `### PR checklist` template. The most common failure mode is rewriting only the heading and leaving the prior PR's scope text below it — agents reading `NEXT.md` after that mistake will start working on the wrong scope.
-- [ ] **`NEXT.md` → `## ▶ Current PR`** — For **bundled** Current PRs, the heading goes `## ▶ Current PR — <id1> + <id2> (bundled)`, the `**Branch:**` slug joins the ids (`feat/auto-003-auto-003b`), each scope gets its own `### Scope N — <id> — <title>` sub-block, and a `**Do not split this PR.**` callout sits above the scopes. The next promotion **must strip the `(bundled)` suffix** when reading the heading — it's a reader hint, not part of the canonical id, and tools that split on `+` will otherwise treat `AUTO-003b (bundled)` as the literal id.
-- [ ] **`NEXT.md` → `## ⏭ Queue`** — Remove the promoted item entirely (heading + body). Renumber the surviving slots so `### 1 · …`, `### 2 · …`, … stay contiguous, and update the `## ⏭ Queue (next N PRs after current)` header count. Pick a new item to fill the empty slot from `ROADMAP.md` (highest priority with `Dependencies: none`) and write its full spec — the queue is the agent's primary source for scope text, not just a list of ids.
-- [ ] **`NEXT.md` → `## ✅ Recently completed`** — Add your shipped item as the new top row with its PR number. Keep the table to the 3 most recent entries; drop the oldest. For bundles, write the title as the joined value (e.g. `Confidence scoring & auto-approval … + provenance / audit trail`) — the table is the human-readable changelog and reads better with full context than a per-id split.
-- [ ] **`NEXT.md` → `## 🔀 Parallel opportunities`** — If your PR modified any file listed in the "Shared files?" column, remove or flag the affected parallel items.
+- [ ] **`ROADMAP.md` — Completed Work Summary**: add one row per shipped ID (e.g. `| DIF-006 | Standalone Playwright export | PR #112 |`). Never use `(bundled)` in the ID cell.
+- [ ] **`ROADMAP.md` — Summary table**: increment `✅ Done`, decrement `🔲 Pending`, and recompute the `**Totals**` row. The narrative `Total tracked items:` line must match Totals exactly.
+- [ ] **`ROADMAP.md` — Fast-path header**: update the `Remaining: ~N planned items` count.
+- [ ] **`ROADMAP.md` — Prune the shipped item's `### <ID>` section** — the Completed Work Summary row is the canonical record.
+- [ ] **`NEXT.md` → `## ▶ Current PR`**: replace the entire block with the next queue item — title, branch slug, effort/priority/dependencies, spec body, and a fresh PR checklist. Do not rewrite only the heading and leave the old scope below it.
+  - Bundled PRs: heading is `## ▶ Current PR — <id1> + <id2> (bundled)`; each scope gets its own `### Scope N` sub-block; add a `**Do not split this PR.**` callout. Strip `(bundled)` when reading the heading as an ID.
+- [ ] **`NEXT.md` → `## ⏭ Queue`**: remove the promoted item, renumber remaining slots, update the header count, and fill the empty slot with the next highest-priority unblocked item from `ROADMAP.md` (full spec, not just an ID).
+- [ ] **`NEXT.md` → `## ✅ Recently completed`**: add the shipped item as the new top row with its PR number. Keep only the 3 most recent entries.
+- [ ] **`NEXT.md` → `## 🔀 Parallel opportunities`**: remove or flag any item whose "Shared files?" column overlaps files this PR modified.
 
-### When your PR is infrastructure/docs/refactor (no roadmap ID)
+### When your PR is infrastructure / docs / refactor (no roadmap ID)
 
-- [ ] No `NEXT.md` update needed.
-- [ ] No `ROADMAP.md` update needed.
-- [ ] Still update `docs/changelog.md` if user-visible.
+No `NEXT.md` or `ROADMAP.md` update needed. Still update `docs/changelog.md` if user-visible.
 
 ### Sanity checks before merging
 
-- [ ] The `Current PR` block in `NEXT.md` **does not** still reference the item this PR shipped.
-- [ ] The `Remaining: N items` count in `ROADMAP.md` decreased by exactly the number of items this PR closed.
-- [ ] The item appears in `ROADMAP.md` ✅ Completed table **and** `NEXT.md` Recently completed — not only one.
-- [ ] The next agent can run `cat NEXT.md` and immediately know what to build, without opening `ROADMAP.md`.
+- [ ] `NEXT.md` Current PR block does not reference the item this PR shipped
+- [ ] `ROADMAP.md` Remaining count decreased by the number of items closed
+- [ ] The item appears in both `ROADMAP.md` Completed table and `NEXT.md` Recently completed
+- [ ] Running `cat NEXT.md` tells the next agent exactly what to build without opening `ROADMAP.md`
 
 ---
 
@@ -62,86 +54,73 @@ Every PR that closes a roadmap item **must** update the sprint trackers. This ke
 
 CI runs on every push to `main`/`develop` and on PRs to `main` via `.github/workflows/ci.yml`.
 
-1. **Secrets** — Gitleaks scan (full git history) gates all subsequent jobs. Blocks on accidentally committed API keys, JWT secrets, or credentials.
-2. **Backend** — `npm install` → syntax check (`node --check`) → `npm test` → JSDoc generation → live smoke test (starts server, registers user, verifies cookie-based auth + CSRF on authenticated endpoints).
-3. **Frontend** — `npm install` → `npm test` → `npm run build` (catches JSX errors, bad imports).
-4. **Docs** — VitePress build + JSDoc assembly (runs after backend passes).
-5. **Docker** — Builds both images, runs a container smoke test with cookie-based auth.
+| Job | Steps |
+|---|---|
+| **Secrets** | Gitleaks scan (full git history) — gates all subsequent jobs |
+| **Backend** | `npm install` → syntax check → `npm test` → JSDoc generation → live smoke test (register → cookie auth → CSRF) |
+| **Frontend** | `npm install` → `npm test` → `npm run build` |
+| **Docs** | VitePress build + JSDoc assembly |
+| **Docker** | Build both images → container smoke test with cookie-based auth |
 
-All five CI jobs must pass before merge. If CI fails, check the smoke test section first — it exercises the full auth flow (register → login → cookie extraction → CSRF-protected POST).
+All five jobs must pass before merge.
 
-**To run locally before pushing:**
+**Run locally before pushing:**
 
 ```bash
-# Backend — tests must all pass
 cd backend && npm test
-
-# Frontend — build must succeed with zero errors
-cd frontend && npm run build
-
-# Frontend — tests must pass
-cd frontend && npm test
+cd frontend && npm run build && npm test
 ```
 
 ---
 
 ## Mandatory Test Requirements
 
-**Every PR that adds or modifies backend logic MUST include tests.** PRs without adequate test coverage will not be merged.
+Every PR that adds or modifies backend logic must include tests. PRs without adequate coverage will not be merged.
 
-| Change type | Required tests | Where |
+| Change type | Required tests | Location |
 |---|---|---|
-| New repository module | Unit tests for every exported function | Dedicated `tests/<module>.test.js` file |
-| New shared utility (`utils/`) | Unit tests for all branches and edge cases | Dedicated file or added to `tests/utils.test.js` |
-| New API endpoint or changed endpoint behaviour | Integration test exercising the HTTP flow (status codes, response shape, auth, error cases) | `tests/api-flow.test.js` or a dedicated file |
-| Bug fix | Regression test that fails without the fix and passes with it | Closest existing test file or dedicated file |
-| New middleware (rate limiter, CSRF, etc.) | Integration test verifying the middleware is wired correctly | Dedicated file or `tests/auth-cookies.test.js` |
-| Security fix | Unit test for the fix mechanism AND integration test proving the vulnerability is closed | Dedicated file (e.g. `tests/security-hardening.test.js`) |
+| New repository module | Unit tests for every exported function | `tests/<module>.test.js` |
+| New shared utility (`utils/`) | Unit tests for all branches and edge cases | `tests/utils.test.js` or dedicated file |
+| New or changed API endpoint | Integration test: status codes, response shape, auth, error cases | `tests/api-flow.test.js` or dedicated file |
+| Bug fix | Regression test that fails before the fix and passes after | Nearest existing file or dedicated file |
+| New middleware | Integration test verifying correct wiring | Dedicated file or `tests/auth-cookies.test.js` |
+| Security fix | Unit test for the fix + integration test proving the vulnerability is closed | `tests/security-hardening.test.js` or dedicated file |
 | Pipeline stage change | Unit tests | `tests/pipeline.test.js` or `tests/pipeline-orchestrator.test.js` |
-| New user-facing flow (auth, project CRUD, run lifecycle, export, etc.) | **UI E2E spec** exercising the real browser flow (Playwright `page` fixture, role-based selectors, runs under `--project=ui-chromium`) **and** a corresponding section / Golden E2E step in [QA.md](./QA.md) **and** a ✅ row in [`tests/e2e/COVERAGE.md`](./tests/e2e/COVERAGE.md). The assertion that flips a row to ✅ must be `expect(page.…)` against rendered DOM — API specs alone never close a row; they are scaffolding only (e.g. seeding fixtures so the UI test can drive the page directly). The only exception is ⏭️ flows that genuinely have no user-facing UI (outbound notifications, ephemeral-storage probe). See [`tests/e2e/COVERAGE.md`](./tests/e2e/COVERAGE.md) § UI-only policy. | `tests/e2e/specs/<area>-ui.spec.mjs` for the UI spec (see STANDARDS.md § E2E Tests); update `QA.md` at repo root; flip the matching row in `tests/e2e/COVERAGE.md` from 🟥/🟨 to ✅ |
+| New user-facing flow | UI E2E spec (Playwright `page` fixture, DOM assertions, `--project=ui-chromium`) + QA.md section + ✅ row in `tests/e2e/COVERAGE.md` | `tests/e2e/specs/<area>-ui.spec.mjs`; update `QA.md` and `COVERAGE.md` |
 
-**Register every new test file** in `backend/tests/run-tests.js` so `npm test` runs it.
+Register every new test file in `backend/tests/run-tests.js`.
 
 ### Backend Test Conventions
 
-Tests live in `backend/tests/` and use Node's built-in `assert/strict` — no test framework.
+Tests live in `backend/tests/` and use Node's built-in `assert/strict` — no framework.
 
 ```bash
-node tests/pipeline.test.js
-node tests/self-healing.test.js
-node tests/code-parsing.test.js
-node tests/api-flow.test.js
-node tests/auth-cookies.test.js
-node tests/password-reset-token.test.js
-node tests/security-hardening.test.js
-node tests/artifact-signing.test.js
-# Or all at once:
-npm test
+node tests/pipeline.test.js   # or any individual file
+npm test                       # all at once
 ```
 
-- Each test file must include a final summary line showing pass/fail counts and exit with `process.exit(1)` on any failure.
-- Tests are synchronous where possible. Async tests must `await` all assertions before the test function returns.
-- Integration tests reset state between tests using `getDatabase().exec("DELETE FROM ...")` and seed using repository modules.
-- **Unit tests** (repositories, utilities): use the synchronous `test(name, fn)` pattern — no HTTP server needed.
-- **Integration tests** (route handlers, auth flows): spin up the Express app on a random port via `app.listen(0)`, make real HTTP requests, and shut down in a `finally` block.
-- **Shared test helpers** live in `backend/tests/helpers/test-base.js`. Use `createTestContext()`. Do not duplicate these patterns.
+- Every test file prints a pass/fail summary and exits with `process.exit(1)` on failure.
+- Integration tests reset state between cases with `getDatabase().exec("DELETE FROM …")` and seed via repository modules.
+- **Unit tests**: use the synchronous `test(name, fn)` pattern — no HTTP server.
+- **Integration tests**: spin up Express on a random port via `app.listen(0)`, make real HTTP requests, shut down in `finally`.
+- **Shared helpers**: `backend/tests/helpers/test-base.js` — use `createTestContext()`, do not duplicate.
 
 ```js
-// ✅ Unit test — one function, one behaviour, clear assertion
+// ✅ Unit test
 test("claim() returns null for an already-used token", () => {
   resetTokenRepo.create("tok-1", "U-1", futureExpiry);
   resetTokenRepo.claim("tok-1");
   assert.equal(resetTokenRepo.claim("tok-1"), null);
 });
 
-// ✅ Integration test — exercises the full HTTP path
+// ✅ Integration test
 out = await req(base, "/api/auth/reset-password", {
   method: "POST",
   body: { token: usedToken, newPassword: "New123!" },
 });
 assert.equal(out.res.status, 400, "Replaying a used token should fail");
 
-// ❌ No assertion — test always passes
+// ❌ No assertion — always passes, do not do this
 test("creates a token", () => {
   resetTokenRepo.create("tok-1", "U-1", futureExpiry);
 });
@@ -149,67 +128,54 @@ test("creates a token", () => {
 
 ### Frontend Tests
 
-Tests live in `frontend/tests/` and also use plain Node `assert`. Run with `npm test` from `frontend/`.
+Tests live in `frontend/tests/` and use plain Node `assert`. Run with `npm test` from `frontend/`.
 
 ### E2E Tests
 
-Playwright suite at `tests/e2e/`. Run with `npm run e2e:test` from the repo root. UI specs are gated by `RUN_UI_E2E=true`; API specs run unconditionally. See **STANDARDS.md § E2E Tests** for full conventions and **REFERENCE.md § E2E Test Utilities** for the helper module table. Do not import directly from `@playwright/test` — go through `tests/e2e/utils/playwright.mjs`. Do not write custom auth or CSRF logic — use `loginWithRetry()` and `SessionClient` from `tests/e2e/utils/`.
+Playwright suite at `tests/e2e/`. Run with `npm run e2e:test` from the repo root. UI specs require `RUN_UI_E2E=true`; API specs run unconditionally.
+
+- Do not import directly from `@playwright/test` — use `tests/e2e/utils/playwright.mjs`.
+- Do not write custom auth or CSRF logic — use `loginWithRetry()` and `SessionClient` from `tests/e2e/utils/`.
+- See **STANDARDS.md § E2E Tests** and **REFERENCE.md § E2E Test Utilities** for full conventions.
 
 ### Testing DIF-001 (Visual Regression) and DIF-015 (Recorder)
 
-**Recorder needs a headed Playwright window — `BROWSER_HEADLESS=true` silently breaks it.** With the default (`true`), the `RecorderModal`'s live CDP screencast still renders a frame, so the UI *looks* wired up — but no click in that pane reaches the headless recorded page. `Stop & Save` then returns HTTP 400 `no actions were captured`. Always start the backend with `BROWSER_HEADLESS=false` before using the Record-a-test button, and interact with the external Playwright window that opens on the desktop.
+**Recorder requires a headed browser.** With `BROWSER_HEADLESS=true` (default) the canvas renders frames but clicks never reach the recorded page — `Stop & Save` returns `400 no actions were captured`. Always start the backend with `BROWSER_HEADLESS=false` before using the Record button.
 
-**Deterministic target page.** Pixel diffs are only meaningful against a page that won't drift between runs. Serve a static HTML with stable `data-testid` attributes via `python3 -m http.server 8080`. For a controlled >2% diff, change multiple CSS values at once:
-
-```bash
-sed -i 's/background: #fff/background: #d62828/; s/color: #111/color: #fff/; s/color: #1f7ae0/color: #ffd166/' /home/ubuntu/target/index.html
-```
-
-**`visualDiff` shape** in `runs.results[*].stepCaptures[*].visualDiff`: `{ status, diffPixels, totalPixels, diffRatio, threshold, baselinePath, diffPath }`. `status` is one of `baseline_created | match | regression | error`.
-
-**Accept must rewrite the PNG, not just the DB row.** A silent no-op failure mode is updating only `baseline_screenshots` without touching disk. Always check `stat`/`md5sum` on baseline files before and after Accept.
+**Visual diff tips:**
+- Use a static HTML page with stable `data-testid` attributes as the target (`python3 -m http.server 8080`).
+- To force a >2% diff, change multiple CSS values at once: `sed -i 's/background: #fff/background: #d62828/; …' index.html`
+- `visualDiff` shape: `{ status, diffPixels, totalPixels, diffRatio, threshold, baselinePath, diffPath }`. `status`: `baseline_created | match | regression | error`.
+- Accept must rewrite the PNG on disk, not only the DB row — verify with `stat`/`md5sum` before and after.
 
 ---
 
 ## Versioning & Releases
 
-Sentri uses **automatic semantic versioning** driven by [Conventional Commits](https://www.conventionalcommits.org/).
+Sentri uses automatic semantic versioning driven by [Conventional Commits](https://www.conventionalcommits.org/).
 
-1. Write the PR title as a Conventional Commit (e.g. `feat: add rate limiting`).
-2. PR is squash-merged to `main` — the PR title becomes the commit message.
-3. `.github/workflows/release.yml` runs: scans commits for `feat:`, `fix:`, `perf:`, `BREAKING CHANGE:`, determines the bump, updates `version` in all three `package.json` files, promotes `## [Unreleased]` in `docs/changelog.md`, commits `chore(release): vX.Y.Z`, creates a git tag and GitHub Release.
-4. `.github/workflows/cd.yml` triggers on the new `v*` tag: tags Docker images with `X.Y.Z`, `X.Y`, `sha-<commit>`, and `latest`. Deploys updated docs to GitHub Pages.
+1. Write the PR title as a Conventional Commit (`feat: add rate limiting`, `fix: correct token expiry`, etc.)
+2. PR is squash-merged to `main` — the title becomes the commit message.
+3. `release.yml` bumps the version, promotes `## [Unreleased]` in the changelog, commits `chore(release): vX.Y.Z`, and creates a GitHub Release + git tag.
+4. `cd.yml` triggers on the new `v*` tag: tags Docker images (`X.Y.Z`, `X.Y`, `sha-<commit>`, `latest`) and deploys docs to GitHub Pages.
 
-**What you need to do in every PR:**
-1. Write the PR title as a Conventional Commit.
-2. Update `docs/changelog.md` under `## [Unreleased]`.
-That's it — versioning, tagging, and releases are fully automated.
+**Your only responsibilities:** write a valid Conventional Commit title and update `docs/changelog.md` under `## [Unreleased]`.
 
 ---
 
 ## Changelog Format
 
-Sentri follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The changelog lives at `docs/changelog.md`.
+Sentri follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). File: `docs/changelog.md`.
 
-**Every PR that adds user-visible features, fixes, security changes, or breaking changes MUST update `docs/changelog.md`.**
+Update the changelog in every PR that adds a user-visible feature, bug fix, security change, or breaking change.
 
 ### Format rules
 
-- Entries go under `## [Unreleased]` at the top.
-- Group entries under these headings (omit empty groups):
-
-| Heading | When to use |
-|---|---|
-| `### Added` | New features, new endpoints, new UI pages |
-| `### Changed` | Behaviour changes to existing features (non-breaking) |
-| `### Deprecated` | Features that will be removed in a future version |
-| `### Removed` | Features or APIs that were removed |
-| `### Fixed` | Bug fixes |
-| `### Security` | Vulnerability patches, auth hardening, rate limiting changes |
-
-- Each entry is a single bullet starting with the area in bold: `- **Auth**: ...`, `- **API**: ...`
-- Reference the PR number at the end: `(#78)`.
-- Write from the user's perspective — what changed for them, not internal refactoring details.
+- Entries go under `## [Unreleased]`.
+- Group under these headings (omit empty ones): `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`
+- One bullet per change: `- **Area**: what changed for the user. (#PR)`
+- Write from the user's perspective — not internal implementation detail.
+- Skip: internal refactors, test-only changes, doc-only changes, CI changes.
 
 ### Example
 
@@ -217,34 +183,27 @@ Sentri follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The cha
 ## [Unreleased]
 
 ### Added
-- **API**: Three-tier global rate limiting — 300 req/15 min general, 20/hr for crawl/run, 30/hr for AI generation (#78)
+- **API**: Three-tier global rate limiting — 300 req/15 min general, 20/hr for crawl/run, 30/hr for AI generation. (#78)
 
 ### Fixed
-- **Auth**: Password reset tokens now survive server restarts (DB-backed via migration 003) (#78)
+- **Auth**: Password reset tokens now survive server restarts. (#78)
 
 ### Security
-- **Auth**: Atomic token claim prevents concurrent replay of password reset tokens (TOCTOU fix) (#78)
+- **Auth**: Atomic token claim prevents concurrent replay of password reset tokens. (#78)
 ```
-
-### What does NOT need a changelog entry
-
-- Internal refactors with no user-visible effect
-- Test-only changes
-- Documentation-only changes (unless they document a new feature)
-- CI/CD pipeline changes
 
 ---
 
 ## Security Checklist
 
-Before submitting any PR that touches auth, routes, or data handling, verify:
+Review before submitting any PR that touches auth, routes, or data handling.
 
-- [ ] Passwords are hashed with `hashPassword()` (scrypt, random salt) — never stored plaintext.
-- [ ] JWTs are validated with `requireAuth` (or `requireUser`/`requireTrigger`) on every non-public endpoint.
-- [ ] JWTs are stored in HttpOnly cookies only — never returned in response bodies or stored in localStorage.
-- [ ] Mutating endpoints (POST/PATCH/PUT/DELETE) are protected by CSRF double-submit cookie validation. Non-cookie auth strategies are auto-exempt. Public mutation paths must be added to `CSRF_EXEMPT_PATHS`.
-- [ ] User-supplied strings are validated with `utils/validate.js` before DB writes.
-- [ ] No sensitive data (API keys, passwords, full JWTs) is returned in API responses. Use `maskKey()` for display.
-- [ ] Credential values stored in the DB use `credentialEncryption.js`.
-- [ ] Any HTML rendered via `dangerouslySetInnerHTML` is sanitised — escape all user/AI-generated content.
-- [ ] Error responses to clients never leak internal details (stack traces, SDK error messages). Return generic messages for 5xx errors.
+- [ ] Passwords hashed with `hashPassword()` (scrypt + random salt) — never stored plaintext
+- [ ] Every non-public endpoint protected by `requireAuth` (or `requireUser` / `requireTrigger`)
+- [ ] JWTs stored in HttpOnly cookies only — never in response bodies or `localStorage`
+- [ ] Mutating endpoints (POST / PATCH / PUT / DELETE) validated with CSRF double-submit cookie; public mutation paths added to `CSRF_EXEMPT_PATHS`
+- [ ] User-supplied strings validated with `utils/validate.js` before DB writes
+- [ ] No sensitive data (API keys, passwords, full JWTs) in API responses — use `maskKey()` for display
+- [ ] Credential values stored via `credentialEncryption.js`
+- [ ] Any `dangerouslySetInnerHTML` content escaped — never render raw user or AI-generated strings
+- [ ] 5xx error responses return generic messages — no stack traces or internal SDK errors exposed to clients

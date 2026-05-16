@@ -39,6 +39,7 @@ import assert from "node:assert/strict";
 import { app } from "../../src/middleware/appSetup.js";
 import { getDatabase } from "../../src/database/sqlite.js";
 import { workspaceScope } from "../../src/middleware/workspaceScope.js";
+import { _internalGenerateTotpCode } from "../../src/routes/auth.js";
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
@@ -88,6 +89,26 @@ export function buildCookieHeader(cookies) {
   return Object.entries(cookies).map(([k, v]) => `${k}=${v.value || v}`).join("; ");
 }
 
+// ─── TOTP helper (SEC-004 tests) ──────────────────────────────────────────────
+
+/**
+ * Generate a valid 6-digit TOTP code for a given base32 secret at the
+ * current time. SEC-004 tests use this to drive `/mfa/enable` and
+ * `/mfa/verify` without depending on a wall-clock-synced authenticator app.
+ *
+ * Delegates to `_internalGenerateTotpCode` in `backend/src/routes/auth.js`
+ * so tests and production share a single TOTP implementation. If production
+ * ever drifts (algorithm, digit count, period), tests fail on the same
+ * commit instead of silently passing against a stale reference impl.
+ *
+ * @param {string} secret - Base32 TOTP secret returned by `/mfa/enroll`.
+ * @param {number} [offsetSteps=0] - Optional step offset for clock-skew tests.
+ * @returns {string} 6-digit code.
+ */
+export function generateTotpCode(secret, offsetSteps = 0) {
+  return _internalGenerateTotpCode(secret, offsetSteps);
+}
+
 // ─── JWT helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -119,6 +140,18 @@ const RESET_TABLES = [
   "runs",
   "tests",
   "oauth_ids",
+  // SEC-007: clear the compliance audit-log DLQ + SIEM config between test
+  // files so DLQ-N counter restarts don't collide with rows persisted by an
+  // earlier test file (the `counters` table is reset below but the data
+  // tables aren't — leading to `UNIQUE constraint failed: audit_dlq.id`).
+  "audit_dlq",
+  "workspace_siem_config",
+  // SEC-004: webauthn_credentials cascade-deletes via FK ON DELETE CASCADE
+  // from users, but list it explicitly to match the established pattern —
+  // every entity table is reset by name so test isolation doesn't depend
+  // on FK behaviour that could be altered (or temporarily disabled by
+  // `PRAGMA foreign_keys = OFF`) in a future test setup change.
+  "webauthn_credentials",
   "projects",
   "workspace_members",
   "workspaces",
@@ -140,6 +173,26 @@ export function resetDb(extraTables = []) {
     try { db.exec(`DELETE FROM ${table}`); } catch { /* table may not exist */ }
   }
   db.exec("UPDATE counters SET value = 0");
+  // SEC-007: re-seed the system sentinel user + workspace that migration
+  // 033 installs at startup. `resetDb` wipes the entire `workspaces` and
+  // `users` tables, but production code (`auth.login.failed` for unknown
+  // emails) assumes the `__system__` row exists — otherwise the FK on
+  // `activities.workspaceId` fires and the route 500s instead of 401.
+  // This mirrors the migration's INSERT OR IGNORE so the contract holds
+  // for every test file. Matches the `INSERT OR IGNORE INTO counters`
+  // re-seed pattern used elsewhere in the migration suite.
+  try {
+    db.prepare(
+      `INSERT OR IGNORE INTO users (id, name, email, passwordHash, role, createdAt, updatedAt)
+       VALUES ('__system__', 'System', '__system__@__system__.invalid', NULL, 'system',
+               '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    db.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, name, slug, ownerId, createdAt, updatedAt)
+       VALUES ('__system__', 'System (auto-managed)', '__system__', '__system__',
+               '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+  } catch { /* tables may not exist on legacy/partial schemas */ }
 }
 
 // ─── Environment helpers ──────────────────────────────────────────────────────
@@ -334,6 +387,7 @@ export function createTestContext() {
     parseCookies,
     buildCookieHeader,
     decodeJwtPayload,
+    generateTotpCode,
     resetDb,
     setupEnv,
     createTestRunner,

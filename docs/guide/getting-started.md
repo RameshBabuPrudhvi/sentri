@@ -296,3 +296,20 @@ The `/api/v1/system` response includes `activeProvider`, `redis`, `postgres`, an
 - [Environment Variables](/guide/env-vars) — full reference for all backend + frontend env vars
 - [Docker Deployment](/guide/docker) — production Docker setup
 - [Production Checklist](/guide/production) — what to harden before exposing Sentri to a team
+
+
+## Distributed runner (AUTO-008)
+
+When Redis is configured, you can scale run workers independently from the web container:
+
+```bash
+docker compose --profile redis --profile postgres up -d --scale worker=4
+```
+
+Required env vars (set in `backend/.env` so both `backend` and `worker` containers pick them up):
+
+- `REDIS_URL=redis://redis:6379` — **must be set on the `backend` service too**, otherwise jobs are executed in-process and the worker replicas sit idle.
+- `DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri` — workers must share the backend's database. SQLite cannot be shared across containers, so distributed mode requires PostgreSQL.
+- `WORKER_CONCURRENCY=2` — per worker container.
+
+Without Redis (or without worker replicas), Sentri automatically degrades to single-process mode.

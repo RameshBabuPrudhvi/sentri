@@ -40,6 +40,17 @@ const TIMEOUT_LONG    = 300_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
+function toQuery(obj = {}) {
+  const params = new URLSearchParams();
+  for (const [k,v] of Object.entries(obj)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((item) => params.append(k, String(item)));
+    else params.set(k, String(v));
+  }
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
 /**
  * Handle a 401 Unauthorized response by clearing the stored user profile
  * and redirecting to the login page.
@@ -119,7 +130,16 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
     error.status = res.status;
     throw error;
   }
-  return parseJsonResponse(res);
+  const data = await parseJsonResponse(res);
+  // SEC-004: opt-in raw response (data + headers) so callers can read custom
+  // response headers like `X-MFA-Grace-Period-Days-Remaining`. Default return
+  // shape is unchanged so the existing ~50 callers keep working.
+  if (opts.returnRaw) {
+    const headers = {};
+    res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+    return { data, headers };
+  }
+  return data;
 }
 
 /**
@@ -407,6 +427,36 @@ export const api = {
    */
   recordAddAssertion: (projectId, sessionId, action) =>
     req("POST", `/projects/${projectId}/record/${sessionId}/assertion`, action),
+  recordPause: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pause`, {}),
+  recordResume: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/resume`, {}),
+  recordPopLast: (projectId, sessionId) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/pop-last`, {}),
+  /**
+   * DIF-015c Gap 5 — switch the active device profile mid-recording.
+   * The server tears down the current page+context and rebuilds them at
+   * the new descriptor. Captured `actions[]` survive; page state does not.
+   * Returns `{ device, viewport: {width, height}, url }` so the caller
+   * can resize the canvas and reconcile its viewport state.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {string} device - One of `DEVICE_PRESETS[].value` (empty string = desktop default).
+   */
+  recordSwitchDevice: (projectId, sessionId, device) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/device`, { device }),
+  /**
+   * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
+   * resolves the `{selector, label, rect}` for an arbitrary viewport
+   * coordinate. Used by `LiveBrowserView` in assert-mode to highlight the
+   * hovered element and pre-fill the verification form on click. Returns
+   * `{ probe: null }` when no interactive ancestor is found.
+   * @param {string} projectId
+   * @param {string} sessionId
+   * @param {{x: number, y: number}} point - Viewport coordinates (scaled).
+   */
+  recordProbe: (projectId, sessionId, point) =>
+    req("POST", `/projects/${projectId}/record/${sessionId}/probe`, point),
 
   // ── Runs ────────────────────────────────────────────────────────────────────
   /** @param {string} id - Project ID. Returns runs sorted newest-first. */
@@ -725,7 +775,13 @@ export const api = {
    * @param {{ email: string, password: string }} body
    * @returns {Promise<Object>}
    */
-  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /**
+   * Log in. Uses `returnRaw` so the caller can read the
+   * `X-MFA-Grace-Period-Days-Remaining` header set by the backend when the
+   * workspace requires MFA but the user is still within grace.
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
+   */
+  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
   /**
    * Register a new account.
    * @param {{ name: string, email: string, password: string }} body
@@ -753,11 +809,18 @@ export const api = {
   verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Exchange an OAuth authorization code for a session.
+   *
+   * SEC-004: returns `{ data, headers }` via `returnRaw` so the caller can
+   * read the `X-MFA-Grace-Period-Days-Remaining` header the backend sets on
+   * a successful OAuth callback when the user's workspace requires MFA but
+   * they're still inside the grace window. Without this, the post-grace
+   * banner only fires for password-login users, not OAuth users.
+   *
    * @param {string} provider - `"github"` or `"google"`.
    * @param {string} code     - Authorization code from the OAuth redirect.
-   * @returns {Promise<Object>}
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
    */
-  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
 
   // ── Email verification (SEC-001) ──────────────────────────────────────────────
   /**
@@ -766,6 +829,173 @@ export const api = {
    * @returns {Promise<{message: string}>}
    */
   resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
+
+  // ── MFA / TOTP (SEC-004) ────────────────────────────────────────────────────
+  /**
+   * Submit a 6-digit TOTP or recovery code during the login challenge.
+   * Public — authenticated by the `pendingToken` from `/auth/login`.
+   * @param {string} pendingToken
+   * @param {string} token - 6-digit TOTP code OR an 8-char recovery code.
+   */
+  mfaVerify: (pendingToken, token) => req("POST", "/auth/mfa/verify", { pendingToken, token }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /** @returns {Promise<{enabled: boolean}>} */
+  mfaStatus: () => req("GET", "/auth/mfa/status"),
+  /**
+   * Aggregate view of every second factor — TOTP, recovery count, passkeys.
+   * @returns {Promise<{totp: boolean, recoveryCodesRemaining: number, webauthn: Array<{id: string, deviceName: string|null, transports: string[], createdAt: string, lastUsedAt: string|null}>}>}
+   */
+  mfaFactors: () => req("GET", "/auth/mfa/factors"),
+  /**
+   * Begin TOTP enrollment — returns the otpauth URL for QR rendering.
+   * @returns {Promise<{secret: string, otpauth: string}>}
+   */
+  mfaEnroll: () => req("POST", "/auth/mfa/enroll"),
+  /**
+   * Finalize TOTP enrollment by verifying the user's first code.
+   * @param {string} token
+   * @returns {Promise<{ok: boolean, recoveryCodes: string[]}>}
+   */
+  mfaEnable: (token) => req("POST", "/auth/mfa/enable", { token }),
+  /**
+   * Disable MFA. Clears TOTP secret + recovery codes. Password required for
+   * non-OAuth-only users (OAuth-only authenticates by session).
+   * @param {string} [password]
+   */
+  mfaDisable: (password) => req("POST", "/auth/mfa/disable", { password }),
+  /**
+   * Regenerate the set of one-time recovery codes. Invalidates the previous
+   * set. Returns the raw codes (shown once — save immediately).
+   * @param {string} [password]
+   * @returns {Promise<{recoveryCodes: string[]}>}
+   */
+  mfaRegenerateRecoveryCodes: (password) =>
+    req("POST", "/auth/mfa/recovery-codes/regenerate", { password }),
+
+  // ── WebAuthn / passkeys (SEC-004) ───────────────────────────────────────────
+  /**
+   * Begin passkey registration — returns options for `startRegistration()`
+   * from `@simplewebauthn/browser` plus a challengeToken for verify.
+   * @returns {Promise<{options: Object, challengeToken: string}>}
+   */
+  webauthnRegisterOptions: () => req("POST", "/auth/webauthn/register/options"),
+  /**
+   * Submit the browser's attestation to finalise passkey registration.
+   * @param {string} challengeToken
+   * @param {Object} attestation - The browser's `PublicKeyCredential` shape.
+   * @param {string} [deviceName] - User-supplied label.
+   */
+  webauthnRegisterVerify: (challengeToken, attestation, deviceName) =>
+    req("POST", "/auth/webauthn/register/verify", { challengeToken, attestation, deviceName }),
+  /**
+   * Begin passkey authentication during the login challenge. Returns options
+   * for `startAuthentication()`. Public — uses the `pendingToken` from `/login`.
+   * @param {string} pendingToken
+   * @returns {Promise<{options: Object, challengeToken: string}>}
+   */
+  webauthnAuthOptions: (pendingToken) =>
+    req("POST", "/auth/webauthn/authenticate/options", { pendingToken }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /**
+   * Submit the browser's assertion to complete passkey authentication.
+   * On success the auth cookie is set with `amr: ["pwd","mfa"]`.
+   * @param {string} challengeToken
+   * @param {Object} assertion - The browser's `PublicKeyCredential` shape.
+   */
+  webauthnAuthVerify: (challengeToken, assertion) =>
+    req("POST", "/auth/webauthn/authenticate/verify", { challengeToken, assertion }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /** @returns {Promise<{credentials: Array<{id: string, deviceName: string|null, transports: string[], createdAt: string, lastUsedAt: string|null}>}>} */
+  webauthnListCredentials: () => req("GET", "/auth/webauthn/credentials"),
+  /**
+   * Remove a passkey. Password required for non-OAuth-only users. Rejects
+   * with 400 `MFA_LAST_FACTOR_PROTECTED` when removing it would lock the
+   * user out under workspace MFA enforcement.
+   * @param {string} id
+   * @param {string} [password]
+   */
+  webauthnDeleteCredential: (id, password) =>
+    req("DELETE", `/auth/webauthn/credentials/${id}`, { password }),
+
+  // ── Workspace MFA compliance (SEC-004, admin) ──────────────────────────────
+  /**
+   * Admin-only — preview enrollment status before flipping the enforcement
+   * toggle.
+   * @returns {Promise<{totalMembers: number, enrolled: number, notEnrolled: number, members: Array<{userId: string, name: string, email: string, role: string, mfaEnabled: boolean}>}>}
+   */
+  getWorkspaceMfaCompliance: () => req("GET", "/workspaces/current/mfa-compliance"),
+  /**
+   * SEC-007: workspace-scoped audit log with cursor pagination.
+   * @param {string} workspaceId — Must match the authenticated workspace; the
+   *   backend returns 403 `AUDIT_WORKSPACE_MISMATCH` on mismatch.
+   * @param {{ userId?: string, type?: string|string[], dateFrom?: string, dateTo?: string, ipAddress?: string, cursor?: string, limit?: number }} [filters]
+   * @returns {Promise<{ rows: Object[], nextCursor: string|null }>}
+   */
+  getWorkspaceAuditLog: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery(filters)}`),
+  /**
+   * Trigger a CSV or NDJSON export of the current page of audit-log rows.
+   * Same filter shape as `getWorkspaceAuditLog`. The backend sets
+   * `Content-Disposition: attachment` so callers can either
+   * `window.location.assign` the URL or stream via fetch + Blob.
+   * @param {string} workspaceId
+   * @param {Object} [filters]
+   * @param {"csv"|"ndjson"} [format="csv"]
+   */
+  exportWorkspaceAuditLog: (workspaceId, filters = {}, format = "csv") => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery({ ...filters, format })}`),
+  /**
+   * Verify the audit-log hash chain for the current workspace. Returns
+   * `{ verified: true, chainDisabled: true }` when `AUDIT_HASH_CHAIN` is
+   * unset on the server.
+   * @returns {Promise<{ verified: boolean, chainDisabled?: boolean, total?: number, firstBrokenRowId?: string }>}
+   */
+  verifyAuditChain: () => req("GET", "/audit/verify"),
+  /**
+   * SEC-007: list deployment-wide security events (workspaceId =
+   * SYSTEM_WORKSPACE_ID sentinel). Surfaces rows that have no resolvable
+   * tenant — chiefly `auth.login.failed` against unknown emails. Admin-only,
+   * cross-tenant by design.
+   * @param {{ type?: string, after?: string, before?: string, limit?: number, offset?: number }} [filters]
+   * @returns {Promise<{ rows: Object[], count: number }>}
+   */
+  getSystemSecurityEvents: (filters = {}) => req("GET", `/system/security-events${toQuery(filters)}`),
+  /**
+   * SEC-007: list SIEM dead-letter queue entries for the workspace. Used by
+   * the AuditLog DLQ inspector to render the "N retry-failed" badge and the
+   * per-row replay actions.
+   * @param {string} workspaceId
+   * @param {{ limit?: number }} [filters]
+   * @returns {Promise<{ rows: Array<{id: string, workspaceId: string, rowSnapshot: Object|null, lastError: string, attempts: number, createdAt: string}>, count: number }>}
+   */
+  listAuditDlq: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log/dlq${toQuery(filters)}`),
+  /**
+   * Re-dispatch a DLQ entry against the SIEM forwarder. Returns
+   * `503 SIEM_NOT_CONFIGURED` when no SIEM target is configured for
+   * the workspace.
+   * @param {string} workspaceId
+   * @param {string} dlqId
+   * @returns {Promise<{ ok: boolean, id: string, replayedAt: string }>}
+   */
+  replayAuditDlq: (workspaceId, dlqId) => req("POST", `/workspaces/${workspaceId}/audit-log/dlq/${dlqId}/replay`),
+  /**
+   * SEC-007 Part C: read the per-workspace SIEM forwarder config.
+   * Server returns the masked `hmacSecret` (`••••••••<last4>`) so admins
+   * can confirm which secret is configured without exposing it.
+   * @param {string} workspaceId
+   * @returns {Promise<{ config: { workspaceId: string, targetUrl: string, hmacSecret: string, headers: Object|null, enabled: boolean, createdAt: string, updatedAt: string } | null }>}
+   */
+  getWorkspaceSiemConfig: (workspaceId) => req("GET", `/workspaces/${workspaceId}/siem-config`),
+  /**
+   * SEC-007 Part C: upsert the per-workspace SIEM forwarder config.
+   * The plaintext `hmacSecret` is sent on every save (the server encrypts
+   * it at rest); subsequent reads only return the masked form.
+   * @param {string} workspaceId
+   * @param {{ targetUrl: string, hmacSecret: string, headers?: Object|null, enabled?: boolean }} config
+   */
+  upsertWorkspaceSiemConfig: (workspaceId, config) => req("PUT", `/workspaces/${workspaceId}/siem-config`, config),
+  /**
+   * SEC-007 Part C: delete the per-workspace SIEM forwarder config.
+   * Idempotent — `removed: false` when no config existed.
+   * @param {string} workspaceId
+   * @returns {Promise<{ ok: boolean, removed: boolean }>}
+   */
+  deleteWorkspaceSiemConfig: (workspaceId) => req("DELETE", `/workspaces/${workspaceId}/siem-config`),
 
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**

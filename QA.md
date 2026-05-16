@@ -399,6 +399,73 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🔒 Multi-factor authentication (SEC-004)
+
+**Preconditions:** Workspace exists; User A (admin) logged in with a verified email + password.
+
+**Surfaces covered:** Settings → Security tab, login factor picker, admin workspace enforcement panel, grace-period banner, post-grace `MFA_ENROLLMENT_REQUIRED` panel. Backend endpoints documented in `backend/src/middleware/permissions.json` under the SEC-004 entries.
+
+**A. TOTP enrollment + login**
+
+1. Sign in as User A → **Settings → Security** → click **Enable TOTP**.
+2. Scan the QR with Google Authenticator / 1Password / Authy (or copy the base32 secret manually). Enter the 6-digit code → click **Verify & enable**.
+3. **Recovery codes panel** appears with 8 hex codes. Click **Download .txt** → file downloads. Click **Copy** → clipboard receives the newline-joined list. Tick **I've saved them** → **Done** dismisses the panel; codes never re-appear.
+4. **Status reflects enrollment** — the Security panel now reads "Enabled · 8 recovery codes remaining".
+5. **Re-enroll guard** — click **Enable TOTP** again on the same account → the request returns 409 with "MFA is already enabled. Disable it first to re-enroll." (no silent overwrite of the existing secret).
+6. **Login with TOTP** — sign out → sign in with email/password → factor-picker modal opens with **Authenticator** tab active. Enter the current TOTP code → land on dashboard.
+7. **JWT `amr` claim** — DevTools → Application → Cookies → copy `access_token` → decode the payload (base64url) → `amr` should be `["pwd","mfa"]` (NOT `["pwd"]` alone).
+
+**B. Recovery-code login + regeneration**
+
+8. Sign out → sign in → on the factor picker, switch to **Recovery code** → paste one of the codes you saved → land on dashboard.
+9. **Single-use enforcement** — sign out, sign back in, attempt the same recovery code → 400 "Invalid authentication code." Switch to **Authenticator** → enter TOTP → succeeds.
+10. **Settings → Security** → recovery counter now reads "7 remaining" (one consumed).
+11. Click **Regenerate codes** → password modal opens → enter wrong password → 403. Enter correct password → fresh 8 codes appear, all different from the previous set.
+12. Sign out → attempt one of the OLD recovery codes at the factor picker → 400 (invalidated by the regenerate).
+13. New codes work for one login each.
+
+**C. Passkey enrollment + login (optional — requires platform authenticator or hardware key)**
+
+14. Settings → Security → **Add passkey** → browser prompt fires (Touch ID / Windows Hello / YubiKey). Complete the platform challenge → prompt asks for a device name → enter "Test passkey".
+15. The Passkeys list shows the new credential with name, added timestamp.
+16. **Login with passkey** — sign out → sign in → factor picker now shows a **Passkey** tab (active by default since it's the strongest factor) → click **Use passkey** → platform prompt → succeed → land on dashboard.
+17. JWT `amr` is still `["pwd","mfa"]` after passkey login.
+18. **Remove passkey** — Settings → Security → per-row **Remove** → password modal → succeeds; passkey gone from list and DB.
+19. **Cross-user isolation** — register User B, register a passkey on User B → sign in as User A → using DevTools, send `DELETE /api/v1/auth/webauthn/credentials/<User B's credential id>` with User A's cookie + password → response 404 (NOT 200). User B's credential survives.
+
+**D. Disable MFA**
+
+20. Settings → Security → **Disable** → password modal → wrong password → 403. Correct password → succeeds.
+21. Status panel returns to "Not enrolled"; recovery counter shows 0; subsequent login no longer prompts for MFA.
+
+**E. Per-workspace enforcement (admin)**
+
+22. As User A (admin), Settings → Security → scroll to **Workspace enforcement** card → verify the **Current enrollment** preview (`N of M members have MFA enabled`). The count includes members with **either** TOTP **or** a registered passkey — passkey-only users are counted as enrolled.
+23. Tick **Require MFA for all workspace members** → set **Grace period (days)** to 7 → click **Save policy** → toast "Workspace MFA policy updated".
+24. Sign out → sign in as User B (no MFA enrolled, just joined the workspace) → login succeeds + the post-login dashboard shows a yellow **"Multi-factor authentication required — N days remaining"** banner with a **Set up now** button that deep-links to `/settings?tab=security`.
+25. Sign in as User A → admin panel **Set policy → 0** (no grace) → save.
+26. Sign out → attempt to sign in as User B again → 403 `MFA_ENROLLMENT_REQUIRED` panel renders showing the workspace name and "Contact a workspace administrator". No auth cookie set, no dashboard access.
+27. Have User B enroll TOTP through a workaround (admin temporarily turns off enforcement, B enrolls, admin re-enables). Sign in as User B → no banner, no block.
+
+**F. Audit logging**
+
+28. Open **Activity log** as admin → confirm rows exist for: `auth.mfa.enroll_started`, `auth.mfa.enabled`, `auth.mfa.disabled`, `auth.mfa.login_verified`, `auth.mfa.recovery_code_consumed`, `auth.mfa.recovery_codes_regenerated`, `workspace.mfa_policy_changed`, `auth.mfa.enrollment_required`. Each row carries `userId` + `userName` + `meta` (e.g. `{ method: "totp" }`, `{ remaining: 6 }`).
+
+**Negative / edge:**
+
+- **TOTP clock skew** — generate a code with a phone clock 30s ahead of server → still accepted (default `MFA_TOTP_WINDOW=1` allows ±30s).
+- **Wrong TOTP at login** → 400; after 5 attempts in 15 min the IP is rate-limited (429 with `Retry-After`). Verify by hammering.
+- **Pending-token single use** — copy the `pendingToken` from a successful `/login` response, use it once at `/mfa/verify`, then replay → 401 "MFA session expired".
+- **CSRF exempt on /mfa/verify** — request succeeds without an `X-CSRF-Token` header (pre-auth, no cookie yet). All other MFA endpoints (`/enroll`, `/enable`, `/disable`, etc.) still require CSRF.
+- **OAuth-only user** — register via GitHub/Google → Settings → Security → destructive actions (Disable, Regenerate, Remove passkey) skip the password modal automatically (the OAuth session itself proves identity).
+- **OAuth login enforcement** — workspace requires MFA past grace + OAuth-only user with no MFA → GitHub/Google callback returns 403 `MFA_ENROLLMENT_REQUIRED` (no auth cookie set).
+- **Last-factor lockout guard** — user with only one passkey + workspace enforcement past grace → attempting to delete that passkey via `DELETE /webauthn/credentials/:id` returns 400 `MFA_LAST_FACTOR_PROTECTED`. Enrolling TOTP first then deleting the passkey succeeds.
+- **`@simplewebauthn/server` omitted** — self-hosters who install with `npm install --omit=optional` → all `/auth/webauthn/*` endpoints return 503 `WEBAUTHN_UNAVAILABLE`; the rest of MFA (TOTP, recovery codes, enforcement) continues to work.
+- **Viewer role** — viewer can manage their own MFA factors but cannot see / change the **Workspace enforcement** panel (admin-only client-side gate + server-side `requireRole("admin")` on `PATCH /workspaces/current` and `GET /workspaces/current/mfa-compliance`).
+- **Grace banner dismissal** — clicking the X on the banner suppresses it for the current session only (`sessionStorage`); next sign-in shows it again until the user actually enrolls. Enrolling TOTP or a passkey clears the banner on the next window-focus event.
+
+---
+
 ### 👥 Workspaces
 
 **Preconditions:** User A logged in.
@@ -526,6 +593,56 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 - **Rate limiting** — the `/input` route is exempt from the global rate limiter (`backend/src/middleware/appSetup.js`) because canvas events arrive at ~60 fps during active use. The exemption is scoped to `POST` requests matching `/record/:sessionId/input` only; `/record` and `/record/:sessionId/stop` are still rate-limited.
 - **Assertion validation** — `POST /record/:sessionId/assertion` rejects payloads with invalid `kind` (anything other than `assertVisible` / `assertText` / `assertValue` / `assertUrl`) with 400. Missing `selector` for non-`assertUrl` kinds → 400. Missing `value` for `assertText` / `assertValue` / `assertUrl` → 400. Verify each branch returns a clear error message.
 - **Step prose contract** — the persisted `steps[]` array must NEVER leak raw `role=…[name="…"]` selectors, `#id` CSS, or `.class` selectors into the rendered step. The fallback chain (`label` → role-selector name extraction → empty target phrase) at `backend/src/runner/recorder.js:440-489` is property-tested at `backend/tests/recorder.test.js` (`never leaks raw role=…[name="…"] or CSS selectors into the rendered step`).
+
+**DIF-015c — Recorder gaps (this PR):**
+
+- **Gap 2 — point-and-click assert UX** (`POST /api/v1/projects/:id/record/:sessionId/probe`, `RecorderModal.jsx`):
+  1. Start a recording. In the right sidebar, click **🎯 Pick element by clicking** — the button label flips to "✓ Pick mode active — click an element on the canvas" and the canvas swaps to a crosshair cursor with the "ASSERT MODE — CLICK TO PICK" badge in the top-right.
+  2. Hover any interactive element (button, input, link) on the canvas → a blue outline appears around the hovered element within ~120 ms (the debounced probe round-trip). The outline tracks the cursor smoothly via an 80 ms CSS transition.
+  3. Click the element → the verification form's **Selector** + **friendly label** fields pre-fill from the probe response, and assert mode exits automatically. Pick the verification kind from the dropdown and click **Add verification step** — the assertion is appended to `session.actions` without a manual selector paste (NEXT.md `:51` acceptance).
+  4. Toggle pick mode on, then off without clicking — the overlay clears and the canvas returns to drive mode (clicks navigate the page again). No stale highlight rect persists.
+  5. **Edge:** hover over the page background (no interactive ancestor) → the outline drops (the probe returns `null`). A click in this region is a no-op rather than a malformed pick.
+
+- **Gap 2 — new assertion kinds** (`assertCount`, `assertHasClass`, `POST /record/:sessionId/assertion`):
+  6. In the verification form, pick **Element count equals** → an integer input appears. Enter `3`, paste a selector, click **Add verification step** → the captured step renders as `There are 3 matching '<label>'` in the sidebar; the generated playwrightCode emits `await expect(<actor>.locator('<sel>')).toHaveCount(3)`.
+  7. Same flow with **Element has class** + value `is-loading` → step text reads `The '<label>' has the 'is-loading' class`; generated code emits `await expect(<actor>.locator('<sel>')).toHaveClass(new RegExp('(^|\\s)is-loading(\\s|$)'))` (word-boundary regex so multi-class attributes match correctly).
+  8. **Negative:** enter a non-integer count (`1.5`, `-1`, `abc`) → the frontend shows "Count must be a non-negative integer." inline before the request fires. Empty count value → "Value is required for this verification."
+
+- **Gap 3 — pause / resume / undo** (`POST /record/:sessionId/{pause,resume,pop-last}`):
+  9. Recording an interactive site, click **Pause capture** → the button label flips to **Resume capture**. Continue clicking and typing on the canvas → no new steps appear in the sidebar. Click **Resume capture** → subsequent clicks resume appending.
+  10. While paused, verify that programmatic page activity (toast popping, animations, framework re-renders firing `change` handlers) does NOT leak any actions into the sidebar — pause guards live at four call sites (`forwardInput`, `__sentriRecord` binding, popup `framenavigated`, debounced main-page `framenavigated`).
+  11. Click **Undo last step** → the most recent action disappears from the sidebar (optimistic update) and the `actionCount` from the server response matches.
+  12. Click **Undo last step** repeatedly until the action list is empty → the button stays clickable (the route is idempotent — returns `{ removed: null, actionCount: 0 }` rather than 4xx).
+  13. **Buttons are disabled during the `stopping` phase** so the operator can't race the server-side teardown (a pause request after Stop & Save would otherwise surface a 404 banner).
+
+- **Gap 5 — device profile at launch + mid-session** (`POST /record` with `device`, `POST /record/:sessionId/device`):
+  14. On the idle launch form, pick **iPhone 14** from the Device dropdown → click **Launch recorder**. The canvas opens at 390×844 (not letterboxed inside the desktop 1280×720 default). Pointer coordinates scale correctly — clicks land where the cursor is, not offset.
+  15. The dropdown list **exactly mirrors** `RunRegressionModal`'s dropdown (the curated `DEVICE_PRESETS` list). Add a device server-side → it must appear in both modals.
+  16. While recording, change the Device profile dropdown in the right sidebar to **Pixel 7** → a confirmation modal appears explaining "your N captured step(s) will be preserved, but the page will reload — any open forms, cookies, and scroll position will be lost." Click **Switch device**.
+  17. The canvas resizes to 412×915 (Pixel 7), the recorder navigates back to the URL the operator was on, and `session.actions[]` are preserved across the switch (visible in the sidebar). The "Device profile" dropdown shows the new active value.
+  18. **Selectors regenerate at the new pixel scale** — click a button after the switch; the captured selector reflects the new viewport's coordinate space (NEXT.md `:53` acceptance).
+  19. Cancel the confirmation modal → no state changes (dropdown reverts to the active device).
+  20. **Negative:** select the SAME device that's already active → modal does NOT appear (idempotent; helper returns current viewport without touching the browser).
+  21. **Disabled states:** the dropdown is disabled while the switch is in flight ("Switching device — rebuilding browser context…" hint) and disabled during the `stopping` phase.
+
+- **Permissions (all five new routes):**
+  22. `viewer` attempts `POST /record/:sessionId/{pause,resume,pop-last,device,probe}` → 403.
+  23. Cross-workspace attempt — outsider `qa_lead` POSTs to a sessionId they don't own → 404 (not 403; existence isn't leaked). All five routes call `projectRepo.getByIdInWorkspace` + `sess.projectId !== project.id` upstream.
+
+- **Gap 6 — stealth launch profile** (`POST /record` with `stealth: true`):
+  24. On the idle launch form, tick the **Stealth mode (bypass headless detection)** checkbox → click **Launch recorder**. The recording sidebar shows a green **🥷 Stealth mode active** badge once the recorder is up.
+  25. The launch response includes `"stealth": true` in the body (verify via DevTools Network) and the backend log shows `[recorder] stealth profile enabled for session=REC-…`.
+  26. **Default-off contract** — launch a fresh recorder WITHOUT ticking the box → request body omits `stealth` (or sends `stealth: false`), response carries `stealth: false`, no `[recorder] stealth profile enabled` log line, and no green badge in the sidebar. Pre-Gap-6 default-mode behaviour is bit-for-bit unchanged.
+  27. **Strict-true coercion** — using a custom client, POST `{stealth: "true"}` (string), `{stealth: 1}`, or `{stealth: "yes"}` to `/record` → response carries `stealth: false`. Only the literal JSON boolean `true` opts in.
+  28. **Fingerprint patches verified** — launch a stealth session pointed at a test page that probes the patched surfaces (a small HTML page that renders `JSON.stringify({webdriver: navigator.webdriver, plugins: navigator.plugins.length, languages: navigator.languages, chrome: typeof window.chrome, perms: (await navigator.permissions.query({name:"notifications"})).state})`). The page should show:
+      - `webdriver: undefined` (not `true`)
+      - `plugins: 3` (not `0`)
+      - `languages: ["en-US","en"]` (not `[]`)
+      - `chrome: "object"` (not `"undefined"`)
+      - `perms: "prompt"` (not `"denied"`)
+  29. **Mid-session device switch preserves stealth** — launch with stealth on, switch to Pixel 7 via the mid-session dropdown, then probe the surfaces on the rebuilt page → all five still patched (the `_finishOpenRecorderPage` helper re-applies `STEALTH_SCRIPT` after the context rebuild).
+  30. **Immutability post-launch** — no UI control exists to toggle stealth on/off mid-session. Verify the idle-form checkbox is gone from the recording stage; operators who change their mind must Discard and re-launch.
+  31. **Init failure is non-fatal** — if `STEALTH_SCRIPT` throws at page-init (rare; possible if a future SUT replaces `Object.defineProperty`), the backend log shows `[sentri-stealth] init failed: <err>` but the recording continues. The half-applied profile is operator-visible via the log so they can decide whether to discard.
 
 ---
 
@@ -1471,6 +1588,114 @@ For each surface: open → fill → submit → close behavior.
 
 ---
 
+### 🛡️ Compliance Audit Log (SEC-007)
+
+**Preconditions:** Workspace exists with User A (admin), User B (qa_lead), User C (viewer), and User D (outsider). Backend env starts with defaults (no overrides): `AUDIT_HASH_CHAIN` unset, `DANGER_ALLOW_AUDIT_PURGE=false`, `AUDIT_RETENTION_DAYS=365`, `AUDIT_EXPORT_RATE_LIMIT` unset (defaults to 10). Full operator reference: `docs/guide/compliance.md`.
+
+**Surfaces covered:** `/audit-log` admin page; `GET /api/v1/workspaces/:workspaceId/audit-log` (JSON / CSV / NDJSON); `GET /api/v1/audit/verify`; `GET /api/v1/workspaces/:workspaceId/audit-log/dlq`; `POST .../dlq/:dlqId/replay`; `DELETE /api/v1/data/activities`.
+
+#### A. Admin gate (defense-in-depth)
+
+1. As User C (`viewer`), navigate to `/audit-log` → `<ProtectedRoute requiredRole="admin">` renders a `403 Access Denied` panel; AuditLog never mounts.
+2. As User B (`qa_lead`), `/audit-log` → same 403 panel.
+3. As User A (`admin`), `/audit-log` → page mounts; stats strip, type chips, and feed render.
+4. As User C via DevTools, call `GET /api/v1/workspaces/<your-ws-id>/audit-log` directly → server `requireRole("admin")` returns **403** (not silent empty data).
+
+#### B. Workspace scope (cross-tenant isolation)
+
+5. As User A (admin of WS-1), call `GET /api/v1/workspaces/WS-OTHER/audit-log` via DevTools → **403 `AUDIT_WORKSPACE_MISMATCH`**. The URL param is NOT used for the query; `req.workspaceId` from the JWT is the trust boundary.
+6. Same with `GET /api/v1/workspaces/WS-OTHER/audit-log/dlq` → **403** with same code.
+7. As User D (outsider, no membership row), `GET /api/v1/workspaces/<any-id>/audit-log` → **403** from `workspaceScope` middleware (no workspace context).
+
+#### C. Auth events captured with IP + UA (SOC 2 CC6.1)
+
+8. In Chrome DevTools → Sensors, set a custom User-Agent like `qa-test-ua/1.0`. Sign in fresh as User B.
+9. As User A on `/audit-log`, filter chip **Auth** → the most recent `auth.login` row for User B is visible.
+10. Hover the actor name → tooltip surfaces `<client-IP> · qa-test-ua/1.0` (both fields populated).
+11. Trigger each event via the UI and verify the row appears with IP + UA in the actor tooltip:
+    - **`auth.login.failed`** — sign out, sign in with wrong password
+    - **`auth.logout`** — sign out via `/logout`
+    - **`auth.password.reset`** — request reset, complete via token
+    - **`auth.role.change`** — as User A, demote User B → meta has `{from, to, changedBy}`
+    - **`auth.api_key.create`** — Settings → save an AI provider key. **Verify the raw key value NEVER appears** in the activity row meta or detail (grep its content).
+    - **`auth.api_key.revoke`** — Settings → delete the provider key
+    - **`auth.session.revoke`** — Settings → MFA → Disable MFA → emits row with `meta.reason: "mfa.disabled"`
+12. Automated regression coverage: `backend/tests/audit-auth-events.test.js`.
+
+#### D. Meta-audit (PCI-DSS 10.2.6, SOC 2 CC7.2)
+
+13. As User A on `/audit-log`, find a recent `audit.read` row → its meta panel shows the filter shape of an earlier admin view (`format`, `filters`, `rowCount`).
+14. Click **Export CSV** → file downloads → reload `/audit-log` → a new `audit.export` row appears with `meta.format: "csv"` and the row count.
+15. Click **Export NDJSON** → file downloads with `Content-Type: application/x-ndjson` and `Content-Disposition: attachment; filename="sentri-audit-log-YYYY-MM-DD.ndjson"` → corresponding `audit.export` row with `meta.format: "ndjson"`.
+16. **Bulk exfil scenario** — script 12 CSV downloads via DevTools `fetch` → after the 10th, requests return **429 `AUDIT_EXPORT_RATE_LIMITED`**. The first 10 each fire one `audit.export` row (fully traceable).
+17. JSON browsing (no `?format=`) does NOT count toward the limit — verify by loading `/audit-log` 11 times → no 429.
+
+#### E. Cursor pagination
+
+18. Trigger ≥ 200 activity events. Open `/audit-log` → first page loads up to `PAGE_SIZE=50` rows.
+19. Click **Load more** → next 50 rows append; no duplicates, no skipped rows. Verify every `createdAt` is strictly less than the prior page's tail timestamp.
+20. While "Load more" is visible, push a new activity row from another tab (e.g. approve a test as User B) → click Load more → the new row does NOT shift the page window. The cursor anchors stably under concurrent writes.
+21. Filter chip changes (Auth / Approvals / Other / project dropdown) reset the cursor and refetch atomically — rows replace, not append.
+
+#### F. Hash chain (opt-in tamper evidence)
+
+22. **Chain disabled (default)** — click **Verify chain** → banner: "Hash chain is disabled on this server (set `AUDIT_HASH_CHAIN=true` to enable tamper-evidence)."
+23. Restart backend with `AUDIT_HASH_CHAIN=true`. Trigger 5 fresh activities.
+24. Click **Verify chain** → banner: `✓ Chain verified · N rows`.
+25. **Tamper test** — stop backend, `UPDATE activities SET detail = 'tampered' WHERE id = '<recent ACT-N>'` via SQLite CLI, restart.
+26. Click **Verify chain** → banner flips to `✗ Chain broken at row ACT-<tampered-id> (N rows scanned)` in red.
+27. **Concurrency** — fire 10 parallel test approvals with chain mode on → all rows persist with valid `prevHash` (Verify Chain → still green). Transactional INSERT prevents siblings chaining off the same predecessor.
+
+#### G. Retention sweep + boot validation (SOC 2 CC7.2)
+
+28. Set `AUDIT_RETENTION_DAYS=50` → restart → boot fails with error including `below the SOC 2 / ISO 27001 minimum of 90 days`.
+29. Set `AUDIT_RETENTION_DAYS=abc` → boot fails with "must be a non-negative integer".
+30. Set `AUDIT_RETENTION_DAYS=-1` → boot fails (same message).
+31. Set `AUDIT_RETENTION_DAYS=0` → boot succeeds; backend log: `audit retention armed`. The sweep is armed but never deletes.
+32. Set `AUDIT_RETENTION_DAYS=90`. Seed an old row via CLI: `INSERT INTO activities(id, type, createdAt, workspaceId) VALUES ('ACT-OLD', 'test.create', datetime('now', '-100 days'), '<WS>')`.
+33. Wait for 03:30 UTC cron tick, or call `purgeOlderThan(90)` via Node REPL → log: `[scheduler] Audit retention sweep deleted 1 row(s) older than 90 days`.
+34. Fresh rows (< 90 days) survive.
+
+#### H. Immutability gate (`DANGER_ALLOW_AUDIT_PURGE`)
+
+35. **Default** — as User A, System page → **Clear activity log** → `DELETE /api/v1/data/activities` returns **403 `AUDIT_PURGE_DISABLED`**.
+36. Activity log unchanged; no rows deleted.
+37. **Incident-response path** — set `DANGER_ALLOW_AUDIT_PURGE=true` → restart → repeat the delete → succeeds with `200 { ok: true, cleared: N }`. Workspace's `activities` rows emptied.
+38. **Always revert the env to `false` immediately after the incident**.
+
+#### I. SIEM dead-letter queue (pre-Part-C state)
+
+39. Click **DLQ (0)** in `/audit-log` header → empty inspector with "No failed dispatches."
+40. Simulate a stuck DLQ row via SQLite CLI: `INSERT INTO audit_dlq(id, workspaceId, rowSnapshot, lastError, attempts, createdAt) VALUES ('DLQ-1', '<WS-id>', '{"id":"ACT-1","type":"test.create"}', 'siem upstream 500', 1, datetime('now'))`.
+41. Reload `/audit-log` → header reads **DLQ (1)** → click → row listed with columns `id`, `createdAt`, `attempts`, `lastError`, **Replay** button.
+42. Click **Replay** → `POST .../dlq/DLQ-1/replay` returns **503 `SIEM_NOT_CONFIGURED`**. UI surfaces this as an info notification: "SIEM forwarding isn't configured on this server yet (Part C)." Row stays in the DLQ.
+43. **Permissions** — as User C (`viewer`), call the DLQ list endpoint → 403. Replay endpoint → 403.
+44. **Cross-workspace replay** — manually POST to `.../workspaces/<OTHER-WS>/audit-log/dlq/<some-dlq-id>/replay` → 403 `AUDIT_WORKSPACE_MISMATCH`.
+
+#### J. Negative / edge cases
+
+- Empty audit log: `/audit-log` shows empty state (no crash).
+- Unknown DLQ id: `POST .../dlq/DLQ-NOT-FOUND/replay` → 404 `AUDIT_DLQ_NOT_FOUND`.
+- `?limit=99999` → clamped to 1000 server-side (defense-in-depth against memory exhaustion).
+- Chain-mode + retention: rows older than the window are deleted; remaining rows still verify cleanly among themselves, but the chain head moves forward (documented in `docs/guide/compliance.md`).
+- API key value in `auth.api_key.create` row: grep `activities.meta` after key creation — only `provider` is logged, never the raw key.
+- Invalid `cursor` in URL (`?cursor=garbage`) → server treats it as missing and returns the first page.
+
+#### K. Standards mapping reference
+
+| Control verified | SOC 2 | ISO 27001 | PCI-DSS |
+|---|---|---|---|
+| Auth events with IP+UA (§C) | CC6.1 | A.8.16 | 10.2 |
+| Workspace-scope assertion (§B) | CC6.6 | A.5.18 | 7.2 |
+| Anti-exfil export limiter (§D #16) | CC6.7 | A.8.12 | — |
+| Hash chain + verification (§F) | CC7.1 | A.5.36 | 10.5.2 |
+| Retention floor + sweep (§G) | CC7.2 | A.8.15 | 10.5.1 |
+| Immutability gate (§H) | CC7.2 | A.8.15 | 10.5.2 |
+| Meta-audit `audit.read/.export` (§D) | CC7.2 | A.8.15 | **10.2.6** |
+| DLQ + SIEM (§I, Part C) | CC7.2 | A.8.16 | 10.5.4 |
+
+---
+
 ## 📱 Cross-Cutting Checks
 
 Run these against the full browser matrix (Chrome, Firefox, Safari, Edge):
@@ -1609,7 +1834,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, standalone Playwright project export (`DIF-006`), and the embedded Playwright trace viewer (`DIF-005`, verified inline at Golden E2E step 31) **are** shipped and must be tested.
+> **Out of scope (not yet shipped):** public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, standalone Playwright project export (`DIF-006`), the embedded Playwright trace viewer (`DIF-005`, verified inline at Golden E2E step 31), and multi-factor authentication (`SEC-004` — see the Security / MFA section for the manual test plan) **are** shipped and must be tested.
 
 ---
 
@@ -1634,3 +1859,19 @@ A release is QA-approved only when **all** of the following are true:
 - Do NOT mark a flow as passing until **every** expected result is observed.
 
 - Run Detail root cause checks: verify panel appears when `rootCauses.length >= 1`; defaults collapsed for single cluster; auto-expands for 2+ clusters.
+
+
+### 🚚 Distributed Runner (AUTO-008)
+
+1. Start stack with Redis + multiple workers: `docker compose --profile redis up --scale worker=4`.
+2. Trigger a sharded run (`shards: 4`) and confirm queue drains while workers process in parallel.
+3. Stop one worker container during execution; confirm run continues and completes via remaining workers (retry if needed).
+4. Open Dashboard and verify Runner Mode = Distributed with queue depth + active/idle worker metrics.
+5. Disable Redis and confirm Dashboard falls back to Single-process mode without errors.
+
+
+## PII Firewall
+- Create a project and run crawl against content containing email, phone, SSN, card-like numbers, JWT, and `?access_token=` values.
+- Verify run logs include `pipeline.pii_redacted` with non-zero category counts.
+- Verify generated tests do not contain raw secrets/PII values.
+- Set `piiAllowlist` with a known token fragment and verify that fragment is not redacted while others remain redacted.

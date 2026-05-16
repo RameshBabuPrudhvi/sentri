@@ -63,7 +63,15 @@ import { acceptBaseline } from "../runner/visualDiff.js";
 import { SHOTS_DIR, BASELINES_DIR, resolveBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from "../runner/config.js";
 import path from "path";
 import fs from "fs";
-import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions } from "../runner/recorder.js";
+import { startRecording, stopRecording, getRecording, takeCompletedRecording, actionsToPlaywrightCode, forwardInput, recordedActionToStepText, addAssertionAction, filterEmittableActions, pauseRecording, resumeRecording, popLastRecordingAction, switchDevice, probeAtPoint } from "../runner/recorder.js";
+import { DEVICE_PRESETS } from "../runner/config.js";
+/**
+ * DIF-015c Gap 5 — allowlist of device names accepted at the route
+ * layer. Built once at module load from the same `DEVICE_PRESETS` the
+ * `RunRegressionModal` dropdown surfaces, so the recorder's accepted
+ * inputs stay byte-aligned with the rest of the regression suite.
+ */
+const RECORDER_DEVICE_VALUES = new Set(DEVICE_PRESETS.map((d) => d.value));
 import { randomUUID } from "crypto";
 import * as environmentRepo from "../database/repositories/environmentRepo.js";
 import { envScopedProject } from "../utils/envScope.js"; // DIF-012 — shared helper, see module doc.
@@ -1348,6 +1356,26 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     return res.status(400).json({ error: "startUrl must be a valid http(s) URL" });
   }
 
+  // DIF-015c Gap 5: validate the optional device profile UP-FRONT, before
+  // `runRepo.create()` inserts the stub `running` row below. A 400 return
+  // after the row was created would orphan it — the partial unique index
+  // `idx_runs_one_active_per_project` would then block every subsequent
+  // run (crawl, test_run, generate, record) on this project until the next
+  // recorder-launch orphan sweep. Hoist the check alongside `startUrl`
+  // validation so all input rejection happens before any DB side effects.
+  const rawDevice = req.body?.device;
+  const device = rawDevice == null ? "" : String(rawDevice);
+  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
+    return res.status(400).json({ error: `Invalid device: ${device}` });
+  }
+  // DIF-015c Gap 6: optional stealth profile. Coerce to a strict
+  // boolean so a stringy `"true"` payload from a misconfigured client
+  // doesn't accidentally enable stealth (or vice versa). Only the
+  // literal JSON `true` opts in — every other value (false, null,
+  // omitted, "true", 1) leaves stealth off so default-mode runs are
+  // bit-for-bit unchanged.
+  const stealth = req.body?.stealth === true;
+
   const sessionId = `REC-${randomUUID().slice(0, 8)}`;
   // Visible breadcrumb so the operator can see the recorder reaching the
   // backend even when everything is working — useful for debugging the
@@ -1410,7 +1438,9 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
       // session start, for audit consistency with crawl/run/generate paths.
       environmentId: environment?.id || null,
     });
-    await startRecording({ sessionId, projectId: project.id, startUrl });
+    // `device` + `stealth` were validated/coerced BEFORE `runRepo.create()`
+    // above so an invalid payload doesn't orphan a stub `running` row.
+    await startRecording({ sessionId, projectId: project.id, startUrl, device, stealth });
     console.log(formatLogLine("info", null, `[recorder] session=${sessionId} ready — browser launched, screencast attached`));
     logActivity({ ...actor(req),
       type: "test.record_start", projectId: project.id, projectName: project.name,
@@ -1418,11 +1448,24 @@ router.post("/projects/:id/record", requireRole("qa_lead"), expensiveOpLimiter, 
     });
     // Return the server-side viewport so the frontend can scale forwarded
     // pointer coordinates correctly on deployments that override the default
-    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars.
+    // 1280x720 via VIEWPORT_WIDTH / VIEWPORT_HEIGHT env vars, OR — DIF-015c
+    // Gap 5 — when a Playwright device descriptor (e.g. iPhone 14 = 390×844)
+    // overrides the desktop default. Read the resolved viewport off the
+    // session we just created so the canvas sizes correctly on the first
+    // SSE frame.
+    const sess = getRecording(sessionId);
+    const resolvedViewport = sess?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
     res.status(202).json({
       sessionId,
       startUrl,
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      device: sess?.device || "",
+      // DIF-015c Gap 6: surface the resolved stealth flag so the
+      // frontend can reflect the active state in the recording-stage
+      // sidebar (and so an operator who toggled stealth but hit a
+      // server-side error sees an explicit `stealth: false` rather
+      // than guessing from missing UI).
+      stealth: sess?.stealth === true,
+      viewport: resolvedViewport,
     });
   } catch (err) {
     // Roll back the stub row so a failed launch doesn't leave an orphaned
@@ -1703,6 +1746,150 @@ router.post("/projects/:id/record/:sessionId/assertion", requireRole("qa_lead"),
     if (/not found|not recording/i.test(err.message || "")) {
       return res.status(404).json({ error: "recording session not found" });
     }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/pause
+ * Pause action capture for an in-flight recording. The headless browser
+ * stays open and the screencast keeps streaming, but `forwardInput` and
+ * the `__sentriRecord` binding short-circuit while `session.paused` is
+ * true so user clicks/keystrokes during the pause window are not
+ * persisted as recorded actions.
+ */
+router.post("/projects/:id/record/:sessionId/pause", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  try {
+    const result = pauseRecording(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/resume
+ * Resume action capture after a pause. Idempotent — calling resume on a
+ * session that was never paused is a no-op.
+ */
+router.post("/projects/:id/record/:sessionId/resume", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  try {
+    const result = resumeRecording(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/probe
+ * DIF-015c Gap 2 (point-and-click assert UX) — read-only probe that
+ * returns the `{selector, label, rect}` for an arbitrary viewport
+ * coordinate. The frontend uses this to highlight the hovered element
+ * inside `LiveBrowserView` and pre-fill the "Add verification" form on
+ * click, matching how Playwright codegen's inspector behaves. NOT a
+ * mutation — does not record an action; safe to call at hover frequency.
+ *
+ * Returns `{ probe: null }` when no interactive ancestor is found under
+ * the cursor (page background, missing recorder script) so the frontend
+ * can drop the highlight rather than show a stale overlay.
+ */
+router.post("/projects/:id/record/:sessionId/probe", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  const { x, y } = req.body || {};
+  // Reject `null` / `undefined` / missing-key payloads explicitly — `Number(null)`
+  // coerces to 0 (finite), which would otherwise let `{ "x": null, "y": null }`
+  // slip past as a probe at viewport (0, 0). `probeAtPoint` clamps gracefully
+  // downstream, but the operator would see whatever happens to be at the
+  // top-left corner returned as the "hovered" element, which is confusing.
+  if (x == null || y == null || !Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) {
+    return res.status(400).json({ error: "x and y must be finite numbers" });
+  }
+  try {
+    const probe = await probeAtPoint(req.params.sessionId, { x, y });
+    res.json({ probe });
+  } catch (err) {
+    if (/not found|not recording|no active page/i.test(err.message || "")) {
+      return res.status(404).json({ error: "recording session not found" });
+    }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/device
+ * DIF-015c Gap 5 — switch the active device profile mid-recording. The
+ * server tears down the current page + Playwright context, rebuilds them
+ * under the new descriptor against the same browser process, and
+ * restarts the CDP screencast at the new viewport. Captured
+ * `session.actions[]` survive the switch; page state (cookies, form
+ * values) does not. The frontend gates the call behind a confirmation
+ * modal so operators understand the trade-off.
+ */
+router.post("/projects/:id/record/:sessionId/device", requireRole("qa_lead"), async (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  const rawDevice = req.body?.device;
+  const device = rawDevice == null ? "" : String(rawDevice);
+  if (device && !RECORDER_DEVICE_VALUES.has(device)) {
+    return res.status(400).json({ error: `Invalid device: ${device}` });
+  }
+  try {
+    const result = await switchDevice(req.params.sessionId, device);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
+    if (/Invalid device/i.test(err.message || "")) return res.status(400).json({ error: err.message });
+    if (/Device switch failed/i.test(err.message || "")) {
+      console.error(formatLogLine("error", null, `[POST record/${req.params.sessionId}/device] ${err.message}`));
+      return res.status(500).json({ error: "Device switch failed — recorder torn down. Re-launch the recorder to continue." });
+    }
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/v1/projects/:id/record/:sessionId/pop-last
+ * Undo the most recent captured action. Idempotent on an empty
+ * `session.actions[]` — returns `{ removed: null, actionCount: 0 }`
+ * rather than 4xx so the UI can fire the button without first checking
+ * step count.
+ */
+router.post("/projects/:id/record/:sessionId/pop-last", requireRole("qa_lead"), (req, res) => {
+  const project = projectRepo.getByIdInWorkspace(req.params.id, req.workspaceId);
+  if (!project) return res.status(404).json({ error: "project not found" });
+  const sess = getRecording(req.params.sessionId);
+  if (!sess || sess.projectId !== project.id) {
+    return res.status(404).json({ error: "recording session not found" });
+  }
+  try {
+    const result = popLastRecordingAction(req.params.sessionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (/not found|not recording/i.test(err.message || "")) return res.status(404).json({ error: "recording session not found" });
     return res.status(500).json({ error: "Internal server error" });
   }
 });

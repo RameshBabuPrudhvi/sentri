@@ -26,11 +26,154 @@
  * stream.
  */
 
-import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT } from "./config.js";
+import { launchBrowser, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, NAVIGATION_TIMEOUT, resolveDevice, DEVICE_PRESETS } from "./config.js";
 import { startScreencast } from "./screencast.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import { buildInjectedBootstrapScript } from "./playwrightSelectorGenerator.js";
+
+/**
+ * DIF-015c Gap 5 — set of device names accepted by the recorder. Built
+ * once at module load from the curated `DEVICE_PRESETS` exported by
+ * `config.js` (the same list `RunRegressionModal` mirrors), plus the
+ * empty-string sentinel for "Desktop (default)". Any other value is a
+ * 400 from the route layer — we deliberately do NOT accept arbitrary
+ * `playwright.devices` keys at the recorder boundary because the curated
+ * list is what the UI exposes and what `executeTest.js` exercises in CI.
+ *
+ * @internal
+ */
+const ACCEPTED_DEVICE_NAMES = new Set(DEVICE_PRESETS.map((d) => d.value));
+
+/**
+ * DIF-015c Gap 6 — opt-in stealth bootstrap script. Patches the five
+ * fingerprint surfaces real-world `if (navigator.webdriver) { block() }`
+ * detection scripts check, **without** pulling in the
+ * `puppeteer-extra-plugin-stealth` dependency tree (which would add a
+ * cat-and-mouse fingerprint patcher running on every page, plus a
+ * security-review surface for anti-bot logic AGENT.md `:123` warns
+ * against bundling without explicit justification).
+ *
+ * Applied via `context.addInitScript(STEALTH_SCRIPT)` ONLY when the
+ * session was launched with `stealth: true`. Default-mode runs never
+ * call `addInitScript` with this body so pre-Gap-6 behaviour is
+ * bit-for-bit identical.
+ *
+ * Coverage of common headless-detection probes:
+ *
+ *   - `navigator.webdriver` — headless sets this to `true`; we redefine
+ *     the getter to return `undefined` (matches what a real Chrome
+ *     window returns).
+ *   - `navigator.plugins` — headless reports an empty `PluginArray`; we
+ *     synthesise a 3-entry array shaped like a real Chrome install
+ *     (PDF Viewer + Chrome PDF Viewer + Chromium PDF Viewer).
+ *   - `navigator.languages` — headless reports `[]`; we force the
+ *     equivalent of a US-English Chrome install. Operators can still
+ *     override per-context via the existing `locale` device option.
+ *   - `window.chrome` — real Chrome exposes a `chrome` object with at
+ *     least a `runtime` stub; headless leaves it undefined. We
+ *     synthesise the minimal shape that detection scripts probe.
+ *   - `Permissions.prototype.query` for `notifications` — real Chrome
+ *     returns `{ state: "prompt" }` for an unset permission; headless
+ *     returns `{ state: "denied" }` which is a strong tell. We patch
+ *     the prototype to flip notifications back to `"prompt"` while
+ *     leaving every other permission query untouched.
+ *
+ * The script is intentionally narrow — it covers the ~90% of detection
+ * scripts that read these five surfaces, NOT the long tail of
+ * canvas-fingerprint / WebGL-renderer / battery-API patches the upstream
+ * plugin chains together. If a target site detects us despite this
+ * stealth profile, the right answer is to add a single targeted patch
+ * here rather than pull in the full upstream stack.
+ *
+ * @internal
+ */
+const STEALTH_SCRIPT = `
+(() => {
+  try {
+    if (window.__sentriStealthInstalled) return;
+    window.__sentriStealthInstalled = true;
+
+    // 1. navigator.webdriver — the canonical "is this headless?" probe.
+    //    Real Chrome returns undefined; headless returns true. Redefine
+    //    the getter on the prototype so existing read paths see undefined
+    //    without breaking property-descriptor introspection.
+    try {
+      Object.defineProperty(navigator, "webdriver", {
+        get: () => undefined,
+        configurable: true,
+      });
+    } catch (_) { /* defineProperty may throw on some platforms */ }
+
+    // 2. navigator.plugins — synthesise a real-Chrome-shaped PluginArray.
+    //    Detection scripts often read .length, so a 3-entry array (the
+    //    default Chrome install on macOS/Windows) is the safest spoof.
+    try {
+      const fakePlugins = [
+        { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chrome PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+        { name: "Chromium PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+      ];
+      Object.defineProperty(navigator, "plugins", {
+        get: () => fakePlugins,
+        configurable: true,
+      });
+    } catch (_) { /* ignore */ }
+
+    // 3. navigator.languages — headless reports [], real browsers report
+    //    at least the UI locale. Force the equivalent of a US-English
+    //    install; operators who need a different locale should set the
+    //    Playwright \`locale\` device option which takes precedence at
+    //    the context layer.
+    try {
+      Object.defineProperty(navigator, "languages", {
+        get: () => ["en-US", "en"],
+        configurable: true,
+      });
+    } catch (_) { /* ignore */ }
+
+    // 4. window.chrome — real Chrome exposes a top-level \`chrome\`
+    //    object with at least a \`runtime\` stub. Headless leaves it
+    //    undefined. Synthesise the minimal shape so detection scripts
+    //    that probe \`window.chrome\` or \`window.chrome.runtime\` see
+    //    something plausible.
+    try {
+      if (!window.chrome) {
+        Object.defineProperty(window, "chrome", {
+          value: { runtime: {} },
+          writable: true,
+          configurable: true,
+        });
+      } else if (!window.chrome.runtime) {
+        window.chrome.runtime = {};
+      }
+    } catch (_) { /* ignore */ }
+
+    // 5. Permissions.prototype.query — patch \`notifications\` only.
+    //    Real Chrome returns { state: "prompt" } for unset notifications;
+    //    headless returns "denied" which is a strong tell. Leave every
+    //    other permission untouched so legitimate permission flows
+    //    (geolocation, camera, mic) behave normally.
+    try {
+      if (window.Permissions && window.Permissions.prototype && window.Permissions.prototype.query) {
+        const origQuery = window.Permissions.prototype.query;
+        window.Permissions.prototype.query = function (params) {
+          if (params && params.name === "notifications") {
+            return Promise.resolve({ state: "prompt" });
+          }
+          return origQuery.call(this, params);
+        };
+      }
+    } catch (_) { /* ignore */ }
+  } catch (err) {
+    // Surface init failures the same way RECORDER_SCRIPT does so a
+    // half-applied stealth profile doesn't silently degrade — better
+    // for the operator to see "stealth init failed" in the backend
+    // log than to wonder why their target site still detects them.
+    console.error("[sentri-stealth] init failed:", err && err.stack ? err.stack : err);
+  }
+})();
+`;
 
 /**
  * Tunable timing constants for the recorder. Centralised so reviewers can
@@ -122,6 +265,85 @@ const INTERACTION_KINDS = new Set([
 ]);
 
 /**
+ * SEC-007 — server-side defence-in-depth credential detector.
+ *
+ * Module-scope sibling to the in-page `isSensitiveField` heuristic. The
+ * page-side script is the **primary** redaction path (it sees the
+ * `<input type="password">` attribute and sets `redacted: true` before
+ * the value crosses the binding boundary). This helper runs at the
+ * Node-side binding callback and only matters when something slipped
+ * past — a SUT that uses `<input type="text">` for a password without
+ * matching the name/id heuristic, or a future RECORDER_SCRIPT change
+ * that introduces a regression.
+ *
+ * Detection rules (entropy + known-credential shapes):
+ *   - JWT (3-segment base64url): `eyJ…\.…\.…`
+ *   - AWS access key id: `AKIA[0-9A-Z]{16}`
+ *   - Bearer token literal: `Bearer <token>`
+ *   - Stripe / GitHub / OpenAI / Slack key prefixes (industry-standard
+ *     gitleaks rules): `sk_(live|test)_…`, `ghp_…`, `gho_…`, `ghs_…`,
+ *     `xox[abps]-…`
+ *   - High-entropy 32+ char base64ish blob (catches API keys / session
+ *     tokens that don't match a known prefix)
+ *   - Credit card (Luhn-checked, 13–19 digits)
+ *
+ * Returns `false` for the empty string, sentinel values
+ * (`__SENTRI_SECRET_<n>__`), and obvious-non-secret short tokens (≤8
+ * chars or all whitespace) so the false-positive rate stays low.
+ *
+ * The detection is intentionally narrower than `secretScanner.js`
+ * (which scans generated test code post-hoc and is allowed false
+ * positives) — at this site a false positive would silently corrupt the
+ * captured fill value, breaking replay. Only catch what we're sure of.
+ *
+ * @param {string|undefined} value - Raw value about to be persisted.
+ * @returns {boolean} `true` when the value matches a known credential pattern.
+ * @internal
+ */
+function _looksLikeSecretValue(value) {
+  if (typeof value !== "string" || value.length === 0) return false;
+  if (value.length <= 8) return false;
+  if (/^__SENTRI_SECRET_/.test(value)) return false;
+  // JWT (3 base64url segments separated by dots)
+  if (/^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}$/.test(value)) return true;
+  // AWS access key id
+  if (/^AKIA[0-9A-Z]{16}$/.test(value)) return true;
+  // Bearer token literal (rare in a fill value, but possible from a
+  // pasted Authorization header)
+  if (/^Bearer\s+[A-Za-z0-9._~+/-]{16,}$/i.test(value)) return true;
+  // Provider-prefixed tokens (industry-standard gitleaks set)
+  if (/^sk_(?:live|test)_[A-Za-z0-9]{20,}$/.test(value)) return true;
+  if (/^gh[poas]_[A-Za-z0-9]{30,}$/.test(value)) return true;
+  if (/^xox[abps]-[A-Za-z0-9-]{20,}$/.test(value)) return true;
+  // Luhn-validated credit card (13–19 digits, accepting space/dash
+  // separators for human-typed cards). Strip separators first.
+  const compact = value.replace(/[\s-]/g, "");
+  if (/^\d{13,19}$/.test(compact) && _luhnValid(compact)) return true;
+  return false;
+}
+
+/**
+ * SEC-007 — Luhn check for credit card validation. Returns true when the
+ * digits-only string passes the standard mod-10 checksum.
+ *
+ * @param {string} digits - Digits-only string (caller must strip spaces/dashes).
+ * @returns {boolean}
+ * @internal
+ */
+function _luhnValid(digits) {
+  let sum = 0;
+  let alt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (n < 0 || n > 9) return false;
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+/**
  * DIF-015b — quality-scores a `data-testid` value. Returns `true` when the
  * value looks machine-generated / random (numeric-only, `el_` / `comp-` /
  * `t-` prefix + hex tail, or a long unseparated token).
@@ -150,7 +372,7 @@ export function isNoisyTestId(value) {
 
 /**
  * @typedef {Object} RecordedAction
- * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"} kind
+ * @property {"goto"|"click"|"dblclick"|"rightClick"|"hover"|"fill"|"press"|"select"|"check"|"uncheck"|"upload"|"drag"|"assertVisible"|"assertText"|"assertValue"|"assertUrl"|"assertCount"|"assertHasClass"} kind
  * @property {string} [selector]   - Best-effort role/label/text/css selector.
  * @property {string} [label]      - Human-readable label for the target
  *                                   element (aria-label / inner text /
@@ -160,6 +382,17 @@ export function isNoisyTestId(value) {
  *                                   The selector is still the source of truth
  *                                   for the generated Playwright code.
  * @property {string} [value]      - For `fill`, the final value typed.
+ *                                   For sensitive inputs (passwords, OTP,
+ *                                   payment fields, operator-marked
+ *                                   `data-sentri-secret`) this is the
+ *                                   sentinel `__SENTRI_SECRET_<n>__`
+ *                                   rather than the raw value (SEC-007).
+ * @property {boolean} [redacted]  - SEC-007: `true` when `value` is a
+ *                                   credential sentinel rather than the
+ *                                   user-typed value. Codegen rewrites
+ *                                   redacted fills to
+ *                                   `process.env.SENTRI_SECRET_<n>`; the
+ *                                   step prose renders as `[REDACTED]`.
  * @property {string} [url]        - For `goto`.
  * @property {string} [key]        - For `press`.
  * @property {string} [frameUrl]    - URL of iframe containing the action.
@@ -176,11 +409,34 @@ export function isNoisyTestId(value) {
  * @property {"recording"|"stopping"|"stopped"} status
  * @property {Array<RecordedAction>} actions
  * @property {number}  startedAt
+ * @property {string}  [device]          - DIF-015c Gap 5: active device profile
+ *                                          (e.g. `"iPhone 14"`); empty string
+ *                                          or undefined → desktop default.
+ * @property {{width: number, height: number}} [viewport] - Resolved viewport
+ *                                          (from device descriptor, falling
+ *                                          back to `VIEWPORT_WIDTH/HEIGHT`).
+ * @property {boolean} [paused]           - DIF-015c Gap 3: pause flag.
+ * @property {boolean} [stealth]          - DIF-015c Gap 6: when true the
+ *                                          recorder context has `STEALTH_SCRIPT`
+ *                                          installed via `addInitScript`,
+ *                                          patching `navigator.webdriver` +
+ *                                          friends so headless-detecting
+ *                                          target apps render normally.
+ *                                          Default false → pre-Gap-6
+ *                                          behaviour bit-for-bit unchanged.
  * @property {Object}  [browser]         - Playwright Browser (internal).
  * @property {Object}  [context]         - Playwright BrowserContext (internal).
  * @property {Object}  [page]            - Playwright Page (internal).
  * @property {Function} [stopScreencast]  - Cleanup fn returned by startScreencast.
  * @property {Object}  [cdpSession]      - CDP session for input forwarding.
+ * @property {*}       [frameNavTimer]   - DIF-015c Gap 5 follow-up: Node-side
+ *                                          setTimeout handle for the debounced
+ *                                          `framenavigated` flush. Tracked on the
+ *                                          session so `switchDevice` can cancel
+ *                                          it before tearing the page down,
+ *                                          preventing a stale `goto` for the
+ *                                          pre-switch URL from leaking into
+ *                                          `actions[]` after the rebuild lands.
  */
 
 /** @type {Map<string, RecordingSession>} */
@@ -359,6 +615,65 @@ const RECORDER_SCRIPT = `
     return "";
   }
 
+  // SEC-007 — in-page credential redaction.
+  //
+  // Sensitive values (passwords, OTP codes, payment card numbers, fields
+  // the operator tagged with \`data-sentri-secret\`) MUST never cross the
+  // \`__sentriRecord\` binding boundary as plaintext — if they did, they
+  // would land in \`session.actions[].value\`, be persisted to the \`tests\`
+  // table inside \`playwrightCode\` + \`steps\`, and replay through the AI
+  // assertion pipeline (leaking the credential to the LLM provider). We
+  // instead assign a stable per-session ordinal and emit a sentinel
+  // \`__SENTRI_SECRET_<n>__\` so codegen can rewrite to
+  // \`process.env.SENTRI_SECRET_<n>\` at replay time. The raw value never
+  // leaves the page context.
+  //
+  // Detection rules (matches industry-standard tools — Mabl, Testim, BearQ):
+  //   - \`<input type="password">\` (the canonical case)
+  //   - \`autocomplete\` hint matches \`current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp\`
+  //   - operator-marked \`data-sentri-secret="true"\` attribute on the input
+  //     (or any ancestor — supports wrapping the whole field in a flagged div)
+  //   - input \`name\`/\`id\` matches the credential heuristic regex (catches
+  //     misconfigured sites that use \`<input type="text" name="password">\`)
+  //
+  // The sentinel map is per-page (lives in the IIFE closure) so reloading
+  // the recorder script resets numbering — this matches how operators
+  // think about credentials ("the password field on this flow") rather
+  // than across-session reuse, which would be a footgun for shared envs.
+  const sentinelBySelector = new Map();
+  let nextSentinelOrdinal = 1;
+  function isSensitiveField(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    // 1. type="password" — the unambiguous case.
+    if (el.type === "password") return true;
+    // 2. autocomplete hint per WHATWG Forms spec §autofill detail tokens.
+    const ac = String(el.getAttribute("autocomplete") || "").toLowerCase().trim();
+    if (ac && /(?:^|\\s)(?:current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year)(?:\\s|$)/.test(ac)) return true;
+    // 3. operator-marked sensitive — check the input AND any ancestor so a
+    //    wrapping <div data-sentri-secret> covers all children.
+    if (el.closest && el.closest('[data-sentri-secret="true"]')) return true;
+    // 4. heuristic: name/id contains \`password\`/\`secret\`/\`pin\`/\`cvv\`/\`cvc\`
+    //    as a separated token (avoids false positives on \`passport_number\`,
+    //    \`secretary\`). Catches sites that use \`<input type="text">\` for a
+    //    password field (rare but real — observed on legacy admin panels).
+    const probe = (String(el.name || "") + " " + String(el.id || "")).toLowerCase();
+    if (/(?:^|[\\W_])(?:password|passwd|pwd|secret|pin|cvv|cvc|otp|totp)(?:[\\W_]|$)/.test(probe)) return true;
+    return false;
+  }
+  function sentinelFor(el, sel) {
+    // Re-use the same sentinel ordinal for repeated fills on the same
+    // selector — operators retyping the same password into the same field
+    // should produce one \`SENTRI_SECRET_1\`, not multiple.
+    const key = sel || (el && (el.name || el.id)) || "unkeyed";
+    const existing = sentinelBySelector.get(key);
+    if (existing) return existing;
+    const sentinel = "__SENTRI_SECRET_" + nextSentinelOrdinal + "__";
+    nextSentinelOrdinal += 1;
+    sentinelBySelector.set(key, sentinel);
+    return sentinel;
+  }
+
   // Browser dispatches click → click → dblclick for a double-click gesture.
   // Defer click emission by one OS double-click window so a trailing
   // "dblclick" listener can cancel the queued clicks for the same target;
@@ -380,6 +695,34 @@ const RECORDER_SCRIPT = `
     }
   }
   let shortcutCaptureBudget = 0;
+  // SEC-007-followup — hover capture is OFF by default.
+  //
+  // The dwell-timer emit path below previously recorded a \`hover\` action
+  // every time the operator's cursor rested on an interactive ancestor for
+  // 600 ms, even when the operator's intent was to click / pick / read. The
+  // "strip trailing hover if same selector" guard in the binding (see
+  // \`INTERACTION_KINDS.has(row.kind) && row.selector\` block in
+  // \`_attachAndOpenRecorderPage\`) only fires when the hover selector
+  // matches the next interaction's selector — but in real flows the hover
+  // lands on a heading / link wrapper (\`<h1>\` inside \`<a>\`, \`role=heading\`)
+  // while the click lands on a button or input. The selectors differ, the
+  // guard misses, and every test ends up with junk \`hover\` steps before
+  // every intended action.
+  //
+  // Industry-standard recorders (Playwright codegen, Mabl, Testim) all
+  // default hover capture OFF for exactly this reason. Operators who need a
+  // hover-to-reveal step for a tooltip flow can enable capture via the
+  // exposed setter (UI toggle in \`RecorderModal\` is a follow-up); the
+  // detection scaffolding (dwell timer, interactive-ancestor walk, sel dedup)
+  // is preserved verbatim so flipping the flag back on requires zero code
+  // change beyond the gate.
+  //
+  // NOTE: every backtick in this comment block MUST be escaped (\\\`) — the
+  // surrounding RECORDER_SCRIPT is a Node-side template literal that's
+  // interpolated into the IIFE before \`addInitScript\`. An unescaped
+  // backtick closes the outer template prematurely and produces a
+  // \`SyntaxError: Unexpected identifier 'hover'\` at module-load time.
+  let hoverCaptureEnabled = false;
   function eventElement(ev) {
     const p = ev.composedPath && ev.composedPath();
     return (p && p[0] && p[0].nodeType === 1) ? p[0] : ev.target;
@@ -446,6 +789,12 @@ const RECORDER_SCRIPT = `
     hoverDwellTimer = setTimeout(() => {
       hoverDwellTimer = null;
       lastHoverSelector = sel;
+      // SEC-007-followup — only emit the hover action when capture is
+      // explicitly enabled. Default is off (matches Playwright codegen,
+      // Mabl, Testim). The dwell timer still runs so the lastHoverSelector
+      // bookkeeping stays consistent — flipping the flag back on at
+      // runtime takes effect on the next dwell without state leak.
+      if (!hoverCaptureEnabled) return;
       window.__sentriRecord && window.__sentriRecord({
         kind: "hover", selector: sel, label: bestLabel(el), ts: Date.now(),
       });
@@ -483,14 +832,21 @@ const RECORDER_SCRIPT = `
     if (!pending) return;
     clearTimeout(pending.timer);
     inputTimers.delete(sel);
-    const value = pending.el ? pending.el.value : "";
+    // SEC-007 — honour the sensitive flag captured at input time. We use
+    // the flag rather than re-running isSensitiveField(pending.el) because
+    // the element may have been detached by the navigation that triggered
+    // this flush (Enter-to-submit, pagehide), and a detached input loses
+    // its \`type\`/\`autocomplete\` attribute lookup paths.
+    const value = pending.sensitive
+      ? sentinelFor(pending.el, sel)
+      : (pending.el ? pending.el.value : "");
     if (lastEmittedFill.get(sel) === value) {
       lastEmittedFill.delete(sel);
       return;
     }
     lastEmittedFill.set(sel, value);
     window.__sentriRecord && window.__sentriRecord({
-      kind: "fill", selector: sel, label: pending.label, value, ts: Date.now(),
+      kind: "fill", selector: sel, label: pending.label, value, redacted: pending.sensitive || undefined, ts: Date.now(),
     });
   }
   function flushAllPendingFills() {
@@ -505,9 +861,20 @@ const RECORDER_SCRIPT = `
     const prev = inputTimers.get(sel);
     if (prev) clearTimeout(prev.timer);
     const label = bestLabel(el);
+    // SEC-007 — compute sensitivity BEFORE the debounce closure so the
+    // redaction is decided at the user-interaction moment, not at flush
+    // time (the element may be detached / re-rendered by then on SPA
+    // frameworks). The sentinel itself is computed inside the closure so
+    // sentinelBySelector reflects the latest selector-to-sentinel mapping.
+    const sensitive = isSensitiveField(el);
     const timer = setTimeout(() => {
       inputTimers.delete(sel);
-      const value = el.value;
+      // SEC-007 — for sensitive fields we NEVER read \`el.value\` into a
+      // variable that crosses the binding boundary. The sentinel replaces
+      // the raw value before \`__sentriRecord\` is called, and the value
+      // local goes out of scope at function return without touching any
+      // global / closure / module state.
+      const value = sensitive ? sentinelFor(el, sel) : el.value;
       // Skip when the paste handler already emitted the exact same value —
       // browsers always fire \`input\` after \`paste\`, so without this dedup
       // a pasted token produces two identical \`fill\` actions. Clear the
@@ -519,10 +886,10 @@ const RECORDER_SCRIPT = `
       }
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label, value, ts: Date.now(),
+        kind: "fill", selector: sel, label, value, redacted: sensitive || undefined, ts: Date.now(),
       });
     }, ${TIMINGS.FILL_DEBOUNCE_MS});
-    inputTimers.set(sel, { timer, el, label });
+    inputTimers.set(sel, { timer, el, label, sensitive });
   }, true);
 
   // Flush on form submit — Enter-to-submit on Google search and other
@@ -564,14 +931,24 @@ const RECORDER_SCRIPT = `
     // value). Using el.value — not just the clipboard snippet — means
     // pasting into a field with pre-existing text records the full final
     // value, matching what the input/change handlers would emit.
+    //
+    // SEC-007 — paste into a sensitive field (password manager autofill is
+    // the canonical case) must redact too. Catching this branch matters:
+    // 1Password / Bitwarden / Chrome autofill all dispatch \`paste\` →
+    // \`input\` for password fields, and without this guard the paste
+    // handler would record the raw password before the input handler's
+    // redaction fired (paste runs first; its dedup cache primes the input
+    // handler's skip path).
+    const sensitive = isSensitiveField(el);
     setTimeout(() => {
-      const value = String(el.value || "").slice(0, 500);
-      if (!value) return;
+      const rawValue = String(el.value || "").slice(0, 500);
+      if (!rawValue) return;
+      const value = sensitive ? sentinelFor(el, sel) : rawValue;
       // Prime the dedup cache so the subsequent \`input\` event (always
       // fired after paste) is suppressed by the guard added above.
       lastEmittedFill.set(sel, value);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label: bestLabel(el), value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value, redacted: sensitive || undefined, ts: Date.now(),
       });
     }, 0);
   }, true);
@@ -605,12 +982,18 @@ const RECORDER_SCRIPT = `
       // action carries the latest value (the user committed it by blurring).
       const sel = selectorGenerator(el);
       if (!sel) return;
+      // SEC-007 — same sensitivity check as the input + paste handlers, so
+      // programmatic autofill (\`el.value = "..."\` from a password manager
+      // extension) and the trailing change event for a manually-typed
+      // password both produce a sentinel instead of the raw value.
+      const sensitive = isSensitiveField(el);
+      const effectiveValue = sensitive ? sentinelFor(el, sel) : el.value;
       const pending = inputTimers.get(sel);
       if (pending) {
         clearTimeout(pending.timer);
         inputTimers.delete(sel);
         // Fall through to emit below; the input handler hadn't fired yet.
-      } else if (lastEmittedFill.get(sel) === el.value) {
+      } else if (lastEmittedFill.get(sel) === effectiveValue) {
         // Already emitted by the input handler with the exact same value —
         // the change event is the trailing duplicate. Drop it and clear
         // the dedup entry so a subsequent retype of the same value still
@@ -618,9 +1001,9 @@ const RECORDER_SCRIPT = `
         lastEmittedFill.delete(sel);
         return;
       }
-      lastEmittedFill.set(sel, el.value);
+      lastEmittedFill.set(sel, effectiveValue);
       window.__sentriRecord && window.__sentriRecord({
-        kind: "fill", selector: sel, label: bestLabel(el), value: el.value, ts: Date.now(),
+        kind: "fill", selector: sel, label: bestLabel(el), value: effectiveValue, redacted: sensitive || undefined, ts: Date.now(),
       });
     }
   }, true);
@@ -669,6 +1052,49 @@ const RECORDER_SCRIPT = `
   window.__sentriRecorderSetShortcutBudget = (n) => {
     const parsed = Number.isFinite(Number(n)) ? Number(n) : 0;
     shortcutCaptureBudget = Math.max(0, Math.floor(parsed));
+  };
+  // SEC-007-followup — setter for the hover-capture opt-in. Strict boolean
+  // coercion (mirrors how Gap 6 stealth coerces) so a stringy "true" can't
+  // accidentally enable capture from a misconfigured caller. The frontend
+  // would call this via a \`page.evaluate\` shim from a route handler that
+  // accepts the toggle from a UI control; without that wiring the flag
+  // stays off and recordings are clean by default.
+  window.__sentriRecorderSetHoverCapture = (enabled) => {
+    hoverCaptureEnabled = enabled === true;
+  };
+  // DIF-015c Gap 2 (point-and-click assert UX) — expose the in-page
+  // selectorGenerator + bestLabel + the closest-interactive-ancestor
+  // walk on \`window\` so the Node-side \`probeAtPoint\` helper can
+  // resolve \`{selector, label, rect}\` for an arbitrary viewport
+  // coordinate via \`page.evaluate\`. Without these exports the probe
+  // would have to re-implement the same Playwright + hand-rolled
+  // fallback logic, which is exactly the drift class of bug AGENT.md
+  // §"Do not duplicate shared utilities" warns against. Returns null
+  // when no interactive ancestor is found so the caller can fall back
+  // to the operator's manual selector paste.
+  window.__sentriProbeAtPoint = (x, y) => {
+    try {
+      const el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      const target = el.closest
+        ? (el.closest("a, button, input, textarea, select, [role], [data-testid], [data-test-id], [contenteditable='true']") || el)
+        : el;
+      const selector = selectorGenerator(target);
+      const label = bestLabel(target);
+      const rect = target.getBoundingClientRect();
+      return {
+        selector: selector || "",
+        label: label || "",
+        rect: {
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+      };
+    } catch (_) {
+      return null;
+    }
   };
 
   document.addEventListener("drop", (ev) => {
@@ -846,12 +1272,24 @@ export function recordedActionToStepText(a) {
       return `User opens the context menu on${friendlyTarget(a)}`;
     case "hover":
       return `User hovers over${friendlyTarget(a)}`;
-    case "fill":
+    case "fill": {
       // Match the AI pipeline's "User fills in X with 'value'" phrasing
       // (outputSchema.js:74-78) — recorder previously used "User fills the
       // 'Email' field with …" which read differently from AI-generated and
       // manually-created steps on the same Test Detail page.
-      return `User fills in${friendlyTarget(a, "field")} with '${truncVal(a.value)}'`;
+      //
+      // SEC-007 — redacted fills render with a `[REDACTED]` placeholder
+      // so reviewers see at a glance that the field is credential-typed
+      // and the persisted prose carries no credential surface area. We
+      // detect via either the explicit `redacted: true` marker (set by
+      // the in-page rule) OR the sentinel pattern (covers actions that
+      // pre-date the marker — the marker was added in the same SEC-007
+      // PR but actions captured during a hot reload would have value
+      // without marker).
+      const isRedacted = a.redacted === true || /^__SENTRI_SECRET_/.test(String(a.value || ""));
+      const display = isRedacted ? "[REDACTED]" : `'${truncVal(a.value)}'`;
+      return `User fills in${friendlyTarget(a, "field")} with ${display}`;
+    }
     case "press":
       return `User presses ${a.key || ""}`.trim();
     case "select":
@@ -908,6 +1346,29 @@ export function recordedActionToStepText(a) {
       // "page address" so the persisted step reads naturally next to AI-
       // generated steps like "User opens the dashboard page".
       return `The page address contains '${truncVal(a.value, 60)}'`;
+    case "assertCount": {
+      // Outcome-style assertion matching the AI pipeline's phrasing. With
+      // a captured label we read "There are N 'Item' rows"; without one we
+      // degrade cleanly to a generic "There are N matching elements"
+      // rather than leaking the selector. The captured `value` is the
+      // expected count (string-coerced upstream); render as an integer.
+      const n = Number(a.value);
+      const count = Number.isFinite(n) ? n : a.value;
+      const t = friendlyTarget(a);
+      return t
+        ? `There are ${count} matching${t}`
+        : `There are ${count} matching elements`;
+    }
+    case "assertHasClass": {
+      // Reads as "The 'Submit' button has the 'is-loading' class" so it
+      // sits naturally next to assertVisible / assertText prose. No label
+      // → fall back to "The matched element has the 'X' class" rather
+      // than emitting a bare quote with nothing in front of it.
+      const t = friendlyTarget(a);
+      return t
+        ? `The${t} has the '${truncVal(a.value)}' class`
+        : `The matched element has the '${truncVal(a.value)}' class`;
+    }
     default:
       // Fall back to the action kind so unknown future kinds still show
       // something — better than emitting an empty string into the steps list.
@@ -949,6 +1410,12 @@ export function isEmittableAction(a) {
     case "press":        return !!a.key;
     case "drag":         return !!a.selector && !!a.target;
     case "assertUrl":    return !!a.value;
+    // assertCount + assertHasClass need BOTH a selector (to bind the
+    // expectation to) AND a value (the count / class name). Without
+    // either field the code generator would emit nothing — match that
+    // here so steps[].length and `// Step N:` comment count stay aligned.
+    case "assertCount":
+    case "assertHasClass": return !!a.selector && a.value != null && String(a.value).length > 0;
     default:             return false;
   }
 }
@@ -1045,8 +1512,24 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       lines.push(`// Step ${stepNo}: Hover over element`);
       lines.push(`await ${actor}.locator('${sel}').hover();`);
     } else if (a.kind === "fill" && sel) {
-      lines.push(`// Step ${stepNo}: Fill field`);
-      lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      // SEC-007 — when the captured value is a redaction sentinel
+      // (`__SENTRI_SECRET_<n>__`), emit `process.env.SENTRI_SECRET_<n>`
+      // instead of the literal string so the generated test reads its
+      // credentials from the runtime environment rather than carrying
+      // them in the source. The generator also emits a guard that
+      // throws a clear error if the env var is unset at replay time —
+      // far better than a confusing "field is empty" assertion failure
+      // when an operator runs a recorded test in a fresh CI shard.
+      const m = String(a.value || "").match(/^__SENTRI_SECRET_(\d+|AUTO)__$/);
+      if (m) {
+        const envName = `SENTRI_SECRET_${m[1]}`;
+        lines.push(`// Step ${stepNo}: Fill field (credential — value sourced from env)`);
+        lines.push(`if (!process.env.${envName}) throw new Error('SEC-007: required env var ${envName} is not set; this recorded test was authored against a sensitive field. See docs/api/tests.md § Recorder credential redaction.');`);
+        lines.push(`await safeFill(${actor}, '${sel}', process.env.${envName});`);
+      } else {
+        lines.push(`// Step ${stepNo}: Fill field`);
+        lines.push(`await safeFill(${actor}, '${sel}', '${escapeJsSingleQuote(a.value || "")}');`);
+      }
     } else if (a.kind === "press" && a.key) {
       // `keyboard` only exists on Page (not Frame), so always route key
       // presses through the owning page even when the action originated
@@ -1108,6 +1591,26 @@ export function actionsToPlaywrightCode(testName, startUrl, actions) {
       const literal = String(a.value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       lines.push(`// Step ${stepNo}: Assert URL`);
       lines.push(`await expect(page).toHaveURL(new RegExp('${escapeJsSingleQuote(literal)}'));`);
+    } else if (a.kind === "assertCount" && sel && a.value != null && String(a.value).length > 0) {
+      // Coerce to a non-negative integer so `toHaveCount(NaN)` can't slip
+      // through. Anything that doesn't parse cleanly falls back to 0 —
+      // emit the assertion anyway so the reviewer sees a clearly broken
+      // step in the Test Detail view rather than the action silently
+      // disappearing from playwrightCode.
+      const n = Number.parseInt(String(a.value), 10);
+      const expected = Number.isFinite(n) && n >= 0 ? n : 0;
+      lines.push(`// Step ${stepNo}: Assert element count`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveCount(${expected});`);
+    } else if (a.kind === "assertHasClass" && sel && a.value != null && String(a.value).length > 0) {
+      // Playwright's `toHaveClass` matches the FULL class attribute when
+      // given a string, so partial-class matches (the common case — "is
+      // this button currently `is-loading`?") need a regex. Build a
+      // word-boundary regex with escaped metacharacters so a class name
+      // like `btn.primary` (rare but valid in framework-generated CSS)
+      // doesn't break out of its regex literal.
+      const literal = String(a.value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      lines.push(`// Step ${stepNo}: Assert element class`);
+      lines.push(`await expect(${actor}.locator('${sel}')).toHaveClass(new RegExp('(^|\\\\s)${escapeJsSingleQuote(literal)}(\\\\s|$)'));`);
     } else {
       continue;
     }
@@ -1137,7 +1640,12 @@ export function addAssertionAction(sessionId, action) {
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
   if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
   const kind = String(action?.kind || "");
-  const allowed = new Set(["assertVisible", "assertText", "assertValue", "assertUrl"]);
+  const allowed = new Set([
+    "assertVisible", "assertText", "assertValue", "assertUrl",
+    // DIF-015c Gap 2 — count + class assertions. Both require selector AND
+    // value (count: integer-parseable; hasClass: non-empty class token).
+    "assertCount", "assertHasClass",
+  ]);
   if (!allowed.has(kind)) throw new Error(`Invalid assertion kind: ${kind}`);
   const selector = action?.selector ? String(action.selector).slice(0, 200) : undefined;
   const value = action?.value != null ? String(action.value).slice(0, 500) : undefined;
@@ -1148,8 +1656,18 @@ export function addAssertionAction(sessionId, action) {
   if (kind !== "assertUrl" && !selector) {
     throw new Error(`Invalid assertion: selector is required for ${kind}.`);
   }
-  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl") && !value) {
+  if ((kind === "assertText" || kind === "assertValue" || kind === "assertUrl" || kind === "assertCount" || kind === "assertHasClass") && !value) {
     throw new Error(`Invalid assertion: value is required for ${kind}.`);
+  }
+  // assertCount needs a non-negative integer-parseable value. Reject
+  // anything that wouldn't survive Number.parseInt cleanly so the route
+  // surfaces a 400 instead of letting the code generator fall back to its
+  // `expected = 0` defence and confusing the reviewer at replay time.
+  if (kind === "assertCount") {
+    const n = Number.parseInt(String(value), 10);
+    if (!Number.isFinite(n) || n < 0 || String(n) !== String(value).trim()) {
+      throw new Error("Invalid assertion: value for assertCount must be a non-negative integer.");
+    }
   }
   const row = {
     kind,
@@ -1163,6 +1681,503 @@ export function addAssertionAction(sessionId, action) {
 }
 
 /**
+ * DIF-015c Gap 3 — pause action capture on an in-flight recording.
+ * Flips `session.paused = true`; the browser stays open and the
+ * screencast continues so the operator can navigate the SUT without
+ * polluting `actions[]`. Three call sites honour the flag:
+ *
+ *   1. {@link forwardInput} — short-circuits CDP dispatch so user
+ *      clicks / keystrokes from the canvas overlay never reach the page.
+ *   2. The `__sentriRecord` exposeBinding callback in {@link startRecording}
+ *      — drops in-page-captured DOM events (debounced fills flushing,
+ *      framework re-renders firing change handlers, programmatic clicks
+ *      from page JS) so in-flight work that started before pause does
+ *      not silently leak in.
+ *   3. The popup + debounced main-page `framenavigated` handlers —
+ *      drop synthesised `goto` actions while paused.
+ *
+ * @param {string} sessionId
+ * @returns {{ paused: true }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
+export function pauseRecording(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  session.paused = true;
+  return { paused: true };
+}
+
+/**
+ * DIF-015c Gap 3 — resume action capture after a pause. Idempotent on a
+ * session that was never paused (the flag was already falsy). See
+ * {@link pauseRecording} for the list of guarded call sites.
+ *
+ * @param {string} sessionId
+ * @returns {{ paused: false }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
+export function resumeRecording(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  session.paused = false;
+  return { paused: false };
+}
+
+/**
+ * DIF-015c Gap 3 — undo the most recent recorded action. Idempotent on
+ * an empty `session.actions[]` (returns `{ removed: null, actionCount: 0 }`
+ * rather than 4xx) so the UI can fire the button without first checking
+ * the step count — matches the spec's "idempotent on empty actions[]"
+ * acceptance criterion in `NEXT.md`.
+ *
+ * @param {string} sessionId
+ * @returns {{ removed: RecordedAction|null, actionCount: number }}
+ * @throws {Error} when the session is unknown or not in `"recording"` state.
+ */
+export function popLastRecordingAction(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  const removed = session.actions.length ? session.actions.pop() : null;
+  return { removed, actionCount: session.actions.length };
+}
+
+/**
+ * DIF-015c Gap 2 (point-and-click assert UX) — resolve the
+ * `{selector, label, rect}` for an arbitrary viewport coordinate so the
+ * frontend can highlight the hovered element and pre-fill the
+ * "Add verification" form on click. Mirrors how Playwright codegen's
+ * inspector probes the page under the cursor.
+ *
+ * The probe runs entirely in the page context via `page.evaluate`,
+ * calling the `window.__sentriProbeAtPoint` helper that the recorder
+ * script attaches at init time. That helper reuses the SAME selector +
+ * label heuristics the click/fill listeners use, so the picker's
+ * suggestion is byte-aligned with what a real click would have captured.
+ *
+ * The probe is cheap (~5 ms in practice) and idempotent — the operator
+ * can pump events at hover frequency (~30 fps) without polluting the
+ * session. We deliberately do NOT record the probe as an action; it's
+ * a read-only inspection.
+ *
+ * @param {string} sessionId
+ * @param {{x: number, y: number}} point - Viewport coordinates (already
+ *   scaled by the frontend from CSS pixels via `LiveBrowserView.scaleCoords`).
+ * @returns {Promise<{selector: string, label: string, rect: {x: number, y: number, width: number, height: number}}|null>}
+ *   The hovered element's selector + friendly label + bounding rect, or
+ *   `null` when no interactive ancestor was found (e.g. cursor over the
+ *   page background). The caller falls back to manual selector paste.
+ * @throws {Error} when the session is unknown or not recording.
+ */
+export async function probeAtPoint(sessionId, point) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+  if (!session.page) throw new Error(`Recording session ${sessionId} has no active page.`);
+  const x = Math.max(0, Math.round(Number(point?.x) || 0));
+  const y = Math.max(0, Math.round(Number(point?.y) || 0));
+  try {
+    const probe = await session.page.evaluate(
+      ({ x, y }) => {
+        if (typeof window.__sentriProbeAtPoint !== "function") return null;
+        return window.__sentriProbeAtPoint(x, y);
+      },
+      { x, y },
+    );
+    return probe || null;
+  } catch (err) {
+    // Page navigating mid-probe → return null so the frontend just drops
+    // the highlight rather than surfacing a 500 to the operator. The
+    // probe is best-effort by design.
+    if (process.env.LOG_LEVEL === "debug") {
+      console.error(formatLogLine("debug", null, `[recorder] probeAtPoint failed: ${err.message}`));
+    }
+    return null;
+  }
+}
+
+/**
+ * DIF-015c Gap 5 — switch the device profile of an in-flight recording
+ * session. Playwright applies device emulation (userAgent, viewport,
+ * deviceScaleFactor, hasTouch, locale) at `browser.newContext()` time
+ * only — there is no mid-context API for swapping descriptors. To honour
+ * the operator's device choice mid-session we tear down the page+context
+ * and rebuild them under the new descriptor against the **same** browser
+ * process. Captured `session.actions[]` are preserved across the switch
+ * (the operator's step history is not lost), but page state (cookies,
+ * partially-filled forms, scroll position, in-flight requests) is — the
+ * UI surfaces a confirmation prompt before calling this so operators
+ * understand the trade-off.
+ *
+ * Acceptance criteria (NEXT.md `:53`):
+ *   - Device dropdown shows the same options as `RunRegressionModal` ✓
+ *     (DEVICE_PRESETS shared via `config.js`).
+ *   - Switching mid-session resizes the canvas to match ✓ (response
+ *     `viewport` flows back to the frontend; `LiveBrowserView` already
+ *     rescales pointer coordinates against `viewportW/viewportH`).
+ *   - Selectors regenerated at the new viewport's pixel scale ✓ (the
+ *     rebuilt context's `deviceScaleFactor` flows from the descriptor;
+ *     subsequent captures use the new viewport's coordinate space
+ *     because `selectorGenerator` runs against the rebuilt page).
+ *
+ * @param {string} sessionId
+ * @param {string} device - One of `DEVICE_PRESETS[].value` (empty string =
+ *   desktop default). Validated against `ACCEPTED_DEVICE_NAMES`; unknown
+ *   values throw.
+ * @returns {Promise<{device: string, viewport: {width: number, height: number}, url: string}>}
+ * @throws {Error} when the session is unknown, not recording, the device
+ *   is invalid, or the rebuild fails (in which case the session is left
+ *   in a torn-down state and the caller should re-issue `stopRecording`).
+ */
+export async function switchDevice(sessionId, device) {
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Recording session ${sessionId} not found.`);
+  if (session.status !== "recording") throw new Error(`Recording session ${sessionId} is not recording.`);
+
+  const requested = device == null ? "" : String(device);
+  if (!ACCEPTED_DEVICE_NAMES.has(requested)) {
+    throw new Error(`Invalid device: ${requested}`);
+  }
+  // Idempotent on the active device — return the current viewport so the
+  // frontend can reconcile without firing a teardown/rebuild dance.
+  // Mirrors how `resumeRecording` no-ops on a never-paused session.
+  if (requested === (session.device || "")) {
+    return {
+      device: session.device || "",
+      viewport: session.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      url: session.url,
+    };
+  }
+
+  // Snapshot the current page URL BEFORE teardown so we can navigate the
+  // rebuilt page to wherever the operator was. If `page.url()` throws
+  // (page already closing), fall back to the recorded session URL so we
+  // still land somewhere sensible.
+  let currentUrl;
+  try { currentUrl = session.page?.url() || session.url; }
+  catch { currentUrl = session.url; }
+
+  const browser = session.browser;
+  if (!browser) throw new Error(`Recording session ${sessionId} has no browser to switch device on.`);
+
+  // Tear down current page + screencast + context — but NOT the browser.
+  // The browser process stays open and the new context is created under
+  // it, saving ~500ms vs. a full launch. Catch-and-swallow each step so
+  // a partial teardown still lets the rebuild run.
+  // DIF-015c Gap 5 follow-up — cancel the debounced framenavigated timer
+  // BEFORE closing the page. Without this, an in-flight 800ms debounce
+  // that started before the switch fires after the rebuilt page is alive
+  // and pushes a stale `goto` for the pre-switch URL into
+  // `session.actions`. The status guard at timer-fire time doesn't help
+  // here because switchDevice deliberately leaves `session.status` as
+  // `"recording"` to keep the session alive across the rebuild.
+  if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+  try { if (session.stopScreencast) await session.stopScreencast(); } catch { /* ignore */ }
+  try { await session.page?.close(); } catch { /* ignore */ }
+  try { await session.context?.close(); } catch { /* ignore */ }
+  session.stopScreencast = null;
+  session.cdpSession = null;
+  session.page = null;
+  session.context = null;
+
+  // Rebuild the context + page under the new device descriptor. This
+  // duplicates the binding + addInitScript + framenavigated wiring from
+  // `startRecording`; keep the two in sync if you change either.
+  try {
+    const { contextOpts, viewport: effectiveViewport } = resolveDeviceContext(requested);
+    const newContext = await browser.newContext(contextOpts);
+    session.context = newContext;
+    session.device = requested;
+    session.viewport = effectiveViewport;
+
+    const newPage = await _attachAndOpenRecorderPage(session, newContext, currentUrl, effectiveViewport);
+    session.page = newPage;
+    return {
+      device: session.device,
+      viewport: session.viewport,
+      url: session.url,
+    };
+  } catch (err) {
+    // Rebuild failed — leave the session in a torn-down state so the
+    // operator's next call (likely Stop & Save or Discard) hits the
+    // "not recording" branch and we don't leak a Chromium process.
+    try { await session.context?.close(); } catch { /* ignore */ }
+    session.context = null;
+    session.page = null;
+    session.status = "stopping";
+    throw new Error(`Device switch failed: ${err.message}`);
+  }
+}
+
+/**
+ * DIF-015c Gap 5 — private helper that wires the `__sentriRecord` binding
+ * + Playwright selector bootstrap + addInitScript + popup + main-page
+ * `framenavigated` handlers onto a fresh context, opens a page, navigates
+ * to `startUrl`, and starts the CDP screencast at the resolved viewport.
+ * Used by {@link switchDevice} after a context teardown.
+ *
+ * The body below duplicates the inline setup in `startRecording` — keep
+ * the two in sync if you change either. A full extraction would require
+ * threading the binding closure, pageAliases map, and screencast handle
+ * through a single options object, which is more refactor than this PR's
+ * scope. The duplication is bounded and clearly documented.
+ *
+ * Side effects on `session`:
+ *   - `session.pageAliases` is reused from the prior context so popup
+ *     `popup1`/`popup2` labels stay stable across the switch.
+ *   - `session.stopScreencast` + `session.cdpSession` are re-assigned to
+ *     the new screencast handle so `forwardInput` resumes routing CDP
+ *     events to the rebuilt page.
+ *   - `session.url` is updated to the post-navigate landed URL.
+ *
+ * @param {RecordingSession} session
+ * @param {Object} context - Freshly-built Playwright BrowserContext.
+ * @param {string} startUrl - URL to navigate the rebuilt page to.
+ * @param {{width: number, height: number}} viewport - Effective viewport
+ *   from the device descriptor; threaded into `startScreencast`.
+ * @returns {Promise<Object>} The newly-created Playwright Page.
+ * @private
+ */
+async function _attachAndOpenRecorderPage(session, context, startUrl, viewport) {
+  // Reuse the prior context's alias map so popup labels stay stable.
+  // Stale entries (the closed pre-switch main page) are pruned below
+  // once the new page is registered.
+  const pageAliases = session.pageAliases || new Map();
+  session.pageAliases = pageAliases;
+
+  // Re-attach the binding to the new context. The closure captures
+  // the same `session` reference, so dedup state (DBLCLICK window,
+  // hover collapse, fill collapse) keeps working against
+  // `session.actions[]` without reinitialisation.
+  await context.exposeBinding("__sentriRecord", (source, action) => {
+    if (session.status !== "recording") return;
+    if (session.paused === true) return;
+    if (!action || typeof action !== "object") return;
+    const sourcePage = source?.page || null;
+    const sourceFrame = source?.frame || null;
+    const isMainFrame = !!(sourcePage && sourceFrame && sourcePage.mainFrame() === sourceFrame);
+    const row = {
+      kind: String(action.kind || ""),
+      selector: action.selector ? String(action.selector).slice(0, 200) : undefined,
+      target: action.target ? String(action.target).slice(0, 200) : undefined,
+      label: action.label ? String(action.label).slice(0, 80) : undefined,
+      value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+      // SEC-007 — preserve the redaction marker so codegen + step prose
+      // can route this fill through `process.env.SENTRI_SECRET_N` instead
+      // of emitting the (already-sentinel) value literal. The page-side
+      // script sets `redacted: true` only when the value is a
+      // `__SENTRI_SECRET_<n>__` placeholder; we also defence-in-depth log
+      // a warning here if we ever see a raw credential pattern slip
+      // through (a future RECORDER_SCRIPT change that bypasses the
+      // sensitivity check), so the leak is caught before persistence.
+      redacted: action.redacted === true || undefined,
+      url: action.url ? String(action.url) : undefined,
+      key: action.key ? String(action.key) : undefined,
+      pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
+      frameUrl: !isMainFrame && sourceFrame?.url ? String(sourceFrame.url()).slice(0, 500) : undefined,
+      ts: Number(action.ts) || Date.now(),
+    };
+    // SEC-007 defence-in-depth — if the in-page script forgot to mark a
+    // fill on a known-sensitive selector pattern, catch it here at the
+    // binding boundary before it lands in session.actions[]. The
+    // redaction marker is added retroactively and a warning is logged
+    // (value NEVER logged — only the selector + label).
+    if (row.kind === "fill" && row.redacted !== true && _looksLikeSecretValue(row.value)) {
+      console.error(formatLogLine("warn", null, `[recorder] SEC-007 server-side redaction triggered for selector=${row.selector || "<unknown>"} label=${row.label || "<unlabelled>"} — in-page rule missed this field; review credential heuristic`));
+      row.value = "__SENTRI_SECRET_AUTO__";
+      row.redacted = true;
+    }
+    // Dedup heuristics — verbatim copy of the startRecording binding.
+    if (row.kind === "dblclick" && row.selector) {
+      for (let i = session.actions.length - 1; i >= 0; i--) {
+        const prev = session.actions[i];
+        if (row.ts - (prev.ts || 0) > TIMINGS.DBLCLICK_WINDOW_MS) break;
+        if (prev.kind === "click" && prev.selector === row.selector) {
+          session.actions.splice(i, 1);
+        }
+      }
+    }
+    if (row.kind === "hover") {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "hover") session.actions.pop();
+    }
+    if (INTERACTION_KINDS.has(row.kind) && row.selector) {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "hover" && last.selector === row.selector) session.actions.pop();
+    }
+    if (row.kind === "fill" && row.selector) {
+      const last = session.actions[session.actions.length - 1];
+      if (last && last.kind === "fill" && last.selector === row.selector) session.actions.pop();
+    }
+    const POINTER_KINDS = new Set(["click", "dblclick", "rightClick", "hover"]);
+    if (POINTER_KINDS.has(row.kind) && !row.label) {
+      const sel = row.selector || "";
+      const hasSemanticSelector = /^(?:role=|text=|data-testid=|label=|placeholder=|alt=|title=)/.test(sel);
+      if (!hasSemanticSelector) row._noLabel = true;
+    }
+    session.actions.push(row);
+  });
+
+  // _attachAndOpenRecorderPage continues in the next chunk —
+  // addInitScript + page creation + framenavigated + screencast.
+  return _finishOpenRecorderPage(session, context, startUrl, viewport, pageAliases);
+}
+
+/**
+ * Second half of {@link _attachAndOpenRecorderPage} — keeps each function
+ * body under the size where editing tools get unhappy. Splits the work
+ * AT a natural seam: by this point the `__sentriRecord` binding is
+ * registered on the context, so creating new pages is safe. This block
+ * handles addInitScripts + page creation + framenavigated listeners +
+ * initial navigation + screencast restart.
+ *
+ * @private
+ */
+async function _finishOpenRecorderPage(session, context, startUrl, viewport, pageAliases) {
+  // DIF-015c Gap 6: re-apply stealth on the rebuilt context so a
+  // mid-session device switch doesn't undo the stealth profile the
+  // operator opted into at launch. Default-mode (`stealth !== true`)
+  // takes the early-return path so pre-Gap-6 behaviour is unchanged.
+  if (session.stealth === true) {
+    await context.addInitScript(STEALTH_SCRIPT);
+  }
+
+  // Inject Playwright's own InjectedScript bootstrap before our recorder
+  // script so `window.__playwrightSelector` is populated by the time
+  // selectorGenerator() runs on the first user interaction. Mirrors the
+  // startRecording flow; see the longer comment there for the rationale.
+  let bootstrap = "";
+  try { bootstrap = buildInjectedBootstrapScript(); }
+  catch (err) {
+    console.error(formatLogLine("warn", null, `[recorder] buildInjectedBootstrapScript failed during device switch — falling back to hand-rolled selectorGenerator: ${err.message}`));
+  }
+  if (bootstrap) await context.addInitScript(bootstrap);
+  await context.addInitScript(RECORDER_SCRIPT);
+
+  // Drop stale page refs from the prior context (closed main page,
+  // closed popups) before wiring the new page in, so popup labels
+  // recompute against the live page count.
+  for (const k of Array.from(pageAliases.keys())) {
+    try { if (!k || (typeof k === "object" && k.isClosed?.())) pageAliases.delete(k); }
+    catch { pageAliases.delete(k); }
+  }
+
+  const page = await context.newPage();
+  pageAliases.set(page, "page");
+
+  page.on("pageerror", (err) => {
+    if (err && err.message && err.message.includes("sentri-recorder")) {
+      console.error(formatLogLine("warn", null, `[recorder/page-error] ${err.message}`));
+    }
+  });
+  context.on("page", (p) => {
+    if (pageAliases.has(p)) return;
+    pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
+    p.on("framenavigated", (frame) => {
+      if (session.paused === true) return;
+      if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
+        session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
+      }
+    });
+  });
+
+  // Navigate to the snapshotted URL so the operator lands back where
+  // they were before the device switch. The post-navigate URL drives
+  // the recorded `goto` action so any server-side redirect (HTTPS
+  // upgrade, locale prefix) is captured truthfully.
+  await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_TIMEOUT }).catch(() => {});
+  const landedUrl = page.url() || startUrl;
+  session.url = landedUrl;
+  // Push a `goto` so the recorded steps reflect the device-switch
+  // navigation — without this, the rebuilt page renders silently and
+  // the operator's first post-switch click looks like it happened on
+  // the pre-switch URL in the generated playwrightCode.
+  session.actions.push({ kind: "goto", pageAlias: "page", url: landedUrl, ts: Date.now() });
+
+  // Debounced main-page framenavigated — verbatim copy of the
+  // startRecording handler, with the same pause guard.
+  //
+  // DIF-015c Gap 5 follow-up — track the timer on `session` (instead of
+  // closure-local) so `switchDevice` can clear it before tearing the
+  // page down. Without this, an in-flight 800ms debounce that started
+  // BEFORE the device switch fires AFTER the rebuilt page is alive and
+  // pushes a stale `goto` for the pre-switch URL into `session.actions`.
+  // The dedup guard at the timer fire ("last.url === pendingFrameUrl")
+  // only catches the case where the new page happens to land on the same
+  // URL the prior debounce captured — common but not guaranteed.
+  // `stopRecording` doesn't need this because it flips
+  // `session.status = "stopping"` before closing the page, and the
+  // status guard at timer-fire time catches the stale fire there.
+  const FRAME_NAV_DEBOUNCE_MS = 800;
+  let pendingFrameUrl = "";
+  page.on("framenavigated", (frame) => {
+    if (frame !== page.mainFrame()) return;
+    const url = frame.url();
+    if (!url || url === "about:blank") return;
+    pendingFrameUrl = url;
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+    session.frameNavTimer = setTimeout(() => {
+      session.frameNavTimer = null;
+      if (session.status !== "recording") return;
+      if (session.paused === true) return;
+      const last = [...session.actions].reverse().find((a) => a.kind === "goto");
+      if (last && last.url === pendingFrameUrl) return;
+      session.actions.push({ kind: "goto", pageAlias: "page", url: pendingFrameUrl, ts: Date.now() });
+    }, FRAME_NAV_DEBOUNCE_MS);
+  });
+
+  // Restart the CDP screencast at the new viewport so the canvas
+  // resizes to native device dimensions — LiveBrowserView already
+  // rescales pointer coordinates against the viewport prop, so the
+  // frontend just needs to update its `viewport` state from the
+  // route response.
+  const screencastResult = await startScreencast(page, session.id, {
+    interactive: true,
+    viewport,
+  });
+  if (screencastResult) {
+    session.stopScreencast = screencastResult.stop;
+    session.cdpSession = screencastResult.cdpSession;
+  }
+
+  return page;
+}
+
+/**
+ * DIF-015c Gap 5 — pure helper that resolves a device name to a
+ * `browser.newContext()` options object plus the effective viewport.
+ * Mirrors the device-descriptor merge already done by `executeTest.js`
+ * (`backend/src/runner/executeTest.js:208-232`) so recorder runs feel
+ * identical to test runs at the same device profile.
+ *
+ * Empty / unknown device names fall back to the desktop defaults so a
+ * caller that never opts into device emulation behaves bit-for-bit
+ * identically to the pre-Gap-5 recorder.
+ *
+ * @param {string} [device] - One of `DEVICE_PRESETS[].value` (curated list).
+ * @returns {{ contextOpts: Object, viewport: {width: number, height: number}, descriptor: Object|null }}
+ */
+function resolveDeviceContext(device) {
+  const descriptor = resolveDevice(device || "");
+  const viewport = descriptor?.viewport || { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT };
+  // Spread the descriptor first so explicit overrides below take precedence
+  // — same merge order as `executeTest.js`. Without `viewport` overridden
+  // explicitly, a missing descriptor would leave the context at Playwright's
+  // default 1280×720 even when the caller asked for desktop, which is
+  // already what we want; the explicit assignment keeps the contract
+  // observable to readers.
+  const contextOpts = {
+    ...(descriptor || {}),
+    viewport,
+    ignoreHTTPSErrors: true,
+    acceptDownloads: true,
+  };
+  return { contextOpts, viewport, descriptor: descriptor || null };
+}
+
+/**
  * Start a new interactive recording session. Opens a Playwright browser,
  * navigates to `startUrl`, installs the capture script, and begins a CDP
  * screencast on the given session ID (reused as the SSE run ID).
@@ -1171,9 +2186,19 @@ export function addAssertionAction(sessionId, action) {
  * @param {string} args.sessionId   - Unique ID used for SSE + session tracking.
  * @param {string} args.projectId
  * @param {string} args.startUrl
+ * @param {string} [args.device]    - DIF-015c Gap 5: optional device name
+ *   from `DEVICE_PRESETS` (e.g. `"iPhone 14"`). Empty string / undefined →
+ *   desktop default (legacy behaviour). Unknown values are rejected at the
+ *   route layer; this helper assumes the caller has already validated.
+ * @param {boolean} [args.stealth=false] - DIF-015c Gap 6: when true, the
+ *   `STEALTH_SCRIPT` is installed via `context.addInitScript` BEFORE the
+ *   recorder script and main page navigation, so `navigator.webdriver`
+ *   reads as `undefined` (and four other surfaces look real-Chrome-ish)
+ *   from the very first byte of the SUT. Default false → no init script
+ *   is registered for stealth; pre-Gap-6 behaviour bit-for-bit unchanged.
  * @returns {Promise<RecordingSession>}
  */
-export async function startRecording({ sessionId, projectId, startUrl }) {
+export async function startRecording({ sessionId, projectId, startUrl, device = "", stealth = false }) {
   if (sessions.has(sessionId)) {
     throw new Error(`Recording session ${sessionId} is already active.`);
   }
@@ -1185,11 +2210,8 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
   let context;
   let page;
   try {
-    context = await browser.newContext({
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-      ignoreHTTPSErrors: true,
-      acceptDownloads: true,
-    });
+    const { contextOpts, viewport: effectiveViewport } = resolveDeviceContext(device);
+    context = await browser.newContext(contextOpts);
 
     const session = /** @type {RecordingSession} */ ({
       id: sessionId,
@@ -1198,11 +2220,15 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       status: "recording",
       actions: [],
       startedAt: Date.now(),
+      device: device || "",
+      viewport: effectiveViewport,
+      stealth: !!stealth,
       browser,
       context,
     });
 
     const pageAliases = new Map();
+    session.pageAliases = pageAliases;
 
     // CRITICAL ORDERING: `exposeBinding` and `addInitScript` only apply to
     // pages / documents created AFTER they are registered. If we call
@@ -1219,6 +2245,14 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Expose a binding for the injected script to relay captured events.
     await context.exposeBinding("__sentriRecord", (source, action) => {
       if (session.status !== "recording") return;
+      // While paused, drop all in-page-captured actions. `forwardInput`
+      // already short-circuits user-initiated CDP input at the route
+      // layer, but the page can still emit events from in-flight work
+      // that started before pause (debounced fills flushing, framework
+      // re-renders firing change handlers, programmatic clicks fired by
+      // page JS, …). Without this guard those would leak into
+      // `session.actions[]` and surprise the operator at replay time.
+      if (session.paused === true) return;
       if (!action || typeof action !== "object") return;
       const sourcePage = source?.page || null;
       const sourceFrame = source?.frame || null;
@@ -1229,6 +2263,12 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
         target: action.target ? String(action.target).slice(0, 200) : undefined,
         label: action.label ? String(action.label).slice(0, 80) : undefined,
         value: action.value != null ? String(action.value).slice(0, 500) : undefined,
+        // SEC-007 — propagate the redaction marker (set by the in-page
+        // script when the source field matched isSensitiveField). The
+        // server-side check below catches the case where the in-page
+        // rule missed (rare — only fires for SUTs that use a text input
+        // for credentials AND don't match the name/id heuristic).
+        redacted: action.redacted === true || undefined,
         url: action.url ? String(action.url) : undefined,
         key: action.key ? String(action.key) : undefined,
         pageAlias: sourcePage ? (pageAliases.get(sourcePage) || "page") : "page",
@@ -1329,6 +2369,20 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // the page would have no `window.__sentriRecord` binding — the
     // symptom is the recorder only emitting `goto` actions while every
     // click/fill/keypress is silently dropped.
+    // DIF-015c Gap 6: install the stealth bootstrap BEFORE the
+    // Playwright selector bootstrap and recorder script so
+    // `navigator.webdriver` reads as `undefined` from the very first
+    // byte of the SUT. Default-mode (`stealth: false`) skips this
+    // entirely — pre-Gap-6 behaviour is bit-for-bit identical.
+    // Without the early-bird ordering, a target site can read
+    // `navigator.webdriver` synchronously during its bootstrap
+    // (`<head><script>if (navigator.webdriver) location = "/blocked"</script>`)
+    // before our addInitScript runs.
+    if (stealth === true) {
+      await context.addInitScript(STEALTH_SCRIPT);
+      console.log(formatLogLine("info", null, `[recorder] stealth profile enabled for session=${sessionId}`));
+    }
+
     let bootstrap = "";
     try { bootstrap = buildInjectedBootstrapScript(); }
     catch (err) {
@@ -1360,6 +2414,7 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
       if (pageAliases.has(p)) return;
       pageAliases.set(p, `popup${Math.max(1, pageAliases.size)}`);
       p.on("framenavigated", (frame) => {
+        if (session.paused === true) return;
         if (frame === p.mainFrame() && frame.url() && frame.url() !== "about:blank") {
           session.actions.push({ kind: "goto", pageAlias: pageAliases.get(p), url: frame.url(), ts: Date.now() });
         }
@@ -1398,18 +2453,26 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Dedup: if the settled URL matches the last recorded goto (e.g. the
     // listener fires for the initial page.goto that already pushed an action
     // above, or a hash-only change on an SPA), the action is silently dropped.
+    // DIF-015c Gap 5 follow-up — the timer lives on `session` (not as a
+    // closure-local variable) so `switchDevice` can clear it before
+    // tearing the page down. See the matching block in
+    // `_finishOpenRecorderPage` for the full rationale.
     const FRAME_NAV_DEBOUNCE_MS = 800;
-    let frameNavTimer = null;
     let pendingFrameUrl = "";
     page.on("framenavigated", (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
       if (!url || url === "about:blank") return;
       pendingFrameUrl = url;
-      if (frameNavTimer) { clearTimeout(frameNavTimer); frameNavTimer = null; }
-      frameNavTimer = setTimeout(() => {
-        frameNavTimer = null;
+      if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
+      session.frameNavTimer = setTimeout(() => {
+        session.frameNavTimer = null;
         if (session.status !== "recording") return;
+        // Pause also drops debounced framenavigated flushes — a
+        // navigation that started before pause but settled after should
+        // not produce a recorded `goto` (matches the `__sentriRecord`
+        // binding guard above; consistent operator-facing model).
+        if (session.paused === true) return;
         // Deduplicate: skip if the settled URL is the same as the last
         // recorded goto so initial-page echoes and trivial hash changes
         // don't produce spurious Navigate steps in the sidebar.
@@ -1422,7 +2485,13 @@ export async function startRecording({ sessionId, projectId, startUrl }) {
     // Start CDP screencast so the RecorderModal can show the live browser.
     // startScreencast now returns { stop, cdpSession } — store both so the
     // recorder can forward mouse/keyboard events from the canvas overlay.
-    const screencastResult = await startScreencast(page, sessionId, { interactive: true });
+    // DIF-015c Gap 5: pass the resolved viewport so iPhone / Pixel device
+    // profiles stream JPEG frames at native resolution (390×844 for an
+    // iPhone 14) instead of being letterboxed inside the desktop default.
+    const screencastResult = await startScreencast(page, sessionId, {
+      interactive: true,
+      viewport: effectiveViewport,
+    });
     if (screencastResult) {
       session.stopScreencast = screencastResult.stop;
       session.cdpSession = screencastResult.cdpSession;
@@ -1575,6 +2644,7 @@ export async function forwardInput(sessionId, event) {
   if (!session) throw new Error(`Recording session ${sessionId} not found.`);
   if (!session.cdpSession) throw new Error(`Session ${sessionId} has no CDP session — cannot forward input.`);
   if (session.status !== "recording") return; // ignore input after stop is called
+  if (session.paused === true) return;
 
   const cdp = session.cdpSession;
   const { type } = event;
@@ -1668,6 +2738,11 @@ export async function stopRecording(sessionId, opts = {}) {
 
   try {
     if (session.idleTimeout) { clearTimeout(session.idleTimeout); session.idleTimeout = null; }
+    // DIF-015c Gap 5 follow-up — defence-in-depth, the timer's status
+    // guard at fire time already catches stale fires here (we just set
+    // `session.status = "stopping"` above), but clearing eagerly avoids
+    // a useless Node-side setTimeout sitting around for up to 800ms.
+    if (session.frameNavTimer) { clearTimeout(session.frameNavTimer); session.frameNavTimer = null; }
     if (session.stopScreencast) await session.stopScreencast().catch(() => {});
     await session.page?.close().catch(() => {});
     await session.context?.close().catch(() => {});

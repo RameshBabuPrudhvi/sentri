@@ -14,12 +14,56 @@ import { deduplicateTests, deduplicateAcrossRuns, scoreTestWithFactors, normaliz
 import { enhanceTests } from "./assertionEnhancer.js";
 import { validateTest } from "./testValidator.js";
 import { applyHealingTransforms } from "../selfHealing.js";
+import { sanitizeDomSnapshot, createPiiContext, finalizePiiContext } from "./domSanitizer.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
 import { setStep } from "../utils/pipelineState.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
+
+/**
+ * SEC-006: PII firewall — single wiring point between the crawler/classify
+ * stages and the AI prompt builder. Called once per run to redact PII from
+ * the snapshots AND classified pages that feed `generateAllTests` and the
+ * post-generation pipeline.
+ *
+ * Honours per-project controls:
+ *   - `project.strictPiiFirewall` (default ON; explicit `false` disables)
+ *   - `project.piiAllowlist`      (string[] passed through to the sanitizer)
+ *
+ * Returns the same shape it was given so callers can transparently swap in
+ * the sanitized values. When the firewall is disabled, inputs are returned
+ * unchanged and no audit log is emitted.
+ *
+ * @param {object} project
+ * @param {object} run
+ * @param {object} inputs
+ * @param {object} [inputs.snapshotsByUrl]
+ * @param {object[]} [inputs.classifiedPages]
+ * @returns {{snapshotsByUrl: object, classifiedPages: object[]}}
+ */
+export function sanitizeRunInputs(project, run, { snapshotsByUrl = {}, classifiedPages = [] } = {}) {
+  const strict = project?.strictPiiFirewall !== false;
+  if (!strict) {
+    return { snapshotsByUrl, classifiedPages };
+  }
+  const allowlist = Array.isArray(project?.piiAllowlist) ? project.piiAllowlist : [];
+  // Share one context across both calls so identical PII values resolve to
+  // the same placeholder ID in both artifacts (the AI correlates references
+  // by ID across snapshots + classified pages — fresh contexts would
+  // produce `<EMAIL_1>` in one and a different ID in the other).
+  // `finalizePiiContext` emits a single `pipeline.pii_redacted` audit log
+  // covering the whole run.
+  const ctx = createPiiContext({ allowlist, runId: run?.id });
+  const sanSnaps = sanitizeDomSnapshot(snapshotsByUrl, ctx);
+  const sanClassified = sanitizeDomSnapshot(classifiedPages, ctx);
+  finalizePiiContext(ctx);
+  return {
+    snapshotsByUrl: sanSnaps.output,
+    classifiedPages: sanClassified.output,
+  };
+}
 
 /**
  * setStep is now imported from utils/pipelineState.js — the single source of

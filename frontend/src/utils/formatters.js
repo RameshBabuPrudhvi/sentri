@@ -167,6 +167,46 @@ export function fmtDateTimeMedium(iso) {
 }
 
 /**
+ * SEC-007: compliance-grade audit timestamp.
+ *
+ * Renders an ISO 8601 instant in UTC with second precision, e.g.
+ * `"2026-05-16 13:45:22 UTC"`. Used by the AuditLog feed because SOC 2 /
+ * ISO 27001 / PCI-DSS 10.3.3 require absolute, time-zone-anchored
+ * timestamps on every event — relative phrasing like "5m ago" is
+ * unacceptable for a compliance trail (an auditor reviewing the log
+ * months later cannot correlate "5m ago" to a specific instant).
+ *
+ * Matches the rendering convention used by Splunk, AWS CloudTrail,
+ * GitHub Audit Log, and Datadog so SIEM-importing reviewers see a
+ * familiar shape.
+ *
+ * Why UTC, not local time:
+ *   - PCI-DSS 10.6 mandates time-sync to an authoritative source.
+ *     UTC is the only timezone every system agrees on.
+ *   - Multi-tenant deployments have admins in many timezones; rendering
+ *     in local time means two reviewers comparing the same row see two
+ *     different timestamps, which an auditor will (correctly) flag.
+ *
+ * Format: `YYYY-MM-DD HH:MM:SS UTC` — fixed-width, sortable as text,
+ * matches ISO 8601 with a space separator (which is RFC 3339 §5.6's
+ * permitted human-readable variant).
+ *
+ * @param {string|null|undefined} iso - ISO 8601 timestamp.
+ * @returns {string}
+ */
+export function fmtAuditTimestamp(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  // Use UTC getters (NOT toLocaleString) so the output is identical for
+  // every reviewer regardless of browser locale or timezone.
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const time = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  return `${date} ${time} UTC`;
+}
+
+/**
  * Future-relative time — `"in 5m"`, `"in 3h"`, `"in 2d"`, `"soon"`.
  * Used by ScheduleManager and ProjectHeader for next-run display.
  *

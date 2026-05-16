@@ -27,6 +27,7 @@ const TestLab       = lazy(() => import("./pages/TestLab.jsx"));
 const ReviewQueue   = lazy(() => import("./pages/ReviewQueue.jsx"));
 const HealingDashboard = lazy(() => import("./pages/HealingDashboard.jsx"));
 const ApprovalsTimeline = lazy(() => import("./pages/ApprovalsTimeline.jsx"));
+const AuditLog          = lazy(() => import("./pages/AuditLog.jsx"));
 
 const NotFound = () => (
   <div style={{ padding: "80px 0", textAlign: "center", color: "var(--text2)" }}>
@@ -68,6 +69,13 @@ export default function App() {
                 <Route path="/runs/:runId" element={<RunDetail />} />
                 <Route path="/tests/:testId" element={<TestDetail />} />
                 <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                {/* SEC-007: compliance audit log — admin-gated at the route
+                    layer (defence-in-depth; backend also enforces admin
+                    via requireRole). Mounted at `/audit-log` only — the
+                    `/settings/compliance` alias was removed to avoid two
+                    paths to the same surface (which would split the
+                    meta-audit trail and confuse access logs). */}
+                <Route path="/audit-log" element={<ProtectedRoute requiredRole="admin"><AuditLog /></ProtectedRoute>} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/runs" element={<Runs />} />
                 <Route path="/system" element={<Systems />} />

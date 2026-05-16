@@ -29,6 +29,7 @@ import * as scheduleRepo from "./database/repositories/scheduleRepo.js";
 import * as projectRepo from "./database/repositories/projectRepo.js";
 import * as testRepo from "./database/repositories/testRepo.js";
 import * as runRepo from "./database/repositories/runRepo.js";
+import * as activityRepo from "./database/repositories/activityRepo.js";
 import { generateRunId } from "./utils/idGenerator.js";
 import { runWithAbort } from "./utils/runWithAbort.js";
 import { runTests } from "./testRunner.js";
@@ -45,6 +46,9 @@ const tasks = new Map();
 
 /** @type {Object|null} Weekly stale test detection task (AUTO-013). */
 let _staleDetectionTask = null;
+
+/** @type {Object|null} Daily SEC-007 audit-log retention sweep task. */
+let _auditRetentionTask = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,7 +377,34 @@ export function initScheduler() {
     }
   }, { timezone: "UTC", scheduled: true });
 
-  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection armed`));
+  // SEC-007: daily audit-log retention sweep — runs every day at 03:30 UTC,
+  // 30 min after the stale-test job so the two don't contend for the DB
+  // write lock on the same minute. Honours `AUDIT_RETENTION_DAYS`:
+  //   - unset / empty → default 365 days (SOC 2 CC7.2 baseline)
+  //   - 0            → never delete (task is armed but is a no-op)
+  //   - ≥ 90         → delete rows older than the configured window
+  // Values < 90 are rejected at boot in `backend/src/index.js`, so any
+  // value reaching here is already known-safe.
+  _auditRetentionTask = cron.schedule("30 3 * * *", () => {
+    try {
+      const raw = process.env.AUDIT_RETENTION_DAYS;
+      const days = raw === undefined || raw === "" ? 365 : Number.parseInt(raw, 10);
+      if (!Number.isFinite(days) || days <= 0) {
+        // 0 (or unparseable, defensively) → retention disabled; skip silently.
+        return;
+      }
+      const deleted = activityRepo.purgeOlderThan(days);
+      if (deleted > 0) {
+        console.log(formatLogLine("info", null,
+          `[scheduler] Audit retention sweep deleted ${deleted} row(s) older than ${days} days`));
+      }
+    } catch (err) {
+      console.error(formatLogLine("error", null,
+        `[scheduler] Audit retention sweep failed: ${err.message}`));
+    }
+  }, { timezone: "UTC", scheduled: true });
+
+  console.log(formatLogLine("info", null, `[scheduler] Initialised — ${tasks.size} active schedule(s) (${schedules.length} loaded), stale detection + audit retention armed`));
 }
 
 /**
@@ -415,6 +446,10 @@ export function stopAllTasks() {
   if (_staleDetectionTask) {
     _staleDetectionTask.stop();
     _staleDetectionTask = null;
+  }
+  if (_auditRetentionTask) {
+    _auditRetentionTask.stop();
+    _auditRetentionTask = null;
   }
 }
 

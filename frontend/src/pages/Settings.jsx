@@ -5,7 +5,7 @@ import {
   RefreshCw, Trash2, Zap, Database, Server, Clock, Cpu,
   Activity, Shield, HardDrive, Info, Wifi, WifiOff, Terminal,
   Compass, RotateCcw, FolderOpen, FileText, Play, AlertCircle,
-  Users, UserPlus, Crown,
+  Users, UserPlus, Crown, KeyRound, Smartphone, Download,
 } from "lucide-react";
 import { api } from "../api.js";
 import { invalidateSettingsCache } from "../queryClient.js";
@@ -548,6 +548,10 @@ const SETTINGS_TABS = [
   // all non-admin roles. See review thread on this file (line 543).
   { key: "integrations", label: "Integrations", icon: <ExternalLink size={14} />, adminOnly: false },
   { key: "data",        label: "Data",          icon: <Database size={14} />,     adminOnly: true },
+  // SEC-004: MFA / passkey management. Available to every user (each
+  // manages their own factors); the admin-only enforcement panel inside the
+  // tab is gated client-side AND on the backend.
+  { key: "security",    label: "Security",      icon: <KeyRound size={14} />,     adminOnly: false },
   { key: "account",     label: "Account",       icon: <Shield size={14} />,       adminOnly: false },
 ];
 
@@ -952,6 +956,655 @@ function RecycleBinTab() {
             onPurge={handlePurge}
           />
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Security tab (SEC-004: MFA / passkeys / workspace enforcement) ──────────
+
+/**
+ * One-time display of freshly minted recovery codes. Renders a download
+ * button + clipboard copy + an "I've saved them" dismiss so the user can
+ * never see them again. Codes are NEVER persisted on the client.
+ *
+ * @param {Object}   props
+ * @param {string[]} props.codes
+ * @param {string}   props.userEmail - Used in the download filename.
+ * @param {Function} props.onDismiss
+ */
+function RecoveryCodesPanel({ codes, userEmail, onDismiss }) {
+  const [confirmed, setConfirmed] = useState(false);
+
+  function handleDownload() {
+    const body = [
+      "Sentri MFA recovery codes",
+      "================================",
+      `Account: ${userEmail}`,
+      `Generated: ${new Date().toISOString()}`,
+      "",
+      "Each code can be used once. Store them somewhere safe.",
+      "",
+      ...codes,
+    ].join("\n");
+    const blob = new Blob([body], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `sentri-recovery-codes-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+  }
+
+  function handleCopy() {
+    navigator.clipboard?.writeText(codes.join("\n")).catch(() => { /* user denied clipboard */ });
+  }
+
+  return (
+    <div className="card card-padded recovery-panel">
+      <div className="recovery-panel__header">
+        <AlertTriangle size={18} color="var(--amber)" className="shrink-0 recovery-panel__icon" />
+        <div>
+          <div className="font-bold recovery-panel__title">Save these recovery codes now</div>
+          <div className="text-xs text-muted recovery-panel__hint">
+            Each code can be used once to sign in if you lose your authenticator. They will not be shown again.
+          </div>
+        </div>
+      </div>
+      <div className="text-mono text-sm recovery-panel__grid">
+        {codes.map((c) => <span key={c}>{c}</span>)}
+      </div>
+      <div className="recovery-panel__actions">
+        <button className="btn btn-ghost btn-sm" onClick={handleDownload}>
+          <Download size={13} /> Download .txt
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={handleCopy}>
+          <FileText size={13} /> Copy
+        </button>
+        <label className="text-xs text-muted recovery-panel__confirm">
+          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+          I've saved them
+        </label>
+        <button className="btn btn-primary btn-sm" disabled={!confirmed} onClick={onDismiss}>
+          <Check size={13} /> Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Small inline modal with a password input. Used to confirm sensitive
+ * actions (disable MFA, regenerate recovery codes, remove a passkey).
+ * OAuth-only users have no password — caller skips this modal entirely.
+ */
+function PasswordConfirmModal({ title, description, busy, error, onConfirm, onCancel }) {
+  const [password, setPassword] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    function onKey(e) { if (e.key === "Escape") onCancel(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pwd-modal-title"
+      className="pwd-modal-overlay"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <form
+        className="card card-padded pwd-modal"
+        onSubmit={(e) => { e.preventDefault(); onConfirm(password); }}
+      >
+        <h3 id="pwd-modal-title" className="pwd-modal__title">{title}</h3>
+        {description && <p className="text-sm text-muted pwd-modal__desc">{description}</p>}
+        <label className="text-sm font-semi pwd-modal__label">
+          Password
+          <input
+            ref={inputRef}
+            className="input pwd-modal__input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+        </label>
+        {error && (
+          <div className="st-status-err pwd-modal__error">
+            <AlertCircle size={12} /> {error}
+          </div>
+        )}
+        <div className="pwd-modal__actions">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !password.trim()}>
+            {busy ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+            Confirm
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * Render the otpauth URL as a scannable QR via api.qrserver.com (no auth /
+ * no rate limit on small images, zero JS dependency). Falls back to the raw
+ * base32 secret for users who can't scan.
+ */
+function TotpEnrollmentPanel({ enrollment, onEnable, onCancel, busy, error }) {
+  const [token, setToken] = useState("");
+  const qrUrl = enrollment?.otpauth
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(enrollment.otpauth)}`
+    : null;
+
+  return (
+    <form
+      className="card card-padded flex-col gap-md totp-enroll"
+      onSubmit={(e) => { e.preventDefault(); onEnable(token); }}
+    >
+      <div className="font-bold">Scan with your authenticator app</div>
+      <div className="text-sm text-muted">
+        Use Google Authenticator, 1Password, Authy, or any TOTP-compatible app.
+      </div>
+      {qrUrl && (
+        <div className="totp-enroll__qr-wrap">
+          <img
+            src={qrUrl}
+            width="200"
+            height="200"
+            alt="MFA QR code — scan with your authenticator app"
+            className="totp-enroll__qr"
+          />
+        </div>
+      )}
+      <div>
+        <div className="text-xs text-muted totp-enroll__secret-label">
+          Or enter this secret manually:
+        </div>
+        <div className="text-mono text-sm totp-enroll__secret">
+          {enrollment?.secret}
+        </div>
+      </div>
+      <label className="text-sm font-semi">
+        6-digit code from your app
+        <input
+          className="input totp-enroll__code-input"
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          value={token}
+          onChange={(e) => setToken(e.target.value.replace(/[^\d]/g, ""))}
+          placeholder="123456"
+          required
+        />
+      </label>
+      {error && (
+        <div className="st-status-err">
+          <AlertCircle size={12} /> {error}
+        </div>
+      )}
+      <div className="totp-enroll__actions">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || token.length < 6}>
+          {busy ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+          Verify &amp; enable
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Main Security tab — TOTP, recovery codes, passkeys, and (for admins)
+ * workspace enforcement. Loads factor state on mount via `api.mfaFactors()`
+ * and refetches after every mutation.
+ */
+function SecurityTab() {
+  // eslint-disable-next-line no-use-before-define
+  return <SecurityTabInner />;
+}
+
+/**
+ * Admin-only workspace enforcement panel. Toggles `mfaRequired` + grace
+ * period, with a live compliance preview so the admin knows how many
+ * members would be impacted at grace=0.
+ */
+function WorkspaceMfaPolicyPanel() {
+  const [ws, setWs] = useState(null);
+  const [compliance, setCompliance] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [draftEnabled, setDraftEnabled] = useState(false);
+  const [draftGrace, setDraftGrace] = useState(7);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [wsRes, compRes] = await Promise.all([
+        api.getWorkspace(),
+        api.getWorkspaceMfaCompliance(),
+      ]);
+      setWs(wsRes);
+      setCompliance(compRes);
+      setDraftEnabled(wsRes.mfaRequired === 1);
+      setDraftGrace(wsRes.mfaGracePeriodDays ?? 7);
+    } catch (err) {
+      setStatus({ type: "err", text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const dirty = ws && (
+    (draftEnabled ? 1 : 0) !== (ws.mfaRequired || 0) ||
+    Number(draftGrace) !== Number(ws.mfaGracePeriodDays ?? 7)
+  );
+
+  async function handleSave() {
+    setSaving(true);
+    setStatus(null);
+    try {
+      await api.updateWorkspace({
+        mfaRequired: draftEnabled ? 1 : 0,
+        mfaGracePeriodDays: Number(draftGrace),
+      });
+      setStatus({ type: "ok", text: "Workspace MFA policy updated." });
+      await load();
+    } catch (err) {
+      setStatus({ type: "err", text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return (
+    <div className="text-sm text-muted" style={{ padding: "16px 0" }}>Loading workspace policy…</div>
+  );
+
+  return (
+    <div className="card card-padded flex-col gap-md">
+      <div className="font-bold" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Crown size={14} color="var(--amber)" /> Workspace enforcement
+      </div>
+      <div className="text-sm text-muted">
+        Require all members of this workspace to enable MFA before signing in.
+        New members get the grace window before they are blocked.
+      </div>
+
+      {compliance && (
+        <div className="card-padded-sm ws-enforce__compliance">
+          <div className="text-xs text-muted font-semi ws-enforce__compliance-title">
+            Current enrollment
+          </div>
+          <div className="text-sm">
+            <strong>{compliance.enrolled}</strong> of {compliance.totalMembers} members have MFA enabled.
+            {compliance.notEnrolled > 0 && (
+              <span className="text-muted" style={{ marginLeft: 6 }}>
+                {compliance.notEnrolled} would be impacted at grace = 0.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <label className="text-sm" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={draftEnabled}
+          onChange={(e) => setDraftEnabled(e.target.checked)}
+        />
+        Require MFA for all workspace members
+      </label>
+
+      <label className="text-sm font-semi mfa-label">
+        Grace period (days)
+        <input
+          className="input ws-enforce__grace-input"
+          type="number"
+          min={0}
+          max={90}
+          value={draftGrace}
+          onChange={(e) => setDraftGrace(e.target.value)}
+          disabled={!draftEnabled}
+        />
+        <div className="hint ws-enforce__grace-hint">
+          Members have this many days from when the policy is enabled (or from
+          when they join) to enroll before they are blocked at login.
+        </div>
+      </label>
+
+      {status && (
+        <div className={status.type === "ok" ? "st-status-ok" : "st-status-err"}>
+          {status.type === "ok" ? <Check size={12} /> : <AlertCircle size={12} />} {status.text}
+        </div>
+      )}
+
+      <div>
+        <button className="btn btn-primary btn-sm" disabled={!dirty || saving} onClick={handleSave}>
+          {saving ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
+          Save policy
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SecurityTabInner() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const isAdmin = user?.workspaceRole === "admin";
+  // OAuth-only users have no password — destructive actions skip the modal
+  // entirely (the OAuth session itself proves identity, matching backend
+  // `verifyAccountPassword` semantics).
+  const needsPassword = user?.hasPassword !== false;
+
+  const [factors, setFactors] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const [enrollment, setEnrollment] = useState(null);
+  const [enrollBusy, setEnrollBusy] = useState(false);
+  const [enrollErr, setEnrollErr] = useState(null);
+  const [recoveryCodes, setRecoveryCodes] = useState(null);
+
+  // Pending destructive action awaiting password confirmation. Shape:
+  //   { kind: "disable" } | { kind: "regenerate" } | { kind: "removePasskey", credentialId }
+  const [pendingAction, setPendingAction] = useState(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionErr, setActionErr] = useState(null);
+  // SEC-004: When recovery codes are regenerated, the backend revokes the
+  // current session AND we still need to show the new codes one final time.
+  // This flag tells the RecoveryCodesPanel.onDismiss handler to chain
+  // logout+redirect after the user confirms they've saved the codes.
+  const [sessionRevokedPending, setSessionRevokedPending] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.mfaFactors();
+      setFactors(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleStartEnroll() {
+    setEnrollBusy(true);
+    setEnrollErr(null);
+    try {
+      const data = await api.mfaEnroll();
+      setEnrollment(data);
+    } catch (err) {
+      setEnrollErr(err.message);
+    } finally {
+      setEnrollBusy(false);
+    }
+  }
+
+  async function handleVerifyEnroll(token) {
+    setEnrollBusy(true);
+    setEnrollErr(null);
+    try {
+      const data = await api.mfaEnable(token);
+      setRecoveryCodes(data.recoveryCodes);
+      setEnrollment(null);
+      // SEC-004: clear the grace-period banner — the user is now enrolled
+      // so the workspace enforcement check will pass on next login. The
+      // banner re-checks sessionStorage on window focus.
+      try { sessionStorage.removeItem("mfa_grace_banner"); } catch { /* unavailable */ }
+      await load();
+    } catch (err) {
+      setEnrollErr(err.message);
+    } finally {
+      setEnrollBusy(false);
+    }
+  }
+
+  const runAction = useCallback(async (action, password) => {
+    setActionBusy(true);
+    setActionErr(null);
+    try {
+      // SEC-004: All three destructive actions revoke the current session on
+      // the backend (see `_internalRevokeCurrentSession` in routes/auth.js +
+      // routes/webauthn.js). The response carries `sessionRevoked: true` so
+      // we know to redirect to /login instead of refetching factor state on
+      // a now-invalid cookie. Matches the industry baseline (Auth0, Clerk,
+      // Okta, GitHub) — security-posture changes terminate the session.
+      let response;
+      if (action.kind === "disable") {
+        response = await api.mfaDisable(needsPassword ? password : "");
+      } else if (action.kind === "regenerate") {
+        response = await api.mfaRegenerateRecoveryCodes(needsPassword ? password : "");
+        // Show the new codes one last time before the session ends — the
+        // recovery panel has its own "I've saved them" gate. The user can
+        // download / copy before they're forced out.
+        setRecoveryCodes(response.recoveryCodes);
+      } else if (action.kind === "removePasskey") {
+        response = await api.webauthnDeleteCredential(action.credentialId, needsPassword ? password : "");
+      }
+      setPendingAction(null);
+
+      if (response?.sessionRevoked) {
+        // For regenerate, defer the redirect until the user dismisses the
+        // recovery-codes panel — otherwise we'd kick them out before they can
+        // save the codes. The other two actions have no follow-up UI.
+        if (action.kind === "regenerate") {
+          // Stash a flag the RecoveryCodesPanel.onDismiss handler reads to
+          // chain the logout+redirect after the user confirms they saved.
+          setSessionRevokedPending(true);
+        } else {
+          await logout();
+          navigate("/login", {
+            state: { notice: "Your session was ended for security. Please sign in again." },
+          });
+        }
+        return;
+      }
+
+      await load();
+    } catch (err) {
+      setActionErr(err.message);
+    } finally {
+      setActionBusy(false);
+    }
+  }, [needsPassword, load, logout, navigate]);
+
+  // OAuth-only path: no password modal — run the action immediately.
+  useEffect(() => {
+    if (!pendingAction || needsPassword) return;
+    runAction(pendingAction, "");
+  }, [pendingAction, needsPassword, runAction]);
+
+  async function handleAddPasskey() {
+    setError(null);
+    try {
+      const { startRegistration } = await import("@simplewebauthn/browser");
+      const { options, challengeToken } = await api.webauthnRegisterOptions();
+      // SimpleWebAuthn v11 takes `{ optionsJSON }`; v10 takes the options
+      // object directly. Try v11 first, fall back to v10 on TypeError.
+      let attestation;
+      try {
+        attestation = await startRegistration({ optionsJSON: options });
+      } catch (e) {
+        if (e?.name === "TypeError") attestation = await startRegistration(options);
+        else throw e;
+      }
+      const deviceName = window.prompt("Name this passkey (e.g. \"YubiKey\", \"iPhone\"):", "")?.slice(0, 80) || null;
+      await api.webauthnRegisterVerify(challengeToken, attestation, deviceName);
+      // SEC-004: passkey counts as a second factor — clear the grace banner.
+      try { sessionStorage.removeItem("mfa_grace_banner"); } catch { /* unavailable */ }
+      await load();
+    } catch (err) {
+      const msg = err?.name === "NotAllowedError"
+        ? "Passkey enrollment was cancelled or denied by the browser."
+        : err.message;
+      setError(msg);
+    }
+  }
+
+  if (loading) return (
+    <div className="text-sm text-muted" style={{ padding: "32px 0", textAlign: "center" }}>
+      Loading security settings…
+    </div>
+  );
+
+  const totpEnabled = factors?.totp === true;
+  const passkeys = factors?.webauthn || [];
+
+  return (
+    <div className="flex-col gap-lg">
+      <SectionTitle
+        icon={<Shield size={16} color="var(--accent)" />}
+        title="Security"
+        sub="Multi-factor authentication, passkeys, and workspace policy"
+      />
+
+      {error && (
+        <div className="card card-padded" style={{ borderColor: "var(--danger)", color: "var(--danger)", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertCircle size={15} /> {error}
+        </div>
+      )}
+
+      {recoveryCodes && (
+        <RecoveryCodesPanel
+          codes={recoveryCodes}
+          userEmail={user?.email || "account"}
+          onDismiss={async () => {
+            setRecoveryCodes(null);
+            // SEC-004: if regenerate revoked the session, complete the
+            // logout chain now that the user has confirmed they saved the
+            // new codes. Without this, the next API call would 401 with
+            // no explanation.
+            if (sessionRevokedPending) {
+              setSessionRevokedPending(false);
+              await logout();
+              navigate("/login", {
+                state: { notice: "Your session was ended for security. Please sign in again." },
+              });
+            }
+          }}
+        />
+      )}
+
+      {enrollment ? (
+        <TotpEnrollmentPanel
+          enrollment={enrollment}
+          onEnable={handleVerifyEnroll}
+          onCancel={() => { setEnrollment(null); setEnrollErr(null); }}
+          busy={enrollBusy}
+          error={enrollErr}
+        />
+      ) : (
+        <div className="card card-padded flex-col gap-md">
+          <div className="factor-row">
+            <Smartphone size={18} color={totpEnabled ? "var(--green)" : "var(--text3)"} />
+            <div className="factor-row__info">
+              <div className="font-bold">Authenticator app (TOTP)</div>
+              <div className="text-xs text-muted factor-row__sub">
+                {totpEnabled
+                  ? `Enabled · ${factors.recoveryCodesRemaining} recovery code${factors.recoveryCodesRemaining === 1 ? "" : "s"} remaining`
+                  : "Not enrolled"}
+              </div>
+            </div>
+            {totpEnabled ? (
+              <>
+                <button className="btn btn-ghost btn-sm" onClick={() => setPendingAction({ kind: "regenerate" })}>
+                  <RefreshCw size={13} /> Regenerate codes
+                </button>
+                <button className="btn btn-danger btn-sm" onClick={() => setPendingAction({ kind: "disable" })}>
+                  <Trash2 size={13} /> Disable
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-primary btn-sm" onClick={handleStartEnroll} disabled={enrollBusy}>
+                {enrollBusy ? <RefreshCw size={13} className="spin" /> : <KeyRound size={13} />}
+                Enable TOTP
+              </button>
+            )}
+          </div>
+          {enrollErr && (
+            <div className="st-status-err">
+              <AlertCircle size={12} /> {enrollErr}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card card-padded flex-col gap-md">
+        <div className="factor-row">
+          <KeyRound size={18} color={passkeys.length > 0 ? "var(--green)" : "var(--text3)"} />
+          <div className="factor-row__info">
+            <div className="font-bold">Passkeys</div>
+            <div className="text-xs text-muted factor-row__sub">
+              {passkeys.length === 0
+                ? "No passkeys registered"
+                : `${passkeys.length} passkey${passkeys.length === 1 ? "" : "s"} registered`}
+            </div>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={handleAddPasskey}>
+            <UserPlus size={13} /> Add passkey
+          </button>
+        </div>
+        {passkeys.length > 0 && (
+          <div className="flex-col gap-xs">
+            {passkeys.map((cred) => (
+              <div key={cred.id} className="passkey-item">
+                <div className="passkey-item__info">
+                  <div className="text-sm font-semi passkey-item__name">
+                    {cred.deviceName || "Unnamed passkey"}
+                  </div>
+                  <div className="text-xs text-muted passkey-item__meta">
+                    Added {fmtDeletedDate(cred.createdAt)}
+                    {cred.lastUsedAt && ` · last used ${fmtDeletedDate(cred.lastUsedAt)}`}
+                  </div>
+                </div>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ color: "var(--text3)" }}
+                  onClick={() => setPendingAction({ kind: "removePasskey", credentialId: cred.id })}
+                  title={`Remove ${cred.deviceName || "passkey"}`}
+                >
+                  <Trash2 size={11} /> Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {isAdmin && <WorkspaceMfaPolicyPanel />}
+
+      {pendingAction && needsPassword && (
+        <PasswordConfirmModal
+          title={
+            pendingAction.kind === "disable" ? "Disable MFA?"
+            : pendingAction.kind === "regenerate" ? "Regenerate recovery codes?"
+            : "Remove passkey?"
+          }
+          description={
+            pendingAction.kind === "disable" ? "This clears your TOTP secret and all recovery codes. You can re-enroll afterwards."
+            : pendingAction.kind === "regenerate" ? "Your existing recovery codes will stop working immediately. A fresh set will be shown once."
+            : "This passkey will no longer be accepted at sign-in."
+          }
+          busy={actionBusy}
+          error={actionErr}
+          onConfirm={(pwd) => runAction(pendingAction, pwd)}
+          onCancel={() => { setPendingAction(null); setActionErr(null); }}
+        />
       )}
     </div>
   );
@@ -1451,6 +2104,9 @@ export default function Settings() {
 
       <RecycleBinTab />
       </>}
+
+      {/* ── Tab: Security (SEC-004) ── */}
+      {tab === "security" && <SecurityTab />}
 
       {/* ── Tab: Account ── */}
       {tab === "account" && <AccountTab />}

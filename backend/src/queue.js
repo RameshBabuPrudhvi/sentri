@@ -84,17 +84,18 @@ export function isQueueAvailable() {
 /**
  * Get queue statistics (waiting + active counts).
  *
- * @returns {Promise<Object>} `{ waiting, active, delayed, failed }`
+ * @returns {Promise<Object>} `{ waiting, active, completed, delayed, failed }`
  */
 export async function getQueueStats() {
-  if (!runQueue) return { waiting: 0, active: 0, delayed: 0, failed: 0 };
-  const [waiting, active, delayed, failed] = await Promise.all([
+  if (!runQueue) return { waiting: 0, active: 0, completed: 0, delayed: 0, failed: 0 };
+  const [waiting, active, completed, delayed, failed] = await Promise.all([
     runQueue.getWaitingCount(),
     runQueue.getActiveCount(),
+    runQueue.getCompletedCount(),
     runQueue.getDelayedCount(),
     runQueue.getFailedCount(),
   ]);
-  return { waiting, active, delayed, failed };
+  return { waiting, active, completed, delayed, failed };
 }
 
 /**

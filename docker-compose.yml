@@ -40,10 +40,18 @@ services:
       # SEC-002: Point at the frontend dist copied into the shared volume so
       # serveIndexWithNonce() can inject per-request CSP nonces into index.html.
       - SPA_INDEX_PATH=/usr/share/frontend/index.html
-      # Uncomment to use PostgreSQL instead of SQLite:
-      # - DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
-      # Uncomment to use Redis for rate limiting, token revocation, and SSE pub/sub:
-      # - REDIS_URL=redis://redis:6379
+      # DATABASE_URL / REDIS_URL are read from the host env (or .env file) so
+      # the backend and `worker` service stay in lockstep — both consume the
+      # same source. Leave both unset for the default single-process SQLite
+      # deployment (BullMQ is a no-op without REDIS_URL, so jobs run in-process
+      # and any `worker` replicas sit idle). For distributed mode (AUTO-008),
+      # set both — typically via .env:
+      #   DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
+      #   REDIS_URL=redis://redis:6379
+      # then run with `--profile redis --profile postgres`. Workers MUST share
+      # the backend's database (SQLite cannot be shared across containers).
+      - DATABASE_URL=${DATABASE_URL:-}
+      - REDIS_URL=${REDIS_URL:-}
     ports:
       - "3001:3001"
     restart: unless-stopped
@@ -58,6 +66,63 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+
+  # ── Distributed runner worker (AUTO-008) ────────────────────────────────────
+  # Same image as `backend`; overrides CMD to run the queue-only entrypoint
+  # (`src/worker.js`) so workers don't bind port 3001. Scale with:
+  #   docker compose --profile redis --profile postgres up -d --scale worker=4
+  # Lives under the `redis` profile because BullMQ requires Redis. The
+  # `postgres` profile is also required by default because workers MUST share
+  # the backend's database (see DATABASE_URL note below) — SQLite cannot be
+  # shared across replicas. Omit `--profile postgres` only if you've pointed
+  # DATABASE_URL at an externally-managed PostgreSQL instance.
+  worker:
+    image: ghcr.io/rameshbabuprudhvi/sentri-backend:latest
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles:
+      - redis
+    command: ["node", "src/worker.js"]
+    environment:
+      - AI_PROVIDER=${AI_PROVIDER}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+      - OPENROUTER_REFERER=${OPENROUTER_REFERER}
+      - OPENROUTER_APP_TITLE=${OPENROUTER_APP_TITLE}
+      - JWT_SECRET=${JWT_SECRET}
+      - NODE_ENV=production
+      - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+      - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+      # Workers MUST share the same database as the backend. Distributed mode
+      # therefore requires a network-accessible DB (PostgreSQL) — a per-container
+      # SQLite file cannot be shared across replicas. If DATABASE_URL is unset
+      # we default to the bundled `postgres` service (activate with
+      # `--profile redis --profile postgres`).
+      - DATABASE_URL=${DATABASE_URL:-postgres://sentri:sentri@postgres:5432/sentri}
+    restart: unless-stopped
+    security_opt:
+      - seccomp=unconfined
+    shm_size: "256mb"
+    depends_on:
+      redis:
+        condition: service_healthy
+      # Wait for the bundled `postgres` service when it's part of the active
+      # profile set. `required: false` means workers still start cleanly when
+      # the operator points DATABASE_URL at an externally-managed PostgreSQL
+      # and runs without `--profile postgres` — in that case the `postgres`
+      # service is inactive and Compose skips this dependency instead of
+      # erroring out.
+      postgres:
+        condition: service_healthy
+        required: false
 
   frontend:
     image: ghcr.io/rameshbabuprudhvi/sentri-frontend:latest

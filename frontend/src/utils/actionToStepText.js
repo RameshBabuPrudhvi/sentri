@@ -84,8 +84,17 @@ export function actionToStepText(action) {
     case "hover":
       return `Hover over${friendlyTarget(action)}`;
 
-    case "fill":
-      return `Fill in${friendlyTarget(action, "field")} with '${truncVal(action.value)}'`;
+    case "fill": {
+      // SEC-007 — render redacted fills as `[REDACTED]` so the recorder
+      // sidebar matches the backend's `recordedActionToStepText` and the
+      // operator sees at a glance which fields were captured as
+      // credentials. Detection mirrors the backend: explicit
+      // `redacted: true` marker OR sentinel pattern (handles legacy
+      // actions captured before the marker was added).
+      const isRedacted = action.redacted === true || /^__SENTRI_SECRET_/.test(String(action.value || ""));
+      const display = isRedacted ? "[REDACTED]" : `'${truncVal(action.value)}'`;
+      return `Fill in${friendlyTarget(action, "field")} with ${display}`;
+    }
 
     case "press":
       return `Press ${action.key || ""}`.trim();
@@ -128,6 +137,28 @@ export function actionToStepText(action) {
 
     case "assertUrl":
       return `Verify URL contains '${truncVal(action.value, 60)}'`;
+
+    case "assertCount": {
+      // DIF-015c Gap 2 — mirror backend's recordedActionToStepText() count
+      // prose. With a captured label we read "There are N matching 'Item'";
+      // without one we degrade to "There are N matching elements" rather
+      // than leaking the selector.
+      const n = Number(action.value);
+      const count = Number.isFinite(n) ? n : action.value;
+      const t = friendlyTarget(action);
+      return t
+        ? `There are ${count} matching${t}`
+        : `There are ${count} matching elements`;
+    }
+
+    case "assertHasClass": {
+      // DIF-015c Gap 2 — mirror backend's recordedActionToStepText() class
+      // prose. Reads as "The 'Submit' has the 'is-loading' class".
+      const t = friendlyTarget(action);
+      return t
+        ? `The${t} has the '${truncVal(action.value)}' class`
+        : `The matched element has the '${truncVal(action.value)}' class`;
+    }
 
     default:
       return `${action.kind || "action"}${friendlyTarget(action)}`;

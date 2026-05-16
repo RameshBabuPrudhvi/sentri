@@ -148,6 +148,26 @@
       "role": "qa_lead",
       "source": "backend/src/routes/tests.js:1172"
     },
+    "POST /api/v1/projects/:id/record/:sessionId/pause": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/resume": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/pop-last": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/device": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
+    "POST /api/v1/projects/:id/record/:sessionId/probe": {
+      "role": "qa_lead",
+      "source": "backend/src/routes/tests.js"
+    },
     "POST /api/v1/tests/:testId/fix": {
       "role": "qa_lead",
       "source": "backend/src/routes/testFix.js:152"
@@ -167,6 +187,11 @@
     "PATCH /api/v1/workspaces/current": {
       "role": "admin",
       "source": "backend/src/routes/workspaces.js:44"
+    },
+    "GET /api/v1/workspaces/current/mfa-compliance": {
+      "role": "admin",
+      "source": "backend/src/routes/workspaces.js:179",
+      "$comment": "SEC-004 \u2014 admin-only preview of how many workspace members have MFA enabled before flipping enforcement."
     },
     "POST /api/v1/workspaces/current/members": {
       "role": "admin",
@@ -208,6 +233,46 @@
       "role": "admin",
       "source": "backend/src/routes/system.js:205"
     },
+    "GET /api/v1/audit/verify": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 walks the prevHash chain for the caller's workspace. No-op (chainDisabled:true) when AUDIT_HASH_CHAIN is unset."
+    },
+    "GET /api/v1/system/security-events": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 lists deployment-wide security events tagged with the SYSTEM_WORKSPACE_ID sentinel (chiefly auth.login.failed against unknown emails \u2014 credential-stuffing probes that fire before a tenant can be resolved). Cross-tenant by design; the workspace-scoped routes naturally exclude these rows. Defence-in-depth: rejects callers whose own workspaceId equals the sentinel."
+    },
+    "GET /api/v1/workspaces/:workspaceId/audit-log": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 workspace-scoped audit log with cursor pagination. The :workspaceId URL param is validated against req.workspaceId (the authenticated workspace) to prevent cross-workspace reads."
+    },
+    "GET /api/v1/workspaces/:workspaceId/audit-log/dlq": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 lists SIEM dead-letter queue entries for the workspace. Same workspace-scope assertion as the audit-log route."
+    },
+    "POST /api/v1/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Re-dispatches the stored snapshot via dispatchSiemEvent. Returns 503 SIEM_NOT_CONFIGURED when no SIEM target is configured for the workspace."
+    },
+    "GET /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 returns the masked SIEM forwarder config. hmacSecret is replaced with \u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022<last4> so admins can confirm which secret is configured without exposing the value."
+    },
+    "PUT /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 upsert SIEM config. hmacSecret encrypted at rest via credentialEncryption (AES-256-GCM). targetUrl validated by SSRF guard. headers JSON bounded at 4096 chars. Emits settings.update activity for audit trail."
+    },
+    "DELETE /api/v1/workspaces/:workspaceId/siem-config": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 Part C \u2014 idempotent delete. Returns { ok: true, removed: false } when no config existed."
+    },
     "GET /api/v1/settings/github-checks": {
       "role": "qa_lead",
       "source": "backend/src/routes/settings.js"
@@ -234,6 +299,21 @@
       "role": "trigger_token + GitHub HMAC",
       "source": "backend/src/routes/trigger.js",
       "noUi": "machine-only GitHub PR webhook [no-ui] \u2014 dual-auth (Bearer trigger token via requireTrigger + X-Hub-Signature-256 HMAC keyed by GITHUB_WEBHOOK_SECRET)"
+    },
+    "POST /api/v1/auth/mfa/verify": {
+      "role": "public (pre-auth via pendingToken)",
+      "source": "backend/src/routes/auth.js",
+      "$comment": "SEC-004 \u2014 exchanges a single-use pendingToken (issued by /auth/login when MFA is required) plus a TOTP or recovery code for an auth cookie. CSRF-exempt + rate-limited (5/15min/IP) because the user has no cookie yet."
+    },
+    "POST /api/v1/auth/webauthn/authenticate/options": {
+      "role": "public (pre-auth via pendingToken)",
+      "source": "backend/src/routes/webauthn.js",
+      "$comment": "SEC-004 \u2014 returns WebAuthn assertion options. Peeks (does not consume) the pendingToken from /auth/login."
+    },
+    "POST /api/v1/auth/webauthn/authenticate/verify": {
+      "role": "public (pre-auth via pendingToken)",
+      "source": "backend/src/routes/webauthn.js",
+      "$comment": "SEC-004 \u2014 verifies a WebAuthn assertion. Consumes the pendingToken, sets the auth cookie with amr=[pwd,mfa], and updates the credential's signature counter (clone detection)."
     },
     "POST /api/v1/tests/:testId/fixtures": {
       "role": "qa_lead",
@@ -275,12 +355,21 @@
     "GET /api/v1/auth/export",
     "DELETE /api/v1/auth/account",
     "POST /api/v1/chat",
-    "GET /api/v1/tests/:testId/fixtures"
+    "GET /api/v1/tests/:testId/fixtures",
+    "GET /api/v1/auth/mfa/status",
+    "GET /api/v1/auth/mfa/factors",
+    "POST /api/v1/auth/mfa/enroll",
+    "POST /api/v1/auth/mfa/enable",
+    "POST /api/v1/auth/mfa/disable",
+    "POST /api/v1/auth/mfa/recovery-codes/regenerate",
+    "POST /api/v1/auth/webauthn/register/options",
+    "POST /api/v1/auth/webauthn/register/verify",
+    "GET /api/v1/auth/webauthn/credentials",
+    "DELETE /api/v1/auth/webauthn/credentials/:id"
   ],
   "outOfScope": {
     "$comment": "Endpoints / flows present in code but not yet shipped end-to-end. Do NOT manually QA \u2014 file enhancement requests instead.",
     "items": [
-      "SEC-004 \u2014 MFA / 2FA",
       "Public / shareable test report links",
       "Jira integration",
       "Billing",
@@ -291,6 +380,7 @@
     "Abort run (POST /runs/:runId/abort) has no per-user 'own runs' restriction; any qa_lead can abort any run in their workspace.",
     "Per-project notification settings (PATCH /projects/:id/notifications) are qa_lead-gated, NOT admin-only \u2014 different from global /settings.",
     "Restore from recycle bin is qa_lead-gated; permanent purge is admin-only.",
-    "There is no in-app change-password endpoint; password reset does NOT invalidate other-device sessions."
+    "There is no in-app change-password endpoint; password reset does NOT invalidate other-device sessions.",
+    "SEC-004: MFA destructive actions (/auth/mfa/disable, /auth/mfa/recovery-codes/regenerate, DELETE /auth/webauthn/credentials/:id) require password confirmation in the request body. OAuth-only users (no passwordHash) authenticate by session \u2014 the password field is ignored. Removing the last passkey is blocked with 400 MFA_LAST_FACTOR_PROTECTED when any workspace the user belongs to enforces MFA past its grace window."
   ]
 }

@@ -23,6 +23,7 @@ const files = [
   "tests/test-validator.test.js",
   "tests/test-validator-allowlist.test.js",
   "tests/secret-scanner.test.js",
+  "tests/pii-sanitizer.test.js",
   "tests/feedback-loop.test.js",
   "tests/pipeline-orchestrator.test.js",
   "tests/chat-window.test.js",
@@ -45,6 +46,15 @@ const files = [
   "tests/notifications-api.test.js",
   "tests/email-verification.test.js",
   "tests/account-compliance.test.js",
+  // SEC-004 — Multi-factor authentication (TOTP + WebAuthn + workspace enforcement).
+  "tests/auth-mfa-totp.test.js",
+  "tests/auth-mfa-enforcement.test.js",
+  "tests/auth-webauthn.test.js",
+  // SEC-007 — Compliance audit log (hash chain, retention, DLQ, routes).
+  "tests/audit-log-routes.test.js",
+  "tests/audit-auth-events.test.js",
+  // SEC-007 Part C — SIEM forwarder (HMAC + retry + DLQ + config CRUD).
+  "tests/audit-siem-forwarder.test.js",
   "tests/postgres-adapter.test.js",
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",
@@ -58,6 +68,8 @@ const files = [
   "tests/stale-detector.test.js",
   "tests/flaky-detector.test.js",
   "tests/recorder.test.js",
+  "tests/recorder-pause.test.js",
+  "tests/recorder-redaction.test.js",
   "tests/projects-pages.test.js",
   "tests/visual-regression.test.js",
   "tests/recorder-baselines-routes.test.js",
@@ -100,6 +112,7 @@ const files = [
   "tests/run-shard-registry.test.js",
   "tests/run-shard-finalizer.test.js",
   "tests/failure-clusterer.test.js",
+  "tests/worker-pool-dashboard.test.js",
 ];
 
 let passed = 0;

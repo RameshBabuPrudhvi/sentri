@@ -23,6 +23,8 @@ function rowToProject(row) {
     webVitalsBudgets: row.webVitalsBudgets ? JSON.parse(row.webVitalsBudgets) : null,
     autoApproveThreshold: row.autoApproveThreshold,
     iterationCap: row.iterationCap,
+    strictPiiFirewall: row.strictPiiFirewall === 1,
+    piiAllowlist: row.piiAllowlist ? JSON.parse(row.piiAllowlist) : [],
   };
 }
 
@@ -38,6 +40,14 @@ function projectToRow(p) {
     createdAt: p.createdAt,
     autoApproveThreshold: p.autoApproveThreshold ?? null,
     iterationCap: p.iterationCap ?? null,
+    // Default ON when the caller omits the field — `projects.strictPiiFirewall`
+    // is `INTEGER NOT NULL DEFAULT 1` (migration 030) and creating a project
+    // via `POST /api/v1/projects` doesn't pass this field through. A naive
+    // `p.strictPiiFirewall ? 1 : 0` would coerce `undefined` → 0 and silently
+    // disable the SEC-006 PII firewall on every new project, defeating the
+    // migration's intent. Only an explicit `false` opts out.
+    strictPiiFirewall: p.strictPiiFirewall === false ? 0 : 1,
+    piiAllowlist: p.piiAllowlist ? JSON.stringify(p.piiAllowlist) : null,
   };
 }
 
@@ -99,8 +109,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist)
   `).run(row);
 }
 
@@ -111,14 +121,21 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
     if (key in fields) {
-      const val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets") && fields[key]
+      let val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets" || key === "piiAllowlist") && fields[key]
         ? JSON.stringify(fields[key])
         : fields[key];
+      // `strictPiiFirewall` is a JS boolean at the route layer but the column
+      // is `INTEGER NOT NULL` — better-sqlite3 refuses to bind booleans and
+      // throws "SQLite3 can only bind numbers, strings, bigints, buffers,
+      // and null". Coerce here so callers can pass a natural `true` / `false`.
+      if (key === "strictPiiFirewall" && typeof val === "boolean") {
+        val = val ? 1 : 0;
+      }
       sets.push(`${key} = @${key}`);
       params[key] = val;
     }
