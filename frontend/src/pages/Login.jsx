@@ -69,6 +69,8 @@ export default function Login() {
   const [tIdx, setTIdx] = useState(0);
   const [verifyEmail, setVerifyEmail] = useState(""); // SEC-001: email needing verification
   const [resending, setResending] = useState(false);
+  const [mfaPendingToken, setMfaPendingToken] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
 
   const from = location.state?.from?.pathname || "/dashboard";
 
@@ -190,7 +192,21 @@ export default function Login() {
         }
         setMode("login"); setPassword(""); setConfirmPassword("");
       }
-      else login(data.user);
+      else if (data.mfaRequired && data.pendingToken) {
+        setMfaPendingToken(data.pendingToken);
+        setSuccess("Enter your authenticator code to finish sign in.");
+      } else login(data.user);
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
+  async function handleMfaVerify(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const data = await api.mfaVerify(mfaPendingToken, mfaCode);
+      login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
@@ -212,6 +228,16 @@ export default function Login() {
       {/* Styles loaded from styles/pages/login.css */}
 
       <div className={`lp-root${mounted?" on":""}`}>
+        {mfaPendingToken && (
+          <div className="card" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"grid",placeItems:"center",zIndex:50}}>
+            <form onSubmit={handleMfaVerify} className="card" style={{padding:20,width:"min(420px,92vw)"}}>
+              <h3>Multi-factor verification</h3>
+              <p className="text-sub">Enter your 6-digit code or a recovery code.</p>
+              <input className="input" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} placeholder="123456" />
+              <button className="btn btn-primary" style={{marginTop:12}} disabled={loading || !mfaCode.trim()}>{loading?"Verifying…":"Verify"}</button>
+            </form>
+          </div>
+        )}
 
         {/* LEFT */}
         <div className="lp-left">

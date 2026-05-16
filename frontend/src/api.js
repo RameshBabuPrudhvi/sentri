@@ -797,6 +797,12 @@ export const api = {
    */
   resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
 
+  mfaVerify: (pendingToken, token) => req("POST", "/auth/mfa/verify", { pendingToken, token }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  mfaStatus: () => req("GET", "/auth/mfa/status"),
+  mfaEnroll: () => req("POST", "/auth/mfa/enroll"),
+  mfaEnable: (token) => req("POST", "/auth/mfa/enable", { token }),
+  mfaDisable: (password) => req("POST", "/auth/mfa/disable", { password }),
+
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**
    * Export account data as JSON. Password confirmation is required.

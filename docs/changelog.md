@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added initial MFA (TOTP) enrollment and login verification flow with recovery-code fallback endpoints and UI login challenge support.
+
+### Added
 - Scalable worker pool with dashboard metrics (queue depth, active/idle workers, job counts) when Redis/BullMQ is available; falls back to single-process mode automatically. (#9)
 - Recorder stealth mode: `stealth: true` option on recording sessions patches common headless-browser detection signals so sites that block automation render normally. No new dependencies. (#DIF-015c)
 - Recorder device profiles: select a device (iPhone 14, Pixel 7, iPad Pro, etc.) at session launch or mid-session; captured steps are preserved across device switches. (#DIF-015c)

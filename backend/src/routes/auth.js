@@ -43,6 +43,7 @@ import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as accountRepo from "../database/repositories/accountRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
+import { encryptString, decryptString } from "../utils/credentialEncryption.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
@@ -282,6 +283,76 @@ function ensureUserWorkspace(user) {
   workspaceRepo.create({ name: `${user.name || "My"}'s Workspace`, slug, ownerId: user.id });
 }
 
+
+const mfaPendingLogins = new Map();
+const MFA_LOGIN_TTL_MS = 5 * 60 * 1000;
+
+
+function base32Decode(input) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = String(input || "").toUpperCase().replace(/=+$/g, "").replace(/[^A-Z2-7]/g, "");
+  let bits = "";
+  for (const c of clean) {
+    const v = alphabet.indexOf(c);
+    if (v < 0) continue;
+    bits += v.toString(2).padStart(5, "0");
+  }
+  const out = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(out);
+}
+function generateTotpSecret() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bytes = crypto.randomBytes(20);
+  let out = "";
+  let bits = 0; let value = 0;
+  for (const b of bytes) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) { out += alphabet[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += alphabet[(value << (5 - bits)) & 31];
+  return out;
+}
+function verifyTotp(token, secret, window = 1) {
+  const t = String(token || "").replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(t)) return false;
+  const key = base32Decode(secret);
+  const step = 30;
+  const now = Math.floor(Date.now() / 1000 / step);
+  for (let w = -window; w <= window; w++) {
+    const counter = Buffer.alloc(8);
+    counter.writeBigUInt64BE(BigInt(now + w));
+    const hmac = crypto.createHmac("sha1", key).update(counter).digest();
+    const off = hmac[hmac.length - 1] & 0xf;
+    const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
+    if (String(code % 1_000_000).padStart(6, "0") === t) return true;
+  }
+  return false;
+}
+
+function hashRecoveryCode(code) {
+  return crypto.createHash("sha256").update(String(code)).digest("hex");
+}
+
+function mintRecoveryCodes() {
+  const raw = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString("hex"));
+  return { raw, hashed: raw.map(hashRecoveryCode) };
+}
+
+function createPendingMfaLogin(userId, workspaceId) {
+  const token = crypto.randomBytes(24).toString("base64url");
+  mfaPendingLogins.set(token, { userId, workspaceId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
+  return token;
+}
+
+function consumePendingMfaLogin(token) {
+  const entry = mfaPendingLogins.get(token);
+  if (!entry) return null;
+  mfaPendingLogins.delete(token);
+  if (entry.expiresAt < Date.now()) return null;
+  return entry;
+}
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 /**
@@ -407,15 +478,17 @@ router.post("/login", async (req, res) => {
     // ACL-001: Ensure the user has a workspace before issuing a token.
     ensureUserWorkspace(user);
 
+    if (user.mfaEnabled === 1 && user.mfaSecret) {
+      const pendingToken = createPendingMfaLogin(user.id);
+      return res.status(200).json({ mfaRequired: true, pendingToken });
+    }
+
     const payload = buildJwtPayload(user);
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
     setAuthCookie(res, token, exp);
 
-    // Note: token is NOT returned in the response body — it lives in the HttpOnly
-    // cookie only. The frontend reads user profile from this response and stores
-    // it in React state. The token_exp cookie exposes the expiry timestamp.
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
     console.error(formatLogLine("error", null, `[auth/login] ${err.message}`));
@@ -1024,5 +1097,71 @@ async function findOrCreateOAuthUser({ provider, providerId, email, name, avatar
 
   return user;
 }
+
+
+router.get("/mfa/status", requireAuth, (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  return res.json({ enabled: user.mfaEnabled === 1 });
+});
+
+router.post("/mfa/enroll", requireAuth, (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  const secret = generateTotpSecret();
+  const otpauth = `otpauth://totp/Sentri:${encodeURIComponent(user.email)}?secret=${secret}&issuer=Sentri&algorithm=SHA1&digits=6&period=30`;
+  userRepo.update(user.id, { mfaSecret: encryptString(secret), mfaEnabled: 0, updatedAt: new Date().toISOString() });
+  return res.json({ secret, otpauth });
+});
+
+router.post("/mfa/enable", requireAuth, (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  const secret = decryptString(user.mfaSecret);
+  if (!secret) return res.status(400).json({ error: "MFA enrollment is not initialized." });
+  const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
+  if (!verifyTotp(token, secret)) return res.status(400).json({ error: "Invalid code." });
+  const recovery = mintRecoveryCodes();
+  userRepo.update(user.id, { mfaEnabled: 1, mfaRecoveryCodes: JSON.stringify(recovery.hashed), updatedAt: new Date().toISOString() });
+  return res.json({ ok: true, recoveryCodes: recovery.raw });
+});
+
+router.post("/mfa/verify", async (req, res) => {
+  const pending = consumePendingMfaLogin(sanitiseString(req.body?.pendingToken, 200));
+  if (!pending) return res.status(401).json({ error: "MFA session expired. Sign in again." });
+  const user = userRepo.getById(pending.userId);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
+  const secret = decryptString(user.mfaSecret);
+  if (!secret) return res.status(400).json({ error: "MFA is not configured." });
+  let ok = verifyTotp(token, secret);
+  let updatedRecovery = null;
+  if (!ok && token) {
+    const hashed = hashRecoveryCode(token);
+    const codes = JSON.parse(user.mfaRecoveryCodes || "[]");
+    const idx = codes.indexOf(hashed);
+    if (idx >= 0) {
+      codes.splice(idx, 1);
+      updatedRecovery = JSON.stringify(codes);
+      ok = true;
+    }
+  }
+  if (!ok) return res.status(400).json({ error: "Invalid authentication code." });
+  if (updatedRecovery !== null) userRepo.update(user.id, { mfaRecoveryCodes: updatedRecovery, updatedAt: new Date().toISOString() });
+  const payload = buildJwtPayload(user);
+  const jwt = signJwt(payload, getJwtSecret());
+  const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
+  setAuthCookie(res, jwt, exp);
+  return res.json({ user: buildUserResponse(user) });
+});
+
+router.post("/mfa/disable", requireAuth, async (req, res) => {
+  const user = userRepo.getById(req.authUser.sub);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  const valid = await verifyAccountPassword(user, req.body?.password);
+  if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
+  userRepo.update(user.id, { mfaEnabled: 0, mfaSecret: null, mfaRecoveryCodes: null, updatedAt: new Date().toISOString() });
+  return res.json({ ok: true });
+});
 
 export default router;
