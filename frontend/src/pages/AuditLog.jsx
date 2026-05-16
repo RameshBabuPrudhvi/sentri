@@ -376,6 +376,14 @@ function ActivityEntry({ entry }) {
           <span
             className="al-entry__actor"
             title={entry.userAgent || undefined}
+            // WCAG 2.2 §1.3.1: mirror the `title` content into `aria-label`
+            // so screen readers and keyboard users learn the actor's
+            // User-Agent without needing a mouse hover. See the IP span
+            // below for the full rationale.
+            aria-label={entry.userAgent
+              ? `${entry.userName}, User-Agent ${entry.userAgent}`
+              : entry.userName}
+            tabIndex={entry.userAgent ? 0 : undefined}
           >
             {entry.userName}
           </span>
@@ -384,11 +392,24 @@ function ActivityEntry({ entry }) {
             can read it directly. Falls back to em-dash for rows without
             an IP (e.g. system-emitted rows from the scheduler that have
             no `req` context). Monospaced via the existing `--font-mono`
-            on the score column so IPv4 / IPv6 stay aligned. */}
+            on the score column so IPv4 / IPv6 stay aligned.
+
+            WCAG 2.2 §1.3.1 (Info & Relationships): the User-Agent string
+            is only on `title` (visible to mouse hover), which is invisible
+            to screen readers and keyboard users. `aria-label` exposes the
+            full `IP + UA` context to assistive tech and `tabIndex={0}`
+            makes the span keyboard-focusable so the tooltip is reachable
+            via Tab + focus-visible browser behaviour. Compliance auditors
+            increasingly score WCAG AA alongside SOC 2 — this is the
+            cheap fix that earns it. */}
         {entry.ipAddress && (
           <span
             className="al-entry__ip"
             title={entry.userAgent ? `User-Agent: ${entry.userAgent}` : undefined}
+            aria-label={entry.userAgent
+              ? `IP address ${entry.ipAddress}, User-Agent ${entry.userAgent}`
+              : `IP address ${entry.ipAddress}`}
+            tabIndex={0}
           >
             {entry.ipAddress}
           </span>
