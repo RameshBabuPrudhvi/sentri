@@ -74,7 +74,15 @@ export default function Login() {
   // `mfaMethods` mirrors the `methods` map on the login response so we know
   // which factors the user actually has registered.
   const [mfaPendingToken, setMfaPendingToken] = useState("");
-  const [mfaCode, setMfaCode] = useState("");
+  // SEC-004 (F3): per-factor input state. The TOTP and recovery-code panels
+  // each own their own buffer so switching tabs mid-typo preserves the
+  // partial input the user already typed (better UX). Each panel's submit
+  // path reads ONLY its own buffer, so the original wrong-tab-submission
+  // bug (a recovery code accidentally sent through the TOTP submit path
+  // and silently consumed) is structurally impossible — the TOTP submit
+  // sees `mfaTotpCode`, the recovery submit sees `mfaRecoveryCode`.
+  const [mfaTotpCode, setMfaTotpCode] = useState("");
+  const [mfaRecoveryCode, setMfaRecoveryCode] = useState("");
   const [mfaMethods, setMfaMethods] = useState({ totp: false, webauthn: false });
   // "totp" = 6-digit input · "recovery" = 8-char alpha input · "webauthn" = passkey flow
   const [mfaFactor, setMfaFactor] = useState("totp");
@@ -245,6 +253,8 @@ export default function Login() {
           }));
         } catch { /* sessionStorage unavailable — banner is best-effort */ }
       }
+      // SEC-004 (F9): defensive guard on the response shape.
+      if (!data?.user) throw new Error("OAuth login returned an unexpected response. Please try again.");
       login(data.user);
       window.history.replaceState({}, "", `${import.meta.env.BASE_URL}login`);
     } catch (e) {
@@ -371,6 +381,8 @@ export default function Login() {
             }));
           } catch { /* sessionStorage unavailable — banner is best-effort */ }
         }
+        // SEC-004 (F9): defensive guard on the response shape.
+        if (!data?.user) throw new Error("Login returned an unexpected response. Please try again.");
         login(data.user);
       }
     } catch (e) {
@@ -387,7 +399,19 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const data = await api.mfaVerify(mfaPendingToken, mfaCode);
+      // SEC-004 (F3): submit reads the per-factor buffer so a recovery code
+      // typed on the recovery tab can never be sent through the TOTP submit
+      // path (or vice versa) — preserves the wrong-tab-submission protection
+      // from the original shared-state design while keeping partial input
+      // across tab switches.
+      const code = mfaFactor === "recovery" ? mfaRecoveryCode : mfaTotpCode;
+      const data = await api.mfaVerify(mfaPendingToken, code);
+      // SEC-004 (F9): defensive guard on the response shape. The backend
+      // contract is `{ user }` on success (see `backend/src/routes/auth.js`
+      // `POST /mfa/verify`) but a partial payload from a future change
+      // would currently call `login(undefined)` and corrupt AuthContext.
+      // Surface a clear error instead.
+      if (!data?.user) throw new Error("MFA verification returned an unexpected response. Please try again.");
       login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -415,6 +439,8 @@ export default function Login() {
         else throw err;
       }
       const data = await api.webauthnAuthVerify(challengeToken, assertion);
+      // SEC-004 (F9): defensive guard — same rationale as handleMfaVerify.
+      if (!data?.user) throw new Error("Passkey verification returned an unexpected response. Please try again.");
       login(data.user);
     } catch (e) {
       const msg = e?.name === "NotAllowedError"
@@ -428,7 +454,8 @@ export default function Login() {
 
   function handleMfaCancel() {
     setMfaPendingToken("");
-    setMfaCode("");
+    setMfaTotpCode("");
+    setMfaRecoveryCode("");
     setMfaMethods({ totp: false, webauthn: false });
     setMfaFactor("totp");
     setSuccess("");
@@ -481,7 +508,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "webauthn"}
                       className={`btn btn-sm ${mfaFactor === "webauthn" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("webauthn"); setMfaCode(""); setError(""); }}
+                      onClick={() => { setMfaFactor("webauthn"); setError(""); }}
                     >
                       Passkey
                     </button>
@@ -492,7 +519,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "totp"}
                       className={`btn btn-sm ${mfaFactor === "totp" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("totp"); setMfaCode(""); setError(""); }}
+                      onClick={() => { setMfaFactor("totp"); setError(""); }}
                     >
                       Authenticator
                     </button>
@@ -503,7 +530,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "recovery"}
                       className={`btn btn-sm ${mfaFactor === "recovery" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("recovery"); setMfaCode(""); setError(""); }}
+                      onClick={() => { setMfaFactor("recovery"); setError(""); }}
                     >
                       Recovery code
                     </button>
@@ -547,8 +574,8 @@ export default function Login() {
                       inputMode="numeric"
                       autoComplete="one-time-code"
                       maxLength={6}
-                      value={mfaCode}
-                      onChange={e => setMfaCode(e.target.value.replace(/[^\d]/g, ""))}
+                      value={mfaTotpCode}
+                      onChange={e => setMfaTotpCode(e.target.value.replace(/[^\d]/g, ""))}
                       placeholder="123456"
                       autoFocus
                     />
@@ -556,7 +583,7 @@ export default function Login() {
                   <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={loading || mfaCode.length < 6}
+                    disabled={loading || mfaTotpCode.length < 6}
                   >
                     {loading ? <Spinner/> : null}
                     {loading ? "Verifying…" : "Verify"}
@@ -578,14 +605,14 @@ export default function Login() {
                       autoCorrect="off"
                       spellCheck={false}
                       maxLength={16}
-                      value={mfaCode}
+                      value={mfaRecoveryCode}
                       // SEC-004: lowercase as the user types. Recovery codes
                       // are minted as lowercase hex; mobile auto-capitalize
                       // would silently produce a wrong-case input. Backend
                       // also normalises, but doing it here gives immediate
                       // visual feedback that the input matches the format
                       // the user was originally shown.
-                      onChange={e => setMfaCode(e.target.value.trim().toLowerCase())}
+                      onChange={e => setMfaRecoveryCode(e.target.value.trim().toLowerCase())}
                       placeholder="abcd1234"
                       autoFocus
                     />
@@ -596,7 +623,7 @@ export default function Login() {
                   <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={loading || !mfaCode.trim()}
+                    disabled={loading || !mfaRecoveryCode.trim()}
                   >
                     {loading ? <Spinner/> : null}
                     {loading ? "Verifying…" : "Verify"}
