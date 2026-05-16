@@ -1,40 +1,46 @@
 /**
  * @module pages/AuditLog
- * @description Workspace audit log — immutable chronological feed of every
- * action taken across the workspace, grouped by calendar day.
+ * @description SEC-007 compliance audit log — admin-only, workspace-scoped,
+ * tamper-evident chronological feed of every action taken across the
+ * workspace, grouped by calendar day.
  *
- * Covers all ACTIVITY_TYPES events: test approvals (auto + human), rejections,
- * restores, revokes, bulk actions, test create/edit/delete/generate.
+ * ### Data source
+ * Backed by `GET /api/v1/workspaces/:workspaceId/audit-log` (admin-only,
+ * cursor-paginated). Every read fires a meta-audit `audit.read` row on the
+ * server (`audit.export` for CSV / NDJSON) per PCI-DSS 10.2.6 + SOC 2 CC7.2,
+ * so this page deliberately does NOT fall back to `api.getActivities` —
+ * that would split the meta-audit trail and make exfiltration invisible.
  *
- * Features
- * ─────────
- * - Stats strip: events today, approvals 7 d (auto/human), fixes 7 d
- * - Free-text search (debounced 300 ms, mirrors ReviewQueue pattern)
- * - Event-type chip filter (all / approve / reject / bulk / create / other)
- * - Project dropdown filter
- * - Sort: newest / oldest
- * - Load-more pagination (offset-based, matches existing `getActivities` API)
- * - CSV export (uses shared `exportCsv` util — admin only)
+ * ### Features
+ * - Stats strip: events today, approvals 7 d (auto / human), revokes 7 d
+ *   (read in one paginated batch from the same compliance endpoint).
+ * - Free-text search (debounced 300 ms) — client-side filter on the
+ *   currently-loaded page.
+ * - Event-type chip filter (all / approve / reject / bulk / create / auth / other).
+ * - Project dropdown + sort selector (URL-driven).
+ * - Cursor-based "Load more" — opaque cursor from `nextCursor` so
+ *   concurrent writes don't shift the page window.
+ * - Server-side CSV / NDJSON export with `Content-Disposition: attachment`.
+ *   Backend rate-limits exports at 10 / 15 min per (workspace × admin).
+ * - "Verify chain" admin action — calls `GET /audit/verify`, shows result
+ *   inline. No-op when `AUDIT_HASH_CHAIN` is unset on the server.
+ * - DLQ inspector — lists SIEM dead-letter rows with per-row "Replay" and
+ *   handles the pre-Part-C `503 SIEM_NOT_CONFIGURED` cleanly.
  *
- * Data source: existing `GET /api/v1/activities` endpoint in system.js —
- * no backend changes required. The endpoint already supports `type`,
- * `projectId`, `after`, `before`, `limit`, `offset` query params and
- * workspace-scopes all results.
- *
- * Role access: viewer+ (mirrors ApprovalsTimeline).
- * CSV export: restricted to admin in the UI (server enforces nothing extra,
- * but the export just downloads what the viewer can already see anyway).
+ * ### Role access
+ * Admin-only at both the route (`<ProtectedRoute requiredRole="admin">`)
+ * and the backend (`requireRole("admin")`) layers. Defence-in-depth: even
+ * if a future bug bypasses the route guard, the backend still refuses.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api.js";
+import { API_PATH } from "../utils/apiBase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useNotifications } from "../context/NotificationContext.jsx";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
 import { fmtDateTime, fmtDate } from "../utils/formatters.js";
-import { exportCsv } from "../utils/exportCsv.js";
-import { userHasRole } from "../utils/roles.js";
 import "../styles/pages/audit-log.css";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -77,6 +83,26 @@ const TYPE_CHIPS = [
     key: "create",
     label: "Generated",
     types: [ACTIVITY_TYPES.TEST_GENERATE, ACTIVITY_TYPES.TEST_CREATE],
+  },
+  {
+    key: "auth",
+    label: "Auth",
+    // SEC-007: surface the 8 password-path auth events + meta-audit reads
+    // so SOC 2 reviewers can filter the entire authentication trail in
+    // one click. `AUDIT_*` types appear here too because they're emitted
+    // by the audit-log route itself (audit-of-audit).
+    types: [
+      ACTIVITY_TYPES.AUTH_LOGIN,
+      ACTIVITY_TYPES.AUTH_LOGIN_FAILED,
+      ACTIVITY_TYPES.AUTH_LOGOUT,
+      ACTIVITY_TYPES.AUTH_PASSWORD_RESET,
+      ACTIVITY_TYPES.AUTH_ROLE_CHANGE,
+      ACTIVITY_TYPES.AUTH_API_KEY_CREATE,
+      ACTIVITY_TYPES.AUTH_API_KEY_REVOKE,
+      ACTIVITY_TYPES.AUTH_SESSION_REVOKE,
+      ACTIVITY_TYPES.AUDIT_READ,
+      ACTIVITY_TYPES.AUDIT_EXPORT,
+    ],
   },
   {
     key: "other",
@@ -128,6 +154,29 @@ function entryMeta(type) {
       return { badgeClass: "badge-red",    label: "Deleted" };
     case ACTIVITY_TYPES.TEST_REGENERATE:
       return { badgeClass: "badge-accent", label: "Regenerated" };
+    // SEC-007 auth-events surface. Distinct colours so SOC 2 reviewers can
+    // visually scan a busy feed and spot failed logins / role changes
+    // without reading the type literal.
+    case ACTIVITY_TYPES.AUTH_LOGIN:
+      return { badgeClass: "badge-blue",   label: "Sign-in" };
+    case ACTIVITY_TYPES.AUTH_LOGIN_FAILED:
+      return { badgeClass: "badge-red",    label: "Sign-in failed" };
+    case ACTIVITY_TYPES.AUTH_LOGOUT:
+      return { badgeClass: "badge-gray",   label: "Sign-out" };
+    case ACTIVITY_TYPES.AUTH_PASSWORD_RESET:
+      return { badgeClass: "badge-amber",  label: "Password reset" };
+    case ACTIVITY_TYPES.AUTH_ROLE_CHANGE:
+      return { badgeClass: "badge-amber",  label: "Role changed" };
+    case ACTIVITY_TYPES.AUTH_API_KEY_CREATE:
+      return { badgeClass: "badge-blue",   label: "API key created" };
+    case ACTIVITY_TYPES.AUTH_API_KEY_REVOKE:
+      return { badgeClass: "badge-amber",  label: "API key revoked" };
+    case ACTIVITY_TYPES.AUTH_SESSION_REVOKE:
+      return { badgeClass: "badge-amber",  label: "Session revoked" };
+    case ACTIVITY_TYPES.AUDIT_READ:
+      return { badgeClass: "badge-gray",   label: "Audit read" };
+    case ACTIVITY_TYPES.AUDIT_EXPORT:
+      return { badgeClass: "badge-amber",  label: "Audit export" };
     default:
       return { badgeClass: "badge-gray",   label: type ?? "—" };
   }
@@ -214,9 +263,16 @@ function ActivityEntry({ entry }) {
           <span className="badge badge-amber al-entry__was-auto">was auto</span>
         )}
 
-        {/* Actor */}
+        {/* Actor + IP (SEC-007: session-reconstruction evidence). The IP is
+            rendered as a `title` on the actor so a SOC 2 reviewer can hover
+            for the full {IP, user-agent} pair without cluttering the row. */}
         {entry.userName && (
-          <span className="al-entry__actor">{entry.userName}</span>
+          <span
+            className="al-entry__actor"
+            title={entry.ipAddress ? `${entry.ipAddress}${entry.userAgent ? ` · ${entry.userAgent}` : ""}` : undefined}
+          >
+            {entry.userName}
+          </span>
         )}
 
         {/* Timestamp */}
@@ -255,7 +311,10 @@ function DayGroup({ label, items }) {
 
 export default function AuditLog() {
   const { user } = useAuth();
-  const isAdmin = userHasRole(user, "admin");
+  // Admin-gated at the route layer (frontend/src/App.jsx:71) AND by the
+  // backend (`requireRole("admin")`). The workspaceId comes from the JWT
+  // claim baked into `user` at login — never from URL state.
+  const workspaceId = user?.workspaceId;
   const { addNotification } = useNotifications();
 
   // ── URL-driven filters (mirrors ReviewQueue + ApprovalsTimeline pattern) ──
@@ -281,40 +340,62 @@ export default function AuditLog() {
   const [debouncedQ, setDQ]     = useState("");
   const [projects, setProjects] = useState([]);
   const [rows, setRows]         = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [offset, setOffset]     = useState(0);
+  // SEC-007: cursor pagination. `cursor` is an opaque ISO timestamp from
+  // the server's `nextCursor` field. `null` (or empty string) means "no
+  // more pages" / "start from the top". Replaces the legacy offset counter
+  // so concurrent INSERTs don't shift the window between page fetches.
+  const [nextCursor, setNextCursor] = useState(null);
   const [loading, setLoading]   = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError]       = useState(null);
   const [stats, setStats]       = useState(null);
 
+  // ── Hash-chain verify state (SEC-007) ──────────────────────────────────────
+  // `null`         — never run / chain disabled state not yet known
+  // { verified }   — last verify result; rendered as an inline banner
+  const [verifyResult, setVerifyResult] = useState(null);
+  const [verifying, setVerifying]       = useState(false);
+
+  // ── DLQ inspector state (SEC-007) ──────────────────────────────────────────
+  // Lazy-loaded — only fetched when the panel is opened. `null` means
+  // "panel never opened". Empty array means "panel opened, zero rows".
+  const [dlqRows, setDlqRows] = useState(null);
+  const [dlqOpen, setDlqOpen] = useState(false);
+  const [dlqLoading, setDlqLoading] = useState(false);
+  const [replayingId, setReplayingId] = useState(null);
+
   // ── Stats ─────────────────────────────────────────────────────────────────
-  // Compute from fetched rows rather than a dedicated endpoint — the backend
-  // doesn't yet have a /activities/stats route and we can avoid a new endpoint
-  // by computing counts client-side from the full (unfiltered) first fetch.
-  // Fetched separately with limit=200 so the strip shows workspace-wide totals
-  // regardless of the active project/type filter.
+  // SEC-007: read stats from the same compliance endpoint as the main feed
+  // (not the legacy /activities route) so every byte goes through the same
+  // workspace-scope assertion, meta-audit, and rate-limiter. The page's two
+  // batches are bucketed under one `audit.read` row on the server — which
+  // is the SOC 2 / PCI-DSS-correct way to attribute the access.
+  //
+  // Fetched independent of the active project / type filters so the strip
+  // shows workspace-wide totals (a SOC-2 reviewer wants the workspace
+  // health, not the currently-filtered slice).
   useEffect(() => {
+    if (!workspaceId) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     Promise.all([
-      api.getActivities({ after: today.toISOString(), limit: 500 }),
-      api.getActivities({ after: sevenDaysAgo.toISOString(), limit: 1000 }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: today.toISOString(),       limit: 500 }),
+      api.getWorkspaceAuditLog(workspaceId, { dateFrom: sevenDaysAgo.toISOString(), limit: 1000 }),
     ])
-      .then(([todayRows, weekRows]) => {
-        const todayArr  = Array.isArray(todayRows)  ? todayRows  : [];
-        const weekArr   = Array.isArray(weekRows)   ? weekRows   : [];
+      .then(([todayRes, weekRes]) => {
+        const todayArr  = Array.isArray(todayRes?.rows) ? todayRes.rows : [];
+        const weekArr   = Array.isArray(weekRes?.rows)  ? weekRes.rows  : [];
         setStats({
           eventsToday:  todayArr.length,
-          autoApprove7d: weekArr.filter(r => r.type === ACTIVITY_TYPES.TEST_AUTO_APPROVE).length,
+          autoApprove7d:  weekArr.filter(r => r.type === ACTIVITY_TYPES.TEST_AUTO_APPROVE).length,
           humanApprove7d: weekArr.filter(r => r.type === ACTIVITY_TYPES.TEST_APPROVE).length,
-          revoked7d:    weekArr.filter(r => r.type === ACTIVITY_TYPES.TEST_REVOKE).length,
+          revoked7d:      weekArr.filter(r => r.type === ACTIVITY_TYPES.TEST_REVOKE).length,
         });
       })
-      .catch(() => {}); // stats strip is non-critical
-  }, []);
+      .catch(() => {}); // stats strip is non-critical; main feed shows the real error
+  }, [workspaceId]);
 
   // ── Projects list for dropdown ─────────────────────────────────────────────
   useEffect(() => {
@@ -330,136 +411,87 @@ export default function AuditLog() {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setDQ(val);
-      setOffset(0);
-      setRows([]);
     }, 300);
   }
 
-  // ── Build filter params for the API call ───────────────────────────────────
+  // ── Build filter params for the compliance API call ────────────────────────
   const chip = TYPE_CHIPS.find((c) => c.key === typeKey) ?? TYPE_CHIPS[0];
-
-  // The existing `getActivities` accepts a single `type` string.
-  // For multi-type groups (approve, bulk) we make one call per type and merge.
-  // For single-type groups we make one call.
-  // For "all" we make one call with no type filter.
+  // SEC-007: the compliance endpoint accepts `type` as a repeatable param,
+  // so we pass the full array in one round-trip — no per-type fan-out, no
+  // client-side merge. `null` (the "all" chip) means "no type filter".
   const filterTypes = chip.types; // null | string[]
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
+  // Shared client-side text filter — applied to the currently-loaded page.
+  // The compliance endpoint has no `q` param yet (a future enhancement);
+  // for now we filter the rendered rows locally on testName, detail,
+  // userName, projectName, ipAddress, and the activity type itself.
+  const applyTextFilter = useCallback((arr) => {
+    if (!debouncedQ) return arr;
+    const lq = debouncedQ.toLowerCase();
+    return arr.filter((r) =>
+      (r.testName    || "").toLowerCase().includes(lq) ||
+      (r.detail      || "").toLowerCase().includes(lq) ||
+      (r.userName    || "").toLowerCase().includes(lq) ||
+      (r.projectName || "").toLowerCase().includes(lq) ||
+      (r.ipAddress   || "").toLowerCase().includes(lq) ||
+      (r.type        || "").toLowerCase().includes(lq),
+    );
+  }, [debouncedQ]);
+
+  // ── Main fetch (cursor-paginated, workspace-scoped) ────────────────────────
+  // Refetch on filter change. Cursor is reset (start from the top); next
+  // pages come from `loadMore` below using the server's `nextCursor`.
   useEffect(() => {
+    if (!workspaceId) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    const before = sortOrder === "oldest"
-      ? undefined
-      : undefined; // newest-first is the API default
-
-    // Build the shared filter object (without `type` — handled per-call below)
-    const base = {
+    const filters = {
       projectId: projectId !== "all" ? projectId : undefined,
-      limit:     PAGE_SIZE,
-      offset:    0,
+      type: filterTypes || undefined,
+      limit: PAGE_SIZE,
     };
 
-    // For "oldest" sort we fetch in reverse by using `after` with a very old
-    // date and relying on the API's DESC order, then reversing client-side.
-    // The existing API has no `order` param, so we sort client-side for now.
-
-    async function fetchRows() {
-      let fetched = [];
-
-      if (!filterTypes) {
-        // All types
-        const data = await api.getActivities({ ...base });
-        fetched = Array.isArray(data) ? data : [];
-      } else {
-        // Fetch each type in the group and merge — the API supports one type
-        // at a time. Use Promise.all so they run in parallel.
-        const results = await Promise.all(
-          filterTypes.map((t) => api.getActivities({ ...base, type: t }))
-        );
-        for (const r of results) {
-          if (Array.isArray(r)) fetched.push(...r);
-        }
-        // Re-sort merged results by createdAt desc
-        fetched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      }
-
-      // Client-side text filter (debouncedQ). The existing endpoint has no `q`
-      // param, so we filter the returned rows locally.
-      if (debouncedQ) {
-        const lq = debouncedQ.toLowerCase();
-        fetched = fetched.filter((r) => {
-          return (
-            (r.testName  || "").toLowerCase().includes(lq) ||
-            (r.detail    || "").toLowerCase().includes(lq) ||
-            (r.userName  || "").toLowerCase().includes(lq) ||
-            (r.projectName || "").toLowerCase().includes(lq)
-          );
-        });
-      }
-
-      if (sortOrder === "oldest") fetched.reverse();
-
-      return fetched;
-    }
-
-    fetchRows()
-      .then((data) => {
+    api.getWorkspaceAuditLog(workspaceId, filters)
+      .then((res) => {
         if (cancelled) return;
-        setRows(data);
-        setTotal(data.length);
-        setOffset(data.length);
+        let fetched = Array.isArray(res?.rows) ? res.rows : [];
+        fetched = applyTextFilter(fetched);
+        if (sortOrder === "oldest") fetched = [...fetched].reverse();
+        setRows(fetched);
+        setNextCursor(res?.nextCursor || null);
         setLoading(false);
       })
       .catch((err) => {
         if (cancelled) return;
+        // AGENT.md: surface the user-facing message; the backend wraps 5xx
+        // errors with stable codes (AUDIT_READ_FAILED) the UI could branch
+        // on later, but the message field is already sanitised.
         setError(err.message || "Failed to load audit log");
         setLoading(false);
       });
 
     return () => { cancelled = true; };
-  }, [typeKey, projectId, sortOrder, debouncedQ]);
+  }, [workspaceId, typeKey, projectId, sortOrder, debouncedQ, applyTextFilter, filterTypes]);
 
-  // ── Load more ──────────────────────────────────────────────────────────────
+  // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
-    if (loadingMore) return;
+    if (loadingMore || !nextCursor || !workspaceId) return;
     setLoadingMore(true);
     try {
-      const base = {
+      const filters = {
         projectId: projectId !== "all" ? projectId : undefined,
-        limit:     PAGE_SIZE,
-        offset,
+        type: filterTypes || undefined,
+        cursor: nextCursor,
+        limit: PAGE_SIZE,
       };
-
-      let fetched = [];
-      if (!filterTypes) {
-        const data = await api.getActivities(base);
-        fetched = Array.isArray(data) ? data : [];
-      } else {
-        const results = await Promise.all(
-          filterTypes.map((t) => api.getActivities({ ...base, type: t }))
-        );
-        for (const r of results) {
-          if (Array.isArray(r)) fetched.push(...r);
-        }
-        fetched.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      }
-
-      if (debouncedQ) {
-        const lq = debouncedQ.toLowerCase();
-        fetched = fetched.filter((r) =>
-          (r.testName || "").toLowerCase().includes(lq) ||
-          (r.detail   || "").toLowerCase().includes(lq) ||
-          (r.userName || "").toLowerCase().includes(lq) ||
-          (r.projectName || "").toLowerCase().includes(lq)
-        );
-      }
-
-      if (sortOrder === "oldest") fetched.reverse();
-
+      const res = await api.getWorkspaceAuditLog(workspaceId, filters);
+      let fetched = Array.isArray(res?.rows) ? res.rows : [];
+      fetched = applyTextFilter(fetched);
+      if (sortOrder === "oldest") fetched = [...fetched].reverse();
       setRows((prev) => [...prev, ...fetched]);
-      setOffset((prev) => prev + fetched.length);
+      setNextCursor(res?.nextCursor || null);
     } catch (err) {
       addNotification({ type: "error", message: err.message || "Failed to load more" });
     } finally {
@@ -467,20 +499,124 @@ export default function AuditLog() {
     }
   }
 
-  // ── CSV export ─────────────────────────────────────────────────────────────
-  function handleExport() {
-    const headers = ["Timestamp", "Type", "Test", "Project", "User", "Score", "Detail"];
-    const csvRows = rows.map((r) => [
-      r.createdAt,
-      r.type,
-      r.testName || r.detail || "",
-      r.projectName || "",
-      r.userName || "",
-      r.meta?.score != null ? Number(r.meta.score).toFixed(2) : "",
-      r.detail || "",
-    ]);
-    const date = new Date().toISOString().slice(0, 10);
-    exportCsv(headers, csvRows, `sentri-audit-log-${date}.csv`);
+  // ── Server-side export (CSV / NDJSON) ──────────────────────────────────────
+  // SEC-007: triggers a server-rendered export via the compliance endpoint.
+  // The server applies the same filter shape we're currently viewing, writes
+  // a meta-audit `audit.export` row, and the response carries
+  // `Content-Disposition: attachment` so the browser saves to disk. The
+  // backend rate-limits exports at 10 / 15 min per (workspace × admin) —
+  // 429 responses are surfaced as a notification with the friendly error
+  // message returned by the limiter.
+  //
+  // We DON'T use the JSON `api.exportWorkspaceAuditLog` helper because that
+  // would try to parse the CSV/NDJSON response as JSON. Instead we build the
+  // URL and fetch as a blob — the same pattern as `api.downloadExport`.
+  async function handleExport(format /* "csv" | "ndjson" */) {
+    if (!workspaceId) return;
+    const params = new URLSearchParams();
+    params.set("format", format);
+    if (projectId !== "all") params.set("projectId", projectId);
+    if (filterTypes) filterTypes.forEach((t) => params.append("type", t));
+    if (debouncedQ) {
+      // The server has no `q` param yet; document the limitation in the
+      // notification so an evidence-pulling admin knows the file matches
+      // the filter chips, not the search box.
+      addNotification({
+        type: "info",
+        message: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
+      });
+    }
+    const url = `${API_PATH}/workspaces/${workspaceId}/audit-log?${params.toString()}`;
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (res.status === 429) {
+        const body = await res.json().catch(() => ({}));
+        addNotification({
+          type: "error",
+          message: body.error || "Too many audit-log exports. Try again later.",
+        });
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        addNotification({
+          type: "error",
+          message: body.error || `Export failed (${res.status}).`,
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const date = new Date().toISOString().slice(0, 10);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `sentri-audit-log-${date}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+    } catch (err) {
+      addNotification({ type: "error", message: err.message || "Export failed." });
+    }
+  }
+
+  // ── Hash-chain verify (SEC-007) ────────────────────────────────────────────
+  // Calls `GET /api/v1/audit/verify`. Result shapes:
+  //   { verified: true,  chainDisabled: true }  — AUDIT_HASH_CHAIN unset
+  //   { verified: true,  total }                — clean walk
+  //   { verified: false, firstBrokenRowId, total } — tamper detected
+  async function handleVerify() {
+    if (verifying) return;
+    setVerifying(true);
+    try {
+      const res = await api.verifyAuditChain();
+      setVerifyResult(res);
+    } catch (err) {
+      addNotification({ type: "error", message: err.message || "Verification failed." });
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  // ── DLQ inspector (SEC-007) ────────────────────────────────────────────────
+  async function openDlq() {
+    if (!workspaceId) return;
+    setDlqOpen(true);
+    if (dlqRows !== null) return; // already loaded
+    setDlqLoading(true);
+    try {
+      const res = await api.listAuditDlq(workspaceId, { limit: 200 });
+      setDlqRows(Array.isArray(res?.rows) ? res.rows : []);
+    } catch (err) {
+      addNotification({ type: "error", message: err.message || "Failed to load DLQ." });
+      setDlqRows([]);
+    } finally {
+      setDlqLoading(false);
+    }
+  }
+
+  async function handleReplay(dlqId) {
+    if (replayingId || !workspaceId) return;
+    setReplayingId(dlqId);
+    try {
+      await api.replayAuditDlq(workspaceId, dlqId);
+      addNotification({ type: "success", message: "DLQ entry replayed." });
+      setDlqRows((prev) => (prev || []).filter((r) => r.id !== dlqId));
+    } catch (err) {
+      // SIEM forwarder is shipped in Part C — pre-then this returns
+      // 503 SIEM_NOT_CONFIGURED. Surface that distinctly from real
+      // dispatch failures so the admin knows it's a server config gap,
+      // not a SIEM outage.
+      const code = err.body?.code;
+      if (code === "SIEM_NOT_CONFIGURED") {
+        addNotification({
+          type: "info",
+          message: "SIEM forwarding isn't configured on this server yet (Part C).",
+        });
+      } else {
+        addNotification({ type: "error", message: err.message || "Replay failed." });
+      }
+    } finally {
+      setReplayingId(null);
+    }
   }
 
   // ── Grouped rows ───────────────────────────────────────────────────────────
@@ -495,21 +631,115 @@ export default function AuditLog() {
         <div>
           <h1 className="page-title">Audit log</h1>
           <p className="page-subtitle">
-            Every action across the workspace · Immutable
+            Workspace compliance trail · Immutable · Admin only
           </p>
         </div>
         <div className="al-header__actions">
-          {isAdmin && (
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={handleExport}
-              disabled={rows.length === 0}
-            >
-              Export CSV
-            </button>
-          )}
+          {/* Hash-chain verify — admin gesture so a SOC 2 reviewer can ask
+              "is the audit log intact?" from the UI rather than the CLI. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleVerify}
+            disabled={verifying}
+            title="Walk the prevHash chain and report tampering"
+          >
+            {verifying ? "Verifying…" : "Verify chain"}
+          </button>
+          {/* DLQ inspector — opens the SIEM dead-letter panel below. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openDlq}
+            title="Inspect SIEM dead-letter queue"
+          >
+            DLQ{dlqRows && dlqRows.length > 0 ? ` (${dlqRows.length})` : ""}
+          </button>
+          {/* Server-side exports — meta-audited + rate-limited (10/15min). */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => handleExport("csv")}
+            disabled={rows.length === 0}
+          >
+            Export CSV
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => handleExport("ndjson")}
+            disabled={rows.length === 0}
+          >
+            Export NDJSON
+          </button>
         </div>
       </div>
+
+      {/* ── Hash-chain verify result banner ── */}
+      {verifyResult && (
+        <div
+          className={`banner ${
+            verifyResult.verified
+              ? "banner-success"
+              : "banner-error"
+          }`}
+          role="status"
+        >
+          {verifyResult.chainDisabled
+            ? "Hash chain is disabled on this server (set AUDIT_HASH_CHAIN=true to enable tamper-evidence)."
+            : verifyResult.verified
+              ? `✓ Chain verified · ${verifyResult.total} rows`
+              : `✗ Chain broken at row ${verifyResult.firstBrokenRowId} (${verifyResult.total} rows scanned)`}
+        </div>
+      )}
+
+      {/* ── DLQ inspector panel ── */}
+      {dlqOpen && (
+        <div className="card card-padded-sm al-dlq" role="region" aria-label="SIEM dead-letter queue">
+          <div className="al-dlq__header">
+            <strong>SIEM dead-letter queue</strong>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setDlqOpen(false)}
+              aria-label="Close DLQ panel"
+            >
+              ✕
+            </button>
+          </div>
+          {dlqLoading && <div className="al-dlq__empty">Loading…</div>}
+          {!dlqLoading && dlqRows !== null && dlqRows.length === 0 && (
+            <div className="al-dlq__empty">No failed dispatches.</div>
+          )}
+          {!dlqLoading && dlqRows && dlqRows.length > 0 && (
+            <table className="al-dlq__table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Created</th>
+                  <th>Attempts</th>
+                  <th>Last error</th>
+                  <th aria-label="Actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {dlqRows.map((r) => (
+                  <tr key={r.id}>
+                    <td><code>{r.id}</code></td>
+                    <td>{fmtDateTime(r.createdAt)}</td>
+                    <td>{r.attempts}</td>
+                    <td className="al-dlq__error" title={r.lastError}>{r.lastError}</td>
+                    <td>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => handleReplay(r.id)}
+                        disabled={replayingId === r.id}
+                      >
+                        {replayingId === r.id ? "Replaying…" : "Replay"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* ── Stats strip ── */}
       <div className="stat-grid al-stats">
@@ -553,11 +783,13 @@ export default function AuditLog() {
           />
         </div>
 
-        {/* Project filter */}
+        {/* Project filter — refetch driven by useEffect on projectId change.
+            No explicit row-reset needed; the effect resets the cursor and
+            replaces `rows` with the first page atomically. */}
         <select
           className="input al-toolbar__select"
           value={projectId}
-          onChange={(e) => { setParam("projectId", e.target.value); setOffset(0); setRows([]); }}
+          onChange={(e) => setParam("projectId", e.target.value)}
           aria-label="Filter by project"
         >
           <option value="all">All projects</option>
@@ -570,7 +802,7 @@ export default function AuditLog() {
         <select
           className="input al-toolbar__select"
           value={sortOrder}
-          onChange={(e) => { setParam("sort", e.target.value); setOffset(0); setRows([]); }}
+          onChange={(e) => setParam("sort", e.target.value)}
           aria-label="Sort order"
         >
           <option value="newest">Newest first</option>
@@ -584,7 +816,7 @@ export default function AuditLog() {
           <button
             key={chip.key}
             className={`btn btn-xs al-chip${typeKey === chip.key ? " al-chip--active" : ""}`}
-            onClick={() => { setTypeKey(chip.key); setOffset(0); setRows([]); }}
+            onClick={() => setTypeKey(chip.key)}
           >
             {chip.label}
           </button>
@@ -626,8 +858,10 @@ export default function AuditLog() {
             <DayGroup key={g.dateKey} label={g.label} items={g.items} />
           ))}
 
-          {/* Load more */}
-          {offset >= PAGE_SIZE && (
+          {/* Load more — visible only while the server says there's a next
+              page. The cursor is opaque (an ISO timestamp internally) so
+              the UI doesn't reason about it directly. */}
+          {nextCursor && (
             <div className="al-load-more">
               <button
                 className="btn btn-ghost btn-sm"

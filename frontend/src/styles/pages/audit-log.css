@@ -309,6 +309,56 @@
   padding: 16px 0 8px;
 }
 
+/* ── SEC-007 DLQ inspector panel ─────────────────────────────────────────── */
+.al-dlq {
+  margin-bottom: 18px;
+}
+
+.al-dlq__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.al-dlq__empty {
+  padding: 12px 4px;
+  color: var(--text2);
+  font-size: 0.85rem;
+}
+
+.al-dlq__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.al-dlq__table th,
+.al-dlq__table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.al-dlq__table th {
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.al-dlq__error {
+  color: var(--text2);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
 /* 900px: toolbar wraps, actor column hidden */
