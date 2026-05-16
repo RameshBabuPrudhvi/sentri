@@ -107,13 +107,17 @@ _purge.unref();
 function rpConfig(req) {
   const rpID = process.env.WEBAUTHN_RP_ID || req.hostname || "localhost";
   // SEC-004 §4: req.hostname derives from the Host header (or X-Forwarded-Host
-  // when trust-proxy is on). An attacker can register a credential against a
-  // spoofed RP ID by injecting a Host header. In production, WEBAUTHN_RP_ID
-  // should always be set explicitly to the canonical domain.
+  // when trust-proxy is on). An attacker behind a misconfigured proxy can
+  // register a credential against a spoofed RP ID by injecting a Host header,
+  // then prevent legitimate passkey use (RP ID mismatch = DoS on the passkey
+  // factor). In production, WEBAUTHN_RP_ID MUST be set explicitly — matching
+  // the ARTIFACT_SECRET / CORS_ORIGIN "required in production" pattern.
   if (!process.env.WEBAUTHN_RP_ID && process.env.NODE_ENV === "production") {
-    console.warn(formatLogLine("warn", null,
-      "[webauthn] WEBAUTHN_RP_ID is not set — falling back to req.hostname which is " +
-      "spoofable via the Host header. Set WEBAUTHN_RP_ID to your canonical domain in production."));
+    throw new Error(
+      "WEBAUTHN_RP_ID must be set in production. " +
+      "Set it to your canonical domain (e.g. WEBAUTHN_RP_ID=sentri.example.com). " +
+      "Without it, the Host header is used as the RP ID, which is spoofable."
+    );
   }
   const rpName = process.env.WEBAUTHN_RP_NAME || "Sentri";
   const originEnv = process.env.WEBAUTHN_ORIGIN;

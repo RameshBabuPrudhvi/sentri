@@ -910,6 +910,13 @@ router.post("/refresh", requireAuth, (req, res) => {
   const { jti: oldJti, exp: oldExp } = req.authUser;
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
+  // SEC-004 §7: re-check workspace MFA enforcement on every refresh so a
+  // policy change mid-session (admin enables mfaRequired with grace=0) is
+  // enforced within one refresh cycle (~8h) rather than never. Without this,
+  // a user whose session pre-dates the policy change stays logged in
+  // indefinitely via the automatic refresh loop.
+  if (applyMfaEnforcement(res, user, { method: "refresh" }, "Session refresh blocked: workspace requires MFA.")) return;
+
   // Issue a fresh token with a new JTI (includes updated workspace context).
   // SEC-004 §5c: forward the existing `amr` claim so an MFA-asserted session
   // (`["pwd","mfa"]`) stays MFA-asserted after the 8-hour refresh cycle.
