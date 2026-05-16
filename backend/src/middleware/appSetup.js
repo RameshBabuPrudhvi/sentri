@@ -226,6 +226,13 @@ const _CSRF_EXEMPT_AUTH_SUFFIXES = [
   // they're exchanging a pendingToken (TOTP / WebAuthn) for one. Without
   // the cookie the double-submit check would reject any request that
   // happens to carry a stale _csrf cookie from a previous session.
+  //
+  // NOTE: these entries are technically redundant with the no-auth-cookie
+  // bypass at line 282 (`if (!req.cookies?.[AUTH_COOKIE]) return next()`).
+  // Both layers exist for defense-in-depth: the explicit list documents
+  // the design intent (these endpoints are public by contract), while the
+  // cookie bypass is a generic safety net for any non-cookie auth strategy.
+  // If either layer is accidentally removed, the other still protects.
   "mfa/verify",
   "webauthn/authenticate/options",
   "webauthn/authenticate/verify",

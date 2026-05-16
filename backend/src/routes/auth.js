@@ -172,7 +172,8 @@ const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 // tests that call `setupEnv({ SKIP_EMAIL_VERIFICATION: "true" })` AFTER
 // importing this module still pick up the raised ceiling.
 function _isTestMode() {
-  return process.env.SKIP_EMAIL_VERIFICATION === "true";
+  return process.env.SKIP_EMAIL_VERIFICATION === "true"
+    || process.env.RATE_LIMIT_TEST_MODE === "true";
 }
 const rateBuckets = {
   login:         { map: new Map(), max: 10, testMax: 200 },  // 10 login attempts per IP per 15 min (200 in test mode)
@@ -1626,8 +1627,17 @@ router.post("/mfa/verify", async (req, res) => {
     // If BOTH the TOTP secret is undecryptable AND no recovery codes exist,
     // surface a clear error rather than the generic "Invalid authentication
     // code" — the user's MFA row is broken and they need admin help.
-    if (!ok && !secret && (!user.mfaRecoveryCodes || user.mfaRecoveryCodes === "[]")) {
-      return res.status(400).json({ error: "MFA is not configured. Contact an administrator." });
+    // Parse the JSON rather than comparing the literal string "[]" — the
+    // column could contain whitespace-variant JSON like "[ ]" or be null.
+    if (!ok && !secret) {
+      let hasRecoveryCodes = false;
+      try {
+        const parsed = JSON.parse(user.mfaRecoveryCodes || "[]");
+        hasRecoveryCodes = Array.isArray(parsed) && parsed.length > 0;
+      } catch { /* malformed JSON — treat as no codes */ }
+      if (!hasRecoveryCodes) {
+        return res.status(400).json({ error: "MFA is not configured. Contact an administrator." });
+      }
     }
 
     if (!ok) {
