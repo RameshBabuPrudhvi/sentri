@@ -36,10 +36,10 @@
  */
 
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
 import { app } from "../../src/middleware/appSetup.js";
 import { getDatabase } from "../../src/database/sqlite.js";
 import { workspaceScope } from "../../src/middleware/workspaceScope.js";
+import { _internalGenerateTotpCode } from "../../src/routes/auth.js";
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
@@ -92,44 +92,21 @@ export function buildCookieHeader(cookies) {
 // ─── TOTP helper (SEC-004 tests) ──────────────────────────────────────────────
 
 /**
- * Decode a base32-encoded TOTP secret to a Buffer (RFC 4648). Mirrors
- * `backend/src/routes/auth.js` `base32Decode` so tests stay independent of
- * the production helper's exact internal shape.
- * @param {string} input
- * @returns {Buffer}
- */
-function _base32DecodeForTest(input) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const clean = String(input || "").toUpperCase().replace(/=+$/g, "").replace(/[^A-Z2-7]/g, "");
-  let bits = "";
-  for (const c of clean) {
-    const v = alphabet.indexOf(c);
-    if (v < 0) continue;
-    bits += v.toString(2).padStart(5, "0");
-  }
-  const out = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(out);
-}
-
-/**
  * Generate a valid 6-digit TOTP code for a given base32 secret at the
  * current time. SEC-004 tests use this to drive `/mfa/enable` and
  * `/mfa/verify` without depending on a wall-clock-synced authenticator app.
+ *
+ * Delegates to `_internalGenerateTotpCode` in `backend/src/routes/auth.js`
+ * so tests and production share a single TOTP implementation. If production
+ * ever drifts (algorithm, digit count, period), tests fail on the same
+ * commit instead of silently passing against a stale reference impl.
  *
  * @param {string} secret - Base32 TOTP secret returned by `/mfa/enroll`.
  * @param {number} [offsetSteps=0] - Optional step offset for clock-skew tests.
  * @returns {string} 6-digit code.
  */
 export function generateTotpCode(secret, offsetSteps = 0) {
-  const key = _base32DecodeForTest(secret);
-  const step = 30;
-  const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 1000 / step) + offsetSteps));
-  const hmac = crypto.createHmac("sha1", key).update(counter).digest();
-  const off = hmac[hmac.length - 1] & 0xf;
-  const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
-  return String(code % 1_000_000).padStart(6, "0");
+  return _internalGenerateTotpCode(secret, offsetSteps);
 }
 
 // ─── JWT helpers ──────────────────────────────────────────────────────────────

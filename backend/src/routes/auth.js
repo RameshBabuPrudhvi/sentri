@@ -377,6 +377,46 @@ function generateTotpSecret() {
 }
 
 /**
+ * Compute the RFC 6238 TOTP code for a given base32 secret at a given step
+ * counter. Single source of truth for both the production `verifyTotp` loop
+ * and the test helper `generateTotpCode` — so any algorithm change
+ * (SHA-256, different digit count, different period) breaks tests
+ * immediately rather than silently letting production drift.
+ *
+ * @param {string} secret      - Base32 TOTP secret.
+ * @param {number} stepCounter - 30-second step counter (`floor(unixSeconds / 30)`).
+ * @returns {string} Zero-padded 6-digit code.
+ * @private
+ */
+function computeTotpAtStep(secret, stepCounter) {
+  const key = base32Decode(secret);
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(stepCounter));
+  const hmac = crypto.createHmac("sha1", key).update(counter).digest();
+  const off = hmac[hmac.length - 1] & 0xf;
+  const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
+  return String(code % 1_000_000).padStart(6, "0");
+}
+
+/**
+ * Internal cross-module helper — exposes the TOTP code generator so the test
+ * suite (`backend/tests/helpers/test-base.js`) can produce valid codes
+ * without re-implementing base32-decode + HMAC. Keeping this in production
+ * code means any algorithm drift (SHA-256, 8-digit, etc.) is reflected in
+ * tests on the same commit. Underscore prefix marks it as not part of the
+ * public API contract.
+ *
+ * @param {string} secret           - Base32 TOTP secret.
+ * @param {number} [offsetSteps=0]  - Step offset from `now` (clock-skew tests).
+ * @returns {string} 6-digit code.
+ */
+export function _internalGenerateTotpCode(secret, offsetSteps = 0) {
+  const step = 30;
+  const now = Math.floor(Date.now() / 1000 / step);
+  return computeTotpAtStep(secret, now + offsetSteps);
+}
+
+/**
  * Verify a 6-digit TOTP code against a base32 secret. Allows ±`window` steps
  * (default 30s each) of clock skew either side of `now`. Configurable via the
  * `MFA_TOTP_WINDOW` env var (default 1 = ±30s tolerance).
@@ -395,18 +435,12 @@ function verifyTotp(token, secret, window) {
   const w = Number.isFinite(window) ? window : (parseInt(process.env.MFA_TOTP_WINDOW ?? "1", 10) || 1);
   const t = String(token || "").replace(/\s+/g, "");
   if (!/^\d{6}$/.test(t)) return false;
-  const key = base32Decode(secret);
   const step = 30;
   const now = Math.floor(Date.now() / 1000 / step);
   const tBuf = Buffer.from(t);
   let matched = false;
   for (let i = -w; i <= w; i++) {
-    const counter = Buffer.alloc(8);
-    counter.writeBigUInt64BE(BigInt(now + i));
-    const hmac = crypto.createHmac("sha1", key).update(counter).digest();
-    const off = hmac[hmac.length - 1] & 0xf;
-    const code = ((hmac[off] & 0x7f) << 24) | ((hmac[off + 1] & 0xff) << 16) | ((hmac[off + 2] & 0xff) << 8) | (hmac[off + 3] & 0xff);
-    const computed = String(code % 1_000_000).padStart(6, "0");
+    const computed = computeTotpAtStep(secret, now + i);
     try {
       if (crypto.timingSafeEqual(Buffer.from(computed), tBuf)) matched = true;
     } catch { /* length mismatch — t validated as /^\d{6}$/ above so unreachable */ }
