@@ -21,6 +21,7 @@ import * as projectRepo from "../database/repositories/projectRepo.js";
 import * as testRepo from "../database/repositories/testRepo.js";
 import * as runRepo from "../database/repositories/runRepo.js";
 import * as activityRepo from "../database/repositories/activityRepo.js";
+import * as auditDlqRepo from "../database/repositories/auditDlqRepo.js";
 import * as healingRepo from "../database/repositories/healingRepo.js";
 import { logActivity } from "../utils/activityLogger.js";
 import { actor } from "../utils/actor.js";
@@ -169,6 +170,113 @@ router.get("/workspaces/:workspaceId/audit-log", requireRole("admin"), (req, res
     // return a stable code so the UI can render a clean "try again" state.
     console.error(formatLogLine("error", null, `[audit-log] ${err.message}`));
     return res.status(500).json({ error: "Audit log unavailable.", code: "AUDIT_READ_FAILED" });
+  }
+});
+
+/**
+ * SEC-007: list SIEM dead-letter queue entries for the caller's workspace.
+ *
+ * The DLQ stores audit events that the SIEM forwarder (Part C) failed to
+ * deliver after exhausting its retry budget. Admins use this list +
+ * `POST .../replay` to recover from transient outages at the SIEM target.
+ *
+ * Workspace-scope is enforced by comparing the URL `:workspaceId` against
+ * `req.workspaceId` — same pattern as the audit-log route above.
+ *
+ * @route GET /api/v1/workspaces/:workspaceId/audit-log/dlq
+ */
+router.get("/workspaces/:workspaceId/audit-log/dlq", requireRole("admin"), (req, res) => {
+  try {
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "Audit DLQ is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(1000, rawLimit)) : 200;
+    const rows = auditDlqRepo.listByWorkspace(req.workspaceId, { limit });
+    return res.json({ rows, count: rows.length });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[audit-log/dlq] ${err.message}`));
+    return res.status(500).json({ error: "Audit DLQ unavailable.", code: "AUDIT_DLQ_READ_FAILED" });
+  }
+});
+
+/**
+ * SEC-007: replay a single DLQ entry against the SIEM forwarder.
+ *
+ * Re-dispatches the stored snapshot. On success the DLQ row is removed.
+ * On failure the attempt counter increments and the latest error is
+ * recorded so the next replay attempt sees the freshest context.
+ *
+ * Pre-Part-C state: the SIEM forwarder (`dispatchSiemEvent`) does not yet
+ * exist, so this route returns `503 SIEM_NOT_CONFIGURED` to signal that
+ * the configured SIEM target is missing. The handler is shaped so that
+ * dropping in the forwarder later (C2) is a one-line change.
+ *
+ * Workspace-scope: both the URL param AND the row's stored `workspaceId`
+ * are checked so even if the DLQ row's path was guessed, an admin in a
+ * different workspace can't replay it.
+ *
+ * @route POST /api/v1/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay
+ */
+router.post("/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay", requireRole("admin"), async (req, res) => {
+  try {
+    if (req.params.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "Audit DLQ is scoped to your authenticated workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+    const row = auditDlqRepo.getById(req.params.dlqId);
+    if (!row) {
+      return res.status(404).json({ error: "DLQ entry not found.", code: "AUDIT_DLQ_NOT_FOUND" });
+    }
+    // Defence-in-depth: even if a future bug let the URL param drift from
+    // the row's workspace, the row's stored workspaceId is the source of
+    // truth for cross-tenant isolation.
+    if (row.workspaceId !== req.workspaceId) {
+      return res.status(403).json({
+        error: "DLQ entry belongs to a different workspace.",
+        code: "AUDIT_WORKSPACE_MISMATCH",
+      });
+    }
+
+    // ── Re-dispatch via the SIEM forwarder ──
+    // The forwarder lives in `utils/notifications.js` (Part C). Until that
+    // lands, fail loudly with a stable code instead of silently succeeding
+    // — operators must know the replay was a no-op.
+    let dispatchSiemEvent = null;
+    try {
+      const mod = await import("../utils/notifications.js");
+      dispatchSiemEvent = mod.dispatchSiemEvent || null;
+    } catch { /* module not present in tests — treated as not-configured */ }
+
+    if (typeof dispatchSiemEvent !== "function") {
+      return res.status(503).json({
+        error: "SIEM forwarder is not configured on this server.",
+        code: "SIEM_NOT_CONFIGURED",
+      });
+    }
+
+    try {
+      await dispatchSiemEvent(row.workspaceId, row.rowSnapshot);
+    } catch (dispatchErr) {
+      const attempts = auditDlqRepo.incrementAttempts(row.id, dispatchErr.message || String(dispatchErr));
+      return res.status(502).json({
+        error: "Replay failed at the SIEM target.",
+        code: "SIEM_DISPATCH_FAILED",
+        attempts,
+      });
+    }
+
+    // Success — remove the DLQ row so it doesn't reappear in the inspector.
+    auditDlqRepo.remove(row.id);
+    return res.json({ ok: true, id: row.id, replayedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error(formatLogLine("error", null, `[audit-log/dlq/replay] ${err.message}`));
+    return res.status(500).json({ error: "Audit DLQ replay unavailable.", code: "AUDIT_DLQ_REPLAY_FAILED" });
   }
 });
 

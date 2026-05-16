@@ -243,10 +243,15 @@
       "source": "backend/src/routes/system.js",
       "$comment": "SEC-007 \u2014 workspace-scoped audit log with cursor pagination. The :workspaceId URL param is validated against req.workspaceId (the authenticated workspace) to prevent cross-workspace reads."
     },
+    "GET /api/v1/workspaces/:workspaceId/audit-log/dlq": {
+      "role": "admin",
+      "source": "backend/src/routes/system.js",
+      "$comment": "SEC-007 \u2014 lists SIEM dead-letter queue entries for the workspace. Same workspace-scope assertion as the audit-log route."
+    },
     "POST /api/v1/workspaces/:workspaceId/audit-log/dlq/:dlqId/replay": {
       "role": "admin",
       "source": "backend/src/routes/system.js",
-      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Route handler not yet implemented; permission entry pre-registered for the upcoming SIEM forwarder PR."
+      "$comment": "SEC-007 \u2014 SIEM dead-letter replay. Re-dispatches the stored snapshot via dispatchSiemEvent. Returns 503 SIEM_NOT_CONFIGURED until the SIEM forwarder (Part C) lands."
     },
     "GET /api/v1/settings/github-checks": {
       "role": "qa_lead",
