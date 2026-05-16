@@ -287,6 +287,34 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
     fields.iterationCap = cap;
   }
 
+  // SEC-006: per-project PII firewall toggle. `null` is rejected — the
+  // column is `NOT NULL DEFAULT 1`, so clients clear the override by
+  // explicitly sending `true` (the default) instead. Only booleans are
+  // accepted; the bypass set at the top of this handler already restricts
+  // single-field PATCHes to this exact key.
+  if (Object.hasOwn(req.body, "strictPiiFirewall")) {
+    const v = req.body.strictPiiFirewall;
+    if (typeof v !== "boolean") {
+      return res.status(400).json({ error: "strictPiiFirewall must be a boolean." });
+    }
+    fields.strictPiiFirewall = v;
+  }
+
+  // SEC-006: per-project PII allowlist. Accepts `null` (clear) or an
+  // array of non-empty strings. Bounded length to keep the per-redact
+  // Set lookup cheap and to discourage clients from pasting megabytes
+  // of "allowed" values into the column.
+  if (Object.hasOwn(req.body, "piiAllowlist")) {
+    const v = req.body.piiAllowlist;
+    if (v === null) {
+      fields.piiAllowlist = null;
+    } else if (Array.isArray(v) && v.every((s) => typeof s === "string") && v.length <= 200) {
+      fields.piiAllowlist = v.map((s) => s.trim()).filter(Boolean);
+    } else {
+      return res.status(400).json({ error: "piiAllowlist must be null or an array of up to 200 strings." });
+    }
+  }
+
   if (req.body.credentials === null) {
     fields.credentials = null;
   } else if (req.body.credentials) {
