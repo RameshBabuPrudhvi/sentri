@@ -33,7 +33,9 @@ import {
   register as metricsRegister,
   httpRequestDurationSeconds,
   httpRequestsTotal,
+  queueDepth,
 } from "../utils/metrics.js";
+import { getQueueStats } from "../queue.js";
 
 // Load .env before reading any env vars below (CORS_ORIGIN, etc.).
 // ESM imports execute before module-level code in index.js, so the
@@ -201,21 +203,20 @@ app.get("/metrics", async (req, res) => {
   // INF-007: Refresh the queue-depth gauge synchronously on each scrape so
   // Prometheus sees the live BullMQ counters rather than a stale snapshot.
   // Best-effort: when BullMQ isn't available (no Redis, in-process mode),
-  // the gauge is simply left at its previous value — operators reading
-  // `app_queue_depth` in single-process mode will see zeros, which is the
-  // correct signal (nothing is queued; everything runs inline).
+  // `getQueueStats()` returns null and the gauge is left at its previous
+  // value — operators reading `app_queue_depth` in single-process mode will
+  // see zeros, which is the correct signal (nothing is queued; everything
+  // runs inline).
   try {
-    const { getQueueStats } = await import("../queue.js");
     const stats = await getQueueStats();
     if (stats) {
-      const { queueDepth } = await import("../utils/metrics.js");
       queueDepth.set({ state: "waiting" },   Number(stats.waiting   || 0));
       queueDepth.set({ state: "active" },    Number(stats.active    || 0));
       queueDepth.set({ state: "delayed" },   Number(stats.delayed   || 0));
       queueDepth.set({ state: "failed" },    Number(stats.failed    || 0));
       queueDepth.set({ state: "completed" }, Number(stats.completed || 0));
     }
-  } catch { /* best-effort — BullMQ unavailable or queue.js not loadable */ }
+  } catch { /* best-effort — BullMQ unavailable */ }
 
   res.set("Content-Type", metricsRegister.contentType);
   res.end(await metricsRegister.metrics());
