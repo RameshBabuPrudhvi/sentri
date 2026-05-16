@@ -514,27 +514,6 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### INF-007 — OpenTelemetry instrumentation + Sentry crash reporting
-
-**Status:** ✅ Complete (PR #14) — see Completed Work Summary above for the full implementation details. Shipped scope matched the AUDIT.md B1/B2/F7/O1/O2 framing and added 11 Prometheus alert rules + a full on-call runbook at `docs/guide/observability.md`.
-
-
-
-
-
-
-
-
-
-**Acceptance criteria:**
-
-
-
-
-
-
----
-
 ### INF-008 — Promote PostgreSQL to default; add dual-DB CI matrix 🔴 Blocker
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md A3, P1, B4 (formerly `ARCH-001` in AUDIT_IMPL.md)
@@ -1084,13 +1063,12 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
-- 🔴 **NEW from AUDIT.md Phase 5 — 3 items unresolved:** INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness). (SEC-004 MFA shipped in PR #10; SEC-006 PII firewall shipped in PR #11; SEC-005 SSO reclassified from Blocker to 🟢 Strategic per AUDIT.md S2.)
+- 🔴 **NEW from AUDIT.md Phase 5 — 3 items unresolved:** INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness). (SEC-004 MFA shipped in PR #10; SEC-006 PII firewall shipped in PR #11; SEC-005 SSO reclassified from Blocker to 🟢 Strategic per AUDIT.md S2.)
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
-1. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation; bundles naturally with MNT-013 request-ID propagation and SEC-007 P1's `req.ip` plumbing)
-2. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
-3. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts; depends on INF-007's `metric_samples` infra)
-4. `SEC-007 Phase 2` (admin compliance surface + CSV/NDJSON export + retention sweep — completes the SOC 2 / ISO 27001 story started in Phase 1)
+1. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
+2. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts; depends on INF-007's `metric_samples` infra)
+3. `SEC-007 Phase 2` (admin compliance surface + CSV/NDJSON export + retention sweep — completes the SOC 2 / ISO 27001 story started in Phase 1)
 
 This rotation alternates between audit-driven hardening and feature delivery so neither narrative starves.
 
