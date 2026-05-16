@@ -597,10 +597,25 @@ export function _internalCheckRateLimit(bucket, ip) {
  * @param {Object} req - Must carry `req.authUser` (the JWT payload).
  * @param {Object} res
  */
-export function _internalRevokeCurrentSession(req, res) {
+export function _internalRevokeCurrentSession(req, res, auditMeta) {
   const { jti, exp } = req.authUser || {};
   if (jti) revokedTokens.set(jti, exp);
   clearAuthCookies(res);
+  // SEC-007: emit `auth.session.revoke` so every server-initiated session
+  // termination (MFA disable, recovery-code regeneration, passkey removal,
+  // etc.) lands in the compliance audit log alongside login/logout events.
+  // The `reason` in `auditMeta` lets reviewers distinguish posture-change
+  // revokes from explicit logouts.
+  if (req?.authUser?.sub) {
+    logActivity({
+      type: "auth.session.revoke",
+      req,
+      userId: req.authUser.sub,
+      userName: req.authUser.name || req.authUser.email || null,
+      workspaceId: req.workspaceId || req.authUser.workspaceId || null,
+      meta: { jti: jti || null, ...(auditMeta || {}) },
+    });
+  }
 }
 
 /**
@@ -1832,7 +1847,7 @@ router.post("/mfa/recovery-codes/regenerate", requireAuth, async (req, res) => {
     // panic) cannot continue acting under the regenerated set. Matches the
     // industry baseline (Auth0, Clerk, Okta, GitHub all terminate sessions
     // on credential change).
-    _internalRevokeCurrentSession(req, res);
+    _internalRevokeCurrentSession(req, res, { reason: "mfa.recovery_codes_regenerated" });
 
     return res.json({ recoveryCodes: recovery.raw, sessionRevoked: true });
   } catch (err) {
@@ -1900,7 +1915,7 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
     // session forces re-authentication so the new cookie reflects the new
     // posture (amr=["pwd"]). Matches the industry baseline for security-
     // impacting account changes.
-    _internalRevokeCurrentSession(req, res);
+    _internalRevokeCurrentSession(req, res, { reason: "mfa.disabled" });
 
     return res.json({ ok: true, sessionRevoked: true });
   } catch (err) {

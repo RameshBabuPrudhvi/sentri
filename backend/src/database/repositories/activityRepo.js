@@ -3,18 +3,96 @@
  * @description Activity log CRUD backed by SQLite.
  */
 
+import crypto from "node:crypto";
 import { getDatabase } from "../sqlite.js";
 
 /**
+ * SEC-007: Canonical hash-input shape for an activity row — everything that
+ * is persisted EXCEPT `prevHash` itself. Both the INSERT path and the
+ * verification path must use this identical helper so the computed hash
+ * round-trips deterministically. Key order is stable because object
+ * literal property order is preserved in V8.
+ *
+ * `meta` is normalised to its JSON-string form (or null) so the hash input
+ * matches the exact byte sequence stored in the TEXT column — the
+ * verification path reads the column back as TEXT and must hash it without
+ * re-parsing.
+ *
+ * @param {Object} row
+ * @returns {Object}
+ * @private
+ */
+function rowMinusHash(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    projectId: row.projectId || null,
+    projectName: row.projectName || null,
+    testId: row.testId || null,
+    testName: row.testName || null,
+    detail: row.detail || null,
+    status: row.status || "completed",
+    createdAt: row.createdAt,
+    userId: row.userId || null,
+    userName: row.userName || null,
+    workspaceId: row.workspaceId || null,
+    meta: row.meta == null
+      ? null
+      : (typeof row.meta === "string" ? row.meta : JSON.stringify(row.meta)),
+    ipAddress: row.ipAddress || null,
+    userAgent: row.userAgent || null,
+  };
+}
+
+/**
+ * SEC-007: Compute the next `prevHash` from the previous row's hash and the
+ * current row's content. Exported for tests and re-used by `verifyAuditChain`
+ * so a single implementation is the source of truth (any drift between
+ * INSERT and verify breaks the chain immediately rather than silently).
+ *
+ *   prevHash_i = sha256(prevHash_{i-1} ++ JSON.stringify(rowMinusHash_i))
+ *
+ * The leading hash for the very first row is the empty string.
+ *
+ * @param {string|null} previousHash
+ * @param {Object}      row
+ * @returns {string} 64-char lowercase hex digest.
+ */
+export function computePrevHash(previousHash, row) {
+  const input = (previousHash || "") + JSON.stringify(rowMinusHash(row));
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+/**
  * Create an activity entry.
- * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId?, userName?, workspaceId? }
+ *
+ * When `AUDIT_HASH_CHAIN=true`, computes `prevHash` from the last row in
+ * the same workspace and stores it in the same transaction as the INSERT.
+ * Otherwise `prevHash` is persisted as null (chain disabled — default).
+ *
+ * @param {Object} activity — { id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId?, userName?, workspaceId?, meta?, ipAddress?, userAgent?, prevHash? }
  */
 export function create(activity) {
   const db = getDatabase();
-  db.prepare(`
+  // `meta` is JSON-encoded TEXT (migration 018) so callers can pass a plain
+  // object; readers below re-parse it. Null when absent so the column is
+  // genuinely empty rather than the string "null".
+  const metaStr = activity.meta != null ? JSON.stringify(activity.meta) : null;
+
+  const insert = db.prepare(`
     INSERT INTO activities (id, type, projectId, projectName, testId, testName, detail, status, createdAt, userId, userName, workspaceId, meta, ipAddress, userAgent, prevHash)
     VALUES (@id, @type, @projectId, @projectName, @testId, @testName, @detail, @status, @createdAt, @userId, @userName, @workspaceId, @meta, @ipAddress, @userAgent, @prevHash)
-  `).run({
+  `);
+
+  // SEC-007: hash-chain compute. Wrapped in a transaction so the lookup of
+  // the previous row and the INSERT are atomic — without this, two parallel
+  // logActivity() calls could both read the same "previous" row and chain
+  // off it, producing two siblings with identical prevHash that break the
+  // verification walk. The feature is opt-in (chained writes serialise
+  // INSERTs under contention) and gated by AUDIT_HASH_CHAIN=true.
+  const chainEnabled = process.env.AUDIT_HASH_CHAIN === "true";
+
+  const params = {
     id: activity.id,
     type: activity.type,
     projectId: activity.projectId || null,
@@ -27,14 +105,28 @@ export function create(activity) {
     userId: activity.userId || null,
     userName: activity.userName || null,
     workspaceId: activity.workspaceId || null,
-    // `meta` is JSON-encoded TEXT (migration 018) so callers can pass a plain
-    // object; readers below re-parse it. Null when absent so the column is
-    // genuinely empty rather than the string "null".
-    meta: activity.meta != null ? JSON.stringify(activity.meta) : null,
+    meta: metaStr,
     ipAddress: activity.ipAddress || null,
     userAgent: activity.userAgent || null,
     prevHash: activity.prevHash || null,
-  });
+  };
+
+  if (chainEnabled) {
+    const tx = db.transaction((row) => {
+      // Order by createdAt DESC, id DESC as a tiebreaker for sub-millisecond
+      // bursts where two rows can share the same ISO timestamp.
+      const prev = db.prepare(
+        "SELECT prevHash FROM activities WHERE workspaceId = ? ORDER BY createdAt DESC, id DESC LIMIT 1"
+      ).get(row.workspaceId);
+      // Pass the stringified meta (matching what's about to be persisted) so
+      // computePrevHash's normaliser sees the same bytes the verifier will.
+      row.prevHash = computePrevHash(prev?.prevHash || null, { ...row, meta: metaStr });
+      insert.run(row);
+    });
+    tx(params);
+  } else {
+    insert.run(params);
+  }
 }
 
 /**
@@ -294,11 +386,42 @@ export function getWorkspaceAuditLog(workspaceId, { userId, types = [], dateFrom
   return db.prepare(sql).all(...params).map(hydrate);
 }
 
+/**
+ * SEC-007: Walk the audit-log chain for a workspace in chronological order
+ * and verify each row's `prevHash` matches the recomputed
+ * `sha256(prev.prevHash + JSON.stringify(rowMinusHash(row)))`.
+ *
+ * Uses the shared `computePrevHash` helper so any drift between the INSERT
+ * path and the verification path is impossible — both call the same function.
+ *
+ * Returns `{ verified: true, total }` on a clean walk, or
+ * `{ verified: false, firstBrokenRowId, total }` at the first mismatch.
+ * An empty workspace is trivially verified.
+ *
+ * Caller is expected to gate this behind `AUDIT_HASH_CHAIN=true` — when
+ * the chain is disabled, every row has `prevHash = null` and this walk
+ * would falsely report the second row as broken. The route handler in
+ * `backend/src/routes/system.js` short-circuits to `{ chainDisabled: true }`
+ * in that case.
+ *
+ * @param {string} workspaceId
+ * @returns {{ verified: boolean, firstBrokenRowId?: string, total: number }}
+ */
 export function verifyAuditChain(workspaceId) {
   const db = getDatabase();
-  const rows = db.prepare("SELECT id, prevHash FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC").all(workspaceId);
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i].prevHash !== rows[i - 1].prevHash) return { verified: false, firstBrokenRowId: rows[i].id, total: rows.length };
+  // SELECT * so we have every column needed to reproduce `rowMinusHash`.
+  // Tiebreaker `id ASC` matches the INSERT-side `id DESC` ordering for
+  // sub-millisecond bursts where two rows share the same createdAt.
+  const rows = db.prepare(
+    "SELECT * FROM activities WHERE workspaceId = ? ORDER BY createdAt ASC, id ASC"
+  ).all(workspaceId);
+  let previousHash = null;
+  for (let i = 0; i < rows.length; i++) {
+    const expected = computePrevHash(previousHash, rows[i]);
+    if (rows[i].prevHash !== expected) {
+      return { verified: false, firstBrokenRowId: rows[i].id, total: rows.length };
+    }
+    previousHash = rows[i].prevHash;
   }
   return { verified: true, total: rows.length };
 }
