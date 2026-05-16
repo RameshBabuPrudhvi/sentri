@@ -265,13 +265,18 @@ export function create(activity) {
   }
 
   const sig = dedupSignature({ ...activity, meta: activity.meta });
+  // Hash the sig so the LIKE match works reliably — the raw JSON sig
+  // contains quotes that get backslash-escaped inside the outer JSON
+  // meta column, breaking substring matching. A hex hash is safe for
+  // LIKE and deterministic.
+  const sigHash = crypto.createHash("sha256").update(sig).digest("hex");
   const cutoff = new Date(Date.now() - windowMs).toISOString();
   // `_dedupSig` flows in `meta._dedupSig` so the existing TEXT column carries
   // it without a schema change — but we strip it from the user-facing meta
   // in `hydrate()` below so consumers never see the internal field.
   const metaWithSig = activity.meta != null
-    ? JSON.stringify({ ...activity.meta, _dedupSig: sig })
-    : JSON.stringify({ _dedupSig: sig });
+    ? JSON.stringify({ ...activity.meta, _dedupSig: sigHash })
+    : JSON.stringify({ _dedupSig: sigHash });
   params.meta = metaWithSig;
 
   const dedupTx = db.transaction(() => {
@@ -294,7 +299,7 @@ export function create(activity) {
       activity.userId || null, activity.userId || null,
       activity.workspaceId || null, activity.workspaceId || null,
       cutoff,
-      `%${sig.replace(/[%_\\]/g, "\\$&")}%`,
+      `%${sigHash}%`,
     );
 
     if (recent) {
