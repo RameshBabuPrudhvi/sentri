@@ -45,21 +45,22 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 - `cd backend && npm test` passes; new test file registered in `run-tests.js`.
 - `cd frontend && npm run build` passes.
 ### PR checklist (INF-007)
-- [ ] PR title follows Conventional Commits (`feat(infra): INF-007 — OpenTelemetry + Sentry observability`)
-- [ ] Branch is off `develop`, not `main`
-- [ ] `cd backend && npm test` passes locally; new test file registered in `backend/tests/run-tests.js`
-- [ ] `cd frontend && npm run build && npm test` passes locally
-- [ ] OTel SDK init is the FIRST import in `backend/src/index.js` (before Express, before DB)
-- [ ] `/metrics` endpoint protected by `METRICS_SCRAPE_KEY` — 401 without Bearer token
-- [ ] `X-Request-Id` header present on every response; same ID in log lines
-- [ ] `SENTRY_DSN` unset → zero runtime effect (no console warnings, no network calls)
-- [ ] `OTEL_EXPORTER_OTLP_ENDPOINT` unset → zero runtime effect
-- [ ] `backend/.env.example` documents all new env vars
-- [ ] `docs/guide/env-vars.md` updated with Observability section
-- [ ] `docs/changelog.md` updated under `## [Unreleased]`
-- [ ] `permissions.json` updated if `/metrics` route is added
-- [ ] No new `devDependencies` that should be `dependencies` (OTel + Sentry are runtime deps)
-- [ ] ROADMAP.md `### INF-007` section flipped to `**Status:** ✅ Complete (PR #N)`
+- [x] PR title follows Conventional Commits (`feat(infra): INF-007 — OpenTelemetry + Sentry observability`)
+- [x] Branch is off `develop`, not `main`
+- [x] `cd backend && npm test` passes locally; new test file registered in `backend/tests/run-tests.js`
+- [x] `cd frontend && npm run build && npm test` passes locally
+- [x] OTel SDK init runs BEFORE any application module loads — via `node --import ./src/otel-preload.mjs` in `package.json` scripts, `Dockerfile` `CMD`, and the worker `docker-compose.yml` command (in-graph init was too late for `@opentelemetry/auto-instrumentations-node` to patch `express`/`pg`/`ioredis`).
+- [x] `/metrics` endpoint protected by `METRICS_SCRAPE_KEY` — 401 without Bearer token
+- [x] `X-Request-Id` header present on every response; same ID in log lines
+- [x] `SENTRY_DSN` unset → zero runtime effect (no console warnings, no network calls)
+- [x] `OTEL_EXPORTER_OTLP_ENDPOINT` unset → zero runtime effect
+- [x] `backend/.env.example` documents all new env vars
+- [x] `docs/guide/env-vars.md` updated with Observability section
+- [x] `docs/changelog.md` updated under `## [Unreleased]`
+- [x] `permissions.json` updated if `/metrics` route is added
+- [x] No new `devDependencies` that should be `dependencies` (OTel + Sentry are runtime deps)
+- [x] ROADMAP.md `### INF-007` section flipped to `**Status:** ✅ Complete (PR #14)`
+- [x] Metric names use brand-neutral `app_*` prefix per `docs/guide/rebranding.md` (avoids adding rebrand-surface tokens for Prometheus dashboards / alerts).
 
 ---
 ## ⏭ Queue (next 3 PRs after current)

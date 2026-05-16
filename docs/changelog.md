@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **INF-007** — Observability baseline: per-request correlation id (`X-Request-Id` propagated via `AsyncLocalStorage` and included in every `formatLogLine()` / `structuredLog()` output), Prometheus `/metrics` endpoint (admin-only, `METRICS_SCRAPE_KEY` Bearer token) with default Node.js metrics + custom counters (`sentri_runs_total`, `sentri_tests_executed_total`, `sentri_crawl_pages_total`), optional OpenTelemetry trace export via `OTEL_EXPORTER_OTLP_ENDPOINT`, and optional Sentry crash reporting (backend + frontend, no-op when `SENTRY_DSN` / `VITE_SENTRY_DSN` unset).
+- **INF-007** — Observability baseline: per-request correlation id (`X-Request-Id` propagated via `AsyncLocalStorage` and included in every `formatLogLine()` / `structuredLog()` output), Prometheus `/metrics` endpoint (admin-only, `METRICS_SCRAPE_KEY` Bearer token) with default Node.js metrics + brand-neutral custom counters (`app_runs_total`, `app_tests_executed_total`, `app_crawl_pages_total`), optional OpenTelemetry trace export via `OTEL_EXPORTER_OTLP_ENDPOINT` (preloaded via `--import ./src/otel-preload.mjs` so auto-instrumentations patch `express` / `pg` / `ioredis` before the app graph loads), and optional Sentry crash reporting (backend Express error handler + frontend `ErrorBoundary`, no-op when `SENTRY_DSN` / `VITE_SENTRY_DSN` unset).
 
 ## [1.7.3] — 2026-05-16
 

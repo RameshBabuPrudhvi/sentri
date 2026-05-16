@@ -21,7 +21,14 @@
  * compatibility during the transition window (INF-005).
  */
 
-import { initOpenTelemetry } from "./utils/observability.js";
+// INF-007: OpenTelemetry + Sentry are initialised in `src/otel-preload.mjs`,
+// which Node loads via `--import` BEFORE any module in this graph (NEXT.md
+// INF-007 acceptance criterion). Importing them here would be too late —
+// `@opentelemetry/auto-instrumentations-node` monkey-patches `express`, `pg`,
+// and `ioredis` at import time, and those modules are already on the import
+// chain via `appSetup.js` below. See `src/otel-preload.mjs` for the full
+// rationale. Run scripts (`npm start`, `npm run dev`, Dockerfile CMD, and
+// the worker compose command) all pass `--import ./src/otel-preload.mjs`.
 import dotenv from "dotenv";
 import * as Sentry from "@sentry/node";
 import { getDatabase, closeDatabase } from "./database/sqlite.js";
@@ -69,10 +76,6 @@ export { runAbortControllers } from "./utils/runWithAbort.js";
 import { runAbortControllers } from "./utils/runWithAbort.js";
 
 dotenv.config();
-await initOpenTelemetry();
-if (process.env.SENTRY_DSN) {
-  Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0), beforeSend(event) { if (event.request) delete event.request.headers; return event; } });
-}
 
 // ─── SEC-007: validate AUDIT_RETENTION_DAYS at boot ──────────────────────────
 // The compliance retention sweep (see scheduler.js) deletes audit-log rows
