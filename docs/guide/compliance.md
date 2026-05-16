@@ -185,6 +185,73 @@ of the compliance trail is impossible without leaving a trace.
 
 ---
 
+## Event dedup (industry-standard collapse)
+
+High-volume read-shaped events that fire in bursts — `audit.read`,
+`audit.export`, `auth.login.failed` — collapse into a single row with
+a `count` and `lastAt` within a configurable time window. This matches
+the convention used by:
+
+- **Splunk** — `transaction` command groups events by key + time window
+- **AWS CloudTrail** — aggregates similar events to reduce volume
+- **Auth0 Logs API** — returns `{type, count, first_seen, last_seen}`
+- **Datadog** — `@count` field on grouped events
+
+### What gets deduped
+
+| Event type | Deduped? | Why |
+|---|---|---|
+| `audit.read` | ✅ | Page reloads + stats fetches naturally burst |
+| `audit.export` | ✅ | Same shape as `audit.read` |
+| `auth.login.failed` | ✅ | Credential-stuffing probes look like a burst |
+| `audit.purge` | ❌ | Destructive admin action — must stay attributable |
+| `auth.login` / `auth.logout` | ❌ | Each is a single user session boundary |
+| `auth.role.change` / `auth.api_key.*` | ❌ | Each is an independent state change |
+| `test.*` | ❌ | User-initiated actions |
+
+### What "collapse" means
+
+Two events collapse into one row only when **all** of these match:
+
+- `workspaceId`
+- `userId` (actor)
+- `type`
+- Meta-filter shape (for `audit.read`/`audit.export` — different
+  filter arguments stay as separate rows)
+- The newer event arrives within `AUDIT_DEDUP_WINDOW_SEC` of the older
+
+The collapsed row's `meta` is refreshed to the latest event's payload
+(so the displayed `rowCount`, `ipAddress`, `userAgent` reflect the most
+recent occurrence), `count` increments, and `lastAt` advances. The
+original `createdAt` (first-seen timestamp) is preserved.
+
+### PCI-DSS 10.5.3 compliance
+
+The standard explicitly permits summarisation of repeated events
+provided every event remains attributable. The `count` field counts
+every occurrence and `(createdAt, lastAt)` give the full time-span, so
+attribution is preserved per the standard.
+
+### Mutual exclusion with hash chain
+
+`AUDIT_DEDUP_WINDOW_SEC` is automatically ignored when
+`AUDIT_HASH_CHAIN=true`. Mutating a persisted row's `count`/`lastAt`
+would invalidate its `prevHash` and break every chain verification.
+With the chain on, every event is its own row — the cryptographic
+integrity is the higher-priority compliance signal and dedup steps
+aside silently.
+
+### Tuning
+
+| `AUDIT_DEDUP_WINDOW_SEC` | Behaviour |
+|---|---|
+| Unset / default | `60` (matches Auth0 / Datadog convention) |
+| `30` | Tighter — bursts within 30s collapse, longer separations don't |
+| `0` | Disabled — every event becomes its own row |
+| `300` | Looser — useful when the operator wants fewer-but-larger rows |
+
+---
+
 ## Anti-exfiltration export rate limit
 
 Bulk CSV / NDJSON exports are rate-limited per (workspace × admin):

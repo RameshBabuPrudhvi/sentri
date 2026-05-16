@@ -308,7 +308,12 @@ function ActivityEntry({ entry }) {
   // correlate "5m ago" to an instant. `fmtAuditTimestamp` returns the
   // industry-standard `YYYY-MM-DD HH:MM:SS UTC` form used by Splunk,
   // CloudTrail, GitHub Audit Log, and Datadog.
-  const time = fmtAuditTimestamp(entry.createdAt);
+  //
+  // For deduped rows (count > 1), show the LAST occurrence as the primary
+  // timestamp — that's what's most actionable for a reviewer ("when did
+  // this most recently happen?"). The first occurrence is in the tooltip.
+  const isDeduped = (entry.count || 1) > 1 && entry.lastAt;
+  const time = fmtAuditTimestamp(isDeduped ? entry.lastAt : entry.createdAt);
   const score = entry.meta?.score;
   const wasAuto = entry.meta?.wasAutoApproved;
   // SEC-007: many audit rows (`audit.read`, `audit.role.change`, etc.) have
@@ -323,6 +328,18 @@ function ActivityEntry({ entry }) {
       <div className="al-entry__left">
         {/* Event badge */}
         <span className={`badge ${badgeClass} al-entry__badge`}>{label}</span>
+        {/* SEC-007: dedup count — Splunk / CloudTrail / Auth0 convention is
+            to show repeat-counts as "×N" next to the event label. Hidden
+            for single events (count = 1) so the feed isn't cluttered. */}
+        {isDeduped && (
+          <span
+            className="al-entry__count"
+            title={`${entry.count} occurrences · first ${fmtAuditTimestamp(entry.createdAt)} · last ${fmtAuditTimestamp(entry.lastAt)}`}
+            aria-label={`${entry.count} occurrences of this event collapsed into one row`}
+          >
+            ×{entry.count}
+          </span>
+        )}
 
         {/* Test name + project + meta-derived context */}
         <div className="al-entry__body">
@@ -376,11 +393,18 @@ function ActivityEntry({ entry }) {
           </span>
         )}
 
-        {/* Timestamp */}
+        {/* Timestamp — for deduped rows, the column shows the LAST
+            occurrence and the tooltip shows the first→last span. For
+            singletons, both `dateTime` and the tooltip carry the same
+            ISO instant — matches the Splunk / CloudTrail UI convention. */}
         <time
           className="al-entry__time"
-          dateTime={entry.createdAt}
-          title={entry.createdAt}
+          dateTime={isDeduped ? entry.lastAt : entry.createdAt}
+          title={
+            isDeduped
+              ? `First seen: ${entry.createdAt}\nLast seen: ${entry.lastAt}`
+              : entry.createdAt
+          }
         >
           {time}
         </time>

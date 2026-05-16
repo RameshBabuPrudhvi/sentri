@@ -179,6 +179,22 @@
   justify-content: center;
 }
 
+/* SEC-007: dedup count "×N" pill next to the badge. Splunk / CloudTrail
+ * convention — small, monospaced, dimmer than the badge so it reads as
+ * metadata rather than a primary status. Hover surfaces the first/last
+ * span via the inline `title` set in JSX. */
+.al-entry__count {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text2);
+  background: var(--bg3);
+  border-radius: 99px;
+  padding: 1px 7px;
+  cursor: help;
+}
+
 .al-entry__body {
   display: flex;
   flex-direction: column;
