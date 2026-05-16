@@ -48,6 +48,7 @@ import { writeArtifactBuffer } from "./utils/objectStorage.js";
 import fs from "fs";
 import { recordMetric } from "./utils/recordMetric.js";
 import { isNonExecutedSkip } from "./utils/skipReasons.js";
+import { testsExecutedTotal } from "./utils/metrics.js"; // INF-007 — bump per executed test result.
 
 
 function evaluateQualityGates(gates, run) {
@@ -530,6 +531,12 @@ export async function runTests(project, tests, run, { parallelWorkers, browser: 
       shardFailed++;
       logError(run, `FAILED: ${result.error}`);
     }
+    // INF-007: count every executed result (passed + warning + failed).
+    // Skipped results never reach `processResult` — they're pre-seeded into
+    // `run.results` at the route layer before this function runs — so this
+    // counter cleanly captures "tests that actually executed in a browser".
+    // Best-effort: a counter hiccup must never fail the run.
+    try { testsExecutedTotal.inc(); } catch { /* best-effort */ }
 
     // Emit result event (without the heavy base64 screenshot)
     const { screenshot: _ss, ...resultLean } = result;

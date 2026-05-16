@@ -515,7 +515,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ### INF-007 — OpenTelemetry instrumentation + Sentry crash reporting 🔴 Blocker
 
-**Status:** ✅ Complete (PR #13) | **Effort:** L | **Source:** AUDIT.md B1, B2, F7, O1, O2 (formerly `OBS-001` in AUDIT_IMPL.md)
+**Status:** ✅ Complete (PR #14) | **Effort:** L | **Source:** AUDIT.md B1, B2, F7, O1, O2 (formerly `OBS-001` in AUDIT_IMPL.md)
 
 **Problem:** Sentri has zero distributed observability. There is no `requestId` propagation, no OTel spans, no Prometheus metrics endpoint, and no frontend crash reporting. Operators are flying blind on production failures. `formatLogLine()` is good but isolated — LLM calls, Playwright runs, and DB queries are all black boxes. Rated Critical for enterprise adoption.
 

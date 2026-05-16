@@ -45,6 +45,7 @@ import { structuredLog } from "./utils/logFormatter.js";
 import * as runRepo from "./database/repositories/runRepo.js";
 import * as crawlBaselineRepo from "./database/repositories/crawlBaselineRepo.js";
 import { diffCrawlSnapshots } from "./pipeline/crawlDiff.js";
+import { crawlPagesTotal } from "./utils/metrics.js"; // INF-007 — bump per discovered crawl page.
 
 /**
  * setStep is imported from utils/pipelineState.js — shared with pipelineOrchestrator.js.
@@ -583,6 +584,14 @@ export async function crawlAndGenerateTests(project, run, { dialsPrompt = "", te
   }
 
   throwIfAborted(signal);
+
+  // INF-007: Prometheus counter for total pages discovered by the crawler
+  // (`app_crawl_pages_total`). `pagesCrawled` is the full breadth from
+  // either the link-crawl or state-explorer branch above, before
+  // AUTO-002 diff-aware filtering narrows `snapshots` to changed pages
+  // only — the counter measures crawl cost, not generation scope.
+  // Best-effort: a counter hiccup must never fail the run.
+  try { if (pagesCrawled > 0) crawlPagesTotal.inc(pagesCrawled); } catch { /* best-effort */ }
 
   // SEC-006: PII firewall — sanitize snapshots + classified pages before
   // they reach `generateAllTests` (which builds the LLM prompt). Wiring

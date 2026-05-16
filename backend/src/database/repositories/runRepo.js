@@ -23,6 +23,7 @@ import { getDatabase, getDatabaseDialect } from "../sqlite.js";
 import { parsePagination } from "../../utils/pagination.js";
 import * as runLogRepo from "./runLogRepo.js";
 import { filterShardRetrySurvivors, countShardRetrySurvivors } from "../../utils/shardRetryFilter.js";
+import { runsTotal as metricsRunsTotal } from "../../utils/metrics.js"; // INF-007 — bump on every run-row creation.
 
 export { parsePagination };
 
@@ -523,6 +524,10 @@ export function create(run) {
   // (runToRow already normalised any boolean value to 0/1).
   if (params.secretScanBlocked == null) params.secretScanBlocked = 0;
   db.prepare(INSERT_SQL).run(params);
+  // INF-007: bump the Prometheus counter for every persisted run row, regardless
+  // of type. Wrapped in try/catch so a metrics-registry hiccup never fails the
+  // actual run creation — the counter is observability, not load-bearing.
+  try { metricsRunsTotal.inc(); } catch { /* best-effort */ }
 }
 
 // Set of valid column names for filtering unknown properties in update().

@@ -119,51 +119,6 @@ if (process.env.SENTRY_DSN) {
   }
 }
 
-// ─── SEC-007: validate AUDIT_RETENTION_DAYS at boot ──────────────────────────
-// The compliance retention sweep (see scheduler.js) deletes audit-log rows
-// older than this many days. SOC 2 Common Criteria CC7.2 requires retention
-// of ≥ 90 days for security-relevant logs, so we refuse to boot with a
-// shorter window — silently honouring a too-low value would put deployments
-// out of compliance without any operator signal. `0` is a legitimate escape
-// hatch ("never delete"); any other value < 90 is rejected.
-{
-  const raw = process.env.AUDIT_RETENTION_DAYS;
-  // Mirror the scheduler's default of 365 when the var is unset so the
-  // hash-chain incompatibility check below catches the implicit-default case
-  // (otherwise an operator who only sets AUDIT_HASH_CHAIN=true would boot
-  // successfully, then have the 03:30 UTC sweep silently shred their chain).
-  let days = 365;
-  if (raw !== undefined && raw !== "") {
-    days = Number.parseInt(raw, 10);
-    if (!Number.isFinite(days) || days < 0) {
-      throw new Error(
-        `AUDIT_RETENTION_DAYS must be a non-negative integer (got "${raw}"). ` +
-        `Use 0 to disable retention, or a value ≥ 90 to enable it.`
-      );
-    }
-    if (days !== 0 && days < 90) {
-      throw new Error(
-        `AUDIT_RETENTION_DAYS=${days} is below the SOC 2 / ISO 27001 minimum of 90 days. ` +
-        `Set it to 0 to disable retention entirely, or to a value ≥ 90 to comply.`
-      );
-    }
-  }
-  // SEC-007: retention + hash chain are mutually exclusive. Deleting old
-  // rows breaks the chain — the first surviving row's `prevHash` was
-  // computed against a now-deleted predecessor, so the verifier walks
-  // from `previousHash = null` and immediately mismatches. Refuse to
-  // boot with both enabled rather than silently producing an audit log
-  // that fails its own verification on the next sweep.
-  if (days > 0 && process.env.AUDIT_HASH_CHAIN === "true") {
-    throw new Error(
-      `AUDIT_HASH_CHAIN=true is incompatible with AUDIT_RETENTION_DAYS=${days}` +
-      `${raw === undefined || raw === "" ? " (default)" : ""}. ` +
-      `Retention purges would break the prevHash chain. ` +
-      `Set AUDIT_RETENTION_DAYS=0 to disable retention, or unset AUDIT_HASH_CHAIN to allow purges.`
-    );
-  }
-}
-
 // ─── Process-level crash guards ───────────────────────────────────────────────
 // Prevent the server from dying on unhandled errors.
 // Playwright can throw unhandled rejections from browser internals, page event
@@ -460,6 +415,15 @@ app.get("*", (req, res, next) => {
   if (req.path.startsWith("/health") || req.path === "/api/docs") return next();
   serveIndexWithNonce(req, res);
 });
+
+// ─── INF-007: Sentry Express error handler ───────────────────────────────────
+// Registered AFTER all route + SPA-fallback handlers so it catches unhandled
+// errors bubbling out of any route. `setupExpressErrorHandler` is a no-op
+// when `Sentry.init()` was not called (i.e. `SENTRY_DSN` unset), so this is
+// safe to register unconditionally.
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;

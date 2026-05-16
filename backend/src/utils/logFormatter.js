@@ -122,6 +122,7 @@ export function structuredLog(event, props = {}) {
     const span = getSpanContext();
     const merged = { requestId: getRequestId() || undefined, traceId: span?.traceId, spanId: span?.spanId, ...props };
     const kvPairs = Object.entries(merged)
+      .filter(([, v]) => v !== undefined && v !== null)
       .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
       .join(" ");
     console.log(`[${ts}] [EVENT] ${event}${kvPairs ? " " + kvPairs : ""}`);

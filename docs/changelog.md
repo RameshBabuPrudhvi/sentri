@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **INF-007** — Observability baseline: per-request correlation id (`X-Request-Id` propagated via `AsyncLocalStorage` and included in every `formatLogLine()` / `structuredLog()` output), Prometheus `/metrics` endpoint (admin-only, `METRICS_SCRAPE_KEY` Bearer token) with default Node.js metrics + custom counters (`sentri_runs_total`, `sentri_tests_executed_total`, `sentri_crawl_pages_total`), optional OpenTelemetry trace export via `OTEL_EXPORTER_OTLP_ENDPOINT`, and optional Sentry crash reporting (backend + frontend, no-op when `SENTRY_DSN` / `VITE_SENTRY_DSN` unset).
+
 ## [1.7.3] — 2026-05-16
 
 ### Added
@@ -297,4 +300,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth state parameter validated before code exchange.
 - JWT fallback secret replaced with random per-process generation.
 - `verifyJwt` hardened with explicit buffer length check.
-- Added observability baseline: request-id correlation (`X-Request-Id`), protected `/metrics`, optional OpenTelemetry exporter, and optional Sentry init (backend + frontend).
