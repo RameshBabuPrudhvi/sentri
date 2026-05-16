@@ -38,7 +38,10 @@ const NAV_GROUPS = [
       { to: "/automation", icon: Bot,    label: "Automation" },
       { to: "/approvals",  icon: ClipboardCheck, label: "Approvals" },
       { to: "/healing", icon: Shield, label: "Healing" },
-      { to: "/audit-log",  icon: ScrollText,     label: "Audit log" },
+      // SEC-007: `/audit-log` is gated by `<ProtectedRoute requiredRole="admin">`
+      // in App.jsx, so we hide the nav item from non-admins to avoid leading them
+      // to a 403 panel — same pattern as the Settings link in the footer.
+      { to: "/audit-log",  icon: ScrollText,     label: "Audit log", adminOnly: true },
       { to: "/system",     icon: Server, label: "System"     },
     ],
   },
@@ -149,7 +152,7 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
 
         {/* Nav icons */}
         <nav className="sidebar-rail__nav">
-          {NAV_GROUPS.flatMap(group => group.items).map(item => {
+          {NAV_GROUPS.flatMap(group => group.items).filter(item => !item.adminOnly || isAdmin).map(item => {
             // AUTO-003b: rail-mode equivalent of the expanded "🤖 N" badge —
             // a small dot in the corner of the Approvals icon when there's
             // unreviewed auto-approval activity today. The full count
@@ -276,7 +279,7 @@ export default function Sidebar({ open, collapsed = false, onToggleCollapsed }) 
           <div key={group.label}>
             <div className="sidebar-nav__group-label">{group.label}</div>
             <div className="sidebar-nav__group-items">
-              {group.items.map(item => {
+              {group.items.filter(item => !item.adminOnly || isAdmin).map(item => {
                 // AUTO-003b: live count of auto-approvals fired today on
                 // the Approvals entry. Rendered as a compact pill before
                 // the active-route chevron so it stays visible regardless

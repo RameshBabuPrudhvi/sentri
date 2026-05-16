@@ -132,17 +132,20 @@ Enable it on:
 Leave it off on high-throughput multi-tenant production unless you've
 load-tested the contention impact.
 
-### Caveat: retention + chain interaction
+### Caveat: retention + chain are mutually exclusive
 
 If both `AUDIT_HASH_CHAIN=true` and `AUDIT_RETENTION_DAYS > 0` are set,
-the daily retention sweep will delete the chain's oldest rows. The
-remaining rows still verify cleanly **among themselves** — but the
-chain head moves forward over time, so historical evidence outside the
-retention window is no longer cryptographically anchored.
+the server **refuses to boot** (see the validator in
+`backend/src/index.js`). Retention purges would break the chain — the
+first surviving row's `prevHash` was computed against a now-deleted
+predecessor, so the verifier would walk from `previousHash = null` and
+immediately report tampering on the next sweep. Failing fast at boot
+beats silently producing an audit log that fails its own verification.
 
-For long-term immutable evidence, set `AUDIT_RETENTION_DAYS=0` (with
-hash chain enabled) and externalise long-term archival to your SIEM
-(see SIEM integration below).
+To use the hash chain, set `AUDIT_RETENTION_DAYS=0` (disable retention
+entirely) and externalise long-term archival to your SIEM (see SIEM
+integration below). If you need retention instead, leave
+`AUDIT_HASH_CHAIN` unset.
 
 ---
 
