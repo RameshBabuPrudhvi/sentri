@@ -1152,11 +1152,11 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | **Totals** | **99** | **62** | **0** | **37** | |
 
 
-**Total tracked items:** 99 across 9 categories — **62 complete** (59%), **0 in current PR**, **37 remaining**
+**Total tracked items:** 99 across 9 categories — **62 complete** (63%), **0 in current PR**, **37 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
-- 🔴 **NEW from AUDIT.md Phase 5 — 6 items unresolved:** SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness).
+- 🔴 **NEW from AUDIT.md Phase 5 — 4 items unresolved:** SEC-006 (PII firewall), INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness). (SEC-004 MFA shipped in PR #10; SEC-005 SSO reclassified from Blocker to 🟢 Strategic per AUDIT.md S2.)
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
 1. `SEC-006` (PII firewall — 🔴 Blocker per AUDIT.md, redacts captured credentials / tokens / emails from screenshots + run logs + AI prompts before persistence; depends on ACL-001 ✅)

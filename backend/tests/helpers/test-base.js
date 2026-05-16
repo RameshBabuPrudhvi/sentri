@@ -140,6 +140,12 @@ const RESET_TABLES = [
   "runs",
   "tests",
   "oauth_ids",
+  // SEC-004: webauthn_credentials cascade-deletes via FK ON DELETE CASCADE
+  // from users, but list it explicitly to match the established pattern —
+  // every entity table is reset by name so test isolation doesn't depend
+  // on FK behaviour that could be altered (or temporarily disabled by
+  // `PRAGMA foreign_keys = OFF`) in a future test setup change.
+  "webauthn_credentials",
   "projects",
   "workspace_members",
   "workspaces",
