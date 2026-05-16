@@ -103,6 +103,11 @@ const TYPE_CHIPS = [
       ACTIVITY_TYPES.AUTH_SESSION_REVOKE,
       ACTIVITY_TYPES.AUDIT_READ,
       ACTIVITY_TYPES.AUDIT_EXPORT,
+      // SEC-007: `audit.purge` is the most security-critical admin action
+      // (truncating the compliance log) — grouped under "Auth" alongside the
+      // other meta-audit types so PCI-DSS 10.2.6 reviewers see every audit-
+      // trail event in one filter click, not only when "All events" is on.
+      ACTIVITY_TYPES.AUDIT_PURGE,
     ],
   },
   {
@@ -178,6 +183,10 @@ function entryMeta(type) {
       return { badgeClass: "badge-gray",   label: "Audit read" };
     case ACTIVITY_TYPES.AUDIT_EXPORT:
       return { badgeClass: "badge-amber",  label: "Audit export" };
+    case ACTIVITY_TYPES.AUDIT_PURGE:
+      // Red — purging the compliance trail is the most destructive admin
+      // action in the system; reviewers must spot it at a glance.
+      return { badgeClass: "badge-red",    label: "Audit purge" };
     default:
       return { badgeClass: "badge-gray",   label: type ?? "—" };
   }
