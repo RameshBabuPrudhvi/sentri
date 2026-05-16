@@ -1718,6 +1718,27 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found." });
     const valid = await verifyAccountPassword(user, req.body?.password);
     if (!valid) return res.status(403).json({ error: "Password confirmation failed." });
+
+    // SEC-004: self-lockout guard. If TOTP is the user's only second factor
+    // (no passkeys) and a workspace they belong to requires MFA past grace,
+    // refuse the disable. Without this, the user clears their only factor,
+    // signs out, and gets blocked at /login with no path back to Settings.
+    // Mirror of the guard in DELETE /webauthn/credentials/:id; passes
+    // `skipWebauthnCheck: true` so a 0-passkey user is correctly seen as
+    // factor-less (the live passkey count is already 0 here, so the flag
+    // is defensive — it future-proofs against accidental reordering).
+    const passkeyCount = webauthnRepo.countByUser(user.id);
+    if (passkeyCount === 0) {
+      const enforcement = evaluateMfaEnforcement({ ...user, mfaEnabled: 0 }, { skipWebauthnCheck: true });
+      if (enforcement.state === "block") {
+        return res.status(400).json({
+          error: "Cannot disable MFA — your workspace requires it. Enroll a passkey first, or ask an administrator to extend the grace window.",
+          code: "MFA_LAST_FACTOR_PROTECTED",
+          workspaceId: enforcement.workspaceId,
+        });
+      }
+    }
+
     userRepo.update(user.id, { mfaEnabled: 0, mfaSecret: null, mfaRecoveryCodes: null, updatedAt: new Date().toISOString() });
 
     logActivity({
