@@ -96,6 +96,7 @@ router.patch("/current", requireRole("admin"), (req, res) => {
   if (mfaPolicyChanged) {
     logActivity({
       type: "workspace.mfa_policy_changed",
+      req,
       detail: `MFA enforcement ${ws.mfaRequired === 1 ? "enabled" : "disabled"} for workspace.`,
       userId: req.authUser.sub, userName: req.authUser.name || req.authUser.email,
       workspaceId: req.workspaceId,
@@ -160,6 +161,7 @@ router.post("/switch", (req, res) => {
   if (enforcement.state === "block") {
     logActivity({
       type: "auth.mfa.enrollment_required",
+      req,
       detail: "Workspace switch blocked: target workspace requires MFA.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: enforcement.workspaceId,
