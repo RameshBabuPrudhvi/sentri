@@ -180,6 +180,17 @@ GitHub App credentials for posting native Check Runs on PRs. The feature is opt-
 | `APP_BASE_PATH` | `/` | Frontend base path prefix (e.g. `/sentri` for GitHub Pages) |
 | `BACKEND_URL` | auto-detect | Backend URL override for cross-origin cookie detection |
 
+### Compliance Audit Log (SEC-007)
+
+The `activities` table is the workspace's compliance audit log. SOC 2 / ISO 27001 / PCI-DSS require it to be immutable, retained, tamper-evident, and its own reads to be audited. Every variable below is off / safe by default. See [Compliance Audit Log](./compliance.md) for the full operator guide.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DANGER_ALLOW_AUDIT_PURGE` | `false` | When `"true"`, `DELETE /api/v1/data/activities` is permitted (admin-gated). Default returns `403 AUDIT_PURGE_DISABLED`. Only flip in dev / CI or under explicit incident-response process. |
+| `AUDIT_HASH_CHAIN` | `false` | When `"true"`, every audit row's `prevHash` is computed as `sha256(prev.prevHash + JSON.stringify(rowMinusHash(row)))` inside the INSERT transaction. `GET /api/v1/audit/verify` walks the chain. Serialises INSERTs under contention — enable only on low-volume, compliance-sensitive deployments. **Mutually exclusive with `AUDIT_RETENTION_DAYS > 0`** (boot fails if both are set). |
+| `AUDIT_RETENTION_DAYS` | `365` | Daily 03:30 UTC sweep deletes activity rows older than this. `0` disables retention entirely. Values `1`–`89` are **rejected at boot** (SOC 2 / ISO 27001 minimum is 90 days). |
+| `AUDIT_EXPORT_RATE_LIMIT` | `10` | Per (workspace × admin) CSV/NDJSON export budget per 15-min window. JSON browsing is exempt. Tripped exports return `429 AUDIT_EXPORT_RATE_LIMITED`. |
+
 ### Object Storage (MNT-006)
 
 Sentri stores test artifacts (screenshots, videos, traces, visual-diff PNGs) on the local `artifacts/` directory by default. Set `STORAGE_BACKEND=s3` to upload supported artifacts to an S3-compatible object store (AWS S3, Cloudflare R2, MinIO).

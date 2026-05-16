@@ -39,7 +39,7 @@ import { formatLogLine } from "./logFormatter.js";
  * @param {Object}      [opts.meta]      - Structured metadata persisted as JSON (migration 018). E.g. `{ score, threshold }` on auto-approval, `{ wasAutoApproved }` on revoke.
  * @returns {Object}    The created activity record.
  */
-export function logActivity({ type, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId, meta }) {
+export function logActivity({ type, req, projectId, projectName, testId, testName, detail, status, userId, userName, workspaceId, meta }) {
   // Warn when a project-scoped activity is logged without a workspaceId.
   // Activities with workspaceId=NULL become orphaned — invisible to
   // workspace-scoped queries (/api/activities, /api/data/activities).
@@ -63,7 +63,30 @@ export function logActivity({ type, projectId, projectName, testId, testName, de
     userName: userName || null,
     workspaceId: workspaceId || null,
     meta: meta || null,
+    ipAddress: req?.ip || null,
+    userAgent: req?.get?.("user-agent") || null,
+    prevHash: null,
   };
   activityRepo.create(activity);
+
+  // SEC-007 Part C: fire-and-forget SIEM forwarding. Every persisted
+  // audit row is pushed to the workspace's configured SIEM target on
+  // a deferred microtask so the originating request is never blocked
+  // by a SIEM outage. The forwarder itself NEVER throws — failures
+  // land in the `audit_dlq` table for admin replay.
+  //
+  // Lazy-imported to break the import cycle: notifications.js imports
+  // auditDlqRepo, which imports counterRepo, which… etc. Using a
+  // dynamic import here keeps activityLogger's top-level dependency
+  // graph minimal (the original notification dispatcher uses the same
+  // dynamic-import pattern in routes/system.js for the replay path).
+  if (activity.workspaceId) {
+    setImmediate(() => {
+      import("./notifications.js")
+        .then((mod) => mod.dispatchSiemEvent?.(activity.workspaceId, activity))
+        .catch(() => { /* best-effort; row is already persisted */ });
+    });
+  }
+
   return activity;
 }

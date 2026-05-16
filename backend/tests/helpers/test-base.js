@@ -140,6 +140,12 @@ const RESET_TABLES = [
   "runs",
   "tests",
   "oauth_ids",
+  // SEC-007: clear the compliance audit-log DLQ + SIEM config between test
+  // files so DLQ-N counter restarts don't collide with rows persisted by an
+  // earlier test file (the `counters` table is reset below but the data
+  // tables aren't — leading to `UNIQUE constraint failed: audit_dlq.id`).
+  "audit_dlq",
+  "workspace_siem_config",
   // SEC-004: webauthn_credentials cascade-deletes via FK ON DELETE CASCADE
   // from users, but list it explicitly to match the established pattern —
   // every entity table is reset by name so test isolation doesn't depend
@@ -167,6 +173,26 @@ export function resetDb(extraTables = []) {
     try { db.exec(`DELETE FROM ${table}`); } catch { /* table may not exist */ }
   }
   db.exec("UPDATE counters SET value = 0");
+  // SEC-007: re-seed the system sentinel user + workspace that migration
+  // 033 installs at startup. `resetDb` wipes the entire `workspaces` and
+  // `users` tables, but production code (`auth.login.failed` for unknown
+  // emails) assumes the `__system__` row exists — otherwise the FK on
+  // `activities.workspaceId` fires and the route 500s instead of 401.
+  // This mirrors the migration's INSERT OR IGNORE so the contract holds
+  // for every test file. Matches the `INSERT OR IGNORE INTO counters`
+  // re-seed pattern used elsewhere in the migration suite.
+  try {
+    db.prepare(
+      `INSERT OR IGNORE INTO users (id, name, email, passwordHash, role, createdAt, updatedAt)
+       VALUES ('__system__', 'System', '__system__@__system__.invalid', NULL, 'system',
+               '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    db.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, name, slug, ownerId, createdAt, updatedAt)
+       VALUES ('__system__', 'System (auto-managed)', '__system__', '__system__',
+               '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+  } catch { /* tables may not exist on legacy/partial schemas */ }
 }
 
 // ─── Environment helpers ──────────────────────────────────────────────────────

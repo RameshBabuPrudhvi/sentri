@@ -244,12 +244,20 @@ function slugify(name) {
 export function ensureDefaultWorkspaces() {
   const db = getDatabase();
 
-  // Find users who are not members of any workspace
+  // Find users who are not members of any workspace.
+  //
+  // SEC-007: explicitly exclude the `__system__` sentinel user (seeded by
+  // migration 033). It owns the `__system__` workspace (FK target for
+  // unknown-email failed-login rows) but has no `workspace_members` row
+  // by design, so without this filter every startup would treat it as
+  // orphan and create accumulating `system-XXX` default workspaces in
+  // production.
   const orphanUsers = db.prepare(`
     SELECT u.id, u.name FROM users u
-    WHERE NOT EXISTS (
-      SELECT 1 FROM workspace_members wm WHERE wm.userId = u.id
-    )
+    WHERE u.id != '__system__'
+      AND NOT EXISTS (
+        SELECT 1 FROM workspace_members wm WHERE wm.userId = u.id
+      )
   `).all();
 
   if (orphanUsers.length === 0) return;

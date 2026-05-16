@@ -40,6 +40,17 @@ const TIMEOUT_LONG    = 300_000;
 
 const BASE_URL = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ? import.meta.env.BASE_URL : "/";
 
+function toQuery(obj = {}) {
+  const params = new URLSearchParams();
+  for (const [k,v] of Object.entries(obj)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((item) => params.append(k, String(item)));
+    else params.set(k, String(v));
+  }
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
 /**
  * Handle a 401 Unauthorized response by clearing the stored user profile
  * and redirecting to the login page.
@@ -910,6 +921,81 @@ export const api = {
    * @returns {Promise<{totalMembers: number, enrolled: number, notEnrolled: number, members: Array<{userId: string, name: string, email: string, role: string, mfaEnabled: boolean}>}>}
    */
   getWorkspaceMfaCompliance: () => req("GET", "/workspaces/current/mfa-compliance"),
+  /**
+   * SEC-007: workspace-scoped audit log with cursor pagination.
+   * @param {string} workspaceId — Must match the authenticated workspace; the
+   *   backend returns 403 `AUDIT_WORKSPACE_MISMATCH` on mismatch.
+   * @param {{ userId?: string, type?: string|string[], dateFrom?: string, dateTo?: string, ipAddress?: string, cursor?: string, limit?: number }} [filters]
+   * @returns {Promise<{ rows: Object[], nextCursor: string|null }>}
+   */
+  getWorkspaceAuditLog: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery(filters)}`),
+  /**
+   * Trigger a CSV or NDJSON export of the current page of audit-log rows.
+   * Same filter shape as `getWorkspaceAuditLog`. The backend sets
+   * `Content-Disposition: attachment` so callers can either
+   * `window.location.assign` the URL or stream via fetch + Blob.
+   * @param {string} workspaceId
+   * @param {Object} [filters]
+   * @param {"csv"|"ndjson"} [format="csv"]
+   */
+  exportWorkspaceAuditLog: (workspaceId, filters = {}, format = "csv") => req("GET", `/workspaces/${workspaceId}/audit-log${toQuery({ ...filters, format })}`),
+  /**
+   * Verify the audit-log hash chain for the current workspace. Returns
+   * `{ verified: true, chainDisabled: true }` when `AUDIT_HASH_CHAIN` is
+   * unset on the server.
+   * @returns {Promise<{ verified: boolean, chainDisabled?: boolean, total?: number, firstBrokenRowId?: string }>}
+   */
+  verifyAuditChain: () => req("GET", "/audit/verify"),
+  /**
+   * SEC-007: list deployment-wide security events (workspaceId =
+   * SYSTEM_WORKSPACE_ID sentinel). Surfaces rows that have no resolvable
+   * tenant — chiefly `auth.login.failed` against unknown emails. Admin-only,
+   * cross-tenant by design.
+   * @param {{ type?: string, after?: string, before?: string, limit?: number, offset?: number }} [filters]
+   * @returns {Promise<{ rows: Object[], count: number }>}
+   */
+  getSystemSecurityEvents: (filters = {}) => req("GET", `/system/security-events${toQuery(filters)}`),
+  /**
+   * SEC-007: list SIEM dead-letter queue entries for the workspace. Used by
+   * the AuditLog DLQ inspector to render the "N retry-failed" badge and the
+   * per-row replay actions.
+   * @param {string} workspaceId
+   * @param {{ limit?: number }} [filters]
+   * @returns {Promise<{ rows: Array<{id: string, workspaceId: string, rowSnapshot: Object|null, lastError: string, attempts: number, createdAt: string}>, count: number }>}
+   */
+  listAuditDlq: (workspaceId, filters = {}) => req("GET", `/workspaces/${workspaceId}/audit-log/dlq${toQuery(filters)}`),
+  /**
+   * Re-dispatch a DLQ entry against the SIEM forwarder. Returns
+   * `503 SIEM_NOT_CONFIGURED` when no SIEM target is configured for
+   * the workspace.
+   * @param {string} workspaceId
+   * @param {string} dlqId
+   * @returns {Promise<{ ok: boolean, id: string, replayedAt: string }>}
+   */
+  replayAuditDlq: (workspaceId, dlqId) => req("POST", `/workspaces/${workspaceId}/audit-log/dlq/${dlqId}/replay`),
+  /**
+   * SEC-007 Part C: read the per-workspace SIEM forwarder config.
+   * Server returns the masked `hmacSecret` (`••••••••<last4>`) so admins
+   * can confirm which secret is configured without exposing it.
+   * @param {string} workspaceId
+   * @returns {Promise<{ config: { workspaceId: string, targetUrl: string, hmacSecret: string, headers: Object|null, enabled: boolean, createdAt: string, updatedAt: string } | null }>}
+   */
+  getWorkspaceSiemConfig: (workspaceId) => req("GET", `/workspaces/${workspaceId}/siem-config`),
+  /**
+   * SEC-007 Part C: upsert the per-workspace SIEM forwarder config.
+   * The plaintext `hmacSecret` is sent on every save (the server encrypts
+   * it at rest); subsequent reads only return the masked form.
+   * @param {string} workspaceId
+   * @param {{ targetUrl: string, hmacSecret: string, headers?: Object|null, enabled?: boolean }} config
+   */
+  upsertWorkspaceSiemConfig: (workspaceId, config) => req("PUT", `/workspaces/${workspaceId}/siem-config`, config),
+  /**
+   * SEC-007 Part C: delete the per-workspace SIEM forwarder config.
+   * Idempotent — `removed: false` when no config existed.
+   * @param {string} workspaceId
+   * @returns {Promise<{ ok: boolean, removed: boolean }>}
+   */
+  deleteWorkspaceSiemConfig: (workspaceId) => req("DELETE", `/workspaces/${workspaceId}/siem-config`),
 
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**

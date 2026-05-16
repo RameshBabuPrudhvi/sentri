@@ -29,4 +29,22 @@ export const ACTIVITY_TYPES = Object.freeze({
   TEST_BULK_REJECT:   "test.bulk_reject",
   TEST_BULK_RESTORE:  "test.bulk_restore",
   TEST_BULK_DELETE:   "test.bulk_delete",
+
+  AUTH_LOGIN:         "auth.login",
+  AUTH_LOGIN_FAILED:  "auth.login.failed",
+  AUTH_LOGOUT:        "auth.logout",
+  AUTH_PASSWORD_RESET:"auth.password.reset",
+  AUTH_ROLE_CHANGE:   "auth.role.change",
+  AUTH_API_KEY_CREATE:"auth.api_key.create",
+  AUTH_API_KEY_REVOKE:"auth.api_key.revoke",
+  AUTH_SESSION_REVOKE:"auth.session.revoke",
+
+  // SEC-007: meta-audit — reads / exports of the audit log itself.
+  // Required by PCI-DSS 10.2.6 and SOC 2 CC7.2.
+  AUDIT_READ:         "audit.read",
+  AUDIT_EXPORT:       "audit.export",
+  // SEC-007: emitted by `DELETE /api/v1/data/activities` BEFORE the truncate
+  // so the act of wiping the compliance log is itself recorded (and survives
+  // long enough to be forwarded to the SIEM via dispatchSiemEvent).
+  AUDIT_PURGE:        "audit.purge",
 });

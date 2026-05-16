@@ -162,6 +162,18 @@ router.post("/settings", requireRole("admin"), async (req, res) => {
     detail: `API key configured for ${getProviderMeta()?.name || provider}`,
   });
 
+  // SEC-007: emit `auth.api_key.create` for the compliance audit log. The
+  // `settings.update` row above is the operator-facing activity stream;
+  // this companion row is the auth-events stream a SOC-2 reviewer filters
+  // on. The raw key is NEVER logged — only the provider and actor.
+  logActivity({
+    ...actor(req),
+    type: "auth.api_key.create",
+    req,
+    workspaceId: req.workspaceId || null,
+    meta: { provider, providerName: getProviderMeta()?.name || provider },
+  });
+
   res.json({
     ok: true,
     provider,
@@ -209,6 +221,16 @@ router.delete("/settings/:provider", requireRole("admin"), (req, res) => {
   logActivity({ ...actor(req),
     type: "settings.update",
     detail: `Provider "${provider}" deactivated`,
+  });
+
+  // SEC-007: emit `auth.api_key.revoke` for the compliance audit log so
+  // key removal is traceable in the same auth-events stream as creation.
+  logActivity({
+    ...actor(req),
+    type: "auth.api_key.revoke",
+    req,
+    workspaceId: req.workspaceId || null,
+    meta: { provider },
   });
 
   res.json({ ok: true });

@@ -289,10 +289,33 @@ router.patch("/current/members/:userId", requireRole("admin"), (req, res) => {
     }
   }
 
+  // Capture the previous role for the audit-log meta before mutating, so
+  // a SOC-2 reviewer can answer "what changed?" without a separate query.
+  const beforeMembers = workspaceRepo.getMembers(req.workspaceId);
+  const previousRole = beforeMembers.find((m) => m.userId === userId)?.role || null;
+
   const updated = workspaceRepo.updateMemberRole(req.workspaceId, userId, role);
   if (!updated) {
     return res.status(404).json({ error: "Member not found in this workspace." });
   }
+
+  // SEC-007: emit `auth.role.change` so the workspace audit log captures
+  // every role mutation with actor + target + before/after + IP/UA.
+  const target = userRepo.getById(userId);
+  logActivity({
+    type: "auth.role.change",
+    req,
+    userId,
+    userName: target?.name || target?.email || null,
+    workspaceId: req.workspaceId,
+    meta: {
+      from: previousRole,
+      to: role,
+      changedBy: req.authUser.sub,
+      changedByName: req.authUser.name || req.authUser.email || null,
+    },
+  });
+
   return res.json({ userId, role, updated: true });
 });
 

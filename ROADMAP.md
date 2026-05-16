@@ -15,11 +15,11 @@
 >
 > Come back here only to: look up a specific item by ID (Ctrl+F the ID e.g. `DIF-008`), check completed work history, or review phase/competitive context.
 >
-> **Current sprint:** `SEC-007 Phase 1` (compliance audit log surface — env-gate `DELETE /api/v1/data/activities` behind `DANGER_ALLOW_AUDIT_PURGE`, capture `ipAddress` + `userAgent` on `activities` rows, emit the 7 password-path `auth.*` events) — promoted after `SEC-006` (PII firewall — `domSanitizer` redacting emails / phones / cards / JWTs / Bearer tokens / auth query params with deterministic placeholders + per-project `strictPiiFirewall` / `piiAllowlist`) shipped in PR #11. SEC-007 Phase 2 (admin surface + CSV/NDJSON export + retention sweep) holds queue slot 1. INF-007 (OTel) slot 2, INF-008 (Postgres-default + dual-DB CI matrix) slot 3, AUTO-022 (AI eval harness) slot 4.
+> **Current sprint:** `INF-007` (OTel / Sentry observability) — promoted after `SEC-007` (compliance audit log — full scope: immutability + auth events + admin export + retention + SIEM forwarder) shipped in PR #12. INF-008 (Postgres-default + dual-DB CI matrix) holds queue slot 1, AUTO-022 (AI eval harness) slot 2, INF-009 (Helm chart + K8s + DR) slot 3.
 >
 > **Blockers:** none remaining · **Remaining:** ~15 planned items across Phases 2–5 + Maintenance (see Summary table at the bottom for the authoritative breakdown).
 >
-> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
+> **Recent ships** (newest first; full details in the Completed Work Summary table — never inline implementation prose here, that's what the table is for): SEC-007 PR #12 · SEC-006 PR #11 · SEC-004 PR #10 · AUTO-008 PR #9 · DIF-015c Gaps 2/3/5/6 PR #8 · AUTO-010 PR #6 · DIF-012 PR #2 · CAP-001 PR #1 · CAP-002 PR #3 · AUTO-004 PR #18 · INT-002b PR #17 · AUTO-001 + INT-002 PR #15 · AI-001 PR #14 · CAP-003 + AUTO-002 + AUTO-002b + AUTO-015 + AUTO-015b PR #12 · DIF-015b Gap 3 + DIF-015c Gap 1 PR #11 · AUTO-003 + AUTO-003b + AUTO-019 PR #10 (legacy) · AUTO-017.3 + PROC-001 + DIF-005 PR #9 (legacy) · CAP-004 + MET-001 + AUTO-017 + UI-REFACTOR-001 PR #8 (legacy). PROC-002 + PROC-003 reverted in PR #10 (legacy).
 
 ---
 
@@ -148,7 +148,7 @@ The following items have been verified complete against the codebase and are **n
 | Phase 2 — Team & Enterprise Foundation | Auth hardening, multi-tenancy, RBAC, queues | ✅ Mostly complete — SEC-001/002/003/004, INF-001/002/003/004/005/006, ACL-001/002, FEA-001/002/003, ENH-036 + ENH-036b all ✅ (SEC-004 MFA shipped in PR #10 with TOTP + WebAuthn + per-workspace enforcement); SEC-005 (SSO) tracked as 🟢 Strategic under Phase 5 per AUDIT.md severity reconciliation | 8–10 weeks |
 | Phase 3 — AI-Native Differentiation | Visual regression, cross-browser, competitive features | 🔄 In progress — most differentiators shipped (DIF-001/002/002b/003/004/005/006/007/011/012/013/014/015/016 ✅ — DIF-005 embedded trace viewer shipped in PR #9; **INT-002** GitHub PR check comments shipped in PR #15; **DIF-012** multi-environment support shipped in PR #2); remaining: DIF-008–010, DIF-015b/c sub-items | 10–12 weeks |
 | Phase 4 — Autonomous Intelligence | Risk-based testing, change detection, quality gates | 🔄 In progress — AUTO-001/002/002b/003/003b/004/005/006/007/008/010/012/013/015/015b/016/016b/017/017.3/019 ✅ (AUTO-008 shipped in PR #9, AUTO-010 in PR #6, AUTO-004 in PR #18, AUTO-001 in PR #15); remaining: AUTO-009, AUTO-011, AUTO-014, AUTO-018, AUTO-021 (AUTO-020 superseded by AUTO-015) · Capabilities row: CAP-001 (data-driven) ✅ PR #1, CAP-002 (sharding) ✅ PR #3; CAP-002b (SaaS-readiness follow-ups) tracked separately in Summary | 14–18 weeks |
-| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11); SEC-007 Phase 1 audit-log immutability + auth events — current sprint; remaining 3× 🔴 Blocker (INF-007 OTel, INF-008 Postgres-default, AUTO-022 eval harness). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
+| Phase 5 — Industry Hardening (AUDIT.md) | OTel, Postgres-default, MFA, SSO, PII firewall, eval harness, Helm/DR, SDK, DAG runner, critic agent | 🔄 In progress — SEC-004 MFA ✅ (PR #10), SEC-006 PII firewall ✅ (PR #11), SEC-007 compliance audit log ✅ (PR #12); INF-007 OTel — current sprint; remaining 2× 🔴 Blocker (INF-008 Postgres-default, AUTO-022 eval harness). Target: industry-readiness score 6.0/10 → 9.0/10. | 12–16 weeks |
 | Ongoing — Maintenance & Platform Health | Healing AI, DX, exports, accessibility | 🔄 Continuous                                                                                                                                                                         | — |
 
 ---
@@ -622,55 +622,6 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 ---
 
-### SEC-007 — Compliance audit log surface + export + SIEM integration 🟡 High
-
-**Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md Enterprise Readiness §9 (formerly `ENT-002` in AUDIT_IMPL.md)
-
-**Problem:** Sentri already records ~30 kinds of operator + system events into the `activities` table via `logActivity()` (`backend/src/utils/activityLogger.js`) — project/test/run CRUD, auto-approvals + revokes, AI-fix events, GitHub integration installs/disables, deployment-triggered crawls, recycle-bin operations, scheduled runs, and per-user attribution (`userId` + `userName` per row, ENH-021 ✅). The feed surfaces at `GET /api/v1/activities` (`backend/src/routes/system.js:10`) filterable by `type` + `projectId`. **What's missing for enterprise / SOC2 / ISO27001:** (1) **immutability** — `DELETE /api/v1/data/activities` (`backend/src/routes/system.js:15`) lets admins truncate the audit log, which is a hard compliance fail; (2) **auth events** — login/logout/MFA-enroll/role-change/API-key create-revoke are not currently logged; (3) **dedicated admin page** — the existing per-project activity feed is a developer view, not the workspace-wide compliance surface auditors expect; (4) **export** — no CSV/JSON download for a given date range; (5) **retention policy** — no documented or enforced minimum window; (6) **SIEM forwarding** — no streaming/push to Splunk/Datadog/Elastic. For an autonomous QA platform specifically, the "who/what/when" question also applies to **AI-driven actions** (auto-approval, AI fix, AI-generated tests) — auditors will ask how to trace every AI decision back to its trigger.
-
-**Fix (phased, ship the immutability + auth-events MVP first, defer SIEM forwarding until customer demand):**
-
-**Phase 1 — Immutability + auth events (MVP, ships with SEC-004 MFA):**
-1. Remove (or admin-gate behind a `DANGER_ALLOW_AUDIT_PURGE=true` env flag) the `DELETE /api/v1/data/activities` route in `backend/src/routes/system.js`. SOC2 auditors fail this on sight; the route was added for dev convenience and is the single biggest compliance blocker.
-2. Extend `activities` with `ipAddress` + `userAgent` columns (additive migration; null-tolerant for historical rows). Capture both in `logActivity()` from `req.ip` + `req.get('user-agent')` — already available in every route handler.
-3. Add new `ACTIVITY_TYPES` entries in `backend/src/constants/activityTypes.js` (mirrored in `frontend/src/constants/activityTypes.js`): `auth.login`, `auth.login.failed`, `auth.logout`, `auth.mfa.enroll`, `auth.mfa.disable`, `auth.password.reset`, `auth.role.change`, `auth.api_key.create`, `auth.api_key.revoke`, `auth.session.revoke`. Emit from `backend/src/routes/auth.js` + SEC-004 MFA routes.
-4. **Optional tamper-evidence**: per-row `prevHash` column populated as `sha256(prevHash || JSON.stringify(rowMinusHash))` in a trigger or in `activityRepo.create()`. Detection-only (not prevention); operators can verify the chain via a new `/api/v1/audit/verify` route. Ship behind a feature flag — chained writes serialise inserts under contention, so make it opt-in for low-volume compliance-sensitive deployments.
-
-**Phase 2 — Dedicated admin surface + export:**
-5. New `GET /api/v1/workspaces/:workspaceId/audit-log` endpoint (admin-gated in `permissions.json`) — filterable by `userId`, `type` (multi-select), `dateFrom`, `dateTo`, `ipAddress`; paginated via the existing `ENH-010` pagination primitives; returns the same row shape as `/activities` plus the new auth + IP/UA fields.
-6. CSV + NDJSON download via `?format=csv` / `?format=ndjson` (signed-URL pattern from ENH-007 if response would exceed 5MB).
-7. New frontend page `frontend/src/pages/AuditLog.jsx` mounted under Settings → Compliance (admin-only via `userHasRole(authUser, "admin")` in the route guard). Workspace-scoped filters, virtualized table for 10k+ rows, "Export" button hits the CSV/NDJSON route. Distinct from the existing per-project Activity feed — this is the compliance surface, that one stays a developer view.
-8. Document retention policy in `docs/guide/compliance.md` (new): default 365 days (matches SOC2 Common Criteria CC7.2), configurable via `AUDIT_RETENTION_DAYS` env var with a hard floor of 90 days. Retention sweep runs in `backend/src/scheduler.js` once daily.
-
-**Phase 3 — SIEM streaming (defer until customer demand):**
-9. Add an admin-configurable webhook target reusing FEA-001's notification dispatcher (`backend/src/utils/notifications.js`) — every audit-log INSERT fires a POST to the configured Splunk HEC / Datadog Logs Intake / Elastic ingest endpoint. HMAC-signed payload, retry with exponential backoff, dead-letter on persistent 5xx. Per-workspace config in the same Settings → Compliance panel.
-10. Document the integration shape (NDJSON event schema, HMAC signature scheme, retry semantics) so customers can wire their own SIEM without proprietary connectors.
-
-**Files to change:**
-- New migration — `ipAddress`, `userAgent`, optional `prevHash` columns on `activities`
-- `backend/src/routes/system.js` — remove or env-gate `DELETE /api/v1/data/activities`; add `GET /workspaces/:workspaceId/audit-log` with CSV/NDJSON export
-- `backend/src/utils/activityLogger.js` — capture `req.ip` + `req.get('user-agent')`; optional hash-chain `prevHash` computation
-- `backend/src/database/repositories/activityRepo.js` — `getByWorkspace(workspaceId, filters)` accessor with paginated cursor for the new admin endpoint
-- `backend/src/constants/activityTypes.js` + `frontend/src/constants/activityTypes.js` — add `auth.*` event literals (keep both files in sync per existing convention)
-- `backend/src/routes/auth.js` — emit `auth.login`, `auth.login.failed`, `auth.logout`, `auth.password.reset`, `auth.role.change`, `auth.api_key.{create,revoke}`, `auth.session.revoke` via `logActivity()`
-- `backend/src/middleware/permissions.json` — register the new admin-gated `/workspaces/:id/audit-log` route
-- `backend/src/scheduler.js` — daily retention sweep honouring `AUDIT_RETENTION_DAYS` (default 365, floor 90)
-- New `frontend/src/pages/AuditLog.jsx` — admin-only compliance surface (Settings → Compliance) with virtualized table, type/user/date/IP filters, export button
-- `frontend/src/api.js` — `getWorkspaceAuditLog(workspaceId, filters)` + `exportWorkspaceAuditLog(workspaceId, filters, format)` helpers (PROC-001 invariant — every new route gets a real consumer)
-- New `docs/guide/compliance.md` — retention policy, immutability contract, hash-chain verification procedure, SIEM integration shape
-- `backend/tests/audit-log-routes.test.js` (new, registered in `run-tests.js`) — admin-gating, workspace-scoped filtering, CSV/NDJSON export, retention-sweep correctness, optional hash-chain verification round-trip
-- `QA.md` § Audit log (SEC-007) — manual test plan covering each new event type emission, export round-trip, retention boundary, permission denials
-- `frontend/src/pages/Settings.jsx` — Audit Log tab with date-range filter + CSV export
-
-**Acceptance criteria:**
-- `GET /audit-log?format=ndjson` streams NDJSON with all security events in the date range.
-- CSV export contains columns: `timestamp`, `userId`, `userName`, `type`, `meta`, `ipAddress`, `workspaceId`.
-- Each security-sensitive action produces a row in `activities`.
-
-**Dependencies:** SEC-005 (SSO events must be audit-logged), SEC-004 (MFA events too).
-
----
-
 ### FEA-004 — Per-tenant resource quotas + token-cost dashboard 🟢 Strategic
 
 **Status:** 🔲 Planned | **Effort:** M | **Source:** AUDIT.md AI8, B8 (formerly `ENT-003` in AUDIT_IMPL.md)
@@ -1123,7 +1074,7 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 
 | Category | Total | ✅ Done | 🔄 In Progress | 🔲 Pending | Remaining |
 |----------|------:|--------:|---------------:|----------:|-----------|
-| Security & Compliance | 7 | 5 | 1 | 1 | SEC-005 (SSO) planned; SEC-007 🟡 (compliance audit log surface — current sprint, Phase 1 in flight) |
+| Security & Compliance | 7 | 6 | 0 | 1 | SEC-005 (SSO) planned |
 | Infrastructure | 10 | 6 | 0 | 4 | INF-007 🔴 (OTel/Sentry), INF-008 🔴 (Postgres default), INF-009 (Helm/DR), INF-010 (SDK + CLI) |
 | Access Control | 2 | 2 | 0 | 0 | — |
 | Platform Features | 7 | 4 | 0 | 3 | FEA-004 (per-tenant quotas), FEA-005 (collaboration/comments), FEA-006 (template gallery) |
@@ -1132,21 +1083,20 @@ CAP-002's Redis dependency is a single point of failure. Production SaaS deploym
 | Capabilities | 4 | 4 | 0 | 0 | — |
 | Process automation | 1 | 1 | 0 | 0 | — |
 | Maintenance | 17 | 5 | 0 | 12 | MNT-001/002/003 (narrowed)/004/005/008/012/013/014/015/016/017 |
-| **Totals** | **99** | **63** | **1** | **35** | |
+| **Totals** | **99** | **64** | **0** | **34** | |
 
 
-**Total tracked items:** 99 across 9 categories — **63 complete** (64%), **1 in current PR** (SEC-007 Phase 1), **35 remaining**
+**Total tracked items:** 99 across 9 categories — **64 complete** (64%), **0 in current PR** (INF-007), **34 remaining**
 
 **Blockers (must ship before paid tier / enterprise demo):**
 - ✅ All Phase 1–4 blockers resolved.
 - 🔴 **NEW from AUDIT.md Phase 5 — 3 items unresolved:** INF-007 (OTel + Sentry), INF-008 (Postgres default + dual-DB CI matrix), AUTO-022 (AI eval harness). (SEC-004 MFA shipped in PR #10; SEC-006 PII firewall shipped in PR #11; SEC-005 SSO reclassified from Blocker to 🟢 Strategic per AUDIT.md S2.)
 
 **Recommended PR order (next 8 sprints, interleaving Phase 4 feature delivery with Phase 5 audit hardening):**
-1. `SEC-007 Phase 1` (compliance audit log immutability + auth events — 🟡 High per AUDIT.md Enterprise Readiness §9; env-gate the purge route, add `ipAddress`/`userAgent` columns, emit the 7 password-path `auth.*` events; depends on SEC-004 ✅)
-2. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation; bundles naturally with MNT-013 request-ID propagation and SEC-007 P1's `req.ip` plumbing)
-3. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
-4. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts; depends on INF-007's `metric_samples` infra)
-5. `SEC-007 Phase 2` (admin compliance surface + CSV/NDJSON export + retention sweep — completes the SOC 2 / ISO 27001 story started in Phase 1)
+1. `INF-007` (OpenTelemetry instrumentation + Sentry crash reporting — 🔴 Blocker per AUDIT.md D-series; required before any meaningful SLO / on-call rotation; bundles naturally with MNT-013 request-ID propagation and SEC-007 P1's `req.ip` plumbing)
+2. `INF-008` (Postgres-default + dual-DB CI matrix — 🔴 Blocker per AUDIT.md; SQLite kept as dev fallback, Postgres becomes the canonical schema for production deployments)
+3. `AUTO-022` (AI eval harness — 🔴 Blocker per AUDIT.md AI series; regression-safety net for prompt / model changes, gates AI-001 fallback-chain rollouts; depends on INF-007's `metric_samples` infra)
+4. `SEC-007 Phase 2` (admin compliance surface + CSV/NDJSON export + retention sweep — completes the SOC 2 / ISO 27001 story started in Phase 1)
 
 This rotation alternates between audit-driven hardening and feature delivery so neither narrative starves.
 

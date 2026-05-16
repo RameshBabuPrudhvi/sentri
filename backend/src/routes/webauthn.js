@@ -594,7 +594,7 @@ router.delete("/credentials/:id", requireAuth, async (req, res) => {
     // Revoke so the next request forces re-authentication and the new
     // session's `amr` reflects whatever factors remain. Matches /mfa/disable
     // and the industry baseline (Auth0, Clerk, Okta, GitHub).
-    _internalRevokeCurrentSession(req, res);
+    _internalRevokeCurrentSession(req, res, { reason: "webauthn.credential_removed", credentialId: req.params.id });
 
     return res.json({ ok: true, sessionRevoked: true });
   } catch (err) {

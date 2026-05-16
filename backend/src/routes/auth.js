@@ -50,6 +50,7 @@ import { encryptString, decryptString } from "../utils/credentialEncryption.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
+import { SYSTEM_WORKSPACE_ID } from "../constants/systemWorkspace.js";
 import { cookieSameSite } from "../middleware/appSetup.js";
 import {
   signJwt, getJwtSecret, revokedTokens,
@@ -597,10 +598,25 @@ export function _internalCheckRateLimit(bucket, ip) {
  * @param {Object} req - Must carry `req.authUser` (the JWT payload).
  * @param {Object} res
  */
-export function _internalRevokeCurrentSession(req, res) {
+export function _internalRevokeCurrentSession(req, res, auditMeta) {
   const { jti, exp } = req.authUser || {};
   if (jti) revokedTokens.set(jti, exp);
   clearAuthCookies(res);
+  // SEC-007: emit `auth.session.revoke` so every server-initiated session
+  // termination (MFA disable, recovery-code regeneration, passkey removal,
+  // etc.) lands in the compliance audit log alongside login/logout events.
+  // The `reason` in `auditMeta` lets reviewers distinguish posture-change
+  // revokes from explicit logouts.
+  if (req?.authUser?.sub) {
+    logActivity({
+      type: "auth.session.revoke",
+      req,
+      userId: req.authUser.sub,
+      userName: req.authUser.name || req.authUser.email || null,
+      workspaceId: req.workspaceId || req.authUser.workspaceId || null,
+      meta: { jti: jti || null, ...(auditMeta || {}) },
+    });
+  }
 }
 
 /**
@@ -755,6 +771,21 @@ router.post("/login", async (req, res) => {
     const valid = user?.passwordHash ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, dummyHash).catch(() => false);
 
     if (!user || !valid) {
+      // SEC-007: route the failed-login row so it's reachable from an admin
+      // UI, never `workspaceId: null` (which is invisible to every scoped
+      // query). Three cases:
+      //   1. Known email → snapshot the user's primary workspace; the row
+      //      appears in that workspace's audit log.
+      //   2. Unknown email (credential-stuffing probe) → tag with the
+      //      `SYSTEM_WORKSPACE_ID` sentinel so admins can list it via
+      //      `GET /api/v1/system/security-events`. The sentinel is a fixed
+      //      string that can never collide with a real workspace UUID, so
+      //      the row cannot leak into any tenant's workspace-scoped view.
+      //   3. Empty-string email → treat as case 2 for safety.
+      const failedWorkspaceId = user
+        ? workspaceRepo.getByUserId(user.id)?.[0]?.id || SYSTEM_WORKSPACE_ID
+        : SYSTEM_WORKSPACE_ID;
+      logActivity({ type: "auth.login.failed", req, userId: user?.id || null, userName: user?.name || email || null, workspaceId: failedWorkspaceId });
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
@@ -801,6 +832,7 @@ router.post("/login", async (req, res) => {
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
@@ -820,6 +852,7 @@ router.post("/login", async (req, res) => {
 router.post("/logout", requireAuth, (req, res) => {
   const { jti, exp } = req.authUser;
   if (jti) revokedTokens.set(jti, exp);
+  logActivity({ type: "auth.logout", req, userId: req.authUser.sub, userName: req.authUser.name || null, workspaceId: req.workspaceId || req.authUser.workspaceId || null });
   clearAuthCookies(res);
   return res.json({ message: "Signed out successfully." });
 });
@@ -1220,6 +1253,13 @@ router.post("/reset-password", async (req, res) => {
     console.log(`[auth/reset-password] Password reset for ${user.email}`);
   }
 
+  // SEC-007: `/reset-password` is a public endpoint so `req.workspaceId` is
+  // unset. Resolve the user's primary workspace from their membership (same
+  // pattern as the MFA pending-login flow above) so the reset event is
+  // visible in the workspace-scoped audit log rather than orphaned with
+  // `workspaceId = NULL`.
+  const resetWorkspaceId = req.workspaceId || workspaceRepo.getByUserId(user.id)?.[0]?.id || null;
+  logActivity({ type: "auth.password.reset", req, userId: user.id, userName: user.name || user.email, workspaceId: resetWorkspaceId });
   return res.json({ message: "Password has been reset successfully. You can now sign in." });
 });
 
@@ -1295,6 +1335,7 @@ router.get("/github/callback", async (req, res) => {
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
@@ -1368,6 +1409,7 @@ router.get("/google/callback", async (req, res) => {
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
     setAuthCookie(res, token, exp);
+    logActivity({ type: "auth.login", req, userId: user.id, userName: user.name || user.email, workspaceId: payload.workspaceId });
 
     return res.json({ user: buildUserResponse(user) });
   } catch (err) {
@@ -1826,7 +1868,7 @@ router.post("/mfa/recovery-codes/regenerate", requireAuth, async (req, res) => {
     // panic) cannot continue acting under the regenerated set. Matches the
     // industry baseline (Auth0, Clerk, Okta, GitHub all terminate sessions
     // on credential change).
-    _internalRevokeCurrentSession(req, res);
+    _internalRevokeCurrentSession(req, res, { reason: "mfa.recovery_codes_regenerated" });
 
     return res.json({ recoveryCodes: recovery.raw, sessionRevoked: true });
   } catch (err) {
@@ -1894,7 +1936,7 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
     // session forces re-authentication so the new cookie reflects the new
     // posture (amr=["pwd"]). Matches the industry baseline for security-
     // impacting account changes.
-    _internalRevokeCurrentSession(req, res);
+    _internalRevokeCurrentSession(req, res, { reason: "mfa.disabled" });
 
     return res.json({ ok: true, sessionRevoked: true });
   } catch (err) {
