@@ -395,7 +395,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "webauthn"}
                       className={`btn btn-sm ${mfaFactor === "webauthn" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("webauthn"); setError(""); }}
+                      onClick={() => { setMfaFactor("webauthn"); setMfaCode(""); setError(""); }}
                     >
                       Passkey
                     </button>
@@ -406,7 +406,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "totp"}
                       className={`btn btn-sm ${mfaFactor === "totp" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("totp"); setError(""); }}
+                      onClick={() => { setMfaFactor("totp"); setMfaCode(""); setError(""); }}
                     >
                       Authenticator
                     </button>
@@ -417,7 +417,7 @@ export default function Login() {
                       role="tab"
                       aria-selected={mfaFactor === "recovery"}
                       className={`btn btn-sm ${mfaFactor === "recovery" ? "btn-primary" : "btn-ghost"}`}
-                      onClick={() => { setMfaFactor("recovery"); setError(""); }}
+                      onClick={() => { setMfaFactor("recovery"); setMfaCode(""); setError(""); }}
                     >
                       Recovery code
                     </button>
