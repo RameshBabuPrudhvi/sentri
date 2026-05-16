@@ -27,6 +27,7 @@ import crypto from "node:crypto";
 import authRouter, { requireAuth } from "../src/routes/auth.js";
 import webauthnRouter from "../src/routes/webauthn.js";
 import * as webauthnRepo from "../src/database/repositories/webauthnRepo.js";
+import * as accountRepo from "../src/database/repositories/accountRepo.js";
 import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
 
 const t = createTestContext();
@@ -166,10 +167,25 @@ async function main() {
       webauthnRepo.create(fakeCred(u.user.id, "b"));
       assert.equal(webauthnRepo.countByUser(u.user.id), 2);
 
-      const db = t.getDatabase();
-      db.prepare("DELETE FROM users WHERE id = ?").run(u.user.id);
+      // SEC-003 / SEC-004 contract: this test asserts that when a user
+      // account is removed, their WebAuthn credentials cascade-delete via
+      // the FK declared in migration 029. We invoke the PRODUCTION removal
+      // path (`accountRepo.deleteAccount`) rather than raw SQL because:
+      //
+      //   1. That is what `DELETE /api/v1/auth/account` actually calls,
+      //      so the test exercises the same path real users hit.
+      //   2. `accountRepo.deleteAccount` deletes non-cascading children
+      //      (workspaces' projects/tests/runs/activities) explicitly before
+      //      issuing `DELETE FROM users` — the LAST step. WebAuthn
+      //      credentials are NOT in that explicit list; they're removed
+      //      only via the FK cascade we're testing here.
+      //
+      // If the cascade FK in migration 029 ever regresses, this test
+      // fails — that's the assertion that matters for SEC-004 §4
+      // (passkey lifecycle on account deletion).
+      accountRepo.deleteAccount(u.user.id);
       assert.equal(webauthnRepo.countByUser(u.user.id), 0,
-        "credentials should cascade-delete when user is removed");
+        "credentials should cascade-delete when the user row is removed");
     });
 
     // ──────────────────────────────────────────────────────────────────────
