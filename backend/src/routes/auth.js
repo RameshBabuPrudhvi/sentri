@@ -1494,6 +1494,16 @@ router.post("/mfa/enroll", requireAuth, (req, res) => {
  * @returns {400} Enrollment not initialized or wrong code.
  */
 router.post("/mfa/enable", requireAuth, (req, res) => {
+  // SEC-004 §6: rate-limit the enable path — an attacker with a stolen session
+  // cookie could brute-force the 6-digit TOTP space during enrollment (1M codes).
+  // Reuse the mfaVerify bucket (5/15min) since the threat model is identical.
+  const ip = req.ip || "unknown";
+  const rate = checkRateLimit("mfaVerify", ip);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", rate.retryAfterSec);
+    return res.status(429).json({ error: `Too many verification attempts. Try again in ${Math.ceil(rate.retryAfterSec / 60)} minutes.` });
+  }
+
   try {
     const user = userRepo.getById(req.authUser.sub);
     if (!user) return res.status(404).json({ error: "User not found." });
@@ -1576,7 +1586,10 @@ router.post("/mfa/verify", async (req, res) => {
     const pending = consumePendingMfaLogin(pendingTokenStr, { peek: true });
     if (!pending) return res.status(401).json({ error: "MFA session expired. Sign in again." });
     const user = userRepo.getById(pending.userId);
-    if (!user) return res.status(404).json({ error: "User not found." });
+    // Return 401 (not 404) to avoid leaking whether the underlying user still
+    // exists via a server-issued pendingToken. The token is short-lived so this
+    // is low-severity, but defense-in-depth matches the expired-token path.
+    if (!user) return res.status(401).json({ error: "MFA session expired. Sign in again." });
     const token = sanitiseString(req.body?.token, 16).replace(/\s+/g, "");
 
     // Attempt TOTP verification only when the secret is decryptable.
