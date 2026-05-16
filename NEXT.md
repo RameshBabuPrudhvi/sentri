@@ -38,7 +38,7 @@ Flag adjacent items as bundling candidates in your PR description rather than ex
 - [x] PII patterns covered: email, US/E.164 phone, SSN, credit card (Luhn), JWT, Bearer/Basic header, common auth query params
 - [x] Deterministic placeholders within a single run; counters reset per run (shared `createPiiContext` across snapshots + classified pages; per-category `seq`)
 - [x] Per-project allowlist persisted + enforced (exact-value match, case-insensitive)
-- [ ] `backend/tests/pii-sanitizer.test.js` — pattern coverage + Luhn cases + allowlist *(deferred — tracked as Gap 3 follow-up)*
+- [x] `backend/tests/pii-sanitizer.test.js` — pattern coverage + Luhn cases + allowlist + determinism + audit-log shape
 - [x] `permissions.json` — no new endpoint; reuses existing `PATCH /api/v1/projects/:id`
 - [x] `docs/changelog.md` `## [Unreleased]` updated
 - [x] `QA.md` § PII Firewall added with manual test plan
