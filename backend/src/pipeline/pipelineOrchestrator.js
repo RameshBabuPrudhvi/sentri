@@ -14,7 +14,7 @@ import { deduplicateTests, deduplicateAcrossRuns, scoreTestWithFactors, normaliz
 import { enhanceTests } from "./assertionEnhancer.js";
 import { validateTest } from "./testValidator.js";
 import { applyHealingTransforms } from "../selfHealing.js";
-import { sanitizeDomSnapshot } from "./domSanitizer.js";
+import { sanitizeDomSnapshot, createPiiContext, finalizePiiContext } from "./domSanitizer.js";
 import { log, logWarn } from "../utils/runLogger.js";
 import { emitRunEvent } from "../utils/runLogger.js";
 import { structuredLog } from "../utils/logFormatter.js";
@@ -47,8 +47,16 @@ export function sanitizeRunInputs(project, run, { snapshotsByUrl = {}, classifie
     return { snapshotsByUrl, classifiedPages };
   }
   const allowlist = Array.isArray(project?.piiAllowlist) ? project.piiAllowlist : [];
-  const sanSnaps = sanitizeDomSnapshot(snapshotsByUrl, { allowlist, runId: run?.id });
-  const sanClassified = sanitizeDomSnapshot(classifiedPages, { allowlist, runId: run?.id });
+  // Share one context across both calls so identical PII values resolve to
+  // the same placeholder ID in both artifacts (the AI correlates references
+  // by ID across snapshots + classified pages — fresh contexts would
+  // produce `<EMAIL_1>` in one and a different ID in the other).
+  // `finalizePiiContext` emits a single `pipeline.pii_redacted` audit log
+  // covering the whole run.
+  const ctx = createPiiContext({ allowlist, runId: run?.id });
+  const sanSnaps = sanitizeDomSnapshot(snapshotsByUrl, ctx);
+  const sanClassified = sanitizeDomSnapshot(classifiedPages, ctx);
+  finalizePiiContext(ctx);
   return {
     snapshotsByUrl: sanSnaps.output,
     classifiedPages: sanClassified.output,
