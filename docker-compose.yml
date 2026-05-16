@@ -114,6 +114,15 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      # Wait for the bundled `postgres` service when it's part of the active
+      # profile set. `required: false` means workers still start cleanly when
+      # the operator points DATABASE_URL at an externally-managed PostgreSQL
+      # and runs without `--profile postgres` — in that case the `postgres`
+      # service is inactive and Compose skips this dependency instead of
+      # erroring out.
+      postgres:
+        condition: service_healthy
+        required: false
 
   frontend:
     image: ghcr.io/rameshbabuprudhvi/sentri-frontend:latest
