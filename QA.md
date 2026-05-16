@@ -440,7 +440,7 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 **E. Per-workspace enforcement (admin)**
 
-22. As User A (admin), Settings → Security → scroll to **Workspace enforcement** card → verify the **Current enrollment** preview (`N of M members have MFA enabled`).
+22. As User A (admin), Settings → Security → scroll to **Workspace enforcement** card → verify the **Current enrollment** preview (`N of M members have MFA enabled`). The count includes members with **either** TOTP **or** a registered passkey — passkey-only users are counted as enrolled.
 23. Tick **Require MFA for all workspace members** → set **Grace period (days)** to 7 → click **Save policy** → toast "Workspace MFA policy updated".
 24. Sign out → sign in as User B (no MFA enrolled, just joined the workspace) → login succeeds + the post-login dashboard shows a yellow **"Multi-factor authentication required — N days remaining"** banner with a **Set up now** button that deep-links to `/settings?tab=security`.
 25. Sign in as User A → admin panel **Set policy → 0** (no grace) → save.
