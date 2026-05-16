@@ -94,13 +94,23 @@ export function sanitizeDomSnapshot(input, ctxOrOpts = {}) {
     if (!text || typeof text !== "string") return text;
     let out = text;
     out = out.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, (m) => allowMatch(m) ? m : (ctx.counters.email++, idFor(`email:${m.toLowerCase()}`, "EMAIL")));
-    out = out.replace(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/g, (m) => allowMatch(m) ? m : (ctx.counters.phone++, idFor(`phone:${m}`, "PHONE")));
-    out = out.replace(/\b\d{3}-\d{2}-\d{4}\b/g, (m) => allowMatch(m) ? m : (ctx.counters.ssn++, idFor(`ssn:${m}`, "SSN")));
+    // ORDERING: card + ssn MUST run before phone. The phone regex below
+    // accepts 10 digits with `[\s.-]` separators, and a canonical hyphenated
+    // PAN like "4111-1111-1111-1111" contains a phone-shaped 14-char prefix
+    // ("4111-1111-1111"). If phone ran first it would consume that prefix as
+    // <PHONE_n>, leaving "-1111" orphaned and the card regex unable to see a
+    // contiguous 13–19 digit run — Luhn never fires, the card counter stays
+    // zero, and the threat-model promise to redact cards silently fails.
+    // Card requires ≥13 digits so it cannot match phone-shaped input; SSN
+    // is `\d{3}-\d{2}-\d{4}` (2-digit middle) which cannot collide with
+    // phone's 3-digit middle group. Email is safe under any order (`@`).
     out = out.replace(/\b(?:\d[ -]*?){13,19}\b/g, (m) => {
       if (allowMatch(m) || !luhnValid(m)) return m;
       ctx.counters.card++;
       return idFor(`card:${m}`, "CARD");
     });
+    out = out.replace(/\b\d{3}-\d{2}-\d{4}\b/g, (m) => allowMatch(m) ? m : (ctx.counters.ssn++, idFor(`ssn:${m}`, "SSN")));
+    out = out.replace(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/g, (m) => allowMatch(m) ? m : (ctx.counters.phone++, idFor(`phone:${m}`, "PHONE")));
     out = out.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, (m) => allowMatch(m) ? m : (ctx.counters.jwt++, ctx.counters.token++, idFor(`jwt:${m}`, "TOKEN")));
     out = out.replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*\b/gi, (m) => allowMatch(m) ? m : (ctx.counters.bearer++, ctx.counters.token++, idFor(`auth:${m}`, "TOKEN")));
     out = out.replace(/([?&](?:token|code|access_token)=)([^&#\s]+)/gi, (_, p1, p2) => {

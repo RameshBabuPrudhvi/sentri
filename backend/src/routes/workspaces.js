@@ -96,6 +96,7 @@ router.patch("/current", requireRole("admin"), (req, res) => {
   if (mfaPolicyChanged) {
     logActivity({
       type: "workspace.mfa_policy_changed",
+      req,
       detail: `MFA enforcement ${ws.mfaRequired === 1 ? "enabled" : "disabled"} for workspace.`,
       userId: req.authUser.sub, userName: req.authUser.name || req.authUser.email,
       workspaceId: req.workspaceId,
@@ -145,14 +146,22 @@ router.post("/switch", (req, res) => {
   const user = userRepo.getById(userId);
   if (!user) return res.status(401).json({ error: "User not found." });
 
-  // SEC-004 §11: re-check MFA enforcement when switching INTO a workspace
-  // whose policy may block the user. Without this, a user could switch into
-  // a workspace that requires MFA (past grace) and get a valid JWT for it.
+  // SEC-004 §11: re-check MFA enforcement on every workspace switch.
+  //
+  // Strictest-wins semantics: `evaluateMfaEnforcement(user)` inspects EVERY
+  // workspace the user belongs to (not just `targetId`) and returns the
+  // strictest outcome. This intentionally prevents a user from escaping
+  // enforcement by switching from a strict-MFA workspace into a no-MFA one
+  // — once any of their workspaces requires MFA past grace, they must
+  // enroll before any workspace switch succeeds. See the contract in
+  // `backend/src/utils/mfaEnforcement.js`.
+  //
   // Same pattern as the /refresh enforcement check in routes/auth.js.
   const enforcement = evaluateMfaEnforcement(user);
   if (enforcement.state === "block") {
     logActivity({
       type: "auth.mfa.enrollment_required",
+      req,
       detail: "Workspace switch blocked: target workspace requires MFA.",
       userId: user.id, userName: user.name || user.email,
       workspaceId: enforcement.workspaceId,
