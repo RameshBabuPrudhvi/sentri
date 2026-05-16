@@ -49,6 +49,7 @@ import {
   _internalCheckRateLimit,
   _internalVerifyAccountPassword,
   _internalRevokeCurrentSession,
+  _internalRecordPendingMfaFailure,
 } from "./auth.js";
 
 // ─── Lazy-loaded SimpleWebAuthn server module ─────────────────────────────────
@@ -406,14 +407,27 @@ router.post("/authenticate/verify", async (req, res) => {
 
     const stored = webauthnRepo.getById(credentialId);
     if (!stored || stored.userId !== entry.userId) {
+      // SEC-004 §5d: strike the shared pendingToken so the per-token
+      // budget applies to passkey brute force too (same threat as TOTP).
+      const strike = _internalRecordPendingMfaFailure(entry.pendingToken);
       logActivity({
         type: "auth.mfa.verify_failed",
         req,
-        detail: "WebAuthn assertion for unknown credential.",
+        detail: strike?.exhausted
+          ? "Pending MFA token exhausted after repeated WebAuthn failures."
+          : "WebAuthn assertion for unknown credential.",
         userId: entry.userId,
         workspaceId: entry.workspaceId,
-        meta: { method: "webauthn", reason: "unknown_credential" },
+        meta: {
+          method: "webauthn",
+          reason: "unknown_credential",
+          remainingAttempts: strike?.remaining ?? null,
+          exhausted: strike?.exhausted || false,
+        },
       });
+      if (strike?.exhausted) {
+        return res.status(401).json({ error: "MFA session expired. Sign in again." });
+      }
       return res.status(400).json({ error: "Unknown credential." });
     }
 
@@ -436,14 +450,27 @@ router.post("/authenticate/verify", async (req, res) => {
         },
       });
     } catch (verifyErr) {
+      // SEC-004 §5d: strike the shared pendingToken (see unknown_credential
+      // branch above for the threat-model rationale).
+      const strike = _internalRecordPendingMfaFailure(entry.pendingToken);
       logActivity({
         type: "auth.mfa.verify_failed",
         req,
-        detail: "WebAuthn assertion failed verification.",
+        detail: strike?.exhausted
+          ? "Pending MFA token exhausted after repeated WebAuthn failures."
+          : "WebAuthn assertion failed verification.",
         userId: entry.userId,
         workspaceId: entry.workspaceId,
-        meta: { method: "webauthn", reason: verifyErr.message },
+        meta: {
+          method: "webauthn",
+          reason: verifyErr.message,
+          remainingAttempts: strike?.remaining ?? null,
+          exhausted: strike?.exhausted || false,
+        },
       });
+      if (strike?.exhausted) {
+        return res.status(401).json({ error: "MFA session expired. Sign in again." });
+      }
       return res.status(400).json({ error: `Assertion failed: ${verifyErr.message}` });
     }
 

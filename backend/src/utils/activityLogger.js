@@ -80,11 +80,31 @@ export function logActivity({ type, req, projectId, projectName, testId, testNam
   // dynamic import here keeps activityLogger's top-level dependency
   // graph minimal (the original notification dispatcher uses the same
   // dynamic-import pattern in routes/system.js for the replay path).
+  // SEC-007 SIEM dispatch contract:
+  //   - First write of an event → forwarded once with `count: 1`, `deduped: false`.
+  //   - Dedup hit (auth.login.failed burst, audit.read poll) → forwarded
+  //     again with the SAME `id`, incremented `count`, and `deduped: true`.
+  //     SIEM-side integrity verifiers that expect unique row ids must
+  //     dedupe on `(id, count)` or treat repeated ids as UPDATE events.
+  //     The alternative (suppress dispatch on dedup hits) would hide
+  //     credential-stuffing bursts — the live `count++` stream is the
+  //     attack signal a SOC analyst wants.
   if (activity.workspaceId) {
     setImmediate(() => {
       import("./notifications.js")
         .then((mod) => mod.dispatchSiemEvent?.(activity.workspaceId, activity))
-        .catch(() => { /* best-effort; row is already persisted */ });
+        .catch((err) => {
+          // SEC-007: best-effort SIEM forwarding — the row is already
+          // persisted, so a dispatch failure does not block the originating
+          // request. BUT a dynamic-import failure (module not found, syntax
+          // error in notifications.js, etc.) never reaches the DLQ —
+          // dispatchSiemEvent was never invoked. Surface to stderr so
+          // operators see persistent forwarding outages even when the DLQ
+          // counter stays at zero. Per-row failures (HTTP errors) are
+          // handled inside dispatchSiemEvent and land in audit_dlq.
+          console.error(formatLogLine("error", null,
+            `[activity/siem] SIEM dispatch failed for activity ${activity.id}: ${err?.message || err}`));
+        });
     });
   }
 

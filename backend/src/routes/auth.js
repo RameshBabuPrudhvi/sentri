@@ -329,6 +329,17 @@ function ensureUserWorkspace(user) {
 const mfaPendingLogins = new Map();
 const MFA_LOGIN_TTL_MS = parseInt(process.env.MFA_PENDING_TTL_MS ?? "", 10) || 5 * 60 * 1000;
 
+// SEC-004 §5d: per-pendingToken attempt counter. The IP-based `mfaVerify`
+// limiter (5/15min) is necessary but not sufficient — an attacker rotating
+// source IPs has the full 5-minute MFA_LOGIN_TTL_MS window to brute-force
+// the 6-digit TOTP space (1M codes ≫ achievable on a botnet). Bind the
+// budget to the pendingToken so the entire MFA session is consumed after
+// `MFA_MAX_ATTEMPTS` failures regardless of IP — the attacker has to
+// re-prove the password to get a fresh token. Configurable in case a
+// deployment wants a tighter or looser ceiling; default 5 matches the
+// per-IP rate limiter.
+const MFA_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.MFA_MAX_ATTEMPTS ?? "", 10) || 5);
+
 const _mfaPurgeInterval = setInterval(() => {
   const now = Date.now();
   for (const [k, v] of mfaPendingLogins) {
@@ -461,10 +472,27 @@ function hashRecoveryCode(code) {
 }
 
 /**
+ * SEC-004 §5b: maximum recovery-code list length used as the constant-time
+ * iteration ceiling. Must be ≥ the largest `MFA_RECOVERY_CODES_COUNT` any
+ * deployment could configure. Larger than the default (8) and any
+ * realistic admin-tuned value, so the scan iterates the same number of
+ * slots regardless of how many codes a particular user has remaining —
+ * preventing timing-based remaining-count exfiltration across users.
+ * @private
+ */
+const RECOVERY_CODE_SCAN_CEILING = 32;
+
+/**
  * Constant-time scan for a hashed recovery code in a list (SEC-004 §5b).
  * `indexOf` short-circuits on first match and leaks via timing which slot
  * matched. This iterates every entry regardless of outcome and only records
  * the first match.
+ *
+ * The loop iterates `RECOVERY_CODE_SCAN_CEILING` times — NOT `codes.length`
+ * — because the real list length is itself sensitive: a user with 1 code
+ * remaining produces a measurably faster scan than a user with 8, leaking
+ * recovery-code consumption across accounts. We pad with dummy hashes
+ * (zero-buffer compares) so total runtime is independent of `codes.length`.
  *
  * @param {string[]} codes  - Pre-hashed recovery codes (hex strings).
  * @param {string}   target - Pre-hashed candidate (hex string).
@@ -474,11 +502,19 @@ function hashRecoveryCode(code) {
 function findRecoveryCodeIndex(codes, target) {
   let matchIdx = -1;
   const targetBuf = Buffer.from(target);
-  for (let i = 0; i < codes.length; i++) {
-    const code = codes[i];
-    if (typeof code !== "string" || code.length !== target.length) continue;
+  // Dummy buffer for padding iterations — same length as target so
+  // timingSafeEqual does not throw and the dummy compare runs in the same
+  // time as a real compare. The dummy is all-zero ASCII; since target is a
+  // SHA-256 hex digest (lowercase hex characters), the timingSafeEqual will
+  // never spuriously match.
+  const dummyBuf = Buffer.alloc(target.length, 0x30 /* '0' */);
+  for (let i = 0; i < RECOVERY_CODE_SCAN_CEILING; i++) {
+    const code = i < codes.length ? codes[i] : null;
+    const candidate = (typeof code === "string" && code.length === target.length)
+      ? Buffer.from(code)
+      : dummyBuf;
     try {
-      if (crypto.timingSafeEqual(Buffer.from(code), targetBuf) && matchIdx < 0) {
+      if (crypto.timingSafeEqual(candidate, targetBuf) && matchIdx < 0 && candidate !== dummyBuf) {
         matchIdx = i;
       }
     } catch { /* length mismatch filtered above — unreachable */ }
@@ -515,8 +551,53 @@ function mintRecoveryCodes() {
  */
 function createPendingMfaLogin(userId, workspaceId) {
   const token = crypto.randomBytes(24).toString("base64url");
-  mfaPendingLogins.set(token, { userId, workspaceId, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
+  mfaPendingLogins.set(token, { userId, workspaceId, attempts: 0, expiresAt: Date.now() + MFA_LOGIN_TTL_MS });
   return token;
+}
+
+/**
+ * SEC-004 §5d: increment the per-pendingToken failure count. When the count
+ * reaches `MFA_MAX_ATTEMPTS` the token is consumed (deleted) so the attacker
+ * cannot continue submitting codes against it from a new IP. Caller decides
+ * how to respond — typically a 401 indistinguishable from "session expired"
+ * so the attacker cannot tell whether they exhausted attempts or simply hit
+ * an expired token.
+ *
+ * Exported for use by the WebAuthn flow which shares the same pendingToken
+ * and faces an identical brute-force window on assertion failures.
+ *
+ * @param {string} token
+ * @returns {{ exhausted: boolean, remaining: number } | null} `null` when the
+ *   token is missing/expired (caller treats as session-expired). Otherwise
+ *   `exhausted: true` when this attempt tipped the budget over the limit
+ *   (token has already been deleted), `false` when more attempts remain.
+ * @private
+ */
+function recordPendingMfaFailure(token) {
+  const entry = mfaPendingLogins.get(token);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    mfaPendingLogins.delete(token);
+    return null;
+  }
+  entry.attempts = (entry.attempts || 0) + 1;
+  if (entry.attempts >= MFA_MAX_ATTEMPTS) {
+    mfaPendingLogins.delete(token);
+    return { exhausted: true, remaining: 0 };
+  }
+  return { exhausted: false, remaining: MFA_MAX_ATTEMPTS - entry.attempts };
+}
+
+/**
+ * Internal cross-module helper — `routes/webauthn.js` shares the
+ * pendingToken brute-force surface (a stolen token can be replayed against
+ * arbitrary assertion attempts) and must apply the same per-token strike
+ * budget. Underscore prefix marks it as not part of the public API contract.
+ * @param {string} token
+ * @returns {{ exhausted: boolean, remaining: number } | null}
+ */
+export function _internalRecordPendingMfaFailure(token) {
+  return recordPendingMfaFailure(token);
 }
 
 /**
@@ -1776,17 +1857,32 @@ router.post("/mfa/verify", async (req, res) => {
     }
 
     if (!ok) {
+      // SEC-004 §5d: bump the per-pendingToken failure counter. The IP
+      // rate limiter (5/15min) doesn't bound an attacker who rotates IPs;
+      // the token-bound counter does. After `MFA_MAX_ATTEMPTS` failures
+      // the token is consumed and the user must re-enter password+email.
+      const strike = recordPendingMfaFailure(pendingTokenStr);
       logActivity({
         type: "auth.mfa.verify_failed",
         req,
-        detail: "Invalid MFA code during login.",
+        detail: strike?.exhausted
+          ? "Pending MFA token exhausted after repeated failures."
+          : "Invalid MFA code during login.",
         userId: user.id, userName: user.name || user.email,
         workspaceId: pending.workspaceId,
-        meta: { method: token ? "unknown" : "missing", phase: "login" },
+        meta: {
+          method: token ? "unknown" : "missing",
+          phase: "login",
+          remainingAttempts: strike?.remaining ?? null,
+          exhausted: strike?.exhausted || false,
+        },
       });
-      // Token is intentionally NOT consumed here — the rate limiter bounds
-      // brute force, and preserving the token lets the user retry without
-      // re-entering email+password after a typo.
+      if (strike?.exhausted) {
+        // Same 401 + message as the expired-token path so an attacker
+        // cannot distinguish "out of attempts" from "session expired" —
+        // both require re-running the password step to recover.
+        return res.status(401).json({ error: "MFA session expired. Sign in again." });
+      }
       return res.status(400).json({ error: "Invalid authentication code." });
     }
 
