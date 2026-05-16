@@ -154,9 +154,16 @@ async function main() {
       const u = await setupUser("eval-grace");
       const db = t.getDatabase();
       // Policy flipped 2 days ago, grace = 7 days → ~5 days remaining.
+      // Backdate joinedAt + user.createdAt so policyAt wins the
+      // MAX(policyAt, joinedAt, accountAt) anchor in evaluateMfaEnforcement.
+      const policyAt = new Date(Date.now() - 2 * DAY_MS).toISOString();
+      const backdate = new Date(Date.now() - 30 * DAY_MS).toISOString();
       db.prepare(
         "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 7, mfaPolicyUpdatedAt = ? WHERE id = ?"
-      ).run(new Date(Date.now() - 2 * DAY_MS).toISOString(), u.user.workspaceId);
+      ).run(policyAt, u.user.workspaceId);
+      db.prepare("UPDATE workspace_members SET joinedAt = ? WHERE userId = ? AND workspaceId = ?")
+        .run(backdate, u.user.id, u.user.workspaceId);
+      db.prepare("UPDATE users SET createdAt = ? WHERE id = ?").run(backdate, u.user.id);
 
       const user = userRepo.getById(u.user.id);
       const decision = evaluateMfaEnforcement(user);
@@ -170,9 +177,18 @@ async function main() {
     await test("returns block when past grace window", async () => {
       const u = await setupUser("eval-block");
       const db = t.getDatabase();
+      // Policy enabled 10 days ago, grace = 1 day → past grace.
+      // Backdate joinedAt + user.createdAt so policyAt wins the anchor —
+      // otherwise the just-created membership/account would re-anchor the
+      // clock to now and place the user inside grace.
+      const policyAt = new Date(Date.now() - 10 * DAY_MS).toISOString();
+      const backdate = new Date(Date.now() - 30 * DAY_MS).toISOString();
       db.prepare(
         "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 1, mfaPolicyUpdatedAt = ? WHERE id = ?"
-      ).run(new Date(Date.now() - 10 * DAY_MS).toISOString(), u.user.workspaceId);
+      ).run(policyAt, u.user.workspaceId);
+      db.prepare("UPDATE workspace_members SET joinedAt = ? WHERE userId = ? AND workspaceId = ?")
+        .run(backdate, u.user.id, u.user.workspaceId);
+      db.prepare("UPDATE users SET createdAt = ? WHERE id = ?").run(backdate, u.user.id);
 
       const user = userRepo.getById(u.user.id);
       const decision = evaluateMfaEnforcement(user);

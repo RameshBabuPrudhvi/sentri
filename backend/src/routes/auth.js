@@ -167,19 +167,27 @@ const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
 // of 10 logins / 15 min would cause cascading 429s in the test suite.
 // Raise the ceiling to 200 in dev/CI mode — the bucket is still enforced
 // so the rate-limit code path is exercised, just with a higher threshold.
-const _isTestMode = process.env.SKIP_EMAIL_VERIFICATION === "true";
+//
+// Evaluated lazily at each rate-limit check (NOT at module-load time) so
+// tests that call `setupEnv({ SKIP_EMAIL_VERIFICATION: "true" })` AFTER
+// importing this module still pick up the raised ceiling.
+function _isTestMode() {
+  return process.env.SKIP_EMAIL_VERIFICATION === "true";
+}
 const rateBuckets = {
-  login:         { map: new Map(), max: _isTestMode ? 200 : 10 },  // 10 login attempts per IP per 15 min (200 in test mode)
+  login:         { map: new Map(), max: 10, testMax: 200 },  // 10 login attempts per IP per 15 min (200 in test mode)
   forgotPassword:{ map: new Map(), max: 5 },   // 5 reset requests per IP per 15 min
   resetPassword: { map: new Map(), max: 5 },   // 5 reset attempts per IP per 15 min
   // SEC-004: MFA-specific buckets — verify is the brute-force surface (only
   // 6 digits of entropy per attempt), enroll prevents secret-flooding abuse.
-  mfaVerify:        { map: new Map(), max: 5 },   // 5 TOTP verify attempts per IP per 15 min
-  mfaEnroll:        { map: new Map(), max: 3 },   // 3 enroll cycles per IP per 15 min
+  // testMax raises the ceiling in CI so the MFA test suite (which runs
+  // ~15 setupUser() cycles per file from 127.0.0.1) doesn't trip 429.
+  mfaVerify:        { map: new Map(), max: 5,  testMax: 200 },   // 5 TOTP verify attempts per IP per 15 min
+  mfaEnroll:        { map: new Map(), max: 3,  testMax: 200 },   // 3 enroll cycles per IP per 15 min
   // SEC-004 §5a: WebAuthn verify is also a brute-force surface (an attacker
   // with a stolen pendingToken could try arbitrary assertions). Same budget
   // as TOTP — failed assertions cost the same as failed codes.
-  webauthnVerify:   { map: new Map(), max: 5 },   // 5 passkey verify attempts per IP per 15 min
+  webauthnVerify:   { map: new Map(), max: 5,  testMax: 200 },   // 5 passkey verify attempts per IP per 15 min
 };
 
 /**
@@ -189,7 +197,12 @@ const rateBuckets = {
  * @returns {{ allowed: boolean, retryAfterSec: number }}
  */
 function checkRateLimit(bucket, ip) {
-  const { map, max } = rateBuckets[bucket];
+  const cfg = rateBuckets[bucket];
+  // Honour `testMax` in dev/CI mode (SKIP_EMAIL_VERIFICATION=true). Resolved
+  // here, not at module-load, so tests setting the env after import still
+  // pick up the raised ceiling.
+  const max = (cfg.testMax !== undefined && _isTestMode()) ? cfg.testMax : cfg.max;
+  const { map } = cfg;
   const now = Date.now();
   const entry = map.get(ip);
   if (!entry || entry.resetAt < now) {
