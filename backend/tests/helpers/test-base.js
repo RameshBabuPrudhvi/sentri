@@ -152,12 +152,6 @@ const RESET_TABLES = [
   // on FK behaviour that could be altered (or temporarily disabled by
   // `PRAGMA foreign_keys = OFF`) in a future test setup change.
   "webauthn_credentials",
-  // SEC-007: clear the compliance audit-log DLQ + SIEM config between test
-  // files so DLQ-N counter restarts don't collide with rows persisted by an
-  // earlier test file (the `counters` table is reset below but the data
-  // tables aren't — leading to `UNIQUE constraint failed: audit_dlq.id`).
-  "audit_dlq",
-  "workspace_siem_config",
   "projects",
   "workspace_members",
   "workspaces",
