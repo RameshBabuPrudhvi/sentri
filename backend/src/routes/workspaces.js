@@ -22,6 +22,7 @@ import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
 import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
 import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
 
 const router = Router();
@@ -142,6 +143,27 @@ router.post("/switch", (req, res) => {
 
   const user = userRepo.getById(userId);
   if (!user) return res.status(401).json({ error: "User not found." });
+
+  // SEC-004 §11: re-check MFA enforcement when switching INTO a workspace
+  // whose policy may block the user. Without this, a user could switch into
+  // a workspace that requires MFA (past grace) and get a valid JWT for it.
+  // Same pattern as the /refresh enforcement check in routes/auth.js.
+  const enforcement = evaluateMfaEnforcement(user);
+  if (enforcement.state === "block") {
+    logActivity({
+      type: "auth.mfa.enrollment_required",
+      detail: "Workspace switch blocked: target workspace requires MFA.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: enforcement.workspaceId,
+      meta: { method: "workspace_switch" },
+    });
+    return res.status(403).json({
+      error: "Your workspace requires multi-factor authentication. Enroll before switching.",
+      code: "MFA_ENROLLMENT_REQUIRED",
+      workspaceId: enforcement.workspaceId,
+      workspaceName: enforcement.workspaceName,
+    });
+  }
 
   // Revoke the old token so it cannot be replayed (matches /refresh behaviour)
   const { jti: oldJti, exp: oldExp } = req.authUser;
