@@ -147,8 +147,12 @@ router.post("/switch", (req, res) => {
   const { jti: oldJti, exp: oldExp } = req.authUser;
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
-  // Issue a new JWT with the target workspace as the hint
-  const payload = buildJwtPayload(user, targetId);
+  // Issue a new JWT with the target workspace as the hint.
+  // SEC-004 §5c: forward the existing `amr` claim so a workspace switch by an
+  // MFA-asserted user does not silently downgrade their session to password-
+  // only. Same rationale as the `/refresh` forward at routes/auth.js — both
+  // revoke + reissue paths must preserve the authentication strength.
+  const payload = buildJwtPayload(user, targetId, { amr: req.authUser.amr });
   const token = signJwt(payload, getJwtSecret());
   const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 

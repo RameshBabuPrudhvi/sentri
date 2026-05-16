@@ -18,6 +18,7 @@
  * - {@link evaluateMfaEnforcement} — Decide enforce / grace / allow for a user.
  */
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
+import * as webauthnRepo from "../database/repositories/webauthnRepo.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -35,7 +36,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * for a user. Pure function — no side effects, safe to call from any auth
  * surface (`/login`, `/refresh`, OAuth callbacks).
  *
- * Users with `mfaEnabled === 1` are always allowed regardless of policy.
+ * Users are "MFA-enabled" if EITHER `mfaEnabled === 1` (TOTP) OR they have at
+ * least one registered WebAuthn credential. Either factor satisfies the
+ * workspace requirement — otherwise an OAuth-only user with a passkey but no
+ * TOTP would be falsely blocked at OAuth callback time.
  *
  * @param {Object} user - User row (must include `id`, `mfaEnabled`, `createdAt`).
  * @returns {MfaEnforcementDecision}
@@ -43,6 +47,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export function evaluateMfaEnforcement(user) {
   if (!user) return { state: "allow" };
   if (user.mfaEnabled === 1) return { state: "allow" };
+  // SEC-004 — a registered passkey is just as strong a second factor as TOTP,
+  // so it satisfies workspace enforcement on its own. Checked second because
+  // it requires a DB round-trip; TOTP enabled is the cheap fast-path above.
+  if (webauthnRepo.countByUser(user.id) > 0) return { state: "allow" };
 
   const memberships = workspaceRepo.getByUserId(user.id);
   if (!memberships || memberships.length === 0) return { state: "allow" };

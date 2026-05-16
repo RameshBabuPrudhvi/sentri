@@ -19,6 +19,7 @@ import authRouter, { requireAuth } from "../src/routes/auth.js";
 import workspacesRouter from "../src/routes/workspaces.js";
 import * as workspaceRepo from "../src/database/repositories/workspaceRepo.js";
 import * as userRepo from "../src/database/repositories/userRepo.js";
+import * as webauthnRepo from "../src/database/repositories/webauthnRepo.js";
 import { evaluateMfaEnforcement } from "../src/utils/mfaEnforcement.js";
 import { createTestContext, parseCookies, buildCookieHeader } from "./helpers/test-base.js";
 
@@ -91,6 +92,56 @@ async function main() {
 
       const user = userRepo.getById(u.user.id);
       assert.equal(evaluateMfaEnforcement(user).state, "allow");
+    });
+
+    await test("returns allow when user has a passkey but no TOTP (passkey satisfies MFA)", async () => {
+      // Regression for the OAuth-only-with-passkey false-block bug:
+      // before the fix, evaluateMfaEnforcement only checked mfaEnabled and
+      // returned `block` for users who had passkeys but no TOTP, locking
+      // them out of OAuth login under workspace enforcement.
+      const u = await setupUser("eval-passkey");
+      const db = t.getDatabase();
+      db.prepare(
+        "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 0, mfaPolicyUpdatedAt = ? WHERE id = ?"
+      ).run(new Date(Date.now() - 10 * DAY_MS).toISOString(), u.user.workspaceId);
+
+      // Register a passkey for the user (mfaEnabled stays 0).
+      webauthnRepo.create({
+        id: `cred-passkey-eval-${Date.now()}`,
+        userId: u.user.id,
+        publicKey: Buffer.from("fake-cose-pubkey").toString("base64"),
+        counter: 0,
+        transports: ["internal"],
+        deviceName: "Test passkey",
+      });
+
+      const user = userRepo.getById(u.user.id);
+      assert.equal(user.mfaEnabled, 0, "TOTP must be off so we exercise the passkey-only path");
+      assert.equal(evaluateMfaEnforcement(user).state, "allow",
+        "user with a registered passkey must be allowed even when workspace requires MFA");
+    });
+
+    await test("grace clock anchors at joinedAt for new members of a long-standing policy", async () => {
+      // Regression for the missing-joinedAt bug: workspaceRepo.getByUserId
+      // did not SELECT wm.joinedAt, so evaluateMfaEnforcement's anchor
+      // collapsed to policyAt and new hires inherited zero grace from an
+      // old policy.
+      const u = await setupUser("eval-joinedat");
+      const db = t.getDatabase();
+      // Policy enabled 90 days ago, grace = 7 days.
+      // User's membership row was created moments ago via setupUser.
+      // After the fix, joinedAt (today) wins the MAX(...) so we should be
+      // mid-grace (~6-7 days remaining), NOT past-grace.
+      db.prepare(
+        "UPDATE workspaces SET mfaRequired = 1, mfaGracePeriodDays = 7, mfaPolicyUpdatedAt = ? WHERE id = ?"
+      ).run(new Date(Date.now() - 90 * DAY_MS).toISOString(), u.user.workspaceId);
+
+      const user = userRepo.getById(u.user.id);
+      const decision = evaluateMfaEnforcement(user);
+      assert.equal(decision.state, "grace",
+        "new member of an old-policy workspace must land in grace, not block");
+      assert.ok(decision.gracePeriodDaysRemaining >= 6,
+        `expected ~7 days remaining (anchored at joinedAt), got ${decision.gracePeriodDaysRemaining}`);
     });
 
     await test("returns allow when workspace mfaRequired=0", async () => {

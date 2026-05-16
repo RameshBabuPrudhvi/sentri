@@ -47,8 +47,12 @@ export function getBySlug(slug) {
  */
 export function getByUserId(userId) {
   const db = getDatabase();
+  // SEC-004: `wm.joinedAt` is required by `evaluateMfaEnforcement()` so the
+  // grace clock anchors at MAX(policyAt, joinedAt, accountAt) — without
+  // selecting it the membership-age contribution silently falls out and new
+  // hires get zero grace if the policy is older than their account.
   return db.prepare(`
-    SELECT w.*, wm.role,
+    SELECT w.*, wm.role, wm.joinedAt,
            CASE WHEN w.ownerId = ? THEN 0 ELSE 1 END AS _sortOwner
     FROM workspaces w
     INNER JOIN workspace_members wm ON wm.workspaceId = w.id

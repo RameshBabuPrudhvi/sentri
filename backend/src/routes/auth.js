@@ -854,8 +854,13 @@ router.post("/refresh", requireAuth, (req, res) => {
   const { jti: oldJti, exp: oldExp } = req.authUser;
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
-  // Issue a fresh token with a new JTI (includes updated workspace context)
-  const payload = buildJwtPayload(user, req.authUser.workspaceId);
+  // Issue a fresh token with a new JTI (includes updated workspace context).
+  // SEC-004 §5c: forward the existing `amr` claim so an MFA-asserted session
+  // (`["pwd","mfa"]`) stays MFA-asserted after the 8-hour refresh cycle.
+  // Without this, every refresh would silently downgrade the session to
+  // password-only, breaking any future step-up-auth check that requires
+  // `amr.includes("mfa")`.
+  const payload = buildJwtPayload(user, req.authUser.workspaceId, { amr: req.authUser.amr });
   const token = signJwt(payload, getJwtSecret());
   const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
   setAuthCookie(res, token, exp);
