@@ -35,12 +35,13 @@
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Download, ChevronDown } from "lucide-react";
 import { api } from "../api.js";
 import { API_PATH } from "../utils/apiBase.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useNotifications } from "../context/NotificationContext.jsx";
 import { ACTIVITY_TYPES } from "../constants/activityTypes.js";
-import { fmtDateTime, fmtDate } from "../utils/formatters.js";
+import { fmtDateTime, fmtDate, fmtAuditTimestamp } from "../utils/formatters.js";
 // audit-log.css is imported from `frontend/src/index.css` after
 // approvals-timeline.css, so the ITCSS cascade order is guaranteed.
 
@@ -237,22 +238,114 @@ function groupByDay(rows) {
  *
  * @param {{ entry: object }} props
  */
+/**
+ * SEC-007: derive a human-readable description for activity rows that
+ * have no `testName`/`detail` but DO carry useful structured `meta`.
+ * Without this, the audit log feed renders "—" for every meta-audit row
+ * (`audit.read`, `audit.export`, `audit.purge`) and every auth event —
+ * dominating the feed with placeholder text instead of the filter shape
+ * / event context a SOC 2 reviewer actually needs.
+ *
+ * Returns null when the row has no row-specific context worth summarising;
+ * the caller renders the existing "—" fallback.
+ *
+ * @param {Object} entry — activity row
+ * @returns {string|null}
+ */
+function describeMetaAuditEntry(entry) {
+  const meta = entry.meta || {};
+  switch (entry.type) {
+    case ACTIVITY_TYPES.AUDIT_READ:
+    case ACTIVITY_TYPES.AUDIT_EXPORT: {
+      // `meta.filters` carries the full filter shape the route handler
+      // captured. Surface the most meaningful slice: format, row count,
+      // and any non-null filter.
+      const fmt = meta.format || "json";
+      const count = typeof meta.rowCount === "number" ? `${meta.rowCount} rows` : "";
+      const f = meta.filters || {};
+      const activeFilters = [];
+      if (f.userId) activeFilters.push(`user=${f.userId}`);
+      if (f.projectId) activeFilters.push(`project=${f.projectId}`);
+      if (Array.isArray(f.types) && f.types.length) activeFilters.push(`types=${f.types.join(",")}`);
+      if (f.dateFrom) activeFilters.push(`from=${f.dateFrom.slice(0, 10)}`);
+      if (f.dateTo) activeFilters.push(`to=${f.dateTo.slice(0, 10)}`);
+      if (f.ipAddress) activeFilters.push(`ip=${f.ipAddress}`);
+      const parts = [fmt.toUpperCase(), count, activeFilters.join(" · ")].filter(Boolean);
+      return parts.join(" · ") || null;
+    }
+    case ACTIVITY_TYPES.AUDIT_PURGE:
+      return meta.cleared != null
+        ? `Cleared ${meta.cleared} activity row(s)`
+        : "Audit log truncated";
+    case ACTIVITY_TYPES.AUTH_LOGIN:
+    case ACTIVITY_TYPES.AUTH_LOGIN_FAILED:
+    case ACTIVITY_TYPES.AUTH_LOGOUT:
+    case ACTIVITY_TYPES.AUTH_PASSWORD_RESET:
+      // userName already shown in the actor column; nothing extra to add
+      // unless the route added a `reason` (e.g. session.revoke).
+      return null;
+    case ACTIVITY_TYPES.AUTH_ROLE_CHANGE:
+      return (meta.from && meta.to)
+        ? `${meta.from} → ${meta.to}`
+        : null;
+    case ACTIVITY_TYPES.AUTH_API_KEY_CREATE:
+    case ACTIVITY_TYPES.AUTH_API_KEY_REVOKE:
+      return meta.provider
+        ? `Provider: ${meta.providerName || meta.provider}`
+        : null;
+    case ACTIVITY_TYPES.AUTH_SESSION_REVOKE:
+      return meta.reason ? `Reason: ${meta.reason}` : null;
+    default:
+      return null;
+  }
+}
+
 function ActivityEntry({ entry }) {
   const { badgeClass, label } = entryMeta(entry.type);
-  const time = fmtDateTime(entry.createdAt);
+  // SEC-007: SOC 2 / PCI-DSS 10.3.3 require absolute UTC timestamps on
+  // every audit row. The "X minutes ago" rendering used by other activity
+  // feeds in the app is fine for a UX feed but unacceptable for a
+  // compliance trail — an auditor reading the log months later cannot
+  // correlate "5m ago" to an instant. `fmtAuditTimestamp` returns the
+  // industry-standard `YYYY-MM-DD HH:MM:SS UTC` form used by Splunk,
+  // CloudTrail, GitHub Audit Log, and Datadog.
+  //
+  // For deduped rows (count > 1), show the LAST occurrence as the primary
+  // timestamp — that's what's most actionable for a reviewer ("when did
+  // this most recently happen?"). The first occurrence is in the tooltip.
+  const isDeduped = (entry.count || 1) > 1 && entry.lastAt;
+  const time = fmtAuditTimestamp(isDeduped ? entry.lastAt : entry.createdAt);
   const score = entry.meta?.score;
   const wasAuto = entry.meta?.wasAutoApproved;
+  // SEC-007: many audit rows (`audit.read`, `audit.role.change`, etc.) have
+  // no `testName` or `detail` because they're not test-scoped — but they
+  // DO carry structured `meta`. Without this, the feed renders "—" for
+  // every such row and looks empty. Falls back to "—" only when no useful
+  // context exists.
+  const metaDescription = describeMetaAuditEntry(entry);
 
   return (
     <div className="al-entry">
       <div className="al-entry__left">
         {/* Event badge */}
         <span className={`badge ${badgeClass} al-entry__badge`}>{label}</span>
+        {/* SEC-007: dedup count — Splunk / CloudTrail / Auth0 convention is
+            to show repeat-counts as "×N" next to the event label. Hidden
+            for single events (count = 1) so the feed isn't cluttered. */}
+        {isDeduped && (
+          <span
+            className="al-entry__count"
+            title={`${entry.count} occurrences · first ${fmtAuditTimestamp(entry.createdAt)} · last ${fmtAuditTimestamp(entry.lastAt)}`}
+            aria-label={`${entry.count} occurrences of this event collapsed into one row`}
+          >
+            ×{entry.count}
+          </span>
+        )}
 
-        {/* Test name + project */}
+        {/* Test name + project + meta-derived context */}
         <div className="al-entry__body">
           <span className="al-entry__test-name">
-            {entry.testName || entry.detail || "—"}
+            {entry.testName || entry.detail || metaDescription || "—"}
           </span>
           {entry.projectName && (
             <span className="al-entry__project">{entry.projectName}</span>
@@ -273,23 +366,67 @@ function ActivityEntry({ entry }) {
           <span className="badge badge-amber al-entry__was-auto">was auto</span>
         )}
 
-        {/* Actor + IP (SEC-007: session-reconstruction evidence). The IP is
-            rendered as a `title` on the actor so a SOC 2 reviewer can hover
-            for the full {IP, user-agent} pair without cluttering the row. */}
+        {/* Actor (SEC-007: SOC 2 / ISO 27001 session-reconstruction
+            evidence). The actor name is the primary display; the
+            user-agent is folded into a `title` tooltip to avoid blowing
+            out the row width with a long UA string. The IP gets its own
+            column so a reviewer scanning a busy feed can spot probes from
+            unexpected addresses without hovering every row. */}
         {entry.userName && (
           <span
             className="al-entry__actor"
-            title={entry.ipAddress ? `${entry.ipAddress}${entry.userAgent ? ` · ${entry.userAgent}` : ""}` : undefined}
+            title={entry.userAgent || undefined}
+            // WCAG 2.2 §1.3.1: mirror the `title` content into `aria-label`
+            // so screen readers and keyboard users learn the actor's
+            // User-Agent without needing a mouse hover. See the IP span
+            // below for the full rationale.
+            aria-label={entry.userAgent
+              ? `${entry.userName}, User-Agent ${entry.userAgent}`
+              : entry.userName}
+            tabIndex={entry.userAgent ? 0 : undefined}
           >
             {entry.userName}
           </span>
         )}
+        {/* IP address — always rendered when present so SOC 2 reviewers
+            can read it directly. Falls back to em-dash for rows without
+            an IP (e.g. system-emitted rows from the scheduler that have
+            no `req` context). Monospaced via the existing `--font-mono`
+            on the score column so IPv4 / IPv6 stay aligned.
 
-        {/* Timestamp */}
+            WCAG 2.2 §1.3.1 (Info & Relationships): the User-Agent string
+            is only on `title` (visible to mouse hover), which is invisible
+            to screen readers and keyboard users. `aria-label` exposes the
+            full `IP + UA` context to assistive tech and `tabIndex={0}`
+            makes the span keyboard-focusable so the tooltip is reachable
+            via Tab + focus-visible browser behaviour. Compliance auditors
+            increasingly score WCAG AA alongside SOC 2 — this is the
+            cheap fix that earns it. */}
+        {entry.ipAddress && (
+          <span
+            className="al-entry__ip"
+            title={entry.userAgent ? `User-Agent: ${entry.userAgent}` : undefined}
+            aria-label={entry.userAgent
+              ? `IP address ${entry.ipAddress}, User-Agent ${entry.userAgent}`
+              : `IP address ${entry.ipAddress}`}
+            tabIndex={0}
+          >
+            {entry.ipAddress}
+          </span>
+        )}
+
+        {/* Timestamp — for deduped rows, the column shows the LAST
+            occurrence and the tooltip shows the first→last span. For
+            singletons, both `dateTime` and the tooltip carry the same
+            ISO instant — matches the Splunk / CloudTrail UI convention. */}
         <time
           className="al-entry__time"
-          dateTime={entry.createdAt}
-          title={entry.createdAt}
+          dateTime={isDeduped ? entry.lastAt : entry.createdAt}
+          title={
+            isDeduped
+              ? `First seen: ${entry.createdAt}\nLast seen: ${entry.lastAt}`
+              : entry.createdAt
+          }
         >
           {time}
         </time>
@@ -303,6 +440,66 @@ function ActivityEntry({ entry }) {
  *
  * @param {{ label: string, items: object[] }} props
  */
+/**
+ * SEC-007: dropdown export menu — single "Export ▾" button with a
+ * format picker. Mirrors `components/project/ProjectExportMenu.jsx`
+ * (the established pattern used on Tests + ProjectDetail) so admins
+ * see a consistent shape across the app.
+ *
+ * The two CSV/NDJSON buttons that previously cluttered the header are
+ * replaced by this one component. Both formats remain accessible — they
+ * just live behind one click of disclosure now.
+ *
+ * @param {Object} props
+ * @param {boolean} props.disabled — Disables the trigger when there are
+ *   no rows to export (mirrors the previous button-level disabled state).
+ * @param {Function} props.onExport — Called with `"csv"` or `"ndjson"`.
+ *   The caller (`AuditLog`) handles the actual fetch + meta-audit emission;
+ *   this component is purely presentational.
+ */
+function AuditExportMenu({ disabled, onExport }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        title="Download the current page as CSV or NDJSON (rate-limited 10 / 15 min per admin)"
+        style={{ gap: 4 }}
+      >
+        <Download size={12} /> Export <ChevronDown size={10} />
+      </button>
+      {open && (
+        <>
+          {/* Backdrop closes on outside click — same pattern as ProjectExportMenu. */}
+          <div className="pd-popover-backdrop" onClick={() => setOpen(false)} />
+          <div className="pd-dropdown" style={{ top: "calc(100% + 4px)", right: 0 }}>
+            <div className="pd-dropdown-heading">Audit-log export</div>
+            <button
+              onClick={() => { setOpen(false); onExport("csv"); }}
+              className="pd-dropdown-item"
+              style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
+            >
+              <div className="pd-dropdown-item-title">CSV</div>
+              <div className="pd-dropdown-item-desc">Spreadsheet-friendly · `createdAt` first column</div>
+            </button>
+            <button
+              onClick={() => { setOpen(false); onExport("ndjson"); }}
+              className="pd-dropdown-item"
+              style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer" }}
+            >
+              <div className="pd-dropdown-item-title">NDJSON</div>
+              <div className="pd-dropdown-item-desc">SIEM-importer friendly · one event per line</div>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DayGroup({ label, items }) {
   return (
     <div className="al-day-group">
@@ -490,7 +687,15 @@ export default function AuditLog() {
       .then((res) => {
         if (cancelled) return;
         let fetched = Array.isArray(res?.rows) ? res.rows : [];
-        fetched = applyTextFilter(fetched);
+        // SEC-007: do NOT apply the text filter here. The filter is a
+        // client-side render-time concern (see `applyTextFilter` below and
+        // the `groupByDay` useMemo). Applying it pre-`setRows` would force
+        // this effect's dep array to include `debouncedQ`, which would
+        // trigger a full server round-trip on every keystroke and emit a
+        // spurious `audit.read` meta-audit row per keystroke — polluting
+        // the PCI-DSS 10.2.6 compliance trail with reads that never
+        // happened. Server fetches now depend ONLY on server-side filter
+        // shape (type, project, sort).
         if (sortOrder === "oldest") fetched = [...fetched].reverse();
         setRows(fetched);
         setNextCursor(res?.nextCursor || null);
@@ -506,7 +711,12 @@ export default function AuditLog() {
       });
 
     return () => { cancelled = true; };
-  }, [workspaceId, typeKey, projectId, sortOrder, debouncedQ, applyTextFilter, filterTypes]);
+    // INTENTIONAL: `debouncedQ` and `applyTextFilter` are NOT in this deps
+    // array. The search is render-time only (see `filteredRows` useMemo).
+    // Including them here would trigger a server fetch (and a meta-audit
+    // `audit.read` row) on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes]);
 
   // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
@@ -521,7 +731,11 @@ export default function AuditLog() {
       };
       const res = await api.getWorkspaceAuditLog(workspaceId, filters);
       let fetched = Array.isArray(res?.rows) ? res.rows : [];
-      fetched = applyTextFilter(fetched);
+      // SEC-007: the text filter is applied at render time (see
+      // `filteredRows` useMemo below), NOT here. Filtering pre-`setRows`
+      // would discard server rows that don't match the current search and
+      // permanently remove them from the cursor stream — typing then
+      // clearing the search would leave gaps in the loaded data.
       // The server always returns newest-first and the cursor walks
       // strictly older. In oldest-first display order the next page is
       // therefore older than every row already on screen — prepend it (in
@@ -551,7 +765,7 @@ export default function AuditLog() {
       }
       setNextCursor(res?.nextCursor || null);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load more" });
+      addNotification({ type: "error", title: "Audit log", body: err.message || "Failed to load more" });
     } finally {
       setLoadingMore(false);
     }
@@ -581,25 +795,45 @@ export default function AuditLog() {
       // the filter chips, not the search box.
       addNotification({
         type: "info",
-        message: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
+        title: "Export",
+        body: "Export ignores the search box (server-side filter applies the type/project/date chips only).",
       });
     }
     const url = `${API_PATH}/workspaces/${workspaceId}/audit-log?${params.toString()}`;
     try {
       const res = await fetch(url, { credentials: "include" });
+      // SEC-007: raw fetch bypasses api.js's req() wrapper (because the
+      // response is binary CSV/NDJSON, not JSON). Streaming endpoints that
+      // bypass req() must still handle 401 — matching the pattern at
+      // api.js exportAccountData (line ~1024). Without this, a stale
+      // session silently falls through to the !res.ok branch and shows a
+      // generic "Export failed" notification instead of redirecting to login.
+      if (res.status === 401) {
+        try { localStorage.removeItem("app_auth_user"); } catch { /* localStorage unavailable */ }
+        const path = window.location.pathname;
+        if (!path.endsWith("/login") && !path.endsWith("/forgot-password")) {
+          const base = (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL)
+            ? import.meta.env.BASE_URL.replace(/\/$/, "")
+            : "";
+          window.location.href = `${base}/login`;
+        }
+        return;
+      }
       if (res.status === 429) {
-        const body = await res.json().catch(() => ({}));
+        const errBody = await res.json().catch(() => ({}));
         addNotification({
           type: "error",
-          message: body.error || "Too many audit-log exports. Try again later.",
+          title: "Export rate-limited",
+          body: errBody.error || "Too many audit-log exports. Try again later.",
         });
         return;
       }
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+        const errBody = await res.json().catch(() => ({}));
         addNotification({
           type: "error",
-          message: body.error || `Export failed (${res.status}).`,
+          title: "Export failed",
+          body: errBody.error || `Export failed (${res.status}).`,
         });
         return;
       }
@@ -612,7 +846,7 @@ export default function AuditLog() {
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Export failed." });
+      addNotification({ type: "error", title: "Export failed", body: err.message || "Export failed." });
     }
   }
 
@@ -628,7 +862,7 @@ export default function AuditLog() {
       const res = await api.verifyAuditChain();
       setVerifyResult(res);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Verification failed." });
+      addNotification({ type: "error", title: "Verify chain", body: err.message || "Verification failed." });
     } finally {
       setVerifying(false);
     }
@@ -644,7 +878,7 @@ export default function AuditLog() {
       const res = await api.listAuditDlq(workspaceId, { limit: 200 });
       setDlqRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load DLQ." });
+      addNotification({ type: "error", title: "DLQ", body: err.message || "Failed to load DLQ." });
       setDlqRows([]);
     } finally {
       setDlqLoading(false);
@@ -656,7 +890,7 @@ export default function AuditLog() {
     setReplayingId(dlqId);
     try {
       await api.replayAuditDlq(workspaceId, dlqId);
-      addNotification({ type: "success", message: "DLQ entry replayed." });
+      addNotification({ type: "success", title: "DLQ replay", body: "DLQ entry replayed." });
       setDlqRows((prev) => (prev || []).filter((r) => r.id !== dlqId));
     } catch (err) {
       // SIEM_NOT_CONFIGURED is distinct from real dispatch failures —
@@ -667,10 +901,11 @@ export default function AuditLog() {
       if (code === "SIEM_NOT_CONFIGURED") {
         addNotification({
           type: "info",
-          message: "No SIEM target configured. Open SIEM config to set one.",
+          title: "SIEM not configured",
+          body: "No SIEM target configured. Open SIEM config to set one.",
         });
       } else {
-        addNotification({ type: "error", message: err.message || "Replay failed." });
+        addNotification({ type: "error", title: "DLQ replay", body: err.message || "Replay failed." });
       }
     } finally {
       setReplayingId(null);
@@ -686,7 +921,7 @@ export default function AuditLog() {
       const res = await api.getSystemSecurityEvents({ limit: 200 });
       setSysEventsRows(Array.isArray(res?.rows) ? res.rows : []);
     } catch (err) {
-      addNotification({ type: "error", message: err.message || "Failed to load system events." });
+      addNotification({ type: "error", title: "System events", body: err.message || "Failed to load system events." });
       setSysEventsRows([]);
     } finally {
       setSysEventsLoading(false);
@@ -773,7 +1008,7 @@ export default function AuditLog() {
       // Clear the hmacSecret field after a successful save so it's not
       // hanging around in the DOM.
       setSiemForm((prev) => ({ ...prev, hmacSecret: "" }));
-      addNotification({ type: "success", message: "SIEM forwarder saved." });
+      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder saved." });
     } catch (err) {
       setSiemError(err.message || "Failed to save SIEM config.");
     } finally {
@@ -789,7 +1024,7 @@ export default function AuditLog() {
       await api.deleteWorkspaceSiemConfig(workspaceId);
       setSiemConfig(null);
       setSiemForm({ targetUrl: "", hmacSecret: "", headersJson: "", enabled: true });
-      addNotification({ type: "success", message: "SIEM forwarder removed." });
+      addNotification({ type: "success", title: "SIEM config", body: "SIEM forwarder removed." });
     } catch (err) {
       setSiemError(err.message || "Failed to delete SIEM config.");
     } finally {
@@ -797,8 +1032,17 @@ export default function AuditLog() {
     }
   }
 
-  // ── Grouped rows ───────────────────────────────────────────────────────────
-  const groups = useMemo(() => groupByDay(rows), [rows]);
+  // ── Filtered + grouped rows (render-time text filter) ─────────────────────
+  // SEC-007: the search box filters the loaded page CLIENT-SIDE only — the
+  // server has no `q` param yet, and including the search in the fetch deps
+  // would emit a spurious `audit.read` meta-audit row per keystroke (see
+  // the dep-array comment above). Filtering here keeps the trail clean and
+  // gives the user instant feedback without a round-trip.
+  const filteredRows = useMemo(
+    () => applyTextFilter(rows),
+    [rows, applyTextFilter],
+  );
+  const groups = useMemo(() => groupByDay(filteredRows), [filteredRows]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -824,6 +1068,30 @@ export default function AuditLog() {
             {verifying ? "Verifying…" : "Verify chain"}
           </button>
 
+          {/* DLQ inspector — opens the SIEM dead-letter panel below.
+              Shows the unread count from `dlqRows` once the panel has been
+              loaded at least once; matches the QA.md:1668 contract
+              ("Click DLQ (0) in /audit-log header"). */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openDlq}
+            title="Inspect SIEM dead-letter queue"
+          >
+            DLQ{dlqRows ? ` (${dlqRows.length})` : ""}
+          </button>
+
+          {/* System events — deployment-wide cross-tenant security events
+              (workspaceId = SYSTEM_WORKSPACE_ID), chiefly auth.login.failed
+              against unknown emails. Admin-only and explicitly cross-tenant
+              per the backend `/system/security-events` route. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openSystemEvents}
+            title="Cross-tenant security events (auth probes, unknown-email failed logins)"
+          >
+            System events
+          </button>
+
           {/* SIEM forwarder configuration — admin-only per-workspace. */}
           <button
             className="btn btn-ghost btn-sm"
@@ -832,21 +1100,15 @@ export default function AuditLog() {
           >
             SIEM
           </button>
-          {/* Server-side exports — meta-audited + rate-limited (10/15min). */}
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => handleExport("csv")}
+          {/* Server-side exports — meta-audited + rate-limited (10/15min).
+              Single "Export ▾" button with a format-picker dropdown so the
+              header doesn't bloat with one button per format. Mirrors the
+              ProjectExportMenu pattern (`components/project/ProjectExportMenu.jsx`)
+              used on Tests + ProjectDetail. */}
+          <AuditExportMenu
             disabled={rows.length === 0}
-          >
-            Export CSV
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => handleExport("ndjson")}
-            disabled={rows.length === 0}
-          >
-            Export NDJSON
-          </button>
+            onExport={handleExport}
+          />
         </div>
       </div>
 

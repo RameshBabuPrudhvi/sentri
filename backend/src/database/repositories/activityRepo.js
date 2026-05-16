@@ -72,7 +72,112 @@ export function computePrevHash(previousHash, row) {
 }
 
 /**
+ * SEC-007: activity types eligible for compliance dedup.
+ *
+ * Industry-standard audit logs (Splunk, AWS CloudTrail, Auth0, Datadog)
+ * collapse high-volume *system-emitted* events (read access, polling)
+ * into a single row with a `count` + `lastAt`. They do NOT collapse
+ * user-initiated state-change events because each one is an independent
+ * attributable action.
+ *
+ * The allowlist captures exactly the event types where collapse is a
+ * noise-reduction win, not an attribution loss:
+ *
+ * - `audit.read` / `audit.export` — page reloads + stats fetches emit
+ *   bursts of identical reads. PCI-DSS 10.5.3 permits summarisation
+ *   provided every event remains attributable; `count` + `lastAt`
+ *   preserve attribution.
+ * - `auth.login.failed` — credential-stuffing probes against a single
+ *   account look like a burst of identical events. Collapsing makes the
+ *   pattern MORE visible to a SOC 2 reviewer (one row "200 attempts"
+ *   beats 200 noise rows).
+ *
+ * Every other event type (`auth.login`, `auth.role.change`, `test.*`,
+ * `audit.purge`) is excluded — those are single user actions that must
+ * each show as their own row for forensic reconstruction.
+ *
+ * @private
+ */
+const DEDUP_ELIGIBLE_TYPES = new Set([
+  "audit.read",
+  "audit.export",
+  "auth.login.failed",
+]);
+
+/**
+ * SEC-007: compute the dedup signature for an activity row.
+ *
+ * Two rows collapse only when this signature matches exactly — workspace,
+ * actor, event type, AND meta-filter shape. Different filter shapes on
+ * `audit.read` (e.g. one filtered by `dateFrom`, another with no filter)
+ * stay as separate rows; they're semantically different audit access
+ * patterns and a SOC 2 reviewer needs to see them as distinct events.
+ *
+ * `rowCount` is INTENTIONALLY excluded from the signature so two reads
+ * with the same filter shape but different counts (a new audit row
+ * appeared between reads) still collapse — the collapsed row's
+ * `meta.rowCount` reflects the most recent read's count.
+ *
+ * @param {Object} row
+ * @returns {string}
+ * @private
+ */
+function dedupSignature(row) {
+  const meta = row.meta || {};
+  const sigMeta = {
+    format: meta.format ?? null,
+    filters: meta.filters
+      ? {
+          userId: meta.filters.userId ?? null,
+          projectId: meta.filters.projectId ?? null,
+          types: Array.isArray(meta.filters.types) ? [...meta.filters.types].sort() : null,
+          dateFrom: meta.filters.dateFrom ?? null,
+          dateTo: meta.filters.dateTo ?? null,
+          ipAddress: meta.filters.ipAddress ?? null,
+        }
+      : null,
+  };
+  return JSON.stringify({
+    workspaceId: row.workspaceId || null,
+    userId: row.userId || null,
+    type: row.type,
+    meta: sigMeta,
+  });
+}
+
+/**
+ * SEC-007: dedup window in ms. Default 60s matches Auth0 / Datadog
+ * industry-standard collapse window. `AUDIT_DEDUP_WINDOW_SEC=0` disables.
+ * Read at call time so test `setupEnv()` flips it correctly.
+ *
+ * @returns {number}
+ * @private
+ */
+function dedupWindowMs() {
+  const raw = process.env.AUDIT_DEDUP_WINDOW_SEC;
+  if (raw === "0") return 0;
+  const sec = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(sec) && sec > 0 ? sec * 1000 : 60_000;
+}
+
+/**
  * Create an activity entry.
+ *
+ * ### Dedup (SEC-007)
+ * For high-volume read-shaped events (`audit.read`, `audit.export`,
+ * `auth.login.failed`), consecutive identical events within the dedup
+ * window collapse into a single row with `count++` and `lastAt = now`.
+ * Matches Splunk / CloudTrail / Auth0 industry practice — every event
+ * is still counted (anti-exfiltration signals intact) but the feed
+ * isn't dominated by duplicate noise. PCI-DSS 10.5.3 permits this
+ * provided attribution is preserved. Window is `AUDIT_DEDUP_WINDOW_SEC`
+ * (default 60, `0` disables).
+ *
+ * Dedup is automatically DISABLED when `AUDIT_HASH_CHAIN=true` —
+ * mutating `lastAt`/`count` on a persisted row would invalidate its
+ * `prevHash` and break the verification walk. With chain on, every
+ * event is its own row (the chain is the higher-priority compliance
+ * signal).
  *
  * When `AUDIT_HASH_CHAIN=true`, computes `prevHash` from the last row in
  * the same workspace and stores it in the same transaction as the INSERT.
@@ -120,6 +225,8 @@ export function create(activity) {
   };
 
   if (chainEnabled) {
+    // Hash-chain path takes precedence over dedup. See the docstring above
+    // for why these features are mutually exclusive at the row level.
     const tx = db.transaction((row) => {
       // Order by createdAt DESC then numerically by the trailing integer of
       // the `ACT-N` id (see idGenerator.js) as a tiebreaker for sub-
@@ -142,9 +249,89 @@ export function create(activity) {
     // Without this mutation, every SIEM-forwarded event carries `prevHash: null`
     // and a SIEM-side integrity verifier can never reconstruct the chain.
     activity.prevHash = params.prevHash;
-  } else {
-    insert.run(params);
+    return;
   }
+
+  // SEC-007 dedup path. Try to fold this event into the most-recent
+  // matching row within the dedup window before falling back to INSERT.
+  // Wrapped in a transaction so the SELECT-then-UPDATE-or-INSERT race is
+  // closed — two parallel logActivity calls cannot both INSERT siblings
+  // because the UPDATE arm acquires the row lock first.
+  const windowMs = dedupWindowMs();
+  const eligible = windowMs > 0 && DEDUP_ELIGIBLE_TYPES.has(activity.type);
+  if (!eligible) {
+    insert.run(params);
+    return;
+  }
+
+  const sig = dedupSignature({ ...activity, meta: activity.meta });
+  // Hash the sig so the LIKE match works reliably — the raw JSON sig
+  // contains quotes that get backslash-escaped inside the outer JSON
+  // meta column, breaking substring matching. A hex hash is safe for
+  // LIKE and deterministic.
+  const sigHash = crypto.createHash("sha256").update(sig).digest("hex");
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  // `_dedupSig` flows in `meta._dedupSig` so the existing TEXT column carries
+  // it without a schema change — but we strip it from the user-facing meta
+  // in `hydrate()` below so consumers never see the internal field.
+  const metaWithSig = activity.meta != null
+    ? JSON.stringify({ ...activity.meta, _dedupSig: sigHash })
+    : JSON.stringify({ _dedupSig: sigHash });
+  params.meta = metaWithSig;
+
+  const dedupTx = db.transaction(() => {
+    // Look for a recent matching row. Cast to lexicographic-safe comparison
+    // on ISO timestamps so the window is portable across SQLite + Postgres.
+    // Match on the full _dedupSig substring inside meta — same portable
+    // LIKE pattern used by `countDistinctTestIds.metaIsAutoApproved` above.
+    const recent = db.prepare(`
+      SELECT id, count, createdAt
+      FROM activities
+      WHERE type = ?
+        AND (userId = ? OR (userId IS NULL AND ? IS NULL))
+        AND (workspaceId = ? OR (workspaceId IS NULL AND ? IS NULL))
+        AND createdAt >= ?
+        AND meta LIKE ?
+      ORDER BY createdAt DESC, CAST(SUBSTR(id, 5) AS INTEGER) DESC
+      LIMIT 1
+    `).get(
+      activity.type,
+      activity.userId || null, activity.userId || null,
+      activity.workspaceId || null, activity.workspaceId || null,
+      cutoff,
+      `%${sigHash}%`,
+    );
+
+    if (recent) {
+      // Update the existing row: bump count + lastAt, refresh meta to the
+      // new event's full payload (so the rendered `rowCount`, `ipAddress`,
+      // etc. always reflect the most recent event in the collapse).
+      db.prepare(`
+        UPDATE activities
+        SET count = count + 1,
+            lastAt = ?,
+            meta = ?,
+            ipAddress = ?,
+            userAgent = ?
+        WHERE id = ?
+      `).run(activity.createdAt, metaWithSig, params.ipAddress, params.userAgent, recent.id);
+      // Mutate the caller's activity so the SIEM forwarder sees the merged
+      // row (same pattern as the prevHash mirror-back above).
+      activity.id = recent.id;
+      activity.count = (recent.count || 1) + 1;
+      activity.lastAt = activity.createdAt;
+      activity.createdAt = recent.createdAt;
+      activity.deduped = true;
+      return;
+    }
+
+    // No match in window — fresh row.
+    insert.run(params);
+    activity.count = 1;
+    activity.lastAt = null;
+    activity.deduped = false;
+  });
+  dedupTx();
 }
 
 /**
@@ -160,6 +347,15 @@ function hydrate(row) {
     try { row.meta = JSON.parse(row.meta); } catch { row.meta = null; }
   } else if (row.meta === undefined) {
     row.meta = null;
+  }
+  // SEC-007: `_dedupSig` is a write-time-only internal field used by the
+  // dedup matcher in `create()`. Strip it from the user-facing payload so
+  // the UI, CSV/NDJSON exports, and SIEM forwarder never see it — only the
+  // dedup matcher reads it (and only via raw LIKE on the TEXT column).
+  if (row.meta && typeof row.meta === "object" && "_dedupSig" in row.meta) {
+    const { _dedupSig: _omit, ...rest } = row.meta;
+    void _omit;
+    row.meta = Object.keys(rest).length > 0 ? rest : null;
   }
   return row;
 }

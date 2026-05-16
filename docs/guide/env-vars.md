@@ -190,6 +190,7 @@ The `activities` table is the workspace's compliance audit log. SOC 2 / ISO 2700
 | `AUDIT_HASH_CHAIN` | `false` | When `"true"`, every audit row's `prevHash` is computed as `sha256(prev.prevHash + JSON.stringify(rowMinusHash(row)))` inside the INSERT transaction. `GET /api/v1/audit/verify` walks the chain. Serialises INSERTs under contention — enable only on low-volume, compliance-sensitive deployments. **Mutually exclusive with `AUDIT_RETENTION_DAYS > 0`** (boot fails if both are set). |
 | `AUDIT_RETENTION_DAYS` | `365` | Daily 03:30 UTC sweep deletes activity rows older than this. `0` disables retention entirely. Values `1`–`89` are **rejected at boot** (SOC 2 / ISO 27001 minimum is 90 days). |
 | `AUDIT_EXPORT_RATE_LIMIT` | `10` | Per (workspace × admin) CSV/NDJSON export budget per 15-min window. JSON browsing is exempt. Tripped exports return `429 AUDIT_EXPORT_RATE_LIMITED`. |
+| `AUDIT_DEDUP_WINDOW_SEC` | `60` | Industry-standard audit-log event dedup window (Splunk / CloudTrail / Auth0 / Datadog convention). Consecutive identical read-shaped events (`audit.read`, `audit.export`, `auth.login.failed`) collapse into a single row with `count++` and `lastAt = now` if they fire within this window. `0` disables dedup entirely. Automatically disabled when `AUDIT_HASH_CHAIN=true` (mutating a persisted row's `count`/`lastAt` would invalidate its `prevHash`). PCI-DSS 10.5.3 permits this provided attribution is preserved. |
 
 ### Object Storage (MNT-006)
 

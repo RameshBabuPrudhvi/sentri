@@ -167,6 +167,140 @@ async function main() {
       }
     });
 
+    // ── Dedup (SEC-007) ──────────────────────────────────────────────────
+    console.log("\n📦 Dedup — industry-standard event collapse (Splunk/CloudTrail shape)");
+
+    await test("audit.read rows from the same actor with identical filters collapse into one row", async () => {
+      t.resetDb();
+      const dedupEnv = t.setupEnv({ AUDIT_DEDUP_WINDOW_SEC: "60" });
+      try {
+        const u = await setupUser(baseUrl, "dedup-collapse");
+        const db = t.getDatabase();
+        const before = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+
+        // Hit the audit-log endpoint three times in quick succession with
+        // the same filter shape. Industry-standard behavior is to collapse
+        // these into ONE row with `count = 3`, not three rows.
+        for (let i = 0; i < 3; i++) {
+          await fetch(`${baseUrl}/api/v1/workspaces/${u.user.workspaceId}/audit-log`, {
+            headers: { Cookie: u.cookieHeader },
+          });
+        }
+
+        const after = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+        assert.equal(after, before + 1,
+          "three identical audit.read calls must collapse into one row");
+
+        const row = db.prepare(
+          "SELECT count, lastAt FROM activities WHERE workspaceId = ? AND type = 'audit.read' ORDER BY createdAt DESC LIMIT 1",
+        ).get(u.user.workspaceId);
+        assert.equal(row.count, 3, "collapsed row must carry count = 3");
+        assert.ok(row.lastAt, "collapsed row must carry a lastAt timestamp");
+      } finally {
+        dedupEnv.restore();
+      }
+    });
+
+    await test("audit.read rows with different filter shapes do NOT collapse", async () => {
+      t.resetDb();
+      const dedupEnv = t.setupEnv({ AUDIT_DEDUP_WINDOW_SEC: "60" });
+      try {
+        const u = await setupUser(baseUrl, "dedup-distinct");
+        const db = t.getDatabase();
+        const before = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+
+        // Same actor, same endpoint, different filter — these are
+        // semantically distinct audit-access patterns and must stay as
+        // separate rows so a SOC 2 reviewer sees both.
+        await fetch(`${baseUrl}/api/v1/workspaces/${u.user.workspaceId}/audit-log`, {
+          headers: { Cookie: u.cookieHeader },
+        });
+        await fetch(`${baseUrl}/api/v1/workspaces/${u.user.workspaceId}/audit-log?type=auth.login`, {
+          headers: { Cookie: u.cookieHeader },
+        });
+
+        const after = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+        assert.equal(after, before + 2,
+          "different filter shapes must stay as separate rows");
+      } finally {
+        dedupEnv.restore();
+      }
+    });
+
+    await test("AUDIT_DEDUP_WINDOW_SEC=0 disables dedup (every event becomes its own row)", async () => {
+      t.resetDb();
+      const dedupEnv = t.setupEnv({ AUDIT_DEDUP_WINDOW_SEC: "0" });
+      try {
+        const u = await setupUser(baseUrl, "dedup-disabled");
+        const db = t.getDatabase();
+        const before = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+
+        for (let i = 0; i < 3; i++) {
+          await fetch(`${baseUrl}/api/v1/workspaces/${u.user.workspaceId}/audit-log`, {
+            headers: { Cookie: u.cookieHeader },
+          });
+        }
+
+        const after = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.read'",
+        ).get(u.user.workspaceId).cnt;
+        assert.equal(after, before + 3,
+          "with dedup disabled, every event must produce its own row");
+      } finally {
+        dedupEnv.restore();
+      }
+    });
+
+    await test("dedup does NOT apply to user-initiated events like audit.purge", async () => {
+      t.resetDb();
+      const dedupEnv = t.setupEnv({
+        AUDIT_DEDUP_WINDOW_SEC: "60",
+        DANGER_ALLOW_AUDIT_PURGE: "true",
+      });
+      try {
+        const u = await setupUser(baseUrl, "dedup-purge");
+        const db = t.getDatabase();
+
+        // Two purges in quick succession — each is a destructive user
+        // action that MUST stay attributable. Even with dedup on, both
+        // must produce their own row.
+        await fetch(`${baseUrl}/api/v1/data/activities`, {
+          method: "DELETE",
+          headers: { Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+        });
+        await fetch(`${baseUrl}/api/v1/data/activities`, {
+          method: "DELETE",
+          headers: { Cookie: u.cookieHeader, "X-CSRF-Token": u.csrf },
+        });
+
+        const count = db.prepare(
+          "SELECT COUNT(*) AS cnt FROM activities WHERE workspaceId = ? AND type = 'audit.purge'",
+        ).get(u.user.workspaceId).cnt;
+        // Each purge truncates first, then emits the meta-audit row that
+        // survives. So we expect exactly 1 surviving purge row from the
+        // second call (the first one was truncated by the second). The
+        // important assertion is that purges are NEVER collapsed into a
+        // single row with count > 1.
+        const row = db.prepare(
+          "SELECT count FROM activities WHERE workspaceId = ? AND type = 'audit.purge' ORDER BY createdAt DESC LIMIT 1",
+        ).get(u.user.workspaceId);
+        assert.equal(row?.count, 1, "audit.purge rows must never be deduped");
+        assert.ok(count >= 1, "at least one purge row must survive");
+      } finally {
+        dedupEnv.restore();
+      }
+    });
+
     // ── Retention sweep ─────────────────────────────────────────────────
     console.log("\n🧹 Retention — purgeOlderThan");
 
