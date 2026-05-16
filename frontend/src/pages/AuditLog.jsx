@@ -490,8 +490,19 @@ export default function AuditLog() {
       const res = await api.getWorkspaceAuditLog(workspaceId, filters);
       let fetched = Array.isArray(res?.rows) ? res.rows : [];
       fetched = applyTextFilter(fetched);
-      if (sortOrder === "oldest") fetched = [...fetched].reverse();
-      setRows((prev) => [...prev, ...fetched]);
+      // The server always returns newest-first and the cursor walks
+      // strictly older. In oldest-first display order the next page is
+      // therefore older than every row already on screen — prepend it (in
+      // chronological order, after the local reverse) so the timeline
+      // stays monotonic and `groupByDay` keeps producing contiguous day
+      // headers. Appending here would interleave a chunk of older rows
+      // *after* newer ones and shatter the day grouping.
+      if (sortOrder === "oldest") {
+        fetched = [...fetched].reverse();
+        setRows((prev) => [...fetched, ...prev]);
+      } else {
+        setRows((prev) => [...prev, ...fetched]);
+      }
       setNextCursor(res?.nextCursor || null);
     } catch (err) {
       addNotification({ type: "error", message: err.message || "Failed to load more" });
