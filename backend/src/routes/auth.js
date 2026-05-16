@@ -44,6 +44,7 @@ import * as accountRepo from "../database/repositories/accountRepo.js";
 import * as projectRepo from "../database/repositories/projectRepo.js";
 import { formatLogLine } from "../utils/logFormatter.js";
 import { logActivity } from "../utils/activityLogger.js";
+import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
 import { encryptString, decryptString } from "../utils/credentialEncryption.js";
 import { stopSchedule } from "../scheduler.js";
 import { sendVerificationEmail } from "../utils/emailSender.js";
@@ -596,6 +597,32 @@ router.post("/login", async (req, res) => {
       return res.status(200).json({ mfaRequired: true, pendingToken });
     }
 
+    // SEC-004: per-workspace MFA enforcement. If any workspace this user
+    // belongs to has mfaRequired=1 and the user is past the grace window,
+    // block login outright with an enrollment-required code. Within the
+    // grace window, allow login but surface the remaining days as a header
+    // so the frontend can render a banner.
+    const enforcement = evaluateMfaEnforcement(user);
+    if (enforcement.state === "block") {
+      logActivity({
+        type: "auth.mfa.enrollment_required",
+        detail: "Login blocked: workspace requires MFA.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: enforcement.workspaceId,
+        meta: { method: "password" },
+      });
+      return res.status(403).json({
+        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
+        code: "MFA_ENROLLMENT_REQUIRED",
+        workspaceId: enforcement.workspaceId,
+        workspaceName: enforcement.workspaceName,
+      });
+    }
+    if (enforcement.state === "grace") {
+      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
+      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
+    }
+
     // SEC-004 §5c: tag password-only sessions with amr=["pwd"] so future
     // step-up auth checks can require MFA-asserted sessions explicitly.
     const payload = buildJwtPayload(user, undefined, { amr: ["pwd"] });
@@ -1075,9 +1102,31 @@ router.get("/github/callback", async (req, res) => {
 
     ensureUserWorkspace(user);
 
+    // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
+    // password but still need MFA when the workspace policy demands it.
+    const enforcement = evaluateMfaEnforcement(user);
+    if (enforcement.state === "block") {
+      logActivity({
+        type: "auth.mfa.enrollment_required",
+        detail: "OAuth login blocked: workspace requires MFA.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: enforcement.workspaceId,
+        meta: { method: "oauth", provider: "github" },
+      });
+      return res.status(403).json({
+        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
+        code: "MFA_ENROLLMENT_REQUIRED",
+        workspaceId: enforcement.workspaceId,
+        workspaceName: enforcement.workspaceName,
+      });
+    }
+    if (enforcement.state === "grace") {
+      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
+      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
+    }
+
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
-    // MFA-asserted — workspace MFA enforcement still applies (handled in the
-    // backend-enforcement lane).
+    // MFA-asserted — workspace MFA enforcement applies above.
     const payload = buildJwtPayload(user, undefined, { amr: ["oauth"] });
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
@@ -1145,9 +1194,31 @@ router.get("/google/callback", async (req, res) => {
 
     ensureUserWorkspace(user);
 
+    // SEC-004: enforcement applies to OAuth too. OAuth-only users have no
+    // password but still need MFA when the workspace policy demands it.
+    const enforcement = evaluateMfaEnforcement(user);
+    if (enforcement.state === "block") {
+      logActivity({
+        type: "auth.mfa.enrollment_required",
+        detail: "OAuth login blocked: workspace requires MFA.",
+        userId: user.id, userName: user.name || user.email,
+        workspaceId: enforcement.workspaceId,
+        meta: { method: "oauth", provider: "google" },
+      });
+      return res.status(403).json({
+        error: "Your workspace requires multi-factor authentication. Enroll before signing in.",
+        code: "MFA_ENROLLMENT_REQUIRED",
+        workspaceId: enforcement.workspaceId,
+        workspaceName: enforcement.workspaceName,
+      });
+    }
+    if (enforcement.state === "grace") {
+      res.setHeader("X-MFA-Grace-Period-Days-Remaining", String(enforcement.gracePeriodDaysRemaining));
+      res.setHeader("X-MFA-Grace-Ends-At", enforcement.graceEndsAt);
+    }
+
     // SEC-004 §5c: OAuth sessions are tagged amr=["oauth"]. They are NOT
-    // MFA-asserted — workspace MFA enforcement still applies (handled in the
-    // backend-enforcement lane).
+    // MFA-asserted — workspace MFA enforcement applies above.
     const payload = buildJwtPayload(user, undefined, { amr: ["oauth"] });
     const token = signJwt(payload, getJwtSecret());
     const exp   = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;

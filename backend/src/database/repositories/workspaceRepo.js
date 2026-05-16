@@ -129,11 +129,14 @@ export function create({ name, slug, ownerId }) {
 /**
  * Update workspace fields.
  * @param {string} id
- * @param {Object} fields — { name?, slug? }
+ * @param {Object} fields — { name?, slug?, mfaRequired?, mfaGracePeriodDays?, mfaPolicyUpdatedAt? }
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "slug"];
+  // SEC-004: MFA enforcement columns (migration 028) are admin-managed via
+  // PATCH /workspaces/current — keep them in the allowlist alongside the
+  // existing name/slug fields so a single update() call can persist them.
+  const allowed = ["name", "slug", "mfaRequired", "mfaGracePeriodDays", "mfaPolicyUpdatedAt"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {

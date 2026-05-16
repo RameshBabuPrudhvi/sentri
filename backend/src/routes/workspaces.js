@@ -21,6 +21,7 @@ import * as userRepo from "../database/repositories/userRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
 import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
+import { logActivity } from "../utils/activityLogger.js";
 import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
 
 const router = Router();
@@ -38,11 +39,17 @@ router.get("/current", (req, res) => {
 });
 
 /**
- * Update the current workspace (name, slug).
+ * Update the current workspace (name, slug, MFA enforcement policy).
+ *
+ * SEC-004: `mfaRequired` / `mfaGracePeriodDays` are admin-managed enforcement
+ * controls. Flipping `mfaRequired` from 0 → 1 stamps `mfaPolicyUpdatedAt`
+ * with the current time so the grace clock starts at the policy change —
+ * existing members get the full grace window before being locked out.
+ *
  * @route PATCH /api/workspaces/current
  */
 router.patch("/current", requireRole("admin"), (req, res) => {
-  const { name, slug } = req.body;
+  const { name, slug, mfaRequired, mfaGracePeriodDays } = req.body;
   const updates = {};
   if (name && typeof name === "string") updates.name = name.trim().slice(0, 100);
   if (slug && typeof slug === "string") {
@@ -55,11 +62,45 @@ router.patch("/current", requireRole("admin"), (req, res) => {
     }
     updates.slug = cleanSlug;
   }
+
+  // SEC-004: MFA enforcement policy. Accept booleans or 0/1 for `mfaRequired`
+  // for ergonomic frontend payloads; coerce to the integer column shape.
+  let mfaPolicyChanged = false;
+  if (mfaRequired !== undefined) {
+    const next = (mfaRequired === true || mfaRequired === 1 || mfaRequired === "1") ? 1 : 0;
+    const current = workspaceRepo.getById(req.workspaceId);
+    if (!current) return res.status(404).json({ error: "Workspace not found." });
+    if (next !== (current.mfaRequired || 0)) {
+      updates.mfaRequired = next;
+      // Stamp policy-changed timestamp so the grace clock starts here.
+      updates.mfaPolicyUpdatedAt = new Date().toISOString();
+      mfaPolicyChanged = true;
+    }
+  }
+  if (mfaGracePeriodDays !== undefined) {
+    const n = Number.parseInt(mfaGracePeriodDays, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 90) {
+      return res.status(400).json({ error: "mfaGracePeriodDays must be between 0 and 90." });
+    }
+    updates.mfaGracePeriodDays = n;
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: "No valid fields to update." });
   }
   workspaceRepo.update(req.workspaceId, updates);
   const ws = workspaceRepo.getById(req.workspaceId);
+
+  if (mfaPolicyChanged) {
+    logActivity({
+      type: "workspace.mfa_policy_changed",
+      detail: `MFA enforcement ${ws.mfaRequired === 1 ? "enabled" : "disabled"} for workspace.`,
+      userId: req.authUser.sub, userName: req.authUser.name || req.authUser.email,
+      workspaceId: req.workspaceId,
+      meta: { mfaRequired: ws.mfaRequired, mfaGracePeriodDays: ws.mfaGracePeriodDays },
+    });
+  }
+
   return res.json(ws);
 });
 
@@ -125,6 +166,35 @@ router.post("/switch", (req, res) => {
 router.get("/current/members", (req, res) => {
   const members = workspaceRepo.getMembers(req.workspaceId);
   return res.json(members);
+});
+
+/**
+ * Report MFA enrollment compliance for the current workspace (SEC-004).
+ * Used by the admin Settings panel to show "N of M members not enrolled"
+ * before flipping the enforcement policy.
+ *
+ * @route GET /api/workspaces/current/mfa-compliance
+ * @returns {200} `{ totalMembers, enrolled, notEnrolled, members: [{userId,name,email,mfaEnabled}] }`
+ */
+router.get("/current/mfa-compliance", requireRole("admin"), (req, res) => {
+  const members = workspaceRepo.getMembers(req.workspaceId);
+  const detailed = members.map((m) => {
+    const u = userRepo.getById(m.userId);
+    return {
+      userId: m.userId,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      mfaEnabled: u?.mfaEnabled === 1,
+    };
+  });
+  const enrolled = detailed.filter((d) => d.mfaEnabled).length;
+  return res.json({
+    totalMembers: detailed.length,
+    enrolled,
+    notEnrolled: detailed.length - enrolled,
+    members: detailed,
+  });
 });
 
 /**
