@@ -40,10 +40,18 @@ services:
       # SEC-002: Point at the frontend dist copied into the shared volume so
       # serveIndexWithNonce() can inject per-request CSP nonces into index.html.
       - SPA_INDEX_PATH=/usr/share/frontend/index.html
-      # Uncomment to use PostgreSQL instead of SQLite:
-      # - DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
-      # Uncomment to use Redis for rate limiting, token revocation, and SSE pub/sub:
-      # - REDIS_URL=redis://redis:6379
+      # DATABASE_URL / REDIS_URL are read from the host env (or .env file) so
+      # the backend and `worker` service stay in lockstep — both consume the
+      # same source. Leave both unset for the default single-process SQLite
+      # deployment (BullMQ is a no-op without REDIS_URL, so jobs run in-process
+      # and any `worker` replicas sit idle). For distributed mode (AUTO-008),
+      # set both — typically via .env:
+      #   DATABASE_URL=postgres://sentri:sentri@postgres:5432/sentri
+      #   REDIS_URL=redis://redis:6379
+      # then run with `--profile redis --profile postgres`. Workers MUST share
+      # the backend's database (SQLite cannot be shared across containers).
+      - DATABASE_URL=${DATABASE_URL:-}
+      - REDIS_URL=${REDIS_URL:-}
     ports:
       - "3001:3001"
     restart: unless-stopped
