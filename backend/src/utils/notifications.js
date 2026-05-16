@@ -382,7 +382,7 @@ function _isRetryableStatus(status) {
  *
  * @param {string} workspaceId - The workspace whose SIEM config to load.
  * @param {Object} row         - The activity row that was just persisted.
- * @returns {Promise<{ ok: boolean, attempts?: number, lastError?: string }>}
+ * @returns {Promise<Object>} `{ ok: boolean, attempts?: number, lastError?: string }`
  */
 export async function dispatchSiemEvent(workspaceId, row) {
   if (!workspaceId || !row) return { ok: false, lastError: "missing workspaceId or row" };
