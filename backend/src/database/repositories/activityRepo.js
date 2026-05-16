@@ -506,7 +506,7 @@ export function getWorkspaceAuditLog(workspaceId, { userId, projectId, types = [
  * in that case.
  *
  * @param {string} workspaceId
- * @returns {{ verified: boolean, firstBrokenRowId?: string, total: number }}
+ * @returns {Object} `{ verified: boolean, firstBrokenRowId?: string, total: number }`
  */
 export function verifyAuditChain(workspaceId) {
   const db = getDatabase();
