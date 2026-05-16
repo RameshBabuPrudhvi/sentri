@@ -490,7 +490,15 @@ export default function AuditLog() {
       .then((res) => {
         if (cancelled) return;
         let fetched = Array.isArray(res?.rows) ? res.rows : [];
-        fetched = applyTextFilter(fetched);
+        // SEC-007: do NOT apply the text filter here. The filter is a
+        // client-side render-time concern (see `applyTextFilter` below and
+        // the `groupByDay` useMemo). Applying it pre-`setRows` would force
+        // this effect's dep array to include `debouncedQ`, which would
+        // trigger a full server round-trip on every keystroke and emit a
+        // spurious `audit.read` meta-audit row per keystroke — polluting
+        // the PCI-DSS 10.2.6 compliance trail with reads that never
+        // happened. Server fetches now depend ONLY on server-side filter
+        // shape (type, project, sort).
         if (sortOrder === "oldest") fetched = [...fetched].reverse();
         setRows(fetched);
         setNextCursor(res?.nextCursor || null);
@@ -506,7 +514,12 @@ export default function AuditLog() {
       });
 
     return () => { cancelled = true; };
-  }, [workspaceId, typeKey, projectId, sortOrder, debouncedQ, applyTextFilter, filterTypes]);
+    // INTENTIONAL: `debouncedQ` and `applyTextFilter` are NOT in this deps
+    // array. The search is render-time only (see `filteredRows` useMemo).
+    // Including them here would trigger a server fetch (and a meta-audit
+    // `audit.read` row) on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, typeKey, projectId, sortOrder, filterTypes]);
 
   // ── Load more (cursor-paginated) ───────────────────────────────────────────
   async function loadMore() {
@@ -521,7 +534,11 @@ export default function AuditLog() {
       };
       const res = await api.getWorkspaceAuditLog(workspaceId, filters);
       let fetched = Array.isArray(res?.rows) ? res.rows : [];
-      fetched = applyTextFilter(fetched);
+      // SEC-007: the text filter is applied at render time (see
+      // `filteredRows` useMemo below), NOT here. Filtering pre-`setRows`
+      // would discard server rows that don't match the current search and
+      // permanently remove them from the cursor stream — typing then
+      // clearing the search would leave gaps in the loaded data.
       // The server always returns newest-first and the cursor walks
       // strictly older. In oldest-first display order the next page is
       // therefore older than every row already on screen — prepend it (in
@@ -801,8 +818,17 @@ export default function AuditLog() {
     }
   }
 
-  // ── Grouped rows ───────────────────────────────────────────────────────────
-  const groups = useMemo(() => groupByDay(rows), [rows]);
+  // ── Filtered + grouped rows (render-time text filter) ─────────────────────
+  // SEC-007: the search box filters the loaded page CLIENT-SIDE only — the
+  // server has no `q` param yet, and including the search in the fetch deps
+  // would emit a spurious `audit.read` meta-audit row per keystroke (see
+  // the dep-array comment above). Filtering here keeps the trail clean and
+  // gives the user instant feedback without a round-trip.
+  const filteredRows = useMemo(
+    () => applyTextFilter(rows),
+    [rows, applyTextFilter],
+  );
+  const groups = useMemo(() => groupByDay(filteredRows), [filteredRows]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -826,6 +852,30 @@ export default function AuditLog() {
             title="Walk the prevHash chain and report tampering"
           >
             {verifying ? "Verifying…" : "Verify chain"}
+          </button>
+
+          {/* DLQ inspector — opens the SIEM dead-letter panel below.
+              Shows the unread count from `dlqRows` once the panel has been
+              loaded at least once; matches the QA.md:1668 contract
+              ("Click DLQ (0) in /audit-log header"). */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openDlq}
+            title="Inspect SIEM dead-letter queue"
+          >
+            DLQ{dlqRows ? ` (${dlqRows.length})` : ""}
+          </button>
+
+          {/* System events — deployment-wide cross-tenant security events
+              (workspaceId = SYSTEM_WORKSPACE_ID), chiefly auth.login.failed
+              against unknown emails. Admin-only and explicitly cross-tenant
+              per the backend `/system/security-events` route. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={openSystemEvents}
+            title="Cross-tenant security events (auth probes, unknown-email failed logins)"
+          >
+            System events
           </button>
 
           {/* SIEM forwarder configuration — admin-only per-workspace. */}
