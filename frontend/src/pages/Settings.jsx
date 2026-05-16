@@ -1379,6 +1379,10 @@ function SecurityTabInner() {
       const data = await api.mfaEnable(token);
       setRecoveryCodes(data.recoveryCodes);
       setEnrollment(null);
+      // SEC-004: clear the grace-period banner — the user is now enrolled
+      // so the workspace enforcement check will pass on next login. The
+      // banner re-checks sessionStorage on window focus.
+      try { sessionStorage.removeItem("mfa_grace_banner"); } catch { /* unavailable */ }
       await load();
     } catch (err) {
       setEnrollErr(err.message);
@@ -1430,6 +1434,8 @@ function SecurityTabInner() {
       }
       const deviceName = window.prompt("Name this passkey (e.g. \"YubiKey\", \"iPhone\"):", "")?.slice(0, 80) || null;
       await api.webauthnRegisterVerify(challengeToken, attestation, deviceName);
+      // SEC-004: passkey counts as a second factor — clear the grace banner.
+      try { sessionStorage.removeItem("mfa_grace_banner"); } catch { /* unavailable */ }
       await load();
     } catch (err) {
       const msg = err?.name === "NotAllowedError"

@@ -69,8 +69,26 @@ export default function Login() {
   const [tIdx, setTIdx] = useState(0);
   const [verifyEmail, setVerifyEmail] = useState(""); // SEC-001: email needing verification
   const [resending, setResending] = useState(false);
+  // SEC-004: MFA challenge state — after `/login` succeeds with `mfaRequired`,
+  // we render an overlay with a factor picker (TOTP / passkey / recovery code).
+  // `mfaMethods` mirrors the `methods` map on the login response so we know
+  // which factors the user actually has registered.
   const [mfaPendingToken, setMfaPendingToken] = useState("");
   const [mfaCode, setMfaCode] = useState("");
+  const [mfaMethods, setMfaMethods] = useState({ totp: false, webauthn: false });
+  // "totp" = 6-digit input · "recovery" = 8-char alpha input · "webauthn" = passkey flow
+  const [mfaFactor, setMfaFactor] = useState("totp");
+  const [webauthnBusy, setWebauthnBusy] = useState(false);
+  // SEC-004: When the workspace requires MFA and the user is past grace,
+  // `/login` returns 403 MFA_ENROLLMENT_REQUIRED. We surface a dedicated
+  // panel because the user cannot self-enroll without a session — they
+  // must contact a workspace admin.
+  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(null);
+  // SEC-004: Grace-period banner data is captured from the
+  // `X-MFA-Grace-Period-Days-Remaining` response header on a successful
+  // login and persisted to sessionStorage (key `mfa_grace_banner`) so the
+  // post-login surfaces (dashboard, navbar) can render it after navigation.
+  // No component-local state is needed here — the banner lives downstream.
 
   const from = location.state?.from?.pathname || "/dashboard";
 
@@ -171,8 +189,18 @@ export default function Login() {
     try {
       const body = mode === "login" ? { email, password } : { name, email, password };
       let data;
+      let headers = {};
       try {
-        data = mode === "login" ? await api.login(body) : await api.register(body);
+        if (mode === "login") {
+          // SEC-004: api.login returns { data, headers } so we can read
+          // the X-MFA-Grace-Period-Days-Remaining banner header. Register
+          // still returns the plain body shape.
+          const raw = await api.login(body);
+          data = raw.data;
+          headers = raw.headers || {};
+        } else {
+          data = await api.register(body);
+        }
       } catch (fetchErr) {
         // SEC-001: Handle unverified email on login attempt.
         // req() attaches the parsed response body as error.body so we can
@@ -180,6 +208,18 @@ export default function Login() {
         // contract) instead of fragile string matching on the error message.
         if (fetchErr.body?.code === "EMAIL_NOT_VERIFIED") {
           setVerifyEmail(fetchErr.body.email || email);
+        }
+        // SEC-004: Workspace requires MFA but the user has not enrolled and
+        // is past the grace window. Render a dedicated panel instead of the
+        // generic error — they need a workspace admin to either disable
+        // enforcement, extend grace, or enroll them out-of-band.
+        if (fetchErr.body?.code === "MFA_ENROLLMENT_REQUIRED") {
+          setMfaEnrollmentRequired({
+            workspaceId: fetchErr.body.workspaceId,
+            workspaceName: fetchErr.body.workspaceName,
+          });
+          // Suppress the generic error banner — the dedicated panel covers it.
+          throw new Error("");
         }
         throw fetchErr;
       }
@@ -194,8 +234,32 @@ export default function Login() {
       }
       else if (data.mfaRequired && data.pendingToken) {
         setMfaPendingToken(data.pendingToken);
-        setSuccess("Enter your authenticator code to finish sign in.");
-      } else login(data.user);
+        // `methods` was added in the backend-webauthn lane. Pre-existing
+        // tokens issued before that change won't include it — default to
+        // TOTP only so the legacy flow still works.
+        const methods = data.methods || { totp: true, webauthn: false };
+        setMfaMethods(methods);
+        // Pick the strongest factor as the default: passkey if the user has
+        // one, otherwise TOTP. Recovery codes are opt-in via the toggle.
+        setMfaFactor(methods.webauthn ? "webauthn" : "totp");
+        setSuccess("Choose a verification method to finish signing in.");
+      } else {
+        // SEC-004: surface the grace-period banner via sessionStorage so
+        // post-login surfaces (dashboard, navbar) can render it. The header
+        // is only set when the workspace requires MFA AND the user is
+        // within grace — absent in every other login outcome.
+        const remaining = headers["x-mfa-grace-period-days-remaining"];
+        const endsAt = headers["x-mfa-grace-ends-at"];
+        if (remaining) {
+          try {
+            sessionStorage.setItem("mfa_grace_banner", JSON.stringify({
+              daysRemaining: Number(remaining),
+              endsAt: endsAt || null,
+            }));
+          } catch { /* sessionStorage unavailable — banner is best-effort */ }
+        }
+        login(data.user);
+      }
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }
@@ -209,6 +273,48 @@ export default function Login() {
       login(data.user);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
+  }
+
+  /**
+   * Passkey verification during the login challenge. Calls the backend for
+   * options, hands them to `@simplewebauthn/browser`, then submits the
+   * assertion. On success the backend sets the auth cookie with
+   * `amr: ["pwd","mfa"]` and we proceed to the dashboard.
+   */
+  async function handleMfaWebauthn() {
+    setError("");
+    setWebauthnBusy(true);
+    try {
+      const { startAuthentication } = await import("@simplewebauthn/browser");
+      const { options, challengeToken } = await api.webauthnAuthOptions(mfaPendingToken);
+      // SimpleWebAuthn v11 takes `{ optionsJSON }`; v10 takes the options
+      // object directly. Try v11 first, fall back to v10 on TypeError.
+      let assertion;
+      try {
+        assertion = await startAuthentication({ optionsJSON: options });
+      } catch (err) {
+        if (err?.name === "TypeError") assertion = await startAuthentication(options);
+        else throw err;
+      }
+      const data = await api.webauthnAuthVerify(challengeToken, assertion);
+      login(data.user);
+    } catch (e) {
+      const msg = e?.name === "NotAllowedError"
+        ? "Passkey verification was cancelled or denied by the browser."
+        : (e.message || "Passkey verification failed.");
+      setError(msg);
+    } finally {
+      setWebauthnBusy(false);
+    }
+  }
+
+  function handleMfaCancel() {
+    setMfaPendingToken("");
+    setMfaCode("");
+    setMfaMethods({ totp: false, webauthn: false });
+    setMfaFactor("totp");
+    setSuccess("");
+    setError("");
   }
 
   const strength = (() => {
@@ -228,14 +334,195 @@ export default function Login() {
       {/* Styles loaded from styles/pages/login.css */}
 
       <div className={`lp-root${mounted?" on":""}`}>
+        {/* SEC-004: MFA challenge overlay — factor picker + per-factor UI. */}
         {mfaPendingToken && (
-          <div className="card" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"grid",placeItems:"center",zIndex:50}}>
-            <form onSubmit={handleMfaVerify} className="card" style={{padding:20,width:"min(420px,92vw)"}}>
-              <h3>Multi-factor verification</h3>
-              <p className="text-sub">Enter your 6-digit code or a recovery code.</p>
-              <input className="input" value={mfaCode} onChange={e=>setMfaCode(e.target.value)} placeholder="123456" />
-              <button className="btn btn-primary" style={{marginTop:12}} disabled={loading || !mfaCode.trim()}>{loading?"Verifying…":"Verify"}</button>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mfa-modal-title"
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"grid",placeItems:"center",zIndex:50,padding:16}}
+          >
+            <form
+              onSubmit={handleMfaVerify}
+              className="card"
+              style={{padding:24,width:"min(440px,92vw)",display:"flex",flexDirection:"column",gap:14}}
+            >
+              <div>
+                <h3 id="mfa-modal-title" style={{margin:0}}>Two-factor verification</h3>
+                <p className="text-sub" style={{margin:"4px 0 0",fontSize:"0.85rem"}}>
+                  Confirm your identity to finish signing in.
+                </p>
+              </div>
+
+              {/* Factor picker — only render when multiple factors exist. */}
+              {(mfaMethods.totp || mfaMethods.webauthn) && (
+                <div role="tablist" aria-label="Verification method" style={{display:"flex",gap:6}}>
+                  {mfaMethods.webauthn && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "webauthn"}
+                      className={`btn btn-sm ${mfaFactor === "webauthn" ? "btn-primary" : "btn-ghost"}`}
+                      style={{flex:1}}
+                      onClick={() => { setMfaFactor("webauthn"); setError(""); }}
+                    >
+                      Passkey
+                    </button>
+                  )}
+                  {mfaMethods.totp && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "totp"}
+                      className={`btn btn-sm ${mfaFactor === "totp" ? "btn-primary" : "btn-ghost"}`}
+                      style={{flex:1}}
+                      onClick={() => { setMfaFactor("totp"); setError(""); }}
+                    >
+                      Authenticator
+                    </button>
+                  )}
+                  {mfaMethods.totp && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={mfaFactor === "recovery"}
+                      className={`btn btn-sm ${mfaFactor === "recovery" ? "btn-primary" : "btn-ghost"}`}
+                      style={{flex:1}}
+                      onClick={() => { setMfaFactor("recovery"); setError(""); }}
+                    >
+                      Recovery code
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {error && (
+                <div className="lp-alert lp-aerr" role="alert" style={{margin:0}}>
+                  {error}
+                </div>
+              )}
+
+              {/* Passkey panel */}
+              {mfaFactor === "webauthn" && (
+                <>
+                  <p className="text-sub" style={{margin:0,fontSize:"0.85rem"}}>
+                    Use a registered passkey (security key, Touch ID, Windows Hello, etc.).
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleMfaWebauthn}
+                    disabled={webauthnBusy}
+                  >
+                    {webauthnBusy ? <Spinner/> : null}
+                    {webauthnBusy ? "Waiting for passkey…" : "Use passkey"}
+                  </button>
+                </>
+              )}
+
+              {/* TOTP panel */}
+              {mfaFactor === "totp" && (
+                <>
+                  <label className="text-sm font-semi" htmlFor="mfa-totp-code" style={{display:"block"}}>
+                    6-digit code from your authenticator app
+                    <input
+                      id="mfa-totp-code"
+                      className="input"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value.replace(/[^\d]/g, ""))}
+                      placeholder="123456"
+                      style={{marginTop:6,letterSpacing:"0.15em",fontFamily:"var(--font-mono)"}}
+                      autoFocus
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={loading || mfaCode.length < 6}
+                  >
+                    {loading ? <Spinner/> : null}
+                    {loading ? "Verifying…" : "Verify"}
+                  </button>
+                </>
+              )}
+
+              {/* Recovery-code panel */}
+              {mfaFactor === "recovery" && (
+                <>
+                  <label className="text-sm font-semi" htmlFor="mfa-recovery-code" style={{display:"block"}}>
+                    Recovery code
+                    <input
+                      id="mfa-recovery-code"
+                      className="input"
+                      type="text"
+                      autoComplete="off"
+                      maxLength={16}
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value.trim())}
+                      placeholder="abcd1234"
+                      style={{marginTop:6,fontFamily:"var(--font-mono)"}}
+                      autoFocus
+                    />
+                    <span className="text-xs text-sub" style={{marginTop:4,display:"block"}}>
+                      Each recovery code can be used once.
+                    </span>
+                  </label>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={loading || !mfaCode.trim()}
+                  >
+                    {loading ? <Spinner/> : null}
+                    {loading ? "Verifying…" : "Verify"}
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleMfaCancel}
+                disabled={loading || webauthnBusy}
+              >
+                Cancel and sign in again
+              </button>
             </form>
+          </div>
+        )}
+
+        {/* SEC-004: Workspace requires MFA but the user has no factor enrolled
+            and is past grace. They cannot reach Settings without a session, so
+            we surface a contact-admin panel instead of letting them retry. */}
+        {mfaEnrollmentRequired && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mfa-blocked-title"
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"grid",placeItems:"center",zIndex:50,padding:16}}
+          >
+            <div className="card" style={{padding:24,width:"min(460px,92vw)",display:"flex",flexDirection:"column",gap:14}}>
+              <h3 id="mfa-blocked-title" style={{margin:0}}>MFA enrollment required</h3>
+              <p className="text-sub" style={{margin:0,fontSize:"0.9rem"}}>
+                Your workspace
+                {mfaEnrollmentRequired.workspaceName ? <> <strong>{mfaEnrollmentRequired.workspaceName}</strong></> : null}
+                {" "}requires multi-factor authentication, and your grace period has ended.
+              </p>
+              <p className="text-sub" style={{margin:0,fontSize:"0.85rem"}}>
+                Contact a workspace administrator to enroll a second factor or
+                extend the grace window. You will not be able to sign in until
+                this is resolved.
+              </p>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setMfaEnrollmentRequired(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         )}
 

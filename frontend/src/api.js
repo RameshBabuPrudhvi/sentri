@@ -119,7 +119,16 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
     error.status = res.status;
     throw error;
   }
-  return parseJsonResponse(res);
+  const data = await parseJsonResponse(res);
+  // SEC-004: opt-in raw response (data + headers) so callers can read custom
+  // response headers like `X-MFA-Grace-Period-Days-Remaining`. Default return
+  // shape is unchanged so the existing ~50 callers keep working.
+  if (opts.returnRaw) {
+    const headers = {};
+    res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+    return { data, headers };
+  }
+  return data;
 }
 
 /**
@@ -755,7 +764,13 @@ export const api = {
    * @param {{ email: string, password: string }} body
    * @returns {Promise<Object>}
    */
-  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /**
+   * Log in. Uses `returnRaw` so the caller can read the
+   * `X-MFA-Grace-Period-Days-Remaining` header set by the backend when the
+   * workspace requires MFA but the user is still within grace.
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
+   */
+  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
   /**
    * Register a new account.
    * @param {{ name: string, email: string, password: string }} body

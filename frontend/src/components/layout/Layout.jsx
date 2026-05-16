@@ -7,6 +7,7 @@ import AIChat from "../ai/AIChat.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import ProviderBanner from "./ProviderBanner.jsx";
 import GlobalRunBanner from "./GlobalRunBanner.jsx";
+import MfaGraceBanner from "./MfaGraceBanner.jsx";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 
@@ -65,6 +66,11 @@ export default function Layout() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <TopBar onOpenPalette={openPalette} onOpenChat={openChat} />
         <ProviderBanner userId={user?.id} />
+        {/* SEC-004: workspace MFA grace-period nudge. Reads sessionStorage
+            populated by Login.jsx from the `X-MFA-Grace-Period-Days-Remaining`
+            response header — no-op when the user is enrolled or the
+            workspace policy is off. */}
+        <MfaGraceBanner />
         {/* Cross-page visibility for in-flight AI runs — closes the gap
             where a 3-min crawl was invisible once the user navigated away
             from Test Lab. Hidden on the Test Lab route itself (the inline
