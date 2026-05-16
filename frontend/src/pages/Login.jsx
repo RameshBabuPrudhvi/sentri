@@ -144,24 +144,50 @@ export default function Login() {
   useEffect(() => { if (user) navigate(from, { replace: true }); }, [user]);
   useEffect(() => { if (testiPaused) return; const t = setInterval(() => setTIdx(i => (i+1) % TESTIMONIALS.length), 4000); return () => clearInterval(t); }, [testiPaused]);
 
-  // SEC-004 a11y: dismiss MFA modals on Escape and capture the previously
-  // focused element so we can restore focus on close. Mirrors the pattern in
-  // Settings.jsx PasswordConfirmModal (line 1042). Without this, keyboard
-  // users have no way to abort an MFA challenge except by submitting / cancel
-  // button click, and the dialog role + aria-modal=true would otherwise lie.
+  // SEC-004 a11y: dismiss MFA modals on Escape, trap Tab cycling inside the
+  // dialog, and capture the previously focused element so we can restore
+  // focus on close. Mirrors the pattern in Settings.jsx PasswordConfirmModal.
+  // Without these the dialog role + aria-modal=true would lie to AT users —
+  // background `inert` already prevents Tab from leaving the overlay, but the
+  // wrap-around keeps focus circling the modal's own controls per WAI-ARIA
+  // APG dialog guidance.
   const modalOpen = !!mfaPendingToken || !!mfaEnrollmentRequired;
   const lastFocusedRef = useRef(null);
+  // Selector for elements that participate in the focus trap. Mirrors the
+  // commonly accepted "tabbable" set — buttons, links, inputs, etc., minus
+  // anything explicitly opted out via tabindex="-1".
+  const FOCUSABLE_SELECTOR =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   useEffect(() => {
     if (!modalOpen) return;
     lastFocusedRef.current = document.activeElement;
     function onKey(e) {
-      if (e.key !== "Escape") return;
-      // Don't allow Escape mid-passkey-verification — the browser's WebAuthn
-      // prompt has its own cancel UI and aborting the React modal would
-      // leave the passkey API in a confused state.
-      if (webauthnBusy) return;
-      if (mfaPendingToken) handleMfaCancel();
-      else if (mfaEnrollmentRequired) setMfaEnrollmentRequired(null);
+      if (e.key === "Escape") {
+        // Don't allow Escape mid-passkey-verification — the browser's WebAuthn
+        // prompt has its own cancel UI and aborting the React modal would
+        // leave the passkey API in a confused state.
+        if (webauthnBusy) return;
+        if (mfaPendingToken) handleMfaCancel();
+        else if (mfaEnrollmentRequired) setMfaEnrollmentRequired(null);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      // Focus trap: query the currently rendered overlay each time so we
+      // pick up the dynamic per-factor controls (TOTP input vs recovery
+      // input vs passkey button) without needing a ref on every panel.
+      const overlay = document.querySelector(".mfa-overlay");
+      if (!overlay) return;
+      const focusables = overlay.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => {
@@ -175,6 +201,21 @@ export default function Login() {
     // but the modalOpen toggle is the actual trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen, webauthnBusy]);
+
+  // SEC-004 a11y: backdrop click dismisses the MFA modals — mirrors the
+  // pattern in Settings.jsx PasswordConfirmModal so the dismiss UX is
+  // consistent across the app. Gated on `e.target === e.currentTarget` so
+  // clicks inside the dialog don't bubble up and accidentally close it.
+  function handleMfaBackdropClick(e) {
+    if (e.target !== e.currentTarget) return;
+    // Same guard as the Escape handler — never abort mid-passkey-verification.
+    if (webauthnBusy) return;
+    handleMfaCancel();
+  }
+  function handleEnrollmentBackdropClick(e) {
+    if (e.target !== e.currentTarget) return;
+    setMfaEnrollmentRequired(null);
+  }
 
   async function handleOAuthCallback(provider, code) {
     setOauthLoading(provider); setError("");
@@ -406,6 +447,7 @@ export default function Login() {
             aria-modal="true"
             aria-labelledby="mfa-modal-title"
             className="mfa-overlay"
+            onClick={handleMfaBackdropClick}
           >
             <form
               onSubmit={handleMfaVerify}
@@ -571,6 +613,7 @@ export default function Login() {
             aria-modal="true"
             aria-labelledby="mfa-blocked-title"
             className="mfa-overlay"
+            onClick={handleEnrollmentBackdropClick}
           >
             <div className="card mfa-blocked">
               <h3 id="mfa-blocked-title" className="mfa-blocked__title">MFA enrollment required</h3>
