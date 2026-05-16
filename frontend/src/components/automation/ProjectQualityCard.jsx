@@ -386,9 +386,9 @@ function PiiFirewallPanel({ project, canEdit, onToast }) {
           className="input aap-textarea"
         />
         <div className="aap-stats aap-stats--hint">
-          Each line is matched as a substring against PII candidates before
-          redaction. Use full literals (entire emails, complete token strings)
-          to avoid accidentally exempting unrelated values.
+          Each line is an exact (case-insensitive) match against the candidate
+          PII value. Enter the complete literal (full email, full token, full
+          query value) — partial fragments will not match.
         </div>
       </div>
 

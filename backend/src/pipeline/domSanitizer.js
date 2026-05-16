@@ -73,7 +73,14 @@ export function sanitizeDomSnapshot(input, ctxOrOpts = {}) {
   const ownsContext = !ctxOrOpts || !(ctxOrOpts.placeholders instanceof Map);
   const ctx = ownsContext ? createPiiContext(ctxOrOpts) : ctxOrOpts;
 
-  const allowMatch = (v) => ctx.allowlist.some((rule) => v.includes(rule));
+  // Exact-value match (case-insensitive). Substring matching was tempting
+  // for "partial allowlist fragments" but creates a silent footgun: a short
+  // entry like "5551" would exempt every phone, card, and SSN that happens
+  // to contain those four digits. Allowlist entries must be complete values
+  // (full email, full token, full query value). Whitespace is trimmed at
+  // both sides to forgive trailing newlines from the textarea input.
+  const allowSet = new Set(ctx.allowlist.map((r) => r.trim().toLowerCase()));
+  const allowMatch = (v) => allowSet.has(String(v).trim().toLowerCase());
   const idFor = (k, label) => {
     if (!ctx.placeholders.has(k)) {
       ctx.seq[label] += 1;
