@@ -23,6 +23,8 @@ function rowToProject(row) {
     webVitalsBudgets: row.webVitalsBudgets ? JSON.parse(row.webVitalsBudgets) : null,
     autoApproveThreshold: row.autoApproveThreshold,
     iterationCap: row.iterationCap,
+    strictPiiFirewall: row.strictPiiFirewall === 1,
+    piiAllowlist: row.piiAllowlist ? JSON.parse(row.piiAllowlist) : [],
   };
 }
 
@@ -38,6 +40,8 @@ function projectToRow(p) {
     createdAt: p.createdAt,
     autoApproveThreshold: p.autoApproveThreshold ?? null,
     iterationCap: p.iterationCap ?? null,
+    strictPiiFirewall: p.strictPiiFirewall ? 1 : 0,
+    piiAllowlist: p.piiAllowlist ? JSON.stringify(p.piiAllowlist) : null,
   };
 }
 
@@ -99,8 +103,8 @@ export function create(project) {
   const row = projectToRow(project);
   row.workspaceId = project.workspaceId || null;
   db.prepare(`
-    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap)
-    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap)
+    INSERT INTO projects (id, name, url, credentials, status, qualityGates, webVitalsBudgets, createdAt, workspaceId, autoApproveThreshold, iterationCap, strictPiiFirewall, piiAllowlist)
+    VALUES (@id, @name, @url, @credentials, @status, @qualityGates, @webVitalsBudgets, @createdAt, @workspaceId, @autoApproveThreshold, @iterationCap, @strictPiiFirewall, @piiAllowlist)
   `).run(row);
 }
 
@@ -111,12 +115,12 @@ export function create(project) {
  */
 export function update(id, fields) {
   const db = getDatabase();
-  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap"];
+  const allowed = ["name", "url", "credentials", "status", "qualityGates", "webVitalsBudgets", "autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"];
   const sets = [];
   const params = { id };
   for (const key of allowed) {
     if (key in fields) {
-      const val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets") && fields[key]
+      const val = (key === "credentials" || key === "qualityGates" || key === "webVitalsBudgets" || key === "piiAllowlist") && fields[key]
         ? JSON.stringify(fields[key])
         : fields[key];
       sets.push(`${key} = @${key}`);

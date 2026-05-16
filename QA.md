@@ -1760,3 +1760,10 @@ A release is QA-approved only when **all** of the following are true:
 3. Stop one worker container during execution; confirm run continues and completes via remaining workers (retry if needed).
 4. Open Dashboard and verify Runner Mode = Distributed with queue depth + active/idle worker metrics.
 5. Disable Redis and confirm Dashboard falls back to Single-process mode without errors.
+
+
+## PII Firewall
+- Create a project and run crawl against content containing email, phone, SSN, card-like numbers, JWT, and `?access_token=` values.
+- Verify run logs include `pipeline.pii_redacted` with non-zero category counts.
+- Verify generated tests do not contain raw secrets/PII values.
+- Set `piiAllowlist` with a known token fragment and verify that fragment is not redacted while others remain redacted.

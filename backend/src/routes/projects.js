@@ -252,7 +252,7 @@ router.patch("/:id", requireRole("qa_lead"), (req, res) => {
   // is gated on the body containing *exactly* its field name so an
   // attempted `status` / `workspaceId` injection still falls through to
   // the full `validateProjectPayload` + field-whitelist path below.
-  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap"]);
+  const SINGLE_FIELD_BYPASS = new Set(["autoApproveThreshold", "iterationCap", "strictPiiFirewall", "piiAllowlist"]);
   const isSingleFieldPatch = bodyKeys.length === 1 && SINGLE_FIELD_BYPASS.has(bodyKeys[0]);
   if (!isSingleFieldPatch) {
     const validationErr = validateProjectPayload(req.body);
