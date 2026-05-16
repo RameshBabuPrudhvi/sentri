@@ -18,9 +18,12 @@
 import { Router } from "express";
 import * as workspaceRepo from "../database/repositories/workspaceRepo.js";
 import * as userRepo from "../database/repositories/userRepo.js";
+import * as webauthnRepo from "../database/repositories/webauthnRepo.js";
 import { requireRole, VALID_ROLES } from "../middleware/requireRole.js";
 import { signJwt, getJwtSecret, revokedTokens } from "../middleware/authenticate.js";
 import { buildJwtPayload, buildUserResponse } from "../utils/authWorkspace.js";
+import { logActivity } from "../utils/activityLogger.js";
+import { evaluateMfaEnforcement } from "../utils/mfaEnforcement.js";
 import { setAuthCookie, JWT_TTL_SEC } from "./auth.js";
 
 const router = Router();
@@ -38,11 +41,17 @@ router.get("/current", (req, res) => {
 });
 
 /**
- * Update the current workspace (name, slug).
+ * Update the current workspace (name, slug, MFA enforcement policy).
+ *
+ * SEC-004: `mfaRequired` / `mfaGracePeriodDays` are admin-managed enforcement
+ * controls. Flipping `mfaRequired` from 0 → 1 stamps `mfaPolicyUpdatedAt`
+ * with the current time so the grace clock starts at the policy change —
+ * existing members get the full grace window before being locked out.
+ *
  * @route PATCH /api/workspaces/current
  */
 router.patch("/current", requireRole("admin"), (req, res) => {
-  const { name, slug } = req.body;
+  const { name, slug, mfaRequired, mfaGracePeriodDays } = req.body;
   const updates = {};
   if (name && typeof name === "string") updates.name = name.trim().slice(0, 100);
   if (slug && typeof slug === "string") {
@@ -55,11 +64,45 @@ router.patch("/current", requireRole("admin"), (req, res) => {
     }
     updates.slug = cleanSlug;
   }
+
+  // SEC-004: MFA enforcement policy. Accept booleans or 0/1 for `mfaRequired`
+  // for ergonomic frontend payloads; coerce to the integer column shape.
+  let mfaPolicyChanged = false;
+  if (mfaRequired !== undefined) {
+    const next = (mfaRequired === true || mfaRequired === 1 || mfaRequired === "1") ? 1 : 0;
+    const current = workspaceRepo.getById(req.workspaceId);
+    if (!current) return res.status(404).json({ error: "Workspace not found." });
+    if (next !== (current.mfaRequired || 0)) {
+      updates.mfaRequired = next;
+      // Stamp policy-changed timestamp so the grace clock starts here.
+      updates.mfaPolicyUpdatedAt = new Date().toISOString();
+      mfaPolicyChanged = true;
+    }
+  }
+  if (mfaGracePeriodDays !== undefined) {
+    const n = Number.parseInt(mfaGracePeriodDays, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 90) {
+      return res.status(400).json({ error: "mfaGracePeriodDays must be between 0 and 90." });
+    }
+    updates.mfaGracePeriodDays = n;
+  }
+
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: "No valid fields to update." });
   }
   workspaceRepo.update(req.workspaceId, updates);
   const ws = workspaceRepo.getById(req.workspaceId);
+
+  if (mfaPolicyChanged) {
+    logActivity({
+      type: "workspace.mfa_policy_changed",
+      detail: `MFA enforcement ${ws.mfaRequired === 1 ? "enabled" : "disabled"} for workspace.`,
+      userId: req.authUser.sub, userName: req.authUser.name || req.authUser.email,
+      workspaceId: req.workspaceId,
+      meta: { mfaRequired: ws.mfaRequired, mfaGracePeriodDays: ws.mfaGracePeriodDays },
+    });
+  }
+
   return res.json(ws);
 });
 
@@ -102,12 +145,37 @@ router.post("/switch", (req, res) => {
   const user = userRepo.getById(userId);
   if (!user) return res.status(401).json({ error: "User not found." });
 
+  // SEC-004 §11: re-check MFA enforcement when switching INTO a workspace
+  // whose policy may block the user. Without this, a user could switch into
+  // a workspace that requires MFA (past grace) and get a valid JWT for it.
+  // Same pattern as the /refresh enforcement check in routes/auth.js.
+  const enforcement = evaluateMfaEnforcement(user);
+  if (enforcement.state === "block") {
+    logActivity({
+      type: "auth.mfa.enrollment_required",
+      detail: "Workspace switch blocked: target workspace requires MFA.",
+      userId: user.id, userName: user.name || user.email,
+      workspaceId: enforcement.workspaceId,
+      meta: { method: "workspace_switch" },
+    });
+    return res.status(403).json({
+      error: "Your workspace requires multi-factor authentication. Enroll before switching.",
+      code: "MFA_ENROLLMENT_REQUIRED",
+      workspaceId: enforcement.workspaceId,
+      workspaceName: enforcement.workspaceName,
+    });
+  }
+
   // Revoke the old token so it cannot be replayed (matches /refresh behaviour)
   const { jti: oldJti, exp: oldExp } = req.authUser;
   if (oldJti) revokedTokens.set(oldJti, oldExp);
 
-  // Issue a new JWT with the target workspace as the hint
-  const payload = buildJwtPayload(user, targetId);
+  // Issue a new JWT with the target workspace as the hint.
+  // SEC-004 §5c: forward the existing `amr` claim so a workspace switch by an
+  // MFA-asserted user does not silently downgrade their session to password-
+  // only. Same rationale as the `/refresh` forward at routes/auth.js — both
+  // revoke + reissue paths must preserve the authentication strength.
+  const payload = buildJwtPayload(user, targetId, { amr: req.authUser.amr });
   const token = signJwt(payload, getJwtSecret());
   const exp = Math.floor(Date.now() / 1000) + JWT_TTL_SEC;
 
@@ -125,6 +193,45 @@ router.post("/switch", (req, res) => {
 router.get("/current/members", (req, res) => {
   const members = workspaceRepo.getMembers(req.workspaceId);
   return res.json(members);
+});
+
+/**
+ * Report MFA enrollment compliance for the current workspace (SEC-004).
+ * Used by the admin Settings panel to show "N of M members not enrolled"
+ * before flipping the enforcement policy.
+ *
+ * @route GET /api/workspaces/current/mfa-compliance
+ * @returns {200} `{ totalMembers, enrolled, notEnrolled, members: [{userId,name,email,mfaEnabled}] }`
+ */
+router.get("/current/mfa-compliance", requireRole("admin"), (req, res) => {
+  const members = workspaceRepo.getMembers(req.workspaceId);
+  const detailed = members.map((m) => {
+    const u = userRepo.getById(m.userId);
+    // SEC-004: a registered passkey is just as strong a second factor as TOTP
+    // (see `evaluateMfaEnforcement` at backend/src/utils/mfaEnforcement.js).
+    // Count passkey-only users as enrolled so the admin preview matches what
+    // the enforcement engine will actually allow — otherwise OAuth-only users
+    // who registered a passkey but no TOTP are misreported as "not enrolled".
+    const passkeyCount = webauthnRepo.countByUser(m.userId);
+    const totp = u?.mfaEnabled === 1;
+    const webauthn = passkeyCount > 0;
+    return {
+      userId: m.userId,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      mfaEnabled: totp || webauthn,
+      totp,
+      webauthn,
+    };
+  });
+  const enrolled = detailed.filter((d) => d.mfaEnabled).length;
+  return res.json({
+    totalMembers: detailed.length,
+    enrolled,
+    notEnrolled: detailed.length - enrolled,
+    members: detailed,
+  });
 });
 
 /**

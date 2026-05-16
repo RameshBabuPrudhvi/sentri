@@ -399,6 +399,73 @@ _(automated: see `tests/e2e/specs/ui-smoke.spec.mjs` for login negative path + v
 
 ---
 
+### 🔒 Multi-factor authentication (SEC-004)
+
+**Preconditions:** Workspace exists; User A (admin) logged in with a verified email + password.
+
+**Surfaces covered:** Settings → Security tab, login factor picker, admin workspace enforcement panel, grace-period banner, post-grace `MFA_ENROLLMENT_REQUIRED` panel. Backend endpoints documented in `backend/src/middleware/permissions.json` under the SEC-004 entries.
+
+**A. TOTP enrollment + login**
+
+1. Sign in as User A → **Settings → Security** → click **Enable TOTP**.
+2. Scan the QR with Google Authenticator / 1Password / Authy (or copy the base32 secret manually). Enter the 6-digit code → click **Verify & enable**.
+3. **Recovery codes panel** appears with 8 hex codes. Click **Download .txt** → file downloads. Click **Copy** → clipboard receives the newline-joined list. Tick **I've saved them** → **Done** dismisses the panel; codes never re-appear.
+4. **Status reflects enrollment** — the Security panel now reads "Enabled · 8 recovery codes remaining".
+5. **Re-enroll guard** — click **Enable TOTP** again on the same account → the request returns 409 with "MFA is already enabled. Disable it first to re-enroll." (no silent overwrite of the existing secret).
+6. **Login with TOTP** — sign out → sign in with email/password → factor-picker modal opens with **Authenticator** tab active. Enter the current TOTP code → land on dashboard.
+7. **JWT `amr` claim** — DevTools → Application → Cookies → copy `access_token` → decode the payload (base64url) → `amr` should be `["pwd","mfa"]` (NOT `["pwd"]` alone).
+
+**B. Recovery-code login + regeneration**
+
+8. Sign out → sign in → on the factor picker, switch to **Recovery code** → paste one of the codes you saved → land on dashboard.
+9. **Single-use enforcement** — sign out, sign back in, attempt the same recovery code → 400 "Invalid authentication code." Switch to **Authenticator** → enter TOTP → succeeds.
+10. **Settings → Security** → recovery counter now reads "7 remaining" (one consumed).
+11. Click **Regenerate codes** → password modal opens → enter wrong password → 403. Enter correct password → fresh 8 codes appear, all different from the previous set.
+12. Sign out → attempt one of the OLD recovery codes at the factor picker → 400 (invalidated by the regenerate).
+13. New codes work for one login each.
+
+**C. Passkey enrollment + login (optional — requires platform authenticator or hardware key)**
+
+14. Settings → Security → **Add passkey** → browser prompt fires (Touch ID / Windows Hello / YubiKey). Complete the platform challenge → prompt asks for a device name → enter "Test passkey".
+15. The Passkeys list shows the new credential with name, added timestamp.
+16. **Login with passkey** — sign out → sign in → factor picker now shows a **Passkey** tab (active by default since it's the strongest factor) → click **Use passkey** → platform prompt → succeed → land on dashboard.
+17. JWT `amr` is still `["pwd","mfa"]` after passkey login.
+18. **Remove passkey** — Settings → Security → per-row **Remove** → password modal → succeeds; passkey gone from list and DB.
+19. **Cross-user isolation** — register User B, register a passkey on User B → sign in as User A → using DevTools, send `DELETE /api/v1/auth/webauthn/credentials/<User B's credential id>` with User A's cookie + password → response 404 (NOT 200). User B's credential survives.
+
+**D. Disable MFA**
+
+20. Settings → Security → **Disable** → password modal → wrong password → 403. Correct password → succeeds.
+21. Status panel returns to "Not enrolled"; recovery counter shows 0; subsequent login no longer prompts for MFA.
+
+**E. Per-workspace enforcement (admin)**
+
+22. As User A (admin), Settings → Security → scroll to **Workspace enforcement** card → verify the **Current enrollment** preview (`N of M members have MFA enabled`). The count includes members with **either** TOTP **or** a registered passkey — passkey-only users are counted as enrolled.
+23. Tick **Require MFA for all workspace members** → set **Grace period (days)** to 7 → click **Save policy** → toast "Workspace MFA policy updated".
+24. Sign out → sign in as User B (no MFA enrolled, just joined the workspace) → login succeeds + the post-login dashboard shows a yellow **"Multi-factor authentication required — N days remaining"** banner with a **Set up now** button that deep-links to `/settings?tab=security`.
+25. Sign in as User A → admin panel **Set policy → 0** (no grace) → save.
+26. Sign out → attempt to sign in as User B again → 403 `MFA_ENROLLMENT_REQUIRED` panel renders showing the workspace name and "Contact a workspace administrator". No auth cookie set, no dashboard access.
+27. Have User B enroll TOTP through a workaround (admin temporarily turns off enforcement, B enrolls, admin re-enables). Sign in as User B → no banner, no block.
+
+**F. Audit logging**
+
+28. Open **Activity log** as admin → confirm rows exist for: `auth.mfa.enroll_started`, `auth.mfa.enabled`, `auth.mfa.disabled`, `auth.mfa.login_verified`, `auth.mfa.recovery_code_consumed`, `auth.mfa.recovery_codes_regenerated`, `workspace.mfa_policy_changed`, `auth.mfa.enrollment_required`. Each row carries `userId` + `userName` + `meta` (e.g. `{ method: "totp" }`, `{ remaining: 6 }`).
+
+**Negative / edge:**
+
+- **TOTP clock skew** — generate a code with a phone clock 30s ahead of server → still accepted (default `MFA_TOTP_WINDOW=1` allows ±30s).
+- **Wrong TOTP at login** → 400; after 5 attempts in 15 min the IP is rate-limited (429 with `Retry-After`). Verify by hammering.
+- **Pending-token single use** — copy the `pendingToken` from a successful `/login` response, use it once at `/mfa/verify`, then replay → 401 "MFA session expired".
+- **CSRF exempt on /mfa/verify** — request succeeds without an `X-CSRF-Token` header (pre-auth, no cookie yet). All other MFA endpoints (`/enroll`, `/enable`, `/disable`, etc.) still require CSRF.
+- **OAuth-only user** — register via GitHub/Google → Settings → Security → destructive actions (Disable, Regenerate, Remove passkey) skip the password modal automatically (the OAuth session itself proves identity).
+- **OAuth login enforcement** — workspace requires MFA past grace + OAuth-only user with no MFA → GitHub/Google callback returns 403 `MFA_ENROLLMENT_REQUIRED` (no auth cookie set).
+- **Last-factor lockout guard** — user with only one passkey + workspace enforcement past grace → attempting to delete that passkey via `DELETE /webauthn/credentials/:id` returns 400 `MFA_LAST_FACTOR_PROTECTED`. Enrolling TOTP first then deleting the passkey succeeds.
+- **`@simplewebauthn/server` omitted** — self-hosters who install with `npm install --omit=optional` → all `/auth/webauthn/*` endpoints return 503 `WEBAUTHN_UNAVAILABLE`; the rest of MFA (TOTP, recovery codes, enforcement) continues to work.
+- **Viewer role** — viewer can manage their own MFA factors but cannot see / change the **Workspace enforcement** panel (admin-only client-side gate + server-side `requireRole("admin")` on `PATCH /workspaces/current` and `GET /workspaces/current/mfa-compliance`).
+- **Grace banner dismissal** — clicking the X on the banner suppresses it for the current session only (`sessionStorage`); next sign-in shows it again until the user actually enrolls. Enrolling TOTP or a passkey clears the banner on the next window-focus event.
+
+---
+
 ### 👥 Workspaces
 
 **Preconditions:** User A logged in.
@@ -1659,7 +1726,7 @@ Mark status per browser: ✅ pass · ❌ fail · ⚠️ partial · ⬜ not teste
 | **Workspace switcher** | ⬜ | ⬜ | ⬜ | ⬜ | |
 | Cross-cutting checks | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-> **Out of scope (not yet shipped):** MFA/2FA (`SEC-004`), public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, standalone Playwright project export (`DIF-006`), and the embedded Playwright trace viewer (`DIF-005`, verified inline at Golden E2E step 31) **are** shipped and must be tested.
+> **Out of scope (not yet shipped):** public/shareable test report links, Jira integration, billing, CLI. Do not test these — file enhancement requests instead. The `/reports` page, Dashboard PDF export, standalone Playwright project export (`DIF-006`), the embedded Playwright trace viewer (`DIF-005`, verified inline at Golden E2E step 31), and multi-factor authentication (`SEC-004` — see the Security / MFA section for the manual test plan) **are** shipped and must be tested.
 
 ---
 

@@ -1,0 +1,313 @@
+/**
+ * MFA / Security — feature-scoped styles (SEC-004)
+ *
+ * BEM naming: `.mfa-*` for MFA challenge UI, `.pwd-modal-*` for the
+ * password-confirmation modal, `.recovery-*` for recovery-code display,
+ * `.totp-*` for enrollment, `.grace-banner-*` for the post-login nudge.
+ *
+ * Reuses `.modal-backdrop` from components.css for overlay backdrops.
+ * Layout primitives (`.flex-*`, `.text-*`, `.card`, `.btn`) are NOT
+ * duplicated — consumed via className composition in JSX.
+ */
+
+/* ── MFA login challenge overlay ───────────────────────────────────────────── */
+.mfa-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+.mfa-modal {
+  padding: 24px;
+  width: min(440px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mfa-modal__title {
+  margin: 0;
+}
+
+.mfa-modal__subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}
+
+.mfa-tablist {
+  display: flex;
+  gap: 6px;
+}
+
+.mfa-tablist .btn {
+  flex: 1;
+}
+
+.mfa-panel__hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.mfa-code-input {
+  margin-top: 6px;
+  letter-spacing: 0.15em;
+  font-family: var(--font-mono);
+}
+
+.mfa-recovery-input {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+}
+
+.mfa-recovery-hint {
+  margin-top: 4px;
+  display: block;
+}
+
+/* ── MFA enrollment-required panel (past-grace block) ──────────────────────── */
+.mfa-blocked {
+  padding: 24px;
+  width: min(460px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mfa-blocked__title {
+  margin: 0;
+}
+
+.mfa-blocked__body {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.mfa-blocked__detail {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* ── Password confirmation modal ───────────────────────────────────────────── */
+.pwd-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+
+.pwd-modal {
+  width: min(420px, 92vw);
+}
+
+.pwd-modal__title {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.pwd-modal__desc {
+  margin-top: 0;
+}
+
+.pwd-modal__label {
+  display: block;
+  margin-top: 12px;
+}
+
+.pwd-modal__input {
+  margin-top: 6px;
+}
+
+.pwd-modal__error {
+  margin-top: 10px;
+}
+
+.pwd-modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* ── TOTP enrollment panel ─────────────────────────────────────────────────── */
+.totp-enroll {
+  border-color: var(--accent);
+}
+
+.totp-enroll__qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+
+.totp-enroll__qr {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 8px;
+}
+
+.totp-enroll__secret-label {
+  margin-bottom: 4px;
+}
+
+.totp-enroll__secret {
+  background: var(--bg3);
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  word-break: break-all;
+}
+
+.totp-enroll__code-input {
+  margin-top: 6px;
+  letter-spacing: 0.15em;
+  font-family: var(--font-mono);
+}
+
+.totp-enroll__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ── Recovery codes one-time display ───────────────────────────────────────── */
+.recovery-panel {
+  border-color: var(--amber);
+  background: rgba(255, 176, 32, 0.06);
+}
+
+.recovery-panel__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.recovery-panel__title {
+  font-size: 0.95rem;
+}
+
+.recovery-panel__hint {
+  margin-top: 4px;
+}
+
+.recovery-panel__icon {
+  margin-top: 2px;
+}
+
+.recovery-panel__grid {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin-bottom: 12px;
+}
+
+.recovery-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.recovery-panel__confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* ── MFA grace-period banner ───────────────────────────────────────────────── */
+.grace-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+}
+
+.grace-banner--warn {
+  background: rgba(255, 176, 32, 0.08);
+  border-bottom: 1px solid rgba(255, 176, 32, 0.25);
+}
+
+.grace-banner--urgent {
+  background: rgba(239, 68, 68, 0.08);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.grace-banner__body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Shared label override (HTML labels default to inline) ─────────────────── */
+.mfa-label {
+  display: block;
+}
+
+/* ── Workspace enforcement admin panel ─────────────────────────────────────── */
+.ws-enforce__compliance {
+  background: var(--bg3);
+}
+
+.ws-enforce__compliance-title {
+  margin-bottom: 6px;
+}
+
+.ws-enforce__grace-input {
+  margin-top: 6px;
+  width: 120px;
+}
+
+.ws-enforce__grace-hint {
+  margin-top: 4px;
+}
+
+/* ── Security tab factor cards ─────────────────────────────────────────────── */
+.factor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.factor-row__info {
+  flex: 1;
+}
+
+.factor-row__sub {
+  margin-top: 2px;
+}
+
+/* Passkey credential list item */
+.passkey-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+}
+
+.passkey-item__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.passkey-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.passkey-item__meta {
+  margin-top: 2px;
+}

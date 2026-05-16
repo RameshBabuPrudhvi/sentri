@@ -119,7 +119,16 @@ async function req(method, path, body, timeout = TIMEOUT_DEFAULT, opts = {}) {
     error.status = res.status;
     throw error;
   }
-  return parseJsonResponse(res);
+  const data = await parseJsonResponse(res);
+  // SEC-004: opt-in raw response (data + headers) so callers can read custom
+  // response headers like `X-MFA-Grace-Period-Days-Remaining`. Default return
+  // shape is unchanged so the existing ~50 callers keep working.
+  if (opts.returnRaw) {
+    const headers = {};
+    res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+    return { data, headers };
+  }
+  return data;
 }
 
 /**
@@ -755,7 +764,13 @@ export const api = {
    * @param {{ email: string, password: string }} body
    * @returns {Promise<Object>}
    */
-  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /**
+   * Log in. Uses `returnRaw` so the caller can read the
+   * `X-MFA-Grace-Period-Days-Remaining` header set by the backend when the
+   * workspace requires MFA but the user is still within grace.
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
+   */
+  login: (body) => req("POST", "/auth/login", body, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
   /**
    * Register a new account.
    * @param {{ name: string, email: string, password: string }} body
@@ -783,11 +798,18 @@ export const api = {
   verifyEmail: (token) => req("GET", `/auth/verify?token=${encodeURIComponent(token)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
   /**
    * Exchange an OAuth authorization code for a session.
+   *
+   * SEC-004: returns `{ data, headers }` via `returnRaw` so the caller can
+   * read the `X-MFA-Grace-Period-Days-Remaining` header the backend sets on
+   * a successful OAuth callback when the user's workspace requires MFA but
+   * they're still inside the grace window. Without this, the post-grace
+   * banner only fires for password-login users, not OAuth users.
+   *
    * @param {string} provider - `"github"` or `"google"`.
    * @param {string} code     - Authorization code from the OAuth redirect.
-   * @returns {Promise<Object>}
+   * @returns {Promise<{data: Object, headers: Object<string,string>}>}
    */
-  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  oauthCallback: (provider, code) => req("GET", `/auth/${provider}/callback?code=${encodeURIComponent(code)}`, undefined, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true, returnRaw: true }),
 
   // ── Email verification (SEC-001) ──────────────────────────────────────────────
   /**
@@ -796,6 +818,98 @@ export const api = {
    * @returns {Promise<{message: string}>}
    */
   resendVerification: (email) => req("POST", "/auth/resend-verification", { email }),
+
+  // ── MFA / TOTP (SEC-004) ────────────────────────────────────────────────────
+  /**
+   * Submit a 6-digit TOTP or recovery code during the login challenge.
+   * Public — authenticated by the `pendingToken` from `/auth/login`.
+   * @param {string} pendingToken
+   * @param {string} token - 6-digit TOTP code OR an 8-char recovery code.
+   */
+  mfaVerify: (pendingToken, token) => req("POST", "/auth/mfa/verify", { pendingToken, token }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /** @returns {Promise<{enabled: boolean}>} */
+  mfaStatus: () => req("GET", "/auth/mfa/status"),
+  /**
+   * Aggregate view of every second factor — TOTP, recovery count, passkeys.
+   * @returns {Promise<{totp: boolean, recoveryCodesRemaining: number, webauthn: Array<{id: string, deviceName: string|null, transports: string[], createdAt: string, lastUsedAt: string|null}>}>}
+   */
+  mfaFactors: () => req("GET", "/auth/mfa/factors"),
+  /**
+   * Begin TOTP enrollment — returns the otpauth URL for QR rendering.
+   * @returns {Promise<{secret: string, otpauth: string}>}
+   */
+  mfaEnroll: () => req("POST", "/auth/mfa/enroll"),
+  /**
+   * Finalize TOTP enrollment by verifying the user's first code.
+   * @param {string} token
+   * @returns {Promise<{ok: boolean, recoveryCodes: string[]}>}
+   */
+  mfaEnable: (token) => req("POST", "/auth/mfa/enable", { token }),
+  /**
+   * Disable MFA. Clears TOTP secret + recovery codes. Password required for
+   * non-OAuth-only users (OAuth-only authenticates by session).
+   * @param {string} [password]
+   */
+  mfaDisable: (password) => req("POST", "/auth/mfa/disable", { password }),
+  /**
+   * Regenerate the set of one-time recovery codes. Invalidates the previous
+   * set. Returns the raw codes (shown once — save immediately).
+   * @param {string} [password]
+   * @returns {Promise<{recoveryCodes: string[]}>}
+   */
+  mfaRegenerateRecoveryCodes: (password) =>
+    req("POST", "/auth/mfa/recovery-codes/regenerate", { password }),
+
+  // ── WebAuthn / passkeys (SEC-004) ───────────────────────────────────────────
+  /**
+   * Begin passkey registration — returns options for `startRegistration()`
+   * from `@simplewebauthn/browser` plus a challengeToken for verify.
+   * @returns {Promise<{options: Object, challengeToken: string}>}
+   */
+  webauthnRegisterOptions: () => req("POST", "/auth/webauthn/register/options"),
+  /**
+   * Submit the browser's attestation to finalise passkey registration.
+   * @param {string} challengeToken
+   * @param {Object} attestation - The browser's `PublicKeyCredential` shape.
+   * @param {string} [deviceName] - User-supplied label.
+   */
+  webauthnRegisterVerify: (challengeToken, attestation, deviceName) =>
+    req("POST", "/auth/webauthn/register/verify", { challengeToken, attestation, deviceName }),
+  /**
+   * Begin passkey authentication during the login challenge. Returns options
+   * for `startAuthentication()`. Public — uses the `pendingToken` from `/login`.
+   * @param {string} pendingToken
+   * @returns {Promise<{options: Object, challengeToken: string}>}
+   */
+  webauthnAuthOptions: (pendingToken) =>
+    req("POST", "/auth/webauthn/authenticate/options", { pendingToken }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /**
+   * Submit the browser's assertion to complete passkey authentication.
+   * On success the auth cookie is set with `amr: ["pwd","mfa"]`.
+   * @param {string} challengeToken
+   * @param {Object} assertion - The browser's `PublicKeyCredential` shape.
+   */
+  webauthnAuthVerify: (challengeToken, assertion) =>
+    req("POST", "/auth/webauthn/authenticate/verify", { challengeToken, assertion }, TIMEOUT_DEFAULT, { skipUnauthorizedRedirect: true }),
+  /** @returns {Promise<{credentials: Array<{id: string, deviceName: string|null, transports: string[], createdAt: string, lastUsedAt: string|null}>}>} */
+  webauthnListCredentials: () => req("GET", "/auth/webauthn/credentials"),
+  /**
+   * Remove a passkey. Password required for non-OAuth-only users. Rejects
+   * with 400 `MFA_LAST_FACTOR_PROTECTED` when removing it would lock the
+   * user out under workspace MFA enforcement.
+   * @param {string} id
+   * @param {string} [password]
+   */
+  webauthnDeleteCredential: (id, password) =>
+    req("DELETE", `/auth/webauthn/credentials/${id}`, { password }),
+
+  // ── Workspace MFA compliance (SEC-004, admin) ──────────────────────────────
+  /**
+   * Admin-only — preview enrollment status before flipping the enforcement
+   * toggle.
+   * @returns {Promise<{totalMembers: number, enrolled: number, notEnrolled: number, members: Array<{userId: string, name: string, email: string, role: string, mfaEnabled: boolean}>}>}
+   */
+  getWorkspaceMfaCompliance: () => req("GET", "/workspaces/current/mfa-compliance"),
 
   // ── Account data portability / deletion (SEC-003) ───────────────────────────
   /**

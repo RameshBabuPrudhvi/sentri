@@ -23,6 +23,7 @@
 @import "./styles/features/notifications.css";
 @import "./styles/features/automation.css";
 @import "./styles/features/recorder.css";
+@import "./styles/features/mfa.css";
 @import "./styles/features/sidebar.css";
 @import "./styles/features/step-results-view.css";
 @import "./styles/pages/new-project.css";

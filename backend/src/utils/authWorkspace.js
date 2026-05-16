@@ -27,6 +27,10 @@ function resolveCurrentWorkspace(workspaces, hint) {
  * @property {string}            role
  * @property {string}            jti
  * @property {string}            [workspaceId] - Present when the user has workspaces.
+ * @property {string[]}          [amr] - Authentication Methods References (RFC 8176).
+ *   Values used by Sentri: `"pwd"` (password), `"mfa"` (TOTP / recovery code),
+ *   `"oauth"` (GitHub / Google). Multi-factor sessions carry both `"pwd"` and
+ *   `"mfa"`. Future high-assurance routes can require `amr.includes("mfa")`.
  */
 
 /**
@@ -37,9 +41,13 @@ function resolveCurrentWorkspace(workspaces, hint) {
  *
  * @param {Object} user - User row from the database.
  * @param {string} [workspaceIdHint] - Preferred current workspace ID.
+ * @param {Object} [opts] - Optional payload extras.
+ * @param {string[]} [opts.amr] - Authentication Methods References (SEC-004).
+ *   Distinguishes password-only (`["pwd"]`), MFA-asserted (`["pwd","mfa"]`),
+ *   and OAuth (`["oauth"]`) sessions. Omitted when empty.
  * @returns {JwtPayload}
  */
-export function buildJwtPayload(user, workspaceIdHint) {
+export function buildJwtPayload(user, workspaceIdHint, opts = {}) {
   const jti = crypto.randomUUID();
   const payload = { sub: user.id, email: user.email, name: user.name, role: user.role, jti };
 
@@ -47,6 +55,10 @@ export function buildJwtPayload(user, workspaceIdHint) {
   const current = resolveCurrentWorkspace(workspaces, workspaceIdHint);
   if (current) {
     payload.workspaceId = current.id;
+  }
+
+  if (Array.isArray(opts.amr) && opts.amr.length > 0) {
+    payload.amr = opts.amr;
   }
 
   return payload;

@@ -39,6 +39,7 @@ import assert from "node:assert/strict";
 import { app } from "../../src/middleware/appSetup.js";
 import { getDatabase } from "../../src/database/sqlite.js";
 import { workspaceScope } from "../../src/middleware/workspaceScope.js";
+import { _internalGenerateTotpCode } from "../../src/routes/auth.js";
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
@@ -88,6 +89,26 @@ export function buildCookieHeader(cookies) {
   return Object.entries(cookies).map(([k, v]) => `${k}=${v.value || v}`).join("; ");
 }
 
+// ─── TOTP helper (SEC-004 tests) ──────────────────────────────────────────────
+
+/**
+ * Generate a valid 6-digit TOTP code for a given base32 secret at the
+ * current time. SEC-004 tests use this to drive `/mfa/enable` and
+ * `/mfa/verify` without depending on a wall-clock-synced authenticator app.
+ *
+ * Delegates to `_internalGenerateTotpCode` in `backend/src/routes/auth.js`
+ * so tests and production share a single TOTP implementation. If production
+ * ever drifts (algorithm, digit count, period), tests fail on the same
+ * commit instead of silently passing against a stale reference impl.
+ *
+ * @param {string} secret - Base32 TOTP secret returned by `/mfa/enroll`.
+ * @param {number} [offsetSteps=0] - Optional step offset for clock-skew tests.
+ * @returns {string} 6-digit code.
+ */
+export function generateTotpCode(secret, offsetSteps = 0) {
+  return _internalGenerateTotpCode(secret, offsetSteps);
+}
+
 // ─── JWT helpers ──────────────────────────────────────────────────────────────
 
 /**
@@ -119,6 +140,12 @@ const RESET_TABLES = [
   "runs",
   "tests",
   "oauth_ids",
+  // SEC-004: webauthn_credentials cascade-deletes via FK ON DELETE CASCADE
+  // from users, but list it explicitly to match the established pattern —
+  // every entity table is reset by name so test isolation doesn't depend
+  // on FK behaviour that could be altered (or temporarily disabled by
+  // `PRAGMA foreign_keys = OFF`) in a future test setup change.
+  "webauthn_credentials",
   "projects",
   "workspace_members",
   "workspaces",
@@ -334,6 +361,7 @@ export function createTestContext() {
     parseCookies,
     buildCookieHeader,
     decodeJwtPayload,
+    generateTotpCode,
     resetDb,
     setupEnv,
     createTestRunner,

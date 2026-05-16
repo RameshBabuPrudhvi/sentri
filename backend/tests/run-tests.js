@@ -45,6 +45,10 @@ const files = [
   "tests/notifications-api.test.js",
   "tests/email-verification.test.js",
   "tests/account-compliance.test.js",
+  // SEC-004 — Multi-factor authentication (TOTP + WebAuthn + workspace enforcement).
+  "tests/auth-mfa-totp.test.js",
+  "tests/auth-mfa-enforcement.test.js",
+  "tests/auth-webauthn.test.js",
   "tests/postgres-adapter.test.js",
   "tests/device-emulation.test.js",
   "tests/ai-fallback.test.js",

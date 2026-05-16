@@ -49,6 +49,7 @@ import dashboardRouter from "./routes/dashboard.js";
 import settingsRouter from "./routes/settings.js";
 import systemRouter from "./routes/system.js";
 import authRouter from "./routes/auth.js";
+import webauthnRouter from "./routes/webauthn.js";
 import { requireAuth } from "./routes/auth.js";
 import chatRouter from "./routes/chat.js";
 import testFixRouter from "./routes/testFix.js";
@@ -194,6 +195,12 @@ const API_PREFIX = `/api/${API_VERSION}`;
 // ─── Mount route modules (INF-005: ${API_PREFIX} prefix) ─────────────────────
 // Auth routes are public (login, register, OAuth callbacks)
 app.use(`${API_PREFIX}/auth`, authRouter);
+
+// SEC-004: WebAuthn / passkey routes. The router applies `requireAuth` to
+// the authenticated endpoints internally; the pre-auth `authenticate/*`
+// endpoints rely on the pendingToken issued by /auth/login. Mounted under
+// /auth/webauthn so the prefix matches the rest of the auth surface.
+app.use(`${API_PREFIX}/auth/webauthn`, webauthnRouter);
 
 // CI/CD trigger endpoint uses its own token-based auth — it must be mounted
 // WITHOUT requireAuth so CI pipelines can call it with a project token.

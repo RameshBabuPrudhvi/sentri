@@ -9,6 +9,7 @@
     "test": "node tests/run-tests.js"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^11.0.0",
     "@tanstack/react-query": "^5.66.9",
     "lucide-react": "^0.577.0",
     "react": "^18.3.1",
